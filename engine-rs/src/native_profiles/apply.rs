@@ -201,8 +201,10 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     Ok(())
 }
 
-/// 原子换入：同目录临时文件 + rename，权限 0600。
+/// 原子换入：同目录临时文件 + rename，权限 0600。文件里有凭据：临时文件从创建起就是 0600，
+/// 且只新建不复用——上次中断留下的同名文件或链接先删掉，不会顺着链接把内容写到别处。
 fn atomic_write(target: &Path, content: &[u8]) -> Result<()> {
+    use std::io::Write;
     let dir = target
         .parent()
         .ok_or_else(|| anyhow!("目标路径没有父目录"))?;
@@ -213,12 +215,22 @@ fn atomic_write(target: &Path, content: &[u8]) -> Result<()> {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "profile".to_string())
     ));
-    std::fs::write(&tmp, content)?;
+    match std::fs::remove_file(&tmp) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err.into()),
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
     }
+    let mut file = options.open(&tmp)?;
+    file.write_all(content)?;
+    file.sync_all()?;
+    drop(file);
     std::fs::rename(&tmp, target)?;
     Ok(())
 }
@@ -393,4 +405,36 @@ fn adopt(ctx: &Context, req: &Request) -> Result<Value> {
         "skipped": [],
         "notes": plan.notes,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 临时文件路径上残留的链接不会被顺着写出去() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("am-profile-atomic-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("instance");
+        std::fs::create_dir_all(&dir).unwrap();
+        let outside = root.join("outside.txt");
+        std::fs::write(&outside, "keep").unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join(".config.toml.am-tmp")).unwrap();
+
+        atomic_write(&dir.join("config.toml"), b"token = \"x\"\n").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
+        assert_eq!(
+            std::fs::read(dir.join("config.toml")).unwrap(),
+            b"token = \"x\"\n"
+        );
+        let mode = std::fs::metadata(dir.join("config.toml"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
+        assert!(!dir.join(".config.toml.am-tmp").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
