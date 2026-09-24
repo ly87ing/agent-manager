@@ -197,6 +197,18 @@ describe("助手实例", () => {
     expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
   });
 
+  it("Claude 环境填了接口地址却没填鉴权变量时不保存，免得官方登录被发往第三方地址", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-relay");
+    await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://api.example.com");
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    expect(within(dialog).getByTestId("profile-form-error")).toHaveTextContent("官方账号登录");
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+
   it("新建实例使用整页分组编辑器，并实时列出全部落地位置与启动值", async () => {
     renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();

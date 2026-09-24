@@ -95,6 +95,10 @@ export function ProfileFormDialog({
       setError("鉴权变量名不合法：要以字母或下划线开头，只能用字母、数字与下划线");
       return;
     }
+    if (kind === "claude" && baseUrl.trim() && !tokenVar.trim()) {
+      setError("填了接口地址就要填鉴权变量名：否则 Claude 会把这个环境里的官方账号登录发往该地址");
+      return;
+    }
     onSubmit(input);
   };
 

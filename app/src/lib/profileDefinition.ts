@@ -103,12 +103,24 @@ export function shellConfigDir(configDir: string): string {
   return trimmed;
 }
 
+/**
+ * 第三方 Codex 环境启动时清空的变量：Codex 把它们当作官方账号侧的凭据，优先于目录里存的登录，
+ * 空值等同未设置。与引擎侧保持一致。
+ */
+export const CODEX_CLEARED_ENV = ["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"] as const;
+
+/** 用第三方接口的环境：这类环境的配置目录里不能有官方账号登录。 */
+export function isThirdPartyProfile(input: Pick<ProfileFormInput, "baseUrl" | "tokenVar">): boolean {
+  return Boolean(input.baseUrl.trim() || input.tokenVar.trim());
+}
+
 /** 该实例的启动命令取值（与别名域取值格式一致）。 */
 export function profileLaunchValue(input: ProfileFormInput, baseBin: string): string {
-  const parts = [
-    `${configEnvOf(input.kind)}="${shellConfigDir(input.configDir)}"`,
-    baseBin,
-  ];
+  const parts: string[] = [];
+  if (input.kind === "codex" && isThirdPartyProfile(input)) {
+    parts.push(...CODEX_CLEARED_ENV.map((name) => `${name}=`));
+  }
+  parts.push(`${configEnvOf(input.kind)}="${shellConfigDir(input.configDir)}"`, baseBin);
   if (input.kind === "codex") parts.push("-p", CODEX_PROFILE_NAME);
   const extra = input.extraArgs.trim();
   if (extra) parts.push(extra);

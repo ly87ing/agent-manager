@@ -53,8 +53,15 @@ describe("助手实例定义", () => {
     expect(profileLaunchValue(claudeInput, "claude")).toBe(
       'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude --dangerously-skip-permissions',
     );
+    // 第三方 Codex 环境清空 Codex 当作官方凭据读取的变量；官方账号环境不加
     expect(
       profileLaunchValue({ ...claudeInput, kind: "codex", configDir: "~/.codex-work", extraArgs: "" }, "codex"),
+    ).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-work" codex -p agent-manager');
+    expect(
+      profileLaunchValue(
+        { ...claudeInput, kind: "codex", configDir: "~/.codex-work", extraArgs: "", baseUrl: "", tokenVar: "" },
+        "codex",
+      ),
     ).toBe('CODEX_HOME="$HOME/.codex-work" codex -p agent-manager');
   });
 

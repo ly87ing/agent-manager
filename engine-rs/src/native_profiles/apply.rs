@@ -163,6 +163,33 @@ fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
     })
 }
 
+/// 第三方实例的配置目录里不能有官方账号登录：两种凭据在同一个目录里，助手取哪个就只能
+/// 靠它的优先级规则，一旦第三方凭据缺失就会退回官方登录。用官方命令确认没有才写；
+/// 无法确认也拒绝。官方账号实例（不带第三方凭据与地址）不做这项检查。
+fn ensure_no_official_login(ctx: &Context, def: &ProfileDef, dir: &Path) -> Result<()> {
+    if !model::is_third_party(def) {
+        return Ok(());
+    }
+    let kind = match def.kind {
+        model::ProfileKind::Claude => crate::native_auth::AuthKind::Claude,
+        model::ProfileKind::Codex => crate::native_auth::AuthKind::Codex,
+    };
+    let bin = super::status::base_bin(ctx, def);
+    match crate::native_auth::official_login(&ctx.home_dir, kind, &bin, dir) {
+        Ok(false) => Ok(()),
+        Ok(true) => bail!(
+            "[{}] {} 里已有官方账号登录，第三方凭据不能写进同一个目录；请给这套第三方接入换一个新的配置目录",
+            def.id,
+            def.config_dir_raw
+        ),
+        Err(reason) => bail!(
+            "[{}] 无法确认 {} 里没有官方账号登录（{reason}），没有写入",
+            def.id,
+            def.config_dir_raw
+        ),
+    }
+}
+
 /// 锁前预检：参数与状态校验，全程零写。
 pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     let cmd = req.command.replace('.', ":");
@@ -218,6 +245,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     // 锁内重新读取并比对基准，不沿用锁前结果
     let plan = plan(ctx, req)?;
     let def = &plan.def;
+    ensure_no_official_login(ctx, def, &plan.dir)?;
 
     ensure_dir(&plan.dir)?;
     let existed = plan.previous.is_some();

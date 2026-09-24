@@ -15,7 +15,42 @@ fn temp_ctx(tag: &str) -> (PathBuf, Context) {
         home_dir: base.join("home"),
     };
     std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    install_fake_clis(&ctx);
     (base, ctx)
+}
+
+/// 官方 CLI 的替身，放在 `<HOME>/.local/bin`（探测优先找这里），不依赖本机装没装 claude/codex。
+/// 目录里有 `.fake-logged-in` 就报告已登录；每次调用把收到的配置目录与凭据变量是否被清掉
+/// 记进 `<HOME>/.probe-log`。
+const FAKE_CLAUDE: &str = r#"#!/bin/sh
+[ "$1" = auth ] && [ "$2" = status ] || exit 64
+printf 'claude|%s|%s\n' "$CLAUDE_CONFIG_DIR" "${CLAUDE_CODE_OAUTH_TOKEN-unset}" >> "$HOME/.probe-log"
+if [ -f "$HOME/.fake-garbage" ]; then echo 'not json'; exit 0; fi
+if [ -f "$CLAUDE_CONFIG_DIR/.fake-logged-in" ]; then echo '{"loggedIn":true,"authMethod":"claude.ai"}'; exit 0; fi
+echo '{"loggedIn":false,"authMethod":"none"}'
+exit 1
+"#;
+const FAKE_CODEX: &str = r#"#!/bin/sh
+[ "$1" = login ] && [ "$2" = status ] || exit 64
+printf 'codex|%s|%s\n' "$CODEX_HOME" "${CODEX_API_KEY-unset}" >> "$HOME/.probe-log"
+if [ -f "$CODEX_HOME/.fake-logged-in" ]; then echo 'Logged in using ChatGPT' >&2; exit 0; fi
+echo 'Not logged in' >&2
+exit 1
+"#;
+
+fn install_fake_clis(ctx: &Context) {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = ctx.home_dir.join(".local/bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    for (name, body) in [("claude", FAKE_CLAUDE), ("codex", FAKE_CODEX)] {
+        let path = bin.join(name);
+        std::fs::write(&path, body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+fn probe_log(ctx: &Context) -> String {
+    std::fs::read_to_string(ctx.home_dir.join(".probe-log")).unwrap_or_default()
 }
 
 fn request(command: &str, args: &[&str]) -> Request {
@@ -202,7 +237,8 @@ fn codex_profile_target_never_contains_the_secret_value() {
     let status = execute(&ctx, &request("profiles:status", &[]));
     assert_eq!(
         element(&status, "cx-work")["observed"]["launch_value"],
-        "CODEX_HOME=\"~/.codex-work\" codex -p agent-manager"
+        "CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"~/.codex-work\" codex -p agent-manager",
+        "第三方实例启动时清空 Codex 当作官方凭据读取的变量"
     );
     assert!(
         !text.contains("codex-sentinel-value"),
@@ -660,4 +696,198 @@ fn 实例的额度读它自己的配置目录_不是默认那份() {
 
     std::env::remove_var("AM_TEST_TOKEN_USAGE");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+fn claude_settings(ctx: &Context, dir: &str) -> serde_json::Value {
+    serde_json::from_slice(&std::fs::read(ctx.home_dir.join(dir).join("settings.json")).unwrap())
+        .unwrap()
+}
+
+#[test]
+fn 第三方实例把未声明的凭据置空_只剩自己声明的那一个() {
+    let (root, ctx) = temp_ctx("cancel-env");
+    std::env::set_var("AM_TEST_TOKEN_CANCEL", "cancel-token");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_TOKEN_CANCEL")
+    ));
+    let apply = apply_now(&ctx, "cc-ly");
+    assert!(apply.ok, "{:?}", apply.errors);
+    let env = &claude_settings(&ctx, ".claude-ly")["env"];
+    assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], "cancel-token");
+    assert_eq!(
+        env["ANTHROPIC_API_KEY"], "",
+        "没声明的第三方凭据置空，shell 里的同名变量进不来"
+    );
+    assert_eq!(env["CLAUDE_CODE_OAUTH_TOKEN"], "", "官方长期令牌置空");
+    assert_eq!(element(&status(&ctx), "cc-ly")["state"], "managed-ok");
+    assert_eq!(
+        probe_log(&ctx),
+        "",
+        "目录原本不存在，不需要探测，也不调用官方命令"
+    );
+
+    // 有人删掉置空项：状态报不一致，再写一次补回
+    let path = ctx.home_dir.join(".claude-ly/settings.json");
+    let mut live = claude_settings(&ctx, ".claude-ly");
+    live["env"]
+        .as_object_mut()
+        .unwrap()
+        .remove("CLAUDE_CODE_OAUTH_TOKEN");
+    std::fs::write(&path, serde_json::to_vec_pretty(&live).unwrap()).unwrap();
+    assert_eq!(element(&status(&ctx), "cc-ly")["state"], "drifted");
+    let again = apply_now(&ctx, "cc-ly");
+    assert!(again.ok, "{:?}", again.errors);
+    assert_eq!(
+        claude_settings(&ctx, ".claude-ly")["env"]["CLAUDE_CODE_OAUTH_TOKEN"],
+        ""
+    );
+    let log = probe_log(&ctx);
+    let dir = ctx.home_dir.join(".claude-ly");
+    assert!(
+        log.starts_with(&format!("claude|{}|", dir.display())),
+        "目录已存在时按该目录探测：{log}"
+    );
+    std::env::remove_var("AM_TEST_TOKEN_CANCEL");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn 目录里有官方登录时拒绝写入第三方凭据_文件不变() {
+    let (root, ctx) = temp_ctx("official-present");
+    std::env::set_var("AM_TEST_TOKEN_OFFICIAL", "official-token");
+    let dir = ctx.home_dir.join(".claude-ly");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".fake-logged-in"), "").unwrap();
+    std::fs::write(dir.join("settings.json"), "{\"theme\":\"dark\"}\n").unwrap();
+    // 官方长期令牌从进程环境继承时，探测不能把它带给官方命令
+    std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", "inherited-official-token");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_TOKEN_OFFICIAL")
+    ));
+    let refused = apply_now(&ctx, "cc-ly");
+    std::env::remove_var("CLAUDE_CODE_OAUTH_TOKEN");
+    assert!(!refused.ok);
+    let message = format!("{:?}", refused.errors);
+    assert!(message.contains("官方账号登录"), "{message}");
+    assert!(!message.contains("official-token"), "错误不回显取值");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("settings.json")).unwrap(),
+        "{\"theme\":\"dark\"}\n"
+    );
+    assert_eq!(
+        probe_log(&ctx),
+        format!("claude|{}|unset\n", dir.display()),
+        "探测指向实例目录，且不带进程环境里的凭据"
+    );
+    std::env::remove_var("AM_TEST_TOKEN_OFFICIAL");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn 第三方凭据遮住官方登录时按登录记录拒绝() {
+    let (root, ctx) = temp_ctx("official-masked");
+    std::env::set_var("AM_TEST_TOKEN_MASKED", "masked-token");
+    let dir = ctx.home_dir.join(".claude-ly");
+    std::fs::create_dir_all(&dir).unwrap();
+    // 目录里已经有一份第三方凭据，官方命令只会报告它；登录会话记录在 .claude.json
+    std::fs::write(
+        dir.join("settings.json"),
+        "{\"env\":{\"ANTHROPIC_BASE_URL\":\"https://api.example.com\",\"ANTHROPIC_AUTH_TOKEN\":\"masked-token\"}}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(".claude.json"),
+        "{\"oauthAccount\":{\"accountUuid\":\"x\"}}\n",
+    )
+    .unwrap();
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_TOKEN_MASKED")
+    ));
+    let refused = apply_now(&ctx, "cc-ly");
+    assert!(!refused.ok);
+    assert!(format!("{:?}", refused.errors).contains("官方账号登录"));
+    std::env::remove_var("AM_TEST_TOKEN_MASKED");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn 无法确认有没有官方登录时拒绝写入() {
+    let (root, ctx) = temp_ctx("official-unknown");
+    std::env::set_var("AM_TEST_TOKEN_UNKNOWN", "unknown-token");
+    std::fs::create_dir_all(ctx.home_dir.join(".claude-ly")).unwrap();
+    std::fs::write(ctx.home_dir.join(".fake-garbage"), "").unwrap();
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_TOKEN_UNKNOWN")
+    ));
+    let refused = apply_now(&ctx, "cc-ly");
+    assert!(!refused.ok);
+    assert!(format!("{:?}", refused.errors).contains("无法确认"));
+    assert!(!ctx.home_dir.join(".claude-ly/settings.json").exists());
+    std::env::remove_var("AM_TEST_TOKEN_UNKNOWN");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn 官方账号实例不带第三方凭据_不检查也不置空() {
+    let (root, ctx) = temp_ctx("official-instance");
+    let dir = ctx.home_dir.join(".claude-work");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".fake-logged-in"), "").unwrap();
+    assert!(save_definition(
+        &ctx,
+        "cc-work",
+        r#"{"display_name":"Claude Code · work","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-work","model":"opus"},"_delete":false,"_replace":true}"#
+    ));
+    let apply = apply_now(&ctx, "cc-work");
+    assert!(apply.ok, "{:?}", apply.errors);
+    let settings = claude_settings(&ctx, ".claude-work");
+    assert_eq!(settings["model"], "opus");
+    assert!(
+        settings.get("env").is_none(),
+        "官方账号实例不写任何凭据变量"
+    );
+    assert_eq!(probe_log(&ctx), "");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn codex_第三方实例_目录已登录官方账号时拒绝_未登录才写() {
+    let (root, ctx) = temp_ctx("codex-official");
+    std::env::set_var("AM_TEST_CODEX_OFFICIAL", "codex-official-token");
+    let dir = ctx.home_dir.join(".codex-work");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".fake-logged-in"), "").unwrap();
+    assert!(save_definition(
+        &ctx,
+        "cx-work",
+        r#"{"display_name":"Codex · work","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-work","base_url":"https://api.example.com/v1","env_key":"AM_TEST_CODEX_OFFICIAL"},"_delete":false,"_replace":true}"#
+    ));
+    let refused = apply_now(&ctx, "cx-work");
+    assert!(!refused.ok);
+    assert!(format!("{:?}", refused.errors).contains("官方账号登录"));
+    assert!(!dir.join("agent-manager.config.toml").exists());
+
+    std::fs::remove_file(dir.join(".fake-logged-in")).unwrap();
+    let apply = apply_now(&ctx, "cx-work");
+    assert!(apply.ok, "{:?}", apply.errors);
+    assert!(dir.join("agent-manager.config.toml").exists());
+    let log = probe_log(&ctx);
+    assert_eq!(
+        log.lines().collect::<Vec<_>>(),
+        vec![
+            format!("codex|{}|unset", dir.display()),
+            format!("codex|{}|unset", dir.display())
+        ],
+        "按实例目录探测，且不带进程环境里的 CODEX_API_KEY"
+    );
+    std::env::remove_var("AM_TEST_CODEX_OFFICIAL");
+    let _ = std::fs::remove_dir_all(root);
 }

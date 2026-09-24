@@ -12,7 +12,7 @@ use crate::native::Context;
 use crate::store;
 
 /// 实例执行的命令：取基础助手定义里的 bin，取不到时退回实例类型的默认命令名。
-fn base_bin(ctx: &Context, def: &ProfileDef) -> String {
+pub(crate) fn base_bin(ctx: &Context, def: &ProfileDef) -> String {
     let fallback = match def.kind {
         model::ProfileKind::Claude => "claude",
         model::ProfileKind::Codex => "codex",

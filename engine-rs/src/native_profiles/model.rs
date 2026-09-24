@@ -277,6 +277,10 @@ pub(crate) fn parse_definition(id: &str, raw: &Value, enabled: bool) -> Result<P
         }
     }
 
+    if kind == ProfileKind::Claude {
+        check_claude_credentials(id, &env)?;
+    }
+
     let base_url = profile
         .get("base_url")
         .and_then(Value::as_str)
@@ -326,6 +330,60 @@ pub(crate) fn parse_definition(id: &str, raw: &Value, enabled: bool) -> Result<P
     })
 }
 
+/// Claude 第三方凭据变量（官方网关文档给出的两种写法）与官方账号的长期令牌变量。
+const CLAUDE_THIRD_PARTY_CREDENTIALS: [&str; 2] = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
+const CLAUDE_OFFICIAL_TOKEN: &str = "CLAUDE_CODE_OAUTH_TOKEN";
+const CLAUDE_BASE_URL: &str = "ANTHROPIC_BASE_URL";
+
+/// 官方账号凭据与第三方凭据不能出现在同一个实例里，第三方实例只能有一种凭据：
+/// - 两种第三方凭据同时声明时 Claude 按优先级取其一，结果取决于规则而不是定义，拒绝；
+/// - 第三方地址不带凭据时，Claude 会把目录里的官方登录发往该地址，拒绝；
+/// - 第三方实例里声明官方长期令牌，就是两种凭据混用，拒绝。
+fn check_claude_credentials(id: &str, env: &Map<String, Value>) -> Result<()> {
+    let declared: Vec<&str> = CLAUDE_THIRD_PARTY_CREDENTIALS
+        .into_iter()
+        .filter(|name| env.contains_key(*name))
+        .collect();
+    if declared.len() > 1 {
+        bail!("[{id}] ANTHROPIC_AUTH_TOKEN 与 ANTHROPIC_API_KEY 只能声明一个，请按接口要求的请求头二选一");
+    }
+    let third_party = !declared.is_empty() || env.contains_key(CLAUDE_BASE_URL);
+    if third_party && declared.is_empty() {
+        bail!("[{id}] 设置了 ANTHROPIC_BASE_URL 却没有凭据：Claude 会把官方账号登录发往这个地址，请声明 ANTHROPIC_AUTH_TOKEN 或 ANTHROPIC_API_KEY");
+    }
+    if third_party && env.contains_key(CLAUDE_OFFICIAL_TOKEN) {
+        bail!("[{id}] {CLAUDE_OFFICIAL_TOKEN} 是官方账号凭据，不能和第三方凭据放在同一个实例");
+    }
+    Ok(())
+}
+
+/// 实例是否使用第三方凭据或第三方地址：这类实例的配置目录里不允许有官方账号登录。
+pub(crate) fn is_third_party(def: &ProfileDef) -> bool {
+    match def.kind {
+        ProfileKind::Claude => {
+            def.env.contains_key(CLAUDE_BASE_URL)
+                || CLAUDE_THIRD_PARTY_CREDENTIALS
+                    .iter()
+                    .any(|name| def.env.contains_key(*name))
+        }
+        ProfileKind::Codex => def.base_url.is_some() || def.env_key.is_some(),
+    }
+}
+
+/// 第三方 Claude 实例的 settings.json 里要置为空串的变量：没声明的那种第三方凭据与官方长期令牌。
+/// 官方文档：settings 的 env 覆盖 shell 里的同名变量，置为 `""` 即取消继承。这样从 shell
+/// 继承来的凭据进不了这个实例，实际生效的只可能是实例自己声明的那一个。
+fn claude_cancelled_env(def: &ProfileDef) -> Vec<&'static str> {
+    if def.kind != ProfileKind::Claude || !is_third_party(def) {
+        return Vec::new();
+    }
+    CLAUDE_THIRD_PARTY_CREDENTIALS
+        .into_iter()
+        .chain([CLAUDE_OFFICIAL_TOKEN])
+        .filter(|name| !def.env.contains_key(*name))
+        .collect()
+}
+
 /// 从有效策略里取出全部 profile 定义（带 profile 段的 agent 定义），按 id 排序。
 pub(crate) fn load_definitions(policy: &Value) -> Vec<Result<ProfileDef>> {
     let mut out = Vec::new();
@@ -365,7 +423,13 @@ pub(crate) const BASE_MISSING: &str = "missing";
 /// 与库里记下的上次写入路径求并，就是这次写入可能改动的全部位置。
 pub(crate) fn owned_paths(def: &ProfileDef) -> Vec<String> {
     let mut paths: Vec<String> = match def.kind {
-        ProfileKind::Claude => def.env.keys().map(|key| format!("env.{key}")).collect(),
+        ProfileKind::Claude => def
+            .env
+            .keys()
+            .map(String::as_str)
+            .chain(claude_cancelled_env(def))
+            .map(|key| format!("env.{key}"))
+            .collect(),
         // Codex 实例文件整份由本工具维护，不按路径记
         ProfileKind::Codex => Vec::new(),
     };
@@ -458,6 +522,19 @@ pub(crate) fn compare_fields(
                     "field": format!("env.{name}"),
                     "state": state,
                     "definition": text,
+                    "live": live.map(|v| display_value(name, v)).unwrap_or(Value::Null),
+                }));
+            }
+            for name in claude_cancelled_env(def) {
+                let live = live_env.get(name).and_then(Value::as_str);
+                fields.push(serde_json::json!({
+                    "field": format!("env.{name}"),
+                    "state": match live {
+                        None => "missing",
+                        Some("") => "same",
+                        Some(_) => "differs",
+                    },
+                    "definition": "",
                     "live": live.map(|v| display_value(name, v)).unwrap_or(Value::Null),
                 }));
             }
@@ -651,6 +728,9 @@ pub(crate) fn render_all(
             for (name, value) in resolved_env(def, resolve)? {
                 env.insert(name, value);
             }
+            for name in claude_cancelled_env(def) {
+                env.insert(name.to_string(), Value::String(String::new()));
+            }
             if env.is_empty() {
                 settings.remove("env");
             } else {
@@ -743,14 +823,25 @@ fn toml_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+/// 第三方 Codex 实例启动时清空的变量：Codex 把它们当作官方账号侧的凭据，优先于目录里
+/// 存的登录（源码 `login/src/auth/manager.rs`），空值等同未设置。
+pub(crate) const CODEX_CLEARED_ENV: [&str; 2] = ["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"];
+
 /// 启动命令取值：`<配置目录变量>="<目录>" <命令> <扩展参数>`，与别名域的取值格式一致。
+/// 第三方 Codex 实例在前面加上清空官方凭据变量的赋值。
 pub(crate) fn launch_value(def: &ProfileDef, bin: &str, extra_args: &str) -> String {
-    let mut out = format!(
+    let mut out = String::new();
+    if def.kind == ProfileKind::Codex && is_third_party(def) {
+        for name in CODEX_CLEARED_ENV {
+            out.push_str(&format!("{name}= "));
+        }
+    }
+    out.push_str(&format!(
         "{}=\"{}\" {}",
         def.kind.config_env(),
         def.config_dir_raw,
         bin
-    );
+    ));
     if def.kind == ProfileKind::Codex {
         out.push_str(&format!(" -p {CODEX_PROFILE_NAME}"));
     }
@@ -800,12 +891,12 @@ mod tests {
     fn http_base_url_is_accepted_but_other_schemes_are_rejected() {
         assert!(def(json!({
             "profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
-                        "env": {"ANTHROPIC_BASE_URL": "http://10.0.0.5:8080"}}
+                        "env": {"ANTHROPIC_BASE_URL": "http://10.0.0.5:8080", "ANTHROPIC_AUTH_TOKEN": "${T}"}}
         }))
         .is_ok());
         let err = def(json!({
             "profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
-                        "env": {"ANTHROPIC_BASE_URL": "ftp://api.example.com"}}
+                        "env": {"ANTHROPIC_BASE_URL": "ftp://api.example.com", "ANTHROPIC_AUTH_TOKEN": "${T}"}}
         }))
         .unwrap_err();
         assert!(format!("{err:#}").contains("https"));
@@ -905,6 +996,78 @@ mod tests {
     }
 
     #[test]
+    fn claude_instance_never_mixes_official_and_third_party_credentials() {
+        let claude = |env: Value| {
+            def(
+                json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly", "env": env}}),
+            )
+        };
+        let err = claude(json!({"ANTHROPIC_BASE_URL": "https://a.example.com"})).unwrap_err();
+        assert!(format!("{err:#}").contains("官方账号登录发往"), "{err:#}");
+        let err = claude(json!({"ANTHROPIC_AUTH_TOKEN": "${A}", "ANTHROPIC_API_KEY": "${B}"}))
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("只能声明一个"), "{err:#}");
+        let err =
+            claude(json!({"ANTHROPIC_AUTH_TOKEN": "${A}", "CLAUDE_CODE_OAUTH_TOKEN": "${O}"}))
+                .unwrap_err();
+        assert!(format!("{err:#}").contains("官方账号凭据"), "{err:#}");
+        // 官方账号实例可以用官方长期令牌；只带凭据、用默认地址也算第三方
+        assert!(!is_third_party(
+            &claude(json!({"CLAUDE_CODE_OAUTH_TOKEN": "${O}"})).unwrap()
+        ));
+        assert!(is_third_party(
+            &claude(json!({"ANTHROPIC_API_KEY": "${K}"})).unwrap()
+        ));
+    }
+
+    #[test]
+    fn third_party_claude_owns_its_cancelled_env_and_official_owns_none() {
+        let third = def(
+            json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
+            "env": {"ANTHROPIC_BASE_URL": "https://a.example.com", "ANTHROPIC_API_KEY": "${K}"}}}),
+        )
+        .unwrap();
+        let mut paths = owned_paths(&third);
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec![
+                "env.ANTHROPIC_API_KEY",
+                "env.ANTHROPIC_AUTH_TOKEN",
+                "env.ANTHROPIC_BASE_URL",
+                "env.CLAUDE_CODE_OAUTH_TOKEN"
+            ]
+        );
+        let official =
+            def(json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly"}}))
+                .unwrap();
+        assert!(owned_paths(&official).is_empty());
+        assert_eq!(
+            launch_value(&official, "claude", ""),
+            "CLAUDE_CONFIG_DIR=\"~/.claude-ly\" claude"
+        );
+    }
+
+    #[test]
+    fn codex_launch_clears_official_credentials_only_for_third_party() {
+        let third = def(
+            json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-w",
+            "base_url": "http://127.0.0.1:11434/v1"}}),
+        )
+        .unwrap();
+        assert_eq!(
+            launch_value(&third, "codex", ""),
+            "CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"~/.codex-w\" codex -p agent-manager"
+        );
+        let official =
+            def(json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-w"}})).unwrap();
+        assert_eq!(
+            launch_value(&official, "codex", ""),
+            "CODEX_HOME=\"~/.codex-w\" codex -p agent-manager"
+        );
+    }
+
+    #[test]
     fn profile_id_rules() {
         assert!(valid_profile_id("cc-ly"));
         assert!(valid_profile_id("work2"));
@@ -955,13 +1118,17 @@ mod live_tests {
 
     #[test]
     fn render_only_touches_declared_env_keys_and_keeps_user_ones() {
-        let def = claude_def(json!({"ANTHROPIC_BASE_URL": "https://a.example.com"}), None);
+        let def = claude_def(
+            json!({"ANTHROPIC_BASE_URL": "https://a.example.com", "ANTHROPIC_AUTH_TOKEN": "${T}"}),
+            None,
+        );
+        let t_var = |name: &str| (name == "T").then(|| "resolved".to_string());
         let existing =
             br#"{"env":{"MY_VAR":"1","OLD":"x"},"model":"user-model","theme":"dark"}"#.to_vec();
         let rendered = render_all(
             &def,
             &|_| Some(existing.clone()),
-            &no_vars,
+            &t_var,
             &["env.OLD".to_string()],
         )
         .unwrap();
@@ -978,17 +1145,12 @@ mod live_tests {
         );
         assert_eq!(out["theme"], "dark");
         // 上次由本工具写过 model、定义里去掉了 → 撤掉
-        let rendered = render_all(
-            &def,
-            &|_| Some(existing.clone()),
-            &no_vars,
-            &["model".into()],
-        )
-        .unwrap();
+        let rendered =
+            render_all(&def, &|_| Some(existing.clone()), &t_var, &["model".into()]).unwrap();
         let out: Value = serde_json::from_slice(&rendered[0].content).unwrap();
         assert!(out.get("model").is_none());
         // 现有文件不是 JSON 对象：拒绝，不当成空文件覆盖
-        assert!(render_all(&def, &|_| Some(b"[1]".to_vec()), &no_vars, &[]).is_err());
+        assert!(render_all(&def, &|_| Some(b"[1]".to_vec()), &t_var, &[]).is_err());
     }
 
     #[test]

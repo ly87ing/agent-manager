@@ -227,6 +227,17 @@ profile 与各类表等）在「运行设置」页底部的「直接编辑配置
 用户在「用定义覆盖实际配置」（先确认，只改实例负责的 env 变量与模型）和「以实际配置更新定义」
 （只写库，凭据不以明文入库）之间明确选择，写入都带状态给出的基准，外部改过即拒绝并刷新。启动命令若携带权限参数，界面明确标记其会覆盖环境
 自动化。
+
+官方账号凭据与第三方凭据不在同一个配置目录里出现。带第三方地址或凭据的实例（Claude 声明了
+`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`；Codex 填了地址或 `env_key`）
+在写入前用官方命令（`claude auth status` / `codex login status`，探测时去掉进程环境里的凭据变量）
+确认配置目录里没有官方账号登录；Claude 的第三方凭据会遮住官方登录，另看目录里 `.claude.json`
+的登录会话记录与 `.credentials.json`。有登录或无法确认都拒绝，提示换一个新目录；官方账号实例
+不做这项检查。Claude 实例的定义规则：两种第三方凭据只能声明一个；有地址必须有凭据（否则 Claude
+会把官方登录发往该地址）；第三方实例不能声明官方长期令牌 `CLAUDE_CODE_OAUTH_TOKEN`。第三方
+Claude 实例的 `settings.json` 把没声明的那种第三方凭据与 `CLAUDE_CODE_OAUTH_TOKEN` 写为空串，按官方
+文档取消从 shell 继承的同名变量；第三方 Codex 实例的启动命令前缀 `CODEX_API_KEY= CODEX_ACCESS_TOKEN=`，
+清空 Codex 当作官方凭据读取、优先于目录登录的变量。
 普通页面不展示 AI CLI 的安装、升级、卸载动作、生命周期脚本或完整 alias。
 
 AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、当前版本和安装来源只在
