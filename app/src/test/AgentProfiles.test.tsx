@@ -239,6 +239,8 @@ describe("助手实例", () => {
               { field: "model", state: "differs", definition: "opus", live: "sonnet" },
               isolation("CLAUDE_CODE_USE_BEDROCK"),
               isolation("ANTHROPIC_CUSTOM_HEADERS"),
+              // 实例文件自己设了、定义没声明：不是 shell 的问题，写入会把它置空
+              { field: "env.CLAUDE_CODE_USE_VERTEX", state: "differs", definition: "", live: "1", purpose: "isolation" },
             ],
           },
         }),
@@ -249,9 +251,15 @@ describe("助手实例", () => {
     const gaps = within(card).getByTestId("profile-isolation-gaps-cc-ly");
     expect(gaps).toHaveTextContent("2 个凭据相关变量");
     expect(gaps).toHaveTextContent("CLAUDE_CODE_USE_BEDROCK、ANTHROPIC_CUSTOM_HEADERS");
+    expect(gaps).not.toHaveTextContent("CLAUDE_CODE_USE_VERTEX");
+    const set = within(card).getByTestId("profile-isolation-set-cc-ly");
+    expect(set).toHaveTextContent("配置文件自己设了定义里没有的 CLAUDE_CODE_USE_VERTEX：写入配置会把它们置空");
     const differs = within(card).getByTestId("profile-differs-cc-ly");
     expect(differs).toHaveTextContent("model");
     expect(differs).not.toHaveTextContent("CLAUDE_CODE_USE_BEDROCK");
+    // 覆盖前的确认点名会被置空的变量，不再笼统说「其他设置保留」了事
+    await userEvent.click(within(card).getByTestId("profile-apply-cc-ly"));
+    expect(await screen.findByText(/配置文件里自己设的 CLAUDE_CODE_USE_VERTEX 定义里没有，会被置空/)).toBeInTheDocument();
   });
 
   it("实例卡片列出挡不住的系统级设置：第三方环境被限定登录时说明会被拦下，没有时不显示", async () => {
@@ -589,6 +597,33 @@ describe("助手实例", () => {
     expect(write.args[write.args.indexOf("--value") + 1]).toBe(
       'CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex --search',
     );
+  });
+
+  it("按现在的规则解析不了的旧定义照样列出：说明原因，可编辑修正或移除", async () => {
+    const invalid = makeElement({
+      id: "profiles:cc-ly",
+      domain: "profiles",
+      spec: { display_name: "Claude Code · ly", base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-cc-ly" },
+      policy: { enabled: false },
+      observed: { invalid: true, blocked_reason: "第三方接入的实例不能再打开云厂商开关" },
+      state: "unsupported",
+      freshness: makeFreshness({ state: "not-applicable" }),
+      actions: [],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, routes([invalid]));
+    await openInstanceManager();
+    const card = await screen.findByTestId("profile-card-cc-ly");
+    expect(within(card).getByTestId("profile-invalid-cc-ly")).toHaveTextContent("第三方接入的实例不能再打开云厂商开关");
+    expect(within(card).queryByTestId("profile-auth-status-cc-ly")).toBeNull();
+    await userEvent.click(within(card).getByTestId("profile-edit-cc-ly"));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByTestId("profile-id-input")).toHaveValue("cc-ly");
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(within(card).getByTestId("profile-remove-cc-ly"));
+    await userEvent.click(await screen.findByRole("button", { name: "确认移除" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const write = calls.find((call) => call.command === "policy:set")!;
+    expect(write.args[write.args.indexOf("--key") + 1]).toBe("agents.definitions.cc-ly");
   });
 
   it("移除实例需确认，且只停止管理、不动配置目录", async () => {

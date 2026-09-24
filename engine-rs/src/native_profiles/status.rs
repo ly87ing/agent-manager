@@ -31,14 +31,22 @@ pub(crate) fn base_bin(ctx: &Context, def: &ProfileDef) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-/// 定义解析失败的固定语义块：只给类别与可读原因，不回显定义正文。
-fn invalid_element(id: &str, err: &anyhow::Error) -> Value {
+/// 定义解析失败的固定语义块：只给类别与可读原因，不回显定义正文。带真实 id 与名称、所属助手等
+/// 标识，界面才能列出它并提供编辑、移除（例如按新规则不再合法的旧定义）。
+fn invalid_element(id: &str, raw: &Value, err: &anyhow::Error) -> Value {
+    let profile = raw.get("profile");
+    let text = |value: Option<&Value>| value.and_then(Value::as_str).map(str::to_string);
     json!({
         "id": format!("profiles:{id}"),
         "domain": "profiles",
-        "spec": {},
+        "spec": {
+            "display_name": text(raw.get("display_name")).unwrap_or_else(|| id.to_string()),
+            "base_agent": text(profile.and_then(|p| p.get("base_agent"))),
+            "kind": text(profile.and_then(|p| p.get("kind"))),
+            "config_dir": text(profile.and_then(|p| p.get("config_dir"))),
+        },
         "policy": {"enabled": false},
-        "observed": {"blocked_reason": format!("{err:#}")},
+        "observed": {"invalid": true, "blocked_reason": format!("{err:#}")},
         "state": "unsupported",
         "freshness": {"state": "not-applicable", "current": null, "upstream": null, "checked_at": null, "probe": null, "cache_age_sec": null},
         "actions": [],
@@ -138,7 +146,11 @@ fn element(ctx: &Context, def: &ProfileDef) -> Value {
         actions.push(
             json!({"id": "apply", "risk": "write-local", "needs_lock": true, "offline_ok": true}),
         );
-        if any_present && !all_same {
+        // 采纳只搬定义声明的项；只剩隔离项不同时采纳改变不了什么，不提供
+        let adoptable = fields
+            .iter()
+            .any(|f| f["state"] != "same" && f.get("purpose").is_none());
+        if any_present && adoptable {
             actions.push(
                 json!({"id": "adopt", "risk": "write-local", "needs_lock": false, "offline_ok": true}),
             );
@@ -220,10 +232,10 @@ fn element(ctx: &Context, def: &ProfileDef) -> Value {
 pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
     let policy = store::effective_policy(ctx)?;
     let mut elements = Vec::new();
-    for (index, parsed) in model::load_definitions(&policy).into_iter().enumerate() {
+    for (id, raw, parsed) in model::load_definition_entries(&policy) {
         match parsed {
             Ok(def) => elements.push(element(ctx, &def)),
-            Err(err) => elements.push(invalid_element(&format!("invalid-{index}"), &err)),
+            Err(err) => elements.push(invalid_element(&id, &raw, &err)),
         }
     }
     Ok(json!({"domain": "profiles", "elements": elements}))

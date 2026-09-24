@@ -64,12 +64,48 @@ export function ProfileCard({
   const missingVars = (observed.env_refs ?? []).filter((ref) => ref.resolved === false);
   const allDiffers = (observed.fields ?? []).filter((field) => field.state !== "same");
   // 取消 shell 继承的隔离项合并成一句说明，其余差异逐条列出
-  const isolationGaps = allDiffers.filter((field) => field.purpose === "isolation");
+  // 实际里还没有（shell 导出的会压过来）与实例文件自己设了值（定义没声明、写入会置空）分开说
+  const isolationGaps = allDiffers.filter((field) => field.purpose === "isolation" && field.state === "missing");
+  const isolationSet = allDiffers.filter((field) => field.purpose === "isolation" && field.state !== "missing");
   const differs = allDiffers.filter((field) => field.purpose !== "isolation");
   const canAdopt = element.actions.some((action) => action.id === "adopt");
   const canApply = element.actions.some((action) => action.id === "apply");
   const thirdParty = observed.third_party === true;
   const systemOverrides = observed.system_overrides ?? [];
+  if (observed.invalid) {
+    // 库里的定义按现在的规则解析不了（如旧版本存下的写法）：只给原因，以及编辑修正或移除
+    return (
+      <section data-testid={`profile-card-${id}`} className="rounded-lg border bg-card p-5 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="min-w-0 text-base font-semibold text-foreground">
+            {spec.display_name}
+            <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">{id}</span>
+          </h3>
+          <StateBadge state={element.state} />
+        </div>
+        <p
+          data-testid={`profile-invalid-${id}`}
+          role="alert"
+          className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+        >
+          这套独立环境的定义现在无法使用：{blocked ?? "未知原因"}。编辑修正后保存，或移除它；配置目录与里面的内容不受影响。
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+          <button type="button" data-testid={`profile-edit-${id}`} onClick={onEdit} className="rounded border px-2.5 py-1 text-xs">
+            编辑
+          </button>
+          <button
+            type="button"
+            data-testid={`profile-remove-${id}`}
+            onClick={onRemove}
+            className="ml-auto inline-flex items-center gap-1 rounded border border-destructive/30 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="h-3 w-3" aria-hidden /> 移除环境
+          </button>
+        </div>
+      </section>
+    );
+  }
   return (
     <section
       data-testid={`profile-card-${id}`}
@@ -249,6 +285,14 @@ export function ProfileCard({
           还没挡住 shell 里导出的 {isolationGaps.length} 个凭据相关变量（
           <span className="font-mono">{isolationGaps.map((field) => field.field.replace(/^env\./, "")).join("、")}</span>
           ）：它们会压过{thirdParty ? "这个环境自己的第三方凭据" : "这个环境自己的登录"}。写入配置后这些变量在本环境里一律置空。
+        </p>
+      )}
+
+      {element.state === "drifted" && isolationSet.length > 0 && (
+        <p data-testid={`profile-isolation-set-${id}`} className="mt-2 rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
+          这个环境的配置文件自己设了定义里没有的{" "}
+          <span className="font-mono">{isolationSet.map((field) => field.field.replace(/^env\./, "")).join("、")}</span>
+          ：写入配置会把它们置空。要保留，请先编辑定义把它们加进去。
         </p>
       )}
 

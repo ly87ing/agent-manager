@@ -575,6 +575,13 @@ fn missing_variable_and_bad_definitions_fail_closed() {
     let text = serde_json::to_string(&status.data).unwrap();
     assert!(text.contains("unsupported"), "非法定义必须以固定状态呈现");
     assert!(!text.contains("literal-secret"), "状态不得回显取值");
+    // 带真实 id 与所属助手：界面才能列出它并提供编辑、移除
+    let invalid = element(&status, "cc-plain");
+    assert_eq!(invalid["state"], "unsupported");
+    assert_eq!(invalid["observed"]["invalid"], true);
+    assert_eq!(invalid["spec"]["base_agent"], "claude-code");
+    assert_eq!(invalid["spec"]["display_name"], "cc-plain");
+    assert_eq!(invalid["actions"], serde_json::json!([]));
 
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1000,6 +1007,35 @@ fn 官方账号实例不检查登录_只把外部凭据变量置空() {
     assert_eq!(env.len(), 10, "{env:?}");
     // 官方账号实例不跑登录检查
     assert_eq!(probe_log(&ctx), "");
+
+    // 用户在实例文件里自己设了网关地址（定义没声明）：显示为不同、实际值可见；只剩隔离项不同
+    // 时不提供「以实际配置更新定义」（采纳只搬定义声明的项，改变不了什么）
+    let mut edited = settings.clone();
+    edited["env"]["ANTHROPIC_BASE_URL"] = serde_json::json!("https://gw.example.com");
+    std::fs::write(
+        dir.join("settings.json"),
+        serde_json::to_vec_pretty(&edited).unwrap(),
+    )
+    .unwrap();
+    let env = status(&ctx);
+    let el = element(&env, "cc-work");
+    assert_eq!(el["state"], "drifted");
+    let row = el["observed"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["field"] == "env.ANTHROPIC_BASE_URL")
+        .unwrap();
+    assert_eq!(row["state"], "differs");
+    assert_eq!(row["live"], "https://gw.example.com");
+    assert_eq!(row["purpose"], "isolation");
+    let actions: Vec<&str> = el["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(actions, vec!["apply"]);
     let _ = std::fs::remove_dir_all(root);
 }
 

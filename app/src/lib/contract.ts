@@ -269,6 +269,8 @@ export interface ProfileObserved {
   usage?: AgentUsage | null;
   /** 用第三方接口或凭据：目录里不能有官方账号登录。 */
   third_party?: boolean;
+  /** 库里的定义按现在的规则解析不了：只有 blocked_reason，界面只给编辑与移除。 */
+  invalid?: boolean;
   /** 实例目录挡不住的系统级设置（组织下发的设置、共享的联合身份档案等）：只有来源与键名。 */
   system_overrides?: { source: string; name: string }[];
   /** 写入基准：实例目标文件本工具负责部分的摘要，文件不存在为 missing；读不了时为 null。 */

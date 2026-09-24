@@ -58,6 +58,18 @@ import { useEngineQuery } from "../lib/queries";
 import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource } from "../lib/useAliasSource";
 import { useDirectApply } from "../lib/useDirectApply";
 
+/** 用定义覆盖实例实际配置前的说明：实例文件自己设了、定义没声明的凭据相关变量会被置空，点名说出来。 */
+function overwriteDescription(element: EngineElement): string {
+  const fields = ((element.observed as { fields?: { field: string; state: string; purpose?: string }[] }).fields ?? []);
+  const blanked = fields
+    .filter((field) => field.purpose === "isolation" && field.state === "differs")
+    .map((field) => field.field.replace(/^env\./, ""));
+  const base = "实例目录里的实际配置与实例定义不同。继续会按定义写入这几项（你自己加的其他设置保留）；想保留实际配置请改用「以实际配置更新定义」。";
+  return blanked.length > 0
+    ? `${base}注意：配置文件里自己设的 ${blanked.join("、")} 定义里没有，会被置空；要保留请先编辑定义把它们加进去。`
+    : base;
+}
+
 export default function AgentsPage({
   onManageSkills,
   onOpenSecrets,
@@ -940,7 +952,7 @@ export default function AgentsPage({
       {profileOverwriting && (
         <ConfirmModal
           title={`用定义覆盖 ${profileOverwriting.id.replace(/^profiles:/, "")} 的实际配置`}
-          description="实例目录里的实际配置与实例定义不同。继续会按定义写入这几项（你自己加的其他设置保留）；想保留实际配置请改用「以实际配置更新定义」。"
+          description={overwriteDescription(profileOverwriting)}
           risk="write-local"
           confirmLabel="确认覆盖"
           executing={profileApply.executing}

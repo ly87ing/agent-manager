@@ -430,6 +430,15 @@ fn claude_cancelled_env(def: &ProfileDef) -> Vec<&'static str> {
 
 /// 从有效策略里取出全部 profile 定义（带 profile 段的 agent 定义），按 id 排序。
 pub(crate) fn load_definitions(policy: &Value) -> Vec<Result<ProfileDef>> {
+    load_definition_entries(policy)
+        .into_iter()
+        .map(|(_, _, parsed)| parsed)
+        .collect()
+}
+
+/// 同 `load_definitions`，另带每条定义的 id 与库里的原始定义：解析失败的定义（如按新规则不再
+/// 合法的旧定义）也要能在界面上看到、编辑或移除。
+pub(crate) fn load_definition_entries(policy: &Value) -> Vec<(String, Value, Result<ProfileDef>)> {
     let mut out = Vec::new();
     let Some(defs) = policy
         .get("agents")
@@ -451,14 +460,15 @@ pub(crate) fn load_definitions(policy: &Value) -> Vec<Result<ProfileDef>> {
             .and_then(|v| v.get("enabled"))
             .and_then(Value::as_bool)
             .unwrap_or(true);
-        out.push(parse_definition(id, raw, enabled));
+        out.push((id.clone(), raw.clone(), parse_definition(id, raw, enabled)));
     }
     out
 }
 
 /// 实例 settings.json 里与本工具有关的键只有 env / model：`hooks` 归 hooks 域，其余根级
-/// 字段是用户自己的（合并写入时原样保留）。env 只写实例定义里声明的那几个变量，
-/// 用户自己加的 env 变量原样保留。Codex 实例 config.toml 同理，只动下面这几项。
+/// 字段是用户自己的（合并写入时原样保留）。env 只写实例定义里声明的那几个变量，外加取消
+/// shell 继承的那组（见 `claude_cancelled_env`，定义没声明的写为空串）；用户自己加的其他 env
+/// 变量原样保留。Codex 实例 config.toml 同理，只动下面这几项。
 const CODEX_MODEL_PROVIDER: &str = "model_provider";
 
 fn codex_provider_path() -> String {
