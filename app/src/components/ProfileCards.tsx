@@ -9,6 +9,7 @@ import type { ProfileLaunchCommand } from "../lib/profileDefinition";
 import { StateBadge } from "./StateBadge";
 import { cn } from "../lib/utils";
 import { overrideEffect } from "../lib/overrideEffects";
+import { balanceSupported } from "../lib/balance";
 
 /** 实例状态 → 一句话说明用户现在处于什么位置。 */
 const STATE_NOTE: Record<string, string> = {
@@ -37,6 +38,7 @@ export function ProfileCard({
   onFixLaunch,
   onCheckAuth,
   onCheckEndpoint,
+  onCheckBalance,
 }: {
   element: EngineElement;
   bin: string;
@@ -60,7 +62,11 @@ export function ProfileCard({
   onCheckAuth: () => Promise<OfficialAuthStatus | string>;
   /** 第三方环境：按实例定义发一次最小真实请求，确认地址、凭据与模型能用。 */
   onCheckEndpoint?: () => Promise<{ ok: boolean; detail: string; latencyMs: number }>;
+  /** 查这个环境凭据的余额（只对有官方余额接口的厂商）；返回一行结果或失败原因。 */
+  onCheckBalance?: () => Promise<string>;
 }) {
+  const [balance, setBalance] = useState<string | null>(null);
+  const [balanceBusy, setBalanceBusy] = useState(false);
   const [endpointCheck, setEndpointCheck] = useState<{ ok: boolean; detail: string; latencyMs: number } | null>(null);
   const [checkingEndpoint, setCheckingEndpoint] = useState(false);
   const checkEndpoint = async () => {
@@ -330,6 +336,11 @@ export function ProfileCard({
         </div>
       )}
 
+      {balance && (
+        <p data-testid={`profile-balance-${id}`} className="mt-2 text-xs text-muted-foreground">
+          {balance}
+        </p>
+      )}
       {endpointCheck && (
         <p
           data-testid={`profile-check-result-${id}`}
@@ -353,6 +364,25 @@ export function ProfileCard({
           >
             {checkingEndpoint ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <Activity className="h-3 w-3" aria-hidden />}
             {checkingEndpoint ? "正在测…" : "测一下"}
+          </button>
+        )}
+        {thirdParty && onCheckBalance && balanceSupported(spec.base_url) && (
+          <button
+            type="button"
+            data-testid={`profile-balance-button-${id}`}
+            disabled={balanceBusy}
+            title="用这个环境的凭据查账户余额；只在点它时联网，不改配置"
+            onClick={async () => {
+              setBalanceBusy(true);
+              try {
+                setBalance(await onCheckBalance());
+              } finally {
+                setBalanceBusy(false);
+              }
+            }}
+            className="inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+          >
+            {balanceBusy ? "正在查…" : "查余额"}
           </button>
         )}
         <button

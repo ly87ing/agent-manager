@@ -218,7 +218,17 @@ fn element(ctx: &Context, def: &ProfileDef) -> Value {
             "base_agent": def.base_agent,
             "kind": def.kind.as_str(),
             "config_dir": def.config_dir_raw,
-            "base_url": def.base_url,
+            // Claude 实例的地址在 env 里；两种都给出，地址里内嵌的账号密码打码
+            "base_url": def
+                .base_url
+                .clone()
+                .or_else(|| {
+                    def.env
+                        .get("ANTHROPIC_BASE_URL")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .map(|url| crate::native::redact_url_userinfo(&url)),
             "model": def.model,
         },
         "policy": {"enabled": def.enabled},

@@ -13,8 +13,10 @@ import { emptyConnection, type ConnectionEntry } from "./agentDefinitionForm";
  * 报「模型不存在」时以各家官方文档为准。
  *
  * 核对日期：2026-09-24。能从厂商自己发布的代码里读到的以代码为准：智谱官方配置助手
- * `@z_ai/coding-helper`（npm，2026-08-27）、MiniMax 官方命令行 `MiniMax-AI/cli`（GitHub）、
- * Kimi Code 仓库 `MoonshotAI/kimi-code`（GitHub）；其余取自厂商文档站。
+ * `@z_ai/coding-helper`（npm，2026-08-27）、MiniMax 官方命令行 `MiniMax-AI/cli`、Kimi Code 仓库
+ * `MoonshotAI/kimi-code` 与帮助中心 `MoonshotAI/kimi-help-center`、火山方舟命令行 `volcengine/ark-cli`、
+ * 小米 MiMo 官方仓库 `XiaomiMiMo/awesome-mimo-agent`（均为 GitHub）；其余取自厂商文档站。
+ * Codex 只认 Responses 协议：厂商文档只写了 Chat Completions 的（阶跃、腾讯、百度等）不收 Codex 预设。
  */
 
 export interface ConnectionPreset {
@@ -27,6 +29,11 @@ export interface ConnectionPreset {
   aliasOpus?: string;
   aliasSonnet?: string;
   aliasHaiku?: string;
+  aliasFable?: string;
+  /** 子代理默认模型（官方 CLAUDE_CODE_SUBAGENT_MODEL），厂商文档写了才填。 */
+  subagentModel?: string;
+  /** 凭据走哪个头：缺省 Bearer（ANTHROPIC_AUTH_TOKEN）；厂商文档要求 x-api-key 的写 api_key。 */
+  auth?: "token" | "api_key";
   /** 厂商建议的请求超时（毫秒）。 */
   timeoutMs?: string;
   /**
@@ -37,6 +44,10 @@ export interface ConnectionPreset {
   tokenVar: string;
   /** 这条取自哪家的什么文档，便于自己去核对。 */
   source: string;
+  /** 厂商控制台里创建 / 查看密钥的页面（只收厂商自己的代码或文档里写明的地址）。 */
+  apiKeyUrl?: string;
+  /** 厂商写明这个端点怎么接 Claude Code / Codex 的文档页。 */
+  docsUrl?: string;
 }
 
 export const CONNECTION_PRESETS: ConnectionPreset[] = [
@@ -53,6 +64,8 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     timeoutMs: "3000000",
     tokenVar: "GLM_API_KEY",
     source: "智谱官方配置助手 @z_ai/coding-helper 与文档 docs.bigmodel.cn",
+    apiKeyUrl: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
+    docsUrl: "https://docs.bigmodel.cn/cn/guide/develop/claude",
   },
   {
     id: "glm-global-claude",
@@ -66,6 +79,8 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     timeoutMs: "3000000",
     tokenVar: "Z_AI_API_KEY",
     source: "智谱官方配置助手 @z_ai/coding-helper 与文档 docs.z.ai",
+    apiKeyUrl: "https://z.ai/manage-apikey/apikey-list",
+    docsUrl: "https://docs.z.ai/devpack/tool/claude",
   },
   {
     id: "kimi-cn-claude",
@@ -76,8 +91,11 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     aliasOpus: "kimi-k3[1m]",
     aliasSonnet: "kimi-k3[1m]",
     aliasHaiku: "kimi-k2.7-code",
+    aliasFable: "kimi-k3[1m]",
     tokenVar: "KIMI_API_KEY",
     source: "Kimi 开放平台文档 platform.kimi.com",
+    apiKeyUrl: "https://platform.kimi.com/console/api-keys",
+    docsUrl: "https://platform.kimi.com/docs/guide/claude-code-kimi",
   },
   {
     id: "kimi-global-claude",
@@ -88,8 +106,11 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     aliasOpus: "kimi-k3[1m]",
     aliasSonnet: "kimi-k3[1m]",
     aliasHaiku: "kimi-k2.7-code",
+    aliasFable: "kimi-k3[1m]",
     tokenVar: "KIMI_GLOBAL_API_KEY",
     source: "Kimi 开放平台文档 platform.kimi.ai",
+    apiKeyUrl: "https://platform.kimi.ai/console/api-keys",
+    docsUrl: "https://platform.kimi.ai/docs/guide/claude-code-kimi",
   },
   {
     id: "deepseek-claude",
@@ -102,6 +123,8 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     aliasHaiku: "deepseek-flash",
     tokenVar: "DEEPSEEK_API_KEY",
     source: "DeepSeek API 文档 api-docs.deepseek.com",
+    apiKeyUrl: "https://platform.deepseek.com/api_keys",
+    docsUrl: "https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/",
   },
   {
     id: "minimax-cn-claude",
@@ -115,6 +138,8 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     timeoutMs: "3000000",
     tokenVar: "MINIMAX_CN_API_KEY",
     source: "MiniMax 官方命令行 MiniMax-AI/cli 与文档 platform.minimaxi.com",
+    apiKeyUrl: "https://platform.minimaxi.com/subscribe/token-plan",
+    docsUrl: "https://platform.minimaxi.com/docs/token-plan/claude-code",
   },
   {
     id: "minimax-global-claude",
@@ -128,8 +153,120 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     timeoutMs: "3000000",
     tokenVar: "MINIMAX_API_KEY",
     source: "MiniMax 官方命令行 MiniMax-AI/cli 与文档 platform.minimax.io",
+    apiKeyUrl: "https://platform.minimax.io/user-center/payment/token-plan",
+    docsUrl: "https://platform.minimax.io/docs/token-plan/claude-code",
   },
 
+  {
+    id: "kimi-code-cn-claude",
+    label: "Kimi Code 会员（国内）",
+    kind: "claude",
+    // Kimi Code 的 Claude Code 接入不走 /anthropic，官方写法就是这个根地址，且用 x-api-key
+    baseUrl: "https://api.kimi.com/coding/",
+    auth: "api_key",
+    model: "k3-256k",
+    aliasOpus: "k3-256k",
+    aliasSonnet: "k3-256k",
+    aliasHaiku: "k3-256k",
+    aliasFable: "k3-256k",
+    subagentModel: "k3-256k",
+    tokenVar: "KIMI_CODE_API_KEY",
+    source: "Kimi Code 仓库 MoonshotAI/kimi-code、帮助中心 MoonshotAI/kimi-help-center 与文档 www.kimi.com/code/docs",
+    apiKeyUrl: "https://www.kimi.com/code/console",
+    docsUrl: "https://www.kimi.com/code/docs/third-party-tools/claude-code.html",
+  },
+  {
+    id: "kimi-code-global-claude",
+    label: "Kimi Code 会员（国际）",
+    kind: "claude",
+    baseUrl: "https://api.kimi.ai/coding/",
+    auth: "api_key",
+    model: "k3-256k",
+    aliasOpus: "k3-256k",
+    aliasSonnet: "k3-256k",
+    aliasHaiku: "k3-256k",
+    aliasFable: "k3-256k",
+    subagentModel: "k3-256k",
+    tokenVar: "KIMI_CODE_GLOBAL_API_KEY",
+    source: "Kimi Code 仓库 MoonshotAI/kimi-code 与文档 www.kimi.com/code/docs",
+    docsUrl: "https://www.kimi.com/code/docs/en/third-party-tools/claude-code.html",
+  },
+  {
+    id: "volcengine-coding-cn-claude",
+    label: "火山方舟 Coding Plan（国内）",
+    kind: "claude",
+    // Coding Plan 专用端点：/api/v3 不计入套餐，官方文档另有提醒
+    baseUrl: "https://ark.cn-beijing.volces.com/api/coding",
+    model: "ark-code-latest",
+    aliasOpus: "ark-code-latest",
+    aliasSonnet: "ark-code-latest",
+    aliasHaiku: "ark-code-latest",
+    aliasFable: "ark-code-latest",
+    tokenVar: "ARK_API_KEY",
+    source: "火山方舟命令行 volcengine/ark-cli 与文档 www.volcengine.com/docs/82379",
+    docsUrl: "https://www.volcengine.com/docs/82379/1928261",
+  },
+  {
+    id: "mimo-claude",
+    label: "小米 MiMo",
+    kind: "claude",
+    baseUrl: "https://api.xiaomimimo.com/anthropic",
+    // 官方仓库把每个别名都指向 pro 模型；型号取当前文档的 v2.6
+    model: "mimo-v2.6-pro[1m]",
+    aliasOpus: "mimo-v2.6-pro[1m]",
+    aliasSonnet: "mimo-v2.6-pro[1m]",
+    aliasHaiku: "mimo-v2.6-pro[1m]",
+    aliasFable: "mimo-v2.6-pro[1m]",
+    tokenVar: "MIMO_API_KEY",
+    source: "小米 MiMo 官方仓库 XiaomiMiMo/awesome-mimo-agent 与文档 platform.xiaomimimo.com",
+    apiKeyUrl: "https://platform.xiaomimimo.com/console/api-keys",
+    docsUrl: "https://platform.xiaomimimo.com/docs/zh-CN/integration/claudecode",
+  },
+  {
+    id: "longcat-claude",
+    label: "美团 LongCat",
+    kind: "claude",
+    baseUrl: "https://api.longcat.chat/anthropic",
+    model: "LongCat-2.0",
+    aliasOpus: "LongCat-2.0",
+    aliasSonnet: "LongCat-2.0",
+    aliasHaiku: "LongCat-2.0",
+    aliasFable: "LongCat-2.0",
+    tokenVar: "LONGCAT_API_KEY",
+    source: "美团 LongCat 开放平台文档 longcat.chat/platform/docs",
+    apiKeyUrl: "https://longcat.chat/platform/api_keys",
+    docsUrl: "https://longcat.chat/platform/docs/zh/ClaudeCode.html",
+  },
+  {
+    id: "stepfun-cn-claude",
+    label: "阶跃星辰 Step Plan（国内）",
+    kind: "claude",
+    baseUrl: "https://api.stepfun.com/step_plan",
+    model: "step-3.7-flash",
+    aliasOpus: "step-3.7-flash",
+    aliasSonnet: "step-3.7-flash",
+    aliasHaiku: "step-3.7-flash",
+    aliasFable: "step-3.7-flash",
+    tokenVar: "STEPFUN_API_KEY",
+    source: "阶跃星辰开放平台文档 platform.stepfun.com（需订阅 Step Plan）",
+    apiKeyUrl: "https://platform.stepfun.com/interface-key",
+    docsUrl: "https://platform.stepfun.com/docs/zh/step-plan/integrations/claude-code",
+  },
+  {
+    id: "stepfun-global-claude",
+    label: "阶跃星辰 Step Plan（国际）",
+    kind: "claude",
+    baseUrl: "https://api.stepfun.ai/step_plan",
+    model: "step-3.7-flash",
+    aliasOpus: "step-3.7-flash",
+    aliasSonnet: "step-3.7-flash",
+    aliasHaiku: "step-3.7-flash",
+    aliasFable: "step-3.7-flash",
+    tokenVar: "STEPFUN_GLOBAL_API_KEY",
+    source: "StepFun 开放平台文档 platform.stepfun.ai（需订阅 Step Plan）",
+    apiKeyUrl: "https://platform.stepfun.ai/interface-key",
+    docsUrl: "https://platform.stepfun.ai/docs/en/step-plan/integrations/claude-code",
+  },
   // ---- Codex：OpenAI Responses 协议端点（与上面的地址不是同一个）----
   {
     id: "glm-cn-codex",
@@ -139,6 +276,8 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     model: "glm-5.3",
     tokenVar: "GLM_API_KEY",
     source: "智谱官方配置助手 @z_ai/coding-helper 与文档 docs.bigmodel.cn",
+    apiKeyUrl: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
+    docsUrl: "https://docs.bigmodel.cn/cn/coding-plan/tool/codex",
   },
   {
     id: "glm-global-codex",
@@ -148,6 +287,8 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     model: "glm-5.3",
     tokenVar: "Z_AI_API_KEY",
     source: "智谱官方配置助手 @z_ai/coding-helper 与文档 docs.z.ai",
+    apiKeyUrl: "https://z.ai/manage-apikey/apikey-list",
+    docsUrl: "https://docs.z.ai/devpack/tool/codex",
   },
   {
     id: "kimi-cn-codex",
@@ -157,6 +298,8 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     model: "kimi-k3",
     tokenVar: "KIMI_API_KEY",
     source: "Kimi 开放平台文档 platform.kimi.com（Codex 接入指南）",
+    apiKeyUrl: "https://platform.kimi.com/console/api-keys",
+    docsUrl: "https://platform.kimi.com/docs/guide/codex-kimi",
   },
   {
     id: "kimi-global-codex",
@@ -166,6 +309,8 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     model: "kimi-k3",
     tokenVar: "KIMI_GLOBAL_API_KEY",
     source: "Kimi 开放平台文档 platform.kimi.ai（Codex 接入指南）",
+    apiKeyUrl: "https://platform.kimi.ai/console/api-keys",
+    docsUrl: "https://platform.kimi.ai/docs/guide/codex-kimi",
   },
   {
     // Kimi Code 是会员产品，与开放平台是两套账号与密钥，不能混用同一个变量
@@ -176,6 +321,8 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     model: "k3-256k",
     tokenVar: "KIMI_CODE_API_KEY",
     source: "Kimi Code 仓库 MoonshotAI/kimi-code 与文档 www.kimi.com/code/docs",
+    apiKeyUrl: "https://www.kimi.com/code/console",
+    docsUrl: "https://www.kimi.com/code/docs/third-party-tools/codex.html",
   },
   {
     id: "kimi-code-global-codex",
@@ -183,8 +330,9 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     kind: "codex",
     baseUrl: "https://api.kimi.ai/coding/v1",
     model: "k3-256k",
-    tokenVar: "KIMI_CODE_API_KEY",
+    tokenVar: "KIMI_CODE_GLOBAL_API_KEY",
     source: "Kimi Code 仓库 MoonshotAI/kimi-code 与文档 www.kimi.com/code/docs",
+    docsUrl: "https://www.kimi.com/code/docs/en/third-party-tools/codex",
   },
   {
     id: "deepseek-codex",
@@ -194,6 +342,8 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     model: "deepseek-flash",
     tokenVar: "DEEPSEEK_API_KEY",
     source: "DeepSeek API 文档 api-docs.deepseek.com",
+    apiKeyUrl: "https://platform.deepseek.com/api_keys",
+    docsUrl: "https://api-docs.deepseek.com/quick_start/agent_integrations/codex/",
   },
   {
     id: "minimax-cn-codex",
@@ -203,6 +353,8 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     model: "MiniMax-M3",
     tokenVar: "MINIMAX_CN_API_KEY",
     source: "MiniMax 官方命令行 MiniMax-AI/cli 与文档 platform.minimaxi.com",
+    apiKeyUrl: "https://platform.minimaxi.com/subscribe/token-plan",
+    docsUrl: "https://platform.minimaxi.com/docs/token-plan/codex",
   },
   {
     id: "minimax-global-codex",
@@ -212,6 +364,30 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     model: "MiniMax-M3",
     tokenVar: "MINIMAX_API_KEY",
     source: "MiniMax 官方命令行 MiniMax-AI/cli 与文档 platform.minimax.io",
+    apiKeyUrl: "https://platform.minimax.io/user-center/payment/token-plan",
+    docsUrl: "https://platform.minimax.io/docs/token-plan/codex",
+  },
+  {
+    id: "mimo-codex",
+    label: "小米 MiMo",
+    kind: "codex",
+    baseUrl: "https://api.xiaomimimo.com/v1",
+    model: "mimo-v2.6-pro",
+    tokenVar: "MIMO_API_KEY",
+    source: "小米 MiMo 官方仓库 XiaomiMiMo/awesome-mimo-agent（Codex 用 Responses 协议）与文档 mimo.mi.com",
+    apiKeyUrl: "https://platform.xiaomimimo.com/console/api-keys",
+    docsUrl: "https://mimo.mi.com/docs/integration/codex",
+  },
+  {
+    id: "longcat-codex",
+    label: "美团 LongCat",
+    kind: "codex",
+    baseUrl: "https://api.longcat.chat/openai/v1",
+    model: "LongCat-2.0",
+    tokenVar: "LONGCAT_API_KEY",
+    source: "美团 LongCat 开放平台文档 longcat.chat/platform/docs（原生支持 Responses 协议）",
+    apiKeyUrl: "https://longcat.chat/platform/api_keys",
+    docsUrl: "https://longcat.chat/platform/docs/zh/Codex.html",
   },
 ];
 
@@ -231,13 +407,15 @@ export function connectionFromPreset(preset: ConnectionPreset, name: string): Co
     ...emptyConnection(name),
     label: preset.label,
     baseUrl: preset.baseUrl,
-    // 这几家的文档都用 Bearer；Codex 侧没有这个选项，写了也不生效
-    auth: "token",
+    // 缺省 Bearer；厂商文档要求 x-api-key 的预设单独写明。Codex 侧没有这个选项，写了也不生效
+    auth: preset.auth ?? "token",
     tokenVar: preset.tokenVar,
     model: preset.model ?? "",
     aliasOpus: preset.aliasOpus ?? "",
     aliasSonnet: preset.aliasSonnet ?? "",
     aliasHaiku: preset.aliasHaiku ?? "",
+    ...(preset.aliasFable ? { aliasFable: preset.aliasFable } : {}),
+    ...(preset.subagentModel ? { subagentModel: preset.subagentModel } : {}),
     timeoutMs: preset.timeoutMs ?? "",
   };
 }

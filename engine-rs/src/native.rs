@@ -477,6 +477,10 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("agents", "models") => {
             crate::native_agent_check::handle_models(ctx, request).map(|d| (d, vec![]))
         }
+        // 查余额：只对有官方余额接口的厂商，只在调用方点它时才联网
+        ("agents", "balance") => {
+            crate::native_agent_check::handle_balance(ctx, request).map(|d| (d, vec![]))
+        }
         // 运行参数落到助手自己的配置文件；与装卸升级分开，那条走 shell 命令，这条写文件
         ("agents", "configure") => {
             crate::native_agent_settings::apply(ctx, request).map(|data| (data, vec![]))

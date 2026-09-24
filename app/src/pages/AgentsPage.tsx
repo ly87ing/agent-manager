@@ -31,6 +31,7 @@ import {
   type ProfileFormInput,
 } from "../lib/profileDefinition";
 import { runEngine } from "../lib/engine";
+import { formatBalance, type BalanceItem } from "../lib/balance";
 import { toastWithUndo } from "../lib/undo";
 import {
   connectionsOf,
@@ -371,6 +372,16 @@ export default function AgentsPage({
         JSON.stringify({ kind, base_url: baseUrl, token_var: tokenVar }),
       ]);
       return envelope.ok ? envelope.data?.models ?? [] : envelope.errors[0]?.message ?? "没拿到模型列表";
+    } catch (err) {
+      return String(err);
+    }
+  };
+
+  /** 查余额（接入卡片与独立环境卡片共用）：只在点按钮时联网、只读；返回一行结果或失败原因。 */
+  const fetchBalance = async (args: string[]): Promise<string> => {
+    try {
+      const envelope = await runEngine<{ items?: BalanceItem[] }>("agents:balance", args);
+      return envelope.ok ? formatBalance(envelope.data?.items ?? []) : envelope.errors[0]?.message ?? "没查到余额";
     } catch (err) {
       return String(err);
     }
@@ -737,6 +748,7 @@ export default function AgentsPage({
           )
         }
         onShowInstances={() => setEnvironmentView("independent")}
+        onBalance={(element, connection) => fetchBalance(["--only", element.id, "--use", connection.name])}
         onExport={(element, connection) => void exportConnection(element, connection)}
         onRemove={(element, connection) => setConnectionRemoving({ agent: element, connection })}
         onMove={(element, connection, direction) => void moveConnection(element, connection, direction)}
@@ -818,6 +830,7 @@ export default function AgentsPage({
                       return String(err);
                     }
                   }}
+                  onCheckBalance={() => fetchBalance(["--only", element.id])}
                   onCheckEndpoint={async () => {
                     try {
                       const envelope = await runEngine<{ ok?: boolean; detail?: string; latency_ms?: number }>(

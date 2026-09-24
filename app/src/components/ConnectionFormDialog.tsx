@@ -329,6 +329,34 @@ export function ConnectionFormDialog({
                   </span>
                 )}
               </div>
+              {!prefilled && (() => {
+                const preset = presets.find((item) => item.id === choice);
+                if (!preset || (!preset.apiKeyUrl && !preset.docsUrl)) return null;
+                return (
+                  <div data-testid="connection-preset-links" className="space-y-1 rounded border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    {[
+                      { label: "获取密钥", url: preset.apiKeyUrl, id: "key" },
+                      { label: "接入文档", url: preset.docsUrl, id: "docs" },
+                    ]
+                      .filter((item): item is { label: string; url: string; id: string } => Boolean(item.url))
+                      .map((item) => (
+                        <p key={item.id} className="flex flex-wrap items-center gap-2">
+                          <span>{item.label}：</span>
+                          <span className="break-all font-mono text-foreground">{item.url}</span>
+                          <button
+                            type="button"
+                            data-testid={`connection-preset-copy-${item.id}`}
+                            onClick={() => void navigator.clipboard?.writeText(item.url)}
+                            className="rounded border bg-card px-1.5 py-0.5 text-[11px] hover:bg-accent"
+                          >
+                            复制
+                          </button>
+                        </p>
+                      ))}
+                    <p>出处：{preset.source}</p>
+                  </div>
+                );
+              })()}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="text-sm text-foreground">
                   显示名称

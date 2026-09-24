@@ -67,7 +67,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
         ("agents", "check") => true,
         // 列模型：同样会联网、只在界面上点它时才发；只读（除审计）
-        ("agents", "models") => true,
+        ("agents", "models" | "balance") => true,
         // 官方账号登录状态：只读，用官方命令查一次
         ("agents", "auth-status") => true,
         // 配置文件原文：读（凭据遮住）与整文件按基准写回
@@ -205,7 +205,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--use", ArgValueKind::ElementId));
         }
         // 表单里还没保存的接入：地址、凭据变量名与形态放在一个 JSON 里，引擎再逐项校验
-        ("agents", "models") => {
+        ("agents", "models" | "balance") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--use", ArgValueKind::ElementId));
             specs.push(("--draft", ArgValueKind::JsonValue));
@@ -649,6 +649,7 @@ mod tests {
             "agents:configure",
             "agents:check",
             "agents:models",
+            "agents:balance",
             "agents:auth-status",
             "usage:status",
             "usage:scan",

@@ -831,9 +831,166 @@ pub(crate) fn handle_models(ctx: &Context, req: &Request) -> Result<Value, Dispa
     }))
 }
 
+/// 有官方余额查询接口的厂商：按接入地址的主机认出来，余额接口与接入地址同主机（凭据不发往别处）。
+/// 只收厂商 API 文档里写明的接口：DeepSeek「查询余额」`GET /user/balance`，Moonshot（Kimi 开放平台）
+/// 「查询余额」`GET /v1/users/me/balance`。套餐额度一类没有公开文档的接口不收。
+fn balance_endpoint(base_url: &str) -> Option<(&'static str, String)> {
+    let rest = base_url.split_once("://")?.1;
+    let host = rest.split(['/', '?', '#']).next()?.to_ascii_lowercase();
+    match host.as_str() {
+        "api.deepseek.com" => Some(("deepseek", "https://api.deepseek.com/user/balance".into())),
+        "api.moonshot.cn" | "api.moonshot.ai" => {
+            Some(("moonshot", format!("https://{host}/v1/users/me/balance")))
+        }
+        _ => None,
+    }
+}
+
+/// 余额响应 → `[{label, amount, currency}]`。字段按两家文档；取不出返回 None，不编数字。
+fn balance_items(vendor: &str, body: &str) -> Option<Vec<Value>> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    let number = |v: Option<&Value>| -> Option<String> {
+        let v = v?;
+        v.as_str()
+            .map(str::to_string)
+            .or_else(|| v.as_f64().map(|n| format!("{n}")))
+    };
+    let items: Vec<Value> = match vendor {
+        "deepseek" => value
+            .get("balance_infos")?
+            .as_array()?
+            .iter()
+            .filter_map(|info| {
+                Some(json!({
+                    "label": "余额",
+                    "amount": number(info.get("total_balance"))?,
+                    "currency": info.get("currency").and_then(Value::as_str),
+                }))
+            })
+            .collect(),
+        "moonshot" => {
+            let data = value.get("data")?;
+            [
+                ("可用余额", "available_balance"),
+                ("代金券", "voucher_balance"),
+                ("现金余额", "cash_balance"),
+            ]
+            .iter()
+            .filter_map(|(label, key)| {
+                Some(json!({"label": label, "amount": number(data.get(*key))?, "currency": null}))
+            })
+            .collect()
+        }
+        _ => return None,
+    };
+    (!items.is_empty()).then_some(items)
+}
+
+/// `agents:balance`：查这套接入（或独立环境、表单草稿）凭据的账户余额。只对有官方余额接口的厂商
+/// 可用；与检查同一口径：只在点它时联网、只读（除审计外不写），凭据经 0600 临时文件交给 curl。
+pub(crate) fn handle_balance(ctx: &Context, req: &Request) -> Result<Value, DispatchError> {
+    let target = models_target(ctx, req)?;
+    let (vendor, url) = balance_endpoint(&target.base_url).ok_or_else(|| {
+        DispatchError::new(
+            "AGENT_ERROR",
+            "这家接口没有公开的余额查询接口，请到厂商控制台查看",
+        )
+    })?;
+    let var = target
+        .token_var
+        .as_deref()
+        .ok_or_else(|| DispatchError::new("AGENT_ERROR", "没有凭据变量，没法查余额"))?;
+    let token = crate::secret_values::lookup(var).ok_or_else(|| {
+        DispatchError::new(
+            "AGENT_ERROR",
+            format!("环境变量 {var} 还没有取值：先在密钥页填上，再查余额"),
+        )
+    })?;
+    let headers = vec![
+        "accept: application/json".to_string(),
+        format!("authorization: Bearer {token}"),
+    ];
+    let probe = run_request(ctx, "GET", &url, &headers, None, MODELS_TIMEOUT);
+    let outcome = if probe.transport_error.is_some() || probe.status != 200 {
+        Err(format!("查余额失败：{}", verdict(target.kind, &probe).1))
+    } else {
+        balance_items(vendor, &probe.body)
+            .ok_or_else(|| "余额接口的返回看不懂，请到厂商控制台查看".to_string())
+    };
+
+    if let Ok(mut conn) = crate::store::open_write(ctx) {
+        if let Ok(tx) = conn.transaction() {
+            let _ = crate::store::record_operation(
+                &tx,
+                Some(&req.run_id),
+                "agents:balance",
+                Some(target.element.trim_start_matches("agents:")),
+                Some(
+                    &json!({"vendor": vendor, "ok": outcome.is_ok(), "http_status": probe.status}),
+                ),
+            );
+            let _ = tx.commit();
+        }
+    }
+
+    let items = outcome.map_err(|message| DispatchError::new("AGENT_ERROR", message))?;
+    Ok(json!({
+        "domain": "agents",
+        "action": "balance",
+        "element": target.element,
+        "vendor": vendor,
+        "items": items,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 只对有官方余额接口的厂商查余额_且同主机() {
+        assert_eq!(
+            balance_endpoint("https://api.deepseek.com/anthropic"),
+            Some((
+                "deepseek",
+                "https://api.deepseek.com/user/balance".to_string()
+            ))
+        );
+        assert_eq!(
+            balance_endpoint("https://API.moonshot.ai/v1"),
+            Some((
+                "moonshot",
+                "https://api.moonshot.ai/v1/users/me/balance".to_string()
+            ))
+        );
+        assert_eq!(
+            balance_endpoint("https://api.deepseek.com.evil.example/v1"),
+            None
+        );
+        assert_eq!(
+            balance_endpoint("https://open.bigmodel.cn/api/anthropic"),
+            None
+        );
+    }
+
+    #[test]
+    fn 余额按两家文档的字段取出() {
+        let deepseek = r#"{"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"110.00","granted_balance":"10.00","topped_up_balance":"100.00"}]}"#;
+        assert_eq!(
+            balance_items("deepseek", deepseek),
+            Some(vec![
+                json!({"label": "余额", "amount": "110.00", "currency": "CNY"})
+            ])
+        );
+        let moonshot = r#"{"code":0,"data":{"available_balance":49.58,"voucher_balance":46.58,"cash_balance":3.0},"scode":"0x0","status":true}"#;
+        let items = balance_items("moonshot", moonshot).unwrap();
+        assert_eq!(
+            items[0],
+            json!({"label": "可用余额", "amount": "49.58", "currency": null})
+        );
+        assert_eq!(items.len(), 3);
+        assert_eq!(balance_items("deepseek", "{}"), None);
+    }
 
     /// 列模型只在接入地址的同一主机下找：Anthropic 协议的 /v1/models 优先，再去掉兼容后缀
     /// 试同一厂商的 OpenAI 协议列表；Codex 地址已带 /v1 时不重复拼。

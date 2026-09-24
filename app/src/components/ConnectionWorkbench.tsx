@@ -16,6 +16,7 @@ import { actualRuntimeSettings, automationRawText, runtimeValueLabel } from "../
 import { parseAliasValue, renderAliasPreview } from "../lib/aliasCommand";
 import { cn } from "../lib/utils";
 import { overrideEffect } from "../lib/overrideEffects";
+import { balanceSupported } from "../lib/balance";
 
 export interface ConnectionCheckResult {
   ok: boolean;
@@ -77,6 +78,7 @@ export function ConnectionWorkbench({
   checkResults,
   instancesOf,
   onShowInstances,
+  onBalance,
   onSelectAgent,
   onAdd,
   onImport,
@@ -109,6 +111,8 @@ export function ConnectionWorkbench({
   instancesOf?: (agentId: string, connection: ConnectionEntry) => { id: string; label: string }[];
   /** 切到「独立环境」页签。 */
   onShowInstances?: () => void;
+  /** 查这套接入凭据的余额（只对有官方余额接口的厂商）；返回一行结果或失败原因。 */
+  onBalance?: (element: EngineElement, connection: ConnectionEntry) => Promise<string>;
   onSelectAgent: (agentId: string) => void;
   onAdd: (element: EngineElement) => void;
   onImport: (element: EngineElement) => void;
@@ -527,6 +531,7 @@ export function ConnectionWorkbench({
                 onMakeProfile={kind && connection && onMakeProfile ? () => onMakeProfile(selected, connection) : undefined}
                 instances={connection && instancesOf ? instancesOf(agentId, connection) : []}
                 onShowInstances={onShowInstances}
+                onBalance={kind && connection && onBalance && balanceSupported(connection.baseUrl) ? () => onBalance(selected, connection) : undefined}
                 onExport={kind && connection ? () => onExport(selected, connection) : undefined}
                 onRemove={kind && connection ? () => onRemove(selected, connection) : undefined}
                 onMoveUp={kind && connection && index > 0 ? () => onMove(selected, connection, "up") : undefined}
@@ -641,6 +646,7 @@ function ConnectionCard({
   onMoveDown,
   instances = [],
   onShowInstances,
+  onBalance,
 }: {
   agentId: string;
   connection: ConnectionEntry | null;
@@ -659,8 +665,11 @@ function ConnectionCard({
   onMoveDown?: () => void;
   instances?: { id: string; label: string }[];
   onShowInstances?: () => void;
+  onBalance?: () => Promise<string>;
 }) {
   const id = connection?.name ?? "default";
+  const [balance, setBalance] = useState<string | null>(null);
+  const [balanceBusy, setBalanceBusy] = useState(false);
   return (
     <article
       data-testid={`connection-card-${agentId}-${id}`}
@@ -720,6 +729,11 @@ function ConnectionCard({
             （终端里输入同名命令启动）
           </p>
         )}
+        {balance && (
+          <p data-testid={`connection-balance-${agentId}-${id}`} className="mt-1 text-xs text-muted-foreground">
+            {balance}
+          </p>
+        )}
         {connection && instances.length === 0 && onMakeProfile && !connection.providerRef && (
           <p data-testid={`connection-unused-${agentId}-${id}`} className="mt-1 text-xs text-muted-foreground">
             还没建成独立环境：主配置只放官方账号，第三方接入要在独立环境里用。
@@ -734,6 +748,25 @@ function ConnectionCard({
           >
             {check.ok && check.latencyMs > 0 ? `${check.latencyMs}ms` : check.detail}
           </span>
+        )}
+        {onBalance && (
+          <button
+            type="button"
+            data-testid={`connection-balance-button-${agentId}-${id}`}
+            disabled={balanceBusy}
+            title="用这套接入的凭据查账户余额；只在点它时联网，不改配置"
+            onClick={async () => {
+              setBalanceBusy(true);
+              try {
+                setBalance(await onBalance());
+              } finally {
+                setBalanceBusy(false);
+              }
+            }}
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg border px-3 py-2 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+          >
+            {balanceBusy ? "正在查…" : "查余额"}
+          </button>
         )}
         {connection && instances.length === 0 && onMakeProfile && !connection.providerRef && (
           <button

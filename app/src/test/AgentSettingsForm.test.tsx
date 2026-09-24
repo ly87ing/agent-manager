@@ -1007,6 +1007,39 @@ describe("助手运行参数", () => {
     expect(entry.model_aliases).toEqual({ opus: "deepseek-v4-pro", sonnet: "deepseek-v4-pro", haiku: "deepseek-v4-pro", fable: "deepseek-v4-pro" });
   });
 
+  it("选中厂商预设时给出获取密钥与接入文档的地址（可复制）与出处", async () => {
+    renderWithEngine(<AgentsPage />, routes());
+    await userEvent.click(await screen.findByTestId("add-connection-button"));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: /DeepSeek/ }));
+    const links = within(dialog).getByTestId("connection-preset-links");
+    expect(links).toHaveTextContent("获取密钥：https://platform.deepseek.com/api_keys");
+    expect(links).toHaveTextContent("接入文档：https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/");
+    expect(links).toHaveTextContent("出处：DeepSeek API 文档");
+  });
+
+  it("有官方余额接口的接入可查余额，结果就地显示；其他厂商不给这个按钮", async () => {
+    const withBalance = routes();
+    const status = withBalance["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "official",
+      profiles: {
+        official: { label: "官方" },
+        deepseek: { label: "DeepSeek", base_url: "https://api.deepseek.com/anthropic", auth: "token", token_var: "DEEPSEEK_API_KEY", model: "deepseek-flash" },
+        glm: { label: "智谱", base_url: "https://open.bigmodel.cn/api/anthropic", auth: "token", token_var: "GLM_API_KEY", model: "glm-5.3" },
+      },
+    };
+    withBalance["agents:balance"] = makeEnvelope(
+      { vendor: "deepseek", items: [{ label: "余额", amount: "110.00", currency: "CNY" }] },
+      { command: "agents.balance" },
+    );
+    const { calls } = renderWithEngine(<AgentsPage />, withBalance);
+    await userEvent.click(await screen.findByTestId("connection-balance-button-claude-code-deepseek"));
+    expect(await screen.findByTestId("connection-balance-claude-code-deepseek")).toHaveTextContent("余额 110.00 CNY");
+    expect(calls.find((call) => call.command === "agents:balance")!.args).toEqual(["--only", "agents:claude-code", "--use", "deepseek"]);
+    expect(screen.queryByTestId("connection-balance-button-claude-code-glm")).toBeNull();
+  });
+
   it("工作台导入接入：先预览，只保存定义且不启用、不写凭据", async () => {
     const withProfiles = routes();
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);

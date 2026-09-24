@@ -510,11 +510,24 @@ Claude 形态另带 `anthropic-version`。404/405 换下一个，其他错误按
 模型与模型别名填进表单，用户可继续改。收录标准是「厂商自营 + 官方文档写明端点」，
 聚合中转站一概不收——那类地址随运营变动，这份表没有维护通道，过期的地址比没有更糟。
 两种形态的端点不通用（Anthropic 协议 vs Responses 协议），因此每条都标形态、按形态筛选，
-单测锁住「Claude 的都以 /anthropic 结尾、Codex 的都不带它，同厂商两侧地址不相同」。能从厂商自己发布的
-代码里读到的以代码为准（智谱官方配置助手 `@z_ai/coding-helper`、MiniMax 官方命令行 `MiniMax-AI/cli`、
-`MoonshotAI/kimi-code`），2026-09-24 据此把智谱 Claude 预设更新到 glm-5.3 系列并带上厂商建议的超时，
-新增 MiniMax；Kimi Code 会员与 Kimi 开放平台是两套账号与密钥，预设分开标注、用不同的凭据变量名，单测锁住
-二者不共用变量。
+单测锁住「Claude 的都以 /anthropic 结尾（Kimi Code、火山方舟 Coding Plan、阶跃 Step Plan 由厂商文档给出专用
+根地址，列为例外且不许以 /v1 结尾）、Codex 的都不带它，同厂商两侧地址不相同」。能从厂商自己发布的代码里读到的
+以代码为准（智谱官方配置助手 `@z_ai/coding-helper`、MiniMax 官方命令行 `MiniMax-AI/cli`、`MoonshotAI/kimi-code`
+与 `MoonshotAI/kimi-help-center`、火山方舟命令行 `volcengine/ark-cli`、`XiaomiMiMo/awesome-mimo-agent`），其余取自
+厂商文档站。2026-09-24 据此把智谱 Claude 预设更新到 glm-5.3 系列并带上厂商建议的超时，新增 MiniMax；随后借鉴
+CC Switch 的预设覆盖面，补上 Kimi Code 会员的 Claude 接入（官方写法用 x-api-key，预设因此可以声明凭据请求头；
+fable 与子代理模型一并带上）、火山方舟 Coding Plan（Claude）、小米 MiMo 与美团 LongCat（两种形态）、阶跃
+Step Plan（Claude，国内与国际），共 25 条。Codex 只认 Responses 协议：厂商文档只写了 Chat Completions 的（阶跃、
+腾讯 Token Plan、百度千帆等）不收 Codex 预设；按套餐与地域拼地址、模型名核对不上的（阿里云百炼、腾讯、百度）与
+聚合中转站暂不收。国内与国际是两套账号与密钥，变量名分开（厂商自己的代码有写法的照它，其余国际版加 `_GLOBAL`），
+单测锁住。预设可带厂商控制台的密钥页与接入文档地址（只收厂商代码或文档里写明的，推断出来的不收），选中时在
+表单里列出并可复制，连同出处。
+
+**查余额**（`agents:balance`）只对厂商 API 文档写明了余额接口的厂商：DeepSeek「查询余额」`GET /user/balance`、
+Moonshot（Kimi 开放平台，国内与国际）「查询余额」`GET /v1/users/me/balance`，按接入地址的主机认出来，余额接口与
+接入地址同主机。CC Switch 另查的套餐额度一类接口没有公开文档，不收。与检查同一口径：只在点「查余额」时联网，
+只读（除审计外不写），凭据经 0600 临时文件交给 curl；目标可以是接入配置或独立环境（实例状态的 `spec.base_url`
+因此对 Claude 实例也给出 env 里的地址，内嵌账号密码打码）。返回的字段按两家文档取，取不出就说看不懂、不编数字。
 
 按 2026-09-19 产品裁决，界面只保留能改变下一步动作的信息与开关，以下一并退役：
 

@@ -1233,3 +1233,46 @@ fn 独立环境可检查可用性_只读_官方账号环境不代为检查() {
     std::env::remove_var("AM_TEST_PROFILE_CHECK_KEY");
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 查余额只对有官方余额接口的厂商；变量没取值时在发请求前拒绝。
+#[test]
+fn 查余额只对有官方接口的厂商_没取值不发请求() {
+    let (root, ctx) = temp_ctx("profile-balance");
+    assert!(save_definition(
+        &ctx,
+        "cc-glm",
+        r#"{"display_name":"glm","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-glm","env":{"ANTHROPIC_BASE_URL":"https://open.bigmodel.cn/api/anthropic","ANTHROPIC_AUTH_TOKEN":"${AM_TEST_BALANCE_GLM}"}},"_delete":false,"_replace":true}"#
+    ));
+    assert!(save_definition(
+        &ctx,
+        "cc-ds",
+        r#"{"display_name":"ds","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-ds","env":{"ANTHROPIC_BASE_URL":"https://api.deepseek.com/anthropic","ANTHROPIC_AUTH_TOKEN":"${AM_TEST_BALANCE_UNSET}"}},"_delete":false,"_replace":true}"#
+    ));
+    let glm = execute(
+        &ctx,
+        &request("agents:balance", &["--only", "profiles:cc-glm"]),
+    );
+    assert!(!glm.ok);
+    assert!(
+        glm.errors[0].message.contains("没有公开的余额查询接口"),
+        "{:?}",
+        glm.errors
+    );
+    let ds = execute(
+        &ctx,
+        &request("agents:balance", &["--only", "profiles:cc-ds"]),
+    );
+    assert!(!ds.ok);
+    assert!(
+        ds.errors[0].message.contains("AM_TEST_BALANCE_UNSET"),
+        "{:?}",
+        ds.errors
+    );
+    // 状态里 Claude 实例也给出地址，界面据此决定给不给「查余额」
+    let status = status(&ctx);
+    assert_eq!(
+        element(&status, "cc-ds")["spec"]["base_url"],
+        "https://api.deepseek.com/anthropic"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
