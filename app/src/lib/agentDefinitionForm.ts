@@ -100,6 +100,16 @@ function validConnectionBaseUrl(value: string): boolean {
 }
 
 /** 非 https 的地址：令牌会明文经过网络。 */
+/** 地址里内嵌了账号密码（`https://user:pass@host`）：这部分是凭据，不能存进接入或实例定义。 */
+export function urlHasUserinfo(value: string | undefined): boolean {
+  try {
+    const url = new URL((value ?? "").trim());
+    return url.username !== "" || url.password !== "";
+  } catch {
+    return false;
+  }
+}
+
 export function isPlainHttpUrl(value: string | undefined): boolean {
   return (value ?? "").trim().toLowerCase().startsWith("http://");
 }
@@ -118,6 +128,7 @@ export function validateConnectionEntry(item: ConnectionEntry, strict = true): s
   if ((strict || item.baseUrl.trim()) && !referenced && !validConnectionBaseUrl(item.baseUrl.trim())) {
     return "接口地址必须是 https:// 或 http://";
   }
+  if (urlHasUserinfo(item.baseUrl)) return "接口地址里不能带账号密码：凭据请用令牌变量";
   if ((strict || item.tokenVar.trim()) && !referenced && !ENV_NAME_RE.test(item.tokenVar.trim())) {
     return "凭据变量名格式不正确";
   }

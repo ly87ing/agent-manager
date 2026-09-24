@@ -699,6 +699,28 @@ fn delete_dot_path(root: &mut Value, segments: &[&str]) -> Result<(), DispatchEr
     Ok(())
 }
 
+/// 地址里内嵌账号密码的那段（`scheme://user:pass@host` 的 `user:pass`）的位置；没有时为 `None`。
+fn url_userinfo_end(url: &str) -> Option<(usize, usize)> {
+    let start = url.find("://")? + 3;
+    let rest = &url[start..];
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let at = rest[..authority_end].rfind('@')?;
+    Some((start, start + at))
+}
+
+/// 地址里是否内嵌了账号密码。这部分是凭据：不存库、不展示。
+pub(crate) fn url_has_userinfo(url: &str) -> bool {
+    url_userinfo_end(url).is_some()
+}
+
+/// 展示地址时把内嵌的账号密码换成 `***`，其余原样。
+pub(crate) fn redact_url_userinfo(url: &str) -> String {
+    match url_userinfo_end(url) {
+        Some((start, end)) => format!("{}***{}", &url[..start], &url[end..]),
+        None => url.to_string(),
+    }
+}
+
 /// 变量名、请求头或配置键看起来是否承载凭据。
 ///
 /// 取值格式检测（`reject_secret_text`）只认得常见厂商前缀，自定义格式的令牌会漏过；
@@ -1209,6 +1231,22 @@ mod tests {
         assert!(format!("{err}").contains("拒绝并发动作"), "{err}");
         drop(holder);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn url_userinfo_is_detected_and_redacted() {
+        assert!(url_has_userinfo("https://u:p@gw.example.com/v1"));
+        assert!(url_has_userinfo("http://token@10.0.0.5:8080"));
+        assert!(!url_has_userinfo("https://gw.example.com/v1/users/@me"));
+        assert!(!url_has_userinfo("https://gw.example.com/v1?x=a@b"));
+        assert_eq!(
+            redact_url_userinfo("https://u:p@gw.example.com/v1?q=1"),
+            "https://***@gw.example.com/v1?q=1"
+        );
+        assert_eq!(
+            redact_url_userinfo("https://gw.example.com/a@b"),
+            "https://gw.example.com/a@b"
+        );
     }
 
     #[test]

@@ -160,9 +160,13 @@ fn validate_base_url(url: &str) -> Result<()> {
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"));
     match rest {
-        Some(host) if !host.is_empty() && !host.starts_with('/') => Ok(()),
+        Some(host) if !host.is_empty() && !host.starts_with('/') => {}
         _ => bail!("接口地址只允许 https:// 或 http:// 开头的完整地址"),
     }
+    if crate::native::url_has_userinfo(url) {
+        bail!("接口地址里不能带账号密码：凭据请用令牌变量");
+    }
+    Ok(())
 }
 
 /// 展开 `~/` 前缀；其余原样。
@@ -550,12 +554,16 @@ fn parse_codex_config(bytes: &[u8]) -> Result<toml::Table> {
         })
 }
 
-/// 展示实际取值：凭据类变量或看起来像凭据的取值一律不输出。
+/// 展示实际取值：凭据类变量、请求头（可以带 Authorization 等凭据头）或看起来像凭据的取值
+/// 一律不输出；地址里内嵌的账号密码换成 `***`。
 fn display_value(name: &str, value: &str) -> Value {
-    if looks_like_credential(name) || crate::native::reject_secret_text(value).is_some() {
+    if looks_like_credential(name)
+        || name.to_ascii_uppercase().contains("HEADER")
+        || crate::native::reject_secret_text(value).is_some()
+    {
         Value::String("<hidden>".to_string())
     } else {
-        Value::String(value.to_string())
+        Value::String(crate::native::redact_url_userinfo(value))
     }
 }
 
@@ -664,7 +672,7 @@ pub(crate) fn compare_fields(
                     "definition": definition,
                     "live": match have {
                         Some(_) if secret => Value::String("<hidden>".into()),
-                        Some(have) => Value::String(have.clone()),
+                        Some(have) => display_value(&field, have),
                         None => Value::Null,
                     },
                 }));
@@ -1278,6 +1286,32 @@ mod tests {
         assert!(is_third_party(
             &claude(json!({"ANTHROPIC_API_KEY": "${K}"})).unwrap()
         ));
+    }
+
+    /// 状态逐字段对比不带出凭据：附加请求头整条隐藏（可以带 Authorization），地址里内嵌的账号
+    /// 密码换成 ***；定义里的地址不许带账号密码。
+    #[test]
+    fn compare_fields_hide_headers_and_url_userinfo() {
+        let official =
+            def(json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly"}}))
+                .unwrap();
+        let live = br#"{"env":{"ANTHROPIC_CUSTOM_HEADERS":"Authorization: Bearer relay-secret-123456","ANTHROPIC_BASE_URL":"https://u:p4ss@gw.example.com/v1"}}"#;
+        let fields = compare_fields(&official, Some(live), &|_| None).unwrap();
+        let text = serde_json::to_string(&fields).unwrap();
+        assert!(!text.contains("relay-secret"), "{text}");
+        assert!(!text.contains("p4ss"), "{text}");
+        let base = fields
+            .iter()
+            .find(|f| f["field"] == "env.ANTHROPIC_BASE_URL")
+            .unwrap();
+        assert_eq!(base["live"], "https://***@gw.example.com/v1");
+
+        let err = def(json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
+            "env": {"ANTHROPIC_BASE_URL": "https://u:p4ss@gw.example.com", "ANTHROPIC_AUTH_TOKEN": "${T}"}}}))
+        .unwrap_err();
+        let message = format!("{err:#}");
+        assert!(message.contains("不能带账号密码"), "{message}");
+        assert!(!message.contains("p4ss"));
     }
 
     /// 实例没声明的凭据、云厂商开关、地址与附加请求头一律置空，取消 shell 继承：第三方实例只用

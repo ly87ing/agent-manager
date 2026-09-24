@@ -16,6 +16,7 @@ import {
   upsertAgentConnection,
   updateCommandWithPlatform,
   validateConnectionEntry,
+  urlHasUserinfo,
 } from "../lib/agentDefinitionForm";
 import { agentManagementFixture } from "./fixtures";
 
@@ -308,6 +309,27 @@ describe("agentDefinitionForm helpers", () => {
     expect(validateConnectionEntry(imported)).toBe("接口地址必须是 https:// 或 http://");
     expect(validateConnectionEntry({ ...imported, tokenVar: "has-dash" }, false)).toBe("凭据变量名格式不正确");
     expect(validateConnectionEntry({ ...imported, providerRef: "kimi", model: "k2" })).toBeNull();
+  });
+
+  it("地址里内嵌账号密码的接入存不下：那部分是凭据", () => {
+    expect(urlHasUserinfo("https://u:p@gw.example.com/v1")).toBe(true);
+    expect(urlHasUserinfo("https://gw.example.com/v1/users/@me")).toBe(false);
+    expect(urlHasUserinfo("not a url")).toBe(false);
+    const entry = {
+      name: "relay",
+      label: "中转",
+      baseUrl: "https://u:p@gw.example.com",
+      auth: "token" as const,
+      tokenVar: "RELAY_TOKEN",
+      model: "m",
+      smallFastModel: "",
+      aliasOpus: "",
+      aliasSonnet: "",
+      aliasHaiku: "",
+      timeoutMs: "",
+    };
+    expect(validateConnectionEntry(entry)).toBe("接口地址里不能带账号密码：凭据请用令牌变量");
+    expect(validateConnectionEntry({ ...entry, baseUrl: "https://gw.example.com" })).toBeNull();
   });
 
   it("extractCommandForPlatform extracts plain string and platform-specific mapping", () => {

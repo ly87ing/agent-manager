@@ -197,7 +197,7 @@ fn claude_observed_config(
         && path_get(&value, &["attribution", "pr"]).and_then(Value::as_str) == Some("");
     Some(json!({
         "provider": "anthropic",
-        "base_url": string_at(&value, &["env", "ANTHROPIC_BASE_URL"]),
+        "base_url": string_at(&value, &["env", "ANTHROPIC_BASE_URL"]).map(crate::native::redact_url_userinfo),
         "model": string_at(&value, &["env", "ANTHROPIC_MODEL"]),
         "small_fast_model": string_at(&value, &["env", "ANTHROPIC_SMALL_FAST_MODEL"]),
         "model_aliases": {
@@ -382,7 +382,10 @@ fn codex_observed_config(bytes: &[u8]) -> Option<Value> {
         // 新写法的权限配置：设了它，Codex 以它为准，旧写法的 sandbox_mode 不再生效
         "default_permissions": root.get("default_permissions").and_then(toml::Value::as_str),
         "provider": provider.unwrap_or("openai"),
-        "base_url": provider_config.and_then(|table| table.get("base_url")).and_then(toml::Value::as_str),
+        "base_url": provider_config
+            .and_then(|table| table.get("base_url"))
+            .and_then(toml::Value::as_str)
+            .map(crate::native::redact_url_userinfo),
         "model": root.get("model").and_then(toml::Value::as_str),
         "timeout_ms": provider_config.and_then(|table| table.get("stream_idle_timeout_ms")).and_then(toml::Value::as_integer),
         "credential": {"configured": env_key.is_some(), "kind": env_key.map(|_| "env"), "variable": env_key},
@@ -695,6 +698,9 @@ fn parse_profile(id: &str, raw: &Value) -> Result<ConnectionProfile> {
         // 提示令牌将明文传输），其余协议一律拒绝
         if !url.starts_with("https://") && !url.starts_with("http://") {
             bail!("接入配置 {id} 的地址只允许 https:// 或 http://");
+        }
+        if crate::native::url_has_userinfo(url) {
+            bail!("接入配置 {id} 的地址里不能带账号密码：凭据请用令牌变量");
         }
     }
     let token_var = non_empty(obj.get("token_var"));

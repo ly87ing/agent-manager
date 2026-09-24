@@ -88,9 +88,54 @@ fn resolve_cli(home_dir: &Path, bin: &str) -> Option<std::path::PathBuf> {
         .find(|path| path.is_file())
 }
 
+/// `.claude.json` 顶层两个登录记录键是否存在且非 null。解析时取值一律跳过（`IgnoredAny`），
+/// 不进任何内存结构——`primaryApiKey` 的取值就是 Console 的 API key。
+#[derive(Default)]
+struct ClaudeJsonLogin {
+    primary_api_key: bool,
+    oauth_account: bool,
+}
+
+impl<'de> serde::Deserialize<'de> for ClaudeJsonLogin {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Present(bool);
+        impl<'de> serde::Deserialize<'de> for Present {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                Ok(Present(
+                    Option::<serde::de::IgnoredAny>::deserialize(deserializer)?.is_some(),
+                ))
+            }
+        }
+        struct Keys;
+        impl<'de> serde::de::Visitor<'de> for Keys {
+            type Value = ClaudeJsonLogin;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON object")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut out = ClaudeJsonLogin::default();
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "primaryApiKey" => out.primary_api_key |= map.next_value::<Present>()?.0,
+                        "oauthAccount" => out.oauth_account |= map.next_value::<Present>()?.0,
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(out)
+            }
+        }
+        deserializer.deserialize_map(Keys)
+    }
+}
+
 /// `.claude.json` 里有没有登录记录（官方文档：这个文件保存登录会话）：`oauthAccount` 是
 /// claude.ai 与 Console 登录的账号记录，`primaryApiKey` 是 Console 登录在 Linux 上保管的 key。
-/// 只看键是否存在，不读取取值。文件存在但解析不了时无法确认，报错。
+/// 只看键是否存在，取值在解析时就跳过。文件存在但解析不了时无法确认，报错。
 ///
 /// 返回 `None` 表示没有登录记录，`Some(方式)` 是能从记录看出的登录方式（看不出时为 `None`）。
 fn claude_json_login(path: &Path) -> Result<Option<Option<&'static str>>, String> {
@@ -99,12 +144,11 @@ fn claude_json_login(path: &Path) -> Result<Option<Option<&'static str>>, String
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err("无法读取 .claude.json".into()),
     };
-    let root = serde_json::from_slice::<Value>(&bytes)
+    let found = serde_json::from_slice::<ClaudeJsonLogin>(&bytes)
         .map_err(|_| ".claude.json 不是合法 JSON".to_string())?;
-    let has = |key: &str| root.get(key).is_some_and(|value| !value.is_null());
-    Ok(if has("primaryApiKey") {
+    Ok(if found.primary_api_key {
         Some(Some("console"))
-    } else if has("oauthAccount") {
+    } else if found.oauth_account {
         Some(None)
     } else {
         None
@@ -911,6 +955,39 @@ mod tests {
         let claude = credential_overrides_with(&home, AuthKind::Claude, &|_| false, &[]);
         assert!(!claude.iter().any(|item| item["name"] == "oidc_federation"));
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 登录记录只看顶层键在不在（非 null）；嵌套里同名的键不算。
+    #[test]
+    fn claude_json_login_looks_only_at_top_level_keys() {
+        let dir = std::env::temp_dir().join(format!("am-auth-cj-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".claude.json");
+        let check = |text: &str| {
+            std::fs::write(&path, text).unwrap();
+            claude_json_login(&path)
+        };
+        assert_eq!(
+            check(r#"{"primaryApiKey":"sk-ant-api03-secret","oauthAccount":{"a":1}}"#),
+            Ok(Some(Some("console")))
+        );
+        assert_eq!(
+            check(r#"{"oauthAccount":{"emailAddress":"x"}}"#),
+            Ok(Some(None))
+        );
+        assert_eq!(
+            check(r#"{"oauthAccount":null,"primaryApiKey":null}"#),
+            Ok(None)
+        );
+        assert_eq!(
+            check(
+                r#"{"mcpServers":{"x":{"primaryApiKey":"k","oauthAccount":{}}},"projects":[1,{"oauthAccount":1}]}"#
+            ),
+            Ok(None)
+        );
+        assert!(check("{not json").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn pairs(items: &[Value]) -> Vec<(String, String)> {
