@@ -644,6 +644,14 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
 - 过程问题：`c75c993` 推送前全量测试的输出筛选（`grep | head`）截掉了 FAILED 行，一个用例未跟着改就推送了，`7dbd73b` 补正；之后复核改为只看 `test result` 与 `FAILED`。
 - 未做：桌面安装包里的点击验收（混用警告、切回官方、建成独立环境、检查登录、启动命令订正）；隔离环境里无法产生真实官方登录，「官方命令报告已登录」一支只由替身测试与真实主配置的只读查询覆盖；未抓包确认请求头；未与真实第三方中转联调。
 
+## 2026-09-23 凭据隔离闭环审查后的修复
+
+- 触发：闭环审查发现三处阻断：桌面应用从访达启动时 PATH 只有系统目录，Homebrew/npm 装的助手找不到，已有第三方实例的写入因「无法确认登录」被拒（复现）；第三方 Codex 实例只写 `env_key`，启动命令不导出该变量时真实 codex 报 `Missing environment variable`，状态却显示正常（复现）；保存实例只写启动命令不写配置，空目录里一运行就引导登录官方账号，之后第三方凭据写不进来。用户要求避开与版本绑定紧的做法、学习 CC Switch 等成熟产品；必须与版本挂钩时不考虑老版本。
+- 裁决：Codex 实例照 CC Switch「保留官方登录」模式，把凭据写进实例 `config.toml` 的 `[model_providers.agent-manager].experimental_bearer_token`（Codex 0.48 起支持，官方说明取值作为 `Authorization: Bearer` 发出、供以程序方式配置时使用），与 Claude 实例写 `settings.json` 同一做法，库里只存变量名。不用 `model_providers.<id>.auth` 命令（0.118 起、需随包提供助手命令），也不再用 `-p` 叠加 `agent-manager.config.toml`（profile-v2，0.134 起替换 `-p`）。命令查找照 CC Switch 补一组常见安装目录，执行时把命令所在目录放到 PATH 最前。本机真实库与 rc 文件里没有独立环境或 `-p agent-manager` 命令，不做旧写法迁移。
+- 提交（均已推送 `rust`）：`ef9cc86` 命令查找补 `~/.npm-global/bin`、`~/.volta/bin`、`~/.bun/bin`、`/opt/homebrew/bin`、`/usr/local/bin`，版本探测与登录检查执行时补 PATH；`27fa934` 上一提交的格式化；`d4210e9` Codex 实例改写 `config.toml`（按键原位修改，只动 `model`、`model_provider` 与本工具那张接入表，写入基准只取这三项，MCP 条目变化不算外部修改）、凭据写 `experimental_bearer_token`、启动命令去掉 `-p`、官方账号实例不写 `model_provider`、凭据变量必须和地址一起设置、Codex 接入表单可选填取值；`c41c558` 新建第三方环境目标文件不存在时先写配置再写启动命令，写不进去时启动命令也先不写；`6a4a5f6` 实例临时文件以 0600 新建、残留链接先删除；`3b4b9a0` 删除无人调用的测试辅助函数。
+- 验收：每次推送前跑改动涉及的全量套件；最终提交 `3b4b9a0` 上 engine-rs 全量 401 项、Tauri 20 项、Vitest 57 files / 574 tests、build 与 `cargo fmt --check` 全绿；新增用例在撤掉对应修复后各自失败（npm 目录查找与同目录解释器、Codex 表单规则、保存顺序两例、临时文件链接）。隔离 HOME 用引擎 CLI 保存并写入第三方 Codex 实例（登录检查走真实 codex 0.156.0）：`config.toml` 权限 0600、状态 managed-ok、状态输出不含取值；按启动命令运行真实 `codex exec`，shell 里故意导出假的 `CODEX_API_KEY`/`CODEX_ACCESS_TOKEN`/`OPENAI_API_KEY`，本地抓包收到 `POST /v1/responses`，唯一凭据头为 `Authorization: Bearer <实例假令牌>`，shell 取值未出现；对照去掉清空前缀时 0.156 仍用实例令牌（前缀保留为纵深防御，并避免官方命令把 shell 变量报成登录）；实例目录没有生成 `auth.json`；真实 `~/.codex/auth.json`、`config.toml` 元数据前后一致。
+- 未做：桌面安装包点击验收（Finder 启动下的命令查找、建成独立环境后的保存顺序）；未与真实第三方中转联调；新实例不自动带上主配置的 MCP、技能、规则；外部密钥文件的备份责任未在界面提示；官方账号实例未拦截 shell 里导出的第三方变量。
+
 ## 交付回执（2026-09-23，实际配置为准 x86_64 DMG 真机验收）
 
 绑定提交：`c0065c090e2ed89e6adedac60bc025a159baefda`（产品代码；其后 `0ceb7e0` 只改验收脚本）。
