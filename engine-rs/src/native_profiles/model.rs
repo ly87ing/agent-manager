@@ -636,7 +636,7 @@ pub(crate) fn compare_fields(
             if let Some(url) = &def.base_url {
                 for (field, value) in [
                     (CODEX_MODEL_PROVIDER, CODEX_PROVIDER_ID),
-                    ("provider.name", def.display_name.as_str()),
+                    ("provider.name", codex_provider_name(def)),
                     ("provider.base_url", url.as_str()),
                     ("provider.wire_api", codex_wire_api(def)),
                 ] {
@@ -684,6 +684,17 @@ const CODEX_WIRE_API: &str = "responses";
 
 fn codex_wire_api(def: &ProfileDef) -> &str {
     def.wire_api.as_deref().unwrap_or(CODEX_WIRE_API)
+}
+
+/// 接入表的 `name`：Codex 要求非空，且把名为 `OpenAI` 的接入方式当成内置 openai
+/// （`model-provider-info` 的 `is_openai()` 按名称判断），这两种情况改用实例名。
+fn codex_provider_name(def: &ProfileDef) -> &str {
+    let name = def.display_name.trim();
+    if name.is_empty() || name == "OpenAI" {
+        &def.id
+    } else {
+        name
+    }
 }
 
 /// Codex 实例文件里与定义对应的字段（解析失败时为空：整份都算不一致）。
@@ -983,7 +994,7 @@ fn codex_provider_table(
         return Ok(None);
     };
     let mut table = toml_edit::Table::new();
-    table.insert("name", toml_edit::value(def.display_name.as_str()));
+    table.insert("name", toml_edit::value(codex_provider_name(def)));
     table.insert("base_url", toml_edit::value(url.as_str()));
     if let Some(var) = &def.env_key {
         let token = resolve(var).ok_or_else(|| {
@@ -1564,6 +1575,34 @@ mod live_tests {
         let mut full = serde_json::Map::new();
         full.insert("profile".into(), Value::Object(profile));
         assert!(parse_definition("cc-ly", &Value::Object(full), true).is_ok());
+    }
+
+    /// Codex 要求接入表有非空 name，且名为 `OpenAI` 的会被当成内置 openai：这两种改用实例名。
+    #[test]
+    fn codex_provider_name_is_never_empty_or_openai() {
+        for (display, expected) in [
+            ("OpenAI", "cx-relay"),
+            ("  ", "cx-relay"),
+            ("我的中转", "我的中转"),
+        ] {
+            let def = parse_definition(
+                "cx-relay",
+                &json!({"display_name": display, "profile": {"base_agent": "codex", "config_dir": "~/.codex-relay",
+                    "base_url": "https://a.example.com/v1"}}),
+                true,
+            )
+            .unwrap();
+            let rendered = render_all(&def, &|_| None, &|_| None, &[]).unwrap();
+            let doc: toml::Value = std::str::from_utf8(&rendered[0].content)
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert_eq!(
+                doc["model_providers"]["agent-manager"]["name"].as_str(),
+                Some(expected)
+            );
+            assert!(crate::native_agent_settings::codex_fatal_issues(&doc).is_empty());
+        }
     }
 
     /// Codex 已移除 `wire_api = "chat"`：写进去整份 config.toml 都读不了，定义里就拒绝。

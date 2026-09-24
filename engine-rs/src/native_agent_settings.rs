@@ -251,6 +251,89 @@ fn claude_env_overrides(root: &Value) -> Value {
     Value::Object(out)
 }
 
+/// Codex 保留、不许重新定义的内置接入方式（`rust-v0.156.1` `config/src/config_toml.rs`）。
+const CODEX_RESERVED_PROVIDERS: &[&str] = &["openai", "ollama", "lmstudio"];
+const CODEX_SANDBOX_MODES: &[&str] = &["read-only", "workspace-write", "danger-full-access"];
+
+/// config.toml 里会让 Codex 拒绝加载整份配置的写法（只收 `rust-v0.156.1` 源码确认、并用真实
+/// 0.156.1 复现过的硬错误）。这种配置下 Codex 的所有命令——包括交互界面与 `login status`——
+/// 都起不来。返回固定措辞的说明，只含键名与接入方式 id，不含取值。
+pub(crate) fn codex_fatal_issues(root: &toml::Value) -> Vec<String> {
+    let mut issues = Vec::new();
+    let text = |key: &str| root.get(key).and_then(toml::Value::as_str);
+    if text("approval_policy") == Some("untrusted") {
+        issues.push(
+            "approval_policy = \"untrusted\" 已被 Codex 移除，请删掉这一行或改用 on-request"
+                .to_string(),
+        );
+    }
+    if let Some(mode) = text("sandbox_mode") {
+        if !CODEX_SANDBOX_MODES.contains(&mode) {
+            issues.push(
+                "sandbox_mode 只能是 read-only、workspace-write 或 danger-full-access".to_string(),
+            );
+        }
+    }
+    if root.get("web_search").is_some_and(toml::Value::is_bool) {
+        issues.push(
+            "web_search 现在是字符串（disabled、cached、indexed 或 live），不能写 true / false"
+                .to_string(),
+        );
+    }
+    if root.get("profile").is_some() {
+        issues.push(
+            "顶层 profile 已被 Codex 移除：改用启动参数 -p <名> 叠加 <名>.config.toml".to_string(),
+        );
+    }
+    if text("model_provider") == Some("ollama-chat") || text("oss_provider") == Some("ollama-chat")
+    {
+        issues.push("接入方式 ollama-chat 已被 Codex 移除，请改成 ollama".to_string());
+    }
+    if let Some(providers) = root.get("model_providers").and_then(toml::Value::as_table) {
+        for (id, table) in providers {
+            if CODEX_RESERVED_PROVIDERS.contains(&id.as_str()) {
+                issues.push(format!(
+                    "[model_providers.{id}] 与 Codex 内置接入方式重名，内置的不能被重新定义，请换一个名字"
+                ));
+                continue;
+            }
+            let Some(table) = table.as_table() else {
+                continue;
+            };
+            if table.get("wire_api").and_then(toml::Value::as_str) == Some("chat") {
+                issues.push(format!(
+                    "[model_providers.{id}] 的 wire_api = \"chat\" 已被 Codex 移除，请改成 responses"
+                ));
+            }
+            let is_bedrock = matches!(id.as_str(), "amazon-bedrock" | "amazon-bedrock-runtime");
+            if !is_bedrock
+                && table
+                    .get("name")
+                    .and_then(toml::Value::as_str)
+                    .is_none_or(|name| name.trim().is_empty())
+            {
+                issues.push(format!(
+                    "[model_providers.{id}] 缺少 name（Codex 要求自定义接入方式有非空名称）"
+                ));
+            }
+            if table.contains_key("auth")
+                && [
+                    "env_key",
+                    "experimental_bearer_token",
+                    "requires_openai_auth",
+                ]
+                .iter()
+                .any(|key| table.contains_key(*key))
+            {
+                issues.push(format!(
+                    "[model_providers.{id}] 的 auth 命令不能和 env_key、experimental_bearer_token 或 requires_openai_auth 同时设置"
+                ));
+            }
+        }
+    }
+    issues
+}
+
 fn codex_observed_config(bytes: &[u8]) -> Option<Value> {
     let text = std::str::from_utf8(bytes).ok()?;
     let root = text.parse::<toml::Value>().ok()?;
@@ -290,6 +373,10 @@ fn codex_observed_config(bytes: &[u8]) -> Option<Value> {
         }
     };
     Some(json!({
+        // 会让 Codex 拒绝加载整份配置的写法：界面显著提示，这时 Codex 的所有命令都起不来
+        "fatal_issues": codex_fatal_issues(&root),
+        // 新写法的权限配置：设了它，Codex 以它为准，旧写法的 sandbox_mode 不再生效
+        "default_permissions": root.get("default_permissions").and_then(toml::Value::as_str),
         "provider": provider.unwrap_or("openai"),
         "base_url": provider_config.and_then(|table| table.get("base_url")).and_then(toml::Value::as_str),
         "model": root.get("model").and_then(toml::Value::as_str),
@@ -1403,12 +1490,19 @@ fn clear_codex_connection(existing: &str, recorded: &[String]) -> String {
     text
 }
 
-/// Codex 内置接入方式的已知默认端点与令牌变量（本机的不需要令牌）。
-fn codex_builtin_endpoint(id: &str) -> Option<(&'static str, Option<&'static str>)> {
+/// Codex 内置接入方式能不能代为检查：本机的两种用已知默认端点、不需要令牌；`openai` 用的是
+/// Codex 自己的官方登录（`auth.json` 或钥匙串，`rust-v0.156.1` 里环境变量 `OPENAI_API_KEY` 已不是
+/// 凭据来源），本工具从不读取，Bedrock 走 AWS 签名，这几种都不代为检查。
+fn codex_builtin_endpoint(id: &str) -> Option<Result<&'static str>> {
     match id {
-        "openai" => Some(("https://api.openai.com/v1", Some("OPENAI_API_KEY"))),
-        "ollama" => Some(("http://localhost:11434/v1", None)),
-        "lmstudio" => Some(("http://localhost:1234/v1", None)),
+        "ollama" => Some(Ok("http://localhost:11434/v1")),
+        "lmstudio" => Some(Ok("http://localhost:1234/v1")),
+        "openai" => Some(Err(anyhow::anyhow!(
+            "内置的 openai 接入方式用 Codex 自己的官方登录，本工具不读取官方凭据，无法代为检查；请直接在终端里用 codex 验证"
+        ))),
+        "amazon-bedrock" | "amazon-bedrock-runtime" => Some(Err(anyhow::anyhow!(
+            "内置的 Amazon Bedrock 接入方式走 AWS 签名认证，无法代为检查；请直接在终端里用 codex 验证"
+        ))),
         _ => None,
     }
 }
@@ -1450,10 +1544,28 @@ pub(crate) fn codex_referenced_endpoint(
         let Some(base_url) = text("base_url") else {
             bail!("{CODEX_CONFIG} 里的接入方式 {reference} 没有 base_url，没有可测的端点");
         };
-        return Ok((base_url, text("env_key")));
+        let env_key = text("env_key");
+        // Codex 按 env_key → experimental_bearer_token → auth 命令 → 官方登录的顺序取凭据
+        // （`model-provider/src/auth.rs`）。只有 env_key 能在不碰文件里凭据的前提下代为检查。
+        if env_key.is_none() {
+            if table.contains_key("experimental_bearer_token") || table.contains_key("auth") {
+                bail!("{CODEX_CONFIG} 里的接入方式 {reference} 把凭据写在文件里或交给命令生成，检查不读取它；请直接在终端里用 codex 验证");
+            }
+            if table
+                .get("requires_openai_auth")
+                .and_then(toml::Value::as_bool)
+                == Some(true)
+            {
+                bail!(
+                    "接入方式 {reference} 用 Codex 自己的官方登录凭据，本工具不读取，无法代为检查"
+                );
+            }
+        }
+        return Ok((base_url, env_key));
     }
     match codex_builtin_endpoint(reference) {
-        Some((base_url, env_key)) => Ok((base_url.to_string(), env_key.map(str::to_string))),
+        Some(Ok(base_url)) => Ok((base_url.to_string(), None)),
+        Some(Err(err)) => Err(err),
         None => bail!(
             "引用的接入方式 {reference} 已不在 {CODEX_CONFIG} 中（也不是 Codex 内置的），无法检查；请先恢复那张表，或删除这个接入配置"
         ),
@@ -3094,7 +3206,10 @@ mod tests {
         assert!(parse(&json!({"settings": {"profiles": {"p": {"auth": "basic"}}}})).is_err());
         assert!(parse(&json!({"settings": {"statusline": "custom"}})).is_err());
         assert!(parse(&json!({"settings": {"claude_effort_level": "ultra"}})).is_err());
-        assert!(parse(&json!({"settings": {"codex_reasoning_effort": "max"}})).is_err());
+        // Codex 客户端已知的档位都接受（0.156 起有 none / max 等），不认识的仍拒绝
+        assert!(parse(&json!({"settings": {"codex_reasoning_effort": "max"}})).is_ok());
+        assert!(parse(&json!({"settings": {"codex_reasoning_effort": "none"}})).is_ok());
+        assert!(parse(&json!({"settings": {"codex_reasoning_effort": "turbo"}})).is_err());
         assert!(parse(&json!({"settings": {"codex_context_window": 0}})).is_err());
         assert!(parse(&json!({"settings": {"codex_web_search": "auto"}})).is_err());
         // active 指向不存在的配置要当场拒绝，不静默落空
@@ -3819,8 +3934,48 @@ stream_idle_timeout_ms = 450000
         }
     }
 
+    /// 与真实 codex 0.156.1 `login status` 的加载结果逐条对齐：左边这些都报
+    /// 「Error loading configuration」，右边这些都能加载。
     #[test]
-    fn 引用型接入的检查端点取自被引用的表_内置用默认值_表不在就明确报错() {
+    fn codex_致命写法与真实_0_156_1_的加载结果一致() {
+        let fatal = [
+            "approval_policy = \"untrusted\"\n",
+            "sandbox_mode = \"full-access\"\n",
+            "web_search = true\n",
+            "profile = \"x\"\n",
+            "model_provider = \"ollama-chat\"\n",
+            "[model_providers.openai]\nname = \"x\"\nbase_url = \"https://a.example.com/v1\"\n",
+            "[model_providers.lmstudio]\nname = \"x\"\nbase_url = \"https://a.example.com/v1\"\n",
+            "[model_providers.x]\nname = \"x\"\nbase_url = \"https://a.example.com/v1\"\nwire_api = \"chat\"\n",
+            "[model_providers.x]\nbase_url = \"https://a.example.com/v1\"\n",
+            "[model_providers.x]\nname = \"x\"\nbase_url = \"https://a.example.com/v1\"\nenv_key = \"K\"\n[model_providers.x.auth]\ncommand = \"echo\"\n",
+        ];
+        let loads = [
+            "[model_providers.amazon-bedrock]\nbase_url = \"https://bedrock.example.com\"\n",
+            "approval_policy = \"on-request\"\nsandbox_mode = \"workspace-write\"\nweb_search = \"live\"\nmodel_reasoning_effort = \"max\"\n[model_providers.x]\nname = \"x\"\nbase_url = \"https://a.example.com/v1\"\nexperimental_bearer_token = \"t\"\n",
+            "approval_policy = \"on-failure\"\n",
+        ];
+        for text in fatal {
+            let root: toml::Value = text.parse().unwrap();
+            assert_eq!(codex_fatal_issues(&root).len(), 1, "应判为致命：{text}");
+        }
+        for text in loads {
+            let root: toml::Value = text.parse().unwrap();
+            assert!(codex_fatal_issues(&root).is_empty(), "不应误判：{text}");
+        }
+        let issues = codex_fatal_issues(
+            &"[model_providers.x]\nname = \"x\"\nbase_url = \"https://a.example.com/v1\"\nexperimental_bearer_token = \"sk-secret\"\nwire_api = \"chat\"\n"
+                .parse()
+                .unwrap(),
+        );
+        assert!(
+            !format!("{issues:?}").contains("sk-secret"),
+            "说明里不含取值"
+        );
+    }
+
+    #[test]
+    fn 引用型接入的检查端点取自被引用的表_本机内置用默认值_官方登录与表不在就明确报错() {
         let root = std::env::temp_dir().join(format!(
             "am-referenced-endpoint-{}-{:x}",
             std::process::id(),
@@ -3836,7 +3991,7 @@ stream_idle_timeout_ms = 450000
         std::fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
         std::fs::write(
             ctx.home_dir.join(".codex/config.toml"),
-            "[model_providers.kimi]\nbase_url = \"http://10.0.0.2:8080/v1\"\nenv_key = \"KIMI_KEY\"\n\n[model_providers.bare]\nname = \"no url\"\n",
+            "[model_providers.kimi]\nbase_url = \"http://10.0.0.2:8080/v1\"\nenv_key = \"KIMI_KEY\"\n\n[model_providers.bare]\nname = \"no url\"\n\n[model_providers.inline]\nname = \"inline\"\nbase_url = \"https://a.example.com/v1\"\nexperimental_bearer_token = \"sk-inline-secret\"\n\n[model_providers.official]\nname = \"gw\"\nbase_url = \"https://gw.example.com/v1\"\nrequires_openai_auth = true\n",
         )
         .unwrap();
 
@@ -3851,13 +4006,18 @@ stream_idle_timeout_ms = 450000
             codex_referenced_endpoint(&ctx, None, "ollama").unwrap(),
             ("http://localhost:11434/v1".to_string(), None)
         );
-        assert_eq!(
-            codex_referenced_endpoint(&ctx, None, "openai")
-                .unwrap()
-                .1
-                .as_deref(),
-            Some("OPENAI_API_KEY")
-        );
+        // 内置 openai 用 Codex 自己的官方登录（0.156 里 OPENAI_API_KEY 已不是凭据来源），Bedrock
+        // 走 AWS 签名：都不代为检查，也不拿别的变量凑一个请求
+        for builtin in ["openai", "amazon-bedrock", "amazon-bedrock-runtime"] {
+            let refused = codex_referenced_endpoint(&ctx, None, builtin).unwrap_err();
+            assert!(refused.to_string().contains("无法代为检查"), "{refused}");
+        }
+        // 表里的凭据写在文件里，或靠官方登录：检查不读取，明确拒绝
+        let inline = codex_referenced_endpoint(&ctx, None, "inline").unwrap_err();
+        assert!(inline.to_string().contains("检查不读取"), "{inline}");
+        assert!(!inline.to_string().contains("sk-inline-secret"));
+        let official = codex_referenced_endpoint(&ctx, None, "official").unwrap_err();
+        assert!(official.to_string().contains("官方登录"), "{official}");
         let missing = codex_referenced_endpoint(&ctx, None, "gone").unwrap_err();
         assert!(
             missing.to_string().contains("已不在 config.toml 中"),

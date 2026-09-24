@@ -1349,6 +1349,31 @@ describe("助手运行参数", () => {
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("GLM Coding");
   });
 
+  it("Codex 配置里有会让它拒绝加载的写法时显著提示；default_permissions 接管沙箱时说明档位只改审批", async () => {
+    const withIssues = agentRoutes("codex", "codex");
+    const status = withIssues["agents:status"] as { data: { elements: EngineElement[] } };
+    (status.data.elements[0].observed as Record<string, any>).current_config = {
+      state: "ready",
+      file: "config.toml",
+      target: "/Users/demo/.codex/config.toml",
+      config: {
+        provider: "openai",
+        runtime: { automation_mode: "manual" },
+        fatal_issues: ["approval_policy = \"untrusted\" 已被 Codex 移除，请删掉这一行或改用 on-request"],
+        default_permissions: ":workspace",
+      },
+      base: BASE,
+      current: DEFAULT_CURRENT,
+    };
+    renderWithEngine(<AgentsPage />, withIssues);
+
+    const alert = await screen.findByTestId("codex-fatal-issues");
+    expect(alert).toHaveTextContent("Codex 会拒绝加载这份配置");
+    expect(alert).toHaveTextContent("approval_policy = \"untrusted\" 已被 Codex 移除");
+    await userEvent.click(screen.getByTestId("workbench-tab-automation"));
+    expect(screen.getByTestId("codex-default-permissions")).toHaveTextContent("default_permissions = :workspace");
+  });
+
   it("Codex 也能配接入配置，但没有认证方式与状态栏那两项", async () => {
     renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));
     await userEvent.click(await screen.findByTestId("add-connection-button"));

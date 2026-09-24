@@ -213,8 +213,8 @@ profile 与各类表等）在「运行设置」页底部的「直接编辑配置
 与用户自己打开文件看到的一致）与整文件摘要 `base`（文件不存在时全文为空、`base` 为 `missing`）；
 不是 UTF-8 的文件只给原因、不给全文。`agents:edit-config --only <助手> --file-base <base> --value <全文>`
 写回：先比对整文件摘要，对不上即返回 `AGENT_CONFIG_CHANGED`（「已在外部修改」，包括助手自己改过），
-文件不动，界面重新读取最新内容；再校验能解析（JSON 须是对象），解析不了只报行列、不带原文；通过后
-按用户给的原文写入，不重新排版。内容没变不写；符号链接写到最终目标、链接本身不变；取排他锁，
+文件不动，界面重新读取最新内容；再校验能解析（JSON 须是对象），解析不了只报行列、不带原文；Codex
+另拒绝会让它拒绝加载整份配置的写法（见下文「Codex 侧」）；通过后按用户给的原文写入，不重新排版。内容没变不写；符号链接写到最终目标、链接本身不变；取排他锁，
 审计只记改了哪些顶层键，不记取值，库里也不存全文。只支持主 Claude 与主 Codex，独立环境的配置以
 实例定义为准，不走这里。界面用 CodeMirror 编辑：语法高亮、行号、查找替换，JSON 另有行内语法
 检查与「格式化」（只在点按钮时按两格缩进重排）；编辑器单独打包，展开时才加载。写入前可查看改动。
@@ -391,6 +391,20 @@ provider、MCP 域写的 `[mcp_servers.*]`）逐行原样保留。写入是文�
 主配置只放官方账号，不再写第三方接入；上面记下的 `[model_providers.*]` 段只在「切回官方账号」时
 撤掉。第三方 Codex 接入在独立环境里用，凭据写法见独立环境一节。
 跳过权限确认在 Codex 侧写 `approval_policy = "never"` 与 `sandbox_mode = "danger-full-access"`。
+config.toml 设了新写法的 `default_permissions` 时，Codex 以它决定沙箱、`sandbox_mode` 不再生效，status 在
+`current_config.config.default_permissions` 如实给出，运行设置页说明自动化档位此时只改审批方式。推理强度
+可选 Codex 客户端已知的全部档位（`rust-v0.156.1` `ReasoningEffort`：none、minimal、low、medium、high、
+xhigh、max、ultra、persistent），具体模型支持哪几档由模型决定。
+
+Codex 的配置有效性是全局的：config.toml 里一处硬错误会让所有 codex 命令（包括交互界面与 `login status`）
+都起不来。status 在 `current_config.config.fatal_issues` 列出已知的硬错误写法，工作台显著提示；
+`agents:edit-config` 不写入含这些写法的内容。只收 `rust-v0.156.1` 源码确认、且用真实 0.156.1 `login status`
+逐条复现为「Error loading configuration」的写法：`approval_policy = "untrusted"`、`sandbox_mode` 取三种之外的
+值、布尔型 `web_search`、顶层 `profile`、`ollama-chat`、重新定义内置接入方式 `openai` / `ollama` / `lmstudio`、
+接入表 `wire_api = "chat"`、自定义接入表缺 `name`、`auth` 命令与 `env_key` 等同时设置；同一组实测里能正常
+加载的（Bedrock 内置接入方式的地址覆盖不带 `name`、`approval_policy = "on-failure"`）不算。说明只含键名与
+接入方式 id，不含取值。独立环境写的接入表 `name` 取实例显示名，为空或恰为 `OpenAI`（Codex 按名称把它当成
+内置 openai）时改用实例名。
 
 状态栏只有 Claude 侧有（Codex 没有这个机制）。
 
@@ -398,8 +412,11 @@ provider、MCP 域写的 `[mcp_servers.*]`）逐行原样保留。写入是文�
 助手侧命令，只在调用方点它时才发请求，其余命令一律零网络。它只读：不碰配置文件、
 不改生效的接入配置，除审计外不写库。缺地址、缺模型、缺变量名或变量没取值时在发请求之前
 就拒绝并说清楚缺什么。引用型 Codex 接入（`provider_ref`）的地址与令牌变量从 `config.toml` 里
-被引用的那张表读取，表不在时内置接入方式用已知默认值（openai 读 `OPENAI_API_KEY`，本机
-ollama、lmstudio 不带令牌），其余明确报「已不在 config.toml 中」。请求按各自协议拼（Claude `{base}/v1/messages`、
+被引用的那张表读取；表里没有 `env_key`、凭据写在文件里（`experimental_bearer_token`）或交给命令生成
+（`auth`）时不读取它，靠 Codex 自己官方登录（`requires_openai_auth`）的也不代为检查，都明确说明原因。
+表不在时本机的 ollama、lmstudio 用已知默认地址、不带令牌；内置 `openai` 用的是 Codex 自己的官方登录
+（0.156 里 `OPENAI_API_KEY` 已不是 Codex 的凭据来源）、Bedrock 走 AWS 签名，都不代为检查，不拿别的变量凑
+一个请求；其余明确报「已不在 config.toml 中」。请求按各自协议拼（Claude `{base}/v1/messages`、
 Codex `{base}/responses`），HTTP 结果翻成可执行的话（401 → 令牌无效、404 → 端点形状不对、
 429 → 地址与令牌都对但被限流，算通过）。令牌经 0600 临时文件交给 curl 的 `--config`
 读取，不进命令行（`ps` 对同机进程可见），上游错误正文出库前走脱敏。

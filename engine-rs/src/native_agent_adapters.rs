@@ -9,7 +9,19 @@ use serde_json::{json, Value};
 pub(crate) const CLAUDE_EFFORT_LEVELS: &[&str] = &["auto", "low", "medium", "high", "xhigh", "max"];
 /// 官方允许持久保存的推理强度（settings.json 的 effortLevel 只接受这四个；max 只在单次会话有效）。
 pub(crate) const CLAUDE_EFFORT_PERSISTED: &[&str] = &["low", "medium", "high", "xhigh"];
-pub(crate) const CODEX_REASONING_EFFORTS: &[&str] = &["minimal", "low", "medium", "high", "xhigh"];
+/// Codex 客户端已知的推理强度（`rust-v0.156.1` `protocol/src/openai_models.rs` 的 `ReasoningEffort`）；
+/// 具体模型支持哪几档由模型决定。
+pub(crate) const CODEX_REASONING_EFFORTS: &[&str] = &[
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "ultra",
+    "persistent",
+];
 pub(crate) const CODEX_WEB_SEARCH_MODES: &[&str] = &["disabled", "cached", "indexed", "live"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -169,7 +181,7 @@ fn codex_fields() -> Vec<Value> {
         json!({
             "key": "codex_reasoning_effort", "type": "enum", "section": "模型与上下文",
             "section_description": "留空即删除本工具的覆盖，恢复 Codex 自己的默认值。",
-            "label": "推理强度", "description": "选择 Codex 的模型推理强度。",
+            "label": "推理强度", "description": "选择 Codex 的模型推理强度；可用档位取决于所用模型。",
             "options": CODEX_REASONING_EFFORTS.iter().map(|value| json!({"value": value, "label": value})).collect::<Vec<_>>(),
             "targets": [{"key": "model_reasoning_effort"}],
             "summary": {"label": "推理强度", "default": "客户端默认"}

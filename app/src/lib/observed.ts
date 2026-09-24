@@ -119,6 +119,10 @@ export interface AgentCurrentConfig {
   claude_model_efforts?: Record<string, string> | null;
   /** Claude：旧版本写进 settings.json env 的单次会话覆盖变量（优先于一切设置）。 */
   claude_env_overrides?: Record<string, string> | null;
+  /** Codex：会让 Codex 拒绝加载整份配置的写法（固定措辞，不含取值）。 */
+  fatal_issues?: string[] | null;
+  /** Codex：新写法的权限配置；设了它，沙箱以它为准，sandbox_mode 不再生效。 */
+  default_permissions?: string | null;
 }
 
 export interface AgentCurrentConfigStatus {

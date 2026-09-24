@@ -183,6 +183,8 @@ export function ConnectionWorkbench({
   const legacyStatusline = currentConfig?.config?.runtime?.statusline === "builtin-legacy";
   const modelEfforts = Object.entries(currentConfig?.config?.claude_model_efforts ?? {});
   const envOverrides = Object.entries(currentConfig?.config?.claude_env_overrides ?? {});
+  const fatalIssues = currentConfig?.config?.fatal_issues ?? [];
+  const defaultPermissions = currentConfig?.config?.default_permissions ?? null;
   const driftedEntry = current?.drifted_from
     ? form.connections.find((item) => item.name === current.drifted_from)
     : undefined;
@@ -320,8 +322,27 @@ export function ConnectionWorkbench({
           ))}
         </div>
 
+        {fatalIssues.length > 0 && (
+          <div
+            role="alert"
+            data-testid="codex-fatal-issues"
+            className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+          >
+            <p className="font-medium">Codex 会拒绝加载这份配置，所有 codex 命令（包括登录）都会直接报错：</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+              {fatalIssues.map((issue) => <li key={issue}>{issue}</li>)}
+            </ul>
+            <p className="mt-1 text-xs">到「运行设置」底部的「直接编辑配置文件」里改掉这些行。</p>
+          </div>
+        )}
         {tab === "automation" && (
           <div data-testid="automation-panel" className="space-y-4 rounded-xl border px-4 py-4">
+            {defaultPermissions && (
+              <p data-testid="codex-default-permissions" className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                config.toml 设了 default_permissions = {defaultPermissions}（新的权限写法），Codex 的沙箱以它为准；
+                下面自动化档位里的沙箱部分不再生效，只有审批方式照常生效。
+              </p>
+            )}
             <p className="text-xs text-muted-foreground">
               以客户端配置文件里的实际值为准，只写你改动的那几项；账号、接口地址、模型与凭据在「接入 Provider」维护。启动命令若带权限参数，会在启动时覆盖这里的自动化设置。
             </p>

@@ -179,6 +179,39 @@ fn codex_config_is_written_back_verbatim() {
     );
     assert!(!env.ok);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), edited);
+
+    // 合法 TOML 但会让 Codex 拒绝加载整份配置（真实 0.156.1 实测）：拒绝，说明原因，不回显取值
+    // 顶层键要写在第一个表头之前，否则按 TOML 规则会落进前面那张表
+    let fatal = format!(
+        "approval_policy = \"untrusted\"\n{edited}[model_providers.x]\nbase_url = \"https://a.example.com/v1\"\n"
+    );
+    let env = edit(
+        &ctx,
+        "agents:codex",
+        fresh["base"].as_str().unwrap(),
+        &fatal,
+    );
+    assert!(!env.ok);
+    let message = &env.errors[0].message;
+    assert!(message.contains("拒绝加载"), "{message}");
+    assert!(
+        message.contains("untrusted") && message.contains("缺少 name"),
+        "{message}"
+    );
+    assert!(!message.contains(TOKEN), "{message}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), edited);
+
+    // Codex 的状态同样标出这类写法
+    std::fs::write(&path, &fatal).unwrap();
+    let status = run(&ctx, "agents:status", &[]);
+    let codex = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "agents:codex")
+        .unwrap();
+    let issues = &codex["observed"]["current_config"]["config"]["fatal_issues"];
+    assert_eq!(issues.as_array().unwrap().len(), 2, "{issues}");
     let _ = std::fs::remove_dir_all(root);
 }
 

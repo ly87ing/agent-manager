@@ -162,6 +162,19 @@ pub(crate) fn write(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         ));
     }
     let after = top_level(kind, &text).map_err(|err| agent_error(err.context("新内容")))?;
+    // 会让 Codex 拒绝加载整份配置的写法：写进去 Codex 的所有命令都起不来，不写
+    if kind == Kind::Codex {
+        let issues = text
+            .parse::<toml::Value>()
+            .map(|root| crate::native_agent_settings::codex_fatal_issues(&root))
+            .unwrap_or_default();
+        if !issues.is_empty() {
+            return Err(agent_error(anyhow!(
+                "这份内容会让 Codex 拒绝加载整份配置，没有写入：{}",
+                issues.join("；")
+            )));
+        }
+    }
     // 原文件读不懂时当作空配置：改动按新内容的全部顶层键记
     let before = existing
         .as_deref()
