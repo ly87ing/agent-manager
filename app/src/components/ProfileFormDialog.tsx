@@ -18,7 +18,8 @@ import {
  * 助手实例表单：为同一个助手再配一套独立配置。
  *
  * 实例有自己的配置目录，启动时用环境变量指过去，所以多个实例可以同时开着互不干扰，
- * 全局配置一个字节都不动。鉴权只填变量名，取值留在环境变量里，不进本工具的库。
+ * 全局配置一个字节都不动。鉴权只填变量名，库里不存取值；写入时解析成取值，只写进这个实例
+ * 自己的配置文件。
  */
 export function ProfileFormDialog({
   baseAgents,
@@ -72,7 +73,7 @@ export function ProfileFormDialog({
     extraEnv,
   };
   const launch = id ? profileLaunchValue(input, baseBinOf(baseAgent)) : "";
-  const managedConfigFile = `${effectiveConfigDir.replace(/\/$/, "")}/${kind === "codex" ? "agent-manager.config.toml" : "settings.json"}`;
+  const managedConfigFile = `${effectiveConfigDir.replace(/\/$/, "")}/${kind === "codex" ? "config.toml" : "settings.json"}`;
   const mcpConfigFile = profileMcpConfig(kind, effectiveConfigDir).path;
   const skillsDir = profileSkillsDir(effectiveConfigDir);
   /** 预设按该实例实际执行的命令给（实例的 bin 来自归属助手）。 */
@@ -102,6 +103,10 @@ export function ProfileFormDialog({
     }
     if (kind === "claude" && baseUrl.trim() && !tokenVar.trim()) {
       setError("填了接口地址就要填鉴权变量名：否则 Claude 会把这个环境里的官方账号登录发往该地址");
+      return;
+    }
+    if (kind === "codex" && tokenVar.trim() && !baseUrl.trim()) {
+      setError("填了鉴权变量名就要填接口地址：凭据只配合这个环境自己的接口使用");
       return;
     }
     onSubmit(input);
@@ -301,7 +306,7 @@ export function ProfileFormDialog({
                   </p>
                 )}
                 <p className="mt-3 rounded-lg border border-info/20 bg-info/5 px-3 py-2 text-xs text-muted-foreground">
-                  这里只保存变量名，不保存密钥值。取值来自「设置 → 密钥」选择的外部文件，或启动进程的环境变量。
+                  这里只保存变量名，不保存密钥值。写入环境配置时从「设置 → 密钥」选择的外部文件取值，写进这个环境自己的配置文件（仅本人可读），启动时不用在终端里导出变量。
                 </p>
               </section>
 

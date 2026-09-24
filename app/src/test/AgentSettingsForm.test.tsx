@@ -1312,10 +1312,11 @@ describe("助手运行参数", () => {
     renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));
     await userEvent.click(await screen.findByTestId("add-connection-button"));
     await userEvent.click(screen.getByTestId("connection-preset-custom"));
-    // 地址、令牌变量名、模型都有
+    // 地址、令牌变量名、模型都有；取值和 Claude 一样可选填，只进外部密钥文件
     expect(screen.getByTestId("new-connection-base-url")).toBeInTheDocument();
     expect(screen.getByTestId("new-connection-token-var")).toBeInTheDocument();
     expect(screen.getByTestId("new-connection-model")).toBeInTheDocument();
+    expect(screen.getByTestId("new-connection-secret")).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
 
     await openRuntimeSettings();

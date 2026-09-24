@@ -1,7 +1,7 @@
 //! profiles 域真实写入：为一个实例建好独立配置目录并写入它的那份配置文件。
 //!
 //! 写入面只有 `<配置目录>/settings.json`（Claude，只改实例定义声明的 env 变量与 model）
-//! 或 `<配置目录>/agent-manager.config.toml`（Codex，整份由本工具维护）。以实际文件为准：
+//! 或 `<配置目录>/config.toml`（Codex，只改 model、model_provider 与本工具那张接入表）。以实际文件为准：
 //! 调用方必须带 status 给出的 `--base`，实际与之不符时拒绝（「已在外部修改」），文件与库都
 //! 不动；不再有「接管 = 用库覆盖」。目标是符号链接时写到最终目标文件，链接本身不变。
 //! 全局 `~/.claude` 与 `~/.codex` 全程不碰。

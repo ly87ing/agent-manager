@@ -209,6 +209,35 @@ describe("助手实例", () => {
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 
+  it("Codex 环境填了鉴权变量却没填接口地址时不保存，免得接入方式指向不存在的接入表", async () => {
+    const codexRoutes = routes();
+    (codexRoutes["agents:status"] as { data: { elements: unknown[] } }).data.elements.push(
+      makeElement({
+        id: "agents:codex",
+        domain: "agents",
+        spec: { display_name: "Codex", bin: "codex", preferred_provider: "native", providers: { native: { managed: true } } },
+        policy: { enabled: true },
+        observed: { install_source: "native", installed: true, management: agentManagementFixture("codex") },
+        state: "managed-ok",
+        freshness: makeFreshness(),
+        actions: [],
+      }),
+    );
+    const { calls } = renderWithEngine(<AgentsPage />, codexRoutes);
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.click(within(within(dialog).getByTestId("profile-base-agent")).getByRole("button", { name: /Codex/ }));
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cx-relay");
+    await userEvent.type(within(dialog).getByTestId("profile-token-var"), "RELAY_KEY");
+    expect(within(dialog).getByTestId("profile-launch-preview")).toHaveTextContent(
+      `alias cx-relay='CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-cx-relay" codex'`,
+    );
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    expect(within(dialog).getByTestId("profile-form-error")).toHaveTextContent("接口地址");
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+
   it("新建实例使用整页分组编辑器，并实时列出全部落地位置与启动值", async () => {
     renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();
@@ -361,7 +390,7 @@ describe("助手实例", () => {
       }),
     ]);
     codexRoutes["aliases:status"] = makeEnvelope(
-      makeAliasStatus({ "cx-w": 'CODEX_HOME="$HOME/.codex-w" codex -p agent-manager --search' }),
+      makeAliasStatus({ "cx-w": 'CODEX_HOME="$HOME/.codex-w" codex --search' }),
       { command: "aliases.status" },
     );
     (codexRoutes["agents:status"] as { data: { elements: unknown[] } }).data.elements.push(
@@ -387,7 +416,7 @@ describe("助手实例", () => {
     const write = calls.find((call) => call.command === "aliases:apply")!;
     expect(write.args[write.args.indexOf("--set") + 1]).toBe("cx-w");
     expect(write.args[write.args.indexOf("--value") + 1]).toBe(
-      'CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex -p agent-manager --search',
+      'CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex --search',
     );
   });
 

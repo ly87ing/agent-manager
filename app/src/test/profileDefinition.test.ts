@@ -55,7 +55,7 @@ describe("助手实例定义", () => {
     expect(def.mcp_config).toEqual({ path: "~/.codex-work/config.toml", format: "toml" });
   });
 
-  it("启动命令取值：Claude 指配置目录，Codex 额外叠加自己的配置", () => {
+  it("启动命令取值：只用配置目录变量指向实例，Codex 不再 -p 叠加", () => {
     // 配置目录写 $HOME 而非引号里的 ~：后者 shell 不展开，取到的是字面量
     expect(profileLaunchValue(claudeInput, "claude")).toBe(
       'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude --dangerously-skip-permissions',
@@ -63,13 +63,13 @@ describe("助手实例定义", () => {
     // 第三方 Codex 环境清空 Codex 当作官方凭据读取的变量；官方账号环境不加
     expect(
       profileLaunchValue({ ...claudeInput, kind: "codex", configDir: "~/.codex-work", extraArgs: "" }, "codex"),
-    ).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-work" codex -p agent-manager');
+    ).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-work" codex');
     expect(
       profileLaunchValue(
         { ...claudeInput, kind: "codex", configDir: "~/.codex-work", extraArgs: "", baseUrl: "", tokenVar: "" },
         "codex",
       ),
-    ).toBe('CODEX_HOME="$HOME/.codex-work" codex -p agent-manager');
+    ).toBe('CODEX_HOME="$HOME/.codex-work" codex');
   });
 
   it("认证命令只生成文本，实例命令严格指向自己的配置目录", () => {
@@ -128,7 +128,7 @@ describe("启动命令里的配置目录", () => {
     expect(fixLaunchCommandTilde(broken)).toBe(
       `CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude --dangerously-skip-permissions`,
     );
-    const good = `CODEX_HOME="$HOME/.codex-x" codex -p agent-manager`;
+    const good = `CODEX_HOME="$HOME/.codex-x" codex`;
     expect(launchCommandNeedsTildeFix(good)).toBe(false);
     expect(fixLaunchCommandTilde(good)).toBe(good);
   });
@@ -220,15 +220,15 @@ describe("启动命令里的配置目录", () => {
   });
 
   it("第三方 Codex 环境的启动命令要清空官方凭据变量：识别缺失并只补前缀，引号里的空白不动", () => {
-    const old = 'CODEX_HOME="$HOME/.codex-w" codex -p agent-manager --msg "a  b"';
+    const old = 'CODEX_HOME="$HOME/.codex-w" codex --msg "a  b"';
     expect(launchCommandNeedsCredentialClear(old)).toBe(true);
     const fixed = fixLaunchCommandCredentialClear(old);
-    expect(fixed).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex -p agent-manager --msg "a  b"');
+    expect(fixed).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex --msg "a  b"');
     expect(launchCommandNeedsCredentialClear(fixed)).toBe(false);
     // 带着取值的赋值不算清空：订正时换成空值
-    const valued = 'CODEX_API_KEY=abc CODEX_HOME="$HOME/.codex-w" codex -p agent-manager';
+    const valued = 'CODEX_API_KEY=abc CODEX_HOME="$HOME/.codex-w" codex';
     expect(launchCommandNeedsCredentialClear(valued)).toBe(true);
-    expect(fixLaunchCommandCredentialClear(valued)).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex -p agent-manager');
+    expect(fixLaunchCommandCredentialClear(valued)).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex');
 
     const aliases = { "cx-w": old, "cc-w": 'CLAUDE_CONFIG_DIR="$HOME/.claude-w" claude' };
     const parse = (value: string) => Object.fromEntries([...value.matchAll(/(\w+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));

@@ -1,7 +1,7 @@
 //! profiles 域：实例定义、只读状态、真实写入与安全反例。
 //!
 //! 核心保证：全局 ~/.claude 与 ~/.codex 全程不被触碰；鉴权取值只以引用形式入库，
-//! Claude 目标文件写解析后的值（客户端不展开引用），Codex 目标只写变量名。
+//! 实例目录里的目标文件写解析后的值（助手不展开引用，启动时也不依赖 shell 导出变量）。
 
 use agent_manager_engine::{execute, store, Context, Request};
 use std::path::PathBuf;
@@ -214,10 +214,16 @@ fn claude_profile_writes_isolated_settings_without_touching_global() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// 与 Claude 实例同一做法：凭据取值只写进实例自己的 config.toml（0600），库里只有变量名。
+/// 此前只写 `env_key`，Codex 要从启动进程的环境变量取值，别名不导出它就报缺变量。
 #[test]
-fn codex_profile_target_never_contains_the_secret_value() {
+fn codex_实例把凭据写进自己的_config_toml_保留_mcp_条目_库里只有变量名() {
     let (root, ctx) = temp_ctx("codex-write");
     std::env::set_var("AM_TEST_CODEX_TOKEN", "codex-sentinel-value");
+    let dir = ctx.home_dir.join(".codex-work");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mcp = "[mcp_servers.fs]\ncommand = \"npx\"\n";
+    std::fs::write(dir.join("config.toml"), mcp).unwrap();
     assert!(save_definition(
         &ctx,
         "cx-work",
@@ -225,25 +231,57 @@ fn codex_profile_target_never_contains_the_secret_value() {
     ));
     let apply = apply_now(&ctx, "cx-work");
     assert!(apply.ok, "{:?}", apply.errors);
-    // 供应商配置写独立的叠加文件，config.toml 留给 MCP 域，两者互不覆盖
-    assert!(
-        !ctx.home_dir.join(".codex-work/config.toml").exists(),
-        "不得写 config.toml（那是 MCP 域的目标）"
-    );
-    let text = std::fs::read_to_string(ctx.home_dir.join(".codex-work/agent-manager.config.toml"))
-        .unwrap();
-    assert!(text.contains("env_key = \"AM_TEST_CODEX_TOKEN\""));
-    assert!(text.contains("model_provider = \"agent-manager\""));
-    let status = execute(&ctx, &request("profiles:status", &[]));
+    let text = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+    let doc: toml::Table = text.parse().unwrap();
+    assert_eq!(doc["model_provider"].as_str(), Some("agent-manager"));
+    let provider = &doc["model_providers"]["agent-manager"];
     assert_eq!(
-        element(&status, "cx-work")["observed"]["launch_value"],
-        "CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"~/.codex-work\" codex -p agent-manager",
-        "第三方实例启动时清空 Codex 当作官方凭据读取的变量"
+        provider["experimental_bearer_token"].as_str(),
+        Some("codex-sentinel-value")
+    );
+    assert!(provider.get("env_key").is_none());
+    assert_eq!(
+        doc["mcp_servers"]["fs"]["command"].as_str(),
+        Some("npx"),
+        "MCP 条目原样保留"
     );
     assert!(
-        !text.contains("codex-sentinel-value"),
-        "Codex 目标只写变量名，绝不写取值"
+        !dir.join("agent-manager.config.toml").exists(),
+        "不再写 -p 叠加文件"
     );
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(dir.join("config.toml"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600, "含凭据的文件只有本人可读写");
+    }
+    let snapshot = status(&ctx);
+    let el = element(&snapshot, "cx-work");
+    assert_eq!(
+        el["observed"]["launch_value"],
+        "CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"~/.codex-work\" codex",
+        "第三方实例启动时清空 Codex 当作官方凭据读取的变量，不用 -p"
+    );
+    assert_eq!(el["state"], "managed-ok", "{el}");
+    assert!(
+        !el.to_string().contains("codex-sentinel-value"),
+        "状态输出不含取值"
+    );
+    // MCP 域之后再改 config.toml 的条目，不算实例配置被外部修改
+    std::fs::write(
+        dir.join("config.toml"),
+        format!("{text}\n[mcp_servers.git]\ncommand = \"uvx\"\n"),
+    )
+    .unwrap();
+    assert_eq!(element(&status(&ctx), "cx-work")["state"], "managed-ok");
+    let db = std::fs::read(ctx.data_dir.join("native-manager.db")).unwrap();
+    assert!(
+        !String::from_utf8_lossy(&db).contains("codex-sentinel-value"),
+        "库里零明文"
+    );
+    assert!(!ctx.home_dir.join(".codex").exists(), "主配置不碰");
     std::env::remove_var("AM_TEST_CODEX_TOKEN");
     let _ = std::fs::remove_dir_all(root);
 }
@@ -636,21 +674,22 @@ fn profile_directory_leaves_rules_file_and_hooks_alone() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// Codex 实例同样不生成规则文件与 hooks.json，也不碰归 MCP 域的 config.toml。
+/// Codex 实例同样不生成规则文件与 hooks.json。
 #[test]
 fn codex_profile_directory_gets_no_rules_or_hooks_file() {
     let (root, ctx) = temp_ctx("codex-full-set");
+    std::env::set_var("AM_TEST_CODEX_FULL_SET", "codex-full-set-token");
     assert!(save_definition(
         &ctx,
         "cx-work",
-        r#"{"display_name":"Codex · work","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-work","base_url":"https://api.example.com/v1","env_key":"AM_TEST_ABSENT_OK","model":"gpt-5.5"},"_delete":false,"_replace":true}"#
+        r#"{"display_name":"Codex · work","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-work","base_url":"https://api.example.com/v1","env_key":"AM_TEST_CODEX_FULL_SET","model":"gpt-5.5"},"_delete":false,"_replace":true}"#
     ));
     let apply = apply_now(&ctx, "cx-work");
     assert!(apply.ok, "{:?}", apply.errors);
+    std::env::remove_var("AM_TEST_CODEX_FULL_SET");
 
     let dir = ctx.home_dir.join(".codex-work");
-    assert!(dir.join("agent-manager.config.toml").is_file());
-    assert!(!dir.join("config.toml").exists(), "config.toml 仍归 MCP 域");
+    assert!(dir.join("config.toml").is_file());
     assert!(!dir.join("AGENTS.md").exists(), "规则文件不由实例域生成");
     assert!(
         !dir.join("hooks.json").exists(),
@@ -873,12 +912,12 @@ fn codex_第三方实例_目录已登录官方账号时拒绝_未登录才写() 
     let refused = apply_now(&ctx, "cx-work");
     assert!(!refused.ok);
     assert!(format!("{:?}", refused.errors).contains("官方账号登录"));
-    assert!(!dir.join("agent-manager.config.toml").exists());
+    assert!(!dir.join("config.toml").exists());
 
     std::fs::remove_file(dir.join(".fake-logged-in")).unwrap();
     let apply = apply_now(&ctx, "cx-work");
     assert!(apply.ok, "{:?}", apply.errors);
-    assert!(dir.join("agent-manager.config.toml").exists());
+    assert!(dir.join("config.toml").exists());
     let log = probe_log(&ctx);
     assert_eq!(
         log.lines().collect::<Vec<_>>(),

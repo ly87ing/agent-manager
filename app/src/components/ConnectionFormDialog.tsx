@@ -391,7 +391,7 @@ export function ConnectionFormDialog({
                     spellCheck={false}
                   />
                 </label>
-                {kind === "claude" ? (
+                {kind === "claude" || kind === "codex" ? (
                   <label className="text-sm text-foreground">
                     API Key（可选）
                     <input
@@ -407,10 +407,6 @@ export function ConnectionFormDialog({
                       填写后只写入“设置 → 密钥”选择的外部文件，不进入本机数据库。
                     </span>
                   </label>
-                ) : kind === "codex" ? (
-                  <p className="rounded border bg-muted px-3 py-2 text-xs text-muted-foreground">
-                    Codex 启动时自己读取这个环境变量；本应用不会把明文凭据写进 Codex 配置。
-                  </p>
                 ) : null}
               </div>}
 

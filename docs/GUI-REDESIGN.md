@@ -233,7 +233,7 @@ profile 与各类表等）在「运行设置」页底部的「直接编辑配置
 自动化。
 
 官方账号凭据与第三方凭据不在同一个配置目录里出现。带第三方地址或凭据的实例（Claude 声明了
-`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`；Codex 填了地址或 `env_key`）
+`ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`；Codex 填了地址，凭据变量必须和地址一起设置）
 在写入前用官方命令（`claude auth status` / `codex login status`，探测时去掉进程环境里的凭据变量）
 确认配置目录里没有官方账号登录；Claude 的第三方凭据会遮住官方登录，另看目录里 `.claude.json`
 的登录会话记录与 `.credentials.json`。有登录或无法确认都拒绝，提示换一个新目录；官方账号实例
@@ -243,6 +243,13 @@ Claude 实例的 `settings.json` 把没声明的那种第三方凭据与 `CLAUDE
 文档取消从 shell 继承的同名变量；第三方 Codex 实例的启动命令前缀 `CODEX_API_KEY= CODEX_ACCESS_TOKEN=`，
 清空 Codex 当作官方凭据读取、优先于目录登录的变量；早先保存、缺这段前缀的启动命令在实例卡片上标出，
 「订正」只补前缀（已有的同名赋值换成空值），命令其余部分原样保留。
+第三方凭据的取值只写进实例自己的配置文件（0600），库里只存变量名，启动时不依赖 shell 导出变量：
+Claude 写 `settings.json` 的 env；Codex 写实例目录 `config.toml` 里 `[model_providers.agent-manager]`
+的 `experimental_bearer_token`（官方说明其取值作为 `Authorization: Bearer` 发出、供以程序方式配置时
+使用，CC Switch 保留官方登录时也写这个字段），同时写 `model_provider = "agent-manager"` 与定义了的
+`model`。Codex 实例的 `config.toml` 与 MCP 域共用、按键分工：本工具只动这三项，MCP 只动
+`mcp_servers`，写入基准也只取这三项，MCP 条目变化不算实例配置被外部修改。启动命令只用 `CODEX_HOME`
+指向实例目录，不再用 `-p` 叠加单独文件。
 普通页面不展示 AI CLI 的安装、升级、卸载动作、生命周期脚本或完整 alias。
 
 AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、当前版本和安装来源只在
@@ -253,8 +260,8 @@ AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、�
 
 「添加 Provider」先展示按助手形态筛过的厂商预设，也允许自定义；选中后地址、模型、凭据变量和
 模型别名自动填入，用户仍可修改。提交时先保存完整定义且保留未知字段、其他接入与原生设置，
-不会提前改 `settings.active`。Claude 可在同一弹窗选填凭据取值，取值通过 `secrets:set`
-单独保存；Codex 只登记环境变量名，不提供明文取值框。创建完成后仍需用户显式点击应用；后一步
+不会提前改 `settings.active`。Claude 与 Codex 都可在同一弹窗选填凭据取值，取值通过
+`secrets:set` 单独保存到外部密钥文件，不进库。创建完成后仍需用户显式点击应用；后一步
 失败不把新 Provider 冒充为当前项。
 
 接入工作台中的「运行设置」直接在页签里展示表单，不再弹窗，按客户端实际值预填，只拥有
@@ -342,10 +349,8 @@ Claude 检查 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`ANTHROPIC_BASE_URL
 provider、MCP 域写的 `[mcp_servers.*]`）逐行原样保留。写入是文本级编辑：顶层键就地替换或插在第一个
 表头之前（越过紧贴表头的注释），表段整段替换。
 
-Codex 的令牌不落盘：provider 用 `env_key` 指向环境变量名，由 Codex 启动时自己去读，
-因此这里只写变量名——与 Claude 那边被迫写真值不同。`wire_api` 固定 `responses`
-（当前唯一支持值）。`openai` / `ollama` / `lmstudio` 是 Codex 内置 id，用作接入配置名会被
-拒绝（引用它们的 `provider_ref` 可以）。用户自己已有同名 provider 表时拒绝写入，提示给接入换名。自定义接入方式没有默认地址，只填令牌变量名而不填地址同样拒绝。
+主配置只放官方账号，不再写第三方接入；上面记下的 `[model_providers.*]` 段只在「切回官方账号」时
+撤掉。第三方 Codex 接入在独立环境里用，凭据写法见独立环境一节。
 跳过权限确认在 Codex 侧写 `approval_policy = "never"` 与 `sandbox_mode = "danger-full-access"`。
 
 状态栏只有 Claude 侧有（Codex 没有这个机制）。

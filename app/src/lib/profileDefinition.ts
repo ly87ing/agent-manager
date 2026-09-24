@@ -4,18 +4,16 @@
  * 一个实例 = 一个独立配置目录 + 一条启动命令。实例定义就是一条 agent 定义（多一个 profile 段），
  * 所以技能与 MCP 的逐助手分配天然适用于它。
  *
- * 目标文件分工（避免两个域写同一个文件互相抹掉）：
+ * 目标文件分工：
  * - Claude：本工具写 `<配置目录>/settings.json`，MCP 写 `<配置目录>/.claude.json`
- * - Codex：本工具写 `<配置目录>/agent-manager.config.toml`（启动时 `-p` 叠加），
- *   MCP 写 `<配置目录>/config.toml`
+ * - Codex：本工具与 MCP 都写 `<配置目录>/config.toml`，各自按键原位修改——本工具只动
+ *   `model`、`model_provider` 与 `[model_providers.agent-manager]`，MCP 只动 `mcp_servers`
  */
 
 import type { ConnectionEntry } from "./agentDefinitionForm";
 
 export type ProfileKind = "claude" | "codex";
 
-/** Codex 叠加配置的固定名字，与引擎侧保持一致。 */
-export const CODEX_PROFILE_NAME = "agent-manager";
 
 export interface ProfileFormInput {
   id: string;
@@ -138,7 +136,6 @@ export function profileLaunchValue(input: ProfileFormInput, baseBin: string): st
     parts.push(...CODEX_CLEARED_ENV.map((name) => `${name}=`));
   }
   parts.push(`${configEnvOf(input.kind)}="${shellConfigDir(input.configDir)}"`, baseBin);
-  if (input.kind === "codex") parts.push("-p", CODEX_PROFILE_NAME);
   const extra = input.extraArgs.trim();
   if (extra) parts.push(extra);
   return parts.join(" ");

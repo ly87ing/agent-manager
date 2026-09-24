@@ -16,9 +16,10 @@ use anyhow::{bail, Result};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
 
-/// Codex 叠加配置的固定名字：文件名与 `-p` 参数取值必须一致。
-pub(crate) const CODEX_PROFILE_NAME: &str = "agent-manager";
-const CODEX_PROFILE_FILE: &str = "agent-manager.config.toml";
+/// Codex 实例的接入方式 id：实例 `config.toml` 里的 `model_provider` 与
+/// `[model_providers.agent-manager]` 用它。
+pub(crate) const CODEX_PROVIDER_ID: &str = "agent-manager";
+const FILE_CODEX_CONFIG: &str = "config.toml";
 
 /// 实例配置目录里由本工具维护的文件。
 pub(crate) const FILE_CLAUDE_SETTINGS: &str = "settings.json";
@@ -45,7 +46,7 @@ pub(crate) struct RenderedTarget {
 pub(crate) enum ProfileKind {
     /// `CLAUDE_CONFIG_DIR` + `<dir>/settings.json`
     Claude,
-    /// `CODEX_HOME` + `<dir>/agent-manager.config.toml`（经 `-p` 叠加，避开归 MCP 域的 config.toml）
+    /// `CODEX_HOME` + `<dir>/config.toml`（只改 model、model_provider 与本工具那张接入表）
     Codex,
 }
 
@@ -65,14 +66,15 @@ impl ProfileKind {
         }
     }
 
-    /// 本工具在配置目录里全权拥有的目标文件（相对配置目录）。
+    /// 本工具在配置目录里写的目标文件（相对配置目录）。
     ///
-    /// Codex 特意不写 `config.toml`：那个文件归 MCP 域写 `mcp_servers`，两个域整文件写入
-    /// 会互相抹掉。改用 Codex 官方的叠加机制——单独一份 `<name>.config.toml`，启动时 `-p` 叠加。
+    /// Codex 与 MCP 域共用 `config.toml`，两边都按键原位修改：MCP 只动 `mcp_servers`，本域
+    /// 只动 `model`、`model_provider` 与 `[model_providers.agent-manager]`。和 CC Switch 一样
+    /// 写助手的标准配置文件，启动时不再 `-p` 叠加单独的文件。
     pub(crate) fn target_file(self) -> &'static str {
         match self {
-            ProfileKind::Claude => "settings.json",
-            ProfileKind::Codex => CODEX_PROFILE_FILE,
+            ProfileKind::Claude => FILE_CLAUDE_SETTINGS,
+            ProfileKind::Codex => FILE_CODEX_CONFIG,
         }
     }
 
@@ -103,7 +105,8 @@ pub(crate) struct ProfileDef {
     pub config_dir_raw: String,
     /// Claude：写进 settings.json 的 env 映射（值可能是 `${VAR}` 引用）。
     pub env: Map<String, Value>,
-    /// Codex：接口地址与鉴权变量名（`env_key` 只写变量名，永不写值）。
+    /// Codex：接口地址与凭据所在的变量名（库里只存变量名；写入实例 `config.toml` 时解析成
+    /// 取值，写进 `experimental_bearer_token`）。
     pub base_url: Option<String>,
     pub env_key: Option<String>,
     pub wire_api: Option<String>,
@@ -296,6 +299,9 @@ pub(crate) fn parse_definition(id: &str, raw: &Value, enabled: bool) -> Result<P
         if !valid_env_name(key) {
             bail!("[{}] env_key 不是合法的环境变量名", id);
         }
+        if base_url.is_none() {
+            bail!("[{}] Codex 实例的凭据要和接口地址一起设置", id);
+        }
     }
     let wire_api = profile
         .get("wire_api")
@@ -414,7 +420,12 @@ pub(crate) fn load_definitions(policy: &Value) -> Vec<Result<ProfileDef>> {
 
 /// 实例 settings.json 里与本工具有关的键只有 env / model：`hooks` 归 hooks 域，其余根级
 /// 字段是用户自己的（合并写入时原样保留）。env 只写实例定义里声明的那几个变量，
-/// 用户自己加的 env 变量原样保留。
+/// 用户自己加的 env 变量原样保留。Codex 实例 config.toml 同理，只动下面这几项。
+const CODEX_MODEL_PROVIDER: &str = "model_provider";
+
+fn codex_provider_path() -> String {
+    format!("model_providers.{CODEX_PROVIDER_ID}")
+}
 
 /// 文件不存在时的写入基准。
 pub(crate) const BASE_MISSING: &str = "missing";
@@ -430,24 +441,42 @@ pub(crate) fn owned_paths(def: &ProfileDef) -> Vec<String> {
             .chain(claude_cancelled_env(def))
             .map(|key| format!("env.{key}"))
             .collect(),
-        // Codex 实例文件整份由本工具维护，不按路径记
+        ProfileKind::Codex if def.base_url.is_some() => {
+            vec![CODEX_MODEL_PROVIDER.to_string(), codex_provider_path()]
+        }
         ProfileKind::Codex => Vec::new(),
     };
-    if def.kind == ProfileKind::Claude && def.model.is_some() {
+    if def.model.is_some() {
         paths.push("model".to_string());
     }
     paths
 }
 
 /// 实例目标文件的写入基准：Claude 取 settings.json 里 env 与 model 两项的摘要（用户改
-/// permissions、hooks 等其他键不影响它）；Codex 实例文件整份归本工具，取文件字节摘要。
-/// 文件不存在为 `missing`；Claude 文件不是 JSON 对象时报错（不给基准，也就不能写）。
+/// permissions、hooks 等其他键不影响它）；Codex 取 config.toml 里 model、model_provider 与
+/// 本工具那张接入表的摘要（MCP 条目等其他内容不影响它）。文件不存在为 `missing`；文件
+/// 解析不了时报错（不给基准，也就不能写）。
 pub(crate) fn live_base(kind: ProfileKind, bytes: Option<&[u8]>) -> Result<String> {
     let Some(bytes) = bytes else {
         return Ok(BASE_MISSING.to_string());
     };
     match kind {
-        ProfileKind::Codex => Ok(crate::native_mcp::model::sha256_hex_bytes(bytes)),
+        ProfileKind::Codex => {
+            let doc = parse_codex_config(bytes)?;
+            let pick = |value: Option<&toml::Value>| {
+                value
+                    .and_then(|value| serde_json::to_value(value).ok())
+                    .unwrap_or(Value::Null)
+            };
+            let slice = serde_json::json!({
+                "model": pick(doc.get("model")),
+                "model_provider": pick(doc.get(CODEX_MODEL_PROVIDER)),
+                "provider": pick(doc.get("model_providers").and_then(|p| p.get(CODEX_PROVIDER_ID))),
+            });
+            Ok(crate::native_mcp::model::sha256_hex(
+                &crate::native_mcp::model::canonical_compact(&slice),
+            ))
+        }
         ProfileKind::Claude => {
             let root = parse_settings(bytes)?;
             let slice = serde_json::json!({
@@ -475,6 +504,16 @@ fn parse_settings(bytes: &[u8]) -> Result<Map<String, Value>> {
         bail!("实例 settings.json 里的 env 不是对象，拒绝读写");
     }
     Ok(root)
+}
+
+/// 解析实例 config.toml：必须是合法 TOML。不当成空文件覆盖。
+fn parse_codex_config(bytes: &[u8]) -> Result<toml::Table> {
+    std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|text| text.parse::<toml::Table>().ok())
+        .ok_or_else(|| {
+            anyhow::anyhow!("实例的 config.toml 不是合法的 TOML，拒绝读写（不会当成空文件覆盖）")
+        })
 }
 
 /// 展示实际取值：凭据类变量或看起来像凭据的取值一律不输出。
@@ -553,24 +592,58 @@ pub(crate) fn compare_fields(
             }
         }
         ProfileKind::Codex => {
-            let expected = codex_fields(render_codex_provider(def).as_bytes());
             let live = bytes.map(codex_fields).unwrap_or_default();
-            for (field, want) in &expected {
-                let have = live.get(field);
+            let mut expected: Vec<(String, String, Option<String>)> = Vec::new();
+            if let Some(model) = &def.model {
+                expected.push(("model".into(), model.clone(), Some(model.clone())));
+            }
+            if let Some(url) = &def.base_url {
+                for (field, value) in [
+                    (CODEX_MODEL_PROVIDER, CODEX_PROVIDER_ID),
+                    ("provider.name", def.display_name.as_str()),
+                    ("provider.base_url", url.as_str()),
+                    ("provider.wire_api", codex_wire_api(def)),
+                ] {
+                    expected.push((field.into(), value.into(), Some(value.into())));
+                }
+                if let Some(var) = &def.env_key {
+                    expected.push((
+                        format!("provider.{CODEX_BEARER_TOKEN}"),
+                        format!("${{{var}}}"),
+                        resolve(var),
+                    ));
+                }
+            }
+            for (field, definition, want) in expected {
+                let have = live.get(&field);
+                let secret = field.ends_with(CODEX_BEARER_TOKEN);
                 fields.push(serde_json::json!({
                     "field": field,
-                    "state": match have {
-                        None => "missing",
-                        Some(have) if have == want => "same",
-                        Some(_) => "differs",
+                    "state": match (have, &want) {
+                        (None, _) => "missing",
+                        (Some(_), None) => "unresolved",
+                        (Some(have), Some(want)) if have == want => "same",
+                        _ => "differs",
                     },
-                    "definition": want,
-                    "live": have,
+                    "definition": definition,
+                    "live": match have {
+                        Some(_) if secret => Value::String("<hidden>".into()),
+                        Some(have) => Value::String(have.clone()),
+                        None => Value::Null,
+                    },
                 }));
             }
         }
     }
     Ok(fields)
+}
+
+/// Codex 接入表里放第三方凭据的字段。官方说明：取值作为 `Authorization: Bearer` 请求头
+/// 发出，以程序方式配置时使用；0.48 起就有，CC Switch 保留官方登录时也写这个字段。
+const CODEX_BEARER_TOKEN: &str = "experimental_bearer_token";
+
+fn codex_wire_api(def: &ProfileDef) -> &str {
+    def.wire_api.as_deref().unwrap_or("responses")
 }
 
 /// Codex 实例文件里与定义对应的字段（解析失败时为空：整份都算不一致）。
@@ -582,17 +655,17 @@ fn codex_fields(bytes: &[u8]) -> std::collections::BTreeMap<String, String> {
     else {
         return out;
     };
-    for key in ["model", "model_provider"] {
+    for key in ["model", CODEX_MODEL_PROVIDER] {
         if let Some(value) = doc.get(key).and_then(toml::Value::as_str) {
             out.insert(key.to_string(), value.to_string());
         }
     }
     if let Some(table) = doc
         .get("model_providers")
-        .and_then(|providers| providers.get(CODEX_PROFILE_NAME))
+        .and_then(|providers| providers.get(CODEX_PROVIDER_ID))
         .and_then(toml::Value::as_table)
     {
-        for key in ["name", "base_url", "env_key", "wire_api"] {
+        for key in ["name", "base_url", CODEX_BEARER_TOKEN, "wire_api"] {
             if let Some(value) = table.get(key).and_then(toml::Value::as_str) {
                 out.insert(format!("provider.{key}"), value.to_string());
             }
@@ -665,18 +738,17 @@ pub(crate) fn adopt_profile(
         }
         ProfileKind::Codex => {
             let live = codex_fields(bytes);
-            if live.get("model_provider").map(String::as_str) != Some(CODEX_PROFILE_NAME) {
+            let ours =
+                live.get(CODEX_MODEL_PROVIDER).map(String::as_str) == Some(CODEX_PROVIDER_ID);
+            if !ours {
                 notes.push("实际配置没有使用本实例的接入方式，只采纳模型".to_string());
             }
             for (field, key) in [
                 ("model", "model"),
                 ("provider.base_url", "base_url"),
-                ("provider.env_key", "env_key"),
                 ("provider.wire_api", "wire_api"),
             ] {
-                if key != "model"
-                    && live.get("model_provider").map(String::as_str) != Some(CODEX_PROFILE_NAME)
-                {
+                if key != "model" && !ours {
                     continue;
                 }
                 match live.get(field) {
@@ -686,6 +758,14 @@ pub(crate) fn adopt_profile(
                     None => {
                         profile.remove(key);
                     }
+                }
+            }
+            if let (true, Some(var)) = (ours, &def.env_key) {
+                let token = live.get(&format!("provider.{CODEX_BEARER_TOKEN}"));
+                if token.is_some() && resolve(var).as_ref() != token {
+                    notes.push(format!(
+                        "{CODEX_BEARER_TOKEN} 的实际取值与变量 {var} 不同；凭据不会以明文写进库，未采纳"
+                    ));
                 }
             }
         }
@@ -751,9 +831,62 @@ pub(crate) fn render_all(
             });
         }
         ProfileKind::Codex => {
+            let text = match existing(FILE_CODEX_CONFIG) {
+                Some(bytes) => {
+                    parse_codex_config(&bytes)?;
+                    String::from_utf8(bytes).expect("已校验为 UTF-8")
+                }
+                None => String::new(),
+            };
+            let mut doc = text
+                .parse::<toml_edit::Document>()
+                .map_err(|_| anyhow::anyhow!("实例的 config.toml 不是合法的 TOML，拒绝读写"))?;
+            let owned_before = |path: &str| recorded.iter().any(|p| p == path);
+            match &def.model {
+                Some(model) => doc["model"] = toml_edit::value(model.as_str()),
+                None if owned_before("model") => {
+                    doc.remove("model");
+                }
+                None => {}
+            }
+            match codex_provider_table(def, resolve)? {
+                Some(table) => {
+                    doc[CODEX_MODEL_PROVIDER] = toml_edit::value(CODEX_PROVIDER_ID);
+                    let providers = doc
+                        .entry("model_providers")
+                        .or_insert_with(|| {
+                            let mut table = toml_edit::Table::new();
+                            table.set_implicit(true);
+                            toml_edit::Item::Table(table)
+                        })
+                        .as_table_mut()
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "实例 config.toml 里的 model_providers 不是普通表，拒绝读写"
+                            )
+                        })?;
+                    providers.insert(CODEX_PROVIDER_ID, toml_edit::Item::Table(table));
+                }
+                None => {
+                    if owned_before(CODEX_MODEL_PROVIDER) {
+                        doc.remove(CODEX_MODEL_PROVIDER);
+                    }
+                    if owned_before(&codex_provider_path()) {
+                        if let Some(providers) = doc
+                            .get_mut("model_providers")
+                            .and_then(toml_edit::Item::as_table_mut)
+                        {
+                            providers.remove(CODEX_PROVIDER_ID);
+                            if providers.is_empty() {
+                                doc.remove("model_providers");
+                            }
+                        }
+                    }
+                }
+            }
             out.push(RenderedTarget {
-                file: CODEX_PROFILE_FILE.to_string(),
-                content: render_codex_provider(def).into_bytes(),
+                file: FILE_CODEX_CONFIG.to_string(),
+                content: doc.to_string().into_bytes(),
             });
         }
     }
@@ -792,35 +925,31 @@ fn resolved_env(
     Ok(env)
 }
 
-/// Codex 供应商叠加配置正文。
-fn render_codex_provider(def: &ProfileDef) -> String {
-    let provider = CODEX_PROFILE_NAME;
-    let mut out = String::new();
-    if let Some(model) = &def.model {
-        out.push_str(&format!("model = {}\n", toml_string(model)));
+/// 第三方 Codex 实例的接入表（整张归本工具）。凭据取值写进 `experimental_bearer_token`，
+/// 和 Claude 实例把令牌写进自己的 settings.json 一样只落在这个实例目录里，启动时不依赖
+/// shell 里导出变量。变量取不到值时 fail-closed。
+fn codex_provider_table(
+    def: &ProfileDef,
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> Result<Option<toml_edit::Table>> {
+    let Some(url) = &def.base_url else {
+        return Ok(None);
+    };
+    let mut table = toml_edit::Table::new();
+    table.insert("name", toml_edit::value(def.display_name.as_str()));
+    table.insert("base_url", toml_edit::value(url.as_str()));
+    if let Some(var) = &def.env_key {
+        let token = resolve(var).ok_or_else(|| {
+            anyhow::anyhow!(
+                "[{}] 环境变量 {} 在当前环境里没有取值，拒绝写入不完整的配置",
+                def.id,
+                var
+            )
+        })?;
+        table.insert(CODEX_BEARER_TOKEN, toml_edit::value(token));
     }
-    out.push_str(&format!("model_provider = {}\n", toml_string(provider)));
-    if let Some(url) = &def.base_url {
-        out.push_str(&format!("\n[model_providers.{provider}]\n"));
-        out.push_str(&format!(
-            "name = {}\n",
-            toml_string(def.display_name.as_str())
-        ));
-        out.push_str(&format!("base_url = {}\n", toml_string(url)));
-        if let Some(key) = &def.env_key {
-            out.push_str(&format!("env_key = {}\n", toml_string(key)));
-        }
-        out.push_str(&format!(
-            "wire_api = {}\n",
-            toml_string(def.wire_api.as_deref().unwrap_or("responses"))
-        ));
-    }
-    out
-}
-
-/// TOML 基本字符串字面量：只需转义反斜杠与双引号（取值里的控制字符已在校验层拒绝）。
-fn toml_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    table.insert("wire_api", toml_edit::value(codex_wire_api(def)));
+    Ok(Some(table))
 }
 
 /// 第三方 Codex 实例启动时清空的变量：Codex 把它们当作官方账号侧的凭据，优先于目录里
@@ -842,9 +971,6 @@ pub(crate) fn launch_value(def: &ProfileDef, bin: &str, extra_args: &str) -> Str
         def.config_dir_raw,
         bin
     ));
-    if def.kind == ProfileKind::Codex {
-        out.push_str(&format!(" -p {CODEX_PROFILE_NAME}"));
-    }
     let extra = extra_args.trim();
     if !extra.is_empty() {
         out.push(' ');
@@ -918,8 +1044,10 @@ mod tests {
         assert!(resolved_env(&claude, &|_| None).is_err());
     }
 
+    /// 和 Claude 实例一样把凭据取值写进实例自己的配置文件：只用 `env_key` 时 Codex 要从
+    /// 启动进程的环境变量里取值，别名不导出这个变量就报「Missing environment variable」。
     #[test]
-    fn codex_provider_only_writes_the_variable_name() {
+    fn codex_instance_config_gets_resolved_token_and_keeps_other_entries() {
         let codex = parse_definition(
             "cx-work",
             &json!({
@@ -929,11 +1057,83 @@ mod tests {
             true,
         )
         .unwrap();
-        let rendered = render_codex_provider(&codex);
-        assert!(rendered.contains("env_key = \"MY_TOKEN\""));
-        assert!(rendered.contains("model_provider = \"agent-manager\""));
-        // 取值只留在环境变量里，永远不进这个文件
-        assert!(!rendered.contains("resolved-value"));
+        let existing =
+            b"# mine\napproval_policy = \"never\"\n\n[mcp_servers.fs]\ncommand = \"npx\"\n"
+                .to_vec();
+        let token = |name: &str| (name == "MY_TOKEN").then(|| "resolved-value".to_string());
+        let rendered = render_all(&codex, &|_| Some(existing.clone()), &token, &[]).unwrap();
+        assert_eq!(rendered[0].file, "config.toml");
+        let text = String::from_utf8(rendered[0].content.clone()).unwrap();
+        let doc: toml::Table = text.parse().unwrap();
+        assert_eq!(doc["model"].as_str(), Some("gpt-5.5"));
+        assert_eq!(doc["model_provider"].as_str(), Some("agent-manager"));
+        let provider = &doc["model_providers"]["agent-manager"];
+        assert_eq!(
+            provider["base_url"].as_str(),
+            Some("https://api.example.com/v1")
+        );
+        assert_eq!(
+            provider["experimental_bearer_token"].as_str(),
+            Some("resolved-value")
+        );
+        assert_eq!(provider["wire_api"].as_str(), Some("responses"));
+        assert!(
+            provider.get("env_key").is_none(),
+            "不再依赖启动时的环境变量"
+        );
+        assert_eq!(
+            doc["approval_policy"].as_str(),
+            Some("never"),
+            "用户的设置原样保留"
+        );
+        assert_eq!(
+            doc["mcp_servers"]["fs"]["command"].as_str(),
+            Some("npx"),
+            "MCP 条目原样保留"
+        );
+        assert!(text.starts_with("# mine\n"), "注释保留");
+        // 变量取不到值时拒绝写出不完整配置
+        assert!(render_all(&codex, &|_| Some(existing.clone()), &|_| None, &[]).is_err());
+        // 现有文件不是合法 TOML：拒绝，不当成空文件覆盖
+        assert!(render_all(&codex, &|_| Some(b"[[".to_vec()), &token, &[]).is_err());
+    }
+
+    #[test]
+    fn codex_official_instance_leaves_provider_alone_and_drops_what_it_wrote_before() {
+        let official = parse_definition(
+            "cx-work",
+            &json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-work"}}),
+            true,
+        )
+        .unwrap();
+        assert!(owned_paths(&official).is_empty());
+        let existing = b"model_provider = \"agent-manager\"\n\n[model_providers.agent-manager]\nbase_url = \"https://a.example.com\"\n\n[model_providers.other]\nbase_url = \"https://b.example.com\"\n".to_vec();
+        let untouched = render_all(&official, &|_| Some(existing.clone()), &|_| None, &[]).unwrap();
+        assert_eq!(untouched[0].content, existing, "没写过的不碰");
+        let recorded = [
+            "model_provider".to_string(),
+            "model_providers.agent-manager".to_string(),
+        ];
+        let rendered =
+            render_all(&official, &|_| Some(existing.clone()), &|_| None, &recorded).unwrap();
+        let doc: toml::Table = String::from_utf8(rendered[0].content.clone())
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(doc.get("model_provider").is_none());
+        assert!(doc["model_providers"].get("agent-manager").is_none());
+        assert!(
+            doc["model_providers"].get("other").is_some(),
+            "别的接入表不碰"
+        );
+        // 凭据要和接口地址一起设置，否则 model_provider 会指向不存在的接入表
+        let err = parse_definition(
+            "cx-work",
+            &json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-work", "env_key": "T"}}),
+            true,
+        )
+        .unwrap_err();
+        assert!(format!("{err:#}").contains("接口地址"), "{err:#}");
     }
 
     #[test]
@@ -969,17 +1169,17 @@ mod tests {
     }
 
     #[test]
-    fn codex_launch_value_layers_its_own_profile_file() {
+    fn codex_launch_value_only_points_codex_home_at_the_instance() {
         let codex = parse_definition(
             "cx-work",
             &json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-work"}}),
             true,
         )
         .unwrap();
-        assert_eq!(codex.kind.target_file(), "agent-manager.config.toml");
+        assert_eq!(codex.kind.target_file(), "config.toml");
         assert_eq!(
             launch_value(&codex, "codex", ""),
-            "CODEX_HOME=\"~/.codex-work\" codex -p agent-manager"
+            "CODEX_HOME=\"~/.codex-work\" codex"
         );
     }
 
@@ -1057,13 +1257,13 @@ mod tests {
         .unwrap();
         assert_eq!(
             launch_value(&third, "codex", ""),
-            "CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"~/.codex-w\" codex -p agent-manager"
+            "CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"~/.codex-w\" codex"
         );
         let official =
             def(json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-w"}})).unwrap();
         assert_eq!(
             launch_value(&official, "codex", ""),
-            "CODEX_HOME=\"~/.codex-w\" codex -p agent-manager"
+            "CODEX_HOME=\"~/.codex-w\" codex"
         );
     }
 
@@ -1110,10 +1310,49 @@ mod live_tests {
         );
         assert_eq!(live_base(ProfileKind::Claude, None).unwrap(), BASE_MISSING);
         assert!(live_base(ProfileKind::Claude, Some(b"not json")).is_err());
-        assert_ne!(
-            live_base(ProfileKind::Codex, Some(b"x")).unwrap(),
-            live_base(ProfileKind::Codex, Some(b"y")).unwrap()
+        // Codex：MCP 条目等其他内容不影响基准，本工具那几项变了才变
+        let codex = |text: &str| live_base(ProfileKind::Codex, Some(text.as_bytes())).unwrap();
+        let ours = "model = \"m\"\n[model_providers.agent-manager]\nbase_url = \"https://a.example.com\"\n";
+        assert_eq!(
+            codex(ours),
+            codex(&format!("{ours}\n[mcp_servers.fs]\ncommand = \"npx\"\n"))
         );
+        assert_ne!(codex(ours), codex(&ours.replace("a.example", "b.example")));
+        assert!(live_base(ProfileKind::Codex, Some(b"[[")).is_err());
+    }
+
+    #[test]
+    fn codex_compare_hides_the_token_and_reports_unresolved() {
+        let def = parse_definition(
+            "cx-work",
+            &json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-work",
+                    "base_url": "https://a.example.com/v1", "env_key": "TOK"}}),
+            true,
+        )
+        .unwrap();
+        let live = b"model_provider = \"agent-manager\"\n[model_providers.agent-manager]\nname = \"cx-work\"\nbase_url = \"https://a.example.com/v1\"\nexperimental_bearer_token = \"sk-live-secret-123456\"\nwire_api = \"responses\"\n";
+        let fields = |resolve: &dyn Fn(&str) -> Option<String>| {
+            compare_fields(&def, Some(live), resolve).unwrap()
+        };
+        let token = |fields: &[Value]| {
+            fields
+                .iter()
+                .find(|f| f["field"] == "provider.experimental_bearer_token")
+                .unwrap()
+                .clone()
+        };
+        let same = fields(&|_| Some("sk-live-secret-123456".into()));
+        assert!(same.iter().all(|f| f["state"] == "same"), "{same:?}");
+        assert_eq!(token(&same)["live"], "<hidden>");
+        assert_eq!(token(&same)["definition"], "${TOK}");
+        assert_eq!(
+            token(&fields(&|_| Some("other".into())))["state"],
+            "differs"
+        );
+        assert_eq!(token(&fields(&|_| None))["state"], "unresolved");
+        assert!(!serde_json::to_string(&fields(&|_| Some("other".into())))
+            .unwrap()
+            .contains("sk-live-secret"));
     }
 
     #[test]
