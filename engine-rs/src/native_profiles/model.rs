@@ -308,8 +308,11 @@ pub(crate) fn parse_definition(id: &str, raw: &Value, enabled: bool) -> Result<P
         .and_then(Value::as_str)
         .map(str::to_string);
     if let Some(api) = &wire_api {
-        if !matches!(api.as_str(), "responses" | "chat") {
-            bail!("[{}] wire_api 只支持 responses 或 chat", id);
+        if api != CODEX_WIRE_API {
+            bail!(
+                "[{}] wire_api 只支持 responses：Codex 已移除 chat（Chat Completions）接入方式，写进配置会让 Codex 读不了整份配置",
+                id
+            );
         }
     }
     let model = profile
@@ -642,8 +645,12 @@ pub(crate) fn compare_fields(
 /// 发出，以程序方式配置时使用；0.48 起就有，CC Switch 保留官方登录时也写这个字段。
 const CODEX_BEARER_TOKEN: &str = "experimental_bearer_token";
 
+/// Codex 唯一支持的接入协议。`wire_api = "chat"` 在当前 Codex 里是反序列化错误
+/// （`model-provider-info` 的 `CHAT_WIRE_API_REMOVED_ERROR`），整份 config.toml 都会读不了。
+const CODEX_WIRE_API: &str = "responses";
+
 fn codex_wire_api(def: &ProfileDef) -> &str {
-    def.wire_api.as_deref().unwrap_or("responses")
+    def.wire_api.as_deref().unwrap_or(CODEX_WIRE_API)
 }
 
 /// Codex 实例文件里与定义对应的字段（解析失败时为空：整份都算不一致）。
@@ -749,6 +756,13 @@ pub(crate) fn adopt_profile(
                 ("provider.wire_api", "wire_api"),
             ] {
                 if key != "model" && !ours {
+                    continue;
+                }
+                if key == "wire_api" && live.get(field).is_some_and(|value| value != CODEX_WIRE_API)
+                {
+                    notes.push(format!(
+                        "实际配置的 wire_api 不是 {CODEX_WIRE_API}（Codex 已不支持其他取值），未采纳"
+                    ));
                     continue;
                 }
                 match live.get(field) {
@@ -1440,5 +1454,39 @@ mod live_tests {
         let mut full = serde_json::Map::new();
         full.insert("profile".into(), Value::Object(profile));
         assert!(parse_definition("cc-ly", &Value::Object(full), true).is_ok());
+    }
+
+    /// Codex 已移除 `wire_api = "chat"`：写进去整份 config.toml 都读不了，定义里就拒绝。
+    #[test]
+    fn codex_wire_api_only_accepts_responses() {
+        let codex = |api: &str| {
+            parse_definition(
+                "cx-relay",
+                &json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-relay",
+                    "base_url": "https://a.example.com/v1", "env_key": "RELAY_KEY", "wire_api": api}}),
+                true,
+            )
+        };
+        assert!(codex("responses").is_ok());
+        let err = codex("chat").unwrap_err();
+        assert!(format!("{err:#}").contains("responses"), "{err:#}");
+        assert!(codex("anything").is_err());
+    }
+
+    /// 实际文件里残留 `wire_api = "chat"` 时，采纳不把它搬进定义（否则定义本身就解析不了）。
+    #[test]
+    fn adopt_does_not_take_a_removed_codex_wire_api() {
+        let raw = json!({"base_agent": "codex", "config_dir": "~/.codex-relay",
+            "base_url": "https://a.example.com/v1", "env_key": "RELAY_KEY", "wire_api": "responses"});
+        let def = parse_definition("cx-relay", &json!({"profile": raw.clone()}), true).unwrap();
+        let live = b"model_provider = \"agent-manager\"\n[model_providers.agent-manager]\nname = \"cx-relay\"\nbase_url = \"https://b.example.com/v1\"\nwire_api = \"chat\"\n";
+        let (profile, notes) =
+            adopt_profile(&def, raw.as_object().unwrap(), Some(live), &|_| None).unwrap();
+        assert_eq!(profile["base_url"], "https://b.example.com/v1");
+        assert_eq!(profile["wire_api"], "responses", "保留定义里的取值");
+        assert!(notes.iter().any(|n| n.contains("wire_api")), "{notes:?}");
+        let mut full = serde_json::Map::new();
+        full.insert("profile".into(), Value::Object(profile));
+        assert!(parse_definition("cx-relay", &Value::Object(full), true).is_ok());
     }
 }
