@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { fireEvent, waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
@@ -841,6 +841,9 @@ describe("助手运行参数", () => {
   });
 
   it("工作台把接入建成独立环境：预填新建表单，保存只写实例定义，不切主配置、不读凭据", async () => {
+    // macOS：第三方环境默认让子进程看不到凭据，从接入建成时同样生效
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)");
+    onTestFinished(() => { vi.restoreAllMocks(); });
     const withProfiles = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
@@ -889,6 +892,7 @@ describe("助手运行参数", () => {
         ANTHROPIC_BASE_URL: "https://relay.example.com",
         ANTHROPIC_API_KEY: "${RELAY_KEY}",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "relay-small",
+        CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       },
     });
     expect(configureCalls(calls)).toHaveLength(0);

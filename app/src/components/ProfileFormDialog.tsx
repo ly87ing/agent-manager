@@ -3,6 +3,7 @@ import { ArrowLeft, Bot, Folder, KeyRound, Play, Terminal } from "lucide-react";
 import { hasPresetArgs, presetsForCommand, togglePresetArgs } from "../lib/agentPresets";
 import { cn } from "../lib/utils";
 import { useDialogFocus } from "../lib/dialogFocus";
+import { detectSystemPlatform, urlHasUserinfo } from "../lib/agentDefinitionForm";
 import {
   PROFILE_ID_RE,
   SUBPROCESS_SCRUB_ENV,
@@ -23,6 +24,11 @@ import {
  * 全局配置一个字节都不动。鉴权只填变量名，库里不存取值；写入时解析成取值，只写进这个实例
  * 自己的配置文件。
  */
+/** Claude Code 认作「打开」的环境变量取值（与官方 isEnvTruthy 一致：1 / true / yes / on）。 */
+function envTruthy(value: string): boolean {
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
 export function ProfileFormDialog({
   baseAgents,
   initial,
@@ -58,8 +64,11 @@ export function ProfileFormDialog({
    * 官方账号环境关。第三方凭据写在这个环境 settings.json 的 env 里，不开的话 Bash 工具、hooks 与
    * MCP 服务都能读到它。
    */
+  const initialScrub = initialExtraEnv[SUBPROCESS_SCRUB_ENV];
+  const initialScrubOn = initialScrub !== undefined && envTruthy(initialScrub);
+  // 已有环境按它现在的值；新建（含从接入建成、复制）没写这个变量时跟随默认
   const [scrubChoice, setScrubChoice] = useState<boolean | null>(
-    initial ? initialExtraEnv[SUBPROCESS_SCRUB_ENV] === "1" : null,
+    initialScrub !== undefined ? initialScrubOn : isEdit ? false : null,
   );
   const [model, setModel] = useState(initial?.model ?? "");
   const [extraArgs, setExtraArgs] = useState(initial?.extraArgs ?? "");
@@ -70,9 +79,13 @@ export function ProfileFormDialog({
   const kind = selectedAgent?.kind ?? baseAgents[0]?.kind ?? "claude";
   const effectiveConfigDir = configDir.trim() || defaultConfigDir(kind, id);
   const thirdParty = isThirdPartyProfile({ baseUrl, tokenVar });
-  const scrub = kind === "claude" && (scrubChoice ?? thirdParty);
+  // Linux 上官方实现要用 bubblewrap 隔离子进程，没装时开了这项 Claude 会拒绝启动（2.1.281 实测）；
+  // macOS 版不需要。所以只在非 Linux 上默认开
+  const onLinux = detectSystemPlatform() === "linux";
+  const scrub = kind === "claude" && (scrubChoice ?? (thirdParty && !onLinux));
   const extraEnv: Record<string, string> = { ...initialExtraEnv };
-  if (scrub) extraEnv[SUBPROCESS_SCRUB_ENV] = "1";
+  // 打开时保留原写法（如 "true"），关掉就删掉
+  if (scrub) extraEnv[SUBPROCESS_SCRUB_ENV] = initialScrubOn ? initialScrub : "1";
   else delete extraEnv[SUBPROCESS_SCRUB_ENV];
   const input: ProfileFormInput = {
     id,
@@ -110,6 +123,10 @@ export function ProfileFormDialog({
     }
     if (baseUrl.trim() && !/^https?:\/\/[^/]/.test(baseUrl.trim())) {
       setError("接口地址要以 https:// 或 http:// 开头");
+      return;
+    }
+    if (urlHasUserinfo(baseUrl)) {
+      setError("接口地址里不能带账号密码：凭据请用鉴权变量");
       return;
     }
     if (tokenVar.trim() && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(tokenVar.trim())) {
@@ -339,8 +356,13 @@ export function ProfileFormDialog({
                       <span className="mt-0.5 block text-xs text-muted-foreground">
                         官方设置 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB：Bash 工具、hooks 与 MCP 服务读不到这个环境的凭据，防提示注入把令牌带出去；
                         Claude 自己照常用它发请求。代价：子进程也看不到 CLAUDE_CONFIG_DIR，Linux 上 Bash 子进程看不到本机其他进程。
-                        第三方环境默认开启。
+                        {onLinux ? "" : "第三方环境默认开启。"}
                       </span>
+                      {onLinux && (
+                        <span data-testid="profile-scrub-linux-bwrap" className="mt-0.5 block text-xs text-warning">
+                          Linux 上要先安装 bubblewrap（bwrap）：没装时开了这项，Claude 在这个环境里会拒绝启动。因此这里默认不开。
+                        </span>
+                      )}
                     </span>
                   </label>
                 )}

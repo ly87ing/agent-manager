@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import type { Envelope } from "../lib/contract";
@@ -299,6 +299,9 @@ describe("助手实例", () => {
   });
 
   it("新建第三方 Claude 环境默认让子进程看不到凭据；官方账号环境默认不开，可手动切换", async () => {
+    // macOS：官方实现不需要 bubblewrap，第三方环境默认开
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)");
+    onTestFinished(() => { vi.restoreAllMocks(); });
     const { calls } = renderWithEngine(
       <AgentsPage />,
       routes([profileElement(), profileElement({ id: "profiles:cc-lan" }), profileElement({ id: "profiles:cc-plain" })]),
@@ -333,6 +336,42 @@ describe("助手实例", () => {
     saved = calls.filter((call) => call.command === "policy:set").slice(-1)[0];
     definition = JSON.parse(saved.args[saved.args.indexOf("--value") + 1]);
     expect(definition.profile.env).toEqual({ CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" });
+  });
+
+  it("Linux 上第三方环境默认不开子进程隔离并说明要装 bubblewrap；已有环境保留原写法", async () => {
+    // 测试环境的 userAgent 就是 Linux
+    const withScrub = profileElement({ id: "profiles:cc-true" });
+    const routeMap = routes([profileElement(), withScrub]);
+    const policy = routeMap["policy:get"] as { data: { layers: { sqlite: { agents: { definitions: Record<string, any> } } } } };
+    policy.data.layers.sqlite.agents.definitions["cc-true"] = {
+      display_name: "cc-true",
+      bin: "claude",
+      profile: {
+        base_agent: "claude-code",
+        kind: "claude",
+        config_dir: "~/.claude-cc-true",
+        env: { ANTHROPIC_BASE_URL: "https://relay.example.com", ANTHROPIC_AUTH_TOKEN: "${RELAY}", CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "true" },
+      },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://relay.example.com");
+    await userEvent.type(within(dialog).getByTestId("profile-token-var"), "RELAY");
+    expect(within(dialog).getByTestId("profile-scrub-subprocess-env")).not.toBeChecked();
+    expect(within(dialog).getByTestId("profile-scrub-linux-bwrap")).toHaveTextContent("bubblewrap");
+    await userEvent.keyboard("{Escape}");
+
+    // 已有环境写的是 "true"（官方同样认作打开）：显示为开，保存时原样保留
+    await userEvent.click(await screen.findByTestId("profile-edit-cc-true"));
+    const edit = await screen.findByRole("dialog", { name: "编辑独立环境" });
+    expect(within(edit).getByTestId("profile-scrub-subprocess-env")).toBeChecked();
+    await userEvent.click(within(edit).getByTestId("profile-form-submit"));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const saved = calls.filter((call) => call.command === "policy:set").slice(-1)[0];
+    const definition = JSON.parse(saved.args[saved.args.indexOf("--value") + 1]);
+    expect(definition.profile.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("true");
   });
 
   it("新建第三方环境时配置写不进去：启动命令也先不写，并说明原因", async () => {
