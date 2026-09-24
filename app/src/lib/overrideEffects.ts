@@ -23,6 +23,8 @@ const MAIN_EFFECT: Record<string, string> = {
   forceLoginOrgUUID: "组织统一下发的设置限定了可登录的组织；用第三方凭据的独立环境会在启动时被拦下",
   CODEX_API_KEY: "codex exec 等非交互命令会优先用这个 API key，不用 auth.json 里的登录（交互界面不读它）",
   CODEX_ACCESS_TOKEN: "Codex 所有入口都会优先用这个访问令牌，不用 auth.json 里的登录",
+  CLAUDE_CONFIG_DIR: "Claude 会改用这个配置目录：主配置 ~/.claude 与 ~/.claude.json 里的设置与登录都不生效",
+  CODEX_HOME: "Codex 会改用这个目录：主配置 ~/.codex 里的设置与登录都不生效",
   openai_base_url: "Codex 会把官方账号的凭据连同请求发往这个地址",
   chatgpt_base_url: "Codex 会把 ChatGPT 登录的凭据发往这个地址",
   forced_login_method: "限定了 Codex 的登录方式：另一种方式登录会被拒绝，已有的会在启动时被 Codex 退出",

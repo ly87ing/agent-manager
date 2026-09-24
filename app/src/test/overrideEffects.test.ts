@@ -32,7 +32,7 @@ const CODEX_SYSTEM = [
 
 describe("外部设置的后果说明", () => {
   it("主配置能报出的键都有专门说明", () => {
-    const names = [...CLAUDE_MANAGED, "ANTHROPIC_FEDERATION_RULE_ID", "oidc_federation", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", ...CODEX_SYSTEM];
+    const names = [...CLAUDE_MANAGED, "ANTHROPIC_FEDERATION_RULE_ID", "oidc_federation", "CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "CLAUDE_CONFIG_DIR", "CODEX_HOME", ...CODEX_SYSTEM];
     for (const name of names) {
       expect(overrideEffect(name, "main"), name).not.toBe("会改变助手使用的凭据");
     }

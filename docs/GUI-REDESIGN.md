@@ -389,7 +389,9 @@ fail-closed。界面的当前接入、运行参数与表单预填全部读实际
   `ANTHROPIC_API_KEY`、`ANTHROPIC_BASE_URL`、`CLAUDE_CODE_OAUTH_TOKEN`、五个云厂商开关
   `CLAUDE_CODE_USE_{BEDROCK,VERTEX,FOUNDRY,ANTHROPIC_AWS,MANTLE}`、`ANTHROPIC_PROFILE`、
   `ANTHROPIC_FEDERATION_RULE_ID` 与 `ANTHROPIC_CUSTOM_HEADERS`；Codex 检查 `CODEX_API_KEY`（`codex exec` 等
-  非交互入口读）与 `CODEX_ACCESS_TOKEN`（所有入口读），两者都优先于 `auth.json` 登录。
+  非交互入口读）与 `CODEX_ACCESS_TOKEN`（所有入口读），两者都优先于 `auth.json` 登录。另查导出的配置目录
+  `CLAUDE_CONFIG_DIR` / `CODEX_HOME`：助手改用那个目录，主配置里的设置与登录都不生效；本工具写的启动命令是
+  `alias 名='…'`，不算导出。
 - Claude 主配置 `settings.json` 的 `apiKeyHelper`，以及 `env` 里的云厂商开关、长期令牌、`ANTHROPIC_PROFILE` 与
   附加请求头（主配置里的第三方地址与凭据由「混用」提示处理）。
 - Claude 托管设置（官方设置文档的固定目录：macOS `/Library/Application Support/ClaudeCode`、Linux

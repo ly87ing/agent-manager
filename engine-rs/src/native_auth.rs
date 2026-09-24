@@ -380,10 +380,13 @@ const CLAUDE_OVERRIDE_ENV: &[&str] = &[
     "ANTHROPIC_FEDERATION_RULE_ID",
     // 附加请求头，可以带 Authorization 等凭据头
     "ANTHROPIC_CUSTOM_HEADERS",
+    // 换了配置目录：主配置 ~/.claude 与 ~/.claude.json 里的设置与登录都不生效
+    "CLAUDE_CONFIG_DIR",
 ];
 /// Codex：`CODEX_ACCESS_TOKEN` 所有入口都读、`CODEX_API_KEY` 由 `codex exec` 等非交互入口读，
 /// 都优先于 `auth.json` 里的登录（`rust-v0.156.1` `login/src/auth/manager.rs`）。
-const CODEX_OVERRIDE_ENV: &[&str] = &["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"];
+/// 另有 `CODEX_HOME`：换了目录，主配置 ~/.codex 里的设置与登录都不生效。
+const CODEX_OVERRIDE_ENV: &[&str] = &["CODEX_API_KEY", "CODEX_ACCESS_TOKEN", "CODEX_HOME"];
 /// Claude `settings.json`（主配置与托管设置）的 `env` 里会压过官方账号、又不属于第三方接入键的变量。
 /// 第三方接入键（地址与两种第三方凭据）写在主配置里由「混用」提示处理，这里只看托管设置里的。
 const CLAUDE_SETTINGS_OVERRIDE_ENV: &[&str] = &[
@@ -988,6 +991,29 @@ mod tests {
         );
         assert!(check("{not json").is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// shell 启动文件导出了配置目录：助手改用那个目录，主配置不生效。本工具写的启动命令是别名
+    /// （`alias 名='CLAUDE_CONFIG_DIR=… claude'`），不算导出。
+    #[test]
+    fn shell_exported_config_dir_is_reported_but_launch_aliases_are_not() {
+        let home = std::env::temp_dir().join(format!("am-auth-dir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join(".zprofile"),
+            "export CLAUDE_CONFIG_DIR=\"$HOME/.claude-work\"\nCODEX_HOME=/opt/codex-home\nalias cc-work='CLAUDE_CONFIG_DIR=\"$HOME/.claude-w\" claude'\nalias cx='CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"$HOME/.codex-w\" codex'\n",
+        )
+        .unwrap();
+        assert_eq!(
+            credential_overrides_with(&home, AuthKind::Claude, &|_| false, &[]),
+            vec![json!({"source": "~/.zprofile", "name": "CLAUDE_CONFIG_DIR"})]
+        );
+        assert_eq!(
+            credential_overrides_with(&home, AuthKind::Codex, &|_| false, &[]),
+            vec![json!({"source": "~/.zprofile", "name": "CODEX_HOME"})]
+        );
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     fn pairs(items: &[Value]) -> Vec<(String, String)> {
