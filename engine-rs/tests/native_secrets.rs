@@ -362,3 +362,53 @@ fn legacy_database_values_require_explicit_migration_to_external_file() {
 
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// 接入配置与独立环境用到的凭据变量也列出来：变量名、有没有取值、用在哪里；不含取值，零写。
+#[test]
+fn provider_key_variables_list_their_connections_and_instances() {
+    let (base, ctx) = temp_ctx("provider-keys");
+    let mut policy = store::builtin_policy();
+    policy["agents"]["definitions"]["claude-code"]["settings"] = json!({
+        "profiles": {
+            "glm": {"label": "智谱", "base_url": "https://open.bigmodel.cn/api/anthropic", "token_var": "AM_TEST_PK_GLM", "model": "glm-5.3"},
+            "local": {"base_url": "http://127.0.0.1:8080", "model": "m"}
+        }
+    });
+    policy["agents"]["definitions"]["cc-glm"] = json!({
+        "display_name": "Claude · GLM", "bin": "claude",
+        "profile": {"base_agent": "claude-code", "config_dir": "~/.claude-glm",
+            "env": {"ANTHROPIC_BASE_URL": "https://open.bigmodel.cn/api/anthropic", "ANTHROPIC_AUTH_TOKEN": "${AM_TEST_PK_GLM}"}}
+    });
+    policy["agents"]["definitions"]["cx-kimi"] = json!({
+        "display_name": "Codex · Kimi", "bin": "codex",
+        "profile": {"base_agent": "codex", "config_dir": "~/.codex-kimi",
+            "base_url": "https://api.moonshot.cn/v1", "env_key": "AM_TEST_PK_KIMI"}
+    });
+    persist_policy(&ctx, &policy);
+    std::env::set_var("AM_TEST_PK_KIMI", "pk-secret-value");
+
+    let db_before = std::fs::read(ctx.data_dir.join("native-manager.db")).unwrap();
+    let env = secrets_status(&ctx, &[]);
+    assert!(env.ok, "{:?}", env.errors);
+    let keys = mcp_env_element(&env)["observed"]["provider_keys"].clone();
+    assert_eq!(
+        keys,
+        json!([
+            {"variable": "AM_TEST_PK_GLM", "resolved": false, "stored": false, "used_by": [
+                {"kind": "connection", "agent": "claude-code", "name": "glm", "label": "智谱"},
+                {"kind": "profile", "id": "cc-glm", "label": "Claude · GLM"}
+            ]},
+            {"variable": "AM_TEST_PK_KIMI", "resolved": true, "stored": false, "used_by": [
+                {"kind": "profile", "id": "cx-kimi", "label": "Codex · Kimi"}
+            ]}
+        ])
+    );
+    assert!(!env.data.to_string().contains("pk-secret-value"));
+    assert_eq!(
+        std::fs::read(ctx.data_dir.join("native-manager.db")).unwrap(),
+        db_before,
+        "查询零写"
+    );
+    std::env::remove_var("AM_TEST_PK_KIMI");
+    let _ = std::fs::remove_dir_all(base);
+}

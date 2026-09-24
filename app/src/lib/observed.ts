@@ -441,6 +441,18 @@ export interface SecretsMcpEnvObserved {
     error?: string | null;
   };
   legacy_database_values?: number;
+  /** 接入配置与独立环境引用的凭据变量：用在哪里、有没有取值；不含取值。 */
+  provider_keys?: ProviderKeyVariable[];
+}
+
+export interface ProviderKeyVariable {
+  variable: string;
+  resolved: boolean;
+  stored: boolean;
+  used_by: (
+    | { kind: "connection"; agent: string; name: string; label: string }
+    | { kind: "profile"; id: string; label: string }
+  )[];
 }
 
 /** 读取 observed.agents 映射（mcp / skills 的 per-agent 单元格）。 */

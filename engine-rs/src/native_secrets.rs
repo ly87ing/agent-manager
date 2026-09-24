@@ -50,6 +50,59 @@ fn mcp_references(ctx: &Context) -> Result<BTreeSet<VarRef>> {
     Ok(refs)
 }
 
+/// 接入配置与独立环境引用的凭据变量：变量名 → 用在哪些地方。只看变量名，不读取值。
+///
+/// 独立环境写配置时把取值写进了自己的文件，改了取值要到那个环境重新写入；接入配置只在检查或
+/// 建成独立环境时解析。界面据此说明「改了之后要做什么」。
+fn provider_key_references(ctx: &Context) -> std::collections::BTreeMap<String, Vec<Value>> {
+    let mut refs: std::collections::BTreeMap<String, Vec<Value>> = Default::default();
+    if let Ok(defs) = crate::native_agents::load_definitions(ctx) {
+        for def in defs
+            .iter()
+            .filter(|def| def.spec_ref().get("profile").is_none())
+        {
+            let Ok(settings) = crate::native_agent_settings::parse(def.spec_ref()) else {
+                continue;
+            };
+            for (name, profile) in &settings.profiles {
+                if let Some(var) = &profile.token_var {
+                    refs.entry(var.clone()).or_default().push(json!({
+                        "kind": "connection",
+                        "agent": def.id,
+                        "name": name,
+                        "label": profile.label.clone().unwrap_or_else(|| name.clone()),
+                    }));
+                }
+            }
+        }
+    }
+    if let Ok(policy) = store::effective_policy(ctx) {
+        for def in crate::native_profiles::model::load_definitions(&policy)
+            .into_iter()
+            .flatten()
+        {
+            let mut vars: Vec<String> = def
+                .env
+                .values()
+                .filter_map(Value::as_str)
+                .filter_map(|text| text.strip_prefix("${")?.strip_suffix('}'))
+                .map(str::to_string)
+                .collect();
+            vars.extend(def.env_key.clone());
+            vars.sort();
+            vars.dedup();
+            for var in vars {
+                refs.entry(var).or_default().push(json!({
+                    "kind": "profile",
+                    "id": def.id,
+                    "label": def.display_name,
+                }));
+            }
+        }
+    }
+    refs
+}
+
 fn status(ctx: &Context) -> Result<Value> {
     let mut variables = Vec::new();
     let mut unresolved = 0i64;
@@ -105,6 +158,15 @@ fn status(ctx: &Context) -> Result<Value> {
                     "error": source_error,
                 },
                 "legacy_database_values": legacy_count,
+                "provider_keys": provider_key_references(ctx)
+                    .into_iter()
+                    .map(|(var, used_by)| json!({
+                        "variable": var,
+                        "resolved": crate::secret_values::is_set(&var),
+                        "stored": crate::secret_values::is_stored(&var),
+                        "used_by": used_by,
+                    }))
+                    .collect::<Vec<_>>(),
             },
             "state": state,
             "freshness": {"state": "not-applicable", "current": Value::Null, "upstream": Value::Null, "checked_at": Value::Null, "probe": Value::Null, "cache_age_sec": Value::Null},

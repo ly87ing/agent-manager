@@ -60,6 +60,32 @@ function mcpEnvElement(
 }
 
 describe("SecretsPage", () => {
+  it("接入与独立环境用到的密钥：列出用在哪里、有没有取值，并说明改了之后要重新写入独立环境", async () => {
+    const element = mcpEnvElement([], 0, "managed-ok");
+    (element.observed as Record<string, unknown>).provider_keys = [
+      {
+        variable: "GLM_API_KEY",
+        resolved: true,
+        stored: true,
+        used_by: [
+          { kind: "connection", agent: "claude-code", name: "glm", label: "智谱" },
+          { kind: "profile", id: "cc-glm", label: "Claude · GLM" },
+        ],
+      },
+      { variable: "KIMI_API_KEY", resolved: false, stored: false, used_by: [{ kind: "profile", id: "cx-kimi", label: "Codex · Kimi" }] },
+    ];
+    renderSecrets({
+      "secrets:status": makeEnvelope({ domain: "secrets", elements: [element] }, { command: "secrets.status" }),
+    });
+    const section = await screen.findByTestId("secrets-provider-keys");
+    expect(section).toHaveTextContent("改了取值后，到下面列出的独立环境卡片上重新「写入配置」才生效");
+    expect(screen.getByTestId("provider-key-GLM_API_KEY")).toHaveTextContent("接入 智谱（claude-code）、独立环境 Claude · GLM（cc-glm）");
+    expect(screen.getByTestId("provider-key-GLM_API_KEY")).toHaveTextContent("外部文件");
+    expect(screen.getByTestId("provider-key-KIMI_API_KEY")).toHaveTextContent("未配置");
+    await userEvent.click(screen.getByTestId("fill-provider-key-KIMI_API_KEY"));
+    expect(await screen.findByRole("dialog")).toHaveTextContent("KIMI_API_KEY");
+  });
+
   it("无变量时显示空态且全部为已配置", async () => {
     renderSecrets({
       "secrets:status": makeEnvelope(

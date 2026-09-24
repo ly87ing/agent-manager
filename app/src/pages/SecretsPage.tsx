@@ -36,6 +36,7 @@ export default function SecretsPage() {
   const unresolved = envObserved.unresolved ?? variables.filter((item) => item.resolved === false).length;
   const servers = Array.from(new Set(variables.map((item) => item.server ?? "?")));
   const legacyCount = envObserved.legacy_database_values ?? 0;
+  const providerKeys = envObserved.provider_keys ?? [];
   const sourceReady = source.ready === true;
   const currentSourcePath = source.path ?? "";
   const sourceChanged = sourcePath.trim() !== currentSourcePath;
@@ -161,6 +162,61 @@ export default function SecretsPage() {
         <EyeOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
         <p>页面只显示变量名和来源，不读取回显密钥。外部文件优先，进程环境仅作为只读回退。</p>
       </div>
+
+      {mcpEnv && providerKeys.length > 0 && (
+        <section data-testid="secrets-provider-keys" className="rounded-lg border bg-card p-5 shadow-sm">
+          <h3 className="text-sm font-semibold text-foreground">接入与独立环境用到的密钥</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            独立环境写配置时把取值写进了自己的配置文件：改了取值后，到下面列出的独立环境卡片上重新「写入配置」才生效。
+          </p>
+          <table className="mt-3 w-full text-left text-sm">
+            <thead>
+              <tr className="border-b text-xs text-muted-foreground">
+                <th className="py-2 pr-4 font-medium">变量名</th>
+                <th className="py-2 pr-4 font-medium">用在</th>
+                <th className="py-2 pr-4 font-medium">当前来源</th>
+                <th className="py-2 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {providerKeys.map((item) => (
+                <tr key={item.variable} data-testid={`provider-key-${item.variable}`} className="border-b last:border-0">
+                  <td className="py-2 pr-4 font-mono text-xs text-foreground">{item.variable}</td>
+                  <td className="py-2 pr-4 text-xs text-muted-foreground">
+                    {item.used_by
+                      .map((use) => (use.kind === "connection" ? `接入 ${use.label}（${use.agent}）` : `独立环境 ${use.label}（${use.id}）`))
+                      .join("、")}
+                  </td>
+                  <td className="py-2 pr-4">
+                    {item.resolved ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-success">
+                        <Check className="h-3.5 w-3.5" aria-hidden />
+                        {item.stored ? "外部文件" : "进程环境"}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs text-destructive">
+                        <X className="h-3.5 w-3.5" aria-hidden /> 未配置
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2">
+                    <button
+                      type="button"
+                      data-testid={`fill-provider-key-${item.variable}`}
+                      disabled={directApply.executing || !sourceReady}
+                      title={sourceReady ? `写入 ${currentSourcePath}` : "先在上方选择可用的外部密钥文件"}
+                      onClick={() => setEditing({ variable: item.variable, stored: item.stored })}
+                      className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {item.stored ? "修改" : "写入外部文件"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       {mcpEnv && (
         <section data-testid="secrets-env-matrix" className="rounded-lg border bg-card p-5 shadow-sm">
