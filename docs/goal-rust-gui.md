@@ -634,6 +634,16 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
 - 验收：引擎全量 cargo test、Tauri 20 项、前端 558 项、build 全绿，新增用例在撤掉回退或名称匹配改动后各自失败；agent-skills 39 项全绿，新增「顶层不得出现技能包」门禁、英文检查覆盖 `docs/`，各做一次反例；四个执行器从任意目录都能找到 7 个技能、196 条触发用例与规则评测文件（只加载，未调用模型）。隔离 HOME 以本地裸仓库为上游：旧布局取回并启用 `verification` → 上游前进到整理后的提交再更新 → 旧定义仍发现 7 个技能、链接目标不变、来源规则与推荐别名照常 → 定义改为 `["skills"]` 后结果一致。
 - 真实环境：先备份库（`before-reorg`），经 CLI 执行与「更新资源库」相同的集合更新（镜像 `cbf1fd2` → `8566c8e`），再把集合定义改为 `["skills"]`（url、agents 不变）。前后 `skills:status` 逐行一致，`~/.claude/skills`、`~/.codex/skills` 共 24 条链接目标一致，各配置文件摘要一致；规则页两份规则文件匹配来源规则 `agent-skills/core`；四条推荐别名已在两个 rc 文件里，故不再推荐。CLI 更新镜像不刷新上游探测缓存，集合卡片仍显示 3 小时前探到的 `cbf1fd2`，另跑一次 `system:refresh-upstream --only skill:agent-skills`（只写探测缓存）后显示 `8566c8e`、已是最新。`30a624e` 安装包 SHA256 `d1cb0ae5d782ec47fb2da328ca0e9c1b314aa9542a317cba20e4b51259dba74b`（8689586 bytes），`verify:macos` 全部通过（未签名、只验 x86_64）；换成该版本后技能页推荐卡片显示「技能取自 skills/ · 已添加」，集合卡片「正常 · 已收录 7 个技能」，无发现失败。遗留：库里仍有已并入 `verification` 的 `frontend-verification` 绑定（两个助手均 missing-link），整理前即存在，未处理。
 
+## 2026-09-23 官方账号与第三方凭据隔离
+
+- 触发：用户要求官方账号体系的凭证与第三方凭证完全隔离、不掺杂使用，不触碰官方账号，一切以各助手官方标准为准。实测（`claude auth status` 注入假凭据）发现同一配置目录里两种凭据并存时，Claude 在「只有地址没有令牌」或「API key 未确认」时会退回官方登录，同时请求照样发往第三方地址；调研 CC Switch、claude-code-router、ccs、ccm、opencode、Cline 后确认：做得稳的都不碰官方登录，按会话或配置目录隔离，并清理抢优先级的键。
+- 裁决：任一配置目录只放一种凭据。主配置（`~/.claude`、`~/.codex`）只放官方账号，本工具不再写入第三方接入（`agents:configure --use` 以 `AGENT_MAIN_OFFICIAL_ONLY` 拒绝），第三方接入一律在独立环境（实例）里用；从不读写钥匙串、`.credentials.json`、`auth.json` 或 `~/.claude.json` 的账号字段。
+- 提交（均已推送 `rust`）：`f4c4cbc` 外部命令执行器可取退出码与 stderr（重构）；`812a81c` 第三方实例写入前用官方命令确认目录无官方登录、Claude 定义规则、置空取消 shell 继承、Codex 启动前缀清空 `CODEX_API_KEY`/`CODEX_ACCESS_TOKEN`；`f918db6` 接入一键建成独立环境、实例表单支持 x-api-key 且保留其他 env；`192121b` 主配置只放官方账号（界面、命令面板、托盘同步，⌘⇧K 改名账号快切）；`c75c993` 清理切到指定接入的死路径（重构）；`7dbd73b` 补正 `c75c993` 漏改的用例；`2808579` 登录状态改用官方命令按需查询（`agents:auth-status`），status 不再读认证文件，第三方实例里的官方登录标为混用；`9a3af04` 旧 Codex 第三方启动命令缺前缀时提示与订正；`1578b76` 提示会压过主配置官方账号的外部设置（只读）。
+- 依据：Claude 官方文档（认证优先级、网关接入、settings `env` 置空取消 shell 变量、钥匙串按 `CLAUDE_CONFIG_DIR` 区分、`~/.claude.json` 保存登录会话）；Codex `rust-v0.156.0` 源码（`env_key` 优先且缺失即报错不退回登录、`requires_openai_auth` 只在无 `env_key` 时走官方身份路径、keyring 按 `CODEX_HOME` 摘要区分、`CODEX_API_KEY`/`CODEX_ACCESS_TOKEN` 优先于存储的登录）与官方配置参考。Codex 第三方表的 `requires_openai_auth` 渲染保留，只用于识别旧版本写进主配置的表。
+- 验收：每次推送前 engine-rs 全量、Tauri 20 项、Vitest 与 build 全绿（最终 57 files / 572 tests）。隔离 HOME 加真实 claude 2.1.281 / codex 0.156.0（Claude 以 `CLAUDE_CONFIG_DIR` 指向隔离目录，钥匙串按路径隔离）：第三方实例新目录写入、已存在目录经真实 `auth status` 探测后写入、出现登录会话记录后拒绝；真实 Claude 确认实例里的空串挡住 shell 导出的 `CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`；真实 `codex login status` 在环境带 `CODEX_API_KEY` 时仍报未登录；主配置拒绝写入第三方接入且文件不变，切回官方把令牌转存密钥文件、主配置清空、数据目录无明文。本机真实 HOME 只读运行 `agents:auth-status`：Claude 主配置由此前误报的「缺失」变为已登录，Codex 已登录（chatgpt）；`credential_overrides` 两边为空；临时数据目录均保持为空。
+- 过程问题：`c75c993` 推送前全量测试的输出筛选（`grep | head`）截掉了 FAILED 行，一个用例未跟着改就推送了，`7dbd73b` 补正；之后复核改为只看 `test result` 与 `FAILED`。
+- 未做：桌面安装包里的点击验收（混用警告、切回官方、建成独立环境、检查登录、启动命令订正）；隔离环境里无法产生真实官方登录，「官方命令报告已登录」一支只由替身测试与真实主配置的只读查询覆盖；未抓包确认请求头；未与真实第三方中转联调。
+
 ## 交付回执（2026-09-23，实际配置为准 x86_64 DMG 真机验收）
 
 绑定提交：`c0065c090e2ed89e6adedac60bc025a159baefda`（产品代码；其后 `0ceb7e0` 只改验收脚本）。
