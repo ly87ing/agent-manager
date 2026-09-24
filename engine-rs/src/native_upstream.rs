@@ -368,15 +368,27 @@ fn run_capture(
     timeout: Duration,
 ) -> Option<String> {
     let mut command = Command::new(program);
-    command
-        .args(args)
-        .env("HOME", &ctx.home_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    command.args(args).env("HOME", &ctx.home_dir);
     if let Some(dir) = cwd {
         command.current_dir(dir);
     }
+    let (code, stdout, _) = capture_exit(command, timeout)?;
+    if code != 0 {
+        return None;
+    }
+    String::from_utf8(stdout).ok()
+}
+
+/// 执行调用方配好参数与环境的命令：stdin 关闭、独立进程组、输出有界，超时终止进程组。
+/// 正常退出 → Some((退出码, stdout, stderr 前 256 字节))；超时、被信号终止或启动失败 → None。
+pub(crate) fn capture_exit(
+    mut command: Command,
+    timeout: Duration,
+) -> Option<(i32, Vec<u8>, Vec<u8>)> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -392,11 +404,10 @@ fn run_capture(
                 let stdout = stdout_rx
                     .recv_timeout(Duration::from_secs(2))
                     .unwrap_or_default();
-                let _ = stderr_rx.recv_timeout(Duration::from_secs(2));
-                if !status.success() {
-                    return None;
-                }
-                return String::from_utf8(stdout).ok();
+                let stderr = stderr_rx
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap_or_default();
+                return Some((status.code()?, stdout, stderr));
             }
             Ok(None) => {
                 if start.elapsed() > timeout {
