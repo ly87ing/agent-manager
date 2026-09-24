@@ -1291,10 +1291,6 @@ mod live_tests {
         parse_definition("cc-ly", &json!({ "profile": profile }), true).unwrap()
     }
 
-    fn no_vars(_: &str) -> Option<String> {
-        None
-    }
-
     #[test]
     fn base_ignores_user_keys_outside_env_and_model() {
         let a = br#"{"env":{"A":"1"},"model":"m","theme":"dark"}"#;

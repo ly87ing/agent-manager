@@ -2985,14 +2985,6 @@ mod tests {
     const LEGACY_CODEX_DIGEST: &str =
         "c4f2c01c16017f3bc7814ff07743d5db0f63d7e89250290906c704e69d4569f9";
 
-    fn relay_profile(name: &str) -> ConnectionProfile {
-        parse_profile(
-            name,
-            &json!({"base_url": format!("https://{name}.example.com/v1"), "token_var": "RELAY_KEY"}),
-        )
-        .unwrap()
-    }
-
     #[test]
     fn 带旧注释的既有文件摘要与旧版本一致_不被误判外部修改() {
         // 旧库没有 owned_providers，按 [] 计；旧注释照样认领
