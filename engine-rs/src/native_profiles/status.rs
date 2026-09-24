@@ -150,7 +150,22 @@ fn element(ctx: &Context, def: &ProfileDef) -> Value {
     observed.insert("kind".into(), json!(def.kind.as_str()));
     observed.insert("config_env".into(), json!(def.kind.config_env()));
     // 用第三方接口或凭据的实例：目录里不能有官方账号登录
-    observed.insert("third_party".into(), json!(model::is_third_party(def)));
+    let third_party = model::is_third_party(def);
+    observed.insert("third_party".into(), json!(third_party));
+    // 实例目录挡不住的系统级设置（托管设置、Codex 的 /etc/codex 等）：只有来源与键名，只读
+    let auth_kind = match def.kind {
+        model::ProfileKind::Claude => crate::native_auth::AuthKind::Claude,
+        model::ProfileKind::Codex => crate::native_auth::AuthKind::Codex,
+    };
+    observed.insert(
+        "system_overrides".into(),
+        Value::Array(crate::native_auth::instance_system_overrides(
+            &ctx.home_dir,
+            auth_kind,
+            !third_party,
+            bytes.as_deref(),
+        )),
+    );
     observed.insert("config_dir".into(), json!(def.config_dir_raw));
     observed.insert("config_dir_exists".into(), json!(dir_exists));
     observed.insert(

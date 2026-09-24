@@ -385,10 +385,29 @@ fail-closed。界面的当前接入、运行参数与表单预填全部读实际
 - 活动的 Anthropic 配置档案是联合身份（`~/.config/anthropic/active_config` 指向的 `configs/<名>.json` 里
   `authentication.type` 为 `oidc_federation`，官方 WIF 参考说明该文件不含机密，排在 `/login` 之前）；用户以
   `ant auth login` 登录的档案排在 `/login` 之后，不提示。
-- Codex 主配置 `config.toml` 顶层的 `openai_base_url`：内置 openai 接入方式的地址覆盖，官方账号的凭据会随请求
-  发往该地址。
+- Codex 主配置 `config.toml` 顶层的 `openai_base_url`、`chatgpt_base_url`（内置 openai 与 ChatGPT 后端的地址
+  覆盖，官方账号的凭据会随请求发往该地址），以及限定登录的 `forced_login_method`、
+  `forced_chatgpt_workspace_id`（另一种方式的登录会被拒绝；已有的在 `codex exec` 与交互界面启动时被 Codex
+  退出，实测会删掉 `auth.json`）。
+- Codex 系统级文件（`rust-v0.156.1` 的分层，Unix 固定 `/etc/codex`）：`config.toml` 排在主配置之下，只在主
+  配置没写该键时提示同上各键与非 openai 的 `model_provider`；旧版 `managed_config.toml` 叠在最上层，同上各键
+  照样生效（实测其 `openai_base_url` 压过主配置，官方凭据发往它）；`requirements.toml` 的非 openai
+  `model_provider`、`chatgpt_base_url` 与限定登录的 `allowed_login_methods`、`allowed_chatgpt_workspaces`。
+  macOS 描述文件下发的设置不看。
 
 工作台逐条提示来源与影响，只提示、不改这些文件。
+
+每个实例的 `profiles:status` 另给 `observed.system_overrides`：实例目录挡不住的系统级设置，同样只有来源与
+键名。实例在自己的配置里取消了 shell 继承的凭据，但系统级设置对每个配置目录都生效：
+
+- Claude 托管设置，项同上（实测其 `env` 压过实例 `settings.json` 的地址与令牌，`forceLoginMethod` 让用第三方
+  凭据的实例启动即被拦下）；官方账号实例另报活动的联合身份档案（`~/.config/anthropic` 不随配置目录隔离）。
+- Codex：第三方实例只报会换掉它接入方式的项——`managed_config.toml` 或 `requirements.toml` 里与实例不同的
+  `model_provider`（实测后者让实例改走组织指定的地址），以及 `requirements.toml` 里与实例同名、会整个替换它的
+  `model_providers` 定义；实例文件还没写时按将要写的 `agent-manager` 判断。官方账号实例同主配置的系统级各项，
+  以实例自己的 `config.toml` 判断谁压过谁。
+
+实例卡片逐条说明后果，第三方实例被限定登录时写明会被拦下。
 
 `⌘K` 命令面板为每个主助手只提供「官方账号」一项，不再列出第三方接入。主配置已是官方账号时
 标为「当前使用」且不可执行；主配置里有第三方接入时显示「切回官方账号」，走带基准的

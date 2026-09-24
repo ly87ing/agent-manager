@@ -254,6 +254,42 @@ describe("助手实例", () => {
     expect(differs).not.toHaveTextContent("CLAUDE_CODE_USE_BEDROCK");
   });
 
+  it("实例卡片列出挡不住的系统级设置：第三方环境被限定登录时说明会被拦下，没有时不显示", async () => {
+    const managed = "/etc/claude-code/managed-settings.json";
+    renderWithEngine(
+      <AgentsPage />,
+      routes([
+        profileElement({
+          observed: {
+            ...(profileElement().observed as Record<string, unknown>),
+            third_party: true,
+            system_overrides: [
+              { source: managed, name: "ANTHROPIC_BASE_URL" },
+              { source: managed, name: "forceLoginMethod" },
+            ],
+          },
+        }),
+        profileElement({
+          id: "profiles:cc-home",
+          observed: {
+            ...(profileElement().observed as Record<string, unknown>),
+            third_party: false,
+            system_overrides: [{ source: "~/.config/anthropic/configs/default.json", name: "oidc_federation" }],
+          },
+        }),
+        profileElement({ id: "profiles:cc-plain" }),
+      ]),
+    );
+    await openInstanceManager();
+    const relay = within(await screen.findByTestId("profile-card-cc-ly")).getByTestId("profile-system-overrides-cc-ly");
+    expect(relay).toHaveTextContent("这个环境挡不住");
+    expect(relay).toHaveTextContent(`${managed} 里的 ANTHROPIC_BASE_URL：请求改发往这个地址，不用这个环境自己的`);
+    expect(relay).toHaveTextContent("forceLoginMethod：限定了登录方式：用第三方凭据的这个环境启动时会被拦下");
+    const official = within(screen.getByTestId("profile-card-cc-home")).getByTestId("profile-system-overrides-cc-home");
+    expect(official).toHaveTextContent("活动档案是联合身份，会优先于这个环境里的登录");
+    expect(within(screen.getByTestId("profile-card-cc-plain")).queryByTestId("profile-system-overrides-cc-plain")).toBeNull();
+  });
+
   it("新建第三方 Claude 环境默认让子进程看不到凭据；官方账号环境默认不开，可手动切换", async () => {
     const { calls } = renderWithEngine(
       <AgentsPage />,

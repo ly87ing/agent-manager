@@ -7,6 +7,7 @@ import { OfficialAuthPanel } from "./OfficialAuthPanel";
 import type { ProfileLaunchCommand } from "../lib/profileDefinition";
 import { StateBadge } from "./StateBadge";
 import { cn } from "../lib/utils";
+import { overrideEffect } from "../lib/overrideEffects";
 
 /** 实例状态 → 一句话说明用户现在处于什么位置。 */
 const STATE_NOTE: Record<string, string> = {
@@ -68,6 +69,7 @@ export function ProfileCard({
   const canAdopt = element.actions.some((action) => action.id === "adopt");
   const canApply = element.actions.some((action) => action.id === "apply");
   const thirdParty = observed.third_party === true;
+  const systemOverrides = observed.system_overrides ?? [];
   return (
     <section
       data-testid={`profile-card-${id}`}
@@ -111,6 +113,24 @@ export function ProfileCard({
           onCheck={onCheckAuth}
         />
       </div>
+
+      {systemOverrides.length > 0 && (
+        <div
+          role="status"
+          data-testid={`profile-system-overrides-${id}`}
+          className="mt-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
+        >
+          <p className="font-medium">这些系统级设置对每个配置目录都生效，这个环境挡不住：</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5">
+            {systemOverrides.map((item) => (
+              <li key={`${item.source}/${item.name}`} className="break-all">
+                <span className="font-mono">{item.source}</span> 里的 <span className="font-mono">{item.name}</span>：
+                {overrideEffect(item.name, thirdParty ? "third-party-instance" : "official-instance")}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="mt-3 space-y-1.5 border-t pt-3 text-[11px] text-muted-foreground">
         <p className="flex items-start gap-1.5 break-all">

@@ -15,6 +15,7 @@ import { configureBaseOf, currentConfigOf, currentConnectionOf, hasUnsavedLive }
 import { actualRuntimeSettings, automationRawText, runtimeValueLabel } from "../lib/agentRuntime";
 import { parseAliasValue, renderAliasPreview } from "../lib/aliasCommand";
 import { cn } from "../lib/utils";
+import { overrideEffect } from "../lib/overrideEffects";
 
 export interface ConnectionCheckResult {
   ok: boolean;
@@ -67,29 +68,6 @@ function unwritableReason(element: EngineElement): string | null {
     ? "配置文件无法解析，修好之前不能写入"
     : "客户端配置文件暂不可读，不能写入";
 }
-
-/** 各外部设置对主配置官方账号的影响（依据官方认证优先级文档、设置参考与 Codex 源码）。 */
-const OVERRIDE_EFFECT: Record<string, string> = {
-  ANTHROPIC_AUTH_TOKEN: "Claude 会优先用这个令牌，不用官方账号",
-  ANTHROPIC_API_KEY: "Claude 可能改用这个 API key（-p 模式直接使用，交互模式确认后使用）",
-  ANTHROPIC_BASE_URL: "Claude 会把请求连同官方账号的登录凭据发往这个地址",
-  CLAUDE_CODE_OAUTH_TOKEN: "Claude 会用这个长期令牌，不用主配置里的登录",
-  CLAUDE_CODE_USE_BEDROCK: "Claude 改走 Amazon Bedrock，不用官方账号",
-  CLAUDE_CODE_USE_VERTEX: "Claude 改走 Google Vertex，不用官方账号",
-  CLAUDE_CODE_USE_FOUNDRY: "Claude 改走 Microsoft Foundry，不用官方账号",
-  CLAUDE_CODE_USE_ANTHROPIC_AWS: "Claude 改走 Claude Platform on AWS，不用官方账号",
-  CLAUDE_CODE_USE_MANTLE: "Claude 改走 Amazon Bedrock Mantle，不用官方账号",
-  ANTHROPIC_PROFILE: "Claude 会用这个 Anthropic 配置档案的凭据，优先于 /login 登录",
-  ANTHROPIC_FEDERATION_RULE_ID: "Claude 会用工作负载身份联合换取的令牌，优先于 /login 登录",
-  ANTHROPIC_CUSTOM_HEADERS: "每个请求都会附加这些请求头，其中可能有凭据头",
-  oidc_federation: "活动的 Anthropic 配置档案是联合身份，Claude 会优先用它换取的令牌，不用 /login 登录",
-  apiKeyHelper: "Claude 会优先用这条命令输出的凭据，不用官方账号",
-  forceLoginMethod: "组织统一下发的设置限定了登录方式；用第三方凭据的独立环境会在启动时被拦下",
-  forceLoginOrgUUID: "组织统一下发的设置限定了可登录的组织；用第三方凭据的独立环境会在启动时被拦下",
-  CODEX_API_KEY: "codex exec 等非交互命令会优先用这个 API key，不用 auth.json 里的登录（交互界面不读它）",
-  CODEX_ACCESS_TOKEN: "Codex 所有入口都会优先用这个访问令牌，不用 auth.json 里的登录",
-  openai_base_url: "Codex 会把官方账号的凭据连同请求发往这个地址",
-};
 
 export function ConnectionWorkbench({
   agents,
@@ -491,7 +469,7 @@ export function ConnectionWorkbench({
               {overrides.map((item) => (
                 <li key={`${item.source}/${item.name}`}>
                   <span className="font-mono">{item.source}</span> 里的 <span className="font-mono">{item.name}</span>：
-                  {OVERRIDE_EFFECT[item.name] ?? "会改变助手使用的凭据"}
+                  {overrideEffect(item.name, "main")}
                 </li>
               ))}
             </ul>

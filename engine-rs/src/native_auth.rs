@@ -360,6 +360,21 @@ const CLAUDE_MANAGED_ONLY_ENV: &[&str] = &[
 /// 托管设置里限定登录方式的键：设了任一个，用第三方凭据（API key、令牌、apiKeyHelper）的会话在
 /// 启动时就被拦下（官方设置参考 `forceLoginMethod` / `forceLoginOrgUUID`）。
 const CLAUDE_MANAGED_LOGIN_KEYS: &[&str] = &["forceLoginMethod", "forceLoginOrgUUID"];
+/// Codex `config.toml` 里改变官方账号凭据去向或限定登录的键（官方配置参考与 `rust-v0.156.1`
+/// 源码）：内置 openai 与 ChatGPT 后端的地址（凭据随请求发往那里）；限定登录方式与工作区——不符的
+/// 登录会被拒绝，已有的在 `codex exec` 与交互界面启动时被 Codex 退出（实测会删掉 `auth.json`）。
+const CODEX_CONFIG_AUTH_KEYS: &[&str] = &[
+    "openai_base_url",
+    "chatgpt_base_url",
+    "forced_login_method",
+    "forced_chatgpt_workspace_id",
+];
+/// Codex 系统 `requirements.toml` 里限定登录的键（`config/src/config_requirements.rs`）。
+const CODEX_REQUIREMENTS_AUTH_KEYS: &[&str] = &[
+    "chatgpt_base_url",
+    "allowed_login_methods",
+    "allowed_chatgpt_workspaces",
+];
 /// shell 启动时会读的配置文件（相对 HOME）。
 const SHELL_RC_FILES: &[&str] = &[
     ".zshenv",
@@ -389,6 +404,25 @@ fn read_small_json(path: &Path) -> Option<Value> {
         .ok()
         .filter(|meta| meta.is_file() && meta.len() <= MAX_JSON_BYTES)?;
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+/// 读一个不太大的 TOML 文件；同 `read_small_json`，读不了就当作没有。
+fn read_small_toml(path: &Path) -> Option<toml::Table> {
+    std::fs::metadata(path)
+        .ok()
+        .filter(|meta| meta.is_file() && meta.len() <= MAX_RC_BYTES)?;
+    std::fs::read_to_string(path).ok()?.parse().ok()
+}
+
+/// TOML 取值是否真的设了（非空字符串、非空数组或表）。
+fn toml_set(value: Option<&toml::Value>) -> bool {
+    match value {
+        Some(toml::Value::String(text)) => !text.trim().is_empty(),
+        Some(toml::Value::Array(items)) => !items.is_empty(),
+        Some(toml::Value::Table(table)) => !table.is_empty(),
+        Some(_) => true,
+        None => false,
+    }
 }
 
 /// 取值是否真的打开了（非空；开关类的 `0` 也不算）。
@@ -430,6 +464,195 @@ fn claude_managed_settings_files(dirs: &[std::path::PathBuf]) -> Vec<std::path::
     files
 }
 
+/// Codex 的系统级配置目录（`rust-v0.156.1` `config/src/loader`：Unix 固定 `/etc/codex`，Windows 为
+/// `%ProgramData%\OpenAI\Codex`）。macOS 描述文件下发的设置不在这里看。
+fn codex_system_dirs() -> Vec<std::path::PathBuf> {
+    #[cfg(unix)]
+    let dirs = vec![std::path::PathBuf::from("/etc/codex")];
+    #[cfg(windows)]
+    let dirs = vec![std::path::PathBuf::from("C:\\ProgramData\\OpenAI\\Codex")];
+    dirs
+}
+
+fn system_dirs(kind: AuthKind) -> Vec<std::path::PathBuf> {
+    match kind {
+        AuthKind::Claude => claude_managed_settings_dirs(),
+        AuthKind::Codex => codex_system_dirs(),
+    }
+}
+
+/// Claude 托管设置里会压过凭据或限定登录的项。托管设置优先级最高，主配置与每个独立环境都挡不住。
+fn claude_managed_overrides(dirs: &[std::path::PathBuf]) -> Vec<Value> {
+    let mut out = Vec::new();
+    for path in claude_managed_settings_files(dirs) {
+        let Some(root) = read_small_json(&path) else {
+            continue;
+        };
+        let source = path.display().to_string();
+        if set_value(root.get("apiKeyHelper")) {
+            out.push(json!({"source": source, "name": "apiKeyHelper"}));
+        }
+        for name in CLAUDE_SETTINGS_OVERRIDE_ENV
+            .iter()
+            .chain(CLAUDE_MANAGED_ONLY_ENV)
+        {
+            if set_value(root.get("env").and_then(|env| env.get(*name))) {
+                out.push(json!({"source": source, "name": name}));
+            }
+        }
+        for key in CLAUDE_MANAGED_LOGIN_KEYS {
+            let value = root.get(*key);
+            if set_value(value)
+                || value
+                    .and_then(Value::as_array)
+                    .is_some_and(|a| !a.is_empty())
+            {
+                out.push(json!({"source": source, "name": key}));
+            }
+        }
+    }
+    out
+}
+
+/// Codex 系统级文件里会压过（或限定）某份 `config.toml` 的项。`user` 是这份配置（主配置或实例的
+/// `config.toml`）；`official` 表示它用官方账号。按 `rust-v0.156.1` 的分层：
+/// - 系统 `config.toml` 排在这份配置之下，只有这份没写的键才生效；
+/// - 旧版 `managed_config.toml`（仅 Unix）叠在最上层，照样生效；
+/// - `requirements.toml` 的 `model_provider` 强制所有配置目录改用它指定的接入方式，
+///   `model_providers` 里同名的定义整个替换掉本地的。
+///
+/// 实测（真实 0.156.1）：`managed_config.toml` 的 `openai_base_url` 压过用户配置、官方凭据发往它；
+/// `requirements.toml` 的 `model_provider` 让实例的第三方接入改走它指定的地址。
+fn codex_system_overrides(
+    dirs: &[std::path::PathBuf],
+    user: Option<&toml::Table>,
+    official: bool,
+) -> Vec<Value> {
+    let own_provider = user
+        .and_then(|doc| doc.get("model_provider"))
+        .and_then(toml::Value::as_str)
+        .unwrap_or("openai");
+    let user_sets = |key: &str| user.is_some_and(|doc| toml_set(doc.get(key)));
+    let forced_provider = |doc: &toml::Table| {
+        doc.get("model_provider")
+            .and_then(toml::Value::as_str)
+            .is_some_and(|provider| !provider.trim().is_empty() && provider != own_provider)
+    };
+    let mut out = Vec::new();
+    for dir in dirs {
+        let system = dir.join("config.toml");
+        if let Some(doc) = read_small_toml(&system) {
+            let source = system.display().to_string();
+            if !user_sets("model_provider") && forced_provider(&doc) {
+                out.push(json!({"source": source, "name": "model_provider"}));
+            }
+            if official {
+                for key in CODEX_CONFIG_AUTH_KEYS {
+                    if toml_set(doc.get(*key)) && !user_sets(key) {
+                        out.push(json!({"source": source, "name": key}));
+                    }
+                }
+            }
+        }
+        #[cfg(unix)]
+        {
+            let managed = dir.join("managed_config.toml");
+            if let Some(doc) = read_small_toml(&managed) {
+                let source = managed.display().to_string();
+                if forced_provider(&doc) {
+                    out.push(json!({"source": source, "name": "model_provider"}));
+                }
+                if official {
+                    for key in CODEX_CONFIG_AUTH_KEYS {
+                        if toml_set(doc.get(*key)) {
+                            out.push(json!({"source": source, "name": key}));
+                        }
+                    }
+                }
+            }
+        }
+        let requirements = dir.join("requirements.toml");
+        if let Some(doc) = read_small_toml(&requirements) {
+            let source = requirements.display().to_string();
+            if forced_provider(&doc) {
+                out.push(json!({"source": source, "name": "model_provider"}));
+            }
+            if doc
+                .get("model_providers")
+                .and_then(toml::Value::as_table)
+                .is_some_and(|providers| providers.contains_key(own_provider))
+            {
+                out.push(json!({"source": source, "name": "model_providers"}));
+            }
+            if official {
+                for key in CODEX_REQUIREMENTS_AUTH_KEYS {
+                    if toml_set(doc.get(*key)) {
+                        out.push(json!({"source": source, "name": key}));
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 独立环境挡不住的系统级设置：`[{source, name}]`，只有来源与键名，不含取值；只读。
+///
+/// 实例在自己的配置里取消了 shell 继承的凭据（Claude 置空、Codex 启动前清空），但系统级设置对
+/// 每个配置目录都生效：Claude 托管设置优先级最高，实测其 `env` 压过实例 `settings.json`、
+/// `forceLoginMethod` 让用第三方凭据的实例启动即被拦下；Codex 见 `codex_system_overrides`。
+/// 官方账号的 Claude 实例另报共享的 Anthropic 联合身份档案（不随配置目录隔离、排在 /login 之前）。
+pub(crate) fn instance_system_overrides(
+    home_dir: &Path,
+    kind: AuthKind,
+    official: bool,
+    instance_config: Option<&[u8]>,
+) -> Vec<Value> {
+    instance_system_overrides_with(
+        home_dir,
+        kind,
+        official,
+        instance_config,
+        &system_dirs(kind),
+    )
+}
+
+fn instance_system_overrides_with(
+    home_dir: &Path,
+    kind: AuthKind,
+    official: bool,
+    instance_config: Option<&[u8]>,
+    dirs: &[std::path::PathBuf],
+) -> Vec<Value> {
+    match kind {
+        AuthKind::Claude => {
+            let mut out = claude_managed_overrides(dirs);
+            if official {
+                if let Some(source) = anthropic_federation_profile(home_dir) {
+                    out.push(json!({"source": source, "name": "oidc_federation"}));
+                }
+            }
+            out
+        }
+        AuthKind::Codex => {
+            let mut user = instance_config
+                .and_then(|bytes| std::str::from_utf8(bytes).ok())
+                .and_then(|text| text.parse::<toml::Table>().ok());
+            if !official {
+                // 第三方实例写入后用自己的接入方式；文件还没写时按将要写的判断
+                user.get_or_insert_with(toml::Table::new)
+                    .entry("model_provider")
+                    .or_insert_with(|| {
+                        toml::Value::String(
+                            crate::native_profiles::model::CODEX_PROVIDER_ID.to_string(),
+                        )
+                    });
+            }
+            codex_system_overrides(dirs, user.as_ref(), official)
+        }
+    }
+}
+
 /// 活动的 Anthropic 配置档案是不是联合身份（WIF 参考文档：`active_config` 是一行档案名，缺省为
 /// `default`；`configs/<名>.json` 不含机密，`authentication.type` 为 `oidc_federation` 时排在 /login
 /// 之前）。只读这两个不含机密的文件，不碰 `credentials/`。
@@ -464,14 +687,14 @@ pub(crate) fn credential_overrides(
     kind: AuthKind,
     env_set: &dyn Fn(&str) -> bool,
 ) -> Vec<Value> {
-    credential_overrides_with(home_dir, kind, env_set, &claude_managed_settings_dirs())
+    credential_overrides_with(home_dir, kind, env_set, &system_dirs(kind))
 }
 
 fn credential_overrides_with(
     home_dir: &Path,
     kind: AuthKind,
     env_set: &dyn Fn(&str) -> bool,
-    managed_dirs: &[std::path::PathBuf],
+    dirs: &[std::path::PathBuf],
 ) -> Vec<Value> {
     let names = match kind {
         AuthKind::Claude => CLAUDE_OVERRIDE_ENV,
@@ -510,52 +733,21 @@ fn credential_overrides_with(
                     }
                 }
             }
-            for path in claude_managed_settings_files(managed_dirs) {
-                let Some(root) = read_small_json(&path) else {
-                    continue;
-                };
-                let source = path.display().to_string();
-                if set_value(root.get("apiKeyHelper")) {
-                    out.push(json!({"source": source, "name": "apiKeyHelper"}));
-                }
-                for name in CLAUDE_SETTINGS_OVERRIDE_ENV
-                    .iter()
-                    .chain(CLAUDE_MANAGED_ONLY_ENV)
-                {
-                    if set_value(root.get("env").and_then(|env| env.get(*name))) {
-                        out.push(json!({"source": source, "name": name}));
-                    }
-                }
-                for key in CLAUDE_MANAGED_LOGIN_KEYS {
-                    let value = root.get(*key);
-                    if set_value(value)
-                        || value
-                            .and_then(Value::as_array)
-                            .is_some_and(|a| !a.is_empty())
-                    {
-                        out.push(json!({"source": source, "name": key}));
-                    }
-                }
-            }
+            out.extend(claude_managed_overrides(dirs));
             if let Some(source) = anthropic_federation_profile(home_dir) {
                 out.push(json!({"source": source, "name": "oidc_federation"}));
             }
         }
         AuthKind::Codex => {
-            // 内置 openai 接入方式的地址覆盖（官方配置参考）：官方账号的凭据会随请求发往这个地址
-            let config = std::fs::metadata(home_dir.join(".codex/config.toml"))
-                .ok()
-                .filter(|meta| meta.is_file() && meta.len() <= MAX_RC_BYTES)
-                .and_then(|_| std::fs::read_to_string(home_dir.join(".codex/config.toml")).ok())
-                .and_then(|text| text.parse::<toml::Table>().ok());
-            if config
-                .as_ref()
-                .and_then(|doc| doc.get("openai_base_url"))
-                .and_then(toml::Value::as_str)
-                .is_some_and(|url| !url.trim().is_empty())
-            {
-                out.push(json!({"source": "~/.codex/config.toml", "name": "openai_base_url"}));
+            // 主配置自己写的地址覆盖与登录限定（官方配置参考）：官方账号的凭据会随请求发往这些
+            // 地址；限定登录的键会让另一种登录被拒绝或在启动时被退出
+            let config = read_small_toml(&home_dir.join(".codex/config.toml"));
+            for key in CODEX_CONFIG_AUTH_KEYS {
+                if toml_set(config.as_ref().and_then(|doc| doc.get(*key))) {
+                    out.push(json!({"source": "~/.codex/config.toml", "name": key}));
+                }
             }
+            out.extend(codex_system_overrides(dirs, config.as_ref(), true));
         }
     }
     out
@@ -718,6 +910,186 @@ mod tests {
         .unwrap();
         let claude = credential_overrides_with(&home, AuthKind::Claude, &|_| false, &[]);
         assert!(!claude.iter().any(|item| item["name"] == "oidc_federation"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    fn pairs(items: &[Value]) -> Vec<(String, String)> {
+        items
+            .iter()
+            .map(|item| {
+                (
+                    item["source"].as_str().unwrap().to_string(),
+                    item["name"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    }
+
+    /// Codex 系统级文件按 0.156.1 的分层提示：系统 config.toml 只在主配置没写该键时生效，
+    /// managed_config.toml 叠在最上层，requirements.toml 强制接入方式与限定登录；主配置自己写的
+    /// 地址覆盖与登录限定也提示。只报来源与键名。
+    #[test]
+    fn codex_主配置提示系统级文件与自己写的登录限定_按分层判断谁生效() {
+        let home = std::env::temp_dir().join(format!("am-auth-codex-sys-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let etc = home.join("etc-codex");
+        std::fs::create_dir_all(&etc).unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::write(
+            home.join(".codex/config.toml"),
+            "openai_base_url = \"https://user.example/v1\"\nchatgpt_base_url = \"https://chat.example\"\nforced_login_method = \"api\"\nforced_chatgpt_workspace_id = [\"ws-secret\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            etc.join("config.toml"),
+            "model_provider = \"orgp\"\nopenai_base_url = \"https://system.example/v1\"\nforced_login_method = \"chatgpt\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            etc.join("managed_config.toml"),
+            "openai_base_url = \"https://managed.example/v1\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            etc.join("requirements.toml"),
+            "model_provider = \"openai\"\nallowed_login_methods = [\"chatgpt\"]\nallowed_chatgpt_workspaces = []\n",
+        )
+        .unwrap();
+
+        let codex = credential_overrides_with(&home, AuthKind::Codex, &|_| false, &[etc.clone()]);
+        let system = etc.join("config.toml").display().to_string();
+        let managed = etc.join("managed_config.toml").display().to_string();
+        let requirements = etc.join("requirements.toml").display().to_string();
+        let user = "~/.codex/config.toml".to_string();
+        assert_eq!(
+            pairs(&codex),
+            vec![
+                (user.clone(), "openai_base_url".to_string()),
+                (user.clone(), "chatgpt_base_url".to_string()),
+                (user.clone(), "forced_login_method".to_string()),
+                (user, "forced_chatgpt_workspace_id".to_string()),
+                // 主配置没写 model_provider：系统 config.toml 的生效；地址与登录限定被主配置自己的压住
+                (system, "model_provider".to_string()),
+                (managed, "openai_base_url".to_string()),
+                // 强制成 openai 对主配置的官方账号无碍，不提示；空数组不算设了
+                (requirements, "allowed_login_methods".to_string()),
+            ]
+        );
+        let text = format!("{codex:?}");
+        for value in [
+            "user.example",
+            "chat.example",
+            "ws-secret",
+            "system.example",
+            "managed.example",
+            "orgp",
+        ] {
+            assert!(!text.contains(value), "不得带出取值 {value}");
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 独立环境挡不住系统级设置：第三方实例只关心强制换掉它接入方式的项与压过它 env 的托管设置；
+    /// 官方账号实例另看限定登录的项与共享的联合身份档案。
+    #[test]
+    fn 实例提示挡不住的系统级设置_按第三方与官方账号区分() {
+        let home = std::env::temp_dir().join(format!("am-auth-inst-sys-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let etc = home.join("etc-codex");
+        std::fs::create_dir_all(&etc).unwrap();
+        std::fs::write(
+            etc.join("config.toml"),
+            "model_provider = \"orgp\"\nforced_login_method = \"chatgpt\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            etc.join("requirements.toml"),
+            "model_provider = \"openai\"\nallowed_login_methods = [\"chatgpt\"]\n[model_providers.agent-manager]\nname = \"org\"\nbase_url = \"https://org.example/v1\"\n",
+        )
+        .unwrap();
+        let system = etc.join("config.toml").display().to_string();
+        let requirements = etc.join("requirements.toml").display().to_string();
+
+        let relay = b"model_provider = \"agent-manager\"\n[model_providers.agent-manager]\nname = \"agent-manager\"\nbase_url = \"https://relay.example/v1\"\nexperimental_bearer_token = \"tok\"\n";
+        let third_party = instance_system_overrides_with(
+            &home,
+            AuthKind::Codex,
+            false,
+            Some(relay),
+            &[etc.clone()],
+        );
+        assert_eq!(
+            pairs(&third_party),
+            vec![
+                (requirements.clone(), "model_provider".to_string()),
+                (requirements.clone(), "model_providers".to_string()),
+            ],
+            "实例自己写了 model_provider，系统 config.toml 的不生效；登录限定与第三方实例无关"
+        );
+
+        // 文件还没写：按将要写的接入方式判断，照样提示
+        let not_written =
+            instance_system_overrides_with(&home, AuthKind::Codex, false, None, &[etc.clone()]);
+        assert_eq!(pairs(&not_written), pairs(&third_party));
+
+        let official = instance_system_overrides_with(
+            &home,
+            AuthKind::Codex,
+            true,
+            Some(b"model = \"gpt-5.5\"\n"),
+            &[etc.clone()],
+        );
+        assert_eq!(
+            pairs(&official),
+            vec![
+                (system.clone(), "model_provider".to_string()),
+                (system, "forced_login_method".to_string()),
+                (requirements, "allowed_login_methods".to_string()),
+            ],
+            "官方账号实例用内置 openai：强制成 openai 不提示"
+        );
+
+        let managed = home.join("managed");
+        std::fs::create_dir_all(&managed).unwrap();
+        std::fs::write(
+            managed.join("managed-settings.json"),
+            r#"{"forceLoginMethod":"claudeai","env":{"ANTHROPIC_BASE_URL":"https://gw.corp.example"}}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(home.join(".config/anthropic/configs")).unwrap();
+        std::fs::write(
+            home.join(".config/anthropic/configs/default.json"),
+            r#"{"authentication":{"type":"oidc_federation"}}"#,
+        )
+        .unwrap();
+        let managed_file = managed.join("managed-settings.json").display().to_string();
+        let claude_relay = instance_system_overrides_with(
+            &home,
+            AuthKind::Claude,
+            false,
+            None,
+            &[managed.clone()],
+        );
+        assert_eq!(
+            pairs(&claude_relay),
+            vec![
+                (managed_file.clone(), "ANTHROPIC_BASE_URL".to_string()),
+                (managed_file.clone(), "forceLoginMethod".to_string()),
+            ]
+        );
+        let claude_official =
+            instance_system_overrides_with(&home, AuthKind::Claude, true, None, &[managed]);
+        assert_eq!(
+            pairs(&claude_official).last(),
+            Some(&(
+                "~/.config/anthropic/configs/default.json".to_string(),
+                "oidc_federation".to_string()
+            ))
+        );
+        let text = format!("{third_party:?}{official:?}{claude_relay:?}{claude_official:?}");
+        for value in ["org.example", "relay.example", "gw.corp.example", "orgp"] {
+            assert!(!text.contains(value), "不得带出取值 {value}");
+        }
         let _ = std::fs::remove_dir_all(&home);
     }
 
