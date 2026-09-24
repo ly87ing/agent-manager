@@ -132,7 +132,7 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
 
 describe("助手实例", () => {
   async function openInstanceManager() {
-    await userEvent.click(await screen.findByTestId("manage-instances-button"));
+    // 独立环境与默认环境在同一页、同一个助手下列出，不用再切页签
     return screen.findByTestId("independent-environments");
   }
 
@@ -142,6 +142,8 @@ describe("助手实例", () => {
     const card = await screen.findByTestId("profile-card-cc-ly");
     expect(within(card).getByText("Claude Code · ly")).toBeInTheDocument();
     expect(card).toHaveTextContent("~/.claude-cc-ly");
+    // 卡片头部写明是什么账号、终端里输入什么启动
+    expect(within(card).getByTestId("profile-summary-cc-ly")).toHaveTextContent("终端输入 cc-ly");
     // 一个实例可以挂多条启动命令，按配置目录反查后都列出来
     expect(within(card).getByTestId("profile-launch-cc-ly-cc-ly")).toHaveTextContent(
       `alias cc-ly='CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude'`,

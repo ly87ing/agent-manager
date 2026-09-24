@@ -180,7 +180,7 @@ describe("助手运行参数", () => {
     const { calls } = renderWithEngine(<AgentsPage />, withExisting);
 
     const panel = await openRuntimeSettings();
-    expect(panel).toHaveTextContent("账号、接口地址、模型与凭据在「接入 Provider」维护");
+    expect(panel).toHaveTextContent("账号与登录在「账号与登录」里看，第三方接入在下方建成独立环境使用");
     // 没改动时不能写
     expect(screen.getByTestId("agent-runtime-submit")).toBeDisabled();
     expect(screen.queryByLabelText("安装命令")).toBeNull();

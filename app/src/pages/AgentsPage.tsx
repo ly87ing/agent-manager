@@ -104,6 +104,8 @@ export default function AgentsPage({
     initial?: ConnectionEntry;
     variant?: "edit" | "duplicate";
     preserveUnknownFrom?: string;
+    /** 从「新建环境」进来：保存接入后接着建成独立环境是主路径。 */
+    intent?: "environment";
   } | null>(null);
   const [connectionSaving, setConnectionSaving] = useState(false);
   const [connectionFormError, setConnectionFormError] = useState<string | null>(null);
@@ -119,7 +121,8 @@ export default function AgentsPage({
     Record<string, { ok: boolean; detail: string; latencyMs: number; pending?: boolean }>
   >({});
   const [checkingAllAgentId, setCheckingAllAgentId] = useState<string | null>(null);
-  const [environmentView, setEnvironmentView] = useState<"default" | "independent">("default");
+  /** 「新建环境 → 另一个官方账号」时预先选中的助手；null 按列表第一个。 */
+  const [profileNewAgent, setProfileNewAgent] = useState<string | null>(null);
 
   const [aliasEditing, setAliasEditing] = useState<
     { bin: string; name: string; value: string | null; presetName?: string } | null
@@ -717,11 +720,7 @@ export default function AgentsPage({
     <div>
       <h2 className="sr-only">助手</h2>
       {query.data.errors.length > 0 && <ErrorPanel title="助手状态读取失败" errors={query.data.errors} />}
-      <div className="mb-3 inline-flex rounded-xl bg-muted p-1" role="group" aria-label="选择环境类型">
-        <button type="button" data-testid="default-environment-button" aria-pressed={environmentView === "default"} onClick={() => setEnvironmentView("default")} className={`rounded-lg px-4 py-2 text-sm ${environmentView === "default" ? "bg-background font-medium shadow-sm" : "text-muted-foreground"}`}>默认环境</button>
-        <button type="button" data-testid="manage-instances-button" aria-pressed={environmentView === "independent"} onClick={() => setEnvironmentView("independent")} className={`rounded-lg px-4 py-2 text-sm ${environmentView === "independent" ? "bg-background font-medium shadow-sm" : "text-muted-foreground"}`}>独立环境</button>
-      </div>
-      {environmentView === "default" && <ConnectionWorkbench
+      <ConnectionWorkbench
         agents={allPrimaryElements}
         selectedAgentId={effectiveSelectedAgentId}
         busyTarget={configuringTarget}
@@ -784,7 +783,19 @@ export default function AgentsPage({
             connection,
           )
         }
-        onShowInstances={() => setEnvironmentView("independent")}
+        onShowInstances={() =>
+          document.querySelector('[data-testid="independent-environments"]')?.scrollIntoView?.({ behavior: "smooth", block: "start" })
+        }
+        onNewEnvironment={(element, kind) => {
+          if (kind === "third-party") {
+            setConnectionFormError(null);
+            setConnectionForm({ agent: element, intent: "environment" });
+          } else {
+            setProfileNewAgent(element.id.replace(/^agents:/, ""));
+            setProfileDuplicating(false);
+            setProfileForm("new");
+          }
+        }}
         onBalance={(element, connection) => fetchBalance(["--only", element.id, "--use", connection.name])}
         onExport={(element, connection) => void exportConnection(element, connection)}
         onRemove={(element, connection) => setConnectionRemoving({ agent: element, connection })}
@@ -817,28 +828,25 @@ export default function AgentsPage({
             return String(err);
           }
         }}
-      />}
-      {environmentView === "independent" && (
+        renderInstances={() => (
           <section data-testid="independent-environments" className="space-y-4 rounded-xl border bg-card p-5 shadow-sm">
-        <div aria-label="选择助手" className="inline-flex rounded-xl bg-muted p-1" role="group">
-          {allPrimaryElements.map((element) => {
-            const id = element.id.replace(/^agents:/, "");
-            const chosen = element.id === effectiveSelectedAgentId;
-            return <button key={element.id} type="button" data-testid={`independent-agent-${id}`} aria-pressed={chosen} onClick={() => setSelectedAgentId(element.id)} className={`rounded-lg px-5 py-2 text-sm font-medium ${chosen ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"}`}>{(element.spec as AgentsSpec).display_name ?? id}</button>;
-          })}
-        </div>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold text-foreground">独立环境</h3>
+            <h3 className="text-base font-semibold text-foreground">
+              独立环境{visibleProfileElements.length > 0 ? `（${visibleProfileElements.length}）` : ""}
+            </h3>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              为当前 Agent 创建另一套配置目录、登录与会话；它和默认环境可以同时运行，互不干扰。
+              各有自己的配置目录、登录与会话，和默认环境可以同时开着；第三方厂商只在这里用，也可以在这里登录另一个官方账号。
             </p>
           </div>
           <button
             type="button"
             data-testid="add-profile-button"
             disabled={profileCapableAgents.length === 0}
-            onClick={() => setProfileForm("new")}
+            onClick={() => {
+              setProfileNewAgent(effectiveAgentName);
+              setProfileForm("new");
+            }}
             className="shrink-0 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-50"
           >
             新建独立环境
@@ -848,8 +856,8 @@ export default function AgentsPage({
           <EmptyState
             compact
             testId="profiles-empty"
-            title="当前 Agent 还没有独立环境"
-            description="主配置只放官方账号，第三方 Provider 在独立环境里用：到「默认环境」的 Provider 卡片上选「建成独立环境」。要登录第二个官方账号，也在这里新建一个。"
+            title="还没有独立环境"
+            description="用右上角「新建环境」：选第三方厂商会建成一个用它的独立环境；选另一个官方账号会建一个单独登录的目录。下方保存过的第三方接入也可以一键建成。"
           />
         ) : (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -967,7 +975,8 @@ export default function AgentsPage({
           </div>
         )}
           </section>
-      )}
+        )}
+      />
 
       {connectionForm && connectionKindOf(connectionForm.agent) && (
         <ConnectionFormDialog
@@ -976,6 +985,7 @@ export default function AgentsPage({
           existingNames={connectionsOf(connectionForm.agent.spec as Record<string, unknown>).map((item) => item.name)}
           initialConnection={connectionForm.initial}
           variant={connectionForm.variant}
+          intent={connectionForm.intent}
           busy={connectionSaving}
           error={connectionFormError}
           onOpenSecrets={onOpenSecrets}
@@ -1054,7 +1064,11 @@ export default function AgentsPage({
 
       {profileForm && (
         <ProfileFormDialog
-          baseAgents={profileCapableAgents}
+          baseAgents={
+            profileForm === "new" && profileNewAgent
+              ? [...profileCapableAgents].sort((a, b) => Number(b.id === profileNewAgent) - Number(a.id === profileNewAgent))
+              : profileCapableAgents
+          }
           initial={profileForm === "new" ? undefined : profileForm}
           isEdit={profileForm !== "new" && !profileDuplicating}
           existingIds={elements.map((element) => element.id.replace(/^agents:/, ""))}

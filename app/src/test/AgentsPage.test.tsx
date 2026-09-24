@@ -109,8 +109,12 @@ describe("助手页产品边界", () => {
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("当前实际配置（未保存）");
     expect(screen.queryByText(/尚未生效/)).toBeNull();
     expect(screen.getByTestId("workbench-tab-automation")).toHaveTextContent("运行设置");
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["接入 Provider", "运行设置", "启动命令"]);
-    expect(screen.getByTestId("manage-instances-button")).toHaveTextContent("独立环境");
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(["账号与登录", "运行设置", "启动命令"]);
+    // 同一个助手的环境在一页里列全：默认环境、独立环境、用来建独立环境的第三方接入
+    expect(screen.getByTestId("default-environment-card")).toHaveTextContent("终端里直接输入 claude");
+    expect(screen.getByTestId("independent-environments")).toBeInTheDocument();
+    expect(screen.getByTestId("third-party-section-claude-code")).toHaveTextContent("第三方接入 · 用来建独立环境");
+    expect(screen.queryByTestId("manage-instances-button")).toBeNull();
     await userEvent.click(screen.getByTestId("workbench-tab-launch"));
     const launches = screen.getByTestId("agent-launch-commands-claude-code");
     expect(within(launches).getByTestId("agent-launch-claude-code-claude")).toHaveTextContent(
@@ -190,6 +194,26 @@ describe("助手页产品边界", () => {
     expect(editorText(await editorView("config-file-text"))).toBe('{\n  "effortLevel": "high"\n}\n');
   });
 
+  it("新建环境是主入口：第三方先选预设、下一步建成独立环境；另一个官方账号直接打开环境表单", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await userEvent.click(await screen.findByTestId("new-environment-button"));
+    await userEvent.click(screen.getByTestId("new-environment-third-party"));
+    const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
+    // 主按钮是建成独立环境；只保存接入退为次要
+    expect(within(dialog).getByTestId("connection-form-submit-and-make-profile")).toHaveTextContent("下一步：建成独立环境");
+    expect(within(dialog).getByTestId("connection-form-submit")).toHaveTextContent("只保存接入，稍后再建");
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "为 Claude Code 新建第三方环境" })).toBeNull());
+
+    await userEvent.click(screen.getByTestId("new-environment-button"));
+    await userEvent.click(screen.getByTestId("new-environment-official"));
+    const profileDialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    expect(within(profileDialog).getByTestId("profile-base-url")).toHaveValue("");
+    expect(within(profileDialog).getByTestId("profile-token-var")).toHaveValue("");
+    // 只打开表单，什么都没写
+    expect(calls.some((call) => call.command === "policy:set" || call.command === "profiles:apply")).toBe(false);
+  });
+
   it("官方账号只指定了模型：说清是官方账号与模型来源，不当成未保存的接入，也不给切回按钮", async () => {
     const official = routes("codex", "codex");
     const status = official["agents:status"] as { data: { elements: EngineElement[] } };
@@ -216,7 +240,7 @@ describe("助手页产品边界", () => {
     expect(screen.queryByTestId("main-mixed-warning")).toBeNull();
     expect(screen.queryByTestId("reset-connection-codex-default")).toBeNull();
     // 第三方接入单独一节，说明只在独立环境里用
-    expect(screen.getByTestId("third-party-section-codex")).toHaveTextContent("第三方接入 · 只在独立环境里用");
+    expect(screen.getByTestId("third-party-section-codex")).toHaveTextContent("第三方接入 · 用来建独立环境");
     expect(screen.getByTestId("third-party-empty-codex")).toBeInTheDocument();
   });
 

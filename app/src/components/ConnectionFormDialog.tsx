@@ -32,6 +32,7 @@ export function ConnectionFormDialog({
   existingNames,
   initialConnection,
   variant,
+  intent,
   busy,
   error,
   onSubmit,
@@ -46,6 +47,8 @@ export function ConnectionFormDialog({
   initialConnection?: ConnectionEntry;
   /** 复制模式允许创建新名称；凭据取值始终为空。 */
   variant?: "edit" | "duplicate";
+  /** environment：从「新建环境」进来，主按钮是建成独立环境，只保存接入退为次要。 */
+  intent?: "environment";
   busy: boolean;
   error?: string | null;
   onSubmit: (submission: ConnectionSubmission) => void;
@@ -80,7 +83,9 @@ export function ConnectionFormDialog({
     ? `编辑 ${initialConnection.label || initialConnection.name}`
     : duplicating
       ? "复制 Provider"
-      : `为 ${agentName} 添加接入`;
+      : intent === "environment"
+        ? `为 ${agentName} 新建第三方环境`
+        : `为 ${agentName} 添加接入`;
 
   // 编辑已有接入（例如从实际配置导入的那套）时地址、凭据变量与模型可以留空：它本来可能就没有
   const strict = !editing && !referenced;
@@ -682,10 +687,16 @@ export function ConnectionFormDialog({
               data-testid="connection-form-submit-and-make-profile"
               disabled={saveDisabled}
               onClick={() => submit(true)}
-              title="主配置只放官方账号，第三方接入在独立环境里用：保存后直接打开建成独立环境的表单"
-              className="rounded border border-primary/40 px-4 py-2 text-sm text-primary hover:bg-primary/10 disabled:opacity-50"
+              title="保存这套接入，再打开建成独立环境的表单：它有自己的配置目录与启动命令，和官方账号互不影响"
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded px-4 py-2 text-sm disabled:opacity-50",
+                intent === "environment"
+                  ? "order-last bg-primary text-primary-foreground hover:bg-primary/90"
+                  : "border border-primary/40 text-primary hover:bg-primary/10",
+              )}
             >
-              保存并建成独立环境
+              {busy && intent === "environment" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+              {intent === "environment" ? "下一步：建成独立环境" : "保存并建成独立环境"}
             </button>
           )}
           <button
@@ -693,16 +704,23 @@ export function ConnectionFormDialog({
             data-testid="connection-form-submit"
             disabled={saveDisabled}
             onClick={() => submit()}
-            className="inline-flex items-center gap-1.5 rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded px-4 py-2 text-sm disabled:opacity-50",
+              intent === "environment" && !editing && !duplicating
+                ? "border text-muted-foreground hover:bg-accent"
+                : "bg-primary text-primary-foreground hover:bg-primary/90",
+            )}
           >
-            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-            {busy
+            {busy && intent !== "environment" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+            {busy && intent !== "environment"
               ? "正在保存…"
               : editing
                 ? "保存修改"
                 : duplicating
                   ? "创建副本"
-                  : "保存接入"}
+                  : intent === "environment"
+                    ? "只保存接入，稍后再建"
+                    : "保存接入"}
           </button>
         </div>
       </section>

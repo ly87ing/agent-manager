@@ -1,5 +1,5 @@
-import { useState, type MouseEvent } from "react";
-import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Download, Loader2, MoreHorizontal, Pencil, Save, Settings2, Terminal, Trash2, Upload } from "lucide-react";
+import { useState, type MouseEvent, type ReactNode } from "react";
+import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Download, Loader2, MoreHorizontal, Pencil, Plus, Save, Settings2, Terminal, Trash2, Upload } from "lucide-react";
 import { AgentRuntimePanel } from "./AgentRuntimePanel";
 import { ConfigFileEditor } from "./ConfigFileEditor";
 import { OfficialAuthPanel } from "./OfficialAuthPanel";
@@ -102,6 +102,8 @@ export function ConnectionWorkbench({
   onFixStatusline,
   onClearEnvOverrides,
   onCheckAuth,
+  renderInstances,
+  onNewEnvironment,
 }: {
   agents: EngineElement[];
   selectedAgentId: string | null;
@@ -142,6 +144,10 @@ export function ConnectionWorkbench({
   onFixStatusline: (element: EngineElement) => void;
   /** 清理旧版本写进 env 的单次会话覆盖变量（用户点按钮才执行）。 */
   onClearEnvOverrides: (element: EngineElement) => void;
+  /** 这个助手的独立环境：与默认环境放在同一个列表里，不再分页签。 */
+  renderInstances?: (element: EngineElement) => ReactNode;
+  /** 新建环境：第三方厂商（先选预设再建成独立环境）或另一个官方账号。 */
+  onNewEnvironment?: (element: EngineElement, kind: "third-party" | "official") => void;
 }) {
   const [tab, setTab] = useState<WorkbenchTab>("providers");
   const [fileOpen, setFileOpen] = useState(false);
@@ -235,8 +241,7 @@ export function ConnectionWorkbench({
   };
 
   return (
-    <section data-testid="connection-workbench" className="rounded-xl border bg-card p-4 shadow-sm sm:p-5">
-      <div className="flex flex-col gap-5">
+    <section data-testid="connection-workbench" className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div aria-label="选择助手" className="inline-flex rounded-xl bg-muted p-1" role="group">
           {agents.map((element) => {
@@ -264,54 +269,50 @@ export function ConnectionWorkbench({
           <span className="sr-only" data-testid="active-connection-summary">
             {summary}
           </span>
-          {tab === "providers" && <div className="flex items-center gap-2">
-            {form.connections.length > 0 && (
-              <button
-                type="button"
-                data-testid="check-all-connections-button"
-                disabled={!kind || checkingAll || connectionCheckStates.some((item) => item.result?.pending)}
-                onClick={() => onCheckAll(selected, form.connections)}
-                title="检查全部接入"
-                aria-label="检查全部接入"
-                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
-              >
-                {checkingAll ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Activity className="h-4 w-4" aria-hidden />}
-                {checkingAll ? "检查中…" : "检查全部"}
-              </button>
-            )}
+          {kind && onNewEnvironment && (
             <details className="group relative">
-              <summary aria-label="更多设置" className="inline-flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-xl border text-muted-foreground hover:bg-accent">
-                <Settings2 className="h-4 w-4" aria-hidden />
+              <summary
+                data-testid="new-environment-button"
+                className="inline-flex h-10 cursor-pointer list-none items-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90"
+              >
+                <Plus className="h-4 w-4" aria-hidden /> 新建环境
               </summary>
-              <div className="absolute right-0 z-10 mt-2 flex w-40 flex-col rounded-lg border bg-popover p-1 shadow-lg">
+              <div className="absolute right-0 z-10 mt-2 flex w-72 flex-col rounded-lg border bg-popover p-1 shadow-lg">
                 <button
                   type="button"
-                  data-testid="import-connection-button"
-                  disabled={!kind}
-                  onClick={(event) => runMenuAction(event, () => onImport(selected))}
-                  className="inline-flex items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
+                  data-testid="new-environment-third-party"
+                  onClick={(event) => runMenuAction(event, () => onNewEnvironment(selected, "third-party"))}
+                  className="rounded px-3 py-2 text-left hover:bg-accent"
                 >
-                  <Upload className="h-4 w-4" aria-hidden /> 导入接入
+                  <span className="block text-sm text-foreground">第三方厂商或中转</span>
+                  <span className="block text-xs text-muted-foreground">选厂商预设、填密钥，建成一个独立环境</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="new-environment-official"
+                  onClick={(event) => runMenuAction(event, () => onNewEnvironment(selected, "official"))}
+                  className="rounded px-3 py-2 text-left hover:bg-accent"
+                >
+                  <span className="block text-sm text-foreground">另一个官方账号</span>
+                  <span className="block text-xs text-muted-foreground">单独的目录里再登录一个官方账号</span>
                 </button>
               </div>
             </details>
-            <button
-              type="button"
-              data-testid="add-connection-button"
-              disabled={!kind}
-              onClick={() => onAdd(selected)}
-              className="inline-flex h-10 items-center rounded-xl bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              添加 Provider
-            </button>
-          </div>}
+          )}
         </div>
+        <p className="text-xs text-muted-foreground">
+          {name} 的每个环境各有自己的配置、登录与会话，可以同时开着；在终端里输入环境的命令启动它。
+        </p>
 
+        <article data-testid="default-environment-card" className="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-sm sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">默认环境</span>
               <strong className="text-sm font-semibold text-foreground">{name}</strong>
+              <span data-testid="default-env-launch" className="text-xs text-muted-foreground">
+                终端里直接输入 <code className="font-mono text-foreground">{bin}</code>
+              </span>
             </div>
             {envState ? (
               <dl data-testid="default-env-status" className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
@@ -340,7 +341,7 @@ export function ConnectionWorkbench({
               <p className="mt-1 text-xs text-muted-foreground">当前接入：{summary} · 自动化：{automationLabel}。</p>
             )}
             <p className="mt-2 text-xs text-muted-foreground">
-              以 {configFile} 的实际内容为准；下面三个页签都属于这一个环境。
+              以 {configFile} 的实际内容为准；下面三个页签都属于默认环境。
             </p>
             {writeBlocked && (
               <p data-testid="configure-blocked" className="mt-1 text-xs text-warning">{writeBlocked}</p>
@@ -350,7 +351,7 @@ export function ConnectionWorkbench({
 
         <div aria-label="环境配置" role="tablist" className="flex gap-1 overflow-x-auto border-b">
           {([
-            ["providers", "接入 Provider"],
+            ["providers", "账号与登录"],
             ["automation", "运行设置"],
             ["launch", "启动命令"],
           ] as const).map(([id, label]) => (
@@ -393,7 +394,7 @@ export function ConnectionWorkbench({
               </p>
             )}
             <p className="text-xs text-muted-foreground">
-              以客户端配置文件里的实际值为准，只写你改动的那几项；账号、接口地址、模型与凭据在「接入 Provider」维护。启动命令若带权限参数，会在启动时覆盖这里的自动化设置。
+              以客户端配置文件里的实际值为准，只写你改动的那几项；账号与登录在「账号与登录」里看，第三方接入在下方建成独立环境使用。启动命令若带权限参数，会在启动时覆盖这里的自动化设置。
             </p>
             {legacyStatusline && (
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2">
@@ -504,27 +505,6 @@ export function ConnectionWorkbench({
           </p>
         )}
 
-        {tab === "providers" && connectionChecks.length > 0 && (
-          <div
-            data-testid="connection-check-summary"
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm"
-          >
-            <p className="text-muted-foreground">
-              接入检查：已完成 {connectionChecks.length}/{form.connections.length}，
-              <strong className="font-medium text-foreground">
-                {connectionChecks.filter((item) => item.result.ok).length} 个可用
-              </strong>
-            </p>
-            {allChecked && fastest && (
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-success">
-                  最快：{fastest.connection.label || fastest.connection.name} {fastest.result.latencyMs}ms
-                </p>
-              </div>
-            )}
-          </div>
-        )}
-
         {tab === "providers" && overrides.length > 0 && (
           <div
             role="status"
@@ -555,7 +535,6 @@ export function ConnectionWorkbench({
           </p>
         )}
         {tab === "providers" && <div className="flex flex-col gap-3">
-            <h3 className="text-sm font-medium text-foreground">账号</h3>
             {unsaved && currentConfig?.config && (
               <LiveConfigCard
                 agentId={agentId}
@@ -594,21 +573,90 @@ export function ConnectionWorkbench({
                 onCheck={() => onCheckAuth(selected)}
               />
             )}
-            <div className="mt-3" data-testid={`third-party-section-${agentId}`}>
-              <h3 className="text-sm font-medium text-foreground">第三方接入 · 只在独立环境里用</h3>
+        </div>}
+        </article>
+
+        {renderInstances?.(selected)}
+
+        <section data-testid={`third-party-section-${agentId}`} className="flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-sm sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold text-foreground">第三方接入 · 用来建独立环境</h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                保存在这里的接入不会写进默认环境。要用哪一套，就「建成独立环境」：它有自己的配置目录与登录，和官方账号互不影响。
+                这里只是保存的接入参数（地址、模型、密钥变量名），不会写进默认环境；建成独立环境后才能用。改这里不会改已经建好的环境。
               </p>
             </div>
-            {savedEntries.length === 0 ? (
-              <p data-testid={`third-party-empty-${agentId}`} className="rounded-lg border border-dashed px-4 py-3 text-xs text-muted-foreground">
-                还没有保存第三方接入。点右上角「添加 Provider」保存一套，再建成独立环境使用。
-              </p>
-            ) : (
-              savedEntries.map((connection) => renderCard(connection, false))
+            <div className="flex items-center gap-2">
+              {form.connections.length > 0 && (
+                <button
+                  type="button"
+                  data-testid="check-all-connections-button"
+                  disabled={!kind || checkingAll || connectionCheckStates.some((item) => item.result?.pending)}
+                  onClick={() => onCheckAll(selected, form.connections)}
+                  title="检查全部接入"
+                  aria-label="检查全部接入"
+                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+                >
+                  {checkingAll ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Activity className="h-4 w-4" aria-hidden />}
+                  {checkingAll ? "检查中…" : "检查全部"}
+                </button>
+              )}
+              <details className="group relative">
+                <summary aria-label="更多设置" className="inline-flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-lg border text-muted-foreground hover:bg-accent">
+                  <Settings2 className="h-4 w-4" aria-hidden />
+                </summary>
+                <div className="absolute right-0 z-10 mt-2 flex w-40 flex-col rounded-lg border bg-popover p-1 shadow-lg">
+                  <button
+                    type="button"
+                    data-testid="import-connection-button"
+                    disabled={!kind}
+                    onClick={(event) => runMenuAction(event, () => onImport(selected))}
+                    className="inline-flex items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
+                  >
+                    <Upload className="h-4 w-4" aria-hidden /> 导入接入
+                  </button>
+                </div>
+              </details>
+              <button
+                type="button"
+                data-testid="add-connection-button"
+                disabled={!kind}
+                onClick={() => onAdd(selected)}
+                className="inline-flex h-9 items-center rounded-lg border border-primary/40 px-3 text-sm font-medium text-primary hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                添加接入
+              </button>
+            </div>
+          </div>
+        {connectionChecks.length > 0 && (
+          <div
+            data-testid="connection-check-summary"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm"
+          >
+            <p className="text-muted-foreground">
+              接入检查：已完成 {connectionChecks.length}/{form.connections.length}，
+              <strong className="font-medium text-foreground">
+                {connectionChecks.filter((item) => item.result.ok).length} 个可用
+              </strong>
+            </p>
+            {allChecked && fastest && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-success">
+                  最快：{fastest.connection.label || fastest.connection.name} {fastest.result.latencyMs}ms
+                </p>
+              </div>
             )}
-        </div>}
-      </div>
+          </div>
+        )}
+
+          {savedEntries.length === 0 ? (
+            <p data-testid={`third-party-empty-${agentId}`} className="rounded-lg border border-dashed px-4 py-3 text-xs text-muted-foreground">
+              还没有保存第三方接入。用右上角「新建环境 → 第三方厂商或中转」一步建好，或在这里「添加接入」先存起来。
+            </p>
+          ) : (
+            savedEntries.map((connection) => renderCard(connection, false))
+          )}
+        </section>
     </section>
   );
 }

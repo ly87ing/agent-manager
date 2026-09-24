@@ -110,6 +110,8 @@ export function ProfileCard({
   const canAdopt = element.actions.some((action) => action.id === "adopt");
   const canApply = element.actions.some((action) => action.id === "apply");
   const thirdParty = observed.third_party === true;
+  // 优先显示和环境同名的那条启动命令
+  const launchName = (launchCommands.find((command) => command.name === id) ?? launchCommands[0])?.name ?? null;
   const systemOverrides = observed.system_overrides ?? [];
   if (observed.invalid) {
     // 库里的定义按现在的规则解析不了（如旧版本存下的写法）：只给原因，以及编辑修正或移除
@@ -156,8 +158,16 @@ export function ProfileCard({
             {spec.display_name}
             <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">{id}</span>
           </h3>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {spec.base_agent} 的独立环境{spec.base_url ? ` · ${spec.base_url}` : ""}
+          <p data-testid={`profile-summary-${id}`} className="mt-0.5 text-xs text-muted-foreground">
+            {thirdParty ? `第三方${spec.base_url ? ` · ${spec.base_url}` : ""}` : "官方账号 · 在这个目录里单独登录"}
+            {launchName ? (
+              <>
+                {" · 终端输入 "}
+                <code className="font-mono text-foreground">{launchName}</code>
+              </>
+            ) : (
+              " · 还没有启动命令"
+            )}
           </p>
         </div>
         <StateBadge state={element.state} />

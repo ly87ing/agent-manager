@@ -183,8 +183,7 @@ describe("App 顶层导航", () => {
 
     renderWithEngine(<App />, customRoutes);
 
-    // 默认助手页，点击独立实例的「管理技能」
-    await userEvent.click(await screen.findByTestId("manage-instances-button"));
+    // 默认助手页：独立环境与默认环境在同一页，直接点实例的「管理技能」
     const manageBtn = await screen.findByTestId("profile-skills-cc-work");
     await userEvent.click(manageBtn);
 
