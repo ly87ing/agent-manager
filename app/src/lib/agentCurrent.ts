@@ -29,16 +29,14 @@ export function hasUnsavedLive(current: AgentCurrentConnection | null): boolean 
 export interface ConfigureRequest {
   agentId: string;
   base: string;
-  /** 切换目标；空字符串 = 助手默认账号。 */
-  use?: string;
-  /** 与 use 同时给：先用这份定义替换目标接入再切换（编辑当前接入）。 */
-  connection?: Record<string, unknown>;
+  /** 切回官方账号：撤掉主配置里的接入键（主配置不写第三方接入）。 */
+  useDefault?: boolean;
   /** 运行参数补丁：只含改动的字段。 */
   runtime?: Record<string, unknown>;
   /** 只把实际配置存成接入配置，不写助手文件。 */
   saveCurrent?: boolean;
   allowYolo?: boolean;
-  /** 放弃无法完整保存的实际接入，直接切换。 */
+  /** 放弃无法完整保存的实际接入，直接切回。 */
   discardLive?: boolean;
   /** 放弃还没保存的实际令牌。 */
   discardLiveToken?: boolean;
@@ -47,8 +45,7 @@ export interface ConfigureRequest {
 export function configureArgs(request: ConfigureRequest): string[] {
   const args = ["--only", `agents:${request.agentId}`, "--base", request.base];
   if (request.runtime) args.push("--runtime", JSON.stringify(request.runtime));
-  if (request.use !== undefined) args.push(...(request.use ? ["--use", request.use] : ["--use-default"]));
-  if (request.connection) args.push("--connection", JSON.stringify(request.connection));
+  if (request.useDefault) args.push("--use-default");
   if (request.saveCurrent) args.push("--save-current");
   if (request.allowYolo) args.push("--allow-yolo");
   if (request.discardLive) args.push("--discard-live");

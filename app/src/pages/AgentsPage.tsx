@@ -184,8 +184,8 @@ export default function AgentsPage({
     }
     const target = request.saveCurrent
       ? `${agentId}/save-current`
-      : request.use !== undefined
-        ? `${agentId}/${request.use || "default"}`
+      : request.useDefault
+        ? `${agentId}/default`
         : `${agentId}/settings`;
     setConfiguringTarget(target);
     try {
@@ -203,10 +203,8 @@ export default function AgentsPage({
             request.runtime,
             currentConfigOf(refreshedAgent),
           ))
-          : request.use !== undefined
-            ? request.use
-              ? current?.profile === request.use
-              : current?.default === true
+          : request.useDefault
+            ? current?.default === true
             : Boolean(current?.profile);
         if (!verified) {
           toast.error("写入已经返回成功，但状态回读没有确认生效", {
@@ -863,7 +861,7 @@ export default function AgentsPage({
           onConfirm={() => {
             const agentId = connectionResetting.id.replace(/^agents:/, "");
             setConnectionResetting(null);
-            void runConfigure({ agentId, use: "" }, { message: `已把 ${agentId} 的主配置切回官方账号` });
+            void runConfigure({ agentId, useDefault: true }, { message: `已把 ${agentId} 的主配置切回官方账号` });
           }}
           onClose={() => setConnectionResetting(null)}
         />

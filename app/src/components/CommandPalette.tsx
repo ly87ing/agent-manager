@@ -139,7 +139,7 @@ export function CommandPalette({
       try {
         const envelope = await execute({
           command: "agents:configure",
-          args: configureArgs({ agentId: request.agentId, base, use: request.profile, ...discard }),
+          args: configureArgs({ agentId: request.agentId, base, useDefault: true, ...discard }),
           label: `切换 ${request.agentName} 到 ${request.profileLabel}`,
           silent: true,
         });

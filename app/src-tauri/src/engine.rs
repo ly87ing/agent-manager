@@ -212,12 +212,10 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("agents", "configure") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--base", ArgValueKind::Digest));
-            // 切换生效的接入配置：名字与元素 id 同一把尺子
-            specs.push(("--use", ArgValueKind::ElementId));
+            // 主配置只放官方账号：只能切回官方（--use-default），不能写入第三方接入
             specs.push(("--use-default", ArgValueKind::Flag));
             specs.push(("--save-current", ArgValueKind::Flag));
             specs.push(("--runtime", ArgValueKind::JsonValue));
-            specs.push(("--connection", ArgValueKind::JsonValue));
             specs.push(("--discard-live", ArgValueKind::Flag));
             specs.push(("--discard-live-token", ArgValueKind::Flag));
             specs.push(("--allow-yolo", ArgValueKind::Flag));
@@ -1397,15 +1395,8 @@ mod tests {
     fn agents_configure_args_require_digest_shape_and_reject_retired_takeover() {
         let digest = "a".repeat(64);
         for extra in [
-            vec!["--use".to_string(), "relay".into()],
-            vec![
-                "--use".into(),
-                "relay".into(),
-                "--connection".into(),
-                r#"{"base_url":"https://x"}"#.into(),
-            ],
-            vec!["--use-default".into(), "--discard-live-token".into()],
-            vec!["--use".into(), "relay".into(), "--discard-live".into()],
+            vec!["--use-default".to_string(), "--discard-live-token".into()],
+            vec!["--use-default".into(), "--discard-live".into()],
             vec!["--save-current".into()],
             vec![
                 "--runtime".into(),
@@ -1426,7 +1417,9 @@ mod tests {
             ("--base", "ABC"),
             ("--base", "g".repeat(64).as_str()),
             ("--runtime", "{not json"),
-            ("--connection", "{not json"),
+            // 主配置不写第三方接入：桥上就不放行
+            ("--use", "relay"),
+            ("--connection", r#"{"base_url":"https://x"}"#),
         ] {
             assert!(
                 validate_args(
@@ -1449,8 +1442,7 @@ mod tests {
                 "agents:codex".into(),
                 "--base".into(),
                 digest,
-                "--use".into(),
-                "relay".into(),
+                "--use-default".into(),
                 "--allow-takeover".into()
             ]
         )

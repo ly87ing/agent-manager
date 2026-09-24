@@ -5,10 +5,11 @@
 //! 写入基准 `base` 与按内容识别的当前接入；库里只存已保存的接入配置（备选），`active`
 //! 与运行参数副本只是「上次写入」的记录，不再当作当前值展示或预填。
 //!
-//! 写入分三种，互不越界：`--runtime` 只改补丁里那几项运行参数的键；`--use` /
-//! `--use-default` 只改接入键，切换前先把还没保存的实际接入回填进库（身份与上次写入的那套
-//! 一致就更新它，否则新建导入项）；`--save-current` 只回填、不写文件。每次写入都要带
-//! status 给出的 `base`，重读后对不上就拒绝，文件与库都不动。
+//! 主配置只放官方账号：第三方接入不写进主配置（`--use` 拒绝），在独立环境（实例）里用。
+//! 写入分三种，互不越界：`--runtime` 只改补丁里那几项运行参数的键；`--use-default` 只撤
+//! 接入键、切回官方账号，切之前先把还没保存的实际接入回填进库（身份与上次写入的那套一致就
+//! 更新它，否则新建导入项）；`--save-current` 只回填、不写文件。每次写入都要带 status 给出的
+//! `base`，重读后对不上就拒绝，文件与库都不动。
 //!
 //! 密钥语义与实例、MCP 一致：库里只存变量名，写目标文件时解析成真值。
 //! `settings.json` 的 `env` 是字面量映射，Claude Code 不对它做变量展开，
@@ -1127,9 +1128,6 @@ const CODEX_OWNED_KEYS: &[&str] = &[
     "web_search",
 ];
 
-/// Codex 内置的 provider id，不允许覆盖（写了也不生效，还会盖掉内置定义）。
-const CODEX_RESERVED_PROVIDERS: &[&str] = &["openai", "ollama", "lmstudio"];
-
 /// 顶层键在哪儿结束：TOML 里 `[table]` 之后的键属于那个表，所以根键必须在第一个表头之前。
 fn toml_root_end(lines: &[&str]) -> usize {
     lines
@@ -1346,15 +1344,10 @@ pub(crate) fn codex_owned_digest(content: &str, recorded: &[String]) -> String {
     )
 }
 
-/// Codex 内置、不需要表的接入方式。
-fn codex_builtin(id: &str) -> bool {
-    CODEX_RESERVED_PROVIDERS.contains(&id)
-}
-
-/// 本工具为一套自定义接入写的 `[model_providers.<name>]` 表正文。
+/// 旧版本为一套自定义接入写进主配置的 `[model_providers.<name>]` 表正文。
 ///
-/// 令牌不落盘：Codex 的 provider 用 `env_key` 指向环境变量名，由它自己去读，
-/// 因此这里只写变量名——与 Claude 那边被迫写真值不同。
+/// 主配置不再写入第三方接入；这里只用于按内容识别旧版本留下的表（与当时写出的逐项一致，
+/// 包括带令牌变量时的 `requires_openai_auth`），以便如实显示并切回官方账号。
 fn codex_provider_table_text(name: &str, profile: &ConnectionProfile) -> Result<String> {
     let Some(url) = profile.base_url.as_deref() else {
         bail!("接入配置 {name} 要填接口地址，Codex 的自定义接入方式没有默认地址");
@@ -1370,8 +1363,7 @@ fn codex_provider_table_text(name: &str, profile: &ConnectionProfile) -> Result<
             "env_key = {}\n",
             crate::native_mcp::codecs::toml_basic_string(var)
         ));
-        // Provider 请求优先使用 env_key；保留这个标志让 Codex 继续识别并刷新
-        // auth.json 中的 ChatGPT 登录，避免切换第三方接入后账号/插件表现为掉线。
+        // 旧版本带令牌变量时写了这个标志（让第三方表共用 auth.json 的登录）；照原样渲染才能认出来
         table.push_str("requires_openai_auth = true\n");
     }
     // wire_api 目前只有 responses 这一种，写死避免用户填错
@@ -1400,77 +1392,15 @@ fn without_name(table: &toml::value::Table) -> toml::value::Table {
     table
 }
 
-/// 文件里（按解析结果）有没有 `model_providers.<id>`，内联表写法也算。
-fn codex_has_provider_parsed(text: &str, id: &str) -> bool {
-    text.parse::<toml::Value>()
-        .ok()
-        .and_then(|root| root.get("model_providers")?.get(id).cloned())
-        .is_some()
-}
-
-/// 写 Codex 的接入部分：撤掉本工具认领的 provider 表与 `model_provider` / `model`，
-/// 再按目标那套写回（`None` = 助手默认账号）。运行参数的顶层键一律不碰。
-///
-/// `recorded` 是库里记下的上次写入的 provider id；返回渲染结果与本次写入的 provider id，
-/// 后者由调用方记回库里。引用型接入（`provider_ref`）只写 `model_provider`，不写也不删那张表。
-fn write_codex_connection(
-    existing: &str,
-    target: Option<(&str, &ConnectionProfile)>,
-    recorded: &[String],
-) -> Result<(String, Vec<String>)> {
+/// 撤掉 Codex 的接入部分（切回官方账号）：本工具认领的 provider 表与顶层 `model_provider` /
+/// `model`。运行参数的顶层键与用户自己的表一律不碰。`recorded` 是库里记下的上次写入的 provider id。
+fn clear_codex_connection(existing: &str, recorded: &[String]) -> String {
     let claimed = codex_claimed_providers(existing, recorded);
     let mut text = toml_remove_provider_tables(existing, &claimed);
     for key in ["model_provider", "model"] {
         text = toml_set_root_key(&text, key, None);
     }
-    let mut written = Vec::new();
-    let Some((name, profile)) = target else {
-        return Ok((text, written));
-    };
-    if let Some(reference) = profile.provider_ref.as_deref() {
-        if !codex_builtin(reference) && !codex_has_provider_parsed(&text, reference) {
-            bail!(
-                "接入配置 {name} 引用的接入方式 {reference} 已不在 {CODEX_CONFIG} 中（也不是 Codex 内置的），拒绝切换：请先恢复那张表，或删除这个接入配置"
-            );
-        }
-        text = toml_set_root_key(
-            &text,
-            "model_provider",
-            Some(&crate::native_mcp::codecs::toml_basic_string(reference)),
-        );
-    } else {
-        if CODEX_RESERVED_PROVIDERS.contains(&name) {
-            bail!("{name} 是 Codex 内置的接入方式，换个名字（内置的不能覆盖）");
-        }
-        // 只有真配了地址或令牌变量才值得建一个 provider；否则就是用 Codex 自带的登录
-        if profile.base_url.is_some() || profile.token_var.is_some() {
-            let table = codex_provider_table_text(name, profile)?;
-            // 库里没记录的同名表是用户自己的：再追加一个会成重复表，Codex 读不了
-            if !claimed.contains(name) && toml_has_provider(existing, name) {
-                bail!(
-                    "{CODEX_CONFIG} 中已有你自己的同名接入方式 {name}，拒绝覆盖；请给这个接入配置换个名字（例如创建副本后删掉原项）"
-                );
-            }
-            if !text.ends_with('\n') && !text.is_empty() {
-                text.push('\n');
-            }
-            text.push_str(&table);
-            written.push(name.to_string());
-            text = toml_set_root_key(
-                &text,
-                "model_provider",
-                Some(&crate::native_mcp::codecs::toml_basic_string(name)),
-            );
-        }
-    }
-    if let Some(model) = profile.model.as_deref() {
-        text = toml_set_root_key(
-            &text,
-            "model",
-            Some(&crate::native_mcp::codecs::toml_basic_string(model)),
-        );
-    }
-    Ok((text, written))
+    text
 }
 
 /// Codex 内置接入方式的已知默认端点与令牌变量（本机的不需要令牌）。
@@ -1980,8 +1910,6 @@ struct Backfill {
     created: bool,
     profile: ConnectionProfile,
     token: TokenOutcome,
-    /// 令牌取值（仅在写进密钥文件时用于本次渲染，不落库、不进日志）。
-    adopted_value: Option<String>,
     secrets_write: Option<crate::secret_values::PlannedWrite>,
 }
 
@@ -2119,7 +2047,6 @@ fn plan_backfill(
     };
     let mut reasons = Vec::new();
     let mut token = TokenOutcome::None;
-    let mut adopted_value = None;
     let mut secrets_write = None;
 
     match live {
@@ -2198,10 +2125,7 @@ fn plan_backfill(
                             plan_token(ctx, &value, &name, settings, discard_token)?;
                         match &outcome {
                             TokenOutcome::Reused(var) => profile.token_var = Some(var.clone()),
-                            TokenOutcome::Adopted(var) => {
-                                profile.token_var = Some(var.clone());
-                                adopted_value = Some(value.clone());
-                            }
+                            TokenOutcome::Adopted(var) => profile.token_var = Some(var.clone()),
                             // 放弃：新建项不带令牌变量；回填进已有项时保留它原来的变量
                             TokenOutcome::Discarded if created => profile.token_var = None,
                             _ => {}
@@ -2276,7 +2200,6 @@ fn plan_backfill(
         created,
         profile,
         token,
-        adopted_value,
         secrets_write,
     })
 }
@@ -2531,8 +2454,8 @@ fn pretty_json(root: Map<String, Value>) -> Result<Vec<u8>> {
 enum Action {
     /// 运行参数补丁（原始 JSON，拿到助手形态后再校验）。
     Runtime(Value),
-    /// 切换到某套接入；None = 助手默认账号。
-    Switch(Option<String>),
+    /// 切回官方账号：撤掉主配置里的接入键。
+    UseDefault,
     /// 只把实际配置存成接入配置，不写助手文件。
     SaveCurrent,
 }
@@ -2541,7 +2464,6 @@ struct ConfigureArgs {
     id: String,
     base: String,
     action: Action,
-    connection: Option<Value>,
     discard_live: bool,
     discard_live_token: bool,
     allow_yolo: bool,
@@ -2558,7 +2480,7 @@ fn configure_args(req: &Request) -> Result<ConfigureArgs, DispatchError> {
     let use_name = req.value("--use");
     // 主配置只放官方账号：第三方接入不写进主配置，改在独立环境（实例）里用。
     // 官方账号与第三方凭据同在一处时，助手取哪个只能靠它的优先级规则。
-    if use_name.is_some() {
+    if use_name.is_some() || req.value("--connection").is_some() {
         return Err(DispatchError::new(
             "AGENT_MAIN_OFFICIAL_ONLY",
             "主配置只保留官方账号，不再写入第三方接入；请在这套接入的菜单里「建成独立环境」，在独立环境里使用它"
@@ -2567,18 +2489,13 @@ fn configure_args(req: &Request) -> Result<ConfigureArgs, DispatchError> {
     }
     let use_default = req.flag("--use-default");
     let save_current = req.flag("--save-current");
-    let chosen = [
-        runtime.is_some(),
-        use_name.is_some(),
-        use_default,
-        save_current,
-    ]
-    .into_iter()
-    .filter(|given| *given)
-    .count();
+    let chosen = [runtime.is_some(), use_default, save_current]
+        .into_iter()
+        .filter(|given| *given)
+        .count();
     if chosen != 1 {
         return Err(usage(
-            "agents:configure 需要且只能给一种写法：--runtime <json>、--use <接入配置>、--use-default 或 --save-current",
+            "agents:configure 需要且只能给一种写法：--runtime <json>、--use-default 或 --save-current",
         ));
     }
     let base = req
@@ -2592,28 +2509,16 @@ fn configure_args(req: &Request) -> Result<ConfigureArgs, DispatchError> {
         .to_string();
     let action = if let Some(raw) = runtime {
         Action::Runtime(serde_json::from_str(raw).map_err(|_| usage("--runtime 必须是 JSON 对象"))?)
-    } else if let Some(name) = use_name {
-        Action::Switch(Some(name.to_string()))
     } else if use_default {
-        Action::Switch(None)
+        Action::UseDefault
     } else {
         Action::SaveCurrent
     };
-    let connection = match req.value("--connection") {
-        Some(raw) => Some(
-            serde_json::from_str::<Value>(raw)
-                .map_err(|_| usage("--connection 必须是 JSON 对象"))?,
-        ),
-        None => None,
-    };
-    if connection.is_some() && !matches!(action, Action::Switch(Some(_))) {
-        return Err(usage("--connection 只能与 --use <接入配置> 一起用"));
-    }
     let discard_live = req.flag("--discard-live");
     let discard_live_token = req.flag("--discard-live-token");
     if (discard_live || discard_live_token) && matches!(action, Action::Runtime(_)) {
         return Err(usage(
-            "--discard-live / --discard-live-token 只用于切换接入或保存当前实际配置",
+            "--discard-live / --discard-live-token 只用于切回官方账号或保存当前实际配置",
         ));
     }
     if discard_live && matches!(action, Action::SaveCurrent) {
@@ -2623,7 +2528,6 @@ fn configure_args(req: &Request) -> Result<ConfigureArgs, DispatchError> {
         id,
         base,
         action,
-        connection,
         discard_live,
         discard_live_token,
         allow_yolo: req.flag("--allow-yolo"),
@@ -2633,9 +2537,8 @@ fn configure_args(req: &Request) -> Result<ConfigureArgs, DispatchError> {
 /// 这次写入要对库里 `settings` 做的改动；写前先在定义副本上演练一遍校验，事务里再照做。
 struct SettingsChanges<'a> {
     backfill: Option<&'a Backfill>,
-    connection: Option<(&'a str, &'a Value)>,
-    /// Some(None) = 删掉 active（切回默认账号）。
-    active: Option<Option<&'a str>>,
+    /// true = 删掉 active（切回官方账号）。
+    clear_active: bool,
     patch: Option<&'a RuntimePatch>,
 }
 
@@ -2657,21 +2560,11 @@ fn apply_settings_changes(settings: &mut Map<String, Value>, changes: &SettingsC
         profiles.insert(plan.name.clone(), Value::Object(merged));
         profiles_changed = true;
     }
-    if let Some((name, raw)) = changes.connection {
-        profiles.insert(name.to_string(), raw.clone());
-        profiles_changed = true;
-    }
     if profiles_changed {
         settings.insert("profiles".into(), Value::Object(profiles));
     }
-    match changes.active {
-        Some(Some(name)) => {
-            settings.insert("active".into(), Value::String(name.to_string()));
-        }
-        Some(None) => {
-            settings.remove("active");
-        }
-        None => {}
+    if changes.clear_active {
+        settings.remove("active");
     }
     if let Some(patch) = changes.patch {
         for (key, value) in &patch.0 {
@@ -2703,9 +2596,9 @@ fn apply_settings_changes(settings: &mut Map<String, Value>, changes: &SettingsC
 
 /// 真实写入：`agents:configure --only <id> --base <摘要> <写法>`。
 ///
-/// 写法四选一：`--runtime <json>` 只改补丁里的运行参数；`--use <接入配置>` /
-/// `--use-default` 切换接入（可带 `--connection <json>` 先替换目标那套）；
-/// `--save-current` 只把实际配置存进库。切换与保存前，还没保存的实际接入先回填进库；
+/// 写法三选一：`--runtime <json>` 只改补丁里的运行参数；`--use-default` 撤掉接入键、切回
+/// 官方账号；`--save-current` 只把实际配置存进库。`--use <接入配置>` 与 `--connection` 已停用
+/// （主配置不写第三方接入）。切回与保存前，还没保存的实际接入先回填进库；
 /// 令牌没保存时按「复用 → 写进已选密钥文件 → `--discard-live-token` 放弃 → 拒绝」处理；
 /// 存不下的实际内容拒绝，除非带 `--discard-live`。
 ///
@@ -2793,25 +2686,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
             });
             patch = Some(parsed);
         }
-        Action::Switch(_) | Action::SaveCurrent => {
-            // 目标先落定：指向不存在的配置一律拒绝，不静默落到「没有生效配置」
-            if let Action::Switch(Some(name)) = &args.action {
-                if let Some(raw) = &args.connection {
-                    if !valid_profile_name(name) {
-                        return Err(DispatchError::new(
-                            "USAGE_ERROR",
-                            format!("接入配置名 {name} 不合法：只能用字母、数字、连字符与下划线，最长 64 位"),
-                        ));
-                    }
-                    let profile = parse_profile(name, raw).map_err(agent_error)?;
-                    next.profiles.insert(name.clone(), profile);
-                } else if !settings.profiles.contains_key(name) {
-                    return Err(DispatchError::new(
-                        "AGENT_ERROR",
-                        format!("{id} 没有名为 {name} 的接入配置"),
-                    ));
-                }
-            }
+        Action::UseDefault | Action::SaveCurrent => {
             if identified.current == Current::Unsaved && !args.discard_live {
                 let plan = plan_backfill(
                     ctx,
@@ -2821,47 +2696,21 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
                     &claimed,
                     args.discard_live_token,
                 )?;
-                // 编辑并切换到上次写入的那套时，用户这次提交的内容优先
-                let overridden = matches!(&args.action, Action::Switch(Some(name)) if args.connection.is_some() && *name == plan.name);
-                if !overridden {
-                    next.profiles
-                        .insert(plan.name.clone(), plan.profile.clone());
-                }
+                next.profiles
+                    .insert(plan.name.clone(), plan.profile.clone());
                 backfill = Some(plan);
             }
-            if let Action::Switch(target) = &args.action {
-                next.active = target.clone();
-                let profile = target.as_deref().map(|name| &next.profiles[name]);
-                // 刚写进密钥文件的令牌还没进缓存：本次渲染直接用它
-                let adopted =
-                    backfill
-                        .as_ref()
-                        .and_then(|plan| match (&plan.token, &plan.adopted_value) {
-                            (TokenOutcome::Adopted(var), Some(value)) => {
-                                Some((var.clone(), value.clone()))
-                            }
-                            _ => None,
-                        });
-                let resolve = |var: &str| match &adopted {
-                    Some((name, value)) if name == var => Some(value.clone()),
-                    _ => crate::secret_values::lookup(var),
-                };
+            if matches!(args.action, Action::UseDefault) {
+                next.active = None;
                 new_bytes = Some(match &live {
                     Live::Claude(root) => {
                         let mut root = root.as_object().cloned().unwrap_or_default();
-                        write_claude_connection(&mut root, profile, &resolve)
-                            .map_err(agent_error)?;
+                        write_claude_connection(&mut root, None, &|_| None).map_err(agent_error)?;
                         pretty_json(root).map_err(agent_error)?
                     }
                     Live::Codex(codex) => {
-                        let (text, written) = write_codex_connection(
-                            &codex.text,
-                            target.as_deref().zip(profile),
-                            &recorded,
-                        )
-                        .map_err(agent_error)?;
-                        owned_after = written;
-                        text.into_bytes()
+                        owned_after = Vec::new();
+                        clear_codex_connection(&codex.text, &recorded).into_bytes()
                     }
                 });
             }
@@ -2886,17 +2735,8 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
     }
 
     let changes = SettingsChanges {
-        backfill: backfill.as_ref().filter(|plan| {
-            !matches!(&args.action, Action::Switch(Some(name)) if args.connection.is_some() && *name == plan.name)
-        }),
-        connection: match (&args.action, &args.connection) {
-            (Action::Switch(Some(name)), Some(raw)) => Some((name.as_str(), raw)),
-            _ => None,
-        },
-        active: match &args.action {
-            Action::Switch(target) => Some(target.as_deref()),
-            _ => None,
-        },
+        backfill: backfill.as_ref(),
+        clear_active: matches!(args.action, Action::UseDefault),
         patch: patch.as_ref(),
     };
     // 写前演练：改动后的定义必须仍能被解析，否则一个字节都不写
@@ -2921,12 +2761,8 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
             .is_some_and(RuntimePatch::sets_builtin_statusline);
     let mode = match &args.action {
         Action::Runtime(_) => "runtime",
-        Action::Switch(_) => "switch",
+        Action::UseDefault => "switch",
         Action::SaveCurrent => "save-current",
-    };
-    let target_name = match &args.action {
-        Action::Switch(target) => target.clone(),
-        _ => None,
     };
     let backfill_json = backfill.as_ref().map(|plan| {
         json!({
@@ -3015,7 +2851,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
             Some(&json!({
                 "file": file_label,
                 "mode": mode,
-                "target": target_name,
+                "target": Value::Null,
                 "changed": changed,
                 "backfill": backfill_json,
                 "discarded_live": discarded_live,
@@ -3172,13 +3008,10 @@ mod tests {
     }
 
     #[test]
-    fn 带旧注释的既有文件写入后注释与旧表撤掉_新表不带注释_其余保留() {
-        let (out, written) =
-            write_codex_connection(LEGACY_CODEX, Some(("next", &relay_profile("next"))), &[])
-                .unwrap();
-        assert_eq!(written, vec!["next".to_string()]);
+    fn 带旧注释的既有文件切回官方后注释与旧表撤掉_其余保留() {
+        let out = clear_codex_connection(LEGACY_CODEX, &[]);
         assert!(!out.contains("[model_providers.relay]"), "{out}");
-        assert!(out.contains("[model_providers.next]"), "{out}");
+        assert!(!out.contains("model_provider ="), "{out}");
         assert!(
             !out.contains("# [agent-manager:managed]\n[model_providers"),
             "provider 表前不再有受管注释：{out}"
@@ -3194,7 +3027,7 @@ mod tests {
     }
 
     #[test]
-    fn 用户自己的同名_provider_含引号写法_未认领就拒绝_认领后撤掉再写() {
+    fn 引号写法的同名_provider_未认领就保留_认领后连子表一起撤() {
         let existing = concat!(
             "[model_providers.\"relay\"]\n",
             "base_url = \"https://hand.example.com\"\n",
@@ -3203,35 +3036,15 @@ mod tests {
             "[mcp_servers.relay]\n",
             "command = \"relay-mcp\"\n",
         );
-        let relay = relay_profile("relay");
-        let err = write_codex_connection(existing, Some(("relay", &relay)), &[]).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("config.toml 中已有你自己的同名接入方式 relay，拒绝覆盖"),
-            "{err}"
-        );
-        // 只有 MCP 同名表不算冲突
-        let (_, written) = write_codex_connection(
-            "[mcp_servers.relay]\ncommand = \"relay-mcp\"\n",
-            Some(("relay", &relay)),
-            &[],
-        )
-        .unwrap();
-        assert_eq!(written, vec!["relay".to_string()]);
+        // 库里没记录：是用户自己的表，逐字节保留
+        assert_eq!(clear_codex_connection(existing, &[]), existing);
 
-        let (out, written) =
-            write_codex_connection(existing, Some(("relay", &relay)), &["relay".to_string()])
-                .unwrap();
-        assert_eq!(written, vec!["relay".to_string()]);
-        let parsed: toml::Value = out.parse().unwrap();
-        assert_eq!(
-            parsed["model_providers"]["relay"]["base_url"].as_str(),
-            Some("https://relay.example.com/v1")
-        );
+        let out = clear_codex_connection(existing, &["relay".to_string()]);
         assert!(!out.contains("hand.example.com"), "{out}");
+        assert!(!out.contains("http_headers"), "{out}");
         assert!(
             out.contains("[mcp_servers.relay]\ncommand = \"relay-mcp\"\n"),
-            "{out}"
+            "只有 MCP 同名表不归这里管：{out}"
         );
     }
 
@@ -4064,7 +3877,7 @@ stream_idle_timeout_ms = 450000
     }
 
     #[test]
-    fn codex_引用型接入只看_model_provider_与模型_切换只写顶层键() {
+    fn codex_引用型接入只看_model_provider_与模型_切回官方只撤顶层键() {
         let user_table = "model_provider = \"kimi\"\nmodel = \"k2\"\n\n[model_providers.kimi]\nbase_url = \"http://10.0.0.2:8080/v1\"\nhttp_headers = { X = \"1\" }\n";
         let live = codex_live(user_table);
         let reference = profile(json!({"provider_ref": "kimi", "model": "k2"}));
@@ -4075,23 +3888,10 @@ stream_idle_timeout_ms = 450000
             &live
         ));
 
-        // 切到引用型接入：只写 model_provider / model，那张表原样保留、也不记为本工具所有
-        let (out, written) = write_codex_connection(
-            "model = \"gpt-5\"\n\n[model_providers.kimi]\nbase_url = \"http://10.0.0.2:8080/v1\"\n",
-            Some(("imported", &reference)),
-            &[],
-        )
-        .unwrap();
-        assert!(written.is_empty());
-        assert!(out.contains("model_provider = \"kimi\""), "{out}");
-        assert!(out.contains("model = \"k2\""), "{out}");
+        // 引用的是用户自己的表：切回官方只撤顶层键，那张表原样保留
+        let out = clear_codex_connection(user_table, &[]);
+        assert!(!out.contains("model_provider ="), "{out}");
+        assert!(!out.contains("model = \"k2\""), "{out}");
         assert!(out.contains("[model_providers.kimi]\nbase_url = \"http://10.0.0.2:8080/v1\"\n"));
-
-        // 引用的表不在了、又不是内置的：拒绝；内置 ollama 不需要表
-        let err = write_codex_connection("", Some(("imported", &reference)), &[]).unwrap_err();
-        assert!(err.to_string().contains("已不在 config.toml 中"), "{err}");
-        let ollama = profile(json!({"provider_ref": "ollama"}));
-        let (out, _) = write_codex_connection("", Some(("local", &ollama)), &[]).unwrap();
-        assert!(out.contains("model_provider = \"ollama\""), "{out}");
     }
 }
