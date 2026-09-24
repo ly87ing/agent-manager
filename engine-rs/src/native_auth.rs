@@ -13,8 +13,9 @@ pub(crate) enum AuthKind {
     Codex,
 }
 
-/// 探测时从子进程环境里去掉的变量：它们会让官方命令报告进程环境里的凭据，
-/// 而不是这个配置目录里存的登录。
+/// 探测时从子进程环境里去掉的变量：它们会让官方命令报告进程环境里的凭据或别的来源，
+/// 而不是这个配置目录里存的登录。依据官方认证优先级：云厂商开关、两种第三方凭据、官方长期
+/// 令牌、Anthropic 配置档案与工作负载身份联合（WIF）变量都排在 `/login` 之前。
 const CLAUDE_PROBE_ENV_REMOVE: &[&str] = &[
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_API_KEY",
@@ -22,9 +23,52 @@ const CLAUDE_PROBE_ENV_REMOVE: &[&str] = &[
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_MANTLE",
+    "ANTHROPIC_PROFILE",
+    "ANTHROPIC_FEDERATION_RULE_ID",
+    "ANTHROPIC_ORGANIZATION_ID",
+    "ANTHROPIC_SERVICE_ACCOUNT_ID",
+    "ANTHROPIC_IDENTITY_TOKEN",
+    "ANTHROPIC_IDENTITY_TOKEN_FILE",
+    "ANTHROPIC_WORKSPACE_ID",
+    // 只认 API key、不读登录（--bare）；嵌入宿主用它让配置文件里的凭据失效
+    "CLAUDE_CODE_SIMPLE",
+    "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST",
     // 未公开，但若从外部继承会把登录存储指到别的目录
     "CLAUDE_SECURESTORAGE_CONFIG_DIR",
 ];
+/// Anthropic 配置档案（`~/.config/anthropic`，WIF 参考文档）不随 `CLAUDE_CONFIG_DIR` 区分：
+/// 活动档案是联合身份时，官方命令对任何配置目录都报「已登录」。探测时把档案目录指到一个
+/// 不存在的位置，只看这个目录自己的登录；实测官方命令只读、不会创建它。档案本身在
+/// `credential_overrides` 里如实提示。
+#[cfg(unix)]
+const CLAUDE_PROBE_NO_PROFILE_DIR: &str = "/nonexistent/agent-manager-probe/anthropic";
+#[cfg(not(unix))]
+const CLAUDE_PROBE_NO_PROFILE_DIR: &str = "Z:\\nonexistent\\agent-manager-probe\\anthropic";
+/// 经官方 `--settings` 取消的凭据来源（CLI 参数优先于配置目录里的 settings.json）：目录自己
+/// 声明的第三方凭据、长期令牌、云厂商开关与 apiKeyHelper 都会遮住目录里的登录，取消后官方命令
+/// 报告的就是这个目录存的登录。只在这次子进程里生效，不改任何文件。
+const CLAUDE_PROBE_CANCELLED_ENV: &[&str] = &[
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_MANTLE",
+];
+/// Console 登录生成、由 Claude Code 自己保管的 API key 在 `auth status` 里的来源名。
+const CLAUDE_CONSOLE_KEY_SOURCE: &str = "/login managed key";
+
+fn claude_probe_settings() -> String {
+    let env: serde_json::Map<String, Value> = CLAUDE_PROBE_CANCELLED_ENV
+        .iter()
+        .map(|name| (name.to_string(), Value::String(String::new())))
+        .collect();
+    json!({"apiKeyHelper": "", "env": env}).to_string()
+}
 const CODEX_PROBE_ENV_REMOVE: &[&str] = &["CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"];
 const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
@@ -44,39 +88,27 @@ fn resolve_cli(home_dir: &Path, bin: &str) -> Option<std::path::PathBuf> {
         .find(|path| path.is_file())
 }
 
-/// 该目录的 settings.json 是否自己声明了凭据：声明了时官方命令只报告它，
-/// 看不到被它遮住的登录。
-fn claude_settings_declare_credential(config_dir: &Path) -> bool {
-    let Some(root) = std::fs::read(config_dir.join("settings.json"))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-    else {
-        return false;
-    };
-    let non_empty = |value: Option<&Value>| {
-        value
-            .and_then(Value::as_str)
-            .is_some_and(|text| !text.is_empty())
-    };
-    let env = root.get("env");
-    non_empty(env.and_then(|env| env.get("ANTHROPIC_AUTH_TOKEN")))
-        || non_empty(env.and_then(|env| env.get("ANTHROPIC_API_KEY")))
-        || non_empty(root.get("apiKeyHelper"))
-}
-
-/// `.claude.json` 里有没有登录会话记录（官方文档：这个文件保存登录会话）。
-/// 只看键是否存在，不读取内容。文件存在但解析不了时无法确认，报错。
-fn claude_json_records_login(path: &Path) -> Result<bool, String> {
+/// `.claude.json` 里有没有登录记录（官方文档：这个文件保存登录会话）：`oauthAccount` 是
+/// claude.ai 与 Console 登录的账号记录，`primaryApiKey` 是 Console 登录在 Linux 上保管的 key。
+/// 只看键是否存在，不读取取值。文件存在但解析不了时无法确认，报错。
+///
+/// 返回 `None` 表示没有登录记录，`Some(方式)` 是能从记录看出的登录方式（看不出时为 `None`）。
+fn claude_json_login(path: &Path) -> Result<Option<Option<&'static str>>, String> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err("无法读取 .claude.json".into()),
     };
     let root = serde_json::from_slice::<Value>(&bytes)
         .map_err(|_| ".claude.json 不是合法 JSON".to_string())?;
-    Ok(root
-        .get("oauthAccount")
-        .is_some_and(|value| !value.is_null()))
+    let has = |key: &str| root.get(key).is_some_and(|value| !value.is_null());
+    Ok(if has("primaryApiKey") {
+        Some(Some("console"))
+    } else if has("oauthAccount") {
+        Some(None)
+    } else {
+        None
+    })
 }
 
 /// 官方账号登录状态：`method` 是官方命令报告的登录方式（不含账号与令牌）。
@@ -104,19 +136,19 @@ pub(crate) fn official_status(
         return Ok(logged_out());
     }
     // Claude 的登录记录：设了配置目录时都在目录里；主配置的 .claude.json 在 HOME 下
-    let claude_dir = config_dir.map_or_else(|| home_dir.join(".claude"), Path::to_path_buf);
     let claude_json = config_dir.map_or_else(
         || home_dir.join(".claude.json"),
         |dir| dir.join(".claude.json"),
     );
-    if matches!(kind, AuthKind::Claude)
-        && (claude_dir.join(".credentials.json").exists()
-            || claude_json_records_login(&claude_json)?)
-    {
-        return Ok(LoginStatus {
-            logged_in: true,
-            method: None,
-        });
+    // `.credentials.json` 还存 MCP 服务的 OAuth 登录（官方认证文档），存在不等于登录了账号，
+    // 以官方命令为准；`.claude.json` 的登录记录不受目录里声明的凭据影响，先看它。
+    if matches!(kind, AuthKind::Claude) {
+        if let Some(method) = claude_json_login(&claude_json)? {
+            return Ok(LoginStatus {
+                logged_in: true,
+                method,
+            });
+        }
     }
     let cli = resolve_cli(home_dir, bin)
         .ok_or_else(|| format!("找不到 {bin} 命令，无法用官方命令确认登录状态"))?;
@@ -126,7 +158,7 @@ pub(crate) fn official_status(
         .env("PATH", crate::native_agents::path_for_command(&cli));
     match kind {
         AuthKind::Claude => {
-            command.args(["auth", "status"]);
+            command.args(["--settings", &claude_probe_settings(), "auth", "status"]);
             match config_dir {
                 Some(dir) => command.env("CLAUDE_CONFIG_DIR", dir),
                 None => command.env_remove("CLAUDE_CONFIG_DIR"),
@@ -134,6 +166,7 @@ pub(crate) fn official_status(
             for name in CLAUDE_PROBE_ENV_REMOVE {
                 command.env_remove(name);
             }
+            command.env("ANTHROPIC_CONFIG_DIR", CLAUDE_PROBE_NO_PROFILE_DIR);
             let (code, stdout, _) = crate::native_upstream::capture_exit(command, PROBE_TIMEOUT)
                 .ok_or_else(|| format!("{bin} auth status 没有正常结束"))?;
             let status = serde_json::from_slice::<Value>(&stdout)
@@ -143,18 +176,16 @@ pub(crate) fn official_status(
             if status.get("loggedIn").and_then(Value::as_bool) != Some(true) {
                 return Ok(logged_out());
             }
+            // 目录声明的凭据已经取消：剩下的 claude.ai / Console 登录是这个目录存的；长期令牌
+            // 只可能来自托管设置，按有登录处理（不放行第三方凭据写进来）。API key、apiKeyHelper
+            // 与云厂商（third_party）也只可能来自托管设置，不是官方账号登录。
+            let key_source = status.get("apiKeySource").and_then(Value::as_str);
             let method = match status.get("authMethod").and_then(Value::as_str) {
+                _ if key_source == Some(CLAUDE_CONSOLE_KEY_SOURCE) => "console",
                 Some("claude.ai") => "claude.ai",
                 Some("oauth_token") => "oauth_token",
-                Some("api_key") => "api_key",
-                _ => "other",
+                _ => return Ok(logged_out()),
             };
-            // 目录自己声明了凭据时，这两种方式来自那份凭据；登录记录已在上面查过
-            if matches!(method, "oauth_token" | "api_key")
-                && claude_settings_declare_credential(&claude_dir)
-            {
-                return Ok(logged_out());
-            }
             Ok(LoginStatus {
                 logged_in: true,
                 method: Some(method),
@@ -288,8 +319,8 @@ pub(crate) fn status_command(
     })
 }
 
-/// 会压过主配置里官方账号的外部设置（官方文档 / 源码确认的变量）：主配置只放官方账号，
-/// 但这些来源不归本工具管，只如实提示。
+/// 会压过主配置里官方账号的外部设置（官方认证优先级文档 / 源码确认的变量）：主配置只放官方
+/// 账号，但这些来源不归本工具管，只如实提示。
 const CLAUDE_OVERRIDE_ENV: &[&str] = &[
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_API_KEY",
@@ -298,13 +329,37 @@ const CLAUDE_OVERRIDE_ENV: &[&str] = &[
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_MANTLE",
+    // Anthropic 配置档案与工作负载身份联合：命名档案与联合身份都排在 /login 之前
+    "ANTHROPIC_PROFILE",
+    "ANTHROPIC_FEDERATION_RULE_ID",
+    // 附加请求头，可以带 Authorization 等凭据头
+    "ANTHROPIC_CUSTOM_HEADERS",
 ];
+/// Codex：`CODEX_ACCESS_TOKEN` 所有入口都读、`CODEX_API_KEY` 由 `codex exec` 等非交互入口读，
+/// 都优先于 `auth.json` 里的登录（`rust-v0.156.1` `login/src/auth/manager.rs`）。
 const CODEX_OVERRIDE_ENV: &[&str] = &["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"];
-const CLAUDE_CLOUD_PROVIDER_ENV: &[&str] = &[
+/// Claude `settings.json`（主配置与托管设置）的 `env` 里会压过官方账号、又不属于第三方接入键的变量。
+/// 第三方接入键（地址与两种第三方凭据）写在主配置里由「混用」提示处理，这里只看托管设置里的。
+const CLAUDE_SETTINGS_OVERRIDE_ENV: &[&str] = &[
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_MANTLE",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_PROFILE",
+    "ANTHROPIC_CUSTOM_HEADERS",
 ];
+const CLAUDE_MANAGED_ONLY_ENV: &[&str] = &[
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+];
+/// 托管设置里限定登录方式的键：设了任一个，用第三方凭据（API key、令牌、apiKeyHelper）的会话在
+/// 启动时就被拦下（官方设置参考 `forceLoginMethod` / `forceLoginOrgUUID`）。
+const CLAUDE_MANAGED_LOGIN_KEYS: &[&str] = &["forceLoginMethod", "forceLoginOrgUUID"];
 /// shell 启动时会读的配置文件（相对 HOME）。
 const SHELL_RC_FILES: &[&str] = &[
     ".zshenv",
@@ -315,6 +370,7 @@ const SHELL_RC_FILES: &[&str] = &[
     ".profile",
 ];
 const MAX_RC_BYTES: u64 = 1024 * 1024;
+const MAX_JSON_BYTES: u64 = 1024 * 1024;
 
 /// 一行 shell 配置是否给 `name` 赋值（`NAME=…` 或 `export NAME=…`，注释行不算）。
 fn assigns(line: &str, name: &str) -> bool {
@@ -327,12 +383,95 @@ fn assigns(line: &str, name: &str) -> bool {
         .is_some_and(|rest| rest.starts_with('='))
 }
 
-/// 主配置之外、会压过官方账号的设置：`[{source, name}]`，只有来源与变量名，不含取值。
-/// 只读：读 shell 配置文件、Claude 的 settings.json 与本进程环境（`env_set` 注入，便于测试）。
+/// 读一个不太大的 JSON 文件；读不了、太大或不是 JSON 都当作没有（提示是尽力而为，不报错）。
+fn read_small_json(path: &Path) -> Option<Value> {
+    std::fs::metadata(path)
+        .ok()
+        .filter(|meta| meta.is_file() && meta.len() <= MAX_JSON_BYTES)?;
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+/// 取值是否真的打开了（非空；开关类的 `0` 也不算）。
+fn set_value(value: Option<&Value>) -> bool {
+    value
+        .and_then(Value::as_str)
+        .is_some_and(|text| !text.is_empty() && text != "0")
+}
+
+/// Claude 托管设置文件（官方设置文档：各平台固定目录下的 `managed-settings.json` 与
+/// `managed-settings.d/*.json`，优先级最高）。macOS 描述文件与 Windows 注册表不在这里看。
+fn claude_managed_settings_dirs() -> Vec<std::path::PathBuf> {
+    #[cfg(target_os = "macos")]
+    let dirs = vec![std::path::PathBuf::from(
+        "/Library/Application Support/ClaudeCode",
+    )];
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let dirs = vec![std::path::PathBuf::from("/etc/claude-code")];
+    #[cfg(windows)]
+    let dirs = vec![std::path::PathBuf::from("C:\\Program Files\\ClaudeCode")];
+    dirs
+}
+
+fn claude_managed_settings_files(dirs: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    for dir in dirs {
+        files.push(dir.join("managed-settings.json"));
+        let mut drop_ins: Vec<_> = std::fs::read_dir(dir.join("managed-settings.d"))
+            .map(|entries| {
+                entries
+                    .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                    .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        drop_ins.sort();
+        files.extend(drop_ins);
+    }
+    files
+}
+
+/// 活动的 Anthropic 配置档案是不是联合身份（WIF 参考文档：`active_config` 是一行档案名，缺省为
+/// `default`；`configs/<名>.json` 不含机密，`authentication.type` 为 `oidc_federation` 时排在 /login
+/// 之前）。只读这两个不含机密的文件，不碰 `credentials/`。
+fn anthropic_federation_profile(home_dir: &Path) -> Option<String> {
+    let base = home_dir.join(".config/anthropic");
+    let name = std::fs::read_to_string(base.join("active_config"))
+        .ok()
+        .map(|text| text.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "default".to_string());
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        || name.starts_with('.')
+    {
+        return None;
+    }
+    let config = read_small_json(&base.join("configs").join(format!("{name}.json")))?;
+    (config
+        .get("authentication")
+        .and_then(|auth| auth.get("type"))
+        .and_then(Value::as_str)
+        == Some("oidc_federation"))
+    .then(|| format!("~/.config/anthropic/configs/{name}.json"))
+}
+
+/// 主配置之外、会压过（或限定）官方账号的设置：`[{source, name}]`，只有来源与变量名，不含取值。
+/// 只读：读 shell 配置文件、Claude 的 settings.json 与托管设置、Anthropic 配置档案、Codex 的
+/// config.toml 与本进程环境（`env_set` 注入，便于测试）。
 pub(crate) fn credential_overrides(
     home_dir: &Path,
     kind: AuthKind,
     env_set: &dyn Fn(&str) -> bool,
+) -> Vec<Value> {
+    credential_overrides_with(home_dir, kind, env_set, &claude_managed_settings_dirs())
+}
+
+fn credential_overrides_with(
+    home_dir: &Path,
+    kind: AuthKind,
+    env_set: &dyn Fn(&str) -> bool,
+    managed_dirs: &[std::path::PathBuf],
 ) -> Vec<Value> {
     let names = match kind {
         AuthKind::Claude => CLAUDE_OVERRIDE_ENV,
@@ -359,23 +498,63 @@ pub(crate) fn credential_overrides(
             out.push(json!({"source": "进程环境", "name": name}));
         }
     }
-    if matches!(kind, AuthKind::Claude) {
-        let settings = std::fs::read(home_dir.join(".claude/settings.json"))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
-        if let Some(root) = settings {
-            let set = |value: Option<&Value>| {
-                value
-                    .and_then(Value::as_str)
-                    .is_some_and(|text| !text.is_empty() && text != "0")
-            };
-            if set(root.get("apiKeyHelper")) {
-                out.push(json!({"source": "~/.claude/settings.json", "name": "apiKeyHelper"}));
-            }
-            for name in CLAUDE_CLOUD_PROVIDER_ENV {
-                if set(root.get("env").and_then(|env| env.get(*name))) {
-                    out.push(json!({"source": "~/.claude/settings.json", "name": name}));
+    match kind {
+        AuthKind::Claude => {
+            if let Some(root) = read_small_json(&home_dir.join(".claude/settings.json")) {
+                if set_value(root.get("apiKeyHelper")) {
+                    out.push(json!({"source": "~/.claude/settings.json", "name": "apiKeyHelper"}));
                 }
+                for name in CLAUDE_SETTINGS_OVERRIDE_ENV {
+                    if set_value(root.get("env").and_then(|env| env.get(*name))) {
+                        out.push(json!({"source": "~/.claude/settings.json", "name": name}));
+                    }
+                }
+            }
+            for path in claude_managed_settings_files(managed_dirs) {
+                let Some(root) = read_small_json(&path) else {
+                    continue;
+                };
+                let source = path.display().to_string();
+                if set_value(root.get("apiKeyHelper")) {
+                    out.push(json!({"source": source, "name": "apiKeyHelper"}));
+                }
+                for name in CLAUDE_SETTINGS_OVERRIDE_ENV
+                    .iter()
+                    .chain(CLAUDE_MANAGED_ONLY_ENV)
+                {
+                    if set_value(root.get("env").and_then(|env| env.get(*name))) {
+                        out.push(json!({"source": source, "name": name}));
+                    }
+                }
+                for key in CLAUDE_MANAGED_LOGIN_KEYS {
+                    let value = root.get(*key);
+                    if set_value(value)
+                        || value
+                            .and_then(Value::as_array)
+                            .is_some_and(|a| !a.is_empty())
+                    {
+                        out.push(json!({"source": source, "name": key}));
+                    }
+                }
+            }
+            if let Some(source) = anthropic_federation_profile(home_dir) {
+                out.push(json!({"source": source, "name": "oidc_federation"}));
+            }
+        }
+        AuthKind::Codex => {
+            // 内置 openai 接入方式的地址覆盖（官方配置参考）：官方账号的凭据会随请求发往这个地址
+            let config = std::fs::metadata(home_dir.join(".codex/config.toml"))
+                .ok()
+                .filter(|meta| meta.is_file() && meta.len() <= MAX_RC_BYTES)
+                .and_then(|_| std::fs::read_to_string(home_dir.join(".codex/config.toml")).ok())
+                .and_then(|text| text.parse::<toml::Table>().ok());
+            if config
+                .as_ref()
+                .and_then(|doc| doc.get("openai_base_url"))
+                .and_then(toml::Value::as_str)
+                .is_some_and(|url| !url.trim().is_empty())
+            {
+                out.push(json!({"source": "~/.codex/config.toml", "name": "openai_base_url"}));
             }
         }
     }
@@ -422,6 +601,123 @@ mod tests {
         );
         assert!(!format!("{claude:?}{codex:?}").contains("sk-secret-value"));
         assert!(!format!("{claude:?}").contains("relay.example.com"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 官方认证优先级里新近的来源同样提示：另两个云厂商开关、命名档案与联合身份、附加请求头、
+    /// 托管设置（含 drop-in 与限定登录方式的键）、活动的联合身份档案、Codex 的 openai_base_url。
+    #[test]
+    fn overrides_cover_newer_sources_and_managed_settings_without_values() {
+        let home = std::env::temp_dir().join(format!("am-auth-overrides2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let managed = home.join("managed");
+        std::fs::create_dir_all(managed.join("managed-settings.d")).unwrap();
+        std::fs::create_dir_all(home.join(".config/anthropic/configs")).unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(
+            home.join(".bashrc"),
+            "export CLAUDE_CODE_USE_MANTLE=1\nANTHROPIC_PROFILE=prod\nexport ANTHROPIC_CUSTOM_HEADERS='X-A: secret-header'\n",
+        )
+        .unwrap();
+        std::fs::write(
+            home.join(".claude/settings.json"),
+            r#"{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"sk-ant-oat01-secret","CLAUDE_CODE_USE_ANTHROPIC_AWS":"1"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            managed.join("managed-settings.json"),
+            r#"{"forceLoginMethod":"claudeai","forceLoginOrgUUID":["org-1"],"env":{"ANTHROPIC_BASE_URL":"https://gw.corp.example"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            managed.join("managed-settings.d/10-helper.json"),
+            r#"{"apiKeyHelper":"/opt/corp/key.sh"}"#,
+        )
+        .unwrap();
+        std::fs::write(home.join(".config/anthropic/active_config"), "wif\n").unwrap();
+        std::fs::write(
+            home.join(".config/anthropic/configs/wif.json"),
+            r#"{"version":"1.0","authentication":{"type":"oidc_federation","federation_rule_id":"fdrl_x"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            home.join(".codex/config.toml"),
+            "openai_base_url = \"https://relay.example.com/v1\"\n",
+        )
+        .unwrap();
+
+        let claude =
+            credential_overrides_with(&home, AuthKind::Claude, &|_| false, &[managed.clone()]);
+        let names: Vec<(String, String)> = claude
+            .iter()
+            .map(|item| {
+                (
+                    item["source"].as_str().unwrap().to_string(),
+                    item["name"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        let managed_main = managed.join("managed-settings.json").display().to_string();
+        let managed_drop = managed
+            .join("managed-settings.d/10-helper.json")
+            .display()
+            .to_string();
+        for expected in [
+            (
+                "~/.bashrc".to_string(),
+                "CLAUDE_CODE_USE_MANTLE".to_string(),
+            ),
+            ("~/.bashrc".to_string(), "ANTHROPIC_PROFILE".to_string()),
+            (
+                "~/.bashrc".to_string(),
+                "ANTHROPIC_CUSTOM_HEADERS".to_string(),
+            ),
+            (
+                "~/.claude/settings.json".to_string(),
+                "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
+            ),
+            (
+                "~/.claude/settings.json".to_string(),
+                "CLAUDE_CODE_USE_ANTHROPIC_AWS".to_string(),
+            ),
+            (managed_main.clone(), "ANTHROPIC_BASE_URL".to_string()),
+            (managed_main.clone(), "forceLoginMethod".to_string()),
+            (managed_main.clone(), "forceLoginOrgUUID".to_string()),
+            (managed_drop, "apiKeyHelper".to_string()),
+            (
+                "~/.config/anthropic/configs/wif.json".to_string(),
+                "oidc_federation".to_string(),
+            ),
+        ] {
+            assert!(names.contains(&expected), "缺 {expected:?}：{names:?}");
+        }
+        let text = format!("{claude:?}");
+        for secret in [
+            "secret-header",
+            "sk-ant-oat01-secret",
+            "gw.corp.example",
+            "/opt/corp/key.sh",
+            "fdrl_x",
+        ] {
+            assert!(!text.contains(secret), "不得带出取值 {secret}");
+        }
+
+        let codex = credential_overrides_with(&home, AuthKind::Codex, &|_| false, &[]);
+        assert_eq!(
+            codex,
+            vec![json!({"source": "~/.codex/config.toml", "name": "openai_base_url"})]
+        );
+        assert!(!format!("{codex:?}").contains("relay.example.com"));
+
+        // 用户自己用 `ant auth login` 登录的档案（user_oauth）排在 /login 之后，不提示
+        std::fs::write(
+            home.join(".config/anthropic/configs/wif.json"),
+            r#"{"authentication":{"type":"user_oauth"}}"#,
+        )
+        .unwrap();
+        let claude = credential_overrides_with(&home, AuthKind::Claude, &|_| false, &[]);
+        assert!(!claude.iter().any(|item| item["name"] == "oidc_federation"));
         let _ = std::fs::remove_dir_all(&home);
     }
 

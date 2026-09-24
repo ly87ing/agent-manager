@@ -67,7 +67,7 @@ function unwritableReason(element: EngineElement): string | null {
     : "客户端配置文件暂不可读，不能写入";
 }
 
-/** 各外部设置对主配置官方账号的影响（依据官方认证优先级文档与 Codex 源码）。 */
+/** 各外部设置对主配置官方账号的影响（依据官方认证优先级文档、设置参考与 Codex 源码）。 */
 const OVERRIDE_EFFECT: Record<string, string> = {
   ANTHROPIC_AUTH_TOKEN: "Claude 会优先用这个令牌，不用官方账号",
   ANTHROPIC_API_KEY: "Claude 可能改用这个 API key（-p 模式直接使用，交互模式确认后使用）",
@@ -76,9 +76,18 @@ const OVERRIDE_EFFECT: Record<string, string> = {
   CLAUDE_CODE_USE_BEDROCK: "Claude 改走 Amazon Bedrock，不用官方账号",
   CLAUDE_CODE_USE_VERTEX: "Claude 改走 Google Vertex，不用官方账号",
   CLAUDE_CODE_USE_FOUNDRY: "Claude 改走 Microsoft Foundry，不用官方账号",
+  CLAUDE_CODE_USE_ANTHROPIC_AWS: "Claude 改走 Claude Platform on AWS，不用官方账号",
+  CLAUDE_CODE_USE_MANTLE: "Claude 改走 Amazon Bedrock Mantle，不用官方账号",
+  ANTHROPIC_PROFILE: "Claude 会用这个 Anthropic 配置档案的凭据，优先于 /login 登录",
+  ANTHROPIC_FEDERATION_RULE_ID: "Claude 会用工作负载身份联合换取的令牌，优先于 /login 登录",
+  ANTHROPIC_CUSTOM_HEADERS: "每个请求都会附加这些请求头，其中可能有凭据头",
+  oidc_federation: "活动的 Anthropic 配置档案是联合身份，Claude 会优先用它换取的令牌，不用 /login 登录",
   apiKeyHelper: "Claude 会优先用这条命令输出的凭据，不用官方账号",
-  CODEX_API_KEY: "Codex 会优先用这个 API key，不用 auth.json 里的登录",
-  CODEX_ACCESS_TOKEN: "Codex 会优先用这个访问令牌，不用 auth.json 里的登录",
+  forceLoginMethod: "组织统一下发的设置限定了登录方式；用第三方凭据的独立环境会在启动时被拦下",
+  forceLoginOrgUUID: "组织统一下发的设置限定了可登录的组织；用第三方凭据的独立环境会在启动时被拦下",
+  CODEX_API_KEY: "codex exec 等非交互命令会优先用这个 API key，不用 auth.json 里的登录（交互界面不读它）",
+  CODEX_ACCESS_TOKEN: "Codex 所有入口都会优先用这个访问令牌，不用 auth.json 里的登录",
+  openai_base_url: "Codex 会把官方账号的凭据连同请求发往这个地址",
 };
 
 export function ConnectionWorkbench({
@@ -452,7 +461,7 @@ export function ConnectionWorkbench({
             data-testid="main-credential-overrides"
             className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning"
           >
-            <p className="font-medium">这些设置会压过主配置里的官方账号：</p>
+            <p className="font-medium">这些外部设置会压过或限定主配置里的官方账号：</p>
             <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
               {overrides.map((item) => (
                 <li key={`${item.source}/${item.name}`}>

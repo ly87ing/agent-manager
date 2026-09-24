@@ -1132,11 +1132,15 @@ describe("助手运行参数", () => {
     (status.data.elements[0].observed as Record<string, unknown>).credential_overrides = [
       { source: "~/.zshrc", name: "ANTHROPIC_BASE_URL" },
       { source: "~/.claude/settings.json", name: "apiKeyHelper" },
+      { source: "/etc/claude-code/managed-settings.json", name: "forceLoginMethod" },
+      { source: "~/.config/anthropic/configs/wif.json", name: "oidc_federation" },
     ];
     const { calls } = renderWithEngine(<AgentsPage />, withOverrides);
     const warning = await screen.findByTestId("main-credential-overrides");
     expect(warning).toHaveTextContent("~/.zshrc 里的 ANTHROPIC_BASE_URL：Claude 会把请求连同官方账号的登录凭据发往这个地址");
     expect(warning).toHaveTextContent("~/.claude/settings.json 里的 apiKeyHelper");
+    expect(warning).toHaveTextContent("/etc/claude-code/managed-settings.json 里的 forceLoginMethod：组织统一下发的设置限定了登录方式；用第三方凭据的独立环境会在启动时被拦下");
+    expect(warning).toHaveTextContent("~/.config/anthropic/configs/wif.json 里的 oidc_federation：活动的 Anthropic 配置档案是联合身份");
     expect(warning).toHaveTextContent("只提示，不会改这些文件");
     expect(within(warning).queryByRole("button")).toBeNull();
     expect(configureCalls(calls)).toHaveLength(0);

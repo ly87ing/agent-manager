@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Copy, FolderTree, Loader2, PlayCircle, Plus, Sparkles, Terminal, Trash2, Wrench } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
-import type { OfficialAuthStatus } from "../lib/observed";
+import { authMethodLabel, type OfficialAuthStatus } from "../lib/observed";
 import type { ProfileObserved, ProfileSpec } from "../lib/contract";
 import { AgentUsageBar } from "./AgentUsageBar";
 import { AuthCommandActions } from "./AuthCommandActions";
@@ -84,7 +84,7 @@ export function ProfileCard({
     : typeof auth === "string"
       ? `检查失败：${auth}`
       : auth.state === "logged-in"
-        ? `已登录${auth.method ? `（${auth.method}）` : ""}`
+        ? `已登录${authMethodLabel(auth.method) ? `（${authMethodLabel(auth.method)}）` : ""}`
         : auth.state === "logged-out"
           ? "未登录"
           : `无法确认：${auth.reason ?? "未知原因"}`;

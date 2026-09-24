@@ -234,10 +234,9 @@ profile 与各类表等）在「运行设置」页底部的「直接编辑配置
 
 官方账号凭据与第三方凭据不在同一个配置目录里出现。带第三方地址或凭据的实例（Claude 声明了
 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN` 或 `ANTHROPIC_API_KEY`；Codex 填了地址，凭据变量必须和地址一起设置）
-在写入前用官方命令（`claude auth status` / `codex login status`，探测时去掉进程环境里的凭据变量）
-确认配置目录里没有官方账号登录；Claude 的第三方凭据会遮住官方登录，另看目录里 `.claude.json`
-的登录会话记录与 `.credentials.json`。有登录或无法确认都拒绝，提示换一个新目录；官方账号实例
-不做这项检查。Claude 实例的定义规则：两种第三方凭据只能声明一个；有地址必须有凭据（否则 Claude
+在写入前用官方命令（`claude auth status` / `codex login status`，探测方式见下文「检查登录」）
+确认配置目录里没有官方账号登录（claude.ai 或 Console 登录都算）。有登录或无法确认都拒绝，提示换一个
+新目录；官方账号实例不做这项检查。Claude 实例的定义规则：两种第三方凭据只能声明一个；有地址必须有凭据（否则 Claude
 会把官方登录发往该地址）；第三方实例不能声明官方长期令牌 `CLAUDE_CODE_OAUTH_TOKEN`，也不能打开
 云厂商开关（`CLAUDE_CODE_USE_*` 非空时 Claude 改走云厂商、不用实例的第三方凭据）。
 
@@ -314,10 +313,20 @@ AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、�
 格式、助手形态、名称、URL、模型与变量名校验，再明确以“保存但不启用”提交。
 
 官方账号登录状态不进 status（不读认证文件内容，也不在每次刷新时调用官方命令）。实例卡片点「检查登录」
-时调用只读的 `agents:auth-status --only <agents:助手 | profiles:实例>`：用官方命令（`claude auth status` /
-`codex login status`，去掉进程环境里的凭据变量；实例带各自的 `CLAUDE_CONFIG_DIR` / `CODEX_HOME`）查一次，
-Claude 另看官方文档说明的登录会话记录（主配置在 `~/.claude.json`，实例在目录里），只返回是否登录、登录方式
-与无法确认的原因，不返回账号、令牌或文件正文，不写库。第三方实例里查到官方登录时标为 `mixed`，卡片提示
+时调用只读的 `agents:auth-status --only <agents:助手 | profiles:实例>`：用官方命令查一次，只看这个配置目录
+自己存的登录——实例带各自的 `CLAUDE_CONFIG_DIR` / `CODEX_HOME`，主配置不带。Claude 的探测：
+去掉进程环境里排在 `/login` 之前的全部来源（两种第三方凭据、长期令牌、五个云厂商开关、`ANTHROPIC_PROFILE`
+与工作负载身份联合变量、`CLAUDE_CODE_SIMPLE` 等）；经官方 `--settings` 参数取消目录 `settings.json` 自己声明的
+凭据、云厂商开关与 `apiKeyHelper`（CLI 参数优先于该文件，只对这次子进程生效，文件不变），否则它们会遮住目录里
+的登录；把 `ANTHROPIC_CONFIG_DIR` 指到不存在的位置，因为 Anthropic 配置档案不随配置目录区分，活动档案是联合
+身份时官方命令对任何目录都报已登录。结果按 `authMethod` 与 `apiKeySource` 识别：`claude.ai` 或来源为
+`/login managed key`（Console 登录）算官方登录；取消目录声明后仍出现的 API key、`apiKeyHelper` 与云厂商只能
+来自托管设置，不算。另看 `.claude.json` 的登录记录键（`oauthAccount`；Linux 上 Console 登录的 `primaryApiKey`，
+只看键在不在）；`.credentials.json` 还存 MCP 服务的 OAuth 登录，存在不等于登录了账号，以官方命令为准。
+Codex 的探测去掉 `CODEX_API_KEY`、`CODEX_ACCESS_TOKEN`（`codex login status` 本身不读前者、会读后者）。
+只返回是否登录、登录方式（Claude 订阅账号 / Console 账号 / 长期令牌 / ChatGPT 账号 / API key）与无法确认
+的原因，不返回账号、令牌或文件正文，本工具不写库也不写文件；官方命令第一次在空目录里运行时会建它自己的
+`.claude.json` 与备份（Codex 不会），那是官方 CLI 自身行为。以上每一支都用真实 claude 2.1.281 以隔离用户核对过。第三方实例里查到官方登录时标为 `mixed`，卡片提示
 退出登录或换目录；第三方实例也不提供「复制登录命令」。普通接入保存、排序、导入导出及运行设置都不得写
 认证文件；第三方接入只在独立环境里用，官方账号的登录与第三方凭据不在同一个配置目录。登录和退出入口只
 复制官方 CLI 命令，从不代用户执行；实例命令显式带各自的 `CLAUDE_CONFIG_DIR` 或 `CODEX_HOME`，用户须在
@@ -333,12 +342,27 @@ fail-closed。界面的当前接入、运行参数与表单预填全部读实际
 `agents:configure` 返回成功后，必须回读到 `current` 是目标、或补丁里每一项都已是实际值，才向
 用户提示成功。
 
-主助手的 status 另给 `observed.credential_overrides`：会压过主配置官方账号、但不归本工具管的外部设置，
-只有来源与变量名、不含取值。来源是 shell 启动文件（`~/.zshenv`、`~/.zshrc`、`~/.zprofile`、`~/.bashrc`、
-`~/.bash_profile`、`~/.profile` 里的 `NAME=` / `export NAME=`，注释行与别名里的赋值不算）、本进程环境，
-以及 Claude `settings.json` 的 `apiKeyHelper` 与云厂商开关 `CLAUDE_CODE_USE_{BEDROCK,VERTEX,FOUNDRY}`。
-Claude 检查 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`ANTHROPIC_BASE_URL`、`CLAUDE_CODE_OAUTH_TOKEN` 与
-上述云厂商开关；Codex 检查 `CODEX_API_KEY`、`CODEX_ACCESS_TOKEN`（Codex 源码中优先于 `auth.json` 登录）。
+主助手的 status 另给 `observed.credential_overrides`：会压过或限定主配置官方账号、但不归本工具管的外部设置，
+只有来源与变量名、不含取值。来源：
+
+- shell 启动文件（`~/.zshenv`、`~/.zshrc`、`~/.zprofile`、`~/.bashrc`、`~/.bash_profile`、`~/.profile` 里的
+  `NAME=` / `export NAME=`，注释行与别名里的赋值不算）与本进程环境。Claude 检查 `ANTHROPIC_AUTH_TOKEN`、
+  `ANTHROPIC_API_KEY`、`ANTHROPIC_BASE_URL`、`CLAUDE_CODE_OAUTH_TOKEN`、五个云厂商开关
+  `CLAUDE_CODE_USE_{BEDROCK,VERTEX,FOUNDRY,ANTHROPIC_AWS,MANTLE}`、`ANTHROPIC_PROFILE`、
+  `ANTHROPIC_FEDERATION_RULE_ID` 与 `ANTHROPIC_CUSTOM_HEADERS`；Codex 检查 `CODEX_API_KEY`（`codex exec` 等
+  非交互入口读）与 `CODEX_ACCESS_TOKEN`（所有入口读），两者都优先于 `auth.json` 登录。
+- Claude 主配置 `settings.json` 的 `apiKeyHelper`，以及 `env` 里的云厂商开关、长期令牌、`ANTHROPIC_PROFILE` 与
+  附加请求头（主配置里的第三方地址与凭据由「混用」提示处理）。
+- Claude 托管设置（官方设置文档的固定目录：macOS `/Library/Application Support/ClaudeCode`、Linux
+  `/etc/claude-code`，含 `managed-settings.d/*.json`，优先级最高）：同上的 `env` 项与第三方地址、凭据、
+  `apiKeyHelper`，以及限定登录的 `forceLoginMethod`、`forceLoginOrgUUID`（设了任一个，用第三方凭据的会话在
+  启动时被拦下）。macOS 描述文件与 Windows 注册表不看。
+- 活动的 Anthropic 配置档案是联合身份（`~/.config/anthropic/active_config` 指向的 `configs/<名>.json` 里
+  `authentication.type` 为 `oidc_federation`，官方 WIF 参考说明该文件不含机密，排在 `/login` 之前）；用户以
+  `ant auth login` 登录的档案排在 `/login` 之后，不提示。
+- Codex 主配置 `config.toml` 顶层的 `openai_base_url`：内置 openai 接入方式的地址覆盖，官方账号的凭据会随请求
+  发往该地址。
+
 工作台逐条提示来源与影响，只提示、不改这些文件。
 
 `⌘K` 命令面板为每个主助手只提供「官方账号」一项，不再列出第三方接入。主配置已是官方账号时

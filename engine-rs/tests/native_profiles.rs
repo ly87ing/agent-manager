@@ -20,13 +20,19 @@ fn temp_ctx(tag: &str) -> (PathBuf, Context) {
 }
 
 /// 官方 CLI 的替身，放在 `<HOME>/.local/bin`（探测优先找这里），不依赖本机装没装 claude/codex。
-/// 目录里有 `.fake-logged-in` 就报告已登录；每次调用把收到的配置目录与凭据变量是否被清掉
-/// 记进 `<HOME>/.probe-log`。
+/// 目录里有 `.fake-logged-in` 就报告已登录、有 `.fake-console` 就报告 Console 登录；每次调用把
+/// 收到的配置目录与凭据变量是否被清掉记进 `<HOME>/.probe-log`，把 `--settings` 与档案目录记进
+/// `<HOME>/.probe-args`。
 const FAKE_CLAUDE: &str = r#"#!/bin/sh
+settings=none
+if [ "$1" = --settings ]; then settings="$2"; shift 2; fi
 [ "$1" = auth ] && [ "$2" = status ] || exit 64
 printf 'claude|%s|%s\n' "$CLAUDE_CONFIG_DIR" "${CLAUDE_CODE_OAUTH_TOKEN-unset}" >> "$HOME/.probe-log"
+printf '%s|%s|%s\n' "$settings" "${ANTHROPIC_CONFIG_DIR-unset}" "${ANTHROPIC_PROFILE-unset}" >> "$HOME/.probe-args"
 if [ -f "$HOME/.fake-garbage" ]; then echo 'not json'; exit 0; fi
 if [ -f "$CLAUDE_CONFIG_DIR/.fake-logged-in" ]; then echo '{"loggedIn":true,"authMethod":"claude.ai"}'; exit 0; fi
+if [ -f "$CLAUDE_CONFIG_DIR/.fake-console" ]; then echo '{"loggedIn":true,"authMethod":"oauth_token","apiKeySource":"/login managed key"}'; exit 0; fi
+if [ -f "$CLAUDE_CONFIG_DIR/.fake-helper" ]; then echo '{"loggedIn":true,"authMethod":"api_key_helper","apiKeySource":"apiKeyHelper"}'; exit 0; fi
 echo '{"loggedIn":false,"authMethod":"none"}'
 exit 1
 "#;
@@ -852,6 +858,91 @@ fn 第三方凭据遮住官方登录时按登录记录拒绝() {
     assert!(!refused.ok);
     assert!(format!("{:?}", refused.errors).contains("官方账号登录"));
     std::env::remove_var("AM_TEST_TOKEN_MASKED");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Console 登录（claude.ai 之外的另一种官方账号登录）同样算：官方命令在目录声明的凭据被
+/// 取消后报告 `apiKeySource: "/login managed key"`，Linux 上 `.claude.json` 另有 `primaryApiKey`。
+#[test]
+fn console_登录也算官方账号登录_拒绝写入第三方凭据() {
+    let (root, ctx) = temp_ctx("official-console");
+    std::env::set_var("AM_TEST_TOKEN_CONSOLE", "console-token");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_TOKEN_CONSOLE")
+    ));
+    let dir = ctx.home_dir.join(".claude-ly");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // 官方命令报告的 Console 登录（macOS 上 key 在钥匙串里，目录里没有文件可看）
+    std::fs::write(dir.join(".fake-console"), "").unwrap();
+    let refused = apply_now(&ctx, "cc-ly");
+    assert!(!refused.ok);
+    assert!(format!("{:?}", refused.errors).contains("官方账号登录"));
+    let auth = auth_status(&ctx, "profiles:cc-ly");
+    assert_eq!(auth.data["method"], "console");
+    assert_eq!(auth.data["mixed"], true);
+    std::fs::remove_file(dir.join(".fake-console")).unwrap();
+
+    // Linux 上 Console 登录的 key 记在 .claude.json：只看键在不在，不读取值
+    std::fs::write(
+        dir.join(".claude.json"),
+        "{\"primaryApiKey\":\"sk-ant-api03-not-read\"}\n",
+    )
+    .unwrap();
+    let refused = apply_now(&ctx, "cc-ly");
+    assert!(!refused.ok);
+    assert!(!format!("{:?}", refused.errors).contains("sk-ant-api03"));
+    assert!(!dir.join("settings.json").exists());
+    std::env::remove_var("AM_TEST_TOKEN_CONSOLE");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 探测只看这个目录存的登录：经官方 `--settings` 取消目录声明的凭据，Anthropic 配置档案目录
+/// 指到不存在的位置，进程环境里的档案与联合身份变量不带给官方命令。托管设置给的 apiKeyHelper、
+/// 只存 MCP 登录的 `.credentials.json` 都不是官方账号登录。
+#[test]
+fn 探测取消目录声明的凭据_不看共享档案_不把托管凭据当成官方登录() {
+    let (root, ctx) = temp_ctx("probe-isolation");
+    std::env::set_var("AM_TEST_TOKEN_PROBE", "probe-token");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_TOKEN_PROBE")
+    ));
+    let dir = ctx.home_dir.join(".claude-ly");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".fake-helper"), "").unwrap();
+    std::fs::write(dir.join(".credentials.json"), "{\"mcpOAuth\":{}}\n").unwrap();
+    std::env::set_var("ANTHROPIC_PROFILE", "shared-wif");
+    let applied = apply_now(&ctx, "cc-ly");
+    std::env::remove_var("ANTHROPIC_PROFILE");
+    assert!(applied.ok, "{:?}", applied.errors);
+
+    let args = std::fs::read_to_string(ctx.home_dir.join(".probe-args")).unwrap();
+    let line = args.lines().next().unwrap();
+    let mut parts = line.rsplitn(3, '|');
+    let profile = parts.next().unwrap();
+    let config_dir = parts.next().unwrap();
+    let settings: serde_json::Value = serde_json::from_str(parts.next().unwrap()).unwrap();
+    assert_eq!(profile, "unset", "进程环境里的档案名不带给官方命令");
+    assert!(
+        config_dir.starts_with("/nonexistent/"),
+        "档案目录指到不存在的位置：{config_dir}"
+    );
+    assert!(!std::path::Path::new(config_dir).exists());
+    assert_eq!(settings["apiKeyHelper"], "");
+    for name in [
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_MANTLE",
+    ] {
+        assert_eq!(settings["env"][name], "", "{name}");
+    }
+    std::env::remove_var("AM_TEST_TOKEN_PROBE");
     let _ = std::fs::remove_dir_all(root);
 }
 

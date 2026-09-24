@@ -137,7 +137,7 @@ export interface OfficialAuthStatus {
   element: string;
   state: "logged-in" | "logged-out" | "unknown";
   logged_in: boolean | null;
-  /** claude.ai / oauth_token / api_key / chatgpt / other；有登录记录但方式未知时为 null。 */
+  /** claude.ai / console / oauth_token / chatgpt / api_key / other；有登录记录但方式未知时为 null。 */
   method: string | null;
   /** 这个环境用第三方接口或凭据。 */
   third_party: boolean;
@@ -445,4 +445,24 @@ export function agentCellsOf(element: { observed: Record<string, unknown> }): Re
     return {};
   }
   return cells as Record<string, { state: string; target?: string; link_path?: string; target_exists?: boolean }>;
+}
+
+/** 官方命令报告的登录方式 → 界面用语；方式未知时为 null。 */
+export function authMethodLabel(method: string | null): string | null {
+  switch (method) {
+    case null:
+      return null;
+    case "claude.ai":
+      return "Claude 订阅账号";
+    case "console":
+      return "Claude Console 账号";
+    case "oauth_token":
+      return "长期令牌";
+    case "chatgpt":
+      return "ChatGPT 账号";
+    case "api_key":
+      return "API key";
+    default:
+      return "其他方式";
+  }
 }

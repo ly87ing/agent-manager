@@ -434,7 +434,7 @@ describe("助手实例", () => {
     expect(calls.some((call) => call.command === "agents:auth-status")).toBe(false);
 
     await userEvent.click(within(card).getByTestId("profile-cc-ly-auth-check"));
-    await waitFor(() => expect(within(card).getByTestId("profile-auth-text-cc-ly")).toHaveTextContent("已登录（claude.ai）"));
+    await waitFor(() => expect(within(card).getByTestId("profile-auth-text-cc-ly")).toHaveTextContent("已登录（Claude 订阅账号）"));
     expect(calls.find((call) => call.command === "agents:auth-status")?.args).toEqual(["--only", "profiles:cc-ly"]);
     expect(within(card).getByTestId("profile-auth-mixed-cc-ly")).toHaveTextContent("两种凭据混在同一个配置目录");
   });
