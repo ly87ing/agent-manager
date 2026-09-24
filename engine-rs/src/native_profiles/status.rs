@@ -149,6 +149,8 @@ fn element(ctx: &Context, def: &ProfileDef) -> Value {
     observed.insert("base_agent".into(), json!(def.base_agent));
     observed.insert("kind".into(), json!(def.kind.as_str()));
     observed.insert("config_env".into(), json!(def.kind.config_env()));
+    // 用第三方接口或凭据的实例：目录里不能有官方账号登录
+    observed.insert("third_party".into(), json!(model::is_third_party(def)));
     observed.insert("config_dir".into(), json!(def.config_dir_raw));
     observed.insert("config_dir_exists".into(), json!(dir_exists));
     observed.insert(
@@ -164,13 +166,6 @@ fn element(ctx: &Context, def: &ProfileDef) -> Value {
             .and_then(|dir| crate::agent_usage::read_profile(def.kind.as_str(), dir, &ctx.data_dir))
             .unwrap_or(Value::Null),
     );
-    if let Some(dir) = config_dir.as_deref() {
-        let auth_kind = match def.kind {
-            model::ProfileKind::Claude => crate::native_auth::AuthKind::Claude,
-            model::ProfileKind::Codex => crate::native_auth::AuthKind::Codex,
-        };
-        observed.insert("auth".into(), crate::native_auth::inspect(dir, auth_kind));
-    }
     observed.insert("files".into(), Value::Array(files));
     observed.insert("base".into(), json!(base));
     observed.insert("fields".into(), Value::Array(fields));

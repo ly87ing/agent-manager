@@ -60,7 +60,6 @@ function demoEnvelopes(): Record<string, Envelope> {
             install_source: "native",
             installed: true,
             management: agentManagementFixture("claude"),
-            auth: { state: "ready", authenticated: true, mode: "oauth", storage: "file", file: ".credentials.json" },
             current_config: {
               state: "ready",
               file: "settings.json",
@@ -115,7 +114,6 @@ function demoEnvelopes(): Record<string, Envelope> {
             install_source: "native",
             installed: true,
             management: agentManagementFixture("codex"),
-            auth: { state: "ready", authenticated: true, mode: "chatgpt", storage: "file", file: "auth.json" },
             current_config: {
               state: "missing",
               file: "config.toml",
@@ -535,6 +533,7 @@ function demoEnvelopes(): Record<string, Envelope> {
             target_exists: true,
             env_refs: [{ name: "ANTHROPIC_AUTH_TOKEN", kind: "reference", variable: "WORK_API_KEY", resolved: true }],
             launch_value: 'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude',
+            third_party: true,
             // 实际配置为准：演示外部改过实例模型后的逐字段差异，可覆盖也可采纳
             base: "d".repeat(64),
             fields: [
@@ -542,7 +541,6 @@ function demoEnvelopes(): Record<string, Envelope> {
               { field: "model", state: "differs", definition: "claude-sonnet-demo", live: "claude-opus-demo" },
             ],
             blocked_reason: null,
-            auth: { state: "missing", authenticated: false, mode: null, storage: "file", file: ".credentials.json" },
           },
           state: "drifted",
           freshness: makeFreshness({ state: "not-applicable" }),
@@ -1381,6 +1379,13 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       if (command === "agents:configure") return configureAgent(args, runId);
       if (command === "agents:config-file") return readConfigFile(args);
       if (command === "agents:edit-config") return editConfigFile(args, runId);
+      if (command === "agents:auth-status") {
+        const only = args[args.indexOf("--only") + 1] ?? "";
+        return makeEnvelope(
+          { element: only, state: "logged-out", logged_in: false, method: null, third_party: only.startsWith("profiles:"), mixed: false, reason: null },
+          { command: "agents.auth-status" },
+        );
+      }
       if (command === "agents:check") {
         return makeEnvelope(
           { ok: true, detail: "模拟连接正常", latency_ms: 128 },

@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Copy, FolderTree, Loader2, PlayCircle, Plus, Sparkles, Terminal, Trash2, Wrench } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
+import type { OfficialAuthStatus } from "../lib/observed";
 import type { ProfileObserved, ProfileSpec } from "../lib/contract";
 import { AgentUsageBar } from "./AgentUsageBar";
 import { AuthCommandActions } from "./AuthCommandActions";
@@ -32,6 +34,7 @@ export function ProfileCard({
   onDuplicateLaunch,
   onRemoveLaunch,
   onFixLaunch,
+  onCheckAuth,
 }: {
   element: EngineElement;
   bin: string;
@@ -51,6 +54,8 @@ export function ProfileCard({
   onDuplicateLaunch: (name: string) => void;
   onRemoveLaunch: (name: string) => void;
   onFixLaunch: (name: string) => void;
+  /** 用官方命令查一次登录状态；失败时返回原因。 */
+  onCheckAuth: () => Promise<OfficialAuthStatus | string>;
 }) {
   const spec = element.spec as unknown as ProfileSpec;
   const observed = element.observed as unknown as ProfileObserved;
@@ -60,6 +65,26 @@ export function ProfileCard({
   const differs = (observed.fields ?? []).filter((field) => field.state !== "same");
   const canAdopt = element.actions.some((action) => action.id === "adopt");
   const canApply = element.actions.some((action) => action.id === "apply");
+  const thirdParty = observed.third_party === true;
+  const [auth, setAuth] = useState<OfficialAuthStatus | string | null>(null);
+  const [checkingAuth, setCheckingAuth] = useState(false);
+  const checkAuth = async () => {
+    setCheckingAuth(true);
+    try {
+      setAuth(await onCheckAuth());
+    } finally {
+      setCheckingAuth(false);
+    }
+  };
+  const authText = auth === null
+    ? "未检查（点「检查登录」用官方命令查询）"
+    : typeof auth === "string"
+      ? `检查失败：${auth}`
+      : auth.state === "logged-in"
+        ? `已登录${auth.method ? `（${auth.method}）` : ""}`
+        : auth.state === "logged-out"
+          ? "未登录"
+          : `无法确认：${auth.reason ?? "未知原因"}`;
 
   return (
     <section
@@ -88,31 +113,44 @@ export function ProfileCard({
         </div>
       )}
 
-      {observed.auth && (
-        <div
-          data-testid={`profile-auth-status-${id}`}
-          className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
-        >
+      <div
+        data-testid={`profile-auth-status-${id}`}
+        className="mt-3 space-y-2 rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span>
             官方登录：
-            <span className="ml-1 font-medium text-foreground">
-              {observed.auth.state === "ready"
-                ? `已识别${observed.auth.mode ? `（${observed.auth.mode}）` : ""}`
-                : observed.auth.state === "missing" && observed.kind === "claude"
-                  ? "未发现凭据文件（可能保存在系统钥匙串）"
-                  : observed.auth.state === "missing"
-                    ? "未登录"
-                    : "认证文件需要处理"}
-            </span>
+            <span data-testid={`profile-auth-text-${id}`} className="ml-1 font-medium text-foreground">{authText}</span>
           </span>
-          <AuthCommandActions
-            kind={observed.kind === "codex" ? "codex" : "claude"}
-            bin={bin}
-            configDir={observed.config_dir}
-            testIdPrefix={`profile-${id}`}
-          />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              data-testid={`profile-${id}-auth-check`}
+              disabled={checkingAuth}
+              onClick={() => void checkAuth()}
+              className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+            >
+              {checkingAuth && <Loader2 className="h-3 w-3 animate-spin" aria-hidden />}
+              {checkingAuth ? "正在检查…" : "检查登录"}
+            </button>
+            <AuthCommandActions
+              kind={observed.kind === "codex" ? "codex" : "claude"}
+              bin={bin}
+              configDir={observed.config_dir}
+              testIdPrefix={`profile-${id}`}
+              allowLogin={!thirdParty}
+            />
+          </div>
         </div>
-      )}
+        {thirdParty && (
+          <p className="text-[11px]">这个环境用第三方接口，不要在这里登录官方账号；官方账号请用主配置或单独的官方账号环境。</p>
+        )}
+        {typeof auth === "object" && auth?.mixed && (
+          <p data-testid={`profile-auth-mixed-${id}`} role="alert" className="rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive">
+            这个环境用第三方接口，却有官方账号登录：两种凭据混在同一个配置目录。请复制退出命令在终端里对这个环境退出登录，或给这套第三方接入换一个新目录。
+          </p>
+        )}
+      </div>
 
       <div className="mt-3 space-y-1.5 border-t pt-3 text-[11px] text-muted-foreground">
         <p className="flex items-start gap-1.5 break-all">

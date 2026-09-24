@@ -305,6 +305,46 @@ describe("助手实例", () => {
     expect(await screen.findByTestId("profile-missing-vars-cc-ly")).toHaveTextContent("MY_TOKEN");
   });
 
+  it("第三方环境不给登录命令；检查登录走官方命令，查到官方登录时标出混用", async () => {
+    const withThirdParty = routes([
+      profileElement({ observed: { ...(profileElement().observed as Record<string, unknown>), third_party: true } }),
+    ]);
+    withThirdParty["agents:auth-status"] = makeEnvelope(
+      { element: "profiles:cc-ly", state: "logged-in", logged_in: true, method: "claude.ai", third_party: true, mixed: true, reason: null },
+      { command: "agents.auth-status" },
+    );
+    const { calls } = renderWithEngine(<AgentsPage />, withThirdParty);
+    await openInstanceManager();
+    const card = await screen.findByTestId("profile-card-cc-ly");
+    expect(within(card).queryByTestId("profile-cc-ly-auth-login")).toBeNull();
+    expect(within(card).getByTestId("profile-cc-ly-auth-logout")).toBeInTheDocument();
+    expect(within(card).getByTestId("profile-auth-text-cc-ly")).toHaveTextContent("未检查");
+    // 状态轮询不跑官方命令：只有点了才查
+    expect(calls.some((call) => call.command === "agents:auth-status")).toBe(false);
+
+    await userEvent.click(within(card).getByTestId("profile-cc-ly-auth-check"));
+    await waitFor(() => expect(within(card).getByTestId("profile-auth-text-cc-ly")).toHaveTextContent("已登录（claude.ai）"));
+    expect(calls.find((call) => call.command === "agents:auth-status")?.args).toEqual(["--only", "profiles:cc-ly"]);
+    expect(within(card).getByTestId("profile-auth-mixed-cc-ly")).toHaveTextContent("两种凭据混在同一个配置目录");
+  });
+
+  it("官方账号环境可以复制登录命令；查不到登录时如实说未登录", async () => {
+    const official = routes([
+      profileElement({ observed: { ...(profileElement().observed as Record<string, unknown>), third_party: false, env_refs: [] } }),
+    ]);
+    official["agents:auth-status"] = makeEnvelope(
+      { element: "profiles:cc-ly", state: "logged-out", logged_in: false, method: null, third_party: false, mixed: false, reason: null },
+      { command: "agents.auth-status" },
+    );
+    renderWithEngine(<AgentsPage />, official);
+    await openInstanceManager();
+    const card = await screen.findByTestId("profile-card-cc-ly");
+    expect(within(card).getByTestId("profile-cc-ly-auth-login")).toBeInTheDocument();
+    await userEvent.click(within(card).getByTestId("profile-cc-ly-auth-check"));
+    await waitFor(() => expect(within(card).getByTestId("profile-auth-text-cc-ly")).toHaveTextContent("未登录"));
+    expect(within(card).queryByTestId("profile-auth-mixed-cc-ly")).toBeNull();
+  });
+
   it("移除实例需确认，且只停止管理、不动配置目录", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();

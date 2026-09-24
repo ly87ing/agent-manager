@@ -891,3 +891,97 @@ fn codex_第三方实例_目录已登录官方账号时拒绝_未登录才写() 
     std::env::remove_var("AM_TEST_CODEX_OFFICIAL");
     let _ = std::fs::remove_dir_all(root);
 }
+
+fn auth_status(ctx: &Context, only: &str) -> agent_manager_engine::Envelope {
+    execute(ctx, &request("agents:auth-status", &["--only", only]))
+}
+
+#[test]
+fn 登录状态用官方命令按需查询_第三方实例里有官方登录标为混用() {
+    let (root, ctx) = temp_ctx("auth-status-mixed");
+    std::env::set_var("AM_TEST_TOKEN_STATUS", "status-token");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_TOKEN_STATUS")
+    ));
+    let dir = ctx.home_dir.join(".claude-ly");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".fake-logged-in"), "").unwrap();
+    let db_before = std::fs::read(store::db_path(&ctx)).ok();
+
+    let env = auth_status(&ctx, "profiles:cc-ly");
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(env.data["state"], "logged-in");
+    assert_eq!(env.data["method"], "claude.ai");
+    assert_eq!(env.data["third_party"], true);
+    assert_eq!(env.data["mixed"], true);
+    assert!(!env.data.to_string().contains("status-token"));
+    assert_eq!(
+        std::fs::read(store::db_path(&ctx)).ok(),
+        db_before,
+        "查询不写库"
+    );
+    assert_eq!(probe_log(&ctx), format!("claude|{}|unset\n", dir.display()));
+    std::env::remove_var("AM_TEST_TOKEN_STATUS");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn 官方账号实例未登录_结果无法识别时如实报未知() {
+    let (root, ctx) = temp_ctx("auth-status-official");
+    assert!(save_definition(
+        &ctx,
+        "cx-work",
+        r#"{"display_name":"Codex · work","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-work"},"_delete":false,"_replace":true}"#
+    ));
+    std::fs::create_dir_all(ctx.home_dir.join(".codex-work")).unwrap();
+    let env = auth_status(&ctx, "profiles:cx-work");
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(env.data["state"], "logged-out");
+    assert_eq!(env.data["third_party"], false);
+    assert_eq!(env.data["mixed"], false);
+
+    assert!(save_definition(
+        &ctx,
+        "cc-work",
+        r#"{"display_name":"Claude Code · work","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-work"},"_delete":false,"_replace":true}"#
+    ));
+    std::fs::create_dir_all(ctx.home_dir.join(".claude-work")).unwrap();
+    std::fs::write(ctx.home_dir.join(".fake-garbage"), "").unwrap();
+    let unknown = auth_status(&ctx, "profiles:cc-work");
+    assert!(unknown.ok, "{:?}", unknown.errors);
+    assert_eq!(unknown.data["state"], "unknown");
+    assert!(unknown.data["reason"]
+        .as_str()
+        .unwrap()
+        .contains("无法识别"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn 主助手的登录状态不设配置目录变量_登录记录在_home_的_claude_json() {
+    let (root, ctx) = temp_ctx("auth-status-main");
+    let env = auth_status(&ctx, "agents:claude-code");
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(env.data["state"], "logged-out");
+    assert_eq!(
+        probe_log(&ctx),
+        "claude||unset\n",
+        "主配置不设 CLAUDE_CONFIG_DIR"
+    );
+
+    // 官方文档：主配置的登录会话记在 ~/.claude.json
+    std::fs::write(
+        ctx.home_dir.join(".claude.json"),
+        "{\"oauthAccount\":{\"accountUuid\":\"x\"}}\n",
+    )
+    .unwrap();
+    let env = auth_status(&ctx, "agents:claude-code");
+    assert_eq!(env.data["state"], "logged-in");
+    assert_eq!(env.data["mixed"], false);
+
+    let wrong = auth_status(&ctx, "agents:nope");
+    assert!(!wrong.ok);
+    let _ = std::fs::remove_dir_all(root);
+}

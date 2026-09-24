@@ -581,20 +581,6 @@ fn status_element(
     if let Some(kind) =
         crate::native_agent_adapters::kind_for_bin(&def.bin).filter(|_| !is_instance)
     {
-        let auth_kind = match kind {
-            crate::native_agent_adapters::AdapterKind::Claude => {
-                crate::native_auth::AuthKind::Claude
-            }
-            crate::native_agent_adapters::AdapterKind::Codex => crate::native_auth::AuthKind::Codex,
-        };
-        let config_dir = match kind {
-            crate::native_agent_adapters::AdapterKind::Claude => ctx.home_dir.join(".claude"),
-            crate::native_agent_adapters::AdapterKind::Codex => ctx.home_dir.join(".codex"),
-        };
-        observed.insert(
-            "auth".into(),
-            crate::native_auth::inspect(&config_dir, auth_kind),
-        );
         // 实际值、写入基准与按内容识别的当前接入；只读零写
         let current_config = crate::native_agent_settings::current_config_status(
             ctx,

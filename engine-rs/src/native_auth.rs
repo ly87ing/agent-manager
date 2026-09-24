@@ -1,122 +1,16 @@
-//! 助手官方认证的只读、脱敏状态。
+//! 助手官方账号登录的只读判断。
 //!
-//! 这里只判断认证存储是否存在以及可识别的认证类型；不返回账号、token、JSON 正文，
-//! 也不写文件。认证修改必须由独立的显式命令完成，Provider 切换不得调用本模块的写路径。
+//! 只经官方 CLI 的状态命令（`claude auth status` / `codex login status`）和官方文档说明的
+//! 登录记录判断，不读取任何凭据内容、不返回账号或令牌、不写文件。认证修改只由用户在终端
+//! 亲自执行官方命令完成，本工具从不代为登录或退出。
 
 use serde_json::{json, Value};
 use std::path::Path;
-
-const MAX_AUTH_FILE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Clone, Copy)]
 pub(crate) enum AuthKind {
     Claude,
     Codex,
-}
-
-impl AuthKind {
-    fn file_name(self) -> &'static str {
-        match self {
-            Self::Claude => ".credentials.json",
-            Self::Codex => "auth.json",
-        }
-    }
-}
-
-fn recognized_mode(kind: AuthKind, value: &Value) -> Option<&'static str> {
-    let object = value.as_object()?;
-    match kind {
-        AuthKind::Claude => {
-            let oauth = object
-                .get("claudeAiOauth")
-                .or_else(|| object.get("claude.ai_oauth"))?
-                .as_object()?;
-            oauth
-                .get("accessToken")
-                .and_then(Value::as_str)
-                .filter(|token| !token.is_empty())
-                .map(|_| "oauth")
-        }
-        AuthKind::Codex => match object.get("auth_mode").and_then(Value::as_str) {
-            Some("chatgpt") => Some("chatgpt"),
-            Some("apikey") => Some("apikey"),
-            Some("chatgptAuthTokens") => Some("chatgpt-auth-tokens"),
-            Some("headers") => Some("headers"),
-            Some("agentIdentity") => Some("agent-identity"),
-            Some("personalAccessToken") => Some("personal-access-token"),
-            Some("bedrockApiKey") => Some("bedrock-api-key"),
-            Some("bedrockAccessKeys") => Some("bedrock-access-keys"),
-            _ => None,
-        },
-    }
-}
-
-/// 检查一个配置目录中的官方认证文件。返回值不含正文、账号或凭据。
-pub(crate) fn inspect(config_dir: &Path, kind: AuthKind) -> Value {
-    let path = config_dir.join(kind.file_name());
-    let file = kind.file_name();
-    let metadata = match std::fs::symlink_metadata(&path) {
-        Ok(metadata) => metadata,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return json!({
-                "state": "missing",
-                "authenticated": false,
-                "mode": null,
-                "storage": "file",
-                "file": file,
-            });
-        }
-        Err(_) => {
-            return json!({
-                "state": "unreadable",
-                "authenticated": false,
-                "mode": null,
-                "storage": "file",
-                "file": file,
-            });
-        }
-    };
-    if metadata.file_type().is_symlink() || !metadata.is_file() {
-        return json!({
-            "state": "unsafe",
-            "authenticated": false,
-            "mode": null,
-            "storage": "file",
-            "file": file,
-        });
-    }
-    if metadata.len() > MAX_AUTH_FILE_BYTES {
-        return json!({
-            "state": "too-large",
-            "authenticated": false,
-            "mode": null,
-            "storage": "file",
-            "file": file,
-        });
-    }
-    let value = match std::fs::read(&path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-    {
-        Some(value) => value,
-        None => {
-            return json!({
-                "state": "invalid",
-                "authenticated": false,
-                "mode": null,
-                "storage": "file",
-                "file": file,
-            });
-        }
-    };
-    let mode = recognized_mode(kind, &value);
-    json!({
-        "state": if mode.is_some() { "ready" } else { "unrecognized" },
-        "authenticated": mode.is_some(),
-        "mode": mode,
-        "storage": "file",
-        "file": file,
-    })
 }
 
 /// 探测时从子进程环境里去掉的变量：它们会让官方命令报告进程环境里的凭据，
@@ -167,50 +61,71 @@ fn claude_settings_declare_credential(config_dir: &Path) -> bool {
         || non_empty(root.get("apiKeyHelper"))
 }
 
-/// 该目录的 `.claude.json` 里有没有登录会话记录（官方文档：这个文件保存登录会话）。
+/// `.claude.json` 里有没有登录会话记录（官方文档：这个文件保存登录会话）。
 /// 只看键是否存在，不读取内容。文件存在但解析不了时无法确认，报错。
-fn claude_json_records_login(config_dir: &Path) -> Result<bool, String> {
-    let path = config_dir.join(".claude.json");
-    let bytes = match std::fs::read(&path) {
+fn claude_json_records_login(path: &Path) -> Result<bool, String> {
+    let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(_) => return Err("无法读取该目录的 .claude.json".into()),
+        Err(_) => return Err("无法读取 .claude.json".into()),
     };
     let root = serde_json::from_slice::<Value>(&bytes)
-        .map_err(|_| "该目录的 .claude.json 不是合法 JSON".to_string())?;
+        .map_err(|_| ".claude.json 不是合法 JSON".to_string())?;
     Ok(root
         .get("oauthAccount")
         .is_some_and(|value| !value.is_null()))
 }
 
-/// 配置目录里是否存有官方账号登录。
-///
-/// 只经官方 CLI 的状态命令（`claude auth status` / `codex login status`）和官方文档说明的
-/// 登录记录判断，不读取任何凭据内容。`Ok(true)` 有登录，`Ok(false)` 确认没有；
-/// `Err` 表示无法确认，调用方应按「有」处理（拒绝写入第三方凭据）。
-pub(crate) fn official_login(
+/// 官方账号登录状态：`method` 是官方命令报告的登录方式（不含账号与令牌）。
+pub(crate) struct LoginStatus {
+    pub logged_in: bool,
+    pub method: Option<&'static str>,
+}
+
+fn logged_out() -> LoginStatus {
+    LoginStatus {
+        logged_in: false,
+        method: None,
+    }
+}
+
+/// 某个配置目录里存的官方账号登录。`config_dir` 为 `None` 表示助手的主配置（不设
+/// `CLAUDE_CONFIG_DIR` / 用默认 `CODEX_HOME`），`Some` 是实例目录。`Err` 表示无法确认。
+pub(crate) fn official_status(
     home_dir: &Path,
     kind: AuthKind,
     bin: &str,
-    config_dir: &Path,
-) -> Result<bool, String> {
-    if !config_dir.is_dir() {
-        return Ok(false);
+    config_dir: Option<&Path>,
+) -> Result<LoginStatus, String> {
+    if config_dir.is_some_and(|dir| !dir.is_dir()) {
+        return Ok(logged_out());
     }
+    // Claude 的登录记录：设了配置目录时都在目录里；主配置的 .claude.json 在 HOME 下
+    let claude_dir = config_dir.map_or_else(|| home_dir.join(".claude"), Path::to_path_buf);
+    let claude_json = config_dir.map_or_else(
+        || home_dir.join(".claude.json"),
+        |dir| dir.join(".claude.json"),
+    );
     if matches!(kind, AuthKind::Claude)
-        && (config_dir.join(".credentials.json").exists() || claude_json_records_login(config_dir)?)
+        && (claude_dir.join(".credentials.json").exists()
+            || claude_json_records_login(&claude_json)?)
     {
-        return Ok(true);
+        return Ok(LoginStatus {
+            logged_in: true,
+            method: None,
+        });
     }
     let cli = resolve_cli(home_dir, bin)
-        .ok_or_else(|| format!("找不到 {bin} 命令，无法用官方命令确认该目录没有官方登录"))?;
+        .ok_or_else(|| format!("找不到 {bin} 命令，无法用官方命令确认登录状态"))?;
     let mut command = std::process::Command::new(&cli);
     command.env("HOME", home_dir);
     match kind {
         AuthKind::Claude => {
-            command
-                .args(["auth", "status"])
-                .env("CLAUDE_CONFIG_DIR", config_dir);
+            command.args(["auth", "status"]);
+            match config_dir {
+                Some(dir) => command.env("CLAUDE_CONFIG_DIR", dir),
+                None => command.env_remove("CLAUDE_CONFIG_DIR"),
+            };
             for name in CLAUDE_PROBE_ENV_REMOVE {
                 command.env_remove(name);
             }
@@ -221,32 +136,58 @@ pub(crate) fn official_login(
                 .filter(|_| code == 0 || code == 1)
                 .ok_or_else(|| format!("{bin} auth status 的输出无法识别"))?;
             if status.get("loggedIn").and_then(Value::as_bool) != Some(true) {
-                return Ok(false);
+                return Ok(logged_out());
             }
-            let method = status
-                .get("authMethod")
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            let method = match status.get("authMethod").and_then(Value::as_str) {
+                Some("claude.ai") => "claude.ai",
+                Some("oauth_token") => "oauth_token",
+                Some("api_key") => "api_key",
+                _ => "other",
+            };
             // 目录自己声明了凭据时，这两种方式来自那份凭据；登录记录已在上面查过
-            let from_declared = matches!(method, "oauth_token" | "api_key")
-                && claude_settings_declare_credential(config_dir);
-            Ok(!from_declared)
+            if matches!(method, "oauth_token" | "api_key")
+                && claude_settings_declare_credential(&claude_dir)
+            {
+                return Ok(logged_out());
+            }
+            Ok(LoginStatus {
+                logged_in: true,
+                method: Some(method),
+            })
         }
         AuthKind::Codex => {
+            let codex_home = config_dir.map_or_else(|| home_dir.join(".codex"), Path::to_path_buf);
             command
                 .args(["login", "status"])
-                .env("CODEX_HOME", config_dir);
+                .env("CODEX_HOME", codex_home);
             for name in CODEX_PROBE_ENV_REMOVE {
                 command.env_remove(name);
             }
             // 退出码 1 也可能是出错；只有明确说「未登录」才算确认没有
             match crate::native_upstream::capture_exit(command, PROBE_TIMEOUT) {
-                Some((0, _, _)) => Ok(true),
+                Some((0, stdout, stderr)) => {
+                    let text = format!(
+                        "{}{}",
+                        String::from_utf8_lossy(&stdout),
+                        String::from_utf8_lossy(&stderr)
+                    );
+                    let method = if text.contains("ChatGPT") {
+                        "chatgpt"
+                    } else if text.contains("API key") {
+                        "api_key"
+                    } else {
+                        "other"
+                    };
+                    Ok(LoginStatus {
+                        logged_in: true,
+                        method: Some(method),
+                    })
+                }
                 Some((1, stdout, stderr))
                     if String::from_utf8_lossy(&stdout).contains("Not logged in")
                         || String::from_utf8_lossy(&stderr).contains("Not logged in") =>
                 {
-                    Ok(false)
+                    Ok(logged_out())
                 }
                 _ => Err(format!("{bin} login status 没有给出可识别的结果")),
             }
@@ -254,26 +195,90 @@ pub(crate) fn official_login(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// 实例目录里是否存有官方账号登录；`Err` 表示无法确认，调用方应按「有」处理。
+pub(crate) fn official_login(
+    home_dir: &Path,
+    kind: AuthKind,
+    bin: &str,
+    config_dir: &Path,
+) -> Result<bool, String> {
+    official_status(home_dir, kind, bin, Some(config_dir)).map(|status| status.logged_in)
+}
 
-    #[test]
-    fn auth_status_only_exposes_redacted_shape() {
-        let root = std::env::temp_dir().join(format!("agent-manager-auth-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(
-            root.join("auth.json"),
-            br#"{"auth_mode":"chatgpt","tokens":{"refresh_token":"never-expose"}}"#,
-        )
-        .unwrap();
-
-        let status = inspect(&root, AuthKind::Codex);
-        assert_eq!(status["state"], "ready");
-        assert_eq!(status["mode"], "chatgpt");
-        assert_eq!(status["authenticated"], true);
-        assert!(!status.to_string().contains("never-expose"));
-        let _ = std::fs::remove_dir_all(&root);
+/// `agents:auth-status --only <agents:助手 | profiles:实例>`：用官方命令查一次登录状态。
+///
+/// 只读：不写库、不取锁、不读取凭据内容，只返回是否登录与登录方式。第三方实例里有官方登录时
+/// 标为 `mixed`（两种凭据混在同一个配置目录）。官方命令一次要一两秒，只在界面上点它时才调用。
+pub(crate) fn status_command(
+    ctx: &crate::native::Context,
+    req: &crate::native::Request,
+) -> anyhow::Result<Value> {
+    let mut only = None;
+    let mut iter = req.args.iter();
+    while let Some(arg) = iter.next() {
+        match (arg.as_str(), only.is_some()) {
+            ("--only", false) => only = iter.next().cloned(),
+            _ => {
+                anyhow::bail!("agents:auth-status 只接受一个 --only <agents:助手 | profiles:实例>")
+            }
+        }
     }
+    let only = only.ok_or_else(|| anyhow::anyhow!("agents:auth-status 需要 --only"))?;
+    let (kind, bin, config_dir, third_party) = if let Some(id) = only.strip_prefix("profiles:") {
+        let policy = crate::store::effective_policy(ctx)?;
+        let def = crate::native_profiles::model::load_definitions(&policy)
+            .into_iter()
+            .flatten()
+            .find(|def| def.id == id)
+            .ok_or_else(|| anyhow::anyhow!("未知实例: {id}"))?;
+        let dir =
+            crate::native_profiles::model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
+        let kind = match def.kind {
+            crate::native_profiles::model::ProfileKind::Claude => AuthKind::Claude,
+            crate::native_profiles::model::ProfileKind::Codex => AuthKind::Codex,
+        };
+        let bin = crate::native_profiles::status::base_bin(ctx, &def);
+        (
+            kind,
+            bin,
+            Some(dir),
+            crate::native_profiles::model::is_third_party(&def),
+        )
+    } else {
+        let id = only.strip_prefix("agents:").unwrap_or(&only);
+        let def = crate::native_agents::load_definitions(ctx)?
+            .into_iter()
+            .find(|def| def.id == id)
+            .ok_or_else(|| anyhow::anyhow!("没有这个助手：{id}"))?;
+        if def.spec_ref().get("profile").is_some() {
+            anyhow::bail!("{id} 是独立环境，请用 --only profiles:{id}");
+        }
+        let kind = match crate::native_agent_adapters::kind_for_bin(&def.bin) {
+            Some(crate::native_agent_adapters::AdapterKind::Claude) => AuthKind::Claude,
+            Some(crate::native_agent_adapters::AdapterKind::Codex) => AuthKind::Codex,
+            None => anyhow::bail!("只有 Claude Code 与 Codex 有官方账号登录状态"),
+        };
+        (kind, def.bin.clone(), None, false)
+    };
+    let result = official_status(&ctx.home_dir, kind, &bin, config_dir.as_deref());
+    Ok(match result {
+        Ok(status) => json!({
+            "element": only,
+            "state": if status.logged_in { "logged-in" } else { "logged-out" },
+            "logged_in": status.logged_in,
+            "method": status.method,
+            "third_party": third_party,
+            "mixed": third_party && status.logged_in,
+            "reason": null,
+        }),
+        Err(reason) => json!({
+            "element": only,
+            "state": "unknown",
+            "logged_in": null,
+            "method": null,
+            "third_party": third_party,
+            "mixed": false,
+            "reason": reason,
+        }),
+    })
 }

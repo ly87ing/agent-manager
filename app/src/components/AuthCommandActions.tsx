@@ -7,11 +7,14 @@ export function AuthCommandActions({
   bin,
   configDir,
   testIdPrefix,
+  allowLogin = true,
 }: {
   kind: ProfileKind;
   bin: string;
   configDir?: string;
   testIdPrefix: string;
+  /** 第三方环境不给登录命令：在那里登录官方账号就是两种凭据混用。 */
+  allowLogin?: boolean;
 }) {
   const copy = async (action: "login" | "logout") => {
     try {
@@ -26,14 +29,16 @@ export function AuthCommandActions({
 
   return (
     <div className="flex flex-wrap items-center gap-1.5" aria-label="认证操作">
-      <button
-        type="button"
-        data-testid={`${testIdPrefix}-auth-login`}
-        onClick={() => void copy("login")}
-        className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
-      >
-        <LogIn className="h-3 w-3" aria-hidden /> 复制登录命令
-      </button>
+      {allowLogin && (
+        <button
+          type="button"
+          data-testid={`${testIdPrefix}-auth-login`}
+          onClick={() => void copy("login")}
+          className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+        >
+          <LogIn className="h-3 w-3" aria-hidden /> 复制登录命令
+        </button>
+      )}
       <button
         type="button"
         data-testid={`${testIdPrefix}-auth-logout`}

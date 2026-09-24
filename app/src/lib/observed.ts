@@ -74,8 +74,6 @@ export interface AgentsObserved {
   management?: AgentManagement | null;
   /** 助手自己写在本机的额度记账；没有这类记录的助手为 null。 */
   usage?: AgentUsage | null;
-  /** 官方认证文件的脱敏状态；不含账号或凭据正文。 */
-  auth?: AgentAuthStatus | null;
   /** 客户端配置文件的只读脱敏观察值；不含 token/API key 正文。 */
   current_config?: AgentCurrentConfigStatus | null;
 }
@@ -132,12 +130,19 @@ export interface AgentCurrentConfigStatus {
   current?: AgentCurrentConnection | null;
 }
 
-export interface AgentAuthStatus {
-  state: "missing" | "ready" | "unrecognized" | "invalid" | "unsafe" | "unreadable" | "too-large" | string;
-  authenticated: boolean;
-  mode?: string | null;
-  storage: "file" | string;
-  file: string;
+/** agents:auth-status：官方命令查到的登录状态；不含账号或凭据。 */
+export interface OfficialAuthStatus {
+  element: string;
+  state: "logged-in" | "logged-out" | "unknown";
+  logged_in: boolean | null;
+  /** claude.ai / oauth_token / api_key / chatgpt / other；有登录记录但方式未知时为 null。 */
+  method: string | null;
+  /** 这个环境用第三方接口或凭据。 */
+  third_party: boolean;
+  /** 第三方环境里有官方账号登录：两种凭据混在同一个配置目录。 */
+  mixed: boolean;
+  /** 无法确认时的原因。 */
+  reason: string | null;
 }
 
 /** 一个计量窗口：window_minutes 是窗口长度（300=5 小时，10080=7 天）。 */

@@ -44,9 +44,6 @@ function routes(bin = "claude", id = "claude-code"): Record<string, Envelope> {
               install_source: "native",
               installed: true,
               management: bin === "claude" || bin === "codex" ? agentManagementFixture(bin) : null,
-              auth: bin === "codex"
-                ? { state: "ready", authenticated: true, mode: "chatgpt", storage: "file", file: "auth.json" }
-                : null,
               current_config: bin === "codex"
                 ? {
                     state: "ready",

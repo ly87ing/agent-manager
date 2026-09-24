@@ -477,6 +477,10 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("agents", "configure") => {
             crate::native_agent_settings::apply(ctx, request).map(|data| (data, vec![]))
         }
+        // 官方账号登录状态：用官方命令查一次，只读零写；一次要一两秒，只在界面上点它时才调
+        ("agents", "auth-status") => crate::native_auth::status_command(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
         // 配置文件原文：读只读零写；写整文件按基准比对（取锁）
         ("agents", "config-file") => crate::native_agent_config_file::read(ctx, request)
             .map(|data| (data, vec![]))

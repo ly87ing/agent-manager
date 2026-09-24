@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:adopt / agents:configure|check|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:adopt / agents:configure|check|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -66,6 +66,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("agents", "configure") => true,
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
         ("agents", "check") => true,
+        // 官方账号登录状态：只读，用官方命令查一次
+        ("agents", "auth-status") => true,
         // 配置文件原文：读（凭据遮住）与整文件按基准写回
         ("agents", "config-file" | "edit-config") => true,
         // 用量：status 只读，scan 读会话文件后写聚合，clear 清空重来
@@ -200,7 +202,9 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--use", ArgValueKind::ElementId));
         }
-        ("agents", "config-file") => specs.push(("--only", ArgValueKind::ElementId)),
+        ("agents", "config-file" | "auth-status") => {
+            specs.push(("--only", ArgValueKind::ElementId))
+        }
         // 整文件写回：基准是 config-file 给出的文件摘要（或 missing），正文由引擎按格式校验
         ("agents", "edit-config") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -636,6 +640,7 @@ mod tests {
             "agents:apply",
             "agents:configure",
             "agents:check",
+            "agents:auth-status",
             "usage:status",
             "usage:scan",
             "mcp:status",
@@ -1269,6 +1274,13 @@ mod tests {
         assert!(validate_args(
             "agents:config-file",
             &args(&["--only", "agents:claude-code", "--value", "x"])
+        )
+        .is_err());
+        // 登录状态：只读，只接受一个 --only（主助手或实例）
+        assert!(validate_args("agents:auth-status", &args(&["--only", "profiles:cc-ly"])).is_ok());
+        assert!(validate_args(
+            "agents:auth-status",
+            &args(&["--only", "agents:claude-code", "--base", &base])
         )
         .is_err());
     }

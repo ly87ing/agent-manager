@@ -1398,9 +1398,9 @@ fn codex_普通运行设置保留认证并拒绝把配置路径指向认证文�
         .iter()
         .find(|element| element["id"] == "agents:codex")
         .unwrap();
-    assert_eq!(codex["observed"]["auth"]["state"], "ready");
-    assert_eq!(codex["observed"]["auth"]["mode"], "chatgpt");
-    assert!(!codex["observed"]["auth"].to_string().contains("test-only"));
+    // 状态不再读认证文件：没有 auth 字段，也不含其中任何内容（登录状态改由官方命令按需查询）
+    assert!(codex["observed"].get("auth").is_none());
+    assert!(!codex.to_string().contains("test-only"));
 
     define_codex(
         &ctx,

@@ -51,7 +51,7 @@ import {
   type ConfigureRequest,
 } from "../lib/agentCurrent";
 import { runtimePatchApplied } from "../lib/agentRuntime";
-import type { AgentsSpec } from "../lib/observed";
+import type { AgentsSpec, OfficialAuthStatus } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
 import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource } from "../lib/useAliasSource";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -726,6 +726,14 @@ export default function AgentsPage({
                 <ProfileCard
                   key={element.id}
                   element={element}
+                  onCheckAuth={async () => {
+                    try {
+                      const envelope = await runEngine<OfficialAuthStatus>("agents:auth-status", ["--only", element.id]);
+                      return envelope.ok ? envelope.data : envelope.errors[0]?.message ?? "未知错误";
+                    } catch (err) {
+                      return String(err);
+                    }
+                  }}
                   bin={baseBinOf((element.spec as unknown as { base_agent?: string }).base_agent ?? id)}
                   busy={profileApply.executing}
                   onApply={() => {
