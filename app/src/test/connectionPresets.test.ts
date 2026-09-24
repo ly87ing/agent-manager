@@ -53,6 +53,23 @@ describe("接入配置预设", () => {
     expect(JSON.stringify(entry)).not.toMatch(/sk-|api[-_]?key["']?\s*[:=]\s*["'][^"']{8}/i);
   });
 
+  it("Kimi Code 会员与 Kimi 开放平台是两套账号：密钥变量不混用", () => {
+    const code = CONNECTION_PRESETS.filter((p) => p.baseUrl.includes("/coding/"));
+    const open = CONNECTION_PRESETS.filter((p) => p.baseUrl.includes("moonshot."));
+    expect(code.length).toBeGreaterThan(0);
+    expect(open.length).toBeGreaterThan(0);
+    const codeVars = new Set(code.map((p) => p.tokenVar));
+    expect(open.some((p) => codeVars.has(p.tokenVar))).toBe(false);
+    expect(code.every((p) => p.label.includes("Kimi Code"))).toBe(true);
+  });
+
+  it("厂商建议的请求超时带进表单", () => {
+    const preset = CONNECTION_PRESETS.find((p) => p.id === "glm-cn-claude")!;
+    expect(connectionFromPreset(preset, "glm-cn").timeoutMs).toBe("3000000");
+    const deepseek = CONNECTION_PRESETS.find((p) => p.id === "deepseek-claude")!;
+    expect(connectionFromPreset(deepseek, "deepseek").timeoutMs).toBe("");
+  });
+
   it("键名避让已有的，不会把同厂商第二套顶掉", () => {
     const preset = CONNECTION_PRESETS.find((p) => p.id === "deepseek-claude")!;
     expect(presetConnectionName(preset, [])).toBe("deepseek");

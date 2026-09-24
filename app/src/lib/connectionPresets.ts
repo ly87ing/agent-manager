@@ -12,7 +12,9 @@ import { emptyConnection, type ConnectionEntry } from "./agentDefinitionForm";
  * 模型名比地址更容易过期（各家发新模型就改）。选完预设后字段都可以改；
  * 报「模型不存在」时以各家官方文档为准。
  *
- * 核对日期：2026-09-20。
+ * 核对日期：2026-09-24。能从厂商自己发布的代码里读到的以代码为准：智谱官方配置助手
+ * `@z_ai/coding-helper`（npm，2026-08-27）、MiniMax 官方命令行 `MiniMax-AI/cli`（GitHub）、
+ * Kimi Code 仓库 `MoonshotAI/kimi-code`（GitHub）；其余取自厂商文档站。
  */
 
 export interface ConnectionPreset {
@@ -25,6 +27,8 @@ export interface ConnectionPreset {
   aliasOpus?: string;
   aliasSonnet?: string;
   aliasHaiku?: string;
+  /** 厂商建议的请求超时（毫秒）。 */
+  timeoutMs?: string;
   /** 建议的环境变量名；取值仍要自己在密钥页填。 */
   tokenVar: string;
   /** 这条取自哪家的什么文档，便于自己去核对。 */
@@ -38,26 +42,30 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     label: "智谱 GLM（国内）",
     kind: "claude",
     baseUrl: "https://open.bigmodel.cn/api/anthropic",
-    model: "glm-5.2[1m]",
-    aliasOpus: "glm-5.2[1m]",
-    aliasSonnet: "glm-5.2[1m]",
-    aliasHaiku: "glm-4.7",
+    model: "glm-5.3[1m]",
+    aliasOpus: "glm-5.3[1m]",
+    aliasSonnet: "glm-5.3[1m]",
+    aliasHaiku: "glm-5.3-flash[1m]",
+    timeoutMs: "3000000",
     tokenVar: "GLM_API_KEY",
-    source: "智谱开放平台文档 docs.bigmodel.cn",
+    source: "智谱官方配置助手 @z_ai/coding-helper 与文档 docs.bigmodel.cn",
   },
   {
     id: "glm-global-claude",
     label: "智谱 GLM（国际 Z.ai）",
     kind: "claude",
     baseUrl: "https://api.z.ai/api/anthropic",
-    model: "glm-5.2[1m]",
-    aliasHaiku: "glm-4.7",
+    model: "glm-5.3[1m]",
+    aliasOpus: "glm-5.3[1m]",
+    aliasSonnet: "glm-5.3[1m]",
+    aliasHaiku: "glm-5.3-flash[1m]",
+    timeoutMs: "3000000",
     tokenVar: "GLM_API_KEY",
-    source: "Z.ai 文档 docs.z.ai",
+    source: "智谱官方配置助手 @z_ai/coding-helper 与文档 docs.z.ai",
   },
   {
     id: "kimi-cn-claude",
-    label: "Kimi（国内）",
+    label: "Kimi 开放平台（国内）",
     kind: "claude",
     baseUrl: "https://api.moonshot.cn/anthropic",
     model: "kimi-k3[1m]",
@@ -69,7 +77,7 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
   },
   {
     id: "kimi-global-claude",
-    label: "Kimi（国际）",
+    label: "Kimi 开放平台（国际）",
     kind: "claude",
     baseUrl: "https://api.moonshot.ai/anthropic",
     model: "kimi-k3[1m]",
@@ -91,6 +99,32 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     tokenVar: "DEEPSEEK_API_KEY",
     source: "DeepSeek API 文档 api-docs.deepseek.com",
   },
+  {
+    id: "minimax-cn-claude",
+    label: "MiniMax（国内）",
+    kind: "claude",
+    baseUrl: "https://api.minimaxi.com/anthropic",
+    model: "MiniMax-M3[1m]",
+    aliasOpus: "MiniMax-M3[1m]",
+    aliasSonnet: "MiniMax-M2.7",
+    aliasHaiku: "MiniMax-M2.7-highspeed",
+    timeoutMs: "3000000",
+    tokenVar: "MINIMAX_API_KEY",
+    source: "MiniMax 官方命令行 MiniMax-AI/cli 与文档 platform.minimaxi.com",
+  },
+  {
+    id: "minimax-global-claude",
+    label: "MiniMax（国际）",
+    kind: "claude",
+    baseUrl: "https://api.minimax.io/anthropic",
+    model: "MiniMax-M3[1m]",
+    aliasOpus: "MiniMax-M3[1m]",
+    aliasSonnet: "MiniMax-M2.7",
+    aliasHaiku: "MiniMax-M2.7-highspeed",
+    timeoutMs: "3000000",
+    tokenVar: "MINIMAX_API_KEY",
+    source: "MiniMax 官方命令行 MiniMax-AI/cli 与文档 platform.minimax.io",
+  },
 
   // ---- Codex：OpenAI Responses 协议端点（与上面的地址不是同一个）----
   {
@@ -100,7 +134,7 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     baseUrl: "https://open.bigmodel.cn/api/v1",
     model: "glm-5.3",
     tokenVar: "GLM_API_KEY",
-    source: "智谱开放平台文档 docs.bigmodel.cn",
+    source: "智谱官方配置助手 @z_ai/coding-helper 与文档 docs.bigmodel.cn",
   },
   {
     id: "glm-global-codex",
@@ -109,25 +143,44 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     baseUrl: "https://api.z.ai/api/v1",
     model: "glm-5.3",
     tokenVar: "GLM_API_KEY",
-    source: "Z.ai 文档 docs.z.ai",
+    source: "智谱官方配置助手 @z_ai/coding-helper 与文档 docs.z.ai",
   },
   {
     id: "kimi-cn-codex",
-    label: "Kimi（国内）",
+    label: "Kimi 开放平台（国内）",
     kind: "codex",
-    baseUrl: "https://api.kimi.com/coding/v1",
-    model: "k3-256k",
+    baseUrl: "https://api.moonshot.cn/v1",
+    model: "kimi-k3",
     tokenVar: "KIMI_API_KEY",
-    source: "Kimi Code 文档 platform.kimi.com",
+    source: "Kimi 开放平台文档 platform.kimi.com（Codex 接入指南）",
   },
   {
     id: "kimi-global-codex",
-    label: "Kimi（国际）",
+    label: "Kimi 开放平台（国际）",
+    kind: "codex",
+    baseUrl: "https://api.moonshot.ai/v1",
+    model: "kimi-k3",
+    tokenVar: "KIMI_API_KEY",
+    source: "Kimi 开放平台文档 platform.kimi.ai（Codex 接入指南）",
+  },
+  {
+    // Kimi Code 是会员产品，与开放平台是两套账号与密钥，不能混用同一个变量
+    id: "kimi-code-cn-codex",
+    label: "Kimi Code 会员（国内）",
+    kind: "codex",
+    baseUrl: "https://api.kimi.com/coding/v1",
+    model: "k3-256k",
+    tokenVar: "KIMI_CODE_API_KEY",
+    source: "Kimi Code 仓库 MoonshotAI/kimi-code 与文档 www.kimi.com/code/docs",
+  },
+  {
+    id: "kimi-code-global-codex",
+    label: "Kimi Code 会员（国际）",
     kind: "codex",
     baseUrl: "https://api.kimi.ai/coding/v1",
     model: "k3-256k",
-    tokenVar: "KIMI_API_KEY",
-    source: "Kimi Code 文档 platform.kimi.ai",
+    tokenVar: "KIMI_CODE_API_KEY",
+    source: "Kimi Code 仓库 MoonshotAI/kimi-code 与文档 www.kimi.com/code/docs",
   },
   {
     id: "deepseek-codex",
@@ -137,6 +190,24 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     model: "deepseek-flash",
     tokenVar: "DEEPSEEK_API_KEY",
     source: "DeepSeek API 文档 api-docs.deepseek.com",
+  },
+  {
+    id: "minimax-cn-codex",
+    label: "MiniMax（国内）",
+    kind: "codex",
+    baseUrl: "https://api.minimaxi.com/v1",
+    model: "MiniMax-M3",
+    tokenVar: "MINIMAX_API_KEY",
+    source: "MiniMax 官方命令行 MiniMax-AI/cli 与文档 platform.minimaxi.com",
+  },
+  {
+    id: "minimax-global-codex",
+    label: "MiniMax（国际）",
+    kind: "codex",
+    baseUrl: "https://api.minimax.io/v1",
+    model: "MiniMax-M3",
+    tokenVar: "MINIMAX_API_KEY",
+    source: "MiniMax 官方命令行 MiniMax-AI/cli 与文档 platform.minimax.io",
   },
 ];
 
@@ -163,6 +234,7 @@ export function connectionFromPreset(preset: ConnectionPreset, name: string): Co
     aliasOpus: preset.aliasOpus ?? "",
     aliasSonnet: preset.aliasSonnet ?? "",
     aliasHaiku: preset.aliasHaiku ?? "",
+    timeoutMs: preset.timeoutMs ?? "",
   };
 }
 

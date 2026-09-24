@@ -1229,7 +1229,7 @@ describe("助手运行参数", () => {
     await userEvent.click(await screen.findByTestId("add-connection-button"));
     await screen.findByRole("dialog", { name: "为 Claude Code 添加接入" });
     await userEvent.click(screen.getByTestId("connection-preset-kimi-cn-claude"));
-    expect(screen.getByTestId("selected-connection-preset")).toHaveTextContent("已选择：Kimi（国内）");
+    expect(screen.getByTestId("selected-connection-preset")).toHaveTextContent("已选择：Kimi 开放平台（国内）");
     expect(screen.getByRole("heading", { name: "Provider 配置" })).toBeInTheDocument();
     expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://api.moonshot.cn/anthropic");
     expect(screen.getByTestId("new-connection-model")).toHaveValue("kimi-k3[1m]");
@@ -1254,7 +1254,7 @@ describe("助手运行参数", () => {
     expect(definition.settings.active).toBe("official");
     expect(definition.settings.profiles.official).toEqual({ label: "官方", custom_profile_flag: 7 });
     expect(definition.settings.profiles["kimi-cn"]).toMatchObject({
-      label: "Kimi（国内）",
+      label: "Kimi 开放平台（国内）",
       base_url: "https://api.moonshot.cn/anthropic",
       token_var: "KIMI_API_KEY",
       model: "kimi-k3[1m]",

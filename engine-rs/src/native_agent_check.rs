@@ -211,6 +211,28 @@ fn verdict(kind: Kind, probe: &Probe) -> (bool, String) {
         Some(msg) if !msg.is_empty() => format!("{fallback}：{msg}"),
         _ => fallback.to_string(),
     };
+    // 返回的是网页不是接口响应：多半被防火墙 / Cloudflare 这类防护拦下，或地址填成了网站首页
+    if probe.body.trim_start().starts_with('<') && probe.status != 200 {
+        return (
+            false,
+            format!(
+                "返回了网页而不是接口响应（{}）：可能被防火墙或 Cloudflare 这类防护拦下，或地址不是接口地址",
+                probe.status
+            ),
+        );
+    }
+    // 只收官方编码助手客户端请求的端点（如 Kimi Code 会员）：检查不冒充客户端，如实说明验不了
+    let coding_agents_only = probe.status == 403
+        && [upstream.as_deref().unwrap_or(""), probe.body.as_str()]
+            .iter()
+            .any(|text| text.to_ascii_lowercase().contains("coding agent"));
+    if coding_agents_only {
+        return (
+            false,
+            "这个端点只接受编码助手客户端自己发的请求，无法代为检查；请直接在终端里用助手验证"
+                .to_string(),
+        );
+    }
     match probe.status {
         200 => (true, "通了：地址、令牌与模型都没问题".to_string()),
         // 限流说明地址与令牌都是对的，只是这会儿用不了
@@ -476,6 +498,36 @@ mod tests {
         let (ok, text) = verdict(Kind::Claude, &failed);
         assert!(!ok);
         assert!(text.contains("连不上"));
+    }
+
+    /// 只收编码助手客户端请求的端点：不冒充客户端，如实说明验不了，而不是说「令牌没权限」。
+    #[test]
+    fn 只收编码助手客户端的端点_说明无法代为检查() {
+        let body = r#"{"error":{"message":"Kimi For Coding is currently only available for Coding Agents such as Kimi CLI, Claude Code, Roo Code","type":"access_terminated_error"}}"#;
+        let (ok, text) = verdict(Kind::Codex, &probe(403, body));
+        assert!(!ok);
+        assert!(text.contains("无法代为检查"), "{text}");
+        // 普通的 403 照旧
+        let (_, text) = verdict(
+            Kind::Codex,
+            &probe(403, r#"{"error":{"message":"model not enabled"}}"#),
+        );
+        assert!(text.contains("没有这个权限"), "{text}");
+    }
+
+    /// 返回网页（防火墙、Cloudflare 或填成了网站首页）时直说，不当成接口错误去猜。
+    #[test]
+    fn 返回网页时说明可能被拦截() {
+        let (ok, text) = verdict(
+            Kind::Claude,
+            &probe(
+                403,
+                "<!DOCTYPE html><html><head><title>Just a moment...</title>",
+            ),
+        );
+        assert!(!ok);
+        assert!(text.contains("网页"), "{text}");
+        assert!(text.contains("403"), "{text}");
     }
 
     #[test]
