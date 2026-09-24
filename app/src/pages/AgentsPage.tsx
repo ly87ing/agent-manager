@@ -21,6 +21,7 @@ import {
   defaultConfigDir,
   fixLaunchCommandTilde,
   fixLaunchCommandCredentialClear,
+  isThirdPartyProfile,
   launchCommandsForProfile,
   parseProfileDefinition,
   profileKindOf,
@@ -396,7 +397,7 @@ export default function AgentsPage({
   };
 
   /**
-   * 把接入建成独立环境：打开预填好的新建表单，保存后照常写定义与启动命令。凭据仍引用同一个
+   * 把接入建成独立环境：打开预填好的新建表单，保存后照常写定义、配置与启动命令。凭据仍引用同一个
    * 变量名；第三方凭据只进新环境的目录，主配置留给官方账号。
    */
   const makeProfileFromConnection = (element: EngineElement, connection: ConnectionEntry) => {
@@ -464,7 +465,24 @@ export default function AgentsPage({
     }
   };
 
-  /** 保存实例：写定义 + 把启动命令存成同名快捷命令；两步都只写配置，不落地。 */
+  /**
+   * 第三方环境的目标文件还不存在时先写好配置：只有启动命令而目录空着，一运行助手就会引导登录
+   * 官方账号，之后第三方凭据就写不进这个目录了。目标文件已存在时不自动覆盖，交给卡片上的逐字段
+   * 对比由用户选择。返回 false 表示应该写却没写成。
+   */
+  const writeNewProfileConfig = async (id: string): Promise<boolean> => {
+    const status = await runEngine<StatusData>("profiles:status", []);
+    const element = status.ok ? status.data.elements.find((item) => item.id === `profiles:${id}`) : undefined;
+    if (!element || profileBaseOf(element) !== "missing") return true;
+    const applied = await profileApply.apply({
+      command: "profiles:apply",
+      label: `写入独立环境 ${id} 的配置`,
+      args: ["--only", element.id, "--base", "missing"],
+    });
+    return applied?.ok === true;
+  };
+
+  /** 保存实例：写定义、（第三方环境）写好配置，再把启动命令存成同名快捷命令。 */
   const saveProfile = async (input: ProfileFormInput) => {
     const definition = buildProfileDefinition(input, baseBinOf(input.baseAgent));
     let envelope;
@@ -483,6 +501,15 @@ export default function AgentsPage({
     }
     if (!envelope.ok) {
       toast.error(`保存独立环境被拒绝:${envelope.errors[0]?.message ?? "未知错误"}`);
+      return;
+    }
+    if (isThirdPartyProfile(input) && !(await writeNewProfileConfig(input.id))) {
+      toast.error(`已保存独立环境 ${input.id}，但配置没有写入，启动命令也先不写`, {
+        description: "原因见任务记录；处理后在实例卡片上写入配置，再新增启动命令。",
+      });
+      setProfileForm(null);
+      setProfileDuplicating(false);
+      void profilesQuery.refetch();
       return;
     }
     if (aliasSource.source) {

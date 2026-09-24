@@ -163,8 +163,11 @@ describe("助手实例", () => {
     expect(within(dialog).getByTestId("profile-config-dir")).toHaveValue("~/.claude-cc-ly-copy");
   });
 
-  it("新建实例：保存定义，并把启动命令按名直接写进终端配置；实例配置目录不落地", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, routes());
+  it("新建第三方环境：保存定义，先写好实例配置，再把启动命令按名写进终端配置", async () => {
+    const { calls } = renderWithEngine(
+      <AgentsPage />,
+      routes([profileElement(), profileElement({ id: "profiles:cc-work" })]),
+    );
     await openInstanceManager();
     await userEvent.click(await screen.findByTestId("add-profile-button"));
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
@@ -193,8 +196,36 @@ describe("助手实例", () => {
     expect(aliasWrite.args[aliasWrite.args.indexOf("--value") + 1]).toBe(
       'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-work" claude --dangerously-skip-permissions',
     );
-    // 实例配置目录仍要单独「写入配置」才落地
-    expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
+    // 目标文件还不存在：先写配置，免得启动命令在空目录里引导登录官方账号
+    const configWrite = calls.find((call) => call.command === "profiles:apply")!;
+    expect(configWrite.args).toEqual(["--only", "profiles:cc-work", "--base", "missing"]);
+    expect(calls.indexOf(configWrite)).toBeGreaterThan(calls.indexOf(defWrite));
+    expect(calls.indexOf(configWrite)).toBeLessThan(calls.indexOf(aliasWrite));
+  });
+
+  it("新建第三方环境时配置写不进去：启动命令也先不写，并说明原因", async () => {
+    const refused = {
+      ...routes([profileElement(), profileElement({ id: "profiles:cc-work" })]),
+      "profiles:apply": async () => makeEnvelope(
+        {},
+        {
+          command: "profiles.apply",
+          ok: false,
+          errors: [{ code: "ENGINE_ERROR", element: null, message: "[cc-work] 环境变量 WORK_TOKEN 在当前环境里没有取值，拒绝写入不完整的配置" }],
+        },
+      ),
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, refused);
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
+    await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://api.example.com");
+    await userEvent.type(within(dialog).getByTestId("profile-token-var"), "WORK_TOKEN");
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply")).toBe(true));
+    expect(await screen.findByText(/配置没有写入，启动命令也先不写/)).toBeInTheDocument();
+    expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
   });
 
   it("Claude 环境填了接口地址却没填鉴权变量时不保存，免得官方登录被发往第三方地址", async () => {
