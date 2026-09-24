@@ -238,10 +238,23 @@ profile 与各类表等）在「运行设置」页底部的「直接编辑配置
 确认配置目录里没有官方账号登录；Claude 的第三方凭据会遮住官方登录，另看目录里 `.claude.json`
 的登录会话记录与 `.credentials.json`。有登录或无法确认都拒绝，提示换一个新目录；官方账号实例
 不做这项检查。Claude 实例的定义规则：两种第三方凭据只能声明一个；有地址必须有凭据（否则 Claude
-会把官方登录发往该地址）；第三方实例不能声明官方长期令牌 `CLAUDE_CODE_OAUTH_TOKEN`。第三方
-Claude 实例的 `settings.json` 把没声明的那种第三方凭据与 `CLAUDE_CODE_OAUTH_TOKEN` 写为空串，按官方
-文档取消从 shell 继承的同名变量；第三方 Codex 实例的启动命令前缀 `CODEX_API_KEY= CODEX_ACCESS_TOKEN=`，
-清空 Codex 当作官方凭据读取、优先于目录登录的变量；早先保存、缺这段前缀的启动命令在实例卡片上标出，
+会把官方登录发往该地址）；第三方实例不能声明官方长期令牌 `CLAUDE_CODE_OAUTH_TOKEN`，也不能打开
+云厂商开关（`CLAUDE_CODE_USE_*` 非空时 Claude 改走云厂商、不用实例的第三方凭据）。
+
+每个 Claude 实例（第三方与官方账号实例都一样）的 `settings.json` 把会压过实例自己凭据或登录、而实例
+没声明的外部设置写为空串：五个云厂商开关（`CLAUDE_CODE_USE_{BEDROCK,VERTEX,FOUNDRY,ANTHROPIC_AWS,MANTLE}`，
+官方认证优先级里排在所有凭据之前）、`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`CLAUDE_CODE_OAUTH_TOKEN`、
+`ANTHROPIC_BASE_URL` 与 `ANTHROPIC_CUSTOM_HEADERS`（可携带 `Authorization` 等凭据头）。依据是官方设置参考
+`env` 一节：settings 的 env 覆盖 shell 导出，置 `""` 即取消，选择凭据时空值按未设置处理。第三方实例因此
+只可能用自己声明的那一个凭据发往自己的地址，官方账号实例只可能用目录里的登录（或它自己声明的长期令牌）。
+真实 claude 2.1.281 实测：不置空时 shell 的 `CLAUDE_CODE_USE_BEDROCK=1` 把第三方实例改走 Bedrock，shell
+的地址与 key 把官方账号实例发往中转，shell 的附加请求头随请求发给实例接口；置空后三者都不再发生。
+实例卡片把尚未写入的这组置空项合并成一句提示，不逐条铺开；新建 Claude 官方账号实例与第三方实例一样，
+目标文件还不存在时先写配置再写启动命令。
+
+Codex 实例（第三方与官方账号实例都一样）的启动命令前缀 `CODEX_API_KEY= CODEX_ACCESS_TOKEN=`，清空 Codex
+当作官方凭据读取、优先于目录登录的变量（`rust-v0.156.1` 源码：`CODEX_ACCESS_TOKEN` 所有入口都读，
+`CODEX_API_KEY` 由 `codex exec` 等非交互入口读）；早先保存、缺这段前缀的启动命令在实例卡片上标出，
 「订正」只补前缀（已有的同名赋值换成空值），命令其余部分原样保留。
 第三方凭据的取值只写进实例自己的配置文件（0600），库里只存变量名，启动时不依赖 shell 导出变量：
 Claude 写 `settings.json` 的 env；Codex 写实例目录 `config.toml` 里 `[model_providers.agent-manager]`

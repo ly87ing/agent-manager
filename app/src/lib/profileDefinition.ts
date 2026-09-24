@@ -119,8 +119,9 @@ export function shellConfigDir(configDir: string): string {
 }
 
 /**
- * 第三方 Codex 环境启动时清空的变量：Codex 把它们当作官方账号侧的凭据，优先于目录里存的登录，
- * 空值等同未设置。与引擎侧保持一致。
+ * Codex 环境启动时清空的变量：Codex 把它们当作官方账号侧的凭据，优先于目录里存的登录，
+ * 空值等同未设置。官方账号环境同样清空，否则 shell 里给别的账号导出的令牌会压过这个目录的登录。
+ * 与引擎侧保持一致。
  */
 export const CODEX_CLEARED_ENV = ["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"] as const;
 
@@ -132,7 +133,7 @@ export function isThirdPartyProfile(input: Pick<ProfileFormInput, "baseUrl" | "t
 /** 该实例的启动命令取值（与别名域取值格式一致）。 */
 export function profileLaunchValue(input: ProfileFormInput, baseBin: string): string {
   const parts: string[] = [];
-  if (input.kind === "codex" && isThirdPartyProfile(input)) {
+  if (input.kind === "codex") {
     parts.push(...CODEX_CLEARED_ENV.map((name) => `${name}=`));
   }
   parts.push(`${configEnvOf(input.kind)}="${shellConfigDir(input.configDir)}"`, baseBin);
@@ -203,7 +204,7 @@ export interface ProfileLaunchCommand {
   value: string;
   /** 配置目录写成了不会展开的 `"~/..."`，需要订正。 */
   needsTildeFix: boolean;
-  /** 第三方 Codex 环境的命令没有清空官方凭据变量，需要订正。 */
+  /** Codex 环境的命令没有清空会压过目录登录的凭据变量，需要订正。 */
   needsCredentialClear: boolean;
 }
 
@@ -218,7 +219,6 @@ export function launchCommandsForProfile(
   kind: ProfileKind,
   configDir: string,
   parseEnv: (value: string) => Record<string, string>,
-  thirdParty = false,
 ): ProfileLaunchCommand[] {
   const envName = configEnvOf(kind);
   const want = normalizeConfigDir(configDir);
@@ -231,7 +231,7 @@ export function launchCommandsForProfile(
       name,
       value,
       needsTildeFix: launchCommandNeedsTildeFix(value),
-      needsCredentialClear: kind === "codex" && thirdParty && launchCommandNeedsCredentialClear(value),
+      needsCredentialClear: kind === "codex" && launchCommandNeedsCredentialClear(value),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

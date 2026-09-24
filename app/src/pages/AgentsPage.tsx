@@ -466,9 +466,12 @@ export default function AgentsPage({
   };
 
   /**
-   * 第三方环境的目标文件还不存在时先写好配置：只有启动命令而目录空着，一运行助手就会引导登录
-   * 官方账号，之后第三方凭据就写不进这个目录了。目标文件已存在时不自动覆盖，交给卡片上的逐字段
-   * 对比由用户选择。返回 false 表示应该写却没写成。
+   * 新环境的目标文件还不存在时先写好配置，再写启动命令：
+   * - 第三方环境只有启动命令而目录空着，一运行助手就会引导登录官方账号，之后第三方凭据就写不进
+   *   这个目录了；
+   * - Claude 官方账号环境要先写好置空的凭据变量，否则第一次启动就会被 shell 里给别的账号或中转
+   *   导出的变量压过这个目录里的登录。
+   * 目标文件已存在时不自动覆盖，交给卡片上的逐字段对比由用户选择。返回 false 表示应该写却没写成。
    */
   const writeNewProfileConfig = async (id: string): Promise<boolean> => {
     const status = await runEngine<StatusData>("profiles:status", []);
@@ -482,7 +485,7 @@ export default function AgentsPage({
     return applied?.ok === true;
   };
 
-  /** 保存实例：写定义、（第三方环境）写好配置，再把启动命令存成同名快捷命令。 */
+  /** 保存实例：写定义、（第三方环境与 Claude 环境）写好配置，再把启动命令存成同名快捷命令。 */
   const saveProfile = async (input: ProfileFormInput) => {
     const definition = buildProfileDefinition(input, baseBinOf(input.baseAgent));
     let envelope;
@@ -503,7 +506,7 @@ export default function AgentsPage({
       toast.error(`保存独立环境被拒绝:${envelope.errors[0]?.message ?? "未知错误"}`);
       return;
     }
-    if (isThirdPartyProfile(input) && !(await writeNewProfileConfig(input.id))) {
+    if ((isThirdPartyProfile(input) || input.kind === "claude") && !(await writeNewProfileConfig(input.id))) {
       toast.error(`已保存独立环境 ${input.id}，但配置没有写入，启动命令也先不写`, {
         description: "原因见任务记录；处理后在实例卡片上写入配置，再新增启动命令。",
       });
@@ -593,7 +596,7 @@ export default function AgentsPage({
   const launchCommandsOf = (element: EngineElement) => {
     if (!aliasSource.source) return [];
     const spec = element.spec as unknown as { base_agent?: string; config_dir?: string };
-    const observed = element.observed as unknown as { config_dir?: string; third_party?: boolean };
+    const observed = element.observed as unknown as { config_dir?: string };
     const dir = observed.config_dir ?? spec.config_dir ?? "";
     if (!dir) return [];
     return launchCommandsForProfile(
@@ -601,7 +604,6 @@ export default function AgentsPage({
       profileKindOf(spec.base_agent ?? "claude-code"),
       dir,
       (value) => parseAliasValue(value).otherEnv,
-      observed.third_party === true,
     );
   };
 

@@ -203,6 +203,57 @@ describe("助手实例", () => {
     expect(calls.indexOf(configWrite)).toBeLessThan(calls.indexOf(aliasWrite));
   });
 
+  it("新建 Claude 官方账号环境：也先写好置空外部凭据变量的配置，再写启动命令", async () => {
+    const { calls } = renderWithEngine(
+      <AgentsPage />,
+      routes([profileElement(), profileElement({ id: "profiles:cc-home" })]),
+    );
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-home");
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
+    const defWrite = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(defWrite.args[defWrite.args.indexOf("--value") + 1]);
+    expect(definition.profile.env).toBeUndefined();
+    const configWrite = calls.find((call) => call.command === "profiles:apply")!;
+    expect(configWrite.args).toEqual(["--only", "profiles:cc-home", "--base", "missing"]);
+    const aliasWrite = calls.find((call) => call.command === "aliases:apply")!;
+    expect(calls.indexOf(configWrite)).toBeLessThan(calls.indexOf(aliasWrite));
+  });
+
+  it("实例卡片把还没置空的外部凭据变量合并成一句说明，不逐条铺开", async () => {
+    const isolation = (name: string) => ({ field: `env.${name}`, state: "missing", definition: "", live: null, purpose: "isolation" });
+    renderWithEngine(
+      <AgentsPage />,
+      routes([
+        profileElement({
+          state: "drifted",
+          observed: {
+            ...(profileElement().observed as Record<string, unknown>),
+            target_exists: true,
+            base: "b".repeat(64),
+            fields: [
+              { field: "model", state: "differs", definition: "opus", live: "sonnet" },
+              isolation("CLAUDE_CODE_USE_BEDROCK"),
+              isolation("ANTHROPIC_CUSTOM_HEADERS"),
+            ],
+          },
+        }),
+      ]),
+    );
+    await openInstanceManager();
+    const card = await screen.findByTestId("profile-card-cc-ly");
+    const gaps = within(card).getByTestId("profile-isolation-gaps-cc-ly");
+    expect(gaps).toHaveTextContent("2 个凭据相关变量");
+    expect(gaps).toHaveTextContent("CLAUDE_CODE_USE_BEDROCK、ANTHROPIC_CUSTOM_HEADERS");
+    const differs = within(card).getByTestId("profile-differs-cc-ly");
+    expect(differs).toHaveTextContent("model");
+    expect(differs).not.toHaveTextContent("CLAUDE_CODE_USE_BEDROCK");
+  });
+
   it("新建第三方环境时配置写不进去：启动命令也先不写，并说明原因", async () => {
     const refused = {
       ...routes([profileElement(), profileElement({ id: "profiles:cc-work" })]),

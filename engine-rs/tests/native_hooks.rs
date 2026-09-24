@@ -724,9 +724,18 @@ fn old_profile_fingerprint_with_hooks_does_not_block_after_hooks_edit() {
         .unwrap();
     }
     let st = run(&ctx, "profiles:status", &[]);
-    assert_eq!(
-        st.data["elements"][0]["state"], "managed-ok",
-        "旧指纹照常认"
+    // 旧指纹照常认：不因指纹或 hooks 判为读不了；唯一的差异是旧版本没写的隔离置空项
+    assert_eq!(st.data["elements"][0]["state"], "drifted");
+    let differs: Vec<&Value> = st.data["elements"][0]["observed"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|field| field["state"] != "same")
+        .collect();
+    assert!(!differs.is_empty());
+    assert!(
+        differs.iter().all(|field| field["purpose"] == "isolation"),
+        "{differs:?}"
     );
 
     let base = base_of(&ctx, "hooks:profile:cc-old");
@@ -743,6 +752,8 @@ fn old_profile_fingerprint_with_hooks_does_not_block_after_hooks_edit() {
         read_json(&path)["hooks"]["Stop"][0]["hooks"][0]["command"],
         "new"
     );
+    let st = run(&ctx, "profiles:status", &[]);
+    assert_eq!(st.data["elements"][0]["state"], "managed-ok");
     let _ = std::fs::remove_dir_all(&root);
 }
 

@@ -284,6 +284,8 @@ export interface ProfileField {
   state: "same" | "differs" | "missing" | "unresolved" | string;
   definition: string | null;
   live: string | null;
+  /** isolation = 置空取消 shell 继承的凭据相关变量（界面合并成一句说明）。 */
+  purpose?: "isolation" | string;
 }
 
 // ---------- system:discover（只读接管发现） ----------

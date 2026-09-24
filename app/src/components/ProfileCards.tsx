@@ -62,7 +62,10 @@ export function ProfileCard({
   const id = element.id.replace(/^profiles:/, "");
   const blocked = observed.blocked_reason;
   const missingVars = (observed.env_refs ?? []).filter((ref) => ref.resolved === false);
-  const differs = (observed.fields ?? []).filter((field) => field.state !== "same");
+  const allDiffers = (observed.fields ?? []).filter((field) => field.state !== "same");
+  // 取消 shell 继承的隔离项合并成一句说明，其余差异逐条列出
+  const isolationGaps = allDiffers.filter((field) => field.purpose === "isolation");
+  const differs = allDiffers.filter((field) => field.purpose !== "isolation");
   const canAdopt = element.actions.some((action) => action.id === "adopt");
   const canApply = element.actions.some((action) => action.id === "apply");
   const thirdParty = observed.third_party === true;
@@ -241,7 +244,7 @@ export function ProfileCard({
                     className="mt-1.5 flex flex-wrap items-center gap-2 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-[11px] text-warning"
                   >
                     <span>
-                      这条命令没有清空 CODEX_API_KEY / CODEX_ACCESS_TOKEN：shell 里有它们时，Codex 会优先用这份官方凭据，和第三方接入混用。
+                      这条命令没有清空 CODEX_API_KEY / CODEX_ACCESS_TOKEN：shell 里有它们时，Codex 会优先用这份凭据，而不是这个环境自己的登录或接入。
                     </span>
                     <button
                       type="button"
@@ -261,6 +264,14 @@ export function ProfileCard({
       {missingVars.length > 0 && (
         <p data-testid={`profile-missing-vars-${id}`} className="mt-2 rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
           这些环境变量当前取不到值，写入会被拒绝：{missingVars.map((ref) => ref.variable ?? ref.name).join("、")}
+        </p>
+      )}
+
+      {element.state === "drifted" && isolationGaps.length > 0 && (
+        <p data-testid={`profile-isolation-gaps-${id}`} className="mt-2 rounded-md border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
+          还没挡住 shell 里导出的 {isolationGaps.length} 个凭据相关变量（
+          <span className="font-mono">{isolationGaps.map((field) => field.field.replace(/^env\./, "")).join("、")}</span>
+          ）：它们会压过{thirdParty ? "这个环境自己的第三方凭据" : "这个环境自己的登录"}。写入配置后这些变量在本环境里一律置空。
         </p>
       )}
 

@@ -343,6 +343,17 @@ pub(crate) fn parse_definition(id: &str, raw: &Value, enabled: bool) -> Result<P
 const CLAUDE_THIRD_PARTY_CREDENTIALS: [&str; 2] = ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
 const CLAUDE_OFFICIAL_TOKEN: &str = "CLAUDE_CODE_OAUTH_TOKEN";
 const CLAUDE_BASE_URL: &str = "ANTHROPIC_BASE_URL";
+/// 云厂商开关：官方认证优先级里排在所有凭据之前，任一为真就改走对应云厂商
+/// （认证文档与环境变量参考列出的五个）。
+pub(crate) const CLAUDE_CLOUD_PROVIDER_SWITCHES: [&str; 5] = [
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_MANTLE",
+];
+/// 附加请求头：可以带 `Authorization` 等凭据头，从 shell 继承进来就会连同请求发给实例的接口。
+const CLAUDE_CUSTOM_HEADERS: &str = "ANTHROPIC_CUSTOM_HEADERS";
 
 /// 官方账号凭据与第三方凭据不能出现在同一个实例里，第三方实例只能有一种凭据：
 /// - 两种第三方凭据同时声明时 Claude 按优先级取其一，结果取决于规则而不是定义，拒绝；
@@ -363,6 +374,15 @@ fn check_claude_credentials(id: &str, env: &Map<String, Value>) -> Result<()> {
     if third_party && env.contains_key(CLAUDE_OFFICIAL_TOKEN) {
         bail!("[{id}] {CLAUDE_OFFICIAL_TOKEN} 是官方账号凭据，不能和第三方凭据放在同一个实例");
     }
+    if let Some(name) = CLAUDE_CLOUD_PROVIDER_SWITCHES.into_iter().find(|name| {
+        third_party
+            && env
+                .get(*name)
+                .and_then(Value::as_str)
+                .is_some_and(|value| !value.is_empty())
+    }) {
+        bail!("[{id}] {name} 会让 Claude 改走云厂商、不用这个实例的第三方凭据，两者不能放在同一个实例");
+    }
     Ok(())
 }
 
@@ -379,16 +399,27 @@ pub(crate) fn is_third_party(def: &ProfileDef) -> bool {
     }
 }
 
-/// 第三方 Claude 实例的 settings.json 里要置为空串的变量：没声明的那种第三方凭据与官方长期令牌。
-/// 官方文档：settings 的 env 覆盖 shell 里的同名变量，置为 `""` 即取消继承。这样从 shell
-/// 继承来的凭据进不了这个实例，实际生效的只可能是实例自己声明的那一个。
+/// Claude 实例的 settings.json 里要置为空串的变量：会压过实例自己凭据或登录的外部设置，
+/// 实例没声明的一律取消——云厂商开关、两种第三方凭据、官方长期令牌、接口地址与附加请求头。
+///
+/// 官方设置参考（`env` 一节）：settings 的 env 覆盖 shell 里的同名变量，置为 `""` 即取消 shell
+/// 导出，Claude Code 在选择凭据时把空值当作未设置。第三方实例因此只可能用自己声明的那一个
+/// 凭据发往自己的地址；官方账号实例只可能用这个目录里的登录（或它自己声明的长期令牌），shell
+/// 里给别的账号或中转导出的变量进不来。真实 claude 2.1.281 实测：不取消时 shell 的
+/// `CLAUDE_CODE_USE_BEDROCK=1` 把第三方实例改走 Bedrock、shell 的地址与 key 把官方账号实例
+/// 发往中转、shell 的附加请求头随请求发给实例的接口；取消后都不再发生。
 fn claude_cancelled_env(def: &ProfileDef) -> Vec<&'static str> {
-    if def.kind != ProfileKind::Claude || !is_third_party(def) {
+    if def.kind != ProfileKind::Claude {
         return Vec::new();
     }
-    CLAUDE_THIRD_PARTY_CREDENTIALS
+    CLAUDE_CLOUD_PROVIDER_SWITCHES
         .into_iter()
-        .chain([CLAUDE_OFFICIAL_TOKEN])
+        .chain(CLAUDE_THIRD_PARTY_CREDENTIALS)
+        .chain([
+            CLAUDE_OFFICIAL_TOKEN,
+            CLAUDE_BASE_URL,
+            CLAUDE_CUSTOM_HEADERS,
+        ])
         .filter(|name| !def.env.contains_key(*name))
         .collect()
 }
@@ -578,6 +609,8 @@ pub(crate) fn compare_fields(
                     },
                     "definition": "",
                     "live": live.map(|v| display_value(name, v)).unwrap_or(Value::Null),
+                    // 取消 shell 继承的隔离项：界面合并成一句说明，不逐条铺开
+                    "purpose": "isolation",
                 }));
             }
             if let Some(model) = &def.model {
@@ -966,15 +999,17 @@ fn codex_provider_table(
     Ok(Some(table))
 }
 
-/// 第三方 Codex 实例启动时清空的变量：Codex 把它们当作官方账号侧的凭据，优先于目录里
-/// 存的登录（源码 `login/src/auth/manager.rs`），空值等同未设置。
+/// Codex 实例启动时清空的变量：Codex 把它们当作官方账号侧的凭据，优先于目录里存的登录
+/// （`rust-v0.156.1` 源码 `login/src/auth/manager.rs`：`CODEX_ACCESS_TOKEN` 所有入口都读，
+/// `CODEX_API_KEY` 由 `codex exec` 等非交互入口读），空值等同未设置。官方账号实例同样清空：
+/// shell 里给别的账号导出的这两个变量会压过这个目录里的登录，多账号隔离就失效了。
 pub(crate) const CODEX_CLEARED_ENV: [&str; 2] = ["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"];
 
 /// 启动命令取值：`<配置目录变量>="<目录>" <命令> <扩展参数>`，与别名域的取值格式一致。
-/// 第三方 Codex 实例在前面加上清空官方凭据变量的赋值。
+/// Codex 实例在前面加上清空官方凭据变量的赋值。
 pub(crate) fn launch_value(def: &ProfileDef, bin: &str, extra_args: &str) -> String {
     let mut out = String::new();
-    if def.kind == ProfileKind::Codex && is_third_party(def) {
+    if def.kind == ProfileKind::Codex {
         for name in CODEX_CLEARED_ENV {
             out.push_str(&format!("{name}= "));
         }
@@ -1193,7 +1228,7 @@ mod tests {
         assert_eq!(codex.kind.target_file(), "config.toml");
         assert_eq!(
             launch_value(&codex, "codex", ""),
-            "CODEX_HOME=\"~/.codex-work\" codex"
+            "CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"~/.codex-work\" codex"
         );
     }
 
@@ -1234,8 +1269,17 @@ mod tests {
         ));
     }
 
+    /// 实例没声明的凭据、云厂商开关、地址与附加请求头一律置空，取消 shell 继承：第三方实例只用
+    /// 自己声明的那一个凭据，官方账号实例只用目录里的登录。
     #[test]
-    fn third_party_claude_owns_its_cancelled_env_and_official_owns_none() {
+    fn claude_instances_cancel_every_inherited_credential_they_do_not_declare() {
+        let cloud = [
+            "env.CLAUDE_CODE_USE_ANTHROPIC_AWS",
+            "env.CLAUDE_CODE_USE_BEDROCK",
+            "env.CLAUDE_CODE_USE_FOUNDRY",
+            "env.CLAUDE_CODE_USE_MANTLE",
+            "env.CLAUDE_CODE_USE_VERTEX",
+        ];
         let third = def(
             json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
             "env": {"ANTHROPIC_BASE_URL": "https://a.example.com", "ANTHROPIC_API_KEY": "${K}"}}}),
@@ -1243,27 +1287,92 @@ mod tests {
         .unwrap();
         let mut paths = owned_paths(&third);
         paths.sort();
-        assert_eq!(
-            paths,
-            vec![
-                "env.ANTHROPIC_API_KEY",
-                "env.ANTHROPIC_AUTH_TOKEN",
-                "env.ANTHROPIC_BASE_URL",
-                "env.CLAUDE_CODE_OAUTH_TOKEN"
-            ]
-        );
+        let mut expected = vec![
+            "env.ANTHROPIC_API_KEY",
+            "env.ANTHROPIC_AUTH_TOKEN",
+            "env.ANTHROPIC_BASE_URL",
+            "env.ANTHROPIC_CUSTOM_HEADERS",
+            "env.CLAUDE_CODE_OAUTH_TOKEN",
+        ];
+        expected.extend(cloud);
+        expected.sort();
+        assert_eq!(paths, expected);
+
         let official =
             def(json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly"}}))
                 .unwrap();
-        assert!(owned_paths(&official).is_empty());
+        let mut paths = owned_paths(&official);
+        paths.sort();
+        let mut expected = vec![
+            "env.ANTHROPIC_API_KEY",
+            "env.ANTHROPIC_AUTH_TOKEN",
+            "env.ANTHROPIC_BASE_URL",
+            "env.ANTHROPIC_CUSTOM_HEADERS",
+            "env.CLAUDE_CODE_OAUTH_TOKEN",
+        ];
+        expected.extend(cloud);
+        expected.sort();
+        assert_eq!(paths, expected);
+        let rendered = render_all(&official, &|_| None, &|_| None, &[]).unwrap();
+        let settings: Value = serde_json::from_slice(&rendered[0].content).unwrap();
+        for path in &expected {
+            let name = path.strip_prefix("env.").unwrap();
+            assert_eq!(settings["env"][name], "", "{name} 必须置空取消 shell 继承");
+        }
         assert_eq!(
             launch_value(&official, "claude", ""),
             "CLAUDE_CONFIG_DIR=\"~/.claude-ly\" claude"
         );
+
+        // 官方账号实例自己声明的长期令牌照常写取值，不被置空
+        let token = def(
+            json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
+            "env": {"CLAUDE_CODE_OAUTH_TOKEN": "${SETUP_TOKEN}"}}}),
+        )
+        .unwrap();
+        let rendered = render_all(
+            &token,
+            &|_| None,
+            &|name| (name == "SETUP_TOKEN").then(|| "tok".to_string()),
+            &[],
+        )
+        .unwrap();
+        let settings: Value = serde_json::from_slice(&rendered[0].content).unwrap();
+        assert_eq!(settings["env"]["CLAUDE_CODE_OAUTH_TOKEN"], "tok");
+        assert_eq!(settings["env"]["ANTHROPIC_API_KEY"], "");
+    }
+
+    /// 第三方实例里打开云厂商开关，Claude 会改走云厂商、不用实例的第三方凭据：定义就拒绝。
+    #[test]
+    fn third_party_claude_instance_rejects_a_cloud_provider_switch() {
+        let claude = |env: Value| {
+            def(
+                json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly", "env": env}}),
+            )
+        };
+        let err = claude(json!({"ANTHROPIC_BASE_URL": "https://a.example.com",
+            "ANTHROPIC_AUTH_TOKEN": "${A}", "CLAUDE_CODE_USE_MANTLE": "1"}))
+        .unwrap_err();
+        assert!(
+            format!("{err:#}").contains("CLAUDE_CODE_USE_MANTLE"),
+            "{err:#}"
+        );
+        // 显式置空是允许的；不带第三方凭据的 Bedrock 实例也照常
+        assert!(claude(json!({"ANTHROPIC_BASE_URL": "https://a.example.com",
+            "ANTHROPIC_AUTH_TOKEN": "${A}", "CLAUDE_CODE_USE_BEDROCK": ""}))
+        .is_ok());
+        let bedrock = claude(json!({"CLAUDE_CODE_USE_BEDROCK": "1"})).unwrap();
+        let rendered = render_all(&bedrock, &|_| None, &|_| None, &[]).unwrap();
+        let settings: Value = serde_json::from_slice(&rendered[0].content).unwrap();
+        assert_eq!(
+            settings["env"]["CLAUDE_CODE_USE_BEDROCK"], "1",
+            "自己声明的开关不被置空"
+        );
+        assert_eq!(settings["env"]["CLAUDE_CODE_USE_VERTEX"], "");
     }
 
     #[test]
-    fn codex_launch_clears_official_credentials_only_for_third_party() {
+    fn codex_launch_clears_env_credentials_for_every_instance() {
         let third = def(
             json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-w",
             "base_url": "http://127.0.0.1:11434/v1"}}),
@@ -1275,9 +1384,10 @@ mod tests {
         );
         let official =
             def(json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-w"}})).unwrap();
+        // 官方账号实例同样清空：shell 里给别的账号导出的访问令牌会压过这个目录里的登录
         assert_eq!(
             launch_value(&official, "codex", ""),
-            "CODEX_HOME=\"~/.codex-w\" codex"
+            "CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"~/.codex-w\" codex"
         );
     }
 

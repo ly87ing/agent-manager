@@ -875,7 +875,7 @@ fn 无法确认有没有官方登录时拒绝写入() {
 }
 
 #[test]
-fn 官方账号实例不带第三方凭据_不检查也不置空() {
+fn 官方账号实例不检查登录_只把外部凭据变量置空() {
     let (root, ctx) = temp_ctx("official-instance");
     let dir = ctx.home_dir.join(".claude-work");
     std::fs::create_dir_all(&dir).unwrap();
@@ -889,10 +889,25 @@ fn 官方账号实例不带第三方凭据_不检查也不置空() {
     assert!(apply.ok, "{:?}", apply.errors);
     let settings = claude_settings(&ctx, ".claude-work");
     assert_eq!(settings["model"], "opus");
-    assert!(
-        settings.get("env").is_none(),
-        "官方账号实例不写任何凭据变量"
-    );
+    // 官方账号实例只用目录里的登录：shell 里给别的账号或中转导出的凭据、地址、云厂商开关与
+    // 附加请求头一律置空取消继承，不写任何凭据取值
+    let env = settings["env"].as_object().expect("写了取消继承的 env");
+    for name in [
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_CUSTOM_HEADERS",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+        "CLAUDE_CODE_USE_MANTLE",
+    ] {
+        assert_eq!(env[name], "", "{name}");
+    }
+    assert_eq!(env.len(), 10, "{env:?}");
+    // 官方账号实例不跑登录检查
     assert_eq!(probe_log(&ctx), "");
     let _ = std::fs::remove_dir_all(root);
 }

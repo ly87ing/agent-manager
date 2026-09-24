@@ -60,7 +60,7 @@ describe("助手实例定义", () => {
     expect(profileLaunchValue(claudeInput, "claude")).toBe(
       'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude --dangerously-skip-permissions',
     );
-    // 第三方 Codex 环境清空 Codex 当作官方凭据读取的变量；官方账号环境不加
+    // Codex 环境都清空 Codex 当作官方凭据读取的变量：第三方环境防混用，官方账号环境防别的账号的令牌压过目录登录
     expect(
       profileLaunchValue({ ...claudeInput, kind: "codex", configDir: "~/.codex-work", extraArgs: "" }, "codex"),
     ).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-work" codex');
@@ -69,7 +69,7 @@ describe("助手实例定义", () => {
         { ...claudeInput, kind: "codex", configDir: "~/.codex-work", extraArgs: "", baseUrl: "", tokenVar: "" },
         "codex",
       ),
-    ).toBe('CODEX_HOME="$HOME/.codex-work" codex');
+    ).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-work" codex');
   });
 
   it("认证命令只生成文本，实例命令严格指向自己的配置目录", () => {
@@ -235,7 +235,7 @@ describe("启动命令里的配置目录", () => {
     ).toBeNull();
   });
 
-  it("第三方 Codex 环境的启动命令要清空官方凭据变量：识别缺失并只补前缀，引号里的空白不动", () => {
+  it("Codex 环境的启动命令要清空会压过目录登录的凭据变量：识别缺失并只补前缀，引号里的空白不动", () => {
     const old = 'CODEX_HOME="$HOME/.codex-w" codex --msg "a  b"';
     expect(launchCommandNeedsCredentialClear(old)).toBe(true);
     const fixed = fixLaunchCommandCredentialClear(old);
@@ -248,8 +248,9 @@ describe("启动命令里的配置目录", () => {
 
     const aliases = { "cx-w": old, "cc-w": 'CLAUDE_CONFIG_DIR="$HOME/.claude-w" claude' };
     const parse = (value: string) => Object.fromEntries([...value.matchAll(/(\w+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
-    expect(launchCommandsForProfile(aliases, "codex", "~/.codex-w", parse, true)[0].needsCredentialClear).toBe(true);
-    expect(launchCommandsForProfile(aliases, "codex", "~/.codex-w", parse, false)[0].needsCredentialClear).toBe(false);
-    expect(launchCommandsForProfile(aliases, "claude", "~/.claude-w", parse, true)[0].needsCredentialClear).toBe(false);
+    // 官方账号环境与第三方环境一样要清空：shell 里给别的账号导出的令牌同样会压过目录里的登录
+    expect(launchCommandsForProfile(aliases, "codex", "~/.codex-w", parse)[0].needsCredentialClear).toBe(true);
+    expect(launchCommandsForProfile({ "cx-w": fixed }, "codex", "~/.codex-w", parse)[0].needsCredentialClear).toBe(false);
+    expect(launchCommandsForProfile(aliases, "claude", "~/.claude-w", parse)[0].needsCredentialClear).toBe(false);
   });
 });
