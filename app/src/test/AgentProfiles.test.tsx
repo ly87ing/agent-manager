@@ -345,6 +345,52 @@ describe("助手实例", () => {
     expect(within(card).queryByTestId("profile-auth-mixed-cc-ly")).toBeNull();
   });
 
+  it("第三方 Codex 环境的旧启动命令没清空官方凭据变量时提示，一键订正只补前缀", async () => {
+    const codexRoutes = routes([
+      profileElement({
+        id: "profiles:cx-w",
+        spec: { display_name: "Codex · w", base_agent: "codex", kind: "codex", config_dir: "~/.codex-w", base_url: "https://relay.example.com/v1", model: null },
+        observed: {
+          ...(profileElement().observed as Record<string, unknown>),
+          kind: "codex",
+          config_env: "CODEX_HOME",
+          config_dir: "~/.codex-w",
+          third_party: true,
+          env_refs: [{ name: "RELAY_KEY", kind: "reference", variable: "RELAY_KEY", resolved: true }],
+        },
+      }),
+    ]);
+    codexRoutes["aliases:status"] = makeEnvelope(
+      makeAliasStatus({ "cx-w": 'CODEX_HOME="$HOME/.codex-w" codex -p agent-manager --search' }),
+      { command: "aliases.status" },
+    );
+    (codexRoutes["agents:status"] as { data: { elements: unknown[] } }).data.elements.push(
+      makeElement({
+        id: "agents:codex",
+        domain: "agents",
+        spec: { display_name: "Codex", bin: "codex", preferred_provider: "native", providers: { native: { managed: true } } },
+        policy: { enabled: true },
+        observed: { install_source: "native", installed: true, management: agentManagementFixture("codex") },
+        state: "managed-ok",
+        freshness: makeFreshness(),
+        actions: [],
+      }),
+    );
+    const { calls } = renderWithEngine(<AgentsPage />, codexRoutes);
+    await userEvent.click(await screen.findByTestId("connection-agent-codex"));
+    await openInstanceManager();
+    const card = await screen.findByTestId("profile-card-cx-w");
+    const warning = await within(card).findByTestId("profile-launch-clear-cx-w-cx-w");
+    expect(warning).toHaveTextContent("CODEX_API_KEY / CODEX_ACCESS_TOKEN");
+    await userEvent.click(within(warning).getByRole("button", { name: /订正/ }));
+    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
+    const write = calls.find((call) => call.command === "aliases:apply")!;
+    expect(write.args[write.args.indexOf("--set") + 1]).toBe("cx-w");
+    expect(write.args[write.args.indexOf("--value") + 1]).toBe(
+      'CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex -p agent-manager --search',
+    );
+  });
+
   it("移除实例需确认，且只停止管理、不动配置目录", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();

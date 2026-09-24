@@ -5,8 +5,11 @@ import {
   buildProfileDefinition,
   connectionToProfileInput,
   defaultConfigDir,
+  fixLaunchCommandCredentialClear,
   fixLaunchCommandTilde,
+  launchCommandNeedsCredentialClear,
   launchCommandNeedsTildeFix,
+  launchCommandsForProfile,
   normalizeConfigDir,
   parseProfileDefinition,
   profileLaunchValue,
@@ -214,5 +217,23 @@ describe("启动命令里的配置目录", () => {
     expect(
       connectionToProfileInput({ id: "codex", kind: "codex" }, { ...connection, providerRef: "ollama" }, []),
     ).toBeNull();
+  });
+
+  it("第三方 Codex 环境的启动命令要清空官方凭据变量：识别缺失并只补前缀，引号里的空白不动", () => {
+    const old = 'CODEX_HOME="$HOME/.codex-w" codex -p agent-manager --msg "a  b"';
+    expect(launchCommandNeedsCredentialClear(old)).toBe(true);
+    const fixed = fixLaunchCommandCredentialClear(old);
+    expect(fixed).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex -p agent-manager --msg "a  b"');
+    expect(launchCommandNeedsCredentialClear(fixed)).toBe(false);
+    // 带着取值的赋值不算清空：订正时换成空值
+    const valued = 'CODEX_API_KEY=abc CODEX_HOME="$HOME/.codex-w" codex -p agent-manager';
+    expect(launchCommandNeedsCredentialClear(valued)).toBe(true);
+    expect(fixLaunchCommandCredentialClear(valued)).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex -p agent-manager');
+
+    const aliases = { "cx-w": old, "cc-w": 'CLAUDE_CONFIG_DIR="$HOME/.claude-w" claude' };
+    const parse = (value: string) => Object.fromEntries([...value.matchAll(/(\w+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
+    expect(launchCommandsForProfile(aliases, "codex", "~/.codex-w", parse, true)[0].needsCredentialClear).toBe(true);
+    expect(launchCommandsForProfile(aliases, "codex", "~/.codex-w", parse, false)[0].needsCredentialClear).toBe(false);
+    expect(launchCommandsForProfile(aliases, "claude", "~/.claude-w", parse, true)[0].needsCredentialClear).toBe(false);
   });
 });

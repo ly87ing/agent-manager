@@ -183,11 +183,31 @@ export function fixLaunchCommandTilde(value: string): string {
   );
 }
 
+/**
+ * 第三方 Codex 环境的这条命令有没有把 Codex 当作官方凭据读取的变量清空。
+ * 早先保存的命令没有这段前缀，shell 里有这两个变量时 Codex 会优先用它们。
+ */
+export function launchCommandNeedsCredentialClear(value: string): boolean {
+  return !CODEX_CLEARED_ENV.every((name) => new RegExp(`(^|\\s)${name}=(\\s|$)`).test(value));
+}
+
+/** 在命令前面补上清空官方凭据变量的赋值；已有的同名赋值先去掉，其余原样。 */
+export function fixLaunchCommandCredentialClear(value: string): string {
+  let rest = value;
+  for (const name of CODEX_CLEARED_ENV) {
+    rest = rest.replace(new RegExp(`(^|\\s)${name}=\\S*`, "g"), "$1");
+  }
+  // 只去掉开头留下的空白：中间的空白可能在引号里，原样保留
+  return [...CODEX_CLEARED_ENV.map((name) => `${name}=`), rest.replace(/^\s+/, "")].join(" ");
+}
+
 export interface ProfileLaunchCommand {
   name: string;
   value: string;
   /** 配置目录写成了不会展开的 `"~/..."`，需要订正。 */
   needsTildeFix: boolean;
+  /** 第三方 Codex 环境的命令没有清空官方凭据变量，需要订正。 */
+  needsCredentialClear: boolean;
 }
 
 /**
@@ -201,6 +221,7 @@ export function launchCommandsForProfile(
   kind: ProfileKind,
   configDir: string,
   parseEnv: (value: string) => Record<string, string>,
+  thirdParty = false,
 ): ProfileLaunchCommand[] {
   const envName = configEnvOf(kind);
   const want = normalizeConfigDir(configDir);
@@ -209,7 +230,12 @@ export function launchCommandsForProfile(
       const dir = parseEnv(value)[envName];
       return dir !== undefined && normalizeConfigDir(dir) === want;
     })
-    .map(([name, value]) => ({ name, value, needsTildeFix: launchCommandNeedsTildeFix(value) }))
+    .map(([name, value]) => ({
+      name,
+      value,
+      needsTildeFix: launchCommandNeedsTildeFix(value),
+      needsCredentialClear: kind === "codex" && thirdParty && launchCommandNeedsCredentialClear(value),
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 

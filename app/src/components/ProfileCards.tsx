@@ -235,6 +235,23 @@ export function ProfileCard({
                     </button>
                   </div>
                 )}
+                {cmd.needsCredentialClear && (
+                  <div
+                    data-testid={`profile-launch-clear-${id}-${cmd.name}`}
+                    className="mt-1.5 flex flex-wrap items-center gap-2 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-[11px] text-warning"
+                  >
+                    <span>
+                      这条命令没有清空 CODEX_API_KEY / CODEX_ACCESS_TOKEN：shell 里有它们时，Codex 会优先用这份官方凭据，和第三方接入混用。
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onFixLaunch(cmd.name)}
+                      className="inline-flex shrink-0 items-center gap-1 rounded border border-warning/40 px-1.5 py-0.5 font-medium hover:bg-warning/15"
+                    >
+                      <Wrench className="h-3 w-3" aria-hidden /> 订正
+                    </button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

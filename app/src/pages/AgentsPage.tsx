@@ -20,6 +20,7 @@ import {
   buildProfileDefinition,
   defaultConfigDir,
   fixLaunchCommandTilde,
+  fixLaunchCommandCredentialClear,
   launchCommandsForProfile,
   parseProfileDefinition,
   profileKindOf,
@@ -565,7 +566,7 @@ export default function AgentsPage({
   const launchCommandsOf = (element: EngineElement) => {
     if (!aliasSource.source) return [];
     const spec = element.spec as unknown as { base_agent?: string; config_dir?: string };
-    const observed = element.observed as unknown as { config_dir?: string };
+    const observed = element.observed as unknown as { config_dir?: string; third_party?: boolean };
     const dir = observed.config_dir ?? spec.config_dir ?? "";
     if (!dir) return [];
     return launchCommandsForProfile(
@@ -573,6 +574,7 @@ export default function AgentsPage({
       profileKindOf(spec.base_agent ?? "claude-code"),
       dir,
       (value) => parseAliasValue(value).otherEnv,
+      observed.third_party === true,
     );
   };
 
@@ -805,9 +807,11 @@ export default function AgentsPage({
                   }
                   onRemoveLaunch={(name) => setLaunchRemoving(name)}
                   onFixLaunch={(name) => {
-                    const current = aliasSource.source?.aliases[name];
-                    if (!current) return;
-                    void saveLaunchAlias(name, fixLaunchCommandTilde(current));
+                    const command = launchCommandsOf(element).find((item) => item.name === name);
+                    if (!command) return;
+                    let fixed = command.needsTildeFix ? fixLaunchCommandTilde(command.value) : command.value;
+                    if (command.needsCredentialClear) fixed = fixLaunchCommandCredentialClear(fixed);
+                    void saveLaunchAlias(name, fixed);
                   }}
                 />
               );
