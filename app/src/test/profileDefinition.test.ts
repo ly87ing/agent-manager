@@ -193,13 +193,29 @@ describe("启动命令里的配置目录", () => {
     });
     expect(PROFILE_ID_RE.test(made.input.id)).toBe(true);
     const def = buildProfileDefinition(made.input, "claude") as Record<string, any>;
+    // 官方已弃用 ANTHROPIC_SMALL_FAST_MODEL：只填了小任务模型时按官方替代写成 Haiku 别名
     expect(def.profile.env).toEqual({
       ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic",
       ANTHROPIC_API_KEY: "${GLM_API_KEY}",
-      ANTHROPIC_SMALL_FAST_MODEL: "glm-4.5-air",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-4.5-air",
       ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-4.5",
       API_TIMEOUT_MS: "3000000",
     });
+  });
+
+  it("小任务模型与 Haiku 别名都填了：以 Haiku 别名为准，并说明小任务模型没带过去", () => {
+    const connection = {
+      ...emptyConnection("relay"),
+      baseUrl: "https://relay.example.com",
+      tokenVar: "RELAY_KEY",
+      smallFastModel: "small-a",
+      aliasHaiku: "haiku-b",
+    };
+    const made = connectionToProfileInput({ id: "claude-code", kind: "claude" }, connection, [])!;
+    const def = buildProfileDefinition(made.input, "claude") as Record<string, any>;
+    expect(def.profile.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("haiku-b");
+    expect(def.profile.env).not.toHaveProperty("ANTHROPIC_SMALL_FAST_MODEL");
+    expect(made.dropped).toEqual(["小任务模型（官方已弃用，后台任务改用 Haiku 别名的模型）"]);
   });
 
   it("Codex 接入建成独立环境：超时不带过去并如实说明；引用主配置接入方式的不能搬", () => {

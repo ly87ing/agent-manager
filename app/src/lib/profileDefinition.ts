@@ -310,10 +310,16 @@ export function connectionToProfileInput(
   const extraEnv: Record<string, string> = {};
   const dropped: string[] = [];
   if (agent.kind === "claude") {
-    if (connection.smallFastModel.trim()) extraEnv.ANTHROPIC_SMALL_FAST_MODEL = connection.smallFastModel.trim();
     if (connection.aliasOpus.trim()) extraEnv.ANTHROPIC_DEFAULT_OPUS_MODEL = connection.aliasOpus.trim();
     if (connection.aliasSonnet.trim()) extraEnv.ANTHROPIC_DEFAULT_SONNET_MODEL = connection.aliasSonnet.trim();
-    if (connection.aliasHaiku.trim()) extraEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL = connection.aliasHaiku.trim();
+    // 官方已弃用 ANTHROPIC_SMALL_FAST_MODEL：后台任务改用 Haiku 别名那个模型。旧接入里只填了
+    // 小任务模型的，按官方替代写成 Haiku 别名；两者都填了以 Haiku 别名为准。
+    const haiku = connection.aliasHaiku.trim() || connection.smallFastModel.trim();
+    if (haiku) extraEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL = haiku;
+    if (connection.aliasHaiku.trim() && connection.smallFastModel.trim()
+      && connection.aliasHaiku.trim() !== connection.smallFastModel.trim()) {
+      dropped.push("小任务模型（官方已弃用，后台任务改用 Haiku 别名的模型）");
+    }
     if (connection.timeoutMs.trim()) extraEnv.API_TIMEOUT_MS = connection.timeoutMs.trim();
   } else if (connection.timeoutMs.trim()) {
     dropped.push("请求超时");

@@ -22,7 +22,6 @@ export interface ConnectionPreset {
   kind: "claude" | "codex";
   baseUrl: string;
   model?: string;
-  smallFastModel?: string;
   aliasOpus?: string;
   aliasSonnet?: string;
   aliasHaiku?: string;
@@ -161,7 +160,6 @@ export function connectionFromPreset(preset: ConnectionPreset, name: string): Co
     auth: "token",
     tokenVar: preset.tokenVar,
     model: preset.model ?? "",
-    smallFastModel: preset.smallFastModel ?? "",
     aliasOpus: preset.aliasOpus ?? "",
     aliasSonnet: preset.aliasSonnet ?? "",
     aliasHaiku: preset.aliasHaiku ?? "",

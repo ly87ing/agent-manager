@@ -295,7 +295,7 @@ export function ConnectionFormDialog({
                         <dl className="mt-2 grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-foreground">
                           {connection.auth === "api_key" && <><dt>认证方式</dt><dd className="font-mono">x-api-key</dd></>}
                           {connection.timeoutMs && <><dt>请求超时</dt><dd className="font-mono">{connection.timeoutMs} ms</dd></>}
-                          {connection.smallFastModel && <><dt>小任务模型</dt><dd className="break-all font-mono">{connection.smallFastModel}</dd></>}
+                          {connection.smallFastModel && <><dt>小任务模型（已弃用）</dt><dd className="break-all font-mono">{connection.smallFastModel}</dd></>}
                           {connection.aliasOpus && <><dt>Opus 映射</dt><dd className="break-all font-mono">{connection.aliasOpus}</dd></>}
                           {connection.aliasSonnet && <><dt>Sonnet 映射</dt><dd className="break-all font-mono">{connection.aliasSonnet}</dd></>}
                           {connection.aliasHaiku && <><dt>Haiku 映射</dt><dd className="break-all font-mono">{connection.aliasHaiku}</dd></>}
@@ -452,14 +452,30 @@ export function ConnectionFormDialog({
                       </select>
                     </label>
                   )}
-                  {kind === "claude" && (
+                  {/* 官方已弃用 ANTHROPIC_SMALL_FAST_MODEL，后台任务改用 Haiku 别名的模型：
+                      只在旧接入里已有取值时显示，便于清空或挪到 Haiku 别名 */}
+                  {kind === "claude" && initialConnection?.smallFastModel && (
                     <label className="text-sm text-foreground">
-                      小任务模型（可选）
+                      小任务模型（官方已弃用）
                       <input
+                        data-testid="new-connection-small-fast-model"
                         value={connection.smallFastModel}
                         onChange={(event) => patch({ smallFastModel: event.target.value })}
                         className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                       />
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        Claude Code 现在用「Haiku 别名」的模型做后台任务；建成独立环境时会按它写入。
+                        {!connection.aliasHaiku.trim() && connection.smallFastModel.trim() && (
+                          <button
+                            type="button"
+                            data-testid="move-small-fast-to-haiku"
+                            onClick={() => patch({ aliasHaiku: connection.smallFastModel.trim(), smallFastModel: "" })}
+                            className="ml-1 underline hover:text-foreground"
+                          >
+                            挪到 Haiku 别名
+                          </button>
+                        )}
+                      </span>
                     </label>
                   )}
                   {kind === "claude" && (

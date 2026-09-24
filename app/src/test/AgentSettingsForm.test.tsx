@@ -694,6 +694,41 @@ describe("助手运行参数", () => {
     });
   });
 
+  it("小任务模型已被官方弃用：新增接入不再提供，旧接入里的取值可一键挪到 Haiku 别名", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "official",
+      profiles: {
+        relay: { label: "我的中转", base_url: "https://relay.example.com", token_var: "RELAY_KEY", model: "m", small_fast_model: "relay-small" },
+        fresh: { label: "新中转", base_url: "https://fresh.example.com", token_var: "FRESH_KEY", model: "m" },
+      },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
+
+    await userEvent.click(await screen.findByTestId("edit-connection-claude-code-fresh"));
+    await screen.findByRole("dialog", { name: "编辑 新中转" });
+    await userEvent.click(screen.getByTestId("new-connection-advanced"));
+    expect(screen.getByTestId("new-connection-alias-haiku")).toBeInTheDocument();
+    expect(screen.queryByTestId("new-connection-small-fast-model")).toBeNull();
+    await userEvent.keyboard("{Escape}");
+
+    await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
+    await screen.findByRole("dialog", { name: "编辑 我的中转" });
+    expect(screen.getByTestId("new-connection-small-fast-model")).toHaveValue("relay-small");
+    expect(screen.getByText(/小任务模型（官方已弃用）/)).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("move-small-fast-to-haiku"));
+    expect(screen.getByTestId("new-connection-alias-haiku")).toHaveValue("relay-small");
+    expect(screen.getByTestId("new-connection-small-fast-model")).toHaveValue("");
+    await userEvent.click(screen.getByTestId("connection-form-submit"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(definition.settings.profiles.relay.small_fast_model).toBeUndefined();
+    expect(definition.settings.profiles.relay.model_aliases).toEqual({ haiku: "relay-small" });
+  });
+
   it("Provider 卡片直接提供编辑入口，点击卡片主体也能打开同一个编辑页", async () => {
     const withProfiles = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
@@ -831,7 +866,9 @@ describe("助手运行参数", () => {
     expect(within(dialog).getByTestId("profile-base-url")).toHaveValue("https://relay.example.com");
     expect(within(dialog).getByTestId("profile-token-var")).toHaveValue("RELAY_KEY");
     expect(within(dialog).getByTestId("profile-auth-header")).toHaveValue("api_key");
-    expect(within(dialog).getByTestId("profile-extra-env")).toHaveTextContent("ANTHROPIC_SMALL_FAST_MODEL");
+    // 官方已弃用 ANTHROPIC_SMALL_FAST_MODEL：旧接入的小任务模型按官方替代写成 Haiku 别名
+    expect(within(dialog).getByTestId("profile-extra-env")).toHaveTextContent("ANTHROPIC_DEFAULT_HAIKU_MODEL");
+    expect(within(dialog).getByTestId("profile-extra-env")).not.toHaveTextContent("ANTHROPIC_SMALL_FAST_MODEL");
     await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
@@ -845,7 +882,7 @@ describe("助手运行参数", () => {
       env: {
         ANTHROPIC_BASE_URL: "https://relay.example.com",
         ANTHROPIC_API_KEY: "${RELAY_KEY}",
-        ANTHROPIC_SMALL_FAST_MODEL: "relay-small",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "relay-small",
       },
     });
     expect(configureCalls(calls)).toHaveLength(0);
