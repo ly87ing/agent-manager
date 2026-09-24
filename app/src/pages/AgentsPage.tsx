@@ -27,6 +27,7 @@ import {
   profileKindOf,
   profileLaunchValue,
   connectionToProfileInput,
+  instancesUsingConnection,
   type ProfileFormInput,
 } from "../lib/profileDefinition";
 import { runEngine } from "../lib/engine";
@@ -351,6 +352,7 @@ export default function AgentsPage({
 
       setConnectionForm(null);
       await query.refetch();
+      if (submission.thenMakeProfile) makeProfileFromConnection(element, submission.connection);
     } catch (err) {
       setConnectionFormError(`保存接入失败:${String(err)}`);
     } finally {
@@ -710,6 +712,15 @@ export default function AgentsPage({
           });
         }}
         onMakeProfile={(element, connection) => makeProfileFromConnection(element, connection)}
+        instancesOf={(agentId, connection) =>
+          instancesUsingConnection(
+            ((policyQuery.data?.ok ? (policyQuery.data.data.effective as Record<string, any> | undefined)?.agents?.definitions : undefined) ??
+              {}) as Record<string, unknown>,
+            agentId,
+            connection,
+          )
+        }
+        onShowInstances={() => setEnvironmentView("independent")}
         onExport={(element, connection) => void exportConnection(element, connection)}
         onRemove={(element, connection) => setConnectionRemoving({ agent: element, connection })}
         onMove={(element, connection, direction) => void moveConnection(element, connection, direction)}
@@ -773,7 +784,7 @@ export default function AgentsPage({
             compact
             testId="profiles-empty"
             title="当前 Agent 还没有独立环境"
-            description="需要第二个账号或完全独立的配置时再创建；只添加 Provider 请回到默认环境。"
+            description="主配置只放官方账号，第三方 Provider 在独立环境里用：到「默认环境」的 Provider 卡片上选「建成独立环境」。要登录第二个官方账号，也在这里新建一个。"
           />
         ) : (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">

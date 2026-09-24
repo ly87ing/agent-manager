@@ -19,6 +19,8 @@ export type ConnectionKind = "claude" | "codex";
 export interface ConnectionSubmission {
   connection: ConnectionEntry;
   secretValue: string;
+  /** 保存后接着打开「建成独立环境」表单：第三方接入只在独立环境里用，一步到位。 */
+  thenMakeProfile?: boolean;
 }
 
 const FOCUSABLE_SELECTOR =
@@ -141,7 +143,7 @@ export function ConnectionFormDialog({
     }
   };
 
-  const submit = () => {
+  const submit = (thenMakeProfile = false) => {
     if (!connection) {
       setLocalError("先选择一个厂商预设，或选择自定义接入");
       return;
@@ -171,6 +173,7 @@ export function ConnectionFormDialog({
         model: connection.model.trim(),
       },
       secretValue,
+      thenMakeProfile,
     });
   };
 
@@ -555,11 +558,23 @@ export function ConnectionFormDialog({
           >
             取消
           </button>
+          {!editing && !duplicating && !connection?.providerRef && (
+            <button
+              type="button"
+              data-testid="connection-form-submit-and-make-profile"
+              disabled={saveDisabled}
+              onClick={() => submit(true)}
+              title="主配置只放官方账号，第三方接入在独立环境里用：保存后直接打开建成独立环境的表单"
+              className="rounded border border-primary/40 px-4 py-2 text-sm text-primary hover:bg-primary/10 disabled:opacity-50"
+            >
+              保存并建成独立环境
+            </button>
+          )}
           <button
             type="button"
             data-testid="connection-form-submit"
             disabled={saveDisabled}
-            onClick={submit}
+            onClick={() => submit()}
             className="inline-flex items-center gap-1.5 rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}

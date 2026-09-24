@@ -278,6 +278,30 @@ export function parseProfileDefinition(id: string, definition: Record<string, un
   };
 }
 
+/**
+ * 用着这套接入的独立环境：同一助手、同一地址（忽略结尾的 /）、同一凭据变量。接入卡片据此说明
+ * 「已建成哪个环境」，没有时直接给「建成独立环境」。
+ */
+export function instancesUsingConnection(
+  definitions: Record<string, unknown>,
+  agentId: string,
+  connection: { baseUrl: string; tokenVar: string },
+): { id: string; label: string }[] {
+  const normalize = (url: string) => url.trim().replace(/\/+$/, "");
+  const baseUrl = normalize(connection.baseUrl);
+  if (!baseUrl) return [];
+  const out: { id: string; label: string }[] = [];
+  for (const [id, raw] of Object.entries(definitions)) {
+    const definition = raw as Record<string, unknown> | null;
+    if (!definition || typeof definition !== "object" || !definition.profile || definition._delete === true) continue;
+    const input = parseProfileDefinition(id, definition);
+    if (input.baseAgent !== agentId) continue;
+    if (normalize(input.baseUrl) !== baseUrl || input.tokenVar !== connection.tokenVar.trim()) continue;
+    out.push({ id, label: input.displayName });
+  }
+  return out.sort((a, b) => a.id.localeCompare(b.id));
+}
+
 /** 接入名 → 可用的环境名：小写字母、数字与连字符，且避开已有名字。 */
 function profileIdFor(name: string, existingIds: string[]): string {
   const stem =

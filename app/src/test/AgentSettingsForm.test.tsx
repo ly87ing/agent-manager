@@ -922,6 +922,53 @@ describe("助手运行参数", () => {
     expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
   });
 
+  it("接入卡片说明已建成哪个独立环境；还没建成的直接给「建成独立环境」", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "official",
+      profiles: {
+        official: { label: "官方" },
+        glm: { label: "智谱", base_url: "https://open.bigmodel.cn/api/anthropic", auth: "token", token_var: "GLM_API_KEY", model: "glm-5.3" },
+        kimi: { label: "Kimi", base_url: "https://api.moonshot.cn/anthropic", auth: "token", token_var: "KIMI_API_KEY", model: "kimi-k3" },
+      },
+    };
+    withProfiles["policy:get"] = makeEnvelope(
+      makePolicyData({
+        effective: {
+          agents: {
+            definitions: {
+              "cc-glm": {
+                display_name: "Claude · GLM",
+                profile: { base_agent: "claude-code", env: { ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic", ANTHROPIC_AUTH_TOKEN: "${GLM_API_KEY}" } },
+              },
+            },
+          },
+        },
+      }),
+      { command: "policy.get" },
+    );
+    renderWithEngine(<AgentsPage />, withProfiles);
+    expect(await screen.findByTestId("connection-instances-claude-code-glm")).toHaveTextContent("已建成独立环境：cc-glm");
+    expect(screen.queryByTestId("make-profile-quick-claude-code-glm")).toBeNull();
+    expect(screen.getByTestId("connection-unused-claude-code-kimi")).toHaveTextContent("还没建成独立环境");
+    await userEvent.click(screen.getByTestId("make-profile-quick-claude-code-kimi"));
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    expect(within(dialog).getByTestId("profile-base-url")).toHaveValue("https://api.moonshot.cn/anthropic");
+  });
+
+  it("添加接入可一步「保存并建成独立环境」：先保存接入，再打开预填的新建独立环境表单", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await userEvent.click(await screen.findByTestId("add-connection-button"));
+    let dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: /DeepSeek/ }));
+    await userEvent.click(within(dialog).getByTestId("connection-form-submit-and-make-profile"));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    expect(within(dialog).getByTestId("profile-base-url")).toHaveValue("https://api.deepseek.com/anthropic");
+    expect(within(dialog).getByTestId("profile-token-var")).toHaveValue("DEEPSEEK_API_KEY");
+  });
+
   it("工作台导入接入：先预览，只保存定义且不启用、不写凭据", async () => {
     const withProfiles = routes();
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);

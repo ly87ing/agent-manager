@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  instancesUsingConnection,
   PROFILE_ID_RE,
   authTerminalCommand,
   buildProfileDefinition,
@@ -264,5 +265,29 @@ describe("启动命令里的配置目录", () => {
     expect(launchCommandsForProfile(aliases, "codex", "~/.codex-w", parse)[0].needsCredentialClear).toBe(true);
     expect(launchCommandsForProfile({ "cx-w": fixed }, "codex", "~/.codex-w", parse)[0].needsCredentialClear).toBe(false);
     expect(launchCommandsForProfile(aliases, "claude", "~/.claude-w", parse)[0].needsCredentialClear).toBe(false);
+  });
+});
+
+describe("用着某套接入的独立环境", () => {
+  it("同一助手、同一地址（忽略结尾 /）、同一凭据变量才算；删除中的与别的助手的不算", () => {
+    const definitions = {
+      "claude-code": { bin: "claude", settings: {} },
+      "cc-glm": {
+        display_name: "Claude · GLM",
+        profile: { base_agent: "claude-code", env: { ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic/", ANTHROPIC_AUTH_TOKEN: "${GLM_API_KEY}" } },
+      },
+      "cc-glm-2": {
+        profile: { base_agent: "claude-code", env: { ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic", ANTHROPIC_AUTH_TOKEN: "${OTHER_KEY}" } },
+      },
+      "cc-old": {
+        _delete: true,
+        profile: { base_agent: "claude-code", env: { ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic", ANTHROPIC_AUTH_TOKEN: "${GLM_API_KEY}" } },
+      },
+      "cx-glm": { profile: { base_agent: "codex", base_url: "https://open.bigmodel.cn/api/anthropic", env_key: "GLM_API_KEY" } },
+    };
+    expect(
+      instancesUsingConnection(definitions, "claude-code", { baseUrl: "https://open.bigmodel.cn/api/anthropic", tokenVar: "GLM_API_KEY" }),
+    ).toEqual([{ id: "cc-glm", label: "Claude · GLM" }]);
+    expect(instancesUsingConnection(definitions, "claude-code", { baseUrl: "", tokenVar: "GLM_API_KEY" })).toEqual([]);
   });
 });
