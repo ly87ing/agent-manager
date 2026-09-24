@@ -3,6 +3,8 @@
 ## 当前结论
 
 - 核心已就绪：Rust/SQLite/Tauri 共用库；2026-09-22 起数据模型改为「实际配置为准」（见下方裁决与 `GUI-REDESIGN.md`），源码、隔离实测与 x86_64 安装包真机验收已完成（见 2026-09-23 交付回执）。
+- 2026-09-24 认证按官方标准全面校正（独立环境取消 shell 继承、登录检查只看目录自己的登录、Codex 致命写法识别、
+  用量去重与实例统计等），源码、全量测试与真实 CLI 端到端已验证，安装包未重建，见「2026-09-24 按官方认证标准全面校正」。
 - 已接线闭环：Agents、Skills、MCP、Rules、Hooks、Aliases 六个资源域，以及只读 `system:audit`、`secrets:status`、`system:discover`（接管发现，见下）、`system:refresh-upstream`（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表，三域 status 回填 freshness，前端收敛调用已补显式 `--action`）。
 - 2026-09-12 高级管理入口裁决已执行完毕：Aliases 原生闭环落地（`b7f30db`）；Tools、快照与 `system:converge` 退役清理完成（`9080c1d`）。
 - 远程 HTTP MCP 已落地（`b353aac`）：三客户端引用形式零明文落盘，与本地 stdio 同级安全语义。
@@ -651,6 +653,49 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
 - 提交（均已推送 `rust`）：`ef9cc86` 命令查找补 `~/.npm-global/bin`、`~/.volta/bin`、`~/.bun/bin`、`/opt/homebrew/bin`、`/usr/local/bin`，版本探测与登录检查执行时补 PATH；`27fa934` 上一提交的格式化；`d4210e9` Codex 实例改写 `config.toml`（按键原位修改，只动 `model`、`model_provider` 与本工具那张接入表，写入基准只取这三项，MCP 条目变化不算外部修改）、凭据写 `experimental_bearer_token`、启动命令去掉 `-p`、官方账号实例不写 `model_provider`、凭据变量必须和地址一起设置、Codex 接入表单可选填取值；`c41c558` 新建第三方环境目标文件不存在时先写配置再写启动命令，写不进去时启动命令也先不写；`6a4a5f6` 实例临时文件以 0600 新建、残留链接先删除；`3b4b9a0` 删除无人调用的测试辅助函数。
 - 验收：每次推送前跑改动涉及的全量套件；最终提交 `3b4b9a0` 上 engine-rs 全量 401 项、Tauri 20 项、Vitest 57 files / 574 tests、build 与 `cargo fmt --check` 全绿；新增用例在撤掉对应修复后各自失败（npm 目录查找与同目录解释器、Codex 表单规则、保存顺序两例、临时文件链接）。隔离 HOME 用引擎 CLI 保存并写入第三方 Codex 实例（登录检查走真实 codex 0.156.0）：`config.toml` 权限 0600、状态 managed-ok、状态输出不含取值；按启动命令运行真实 `codex exec`，shell 里故意导出假的 `CODEX_API_KEY`/`CODEX_ACCESS_TOKEN`/`OPENAI_API_KEY`，本地抓包收到 `POST /v1/responses`，唯一凭据头为 `Authorization: Bearer <实例假令牌>`，shell 取值未出现；对照去掉清空前缀时 0.156 仍用实例令牌（前缀保留为纵深防御，并避免官方命令把 shell 变量报成登录）；实例目录没有生成 `auth.json`；真实 `~/.codex/auth.json`、`config.toml` 元数据前后一致。
 - 未做：桌面安装包点击验收（Finder 启动下的命令查找、建成独立环境后的保存顺序）；未与真实第三方中转联调；新实例不自动带上主配置的 MCP、技能、规则；外部密钥文件的备份责任未在界面提示；官方账号实例未拦截 shell 里导出的第三方变量。
+
+## 2026-09-24 按官方认证标准全面校正
+
+- 触发：用户要求学习 CC Switch 等业界工具，把本工具做到无可挑剔，认证部分一律遵从各助手官方标准。
+- 依据与方法：Claude Code 官方文档（认证优先级、设置参考 `env` 与 `apiKeyHelper`、环境变量参考、托管设置、
+  WIF 参考）与 2.1.281 二进制；Codex `rust-v0.156.1` 源码（npm latest 0.156.1）；CC Switch `f8788719`、
+  ccs、ccm 等源码；厂商预设能从厂商自己发布的代码读到的以代码为准（`@z_ai/coding-helper`、`MiniMax-AI/cli`、
+  `MoonshotAI/kimi-code`）。每条行为结论都用真实 claude 2.1.281 / codex 0.156.1 实测：本地假接口（抓请求头、
+  回 Anthropic Messages 与 Responses 流）、隔离 HOME 与配置目录。云端容器会给 root 注入自己的 Claude 登录，
+  凡涉及「未登录」的实测都以无权读取该令牌的普通用户运行；引擎权限类用例同样以普通用户跑全量（root 下两例
+  因目录只读限制对 root 无效而失败，普通用户全通过）。
+- 实测发现并已修复的问题：
+  - 独立环境没挡住 shell 继承：shell 里的 `CLAUDE_CODE_USE_BEDROCK=1` 把第三方实例改走 Bedrock，shell 的地址
+    与 key 把官方账号实例发往中转，shell 的 `ANTHROPIC_CUSTOM_HEADERS` 随请求发给实例接口；官方账号 Codex 实例
+    会被 shell 的 `CODEX_ACCESS_TOKEN` 压过目录登录（`f13cd7a`）。
+  - 登录检查有误判：共享的 Anthropic 联合身份档案让官方命令对任何目录都报已登录，会误拒所有第三方实例写入；
+    藏在第三方令牌下面的 Console 登录被当成未登录；只存 MCP 登录的 `.credentials.json` 被当成已登录。改为经
+    官方 `--settings` 取消目录声明的凭据、档案目录指向不存在处，按 `apiKeySource` 识别 Console 登录（`b210305`）。
+  - Codex：`wire_api = "chat"` 已是硬错误却仍被接受（`fdd294c`）；连同它共九类写法会让 Codex 所有命令起不来，
+    原文编辑可以写进去；可用性检查为内置 openai 读 0.156 已不用的 `OPENAI_API_KEY`；名为 `OpenAI` 的实例接入表会被
+    当成内置 openai（`ac4209b`）。
+  - 官方已弃用的 `ANTHROPIC_SMALL_FAST_MODEL` 仍在写（`4c6341b`）；官方新增的 `fable` 别名切回官方账号时不撤
+    （`3c61fac`）。
+  - 实例 `settings.json` 的 env 令牌会进入 Bash 工具、hooks 与 MCP 子进程；官方 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`
+    实测可挡住，第三方实例默认开启（`3c61fac`）。
+  - 用量：Claude `--fork-session` 把旧回复抄进新文件导致重复计数；第三方接入只在实例里用，但实例用量完全没统计
+    （`cda5940`）。
+  - 厂商预设：Kimi Code 会员与开放平台两套密钥混用同一变量、出处写错；智谱模型落后一代（`af8eacf`）。
+- 另补：主配置「官方账号」卡片的检查登录与只复制的登录 / 退出命令、登录方式中文说法、实例换目录与移除时说明
+  登录不随行、x-api-key 首次确认说明（`9dc43f1`）；外部来源提示补齐另两个云厂商开关、命名档案与联合身份、附加
+  请求头、托管设置（含 `forceLoginMethod` / `forceLoginOrgUUID`）与 Codex `openai_base_url`（`b210305`）。
+  契约细节见 `GUI-REDESIGN.md` 相应各节。
+- 保留不改（有官方依据）：Codex 实例凭据仍写 `experimental_bearer_token`（源码注释称以程序方式配置时使用，
+  0600 文件，CC Switch 同法）；`auth` 命令式凭据需随包提供取值命令，维持前次裁决不用。Claude 用户级
+  `.claude.json` 的 MCP 头 `${VAR}` 实测会被展开，远程 MCP 零明文写法有效。
+- 验证：每个提交推送前跑全量——最终 engine-rs 420 项（普通用户）、Tauri 20 项、Vitest 57 files / 588 tests、
+  `pnpm build` 与 `cargo fmt --check` 全绿；新增用例均在撤掉对应修复后失败。真实 CLI 端到端：引擎 CLI 写出的
+  实例文件在恶意 shell 环境下，第三方 Claude 实例只把实例令牌发往自己的地址、官方账号实例零外发；第三方 Codex
+  实例 `codex exec` 只带实例令牌；引擎 CLI 扫描真实 CLI 写出的会话（含分叉）计数正确、重扫不增加。浏览器 mock
+  实见主配置登录检查一行与 360px 无横向溢出。
+- 未做：桌面安装包重建与真机点击验收（本环境为 Linux 容器，无 macOS）；未与真实第三方中转、真实官方账号联调；
+  Codex 写入后未用官方二进制再加载一次校验（只做源码确认的静态识别）；VS Code 扩展里使用实例的环境变量片段
+  未提供；未发布 tag 或 Release。
 
 ## 交付回执（2026-09-23，实际配置为准 x86_64 DMG 真机验收）
 
