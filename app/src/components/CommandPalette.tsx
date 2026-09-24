@@ -10,6 +10,7 @@ import {
   currentConnectionOf,
   liveRefusalDescription,
 } from "../lib/agentCurrent";
+import { isOfficial } from "../lib/defaultEnvironment";
 import { useExecutions } from "../lib/execution";
 import { useEngineQuery } from "../lib/queries";
 import { useRefreshUpstream } from "../lib/queries";
@@ -62,12 +63,12 @@ function supportsConnectionSwitch(spec: Record<string, unknown>): boolean {
   return bin === "claude" || bin === "codex";
 }
 
-/** 当前接入以实际配置为准：引擎按内容识别，默认账号即实际没有任何接入键。 */
+/** 当前接入以实际配置为准：引擎按内容识别；官方账号看地址与凭据，指定了模型也仍是官方账号。 */
 function isCurrentConnection(data: StatusData | undefined, agentId: string, profile: string): boolean {
   const element = data?.elements.find((item) => item.id === `agents:${agentId}`);
   const current = element ? currentConnectionOf(element) : null;
   if (!current) return false;
-  return profile ? current.profile === profile : current.default;
+  return profile ? current.profile === profile : isOfficial(current);
 }
 
 /**

@@ -83,6 +83,14 @@ const CLAUDE_CONNECTION_PATHS: &[&[&str]] = &[
     &["env", "API_TIMEOUT_MS"],
 ];
 
+/// 决定「连到哪、用谁的凭据」的键：有其一就不是官方账号。其余接入键（模型、别名、超时）
+/// 在官方账号上同样合法。
+const CLAUDE_ACCOUNT_PATHS: &[&[&str]] = &[
+    &["env", "ANTHROPIC_BASE_URL"],
+    &["env", "ANTHROPIC_AUTH_TOKEN"],
+    &["env", "ANTHROPIC_API_KEY"],
+];
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AutomationMode {
     #[default]
@@ -199,6 +207,8 @@ fn claude_observed_config(
         "provider": "anthropic",
         "base_url": string_at(&value, &["env", "ANTHROPIC_BASE_URL"]).map(crate::native::redact_url_userinfo),
         "model": string_at(&value, &["env", "ANTHROPIC_MODEL"]),
+        // 顶层 model：官方设置里的默认模型（/model 保存的就是它）；env 的 ANTHROPIC_MODEL 优先于它
+        "settings_model": string_at(&value, &["model"]),
         "small_fast_model": string_at(&value, &["env", "ANTHROPIC_SMALL_FAST_MODEL"]),
         "model_aliases": {
             "opus": string_at(&value, &["env", "ANTHROPIC_DEFAULT_OPUS_MODEL"]),
@@ -1817,6 +1827,18 @@ impl Live {
         }
     }
 
+    /// 用的是不是官方账号：Claude 没有第三方地址与凭据（`ANTHROPIC_BASE_URL`、
+    /// `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`），Codex 的接入方式是内置 openai。
+    /// 模型、别名与超时只是官方账号上的设置，不算另一套接入。
+    fn is_official(&self) -> bool {
+        match self {
+            Live::Claude(root) => CLAUDE_ACCOUNT_PATHS
+                .iter()
+                .all(|path| string_at(root, path).is_none_or(str::is_empty)),
+            Live::Codex(live) => live.on_openai(),
+        }
+    }
+
     /// 没有任何接入键 = 助手默认账号。
     fn is_default(&self) -> bool {
         match self {
@@ -1932,7 +1954,7 @@ fn same_identity(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Current {
-    /// 助手默认账号：没有任何接入键。
+    /// 官方账号，且对不上别的已保存接入：没有接入键，或只指定了模型、别名与超时。
     Default,
     /// 与某套已保存接入逐项一致。
     Profile(String),
@@ -1942,6 +1964,8 @@ enum Current {
 
 struct Identified {
     current: Current,
+    /// 实际用的是官方账号（见 `Live::is_official`）；对上的已保存接入也可能是官方账号加模型。
+    official: bool,
     unverified: Vec<String>,
     /// 未保存、但与上次写入的那套身份一致：切换时回填进它。
     drifted_from: Option<String>,
@@ -1959,6 +1983,7 @@ impl Identified {
         json!({
             "profile": self.profile(),
             "default": self.current == Current::Default,
+            "official": self.official,
             "last_written": settings.active,
             "unverified": self.unverified,
             "drifted_from": self.drifted_from,
@@ -1984,6 +2009,9 @@ fn identify(live: &Live, settings: &AgentSettings, claimed: &BTreeSet<String>) -
         Current::Default
     } else if let Some(first) = candidates.first() {
         Current::Profile(first.clone())
+    } else if live.is_official() {
+        // 官方账号只是指定了模型等：仍是官方账号，不是一套还没保存的接入
+        Current::Default
     } else {
         Current::Unsaved
     };
@@ -2001,6 +2029,7 @@ fn identify(live: &Live, settings: &AgentSettings, claimed: &BTreeSet<String>) -
     };
     Identified {
         current,
+        official: live.is_official(),
         unverified,
         drifted_from,
     }
@@ -2785,6 +2814,22 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
     let settings = parse(def.spec_ref()).map_err(agent_error)?;
     let claimed = live.claimed(&recorded);
     let identified = identify(&live, &settings, &claimed);
+    if matches!(args.action, Action::UseDefault) && identified.official {
+        // 已经是官方账号：没有要撤的地址与凭据；指定的模型等是官方账号自己的设置，照旧保留。零写
+        return Ok(json!({
+            "domain": "agents",
+            "action": "configure",
+            "element": format!("agents:{id}"),
+            "target": path.display().to_string(),
+            "mode": "switch",
+            "active": settings.active,
+            "current": identified.profile(),
+            "changed": [],
+            "backfill": null,
+            "base": args.base,
+            "statusline": false,
+        }));
+    }
 
     let mut patch = None;
     let mut backfill = None;

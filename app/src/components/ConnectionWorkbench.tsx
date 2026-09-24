@@ -1,4 +1,4 @@
-import { Fragment, useState, type MouseEvent } from "react";
+import { useState, type MouseEvent } from "react";
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Download, Loader2, MoreHorizontal, Pencil, Save, Settings2, Terminal, Trash2, Upload } from "lucide-react";
 import { AgentRuntimePanel } from "./AgentRuntimePanel";
 import { ConfigFileEditor } from "./ConfigFileEditor";
@@ -16,6 +16,7 @@ import { actualRuntimeSettings, automationRawText, runtimeValueLabel } from "../
 import { parseAliasValue, renderAliasPreview } from "../lib/aliasCommand";
 import { cn } from "../lib/utils";
 import { overrideEffect } from "../lib/overrideEffects";
+import { defaultEnvState, isOfficial } from "../lib/defaultEnvironment";
 import { balanceSupported } from "../lib/balance";
 
 export interface ConnectionCheckResult {
@@ -180,9 +181,13 @@ export function ConnectionWorkbench({
   const driftedEntry = current?.drifted_from
     ? form.connections.find((item) => item.name === current.drifted_from)
     : undefined;
+  const official = isOfficial(current);
+  const envState = kind ? defaultEnvState(kind, current, currentConfig?.config) : null;
+  const thirdParty = envState?.account === "third-party";
+  const configFile = kind === "codex" ? "~/.codex/config.toml" : "~/.claude/settings.json";
   const summary = activeEntry
     ? activeEntry.label || activeEntry.name
-    : current?.default
+    : official
       ? "官方账号"
       : unsaved
         ? "当前实际配置（未保存）"
@@ -198,10 +203,36 @@ export function ConnectionWorkbench({
     .filter((item) => item.result.ok && item.result.latencyMs > 0)
     .sort((a, b) => a.result.latencyMs - b.result.latencyMs)[0];
   const checkingAll = checkingAllAgentId === agentId;
-  // 当前那张排在最前：已保存的当前项、默认账号，或虚拟的「当前实际配置（未保存）」
-  const orderedEntries: Array<ConnectionEntry | null> = activeEntry
-    ? [activeEntry, null, ...form.connections.filter((connection) => connection.name !== active)]
-    : [null, ...form.connections];
+  // 主配置正在用的那套已保存第三方接入放进「账号」一节；其余接入只在独立环境里用
+  const mainThirdParty = thirdParty && activeEntry ? activeEntry : null;
+  const savedEntries = form.connections.filter((connection) => connection !== mainThirdParty);
+
+  const renderCard = (connection: ConnectionEntry, inMain: boolean) => {
+    const key = `${agentId}/${connection.name}`;
+    const index = form.connections.findIndex((item) => item.name === connection.name);
+    return (
+      <ConnectionCard
+        key={connection.name}
+        agentId={agentId}
+        connection={connection}
+        active={inMain}
+        busy={busyTarget === key}
+        disabled={busyTarget !== null || Boolean(writeBlocked)}
+        check={checkResults[key]}
+        onCheck={kind ? () => onCheck(selected, connection.name) : undefined}
+        onEdit={kind ? () => onEdit(selected, connection) : undefined}
+        onDuplicate={kind ? () => onDuplicate(selected, connection) : undefined}
+        onMakeProfile={kind && onMakeProfile ? () => onMakeProfile(selected, connection) : undefined}
+        instances={instancesOf ? instancesOf(agentId, connection) : []}
+        onShowInstances={onShowInstances}
+        onBalance={kind && onBalance && balanceSupported(connection.baseUrl) ? () => onBalance(selected, connection) : undefined}
+        onExport={kind ? () => onExport(selected, connection) : undefined}
+        onRemove={kind ? () => onRemove(selected, connection) : undefined}
+        onMoveUp={kind && index > 0 ? () => onMove(selected, connection, "up") : undefined}
+        onMoveDown={kind && index < form.connections.length - 1 ? () => onMove(selected, connection, "down") : undefined}
+      />
+    );
+  };
 
   return (
     <section data-testid="connection-workbench" className="rounded-xl border bg-card p-4 shadow-sm sm:p-5">
@@ -282,8 +313,34 @@ export function ConnectionWorkbench({
               <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">默认环境</span>
               <strong className="text-sm font-semibold text-foreground">{name}</strong>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              当前接入：{summary} · 自动化：{automationLabel}。以客户端实际配置为准，下面所有页签都属于这一个环境。
+            {envState ? (
+              <dl data-testid="default-env-status" className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+                <dt className="text-muted-foreground">账号</dt>
+                <dd data-testid="default-env-account" className={cn("font-medium", thirdParty ? "text-warning" : "text-foreground")}>
+                  {envState.accountText}
+                  {thirdParty && "（和官方账号混在主配置里，见下方说明）"}
+                </dd>
+                <dt className="text-muted-foreground">登录</dt>
+                <dd data-testid="default-env-login" className="text-muted-foreground">
+                  {thirdParty ? "现在用的是配置里的第三方令牌，不是官方登录。" : ""}
+                  {envState.loginNote}
+                </dd>
+                <dt className="text-muted-foreground">模型</dt>
+                <dd data-testid="default-env-model" className="text-foreground">
+                  {envState.modelText}
+                  {envState.modelSource && <span className="text-muted-foreground"> · {envState.modelSource}</span>}
+                </dd>
+                <dt className="text-muted-foreground">自动化</dt>
+                <dd data-testid="default-env-automation" className="text-foreground">
+                  {automationLabel}
+                  <span className="text-muted-foreground"> · 在「运行设置」里改</span>
+                </dd>
+              </dl>
+            ) : (
+              <p className="mt-1 text-xs text-muted-foreground">当前接入：{summary} · 自动化：{automationLabel}。</p>
+            )}
+            <p className="mt-2 text-xs text-muted-foreground">
+              以 {configFile} 的实际内容为准；下面三个页签都属于这一个环境。
             </p>
             {writeBlocked && (
               <p data-testid="configure-blocked" className="mt-1 text-xs text-warning">{writeBlocked}</p>
@@ -486,17 +543,19 @@ export function ConnectionWorkbench({
             <p className="mt-1 text-xs">只提示，不会改这些文件；不需要时请自己删除或注释掉，再重新打开终端。</p>
           </div>
         )}
-        {tab === "providers" && current && !current.default && (
+        {tab === "providers" && thirdParty && (
           <p
             role="status"
             data-testid="main-mixed-warning"
             className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning"
           >
-            主配置里有第三方接入，和官方账号用的是同一个配置目录。点「官方账号」卡片上的「切回官方账号」，
-            这份第三方配置会先保存为接入；要继续用它，在它的菜单里选「建成独立环境」。
+            主配置里有第三方接入，和官方账号用的是同一个配置目录：{name} 现在把请求发往第三方，用的是配置里的令牌。
+            点「官方账号」上的「切回官方账号」（会先让你确认改动范围），这份第三方配置会先保存为接入；要继续用它，
+            在它的菜单里选「建成独立环境」。
           </p>
         )}
         {tab === "providers" && <div className="flex flex-col gap-3">
+            <h3 className="text-sm font-medium text-foreground">账号</h3>
             {unsaved && currentConfig?.config && (
               <LiveConfigCard
                 agentId={agentId}
@@ -508,53 +567,46 @@ export function ConnectionWorkbench({
                 onSave={kind ? () => onSaveCurrent(selected) : undefined}
               />
             )}
-            {orderedEntries.map((connection) => {
-              const connectionName = connection?.name ?? "";
-              const key = `${agentId}/${connectionName || "default"}`;
-              const index = connection
-                ? form.connections.findIndex((item) => item.name === connection.name)
-                : -1;
-              const isCurrent = connection ? active === connectionName : current?.default === true;
-              return (
-              <Fragment key={connection?.name ?? "default"}>
-              <ConnectionCard
-                agentId={agentId}
-                connection={connection}
-                active={isCurrent}
-                busy={busyTarget === key}
-                disabled={busyTarget !== null || Boolean(writeBlocked)}
-                check={checkResults[key]}
-                onReset={kind && !connection && !isCurrent ? () => onResetDefault(selected) : undefined}
-                onCheck={kind && connection ? () => onCheck(selected, connection.name) : undefined}
-                onEdit={kind && connection ? () => onEdit(selected, connection) : undefined}
-                onDuplicate={kind && connection ? () => onDuplicate(selected, connection) : undefined}
-                onMakeProfile={kind && connection && onMakeProfile ? () => onMakeProfile(selected, connection) : undefined}
-                instances={connection && instancesOf ? instancesOf(agentId, connection) : []}
-                onShowInstances={onShowInstances}
-                onBalance={kind && connection && onBalance && balanceSupported(connection.baseUrl) ? () => onBalance(selected, connection) : undefined}
-                onExport={kind && connection ? () => onExport(selected, connection) : undefined}
-                onRemove={kind && connection ? () => onRemove(selected, connection) : undefined}
-                onMoveUp={kind && connection && index > 0 ? () => onMove(selected, connection, "up") : undefined}
-                onMoveDown={kind && connection && index < form.connections.length - 1 ? () => onMove(selected, connection, "down") : undefined}
+            {mainThirdParty && renderCard(mainThirdParty, true)}
+            <ConnectionCard
+              agentId={agentId}
+              connection={null}
+              active={official}
+              officialDetail={official
+                ? `正在使用 · 模型 ${envState?.modelText ?? "助手默认"}；登录由助手自己管理，本工具不读取`
+                : "官方登录没有被动过；切回后助手改用它"}
+              busy={busyTarget === `${agentId}/default`}
+              disabled={busyTarget !== null || Boolean(writeBlocked)}
+              onReset={kind && thirdParty ? () => onResetDefault(selected) : undefined}
+            />
+            {kind && onCheckAuth && (
+              <OfficialAuthPanel
+                key={`auth-${agentId}`}
+                kind={kind}
+                bin={bin}
+                testIds={{
+                  root: `main-auth-status-${agentId}`,
+                  text: `main-auth-text-${agentId}`,
+                  check: `main-auth-check-${agentId}`,
+                  mixed: `main-auth-mixed-${agentId}`,
+                  commands: `main-${agentId}`,
+                }}
+                onCheck={() => onCheckAuth(selected)}
               />
-              {!connection && kind && onCheckAuth && (
-                <OfficialAuthPanel
-                  key={`auth-${agentId}`}
-                  kind={kind}
-                  bin={bin}
-                  testIds={{
-                    root: `main-auth-status-${agentId}`,
-                    text: `main-auth-text-${agentId}`,
-                    check: `main-auth-check-${agentId}`,
-                    mixed: `main-auth-mixed-${agentId}`,
-                    commands: `main-${agentId}`,
-                  }}
-                  onCheck={() => onCheckAuth(selected)}
-                />
-              )}
-              </Fragment>
-              );
-            })}
+            )}
+            <div className="mt-3" data-testid={`third-party-section-${agentId}`}>
+              <h3 className="text-sm font-medium text-foreground">第三方接入 · 只在独立环境里用</h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                保存在这里的接入不会写进默认环境。要用哪一套，就「建成独立环境」：它有自己的配置目录与登录，和官方账号互不影响。
+              </p>
+            </div>
+            {savedEntries.length === 0 ? (
+              <p data-testid={`third-party-empty-${agentId}`} className="rounded-lg border border-dashed px-4 py-3 text-xs text-muted-foreground">
+                还没有保存第三方接入。点右上角「添加 Provider」保存一套，再建成独立环境使用。
+              </p>
+            ) : (
+              savedEntries.map((connection) => renderCard(connection, false))
+            )}
         </div>}
       </div>
     </section>
@@ -604,7 +656,7 @@ function LiveConfigCard({
         <p data-testid={`connection-live-hint-${agentId}`} className="mt-1 text-xs text-muted-foreground">
           {driftedLabel
             ? `与「${driftedLabel}」地址相同，外部改了模型等参数；切换或保存时会更新「${driftedLabel}」。`
-            : "还没有保存为接入配置；切换到其他接入前会自动保存，不会丢。"}
+            : "还没有保存为接入配置；切回官方账号前会先自动保存，不会丢。"}
           {tokenUnsaved ? " 令牌还没有保存为变量，切换前需要选择密钥文件或确认放弃。" : ""}
           {unverified.length > 0 ? ` 与「${unverified.join("」「")}」地址和模型一致，但其令牌变量在本机取不到值，无法核对。` : ""}
         </p>
@@ -647,9 +699,12 @@ function ConnectionCard({
   instances = [],
   onShowInstances,
   onBalance,
+  officialDetail,
 }: {
   agentId: string;
   connection: ConnectionEntry | null;
+  /** 官方账号卡片的说明：正在用时写模型，没在用时说明登录没被动过。 */
+  officialDetail?: string;
   active: boolean;
   busy: boolean;
   disabled: boolean;
@@ -683,7 +738,7 @@ function ConnectionCard({
       )}
     >
       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border bg-muted text-lg font-semibold text-foreground">
-        {(connection?.label || connection?.name || "默").slice(0, 1).toUpperCase()}
+        {(connection?.label || connection?.name || "官").slice(0, 1).toUpperCase()}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -691,7 +746,12 @@ function ConnectionCard({
             {connection ? connection.label || connection.name : "官方账号"}
           </h3>
           {active && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2.5 py-1 text-xs font-medium text-success">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium",
+                connection ? "bg-warning/15 text-warning" : "bg-success/15 text-success",
+              )}
+            >
               <Check className="h-3 w-3" aria-hidden />
               当前使用
             </span>
@@ -700,7 +760,7 @@ function ConnectionCard({
         <p className="mt-1 truncate text-sm text-primary">
           {connection?.providerRef
             ? `引用 config.toml 中的接入方式 ${connection.providerRef}`
-            : connection?.baseUrl || "使用助手自己的登录与默认地址"}
+            : connection?.baseUrl || officialDetail || "使用助手自己的登录与默认地址"}
         </p>
         {connection && isPlainHttpUrl(connection.baseUrl) && (
           <p className="mt-1 text-xs text-warning">非 https 地址：令牌将明文传输。</p>
@@ -736,7 +796,7 @@ function ConnectionCard({
         )}
         {connection && instances.length === 0 && onMakeProfile && !connection.providerRef && (
           <p data-testid={`connection-unused-${agentId}-${id}`} className="mt-1 text-xs text-muted-foreground">
-            还没建成独立环境：主配置只放官方账号，第三方接入要在独立环境里用。
+            还没建成独立环境。
           </p>
         )}
       </div>

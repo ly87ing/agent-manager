@@ -92,8 +92,10 @@ export interface AgentCurrentConfigCredential {
 export interface AgentCurrentConnection {
   /** 与实际配置逐项一致的已保存接入；null 表示助手默认账号或还没保存。 */
   profile: string | null;
-  /** 实际没有任何接入键：助手默认账号。 */
+  /** 官方账号，且对不上别的已保存接入（没有接入键，或只指定了模型、别名与超时）。 */
   default: boolean;
+  /** 实际用的是官方账号：没有第三方地址与凭据（Claude）、接入方式是内置 openai（Codex）。 */
+  official?: boolean;
   /** 库里记下的上次写入的接入，只作记录，不代表当前。 */
   last_written?: string | null;
   /** 地址、模型都对上，但令牌变量在本进程取不到值、无法核对的接入。 */
@@ -106,6 +108,8 @@ export interface AgentCurrentConfig {
   provider?: string | null;
   base_url?: string | null;
   model?: string | null;
+  /** Claude：settings.json 顶层的 model（/model 保存的）；env 的 ANTHROPIC_MODEL 优先于它。 */
+  settings_model?: string | null;
   small_fast_model?: string | null;
   model_aliases?: {
     opus?: string | null;

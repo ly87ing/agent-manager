@@ -326,7 +326,7 @@ describe("助手运行参数", () => {
     const { calls } = renderWithEngine(<AgentsPage />, withRecord);
 
     const panel = await openRuntimeSettings();
-    expect(screen.getByTestId("connection-workbench")).toHaveTextContent("自动化：手动确认");
+    expect(screen.getByTestId("default-env-automation")).toHaveTextContent("手动确认");
     expect(panel).not.toHaveTextContent("尚未生效");
     expect(screen.queryByTestId("agent-runtime-apply")).toBeNull();
     expect(screen.getByTestId("agent-runtime-automation-mode-manual")).toBeChecked();
@@ -617,7 +617,12 @@ describe("助手运行参数", () => {
     await userEvent.click(screen.getByTestId("reset-connection-claude-code-default"));
     const resetConfirm = await screen.findByRole("dialog", { name: "把 Claude Code 的主配置切回官方账号" });
     expect(configureCalls(calls)).toHaveLength(0);
-    expect(resetConfirm).toHaveTextContent("不会删除官方登录状态、密钥变量或其他接入定义");
+    // 逐条说清改动范围：撤哪些键、先保存什么、登录与其他设置不动
+    const effects = within(resetConfirm).getByTestId("switch-back-effects");
+    expect(effects).toHaveTextContent("会撤掉settings.json 的 env 里的接口地址、令牌");
+    expect(effects).toHaveTextContent("切之前这份第三方配置先保存成一套接入");
+    expect(effects).toHaveTextContent("不会动官方账号的登录（系统钥匙串或 ~/.claude/.credentials.json");
+    expect(effects).toHaveTextContent("运行设置（自动化档位、推理强度等）");
     await userEvent.click(within(resetConfirm).getByTestId("confirm-modal-confirm"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     expect(configureCalls(calls)[0].args).toEqual(configureArgsOf("--use-default"));

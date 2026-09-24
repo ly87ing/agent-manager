@@ -1216,6 +1216,41 @@ fn 用户自己的状态栏不被碰_也不算外部修改() {
 }
 
 #[test]
+fn claude_官方账号只指定了模型与别名仍是官方账号_切回官方零写() {
+    let (base, ctx) = temp_ctx("claude-official-model");
+    fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
+    let file = json!({
+        "env": {"ANTHROPIC_MODEL": "opus", "ANTHROPIC_DEFAULT_HAIKU_MODEL": "haiku-x", "ANTHROPIC_BASE_URL": ""},
+        "permissions": {"allow": ["Bash(ls:*)"]}
+    });
+    write_settings_file(&ctx, &file);
+    let before = file_bytes(&ctx.home_dir.join(".claude/settings.json"));
+    let current = current_config(&ctx, "claude-code")["current"].clone();
+    assert_eq!(current["official"], true, "{current}");
+    assert_eq!(current["default"], true, "只指定模型不算一套还没保存的接入");
+
+    let back = configure(&ctx, "claude-code", &["--use-default"]);
+    assert!(back.ok, "{:?}", back.errors);
+    assert_eq!(back.data["changed"], json!([]));
+    assert_eq!(
+        file_bytes(&ctx.home_dir.join(".claude/settings.json")),
+        before,
+        "已是官方账号：模型与别名原样保留"
+    );
+    assert!(db_bytes(&ctx).is_none(), "零写：连库都不建");
+
+    // 有了第三方地址就不是官方账号了
+    let mut mixed = file.clone();
+    mixed["env"]["ANTHROPIC_BASE_URL"] = json!("https://relay.example.com");
+    write_settings_file(&ctx, &mixed);
+    let current = current_config(&ctx, "claude-code")["current"].clone();
+    assert_eq!(current["official"], false);
+    assert_eq!(current["default"], false);
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
 fn 切回默认会撤掉接入配置_库里的上次写入记录也清空() {
     let (base, ctx) = temp_ctx("use-default");
     seed_legacy_claude(
@@ -1858,36 +1893,47 @@ fn codex_外部改了本工具写的表地址_旧基准被拒_切回官方时存
     let _ = fs::remove_dir_all(&base);
 }
 #[test]
-fn codex_首次切回官方保留用户自己的运行参数_模型存进导入项() {
+fn codex_官方账号只指定了模型仍是官方账号_切回官方零写_模型与运行参数不动() {
     let (base, ctx) = temp_ctx("codex-first-run");
     fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
-    // 从没用本工具写过，但用户自己设了模型与审批策略
-    fs::write(
-        ctx.home_dir.join(".codex/config.toml"),
-        "model = \"gpt-5.6-sol\"\napproval_policy = \"never\"\n",
-    )
-    .unwrap();
+    // 从没用本工具写过，用户在官方账号上自己设了模型与审批策略
+    let original = "model = \"gpt-5.6-sol\"\napproval_policy = \"never\"\n";
+    fs::write(ctx.home_dir.join(".codex/config.toml"), original).unwrap();
     define_codex(
         &ctx,
         json!({"active": "relay", "profiles": {"relay": {"base_url": "https://relay.example.com/v1", "model": "other"}}}),
     );
-    let runtime = current_config(&ctx, "codex")["config"]["runtime"].clone();
-    assert_eq!(runtime["automation_mode"], "custom");
-    assert_eq!(runtime["automation_raw"]["approval_policy"], "never");
+    let status = current_config(&ctx, "codex");
+    assert_eq!(status["config"]["runtime"]["automation_mode"], "custom");
+    assert_eq!(
+        status["config"]["runtime"]["automation_raw"]["approval_policy"],
+        "never"
+    );
+    // 模型只是官方账号上的设置：不是一套「还没保存的接入」，也不算混用
+    assert_eq!(status["current"]["official"], true);
+    assert_eq!(status["current"]["default"], true);
+    assert_eq!(status["current"]["profile"], Value::Null);
+    assert_eq!(status["config"]["model"], "gpt-5.6-sol");
+    let profiles_before = profiles_in_db(&ctx, "codex");
 
     let switched = configure(&ctx, "codex", &["--use-default"]);
     assert!(switched.ok, "{:?}", switched.errors);
-    let imported = switched.data["backfill"]["name"].as_str().unwrap();
+    assert_eq!(switched.data["changed"], json!([]));
     assert_eq!(
-        profiles_in_db(&ctx, "codex")[imported]["model"],
-        "gpt-5.6-sol"
+        switched.data["backfill"],
+        Value::Null,
+        "没有要保存的第三方接入"
     );
-    let after = codex_config(&ctx);
-    assert!(
-        after.contains("approval_policy = \"never\""),
-        "切回官方不碰运行参数：{after}"
+    assert_eq!(
+        codex_config(&ctx),
+        original,
+        "已是官方账号：模型与运行参数都不动"
     );
-    assert!(!after.contains("model ="), "模型随接入存进导入项：{after}");
+    assert_eq!(
+        profiles_in_db(&ctx, "codex"),
+        profiles_before,
+        "不生成导入项"
+    );
 
     let _ = fs::remove_dir_all(&base);
 }

@@ -170,6 +170,20 @@ Codex 侧读 `<CODEX_HOME>/sessions/**/rollout-*.jsonl` 里最后一条 `rate_li
 「建成独立环境」）。旧版本或手改留在主配置里的第三方接入如实显示，界面提示混用，用户可「切回官方账号」
 （`--use-default`，切之前照常回填保存）。
 
+账号按「连到哪、用谁的凭据」判定：Claude 的 env 里有非空的 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN`
+或 `ANTHROPIC_API_KEY`，或 Codex 的 `model_provider` 不是内置 `openai`，才算第三方接入；模型、别名与超时
+只是官方账号上的设置（`current_config.current.official`）。官方账号只指定了模型时 `current.default` 同样为真，
+不再报成「当前实际配置（未保存）」、不提示混用；此时 `--use-default` 零写（不撤模型、不生成导入项）。此前按
+「有没有任何接入键」判定，官方账号设了模型就被当成一套未保存的接入，「切回官方账号」会删掉模型并生成导入项
+（2026-09-24 用真实 codex 0.156.1 复现：`auth.json` 与登录状态不受影响，但模型被删）。Claude 的状态另报顶层
+`model`（`settings_model`，`/model` 保存的就是它；env 的 `ANTHROPIC_MODEL` 优先于它）。
+
+默认环境的状态逐行写明：账号（官方账号，或「第三方接入 · 地址」并注明与官方账号混在主配置里）、登录（由助手
+自己保存在哪里，本工具不读取也不改动；第三方时说明现在用的是配置里的令牌）、模型与它取自哪个键、自动化档位。
+「接入 Provider」页签先是「账号」一节（官方账号卡片、登录检查，混用时还有主配置正在用的那套），再是「第三方接入 ·
+只在独立环境里用」一节。「切回官方账号」只在混用时出现，确认框逐条列出会撤掉的键、切之前先保存什么、不会动的
+内容（官方登录、运行设置、MCP、Hooks、其他接入与密钥变量）以及之后要重启或登录。
+
 **接入配置**：`settings.profiles` 存多套各家中转站的接入定义，作为备选保存、测试、导入导出，
 或建成独立环境。每套含地址、令牌变量名、令牌走哪个头（`token` → `ANTHROPIC_AUTH_TOKEN` 的
 Bearer，`api_key` → `ANTHROPIC_API_KEY` 的 x-api-key，中转站两种都有）、模型、
@@ -179,7 +193,7 @@ opus/sonnet/haiku/fable 别名（表单可一键都指向默认模型：第三�
 提供，建成独立环境时按官方替代写成 Haiku 别名）；地址允许 `https://` 与任意主机的 `http://`（界面对非 https
 提示令牌将明文传输）。当前是哪一套以目标文件为准：`agents:status` 把实际接入与每套已保存
 接入按渲染结果逐项比较，给出 `current_config.current`（`profile` 为匹配到的那套，`default`
-为官方账号，都不是即「当前实际配置（未保存）」）。库里的 `settings.active` 只是上次写入
+为官方账号（可带模型等设置），都不是即「当前实际配置（未保存）」，只会出现在第三方接入上）。库里的 `settings.active` 只是上次写入
 记录，只在内容相同的候选之间裁决。切回官方账号时清空全部接入键，不留残余变量。
 
 **写入**：`agents:configure --only <助手> --base <摘要>` 加一种写法——`--runtime <json>`

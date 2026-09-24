@@ -61,6 +61,7 @@ import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource } from "../lib/useAliasS
 import { useDirectApply } from "../lib/useDirectApply";
 import { useExecutions } from "../lib/execution";
 import { seedArgs, summarizeSeed, type SeedItem, type SeedResult } from "../lib/profileSeed";
+import { isOfficial, switchBackEffects } from "../lib/defaultEnvironment";
 
 /** 用定义覆盖实例实际配置前的说明：实例文件自己设了、定义没声明的凭据相关变量会被置空，点名说出来。 */
 function overwriteDescription(element: EngineElement): string {
@@ -223,7 +224,7 @@ export default function AgentsPage({
             currentConfigOf(refreshedAgent),
           ))
           : request.useDefault
-            ? current?.default === true
+            ? isOfficial(current)
             : Boolean(current?.profile);
         if (!verified) {
           toast.error("写入已经返回成功，但状态回读没有确认生效", {
@@ -1013,7 +1014,7 @@ export default function AgentsPage({
       {connectionResetting && (
         <ConfirmModal
           title={`把 ${(connectionResetting.spec as AgentsSpec).display_name ?? connectionResetting.id.replace(/^agents:/, "")} 的主配置切回官方账号`}
-          description="撤掉主配置里的第三方接入地址、模型与令牌，改用助手自己的官方账号；还没保存的这份第三方配置会先保存成接入，之后可以建成独立环境继续用。不会删除官方登录状态、密钥变量或其他接入定义；已经打开的助手需要重启后生效。"
+          description="主配置改回只用官方账号。改动范围如下："
           risk="write-local"
           riskLabel="切回官方账号"
           confirmLabel="确认切回"
@@ -1024,7 +1025,31 @@ export default function AgentsPage({
             void runConfigure({ agentId, useDefault: true }, { message: `已把 ${agentId} 的主配置切回官方账号` });
           }}
           onClose={() => setConnectionResetting(null)}
-        />
+        >
+          {(() => {
+            const effects = switchBackEffects(connectionKindOf(connectionResetting) ?? "claude");
+            return (
+              <dl data-testid="switch-back-effects" className="space-y-2 text-sm">
+                <div>
+                  <dt className="font-medium text-foreground">会撤掉</dt>
+                  <dd className="text-muted-foreground">{effects.removes}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-foreground">切之前</dt>
+                  <dd className="text-muted-foreground">{effects.before}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-foreground">不会动</dt>
+                  <dd className="text-muted-foreground">{effects.keeps.join("；")}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-foreground">之后</dt>
+                  <dd className="text-muted-foreground">{effects.after}</dd>
+                </div>
+              </dl>
+            );
+          })()}
+        </ConfirmModal>
       )}
 
       {profileForm && (
