@@ -50,6 +50,7 @@ const CLAUDE_OWNED_PATHS: &[&[&str]] = &[
     &["env", "ANTHROPIC_DEFAULT_OPUS_MODEL"],
     &["env", "ANTHROPIC_DEFAULT_SONNET_MODEL"],
     &["env", "ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+    &["env", "ANTHROPIC_DEFAULT_FABLE_MODEL"],
     &["env", "API_TIMEOUT_MS"],
     &["env", "ENABLE_TOOL_SEARCH"],
     &["env", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"],
@@ -77,6 +78,8 @@ const CLAUDE_CONNECTION_PATHS: &[&[&str]] = &[
     &["env", "ANTHROPIC_DEFAULT_OPUS_MODEL"],
     &["env", "ANTHROPIC_DEFAULT_SONNET_MODEL"],
     &["env", "ANTHROPIC_DEFAULT_HAIKU_MODEL"],
+    // 官方新增的 fable 别名（环境变量参考）：与另三个别名同类，切回官方账号时一并撤掉
+    &["env", "ANTHROPIC_DEFAULT_FABLE_MODEL"],
     &["env", "API_TIMEOUT_MS"],
 ];
 
@@ -200,7 +203,8 @@ fn claude_observed_config(
         "model_aliases": {
             "opus": string_at(&value, &["env", "ANTHROPIC_DEFAULT_OPUS_MODEL"]),
             "sonnet": string_at(&value, &["env", "ANTHROPIC_DEFAULT_SONNET_MODEL"]),
-            "haiku": string_at(&value, &["env", "ANTHROPIC_DEFAULT_HAIKU_MODEL"])
+            "haiku": string_at(&value, &["env", "ANTHROPIC_DEFAULT_HAIKU_MODEL"]),
+            "fable": string_at(&value, &["env", "ANTHROPIC_DEFAULT_FABLE_MODEL"])
         },
         "timeout_ms": string_at(&value, &["env", "API_TIMEOUT_MS"]),
         "credential": {"configured": credential_kind.is_some(), "kind": credential_kind, "variable": null},
@@ -719,7 +723,7 @@ fn parse_profile(id: &str, raw: &Value) -> Result<ConnectionProfile> {
         let map = raw_aliases
             .as_object()
             .ok_or_else(|| anyhow::anyhow!("接入配置 {id} 的模型别名必须是对象"))?;
-        for tier in ["opus", "sonnet", "haiku"] {
+        for tier in ["opus", "sonnet", "haiku", "fable"] {
             if let Some(value) = non_empty(map.get(tier)) {
                 model_aliases.insert(tier.to_string(), value);
             }
@@ -966,6 +970,7 @@ fn write_claude_connection(
             "opus" => "ANTHROPIC_DEFAULT_OPUS_MODEL",
             "sonnet" => "ANTHROPIC_DEFAULT_SONNET_MODEL",
             "haiku" => "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "fable" => "ANTHROPIC_DEFAULT_FABLE_MODEL",
             _ => continue,
         };
         path_set(root, &["env", key], Value::String(target.clone()));
@@ -2171,6 +2176,7 @@ fn plan_backfill(
                 ("opus", "ANTHROPIC_DEFAULT_OPUS_MODEL"),
                 ("sonnet", "ANTHROPIC_DEFAULT_SONNET_MODEL"),
                 ("haiku", "ANTHROPIC_DEFAULT_HAIKU_MODEL"),
+                ("fable", "ANTHROPIC_DEFAULT_FABLE_MODEL"),
             ]
             .into_iter()
             .filter_map(|(tier, key)| text(key).map(|value| (tier.to_string(), value)))

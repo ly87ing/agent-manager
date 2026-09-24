@@ -66,7 +66,7 @@ export function ConnectionFormDialog({
   const [localError, setLocalError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(!duplicating && Boolean(
     initialConnection?.timeoutMs || initialConnection?.smallFastModel || initialConnection?.aliasOpus
-    || initialConnection?.aliasSonnet || initialConnection?.aliasHaiku || initialConnection?.auth === "api_key",
+    || initialConnection?.aliasSonnet || initialConnection?.aliasHaiku || initialConnection?.aliasFable || initialConnection?.auth === "api_key",
   ));
   const dialogTitle = editing
     ? `编辑 ${initialConnection.label || initialConnection.name}`
@@ -289,7 +289,7 @@ export function ConnectionFormDialog({
                         <dd className="break-all font-mono text-xs text-foreground">环境变量 {connection.tokenVar}</dd>
                       </div>
                     </dl>
-                    {(connection.timeoutMs || connection.smallFastModel || connection.aliasOpus || connection.aliasSonnet || connection.aliasHaiku || connection.auth === "api_key") && (
+                    {(connection.timeoutMs || connection.smallFastModel || connection.aliasOpus || connection.aliasSonnet || connection.aliasHaiku || connection.aliasFable || connection.auth === "api_key") && (
                       <details className="border-t px-3 py-2 text-xs">
                         <summary className="cursor-pointer text-muted-foreground">查看一并复制的高级配置</summary>
                         <dl className="mt-2 grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-foreground">
@@ -299,6 +299,7 @@ export function ConnectionFormDialog({
                           {connection.aliasOpus && <><dt>Opus 映射</dt><dd className="break-all font-mono">{connection.aliasOpus}</dd></>}
                           {connection.aliasSonnet && <><dt>Sonnet 映射</dt><dd className="break-all font-mono">{connection.aliasSonnet}</dd></>}
                           {connection.aliasHaiku && <><dt>Haiku 映射</dt><dd className="break-all font-mono">{connection.aliasHaiku}</dd></>}
+                          {connection.aliasFable && <><dt>Fable 映射</dt><dd className="break-all font-mono">{connection.aliasFable}</dd></>}
                         </dl>
                       </details>
                     )}
@@ -507,6 +508,17 @@ export function ConnectionFormDialog({
                         data-testid="new-connection-alias-haiku"
                         value={connection.aliasHaiku}
                         onChange={(event) => patch({ aliasHaiku: event.target.value })}
+                        className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
+                      />
+                    </label>
+                  )}
+                  {kind === "claude" && (
+                    <label className="text-sm text-foreground">
+                      Fable 别名（可选）
+                      <input
+                        data-testid="new-connection-alias-fable"
+                        value={connection.aliasFable ?? ""}
+                        onChange={(event) => patch({ aliasFable: event.target.value })}
                         className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                       />
                     </label>

@@ -44,6 +44,8 @@ export interface ConnectionEntry {
   aliasOpus: string;
   aliasSonnet: string;
   aliasHaiku: string;
+  /** Claude Code 的 fable 别名解析到的模型（官方 ANTHROPIC_DEFAULT_FABLE_MODEL）。 */
+  aliasFable?: string;
   /** 请求超时（毫秒）；留空用默认。 */
   timeoutMs: string;
   /**
@@ -172,6 +174,7 @@ export function parseConnectionBundle(text: string, expectedKind: "claude" | "co
     aliasOpus: stringField("aliasOpus").trim(),
     aliasSonnet: stringField("aliasSonnet").trim(),
     aliasHaiku: stringField("aliasHaiku").trim(),
+    ...(stringField("aliasFable").trim() ? { aliasFable: stringField("aliasFable").trim() } : {}),
     timeoutMs: stringField("timeoutMs").trim(),
   };
   const error = validateConnectionEntry(connection);
@@ -196,6 +199,7 @@ export function connectionToDefinitionValue(item: ConnectionEntry): Record<strin
   if (item.aliasOpus.trim()) aliases.opus = item.aliasOpus.trim();
   if (item.aliasSonnet.trim()) aliases.sonnet = item.aliasSonnet.trim();
   if (item.aliasHaiku.trim()) aliases.haiku = item.aliasHaiku.trim();
+  if (item.aliasFable?.trim()) aliases.fable = item.aliasFable.trim();
   if (Object.keys(aliases).length > 0) entry.model_aliases = aliases;
   const timeout = Number(item.timeoutMs.trim());
   if (item.timeoutMs.trim() && Number.isFinite(timeout) && timeout > 0) {
@@ -538,6 +542,7 @@ function readAgentSettings(
       aliasOpus: alias("opus"),
       aliasSonnet: alias("sonnet"),
       aliasHaiku: alias("haiku"),
+      ...(alias("fable") ? { aliasFable: alias("fable") } : {}),
       timeoutMs: typeof entry.timeout_ms === "number" ? String(entry.timeout_ms) : "",
       ...(typeof entry.provider_ref === "string" && entry.provider_ref
         ? { providerRef: entry.provider_ref }

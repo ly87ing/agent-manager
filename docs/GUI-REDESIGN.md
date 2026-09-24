@@ -150,8 +150,9 @@ Codex 侧读 `<CODEX_HOME>/sessions/**/rollout-*.jsonl` 里最后一条 `rate_li
 
 **接入配置**：`settings.profiles` 存多套各家中转站的接入定义，作为备选保存、测试、导入导出，
 或建成独立环境。每套含地址、令牌变量名、令牌走哪个头（`token` → `ANTHROPIC_AUTH_TOKEN` 的
-Bearer，`api_key` → `ANTHROPIC_API_KEY` 的 x-api-key，中转站两种都有）、模型、小任务模型、
-opus/sonnet/haiku 别名与超时；地址允许 `https://` 与任意主机的 `http://`（界面对非 https
+Bearer，`api_key` → `ANTHROPIC_API_KEY` 的 x-api-key，中转站两种都有）、模型、
+opus/sonnet/haiku/fable 别名与超时（官方已弃用的小任务模型 `ANTHROPIC_SMALL_FAST_MODEL` 只读旧值，新接入不再
+提供，建成独立环境时按官方替代写成 Haiku 别名）；地址允许 `https://` 与任意主机的 `http://`（界面对非 https
 提示令牌将明文传输）。当前是哪一套以目标文件为准：`agents:status` 把实际接入与每套已保存
 接入按渲染结果逐项比较，给出 `current_config.current`（`profile` 为匹配到的那套，`default`
 为官方账号，都不是即「当前实际配置（未保存）」）。库里的 `settings.active` 只是上次写入
@@ -177,7 +178,7 @@ Codex：地址 + 令牌变量且仍是本工具写的那张表，或引用同一
 
 **受管粒度**按键路径而不是整个顶层键：本工具只拥有 `env.ANTHROPIC_BASE_URL`、
 `env.ANTHROPIC_AUTH_TOKEN`、`env.ANTHROPIC_API_KEY`、`env.ANTHROPIC_MODEL`、
-`env.ANTHROPIC_SMALL_FAST_MODEL`、`env.ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`、
+`env.ANTHROPIC_SMALL_FAST_MODEL`、`env.ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL`、
 `env.API_TIMEOUT_MS`、`env.ENABLE_TOOL_SEARCH`、`env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`、
 `env.DISABLE_AUTOUPDATER`（禁止自动更新，官方写法）、
 `effortLevel`、`enableArtifact`（连同已废弃的 `disableArtifact`）、`permissions.defaultMode`
@@ -250,6 +251,15 @@ profile 与各类表等）在「运行设置」页底部的「直接编辑配置
 的地址与 key 把官方账号实例发往中转，shell 的附加请求头随请求发给实例接口；置空后三者都不再发生。
 实例卡片把尚未写入的这组置空项合并成一句提示，不逐条铺开；新建 Claude 官方账号实例与第三方实例一样，
 目标文件还不存在时先写配置再写启动命令。
+
+第三方凭据写在实例 `settings.json` 的 `env` 里，按官方设置参考会进入 Claude 启动的每个子进程（Bash 工具、
+hooks、MCP 服务），提示注入可借此把令牌带出去。实例表单因此提供「子进程看不到凭据」，即官方的
+`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`（作为实例 env 的普通取值），新建第三方 Claude 实例默认开启、官方账号实例
+默认关闭，编辑时按实际定义回填。真实 claude 2.1.281 实测：不开时 hook 能读到实例令牌，开启后 hook 里没有令牌
+与 `CLAUDE_CONFIG_DIR`，Claude 自己的请求照常带实例令牌。官方说明的代价同样写在表单上：子进程看不到
+`CLAUDE_CONFIG_DIR`，Linux 上 Bash 子进程看不到本机其他进程。内置状态栏因此在拿不到 `CLAUDE_CONFIG_DIR` 时
+从输入的 `transcript_path`（`<配置目录>/projects/…`）反推配置目录，实例额度仍记在自己名下。实例表单的接口地址
+与接入配置同一口径：`https://` 或任意主机的 `http://`，后者提示令牌将明文传输。
 
 Codex 实例（第三方与官方账号实例都一样）的启动命令前缀 `CODEX_API_KEY= CODEX_ACCESS_TOKEN=`，清空 Codex
 当作官方凭据读取、优先于目录登录的变量（`rust-v0.156.1` 源码：`CODEX_ACCESS_TOKEN` 所有入口都读，

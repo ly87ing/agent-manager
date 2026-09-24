@@ -34,6 +34,9 @@ export interface ProfileFormInput {
   extraEnv: Record<string, string>;
 }
 
+/** 官方设置：子进程（Bash 工具、hooks、MCP 服务）的环境里去掉凭据。第三方环境默认开启。 */
+export const SUBPROCESS_SCRUB_ENV = "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB";
+
 /** 表单自己管理的 Claude env 变量；其余 env 进 extraEnv 原样往返。 */
 const CLAUDE_FORM_ENV = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
 
@@ -314,6 +317,7 @@ export function connectionToProfileInput(
     if (connection.aliasSonnet.trim()) extraEnv.ANTHROPIC_DEFAULT_SONNET_MODEL = connection.aliasSonnet.trim();
     // 官方已弃用 ANTHROPIC_SMALL_FAST_MODEL：后台任务改用 Haiku 别名那个模型。旧接入里只填了
     // 小任务模型的，按官方替代写成 Haiku 别名；两者都填了以 Haiku 别名为准。
+    if (connection.aliasFable?.trim()) extraEnv.ANTHROPIC_DEFAULT_FABLE_MODEL = connection.aliasFable.trim();
     const haiku = connection.aliasHaiku.trim() || connection.smallFastModel.trim();
     if (haiku) extraEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL = haiku;
     if (connection.aliasHaiku.trim() && connection.smallFastModel.trim()

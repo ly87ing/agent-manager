@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentDefinition,
+  connectionToDefinitionValue,
   detectSystemPlatform,
   duplicateConnectionDraft,
   extractCommandForPlatform,
@@ -720,5 +721,18 @@ describe("moveAgentConnection", () => {
     expect(moveAgentConnection(initial, "alpha", "up")).toEqual(initial);
     expect(moveAgentConnection(initial, "beta", "down")).toEqual(initial);
     expect(moveAgentConnection(initial, "missing", "up")).toEqual(initial);
+  });
+
+  it("Fable 别名存进 model_aliases.fable，读回表单也还在；没填时不多出字段", () => {
+    const values = parseInitialToFormValues("claude-code", {
+      settings: { profiles: { relay: { base_url: "https://r.example.com", model_aliases: { fable: "relay-fable", haiku: "h" } } } },
+    });
+    const relay = values.connections.find((item) => item.name === "relay")!;
+    expect(relay.aliasFable).toBe("relay-fable");
+    expect(connectionToDefinitionValue(relay).model_aliases).toEqual({ fable: "relay-fable", haiku: "h" });
+    const plain = parseInitialToFormValues("claude-code", {
+      settings: { profiles: { p: { base_url: "https://r.example.com" } } },
+    }).connections.find((item) => item.name === "p")!;
+    expect("aliasFable" in plain).toBe(false);
   });
 });

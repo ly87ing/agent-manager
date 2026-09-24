@@ -203,6 +203,18 @@ describe("启动命令里的配置目录", () => {
     });
   });
 
+  it("Fable 别名建成独立环境时写官方的 ANTHROPIC_DEFAULT_FABLE_MODEL", () => {
+    const connection = {
+      ...emptyConnection("relay"),
+      baseUrl: "https://relay.example.com",
+      tokenVar: "RELAY_KEY",
+      aliasFable: "relay-fable",
+    };
+    const made = connectionToProfileInput({ id: "claude-code", kind: "claude" }, connection, [])!;
+    const def = buildProfileDefinition(made.input, "claude") as Record<string, any>;
+    expect(def.profile.env.ANTHROPIC_DEFAULT_FABLE_MODEL).toBe("relay-fable");
+  });
+
   it("小任务模型与 Haiku 别名都填了：以 Haiku 别名为准，并说明小任务模型没带过去", () => {
     const connection = {
       ...emptyConnection("relay"),

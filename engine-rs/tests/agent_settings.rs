@@ -421,6 +421,39 @@ fn 身份一致只改了模型_回填进上次写入的那套_不新建导入项
     let _ = fs::remove_dir_all(&base);
 }
 
+/// 官方新增的 fable 别名与另三个别名同类：切回官方账号时一并撤掉（否则 /model fable 会解析到中转
+/// 的模型名），切回前的回填也把它存进导入项。
+#[test]
+fn 切回官方时_fable_别名一并撤掉并回填进导入项() {
+    let (base, ctx) = temp_ctx("fable-alias");
+    write_settings_file(
+        &ctx,
+        &json!({"env": {"ANTHROPIC_BASE_URL": "https://mine.example.com", "ANTHROPIC_MODEL": "m",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL": "relay-fable", "MY_OWN": "keep"}}),
+    );
+    define(&ctx, json!({"base_url": "https://api.example.com"}));
+    assert_eq!(
+        current_config(&ctx, "claude-code")["config"]["model_aliases"]["fable"],
+        "relay-fable"
+    );
+
+    let switched = configure(&ctx, "claude-code", &["--use-default"]);
+    assert!(switched.ok, "{:?}", switched.errors);
+    let imported = switched.data["backfill"]["name"].as_str().unwrap();
+    assert_eq!(
+        profiles_in_db(&ctx, "claude-code")[imported]["model_aliases"]["fable"],
+        "relay-fable"
+    );
+    let env = &settings_file(&ctx)["env"];
+    assert!(env.get("ANTHROPIC_DEFAULT_FABLE_MODEL").is_none(), "{env}");
+    assert_eq!(env["MY_OWN"], "keep");
+    assert_eq!(
+        current_config(&ctx, "claude-code")["current"]["default"],
+        true
+    );
+    let _ = fs::remove_dir_all(&base);
+}
+
 #[test]
 fn 首次切回官方把用户手配的接入存成导入项_不丢() {
     let (base, ctx) = temp_ctx("first-run-existing");

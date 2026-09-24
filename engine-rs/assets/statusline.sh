@@ -15,11 +15,12 @@
 
 IFS= read -rd '' I   # 读全部 stdin
 
-model=""; cwd=""; ctx=""; added=""; removed=""; cost=""; five=""; week=""
+model=""; cwd=""; transcript=""; ctx=""; added=""; removed=""; cost=""; five=""; week=""
 five_reset=""; week_reset=""
 
 re_model='"display_name"[[:space:]]*:[[:space:]]*"([^"]+)"'
 re_cwd='"cwd"[[:space:]]*:[[:space:]]*"([^"]+)"'
+re_transcript='"transcript_path"[[:space:]]*:[[:space:]]*"([^"]+)"'
 # 仅 context_window 段的 used_percentage 后面跟着 remaining_percentage，据此与额度区分
 re_ctx='"used_percentage"[[:space:]]*:[[:space:]]*([0-9]+)[^}]*"remaining_percentage"'
 re_added='"total_lines_added"[[:space:]]*:[[:space:]]*([0-9]+)'
@@ -32,6 +33,7 @@ re_week_reset='"seven_day"[[:space:]]*:[[:space:]]*\{[^}]*"resets_at"[[:space:]]
 
 [[ $I =~ $re_model      ]] && model=${BASH_REMATCH[1]}
 [[ $I =~ $re_cwd        ]] && cwd=${BASH_REMATCH[1]}
+[[ $I =~ $re_transcript ]] && transcript=${BASH_REMATCH[1]}
 [[ $I =~ $re_ctx        ]] && ctx=${BASH_REMATCH[1]}
 [[ $I =~ $re_added      ]] && added=${BASH_REMATCH[1]}
 [[ $I =~ $re_removed    ]] && removed=${BASH_REMATCH[1]}
@@ -74,7 +76,11 @@ if [[ -n $five_reset || -n $week_reset ]]; then now=${AM_STATUSLINE_NOW:-$(date 
 # 写临时文件再 mv 覆盖：多个窗口并发也不会让 Agent Manager 读到半截内容。
 # 文件名跟随当前会话的配置目录，实例各存各的。
 if [[ -n $five || -n $week ]]; then
-  am_dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+  am_dir=$CLAUDE_CONFIG_DIR
+  # 开了 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB 时子进程拿不到 CLAUDE_CONFIG_DIR：会话记录在
+  # <配置目录>/projects/ 下，从 transcript_path 反推，实例的额度仍记在它自己名下
+  if [[ -z $am_dir && $transcript == */projects/* ]]; then am_dir=${transcript%/projects/*}; fi
+  [[ -z $am_dir ]] && am_dir=$HOME/.claude
   # 启动命令写成 CLAUDE_CONFIG_DIR="~/..." 时引号里的 ~ 不会被 shell 展开，这里补上，
   # 与 Agent Manager 读取时展开后的路径对得上
   [[ $am_dir == "~" ]] && am_dir=$HOME

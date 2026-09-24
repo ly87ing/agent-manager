@@ -254,6 +254,43 @@ describe("助手实例", () => {
     expect(differs).not.toHaveTextContent("CLAUDE_CODE_USE_BEDROCK");
   });
 
+  it("新建第三方 Claude 环境默认让子进程看不到凭据；官方账号环境默认不开，可手动切换", async () => {
+    const { calls } = renderWithEngine(
+      <AgentsPage />,
+      routes([profileElement(), profileElement({ id: "profiles:cc-lan" }), profileElement({ id: "profiles:cc-plain" })]),
+    );
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    let dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-lan");
+    expect(within(dialog).getByTestId("profile-scrub-subprocess-env")).not.toBeChecked();
+    // 局域网 http 中转与接入配置同一口径：能保存，但提示明文传输
+    await userEvent.type(within(dialog).getByTestId("profile-base-url"), "http://10.0.0.5:8080");
+    await userEvent.type(within(dialog).getByTestId("profile-token-var"), "LAN_TOKEN");
+    expect(within(dialog).getByTestId("profile-plain-http")).toHaveTextContent("令牌将明文传输");
+    expect(within(dialog).getByTestId("profile-scrub-subprocess-env")).toBeChecked();
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    let saved = calls.filter((call) => call.command === "policy:set").slice(-1)[0];
+    let definition = JSON.parse(saved.args[saved.args.indexOf("--value") + 1]);
+    expect(definition.profile.env).toMatchObject({
+      ANTHROPIC_BASE_URL: "http://10.0.0.5:8080",
+      ANTHROPIC_AUTH_TOKEN: "${LAN_TOKEN}",
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
+    });
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "新建独立环境" })).toBeNull());
+    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-plain");
+    await userEvent.click(within(dialog).getByTestId("profile-scrub-subprocess-env"));
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "policy:set").length).toBe(2));
+    saved = calls.filter((call) => call.command === "policy:set").slice(-1)[0];
+    definition = JSON.parse(saved.args[saved.args.indexOf("--value") + 1]);
+    expect(definition.profile.env).toEqual({ CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1" });
+  });
+
   it("新建第三方环境时配置写不进去：启动命令也先不写，并说明原因", async () => {
     const refused = {
       ...routes([profileElement(), profileElement({ id: "profiles:cc-work" })]),

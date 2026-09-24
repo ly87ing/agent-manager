@@ -5,8 +5,10 @@ import { cn } from "../lib/utils";
 import { useDialogFocus } from "../lib/dialogFocus";
 import {
   PROFILE_ID_RE,
+  SUBPROCESS_SCRUB_ENV,
   configEnvOf,
   defaultConfigDir,
+  isThirdPartyProfile,
   profileMcpConfig,
   profileLaunchValue,
   profileSkillsDir,
@@ -50,7 +52,15 @@ export function ProfileFormDialog({
   const [tokenVar, setTokenVar] = useState(initial?.tokenVar ?? "");
   const [authHeader, setAuthHeader] = useState<ProfileFormInput["authHeader"]>(initial?.authHeader ?? "token");
   /** 表单不单独编辑的 env（小模型、模型别名、超时等），原样带回定义。 */
-  const extraEnv = initial?.extraEnv ?? {};
+  const initialExtraEnv = initial?.extraEnv ?? {};
+  /**
+   * 子进程看不到凭据（官方 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB）：null 表示跟随默认——第三方环境开、
+   * 官方账号环境关。第三方凭据写在这个环境 settings.json 的 env 里，不开的话 Bash 工具、hooks 与
+   * MCP 服务都能读到它。
+   */
+  const [scrubChoice, setScrubChoice] = useState<boolean | null>(
+    initial ? initialExtraEnv[SUBPROCESS_SCRUB_ENV] === "1" : null,
+  );
   const [model, setModel] = useState(initial?.model ?? "");
   const [extraArgs, setExtraArgs] = useState(initial?.extraArgs ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +69,11 @@ export function ProfileFormDialog({
   const selectedAgent = baseAgents.find((agent) => agent.id === baseAgent);
   const kind = selectedAgent?.kind ?? baseAgents[0]?.kind ?? "claude";
   const effectiveConfigDir = configDir.trim() || defaultConfigDir(kind, id);
+  const thirdParty = isThirdPartyProfile({ baseUrl, tokenVar });
+  const scrub = kind === "claude" && (scrubChoice ?? thirdParty);
+  const extraEnv: Record<string, string> = { ...initialExtraEnv };
+  if (scrub) extraEnv[SUBPROCESS_SCRUB_ENV] = "1";
+  else delete extraEnv[SUBPROCESS_SCRUB_ENV];
   const input: ProfileFormInput = {
     id,
     displayName,
@@ -93,8 +108,8 @@ export function ProfileFormDialog({
       setError("配置目录要填绝对路径或以 ~/ 开头");
       return;
     }
-    if (baseUrl.trim() && !/^https:\/\/|^http:\/\/(localhost|127\.0\.0\.1)/.test(baseUrl.trim())) {
-      setError("接口地址只允许 https，或本机回环 http://localhost / http://127.0.0.1");
+    if (baseUrl.trim() && !/^https?:\/\/[^/]/.test(baseUrl.trim())) {
+      setError("接口地址要以 https:// 或 http:// 开头");
       return;
     }
     if (tokenVar.trim() && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(tokenVar.trim())) {
@@ -310,9 +325,31 @@ export function ProfileFormDialog({
                     )}
                   </label>
                 )}
-                {Object.keys(extraEnv).length > 0 && (
+                {kind === "claude" && (
+                  <label className="mt-4 flex items-start gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      data-testid="profile-scrub-subprocess-env"
+                      checked={scrub}
+                      onChange={(event) => setScrubChoice(event.target.checked)}
+                      className="mt-1"
+                    />
+                    <span>
+                      子进程看不到凭据
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        官方设置 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB：Bash 工具、hooks 与 MCP 服务读不到这个环境的凭据，防提示注入把令牌带出去；
+                        Claude 自己照常用它发请求。代价：子进程也看不到 CLAUDE_CONFIG_DIR，Linux 上 Bash 子进程看不到本机其他进程。
+                        第三方环境默认开启。
+                      </span>
+                    </span>
+                  </label>
+                )}
+                {baseUrl.trim().startsWith("http://") && (
+                  <p data-testid="profile-plain-http" className="mt-3 text-xs text-warning">非 https 地址：令牌将明文传输。</p>
+                )}
+                {Object.keys(extraEnv).filter((name) => name !== SUBPROCESS_SCRUB_ENV).length > 0 && (
                   <p data-testid="profile-extra-env" className="mt-3 text-xs text-muted-foreground">
-                    另外保留的环境变量：<span className="font-mono">{Object.keys(extraEnv).sort().join("、")}</span>
+                    另外保留的环境变量：<span className="font-mono">{Object.keys(extraEnv).filter((name) => name !== SUBPROCESS_SCRUB_ENV).sort().join("、")}</span>
                   </p>
                 )}
                 <p className="mt-3 rounded-lg border border-info/20 bg-info/5 px-3 py-2 text-xs text-muted-foreground">

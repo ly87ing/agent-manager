@@ -398,6 +398,47 @@ mod tests {
         assert!(child.wait().unwrap().success());
     }
 
+    /// 开了 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB 时状态栏子进程拿不到 CLAUDE_CONFIG_DIR：
+    /// 从 transcript_path（<配置目录>/projects/…）反推，额度仍记在该实例名下。
+    #[test]
+    fn statusline_falls_back_to_transcript_dir_when_config_dir_is_scrubbed() {
+        let base = std::env::temp_dir().join(format!("am-usage-scrub-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let home = base.join("home");
+        let data = base.join("data");
+        let instance = home.join(".claude-relay");
+        fs::create_dir_all(&data).unwrap();
+        fs::create_dir_all(instance.join("projects/p")).unwrap();
+        let script = data.join("statusline.sh");
+        fs::write(&script, SCRIPT).unwrap();
+
+        let mut child = Command::new("/bin/bash")
+            .arg(&script)
+            .env("HOME", &home)
+            .env("AM_STATUSLINE_NOW", "1789871000")
+            .env_remove("CLAUDE_CONFIG_DIR")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let input = format!(
+            r#"{{"transcript_path":"{}/projects/p/s.jsonl","rate_limits":{{"five_hour":{{"used_percentage":17,"resets_at":1789900000}}}}}}"#,
+            instance.display()
+        );
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+
+        let via_profile = read_profile("claude", &instance, &data).unwrap();
+        assert_eq!(via_profile["windows"][0]["used_percent"], json!(17.0));
+        assert!(entries(&instance.join("projects/p")).is_empty());
+        let _ = fs::remove_dir_all(&base);
+    }
+
     fn entries(dir: &Path) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(dir)
             .unwrap()

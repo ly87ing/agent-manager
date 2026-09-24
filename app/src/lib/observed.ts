@@ -111,6 +111,7 @@ export interface AgentCurrentConfig {
     opus?: string | null;
     sonnet?: string | null;
     haiku?: string | null;
+    fable?: string | null;
   } | null;
   timeout_ms?: string | number | null;
   credential?: AgentCurrentConfigCredential | null;
