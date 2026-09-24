@@ -437,7 +437,10 @@ mod tests {
         let interpreter = format!("am-fake-node-{}", std::process::id());
         let cli = format!("am-npm-codex-{}", std::process::id());
         for (name, body) in [
-            (interpreter.as_str(), "#!/bin/sh\nexec /bin/sh \"$@\"\n".to_string()),
+            (
+                interpreter.as_str(),
+                "#!/bin/sh\nexec /bin/sh \"$@\"\n".to_string(),
+            ),
             (
                 cli.as_str(),
                 format!("#!/usr/bin/env {interpreter}\necho 'Not logged in' >&2\nexit 1\n"),

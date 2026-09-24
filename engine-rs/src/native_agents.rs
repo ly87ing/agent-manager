@@ -262,7 +262,11 @@ pub(crate) fn fallback_bin_dirs(home_dir: &Path) -> Vec<PathBuf> {
 /// 执行已解析出的命令时用的 PATH：命令所在目录放最前，再接继承的 PATH。npm 装的助手是
 /// node 脚本，node 一般与它在同一目录；桌面应用继承的 PATH 里没有这个目录。
 pub(crate) fn path_for_command(bin_path: &Path) -> std::ffi::OsString {
-    let mut dirs: Vec<PathBuf> = bin_path.parent().map(Path::to_path_buf).into_iter().collect();
+    let mut dirs: Vec<PathBuf> = bin_path
+        .parent()
+        .map(Path::to_path_buf)
+        .into_iter()
+        .collect();
     if let Some(paths) = std::env::var_os("PATH") {
         dirs.extend(std::env::split_paths(&paths));
     }
