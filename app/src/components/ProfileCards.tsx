@@ -1,4 +1,5 @@
-import { Copy, FolderTree, Loader2, PlayCircle, Plus, Sparkles, Terminal, Trash2, Wrench } from "lucide-react";
+import { useState } from "react";
+import { Activity, Copy, FolderTree, Loader2, PlayCircle, Plus, Sparkles, Terminal, Trash2, Wrench } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
 import type { OfficialAuthStatus } from "../lib/observed";
 import type { ProfileObserved, ProfileSpec } from "../lib/contract";
@@ -35,6 +36,7 @@ export function ProfileCard({
   onRemoveLaunch,
   onFixLaunch,
   onCheckAuth,
+  onCheckEndpoint,
 }: {
   element: EngineElement;
   bin: string;
@@ -56,7 +58,20 @@ export function ProfileCard({
   onFixLaunch: (name: string) => void;
   /** 用官方命令查一次登录状态；失败时返回原因。 */
   onCheckAuth: () => Promise<OfficialAuthStatus | string>;
+  /** 第三方环境：按实例定义发一次最小真实请求，确认地址、凭据与模型能用。 */
+  onCheckEndpoint?: () => Promise<{ ok: boolean; detail: string; latencyMs: number }>;
 }) {
+  const [endpointCheck, setEndpointCheck] = useState<{ ok: boolean; detail: string; latencyMs: number } | null>(null);
+  const [checkingEndpoint, setCheckingEndpoint] = useState(false);
+  const checkEndpoint = async () => {
+    if (!onCheckEndpoint) return;
+    setCheckingEndpoint(true);
+    try {
+      setEndpointCheck(await onCheckEndpoint());
+    } finally {
+      setCheckingEndpoint(false);
+    }
+  };
   const spec = element.spec as unknown as ProfileSpec;
   const observed = element.observed as unknown as ProfileObserved;
   const id = element.id.replace(/^profiles:/, "");
@@ -315,7 +330,31 @@ export function ProfileCard({
         </div>
       )}
 
+      {endpointCheck && (
+        <p
+          data-testid={`profile-check-result-${id}`}
+          className={cn("mt-2 text-xs", endpointCheck.ok ? "text-success" : "text-destructive")}
+        >
+          {endpointCheck.ok && endpointCheck.latencyMs > 0
+            ? `${endpointCheck.detail}（${endpointCheck.latencyMs}ms）`
+            : endpointCheck.detail}
+        </p>
+      )}
+
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+        {thirdParty && onCheckEndpoint && (
+          <button
+            type="button"
+            data-testid={`profile-check-${id}`}
+            disabled={checkingEndpoint}
+            onClick={() => void checkEndpoint()}
+            title="按这个环境的地址、凭据与模型发一次最小请求；只读，不改配置"
+            className="inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+          >
+            {checkingEndpoint ? <Loader2 className="h-3 w-3 animate-spin" aria-hidden /> : <Activity className="h-3 w-3" aria-hidden />}
+            {checkingEndpoint ? "正在测…" : "测一下"}
+          </button>
+        )}
         <button
           type="button"
           data-testid={`profile-apply-${id}`}

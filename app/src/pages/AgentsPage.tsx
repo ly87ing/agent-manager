@@ -791,6 +791,21 @@ export default function AgentsPage({
                       return String(err);
                     }
                   }}
+                  onCheckEndpoint={async () => {
+                    try {
+                      const envelope = await runEngine<{ ok?: boolean; detail?: string; latency_ms?: number }>(
+                        "agents:check",
+                        ["--only", element.id],
+                      );
+                      return {
+                        ok: envelope.ok === true && envelope.data?.ok === true,
+                        detail: envelope.ok ? envelope.data?.detail ?? "测完了" : envelope.errors[0]?.message ?? "没测成",
+                        latencyMs: envelope.data?.latency_ms ?? 0,
+                      };
+                    } catch (err) {
+                      return { ok: false, detail: String(err), latencyMs: 0 };
+                    }
+                  }}
                   bin={baseBinOf((element.spec as unknown as { base_agent?: string }).base_agent ?? id)}
                   busy={profileApply.executing}
                   onApply={() => {

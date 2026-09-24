@@ -665,6 +665,28 @@ describe("助手实例", () => {
     expect(write.args[write.args.indexOf("--key") + 1]).toBe("agents.definitions.cc-ly");
   });
 
+  it("第三方独立环境可测一下：按实例检查，结果就地显示；官方账号环境不给这个按钮", async () => {
+    const routeMap = {
+      ...routes([
+        profileElement({ observed: { ...(profileElement().observed as Record<string, unknown>), third_party: true } }),
+        profileElement({ id: "profiles:cc-home", observed: { ...(profileElement().observed as Record<string, unknown>), third_party: false } }),
+      ]),
+      "agents:check": makeEnvelope(
+        { element: "profiles:cc-ly", ok: true, detail: "通了：地址、令牌与模型都没问题", latency_ms: 321 },
+        { command: "agents.check" },
+      ),
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
+    await openInstanceManager();
+    const card = await screen.findByTestId("profile-card-cc-ly");
+    await userEvent.click(within(card).getByTestId("profile-check-cc-ly"));
+    expect(await within(card).findByTestId("profile-check-result-cc-ly")).toHaveTextContent("通了：地址、令牌与模型都没问题（321ms）");
+    const call = calls.find((item) => item.command === "agents:check")!;
+    expect(call.args).toEqual(["--only", "profiles:cc-ly"]);
+    expect(within(screen.getByTestId("profile-card-cc-home")).queryByTestId("profile-check-cc-home")).toBeNull();
+    expect(calls.some((item) => item.command === "profiles:apply")).toBe(false);
+  });
+
   it("移除实例需确认，且只停止管理、不动配置目录", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();

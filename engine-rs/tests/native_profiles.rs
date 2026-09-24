@@ -1166,3 +1166,70 @@ fn 主助手的登录状态不设配置目录变量_登录记录在_home_的_cla
     assert!(!wrong.ok);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 独立环境也能测一下：按实例定义的地址、凭据变量与模型发最小请求，不写实例文件；官方账号
+/// 环境不代为发请求；凭据变量没取值时不发请求。
+#[test]
+fn 独立环境可检查可用性_只读_官方账号环境不代为检查() {
+    let (root, ctx) = temp_ctx("profile-check");
+    // 端口 1 立即拒绝：要的是「按实例定义拼出了端点、没写任何东西」，不是真去连
+    assert!(save_definition(
+        &ctx,
+        "cc-relay",
+        r#"{"display_name":"relay","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-relay","model":"glm-5.3","env":{"ANTHROPIC_BASE_URL":"https://127.0.0.1:1/api/anthropic","ANTHROPIC_API_KEY":"${AM_TEST_PROFILE_CHECK_KEY}"}},"_delete":false,"_replace":true}"#
+    ));
+    assert!(save_definition(
+        &ctx,
+        "cx-relay",
+        r#"{"display_name":"cx","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-relay","base_url":"https://127.0.0.1:1/v1","env_key":"AM_TEST_PROFILE_CHECK_KEY","model":"m1"},"_delete":false,"_replace":true}"#
+    ));
+    assert!(save_definition(
+        &ctx,
+        "cc-home",
+        r#"{"display_name":"home","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-home"},"_delete":false,"_replace":true}"#
+    ));
+    let check = |id: &str| execute(&ctx, &request("agents:check", &["--only", id]));
+
+    let unset = check("profiles:cc-relay");
+    assert!(!unset.ok);
+    assert!(
+        unset.errors[0]
+            .message
+            .contains("AM_TEST_PROFILE_CHECK_KEY"),
+        "{:?}",
+        unset.errors
+    );
+
+    std::env::set_var("AM_TEST_PROFILE_CHECK_KEY", "check-secret-value");
+    let claude = check("profiles:cc-relay");
+    assert!(claude.ok, "{:?}", claude.errors);
+    assert_eq!(claude.data["element"], "profiles:cc-relay");
+    assert_eq!(
+        claude.data["endpoint"],
+        "https://127.0.0.1:1/api/anthropic/v1/messages"
+    );
+    assert_eq!(claude.data["model"], "glm-5.3");
+    assert_eq!(claude.data["ok"], false, "端口 1 连不上");
+    let codex = check("profiles:cx-relay");
+    assert!(codex.ok, "{:?}", codex.errors);
+    assert_eq!(codex.data["endpoint"], "https://127.0.0.1:1/v1/responses");
+    let text = format!("{:?}{:?}", claude.data, codex.data);
+    assert!(!text.contains("check-secret-value"), "结果不含取值");
+
+    let official = check("profiles:cc-home");
+    assert!(!official.ok);
+    assert!(
+        official.errors[0].message.contains("官方账号"),
+        "{:?}",
+        official.errors
+    );
+    let missing = check("profiles:nope");
+    assert!(!missing.ok);
+
+    // 只读：实例目录一个都没建
+    for dir in [".claude-relay", ".codex-relay", ".claude-home"] {
+        assert!(!ctx.home_dir.join(dir).exists(), "{dir}");
+    }
+    std::env::remove_var("AM_TEST_PROFILE_CHECK_KEY");
+    let _ = std::fs::remove_dir_all(root);
+}

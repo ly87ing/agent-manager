@@ -275,11 +275,16 @@ fn kind_of(bin: &str) -> Option<Kind> {
 ///
 /// 只读：不碰任何配置文件、不写库（除审计外），也不改生效的接入配置。
 pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value, DispatchError> {
-    let id = req
-        .value("--only")
-        .ok_or_else(|| DispatchError::new("USAGE_ERROR", "agents:check 需要 --only <助手>"))?
-        .trim_start_matches("agents:")
-        .to_string();
+    let only = req.value("--only").ok_or_else(|| {
+        DispatchError::new(
+            "USAGE_ERROR",
+            "agents:check 需要 --only <助手 | profiles:独立环境>",
+        )
+    })?;
+    if let Some(profile_id) = only.strip_prefix("profiles:") {
+        return handle_profile(ctx, req, profile_id);
+    }
+    let id = only.trim_start_matches("agents:").to_string();
 
     let defs = crate::native_agents::load_definitions(ctx)
         .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
@@ -359,25 +364,53 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value, DispatchErro
         None => None,
     };
 
-    let endpoint = probe_endpoint(kind, &base_url);
+    let mut out = probe_and_report(
+        ctx,
+        req,
+        &format!("agents:{id}"),
+        Some(&name),
+        kind,
+        &base_url,
+        profile.auth,
+        token.as_deref(),
+        model,
+    );
+    out.insert("profile".into(), json!(name));
+    Ok(Value::Object(out))
+}
+
+/// 发一次检查请求、翻译结果并记审计：接入配置与独立环境共用。审计只记测了谁、结果如何，
+/// 不记取值，也不记响应正文。
+#[allow(clippy::too_many_arguments)]
+fn probe_and_report(
+    ctx: &Context,
+    req: &Request,
+    element: &str,
+    profile: Option<&str>,
+    kind: Kind,
+    base_url: &str,
+    auth: AuthKind,
+    token: Option<&str>,
+    model: &str,
+) -> Map<String, Value> {
+    let endpoint = probe_endpoint(kind, base_url);
     let probe = run_probe(
         ctx,
         &endpoint,
-        &headers(kind, profile.auth, token.as_deref()),
+        &headers(kind, auth, token),
         &probe_body(kind, model),
     );
     let (ok, detail) = verdict(kind, &probe);
 
-    // 审计只记测了谁、结果如何，不记取值，也不记响应正文
     if let Ok(mut conn) = crate::store::open_write(ctx) {
         if let Ok(tx) = conn.transaction() {
             let _ = crate::store::record_operation(
                 &tx,
                 Some(&req.run_id),
                 "agents:check",
-                Some(&id),
+                Some(element.trim_start_matches("agents:")),
                 Some(&json!({
-                    "profile": name,
+                    "profile": profile,
                     "endpoint": endpoint,
                     "ok": ok,
                     "http_status": probe.status,
@@ -391,14 +424,134 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value, DispatchErro
     let mut out = Map::new();
     out.insert("domain".into(), json!("agents"));
     out.insert("action".into(), json!("check"));
-    out.insert("element".into(), json!(format!("agents:{id}")));
-    out.insert("profile".into(), json!(name));
+    out.insert("element".into(), json!(element));
     out.insert("endpoint".into(), json!(endpoint));
     out.insert("model".into(), json!(model));
     out.insert("ok".into(), json!(ok));
     out.insert("http_status".into(), json!(probe.status));
     out.insert("latency_ms".into(), json!(probe.latency_ms));
     out.insert("detail".into(), json!(detail));
+    out
+}
+
+/// 独立环境要检查的端点：按实例定义（与写进实例配置的一致），凭据从密钥来源解析。
+struct ProfileEndpoint {
+    kind: Kind,
+    base_url: String,
+    auth: AuthKind,
+    token_var: String,
+    model: String,
+}
+
+/// 从实例定义取出检查要用的地址、凭据变量与模型。官方账号环境没有第三方端点，不代为发请求。
+fn profile_endpoint(
+    def: &crate::native_profiles::model::ProfileDef,
+) -> Result<ProfileEndpoint, String> {
+    use crate::native_profiles::model::ProfileKind;
+    let reference = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_str)
+            .and_then(|text| text.strip_prefix("${"))
+            .and_then(|text| text.strip_suffix('}'))
+            .map(str::to_string)
+    };
+    let official = || {
+        format!(
+            "独立环境 {} 用官方账号，检查不代为发请求；请在终端里用它的启动命令验证",
+            def.id
+        )
+    };
+    let (kind, base_url, auth, token_var) = match def.kind {
+        ProfileKind::Claude => {
+            let Some(base_url) = def
+                .env
+                .get("ANTHROPIC_BASE_URL")
+                .and_then(Value::as_str)
+                .filter(|url| !url.trim().is_empty())
+            else {
+                return Err(official());
+            };
+            let (auth, var) = match (
+                reference(def.env.get("ANTHROPIC_AUTH_TOKEN")),
+                reference(def.env.get("ANTHROPIC_API_KEY")),
+            ) {
+                (Some(var), _) => (AuthKind::Token, var),
+                (None, Some(var)) => (AuthKind::ApiKey, var),
+                (None, None) => {
+                    return Err(format!(
+                        "独立环境 {} 没有引用凭据变量，没法带凭据去问",
+                        def.id
+                    ))
+                }
+            };
+            (Kind::Claude, base_url.to_string(), auth, var)
+        }
+        ProfileKind::Codex => {
+            let Some(base_url) = def.base_url.clone() else {
+                return Err(official());
+            };
+            let Some(var) = def.env_key.clone() else {
+                return Err(format!("独立环境 {} 没有凭据变量，没法带凭据去问", def.id));
+            };
+            (Kind::Codex, base_url, AuthKind::Token, var)
+        }
+    };
+    let model = def
+        .model
+        .clone()
+        .or_else(|| {
+            def.env
+                .get("ANTHROPIC_MODEL")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .filter(|model| !model.trim().is_empty())
+        .ok_or_else(|| {
+            format!(
+                "独立环境 {} 没填模型，检查要靠它才能确认模型名对不对",
+                def.id
+            )
+        })?;
+    Ok(ProfileEndpoint {
+        kind,
+        base_url,
+        auth,
+        token_var,
+        model,
+    })
+}
+
+/// `agents:check --only profiles:<独立环境>`：检查独立环境的第三方端点。只读，除审计外不写。
+fn handle_profile(ctx: &Context, req: &Request, id: &str) -> Result<Value, DispatchError> {
+    let policy = crate::store::effective_policy(ctx)
+        .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
+    let def = crate::native_profiles::model::load_definition_entries(&policy)
+        .into_iter()
+        .find(|(entry_id, _, _)| entry_id == id)
+        .ok_or_else(|| DispatchError::new("AGENT_ERROR", format!("没有这个独立环境：{id}")))?
+        .2
+        .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}")))?;
+    let endpoint = profile_endpoint(&def).map_err(|err| DispatchError::new("AGENT_ERROR", err))?;
+    let token = crate::secret_values::lookup(&endpoint.token_var).ok_or_else(|| {
+        DispatchError::new(
+            "AGENT_ERROR",
+            format!(
+                "环境变量 {} 还没有取值：先在密钥页填上，或在启动环境里 export 它",
+                endpoint.token_var
+            ),
+        )
+    })?;
+    let out = probe_and_report(
+        ctx,
+        req,
+        &format!("profiles:{id}"),
+        None,
+        endpoint.kind,
+        &endpoint.base_url,
+        endpoint.auth,
+        Some(&token),
+        &endpoint.model,
+    );
     Ok(Value::Object(out))
 }
 
