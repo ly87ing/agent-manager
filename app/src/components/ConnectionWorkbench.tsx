@@ -67,6 +67,20 @@ function unwritableReason(element: EngineElement): string | null {
     : "客户端配置文件暂不可读，不能写入";
 }
 
+/** 各外部设置对主配置官方账号的影响（依据官方认证优先级文档与 Codex 源码）。 */
+const OVERRIDE_EFFECT: Record<string, string> = {
+  ANTHROPIC_AUTH_TOKEN: "Claude 会优先用这个令牌，不用官方账号",
+  ANTHROPIC_API_KEY: "Claude 可能改用这个 API key（-p 模式直接使用，交互模式确认后使用）",
+  ANTHROPIC_BASE_URL: "Claude 会把请求连同官方账号的登录凭据发往这个地址",
+  CLAUDE_CODE_OAUTH_TOKEN: "Claude 会用这个长期令牌，不用主配置里的登录",
+  CLAUDE_CODE_USE_BEDROCK: "Claude 改走 Amazon Bedrock，不用官方账号",
+  CLAUDE_CODE_USE_VERTEX: "Claude 改走 Google Vertex，不用官方账号",
+  CLAUDE_CODE_USE_FOUNDRY: "Claude 改走 Microsoft Foundry，不用官方账号",
+  apiKeyHelper: "Claude 会优先用这条命令输出的凭据，不用官方账号",
+  CODEX_API_KEY: "Codex 会优先用这个 API key，不用 auth.json 里的登录",
+  CODEX_ACCESS_TOKEN: "Codex 会优先用这个访问令牌，不用 auth.json 里的登录",
+};
+
 export function ConnectionWorkbench({
   agents,
   selectedAgentId,
@@ -155,6 +169,8 @@ export function ConnectionWorkbench({
     })
     .sort(([left], [right]) => left.localeCompare(right));
   const currentConfig = currentConfigOf(selected);
+  const overrides = (selected.observed as { credential_overrides?: { source: string; name: string }[] })
+    .credential_overrides ?? [];
   const legacyStatusline = currentConfig?.config?.runtime?.statusline === "builtin-legacy";
   const modelEfforts = Object.entries(currentConfig?.config?.claude_model_efforts ?? {});
   const envOverrides = Object.entries(currentConfig?.config?.claude_env_overrides ?? {});
@@ -430,6 +446,24 @@ export function ConnectionWorkbench({
           </div>
         )}
 
+        {tab === "providers" && overrides.length > 0 && (
+          <div
+            role="status"
+            data-testid="main-credential-overrides"
+            className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning"
+          >
+            <p className="font-medium">这些设置会压过主配置里的官方账号：</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+              {overrides.map((item) => (
+                <li key={`${item.source}/${item.name}`}>
+                  <span className="font-mono">{item.source}</span> 里的 <span className="font-mono">{item.name}</span>：
+                  {OVERRIDE_EFFECT[item.name] ?? "会改变助手使用的凭据"}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-xs">只提示，不会改这些文件；不需要时请自己删除或注释掉，再重新打开终端。</p>
+          </div>
+        )}
         {tab === "providers" && current && !current.default && (
           <p
             role="status"

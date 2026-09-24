@@ -311,6 +311,14 @@ fail-closed。界面的当前接入、运行参数与表单预填全部读实际
 `agents:configure` 返回成功后，必须回读到 `current` 是目标、或补丁里每一项都已是实际值，才向
 用户提示成功。
 
+主助手的 status 另给 `observed.credential_overrides`：会压过主配置官方账号、但不归本工具管的外部设置，
+只有来源与变量名、不含取值。来源是 shell 启动文件（`~/.zshenv`、`~/.zshrc`、`~/.zprofile`、`~/.bashrc`、
+`~/.bash_profile`、`~/.profile` 里的 `NAME=` / `export NAME=`，注释行与别名里的赋值不算）、本进程环境，
+以及 Claude `settings.json` 的 `apiKeyHelper` 与云厂商开关 `CLAUDE_CODE_USE_{BEDROCK,VERTEX,FOUNDRY}`。
+Claude 检查 `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_API_KEY`、`ANTHROPIC_BASE_URL`、`CLAUDE_CODE_OAUTH_TOKEN` 与
+上述云厂商开关；Codex 检查 `CODEX_API_KEY`、`CODEX_ACCESS_TOKEN`（Codex 源码中优先于 `auth.json` 登录）。
+工作台逐条提示来源与影响，只提示、不改这些文件。
+
 `⌘K` 命令面板为每个主助手只提供「官方账号」一项，不再列出第三方接入。主配置已是官方账号时
 标为「当前使用」且不可执行；主配置里有第三方接入时显示「切回官方账号」，走带基准的
 `agents:configure --use-default`，写入带操作记录 ID。成功必须重新读取 `agents:status`，确认

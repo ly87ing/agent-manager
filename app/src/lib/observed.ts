@@ -76,6 +76,8 @@ export interface AgentsObserved {
   usage?: AgentUsage | null;
   /** 客户端配置文件的只读脱敏观察值；不含 token/API key 正文。 */
   current_config?: AgentCurrentConfigStatus | null;
+  /** 会压过主配置里官方账号的外部设置（shell 配置、进程环境、apiKeyHelper 等）；只有来源与变量名。 */
+  credential_overrides?: { source: string; name: string }[];
 }
 
 export interface AgentCurrentConfigCredential {

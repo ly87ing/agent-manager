@@ -1089,12 +1089,29 @@ describe("助手运行参数", () => {
     expect(configureCalls(calls)).toHaveLength(0);
   });
 
+  it("外部设置会压过主配置的官方账号时逐条提示来源与影响，不提供修改", async () => {
+    const withOverrides = routes();
+    const status = withOverrides["agents:status"] as { data: { elements: EngineElement[] } };
+    (status.data.elements[0].observed as Record<string, unknown>).credential_overrides = [
+      { source: "~/.zshrc", name: "ANTHROPIC_BASE_URL" },
+      { source: "~/.claude/settings.json", name: "apiKeyHelper" },
+    ];
+    const { calls } = renderWithEngine(<AgentsPage />, withOverrides);
+    const warning = await screen.findByTestId("main-credential-overrides");
+    expect(warning).toHaveTextContent("~/.zshrc 里的 ANTHROPIC_BASE_URL：Claude 会把请求连同官方账号的登录凭据发往这个地址");
+    expect(warning).toHaveTextContent("~/.claude/settings.json 里的 apiKeyHelper");
+    expect(warning).toHaveTextContent("只提示，不会改这些文件");
+    expect(within(warning).queryByRole("button")).toBeNull();
+    expect(configureCalls(calls)).toHaveLength(0);
+  });
+
   it("没配接入配置的助手：工作台明确展示官方账号和新增入口", async () => {
     renderWithEngine(<AgentsPage />, routes());
     expect(await screen.findByTestId("connection-card-claude-code-default")).toHaveTextContent("当前使用");
     expect(screen.queryByTestId("reset-connection-claude-code-default")).toBeNull();
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方账号");
     expect(screen.queryByTestId("main-mixed-warning")).toBeNull();
+    expect(screen.queryByTestId("main-credential-overrides")).toBeNull();
     expect(screen.getByTestId("add-connection-button")).toBeEnabled();
   });
 

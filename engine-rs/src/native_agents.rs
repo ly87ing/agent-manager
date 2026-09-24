@@ -581,6 +581,21 @@ fn status_element(
     if let Some(kind) =
         crate::native_agent_adapters::kind_for_bin(&def.bin).filter(|_| !is_instance)
     {
+        // 会压过主配置里官方账号的外部设置：只报来源与变量名，只读
+        let auth_kind = match kind {
+            crate::native_agent_adapters::AdapterKind::Claude => {
+                crate::native_auth::AuthKind::Claude
+            }
+            crate::native_agent_adapters::AdapterKind::Codex => crate::native_auth::AuthKind::Codex,
+        };
+        observed.insert(
+            "credential_overrides".into(),
+            Value::Array(crate::native_auth::credential_overrides(
+                &ctx.home_dir,
+                auth_kind,
+                &|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()),
+            )),
+        );
         // 实际值、写入基准与按内容识别的当前接入；只读零写
         let current_config = crate::native_agent_settings::current_config_status(
             ctx,

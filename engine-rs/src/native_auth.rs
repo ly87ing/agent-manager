@@ -282,3 +282,141 @@ pub(crate) fn status_command(
         }),
     })
 }
+
+/// 会压过主配置里官方账号的外部设置（官方文档 / 源码确认的变量）：主配置只放官方账号，
+/// 但这些来源不归本工具管，只如实提示。
+const CLAUDE_OVERRIDE_ENV: &[&str] = &[
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+];
+const CODEX_OVERRIDE_ENV: &[&str] = &["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"];
+const CLAUDE_CLOUD_PROVIDER_ENV: &[&str] = &[
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+];
+/// shell 启动时会读的配置文件（相对 HOME）。
+const SHELL_RC_FILES: &[&str] = &[
+    ".zshenv",
+    ".zshrc",
+    ".zprofile",
+    ".bashrc",
+    ".bash_profile",
+    ".profile",
+];
+const MAX_RC_BYTES: u64 = 1024 * 1024;
+
+/// 一行 shell 配置是否给 `name` 赋值（`NAME=…` 或 `export NAME=…`，注释行不算）。
+fn assigns(line: &str, name: &str) -> bool {
+    let line = line.trim_start();
+    if line.starts_with('#') {
+        return false;
+    }
+    let line = line.strip_prefix("export ").map_or(line, str::trim_start);
+    line.strip_prefix(name)
+        .is_some_and(|rest| rest.starts_with('='))
+}
+
+/// 主配置之外、会压过官方账号的设置：`[{source, name}]`，只有来源与变量名，不含取值。
+/// 只读：读 shell 配置文件、Claude 的 settings.json 与本进程环境（`env_set` 注入，便于测试）。
+pub(crate) fn credential_overrides(
+    home_dir: &Path,
+    kind: AuthKind,
+    env_set: &dyn Fn(&str) -> bool,
+) -> Vec<Value> {
+    let names = match kind {
+        AuthKind::Claude => CLAUDE_OVERRIDE_ENV,
+        AuthKind::Codex => CODEX_OVERRIDE_ENV,
+    };
+    let mut out = Vec::new();
+    for file in SHELL_RC_FILES {
+        let path = home_dir.join(file);
+        let Some(text) = std::fs::metadata(&path)
+            .ok()
+            .filter(|meta| meta.is_file() && meta.len() <= MAX_RC_BYTES)
+            .and_then(|_| std::fs::read_to_string(&path).ok())
+        else {
+            continue;
+        };
+        for name in names {
+            if text.lines().any(|line| assigns(line, name)) {
+                out.push(json!({"source": format!("~/{file}"), "name": name}));
+            }
+        }
+    }
+    for name in names {
+        if env_set(name) {
+            out.push(json!({"source": "进程环境", "name": name}));
+        }
+    }
+    if matches!(kind, AuthKind::Claude) {
+        let settings = std::fs::read(home_dir.join(".claude/settings.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+        if let Some(root) = settings {
+            let set = |value: Option<&Value>| {
+                value
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| !text.is_empty() && text != "0")
+            };
+            if set(root.get("apiKeyHelper")) {
+                out.push(json!({"source": "~/.claude/settings.json", "name": "apiKeyHelper"}));
+            }
+            for name in CLAUDE_CLOUD_PROVIDER_ENV {
+                if set(root.get("env").and_then(|env| env.get(*name))) {
+                    out.push(json!({"source": "~/.claude/settings.json", "name": name}));
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overrides_report_sources_and_names_but_never_values() {
+        let home = std::env::temp_dir().join(format!("am-auth-overrides-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(
+            home.join(".zshrc"),
+            "# export ANTHROPIC_API_KEY=commented\nexport ANTHROPIC_BASE_URL=https://relay.example.com\nalias x='ANTHROPIC_AUTH_TOKEN=a claude'\n  CODEX_API_KEY=sk-secret-value\n",
+        )
+        .unwrap();
+        std::fs::write(
+            home.join(".claude/settings.json"),
+            r#"{"apiKeyHelper":"~/bin/key.sh","env":{"CLAUDE_CODE_USE_BEDROCK":"1","CLAUDE_CODE_USE_VERTEX":"0"}}"#,
+        )
+        .unwrap();
+
+        let claude = credential_overrides(&home, AuthKind::Claude, &|name| {
+            name == "CLAUDE_CODE_OAUTH_TOKEN"
+        });
+        assert_eq!(
+            claude,
+            vec![
+                json!({"source": "~/.zshrc", "name": "ANTHROPIC_BASE_URL"}),
+                json!({"source": "进程环境", "name": "CLAUDE_CODE_OAUTH_TOKEN"}),
+                json!({"source": "~/.claude/settings.json", "name": "apiKeyHelper"}),
+                json!({"source": "~/.claude/settings.json", "name": "CLAUDE_CODE_USE_BEDROCK"}),
+            ],
+            "注释行、别名里的赋值与取值为 0 的开关都不算"
+        );
+        let codex = credential_overrides(&home, AuthKind::Codex, &|_| false);
+        assert_eq!(
+            codex,
+            vec![json!({"source": "~/.zshrc", "name": "CODEX_API_KEY"})]
+        );
+        assert!(!format!("{claude:?}{codex:?}").contains("sk-secret-value"));
+        assert!(!format!("{claude:?}").contains("relay.example.com"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+}
