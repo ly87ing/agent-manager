@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 import type { StatusData } from "../lib/contract";
-import { parseInitialToFormValues } from "../lib/agentDefinitionForm";
 import {
   backfillNotice,
   configureArgs,
@@ -87,7 +86,7 @@ export function CommandPalette({
   onOpenAgentSkills,
 }: {
   open: boolean;
-  /** 接入快切模式只保留接入项；执行路径与完整命令面板相同。 */
+  /** 账号快切模式只保留各助手的「官方账号」项；执行路径与完整命令面板相同。 */
   scope?: "all" | "connections";
   /** 托盘目标会带精确查询，打开后直接把焦点落在对应接入。 */
   initialKeyword?: string | null;
@@ -198,11 +197,8 @@ export function CommandPalette({
       if (profileIds.has(agentId) || !supportsConnectionSwitch(element.spec)) continue;
       const spec = element.spec as { display_name?: string };
       const agentName = spec.display_name ?? agentId;
-      const form = parseInitialToFormValues(agentId, element.spec);
-      const options = [
-        { profile: "", label: "助手默认账号" },
-        ...form.connections.map((connection) => ({ profile: connection.name, label: connection.label || connection.name })),
-      ];
+      // 主配置只放官方账号：托盘只给「官方账号」一项，主配置里有第三方凭据时用它切回
+      const options = [{ profile: "", label: "官方账号" }];
       for (const option of options) {
         out.push({
           agentId,
@@ -266,17 +262,8 @@ export function CommandPalette({
       });
 
       if (!profileIds.has(id) && supportsConnectionSwitch(element.spec)) {
-        const form = parseInitialToFormValues(id, element.spec);
-        const options = [
-          { profile: "", label: "助手默认账号", baseUrl: "", model: "", note: "" },
-          ...form.connections.map((connection) => ({
-            profile: connection.name,
-            label: connection.label || connection.name,
-            baseUrl: connection.baseUrl,
-            model: connection.model,
-            note: connection.note ?? "",
-          })),
-        ];
+        // 主配置只放官方账号，第三方接入在独立环境里用；这里只剩「切回官方账号」
+        const options = [{ profile: "", label: "官方账号", baseUrl: "", model: "", note: "" }];
         for (const option of options) {
           const current = Boolean(
             agents.data?.ok && isCurrentConnection(agents.data.data, id, option.profile),
@@ -286,12 +273,12 @@ export function CommandPalette({
             id: `connection:${id}:${option.profile || "default"}`,
             label: `${displayName} · ${option.label}`,
             hint: current
-              ? "当前接入"
+              ? "当前使用"
               : switchingTarget === target
                 ? "正在切换…"
-                : "切换接入",
-            keywords: `${id} ${spec.bin ?? ""} ${option.profile} ${option.label} ${option.baseUrl} ${option.model} ${option.note} provider 供应商 接入 切换`,
-            group: "切换接入",
+                : "切回官方账号",
+            keywords: `${id} ${spec.bin ?? ""} ${option.label} 官方 账号 登录 provider 接入 切换`,
+            group: "官方账号",
             disabled: current || switchingTarget !== null,
             current,
             run: () =>
@@ -364,7 +351,7 @@ export function CommandPalette({
 
   const filtered = useMemo(() => {
     const scoped = scope === "connections"
-      ? items.filter((item) => item.group === "切换接入")
+      ? items.filter((item) => item.group === "官方账号")
       : items;
     return targetItemId
       ? scoped.filter((item) => item.id === targetItemId)
@@ -399,7 +386,7 @@ export function CommandPalette({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={scope === "connections" ? "接入快切" : "命令面板"}
+        aria-label={scope === "connections" ? "账号快切" : "命令面板"}
         data-testid="command-palette"
         className="w-full max-w-xl overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
         onKeyDown={(event) => {
@@ -429,15 +416,15 @@ export function CommandPalette({
               setKeyword(event.target.value);
             }}
             data-testid="command-palette-input"
-            aria-label={scope === "connections" ? "搜索接入名称、备注、地址或模型" : "搜索资源、页面与动作"}
-            placeholder={scope === "connections" ? "搜索接入名称、备注、地址或模型…" : "搜索助手、技能、MCP、实例，或直接执行常用动作…"}
+            aria-label={scope === "connections" ? "搜索助手" : "搜索资源、页面与动作"}
+            placeholder={scope === "connections" ? "搜索助手名称…" : "搜索助手、技能、MCP、实例，或直接执行常用动作…"}
             className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
         <div className="max-h-[50vh] overflow-y-auto p-2">
           {filtered.length === 0 ? (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-              {scope === "connections" ? "没有匹配的接入。" : "没有匹配的资源或动作。"}
+              {scope === "connections" ? "没有匹配的助手。" : "没有匹配的资源或动作。"}
             </p>
           ) : (
             Object.entries(groups).map(([group, groupItems]) => (

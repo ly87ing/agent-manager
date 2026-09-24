@@ -30,7 +30,6 @@ export function ConnectionFormDialog({
   existingNames,
   initialConnection,
   variant,
-  editingCurrent = false,
   busy,
   error,
   onSubmit,
@@ -44,8 +43,6 @@ export function ConnectionFormDialog({
   initialConnection?: ConnectionEntry;
   /** 复制模式允许创建新名称；凭据取值始终为空。 */
   variant?: "edit" | "duplicate";
-  /** 编辑的是当前生效的那套：保存即写进助手配置。 */
-  editingCurrent?: boolean;
   busy: boolean;
   error?: string | null;
   onSubmit: (submission: ConnectionSubmission) => void;
@@ -196,9 +193,7 @@ export function ConnectionFormDialog({
             <h2 className="text-lg font-semibold text-foreground">{dialogTitle}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {editing
-                ? editingCurrent
-                  ? `这是 ${agentName} 当前生效的接入：保存即写进助手配置，并同步更新这里保存的内容；留空凭据取值不会覆盖外部密钥文件中的值。`
-                  : `修改 ${agentName} 的这套接入；只保存，不切换当前接入。留空凭据取值不会覆盖外部密钥文件中的值。`
+                ? `修改 ${agentName} 的这套接入；只保存定义，不写助手配置。留空凭据取值不会覆盖外部密钥文件中的值。`
                 : duplicating
                   ? "确认新名称即可创建；原 Provider、当前接入和客户端配置都不会改变。"
                 : "先选厂商，再确认地址、模型和凭据；安装命令不在这里。"}
@@ -508,9 +503,7 @@ export function ConnectionFormDialog({
               </details>
 
               <p className="rounded-lg border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                {editingCurrent
-                  ? "保存即写进助手配置；配置文件在打开后被外部改过时会拒绝写入并刷新，不会覆盖外部修改。"
-                  : "保存只更新 Provider 定义，不写助手配置。需要生效时，请回到卡片点击“应用”。"}
+                保存只更新接入定义，不写助手配置。主配置只放官方账号；要使用这套接入，在卡片菜单里选「建成独立环境」。
               </p>
                 </>
               )}
@@ -549,9 +542,7 @@ export function ConnectionFormDialog({
             {busy
               ? "正在保存…"
               : editing
-                ? editingCurrent
-                  ? "保存并写入"
-                  : "保存修改"
+                ? "保存修改"
                 : duplicating
                   ? "创建副本"
                   : "保存接入"}

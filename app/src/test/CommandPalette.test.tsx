@@ -171,7 +171,7 @@ async function openPalette() {
 
 async function openConnectionSwitcher() {
   await userEvent.keyboard("{Meta>}{Shift>}k{/Shift}{/Meta}");
-  return screen.findByRole("dialog", { name: "接入快切" });
+  return screen.findByRole("dialog", { name: "账号快切" });
 }
 
 describe("命令面板", () => {
@@ -191,20 +191,19 @@ describe("命令面板", () => {
     expect(palette).not.toBeInTheDocument();
   });
 
-  it("⌘⇧K 直接打开接入快切，只列接入并可继续按备注过滤", async () => {
+  it("⌘⇧K 打开账号快切：只列各助手的官方账号，不列第三方接入", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     const switcher = await openConnectionSwitcher();
-    expect(within(switcher).getByTestId("command-item-connection:claude-code:default")).toBeInTheDocument();
-    expect(within(switcher).getByTestId("command-item-connection:claude-code:kimi")).toBeInTheDocument();
+    expect(within(switcher).getByTestId("command-item-connection:claude-code:default")).toHaveTextContent("Claude Code · 官方账号");
+    expect(within(switcher).queryByTestId("command-item-connection:claude-code:kimi")).toBeNull();
     expect(within(switcher).queryByTestId("command-item-page:agents")).toBeNull();
     expect(within(switcher).queryByTestId("command-item-action:apply-rules")).toBeNull();
 
-    const input = within(switcher).getByRole("textbox", { name: "搜索接入名称、备注、地址或模型" });
+    const input = within(switcher).getByRole("textbox", { name: "搜索助手" });
     await userEvent.type(input, "月度套餐");
-    expect(within(switcher).getByTestId("command-item-connection:claude-code:kimi")).toHaveTextContent("Claude Code · Kimi Code");
     expect(within(switcher).queryByTestId("command-item-connection:claude-code:default")).toBeNull();
 
     await userEvent.keyboard("{Escape}");
@@ -221,7 +220,7 @@ describe("命令面板", () => {
     await userEvent.type(screen.getByTestId("command-palette-input"), "同步规则");
     expect(screen.queryByTestId("command-item-action:apply-rules")).toBeNull();
     await userEvent.clear(screen.getByTestId("command-palette-input"));
-    // 快捷命令每次编辑都直接写回 rc 文件，没有「同步」可做（执行通道见下方接入快切用例）
+    // 快捷命令每次编辑都直接写回 rc 文件，没有「同步」可做（执行通道见下方账号快切用例）
     await userEvent.type(screen.getByTestId("command-palette-input"), "同步终端快捷命令");
     expect(screen.queryByTestId("command-item-action:apply-aliases")).toBeNull();
     expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
@@ -267,51 +266,57 @@ describe("命令面板", () => {
     expect(await screen.findByRole("heading", { name: "密钥" }, { timeout: 10_000 })).toBeInTheDocument();
   });
 
-  it("能搜索接入并一步切换，成功必须经过状态回读且带操作记录 id", async () => {
+  it("主配置里有第三方接入时一步切回官方账号，成功必须经过状态回读且带操作记录 id", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
-    let active = "";
+    let actual = "kimi";
     const testRoutes = routes();
-    testRoutes["agents:status"] = async () => agentsStatus(active);
+    testRoutes["agents:status"] = async () => agentsStatus("kimi", actual);
     testRoutes["agents:configure"] = async (args) => {
-      active = args.includes("--use") ? args[args.indexOf("--use") + 1] : "";
+      if (args.includes("--use-default")) actual = "";
       return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
     };
     const { calls } = renderWithEngine(<App />, testRoutes);
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
-    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
-    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:kimi"));
+    await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
+    const official = await screen.findByTestId("command-item-connection:claude-code:default");
+    expect(official).toHaveTextContent("切回官方账号");
+    await userEvent.click(official);
 
-    await screen.findByText("已切换 Claude Code 到 Kimi Code");
+    await screen.findByText("已切换 Claude Code 到 官方账号");
     const configure = calls.find((call) => call.command === "agents:configure");
-    expect(configure?.args).toEqual(["--only", "agents:claude-code", "--base", BASE, "--use", "kimi"]);
+    expect(configure?.args).toEqual(["--only", "agents:claude-code", "--base", BASE, "--use-default"]);
     expect(configure?.options?.runId).toMatch(/^gui-/);
     expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThanOrEqual(2);
 
     await openPalette();
-    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
-    expect(await screen.findByTestId("command-item-connection:claude-code:kimi")).toBeDisabled();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
+    const current = await screen.findByTestId("command-item-connection:claude-code:default");
+    expect(current).toBeDisabled();
+    expect(current).toHaveTextContent("当前使用");
   });
 
-  it("可按接入备注搜索，备注不会取代接入名称", async () => {
+  it("命令面板不再提供切到第三方接入：按接入名或备注都搜不到切换项", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
+    expect(screen.queryByTestId("command-item-connection:claude-code:kimi")).toBeNull();
+    await userEvent.clear(screen.getByTestId("command-palette-input"));
     await userEvent.type(screen.getByTestId("command-palette-input"), "月度套餐");
-
-    expect(await screen.findByTestId("command-item-connection:claude-code:kimi")).toHaveTextContent("Claude Code · Kimi Code");
+    expect(screen.queryByTestId("command-item-connection:claude-code:kimi")).toBeNull();
   });
 
-  it("原生托盘接入事件唤回精确目标且确认后走同一条切换与双回读路径", async () => {
+  it("原生托盘的官方账号事件唤回精确目标，确认后走同一条切回与双回读路径", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
-    let active = "";
+    let actual = "kimi";
     const testRoutes = routes();
-    testRoutes["agents:status"] = async () => agentsStatus(active);
+    testRoutes["agents:status"] = async () => agentsStatus("kimi", actual);
     testRoutes["agents:configure"] = async (args) => {
-      active = args.includes("--use") ? args[args.indexOf("--use") + 1] : "";
+      if (args.includes("--use-default")) actual = "";
       return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
     };
     const { calls } = renderWithEngine(<App />, testRoutes);
@@ -324,32 +329,31 @@ describe("命令面板", () => {
           type: "switch-connection",
           agentId: "claude-code",
           agentName: "Claude Code",
-          profile: "kimi",
-          profileLabel: "Kimi Code",
+          profile: "",
+          profileLabel: "官方账号",
         },
       });
     }
 
     expect(await screen.findByTestId("command-palette")).toBeInTheDocument();
-    expect(await screen.findByTestId("command-item-connection:claude-code:kimi")).toBeInTheDocument();
+    expect(await screen.findByTestId("command-item-connection:claude-code:default")).toBeInTheDocument();
     expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
     await userEvent.keyboard("{Enter}");
 
-    await screen.findByText("已切换 Claude Code 到 Kimi Code");
+    await screen.findByText("已切换 Claude Code 到 官方账号");
     expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
       "--only",
       "agents:claude-code",
       "--base",
       BASE,
-      "--use",
-      "kimi",
+      "--use-default",
     ]);
     expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("托盘目标遇到还没保存的实际令牌时不静默丢弃，转入可见确认后才带放弃标志重试", async () => {
+  it("托盘切回官方遇到还没保存的实际令牌时不静默丢弃，转入可见确认后才带放弃标志重试", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
-    let actual = "";
+    let actual = "kimi";
     const testRoutes = routes();
     testRoutes["agents:status"] = async () => agentsStatus("", actual);
     testRoutes["agents:configure"] = async (args) => {
@@ -363,7 +367,7 @@ describe("命令面板", () => {
           },
         );
       }
-      actual = "kimi";
+      actual = "";
       return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
     };
     const { calls } = renderWithEngine(<App />, testRoutes);
@@ -376,8 +380,8 @@ describe("命令面板", () => {
           type: "switch-connection",
           agentId: "claude-code",
           agentName: "Claude Code",
-          profile: "kimi",
-          profileLabel: "Kimi Code",
+          profile: "",
+          profileLabel: "官方账号",
         },
       });
     }
@@ -389,19 +393,18 @@ describe("命令面板", () => {
     expect(confirm).toHaveTextContent("设置 → 密钥");
     expect(confirm).not.toHaveTextContent("--discard-live-token");
     await userEvent.click(within(confirm).getByTestId("confirm-modal-confirm"));
-    expect(await screen.findByText("已切换 Claude Code 到 Kimi Code")).toBeInTheDocument();
+    expect(await screen.findByText("已切换 Claude Code 到 官方账号")).toBeInTheDocument();
     expect(calls.filter((call) => call.command === "agents:configure")[1]?.args).toEqual([
       "--only",
       "agents:claude-code",
       "--base",
       BASE,
-      "--use",
-      "kimi",
+      "--use-default",
       "--discard-live-token",
     ]);
   });
 
-  it("切回助手默认账号使用 use-default，不复写不存在的 profile", async () => {
+  it("切回官方账号使用 use-default，不复写不存在的 profile", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     let active = "kimi";
     const testRoutes = routes();
@@ -414,10 +417,10 @@ describe("命令面板", () => {
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
-    await userEvent.type(screen.getByTestId("command-palette-input"), "默认账号");
+    await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
     await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
 
-    await screen.findByText("已切换 Claude Code 到 助手默认账号");
+    await screen.findByText("已切换 Claude Code 到 官方账号");
     expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
       "--only",
       "agents:claude-code",
@@ -429,64 +432,44 @@ describe("命令面板", () => {
 
   it("库里的记录变了但客户端实际配置没变时不误报成功", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
-    let active = "";
+    let active = "kimi";
     const testRoutes = routes();
-    testRoutes["agents:status"] = async () => agentsStatus(active, "");
+    testRoutes["agents:status"] = async () => agentsStatus(active, "kimi");
     testRoutes["agents:configure"] = async () => {
-      active = "kimi";
+      active = "";
       return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
     };
     renderWithEngine(<App />, testRoutes);
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
-    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
-    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:kimi"));
+    await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
+    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
 
     expect(await screen.findByText("写入已经返回成功，但状态回读没有确认接入生效，请在助手页检查")).toBeInTheDocument();
-    expect(screen.queryByText("已切换 Claude Code 到 Kimi Code")).not.toBeInTheDocument();
+    expect(screen.queryByText("已切换 Claude Code 到 官方账号")).not.toBeInTheDocument();
   });
 
-  it("库里记着 kimi 但实际不是时按实际显示，可在命令面板一键切回", async () => {
+  it("库里记着 kimi 但实际已是官方账号时按实际显示为当前使用", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
-    let actual = "";
     const testRoutes = routes();
-    testRoutes["agents:status"] = async () => agentsStatus("kimi", actual);
-    testRoutes["agents:configure"] = async () => {
-      actual = "kimi";
-      return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
-    };
+    testRoutes["agents:status"] = agentsStatus("kimi", "");
     const { calls } = renderWithEngine(<App />, testRoutes);
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
-    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
-    const repair = await screen.findByTestId("command-item-connection:claude-code:kimi");
-    expect(repair).toBeEnabled();
-    expect(repair).toHaveTextContent("切换接入");
-    await userEvent.click(repair);
-
-    expect(await screen.findByText("已切换 Claude Code 到 Kimi Code")).toBeInTheDocument();
-    expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
-      "--only",
-      "agents:claude-code",
-      "--base",
-      BASE,
-      "--use",
-      "kimi",
-    ]);
-
-    await openPalette();
-    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
-    const current = await screen.findByTestId("command-item-connection:claude-code:kimi");
+    await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
+    const current = await screen.findByTestId("command-item-connection:claude-code:default");
     expect(current).toBeDisabled();
-    expect(current).toHaveTextContent("当前接入");
+    expect(current).toHaveTextContent("当前使用");
+    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
   });
 
   it("外部修改时不冒充成功：刷新后提示重新选择，不再提供用库覆盖", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     let attempts = 0;
     const testRoutes = routes();
+    testRoutes["agents:status"] = agentsStatus("kimi", "kimi");
     testRoutes["agents:configure"] = async () => {
       attempts += 1;
       return makeEnvelope(
@@ -502,12 +485,12 @@ describe("命令面板", () => {
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
-    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
+    await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
     const statusBefore = calls.filter((call) => call.command === "agents:status").length;
-    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:kimi"));
+    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
 
     expect(await screen.findByText("配置文件已在外部修改，接入没有切换")).toBeInTheDocument();
-    expect(screen.queryByText("已切换 Claude Code 到 Kimi Code")).not.toBeInTheDocument();
+    expect(screen.queryByText("已切换 Claude Code 到 官方账号")).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "覆盖被改过的接入配置" })).not.toBeInTheDocument();
     expect(attempts).toBe(1);
     expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThan(statusBefore);
@@ -516,6 +499,7 @@ describe("命令面板", () => {
   it("配置被拒绝时保留真实状态并说明失败，不弹放弃确认", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     const testRoutes = routes();
+    testRoutes["agents:status"] = agentsStatus("kimi", "kimi");
     testRoutes["agents:configure"] = async () =>
       makeEnvelope(
         {},
@@ -529,8 +513,8 @@ describe("命令面板", () => {
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
     await openPalette();
-    await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
-    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:kimi"));
+    await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
+    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
 
     expect(await screen.findByText("接入没有切换：凭据变量 KIMI_API_KEY 未配置")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "当前实际令牌还没有保存" })).not.toBeInTheDocument();

@@ -2556,6 +2556,15 @@ fn configure_args(req: &Request) -> Result<ConfigureArgs, DispatchError> {
         .to_string();
     let runtime = req.value("--runtime");
     let use_name = req.value("--use");
+    // 主配置只放官方账号：第三方接入不写进主配置，改在独立环境（实例）里用。
+    // 官方账号与第三方凭据同在一处时，助手取哪个只能靠它的优先级规则。
+    if use_name.is_some() {
+        return Err(DispatchError::new(
+            "AGENT_MAIN_OFFICIAL_ONLY",
+            "主配置只保留官方账号，不再写入第三方接入；请在这套接入的菜单里「建成独立环境」，在独立环境里使用它"
+                .to_string(),
+        ));
+    }
     let use_default = req.flag("--use-default");
     let save_current = req.flag("--save-current");
     let chosen = [

@@ -83,6 +83,19 @@ function markCurrent(element: EngineElement, profile: string | null): void {
   };
 }
 
+/** 主配置里有旧版本留下、还没保存的第三方配置：当前既不是官方账号也对不上已保存接入。 */
+function markUnsavedLive(element: EngineElement): void {
+  markCurrent(element, null);
+  (element.observed as any).current_config.current.default = false;
+}
+
+/** 点「官方账号」卡片上的「切回官方账号」并确认。 */
+async function switchBackToOfficial(): Promise<void> {
+  await userEvent.click(await screen.findByTestId("reset-connection-claude-code-default"));
+  const confirm = await screen.findByRole("dialog", { name: "把 Claude Code 的主配置切回官方账号" });
+  await userEvent.click(within(confirm).getByTestId("confirm-modal-confirm"));
+}
+
 function configureArgsOf(...rest: string[]): string[] {
   return ["--only", "agents:claude-code", "--base", BASE, ...rest];
 }
@@ -478,15 +491,14 @@ describe("助手运行参数", () => {
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("导入的配置");
   });
 
-  it("实际令牌没保存时切换被拒：可去选密钥文件，或确认放弃后带标志重试", async () => {
+  it("切回官方时实际令牌没保存被拒：可去选密钥文件，或确认放弃后带标志重试", async () => {
     const onOpenSecrets = vi.fn();
     const refusing: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
     const status = refusing["agents:status"] as { data: { elements: EngineElement[] } };
     (status.data.elements[0].spec as Record<string, unknown>).settings = {
       profiles: { relay: { label: "我的中转", base_url: "https://relay.example.com" } },
     };
-    markCurrent(status.data.elements[0], null);
-    (status.data.elements[0].observed as any).current_config.current.default = false;
+    markUnsavedLive(status.data.elements[0]);
     refusing["agents:configure"] = async (args) => {
       if (!args.includes("--discard-live-token")) {
         return makeEnvelope({}, {
@@ -495,12 +507,12 @@ describe("助手运行参数", () => {
           errors: [{ code: "AGENT_LIVE_TOKEN_UNSAVED", element: null, message: "当前实际配置里的令牌还没有保存在任何变量里，切换会丢失它：先到“设置 → 密钥”选择外部密钥文件（令牌会写进该文件，库里只存变量名），或确认放弃这个令牌后带 --discard-live-token 重试" }],
         });
       }
-      markCurrent(status.data.elements[0], "relay");
+      markCurrent(status.data.elements[0], null);
       return makeEnvelope({ domain: "agents", action: "configure" }, { command: "agents.configure" });
     };
     const { calls } = renderWithEngine(<AgentsPage onOpenSecrets={onOpenSecrets} />, refusing);
 
-    await userEvent.click(await screen.findByTestId("activate-connection-claude-code-relay"));
+    await switchBackToOfficial();
     const dialog = await screen.findByRole("dialog", { name: "当前实际令牌还没有保存" });
     expect(dialog).toHaveTextContent("切换会丢失它");
     expect(dialog).toHaveTextContent("设置 → 密钥");
@@ -510,12 +522,12 @@ describe("助手运行参数", () => {
     await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
-    expect(configureCalls(calls)[1].args).toEqual(configureArgsOf("--use", "relay", "--discard-live-token"));
-    await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("我的中转"));
+    expect(configureCalls(calls)[1].args).toEqual(configureArgsOf("--use-default", "--discard-live-token"));
+    await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方账号"));
     expect(onOpenSecrets).not.toHaveBeenCalled();
   });
 
-  it("实际令牌没保存时可直接去密钥设置，不做任何写入", async () => {
+  it("切回官方时实际令牌没保存，可直接去密钥设置，不做任何写入", async () => {
     const onOpenSecrets = vi.fn();
     const refusing: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes({
       "agents:configure": makeEnvelope({}, {
@@ -528,21 +540,23 @@ describe("助手运行参数", () => {
     (status.data.elements[0].spec as Record<string, unknown>).settings = {
       profiles: { relay: { label: "我的中转", base_url: "https://relay.example.com" } },
     };
+    markUnsavedLive(status.data.elements[0]);
     const { calls } = renderWithEngine(<AgentsPage onOpenSecrets={onOpenSecrets} />, refusing);
 
-    await userEvent.click(await screen.findByTestId("activate-connection-claude-code-relay"));
+    await switchBackToOfficial();
     const dialog = await screen.findByRole("dialog", { name: "当前实际令牌还没有保存" });
     await userEvent.click(within(dialog).getByTestId("confirm-modal-secondary"));
     expect(onOpenSecrets).toHaveBeenCalledTimes(1);
     expect(configureCalls(calls)).toHaveLength(1);
   });
 
-  it("实际配置存不下时列出原因，确认放弃后带 --discard-live 重试", async () => {
+  it("切回官方时实际配置存不下：列出原因，确认放弃后带 --discard-live 重试", async () => {
     const refusing: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
     const status = refusing["agents:status"] as { data: { elements: EngineElement[] } };
     (status.data.elements[0].spec as Record<string, unknown>).settings = {
       profiles: { relay: { label: "我的中转", base_url: "https://relay.example.com" } },
     };
+    markUnsavedLive(status.data.elements[0]);
     refusing["agents:configure"] = async (args) => {
       if (!args.includes("--discard-live")) {
         return makeEnvelope({}, {
@@ -555,12 +569,12 @@ describe("助手运行参数", () => {
           }],
         });
       }
-      markCurrent(status.data.elements[0], "relay");
+      markCurrent(status.data.elements[0], null);
       return makeEnvelope({ domain: "agents", action: "configure" }, { command: "agents.configure" });
     };
     const { calls } = renderWithEngine(<AgentsPage />, refusing);
 
-    await userEvent.click(await screen.findByTestId("activate-connection-claude-code-relay"));
+    await switchBackToOfficial();
     const dialog = await screen.findByRole("dialog", { name: "当前实际配置无法完整保存" });
     expect(dialog).toHaveTextContent("ANTHROPIC_AUTH_TOKEN 与 ANTHROPIC_API_KEY");
     expect(dialog).toHaveTextContent("可以先在配置文件里处理后再切换");
@@ -568,10 +582,10 @@ describe("助手运行参数", () => {
     expect(within(dialog).queryByTestId("confirm-modal-secondary")).toBeNull();
     await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
-    expect(configureCalls(calls)[1].args).toEqual(configureArgsOf("--use", "relay", "--discard-live"));
+    expect(configureCalls(calls)[1].args).toEqual(configureArgsOf("--use-default", "--discard-live"));
   });
 
-  it("工作台一键切换接入：一条命令带 --use，切回默认带 --use-default", async () => {
+  it("主配置里有第三方接入时提示混用、卡片不提供应用；切回官方账号先确认再带 --use-default", async () => {
     const withProfiles: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
@@ -583,13 +597,8 @@ describe("助手运行参数", () => {
     };
     setClaudeCurrentConfig(status.data.elements[0] as EngineElement, "relay");
     withProfiles["agents:configure"] = async (args) => {
-      const settings = status.data.elements[0].spec.settings as { active?: string };
-      const useAt = args.indexOf("--use");
-      if (useAt >= 0) {
-        settings.active = args[useAt + 1];
-        setClaudeCurrentConfig(status.data.elements[0] as EngineElement, settings.active);
-      } else if (args.includes("--use-default")) {
-        delete settings.active;
+      if (args.includes("--use-default")) {
+        delete (status.data.elements[0].spec.settings as { active?: string }).active;
         setClaudeCurrentConfig(status.data.elements[0] as EngineElement, null);
       }
       return makeEnvelope(
@@ -600,40 +609,32 @@ describe("助手运行参数", () => {
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
     expect(await screen.findByTestId("active-connection-summary")).toHaveTextContent("我的中转");
-    expect(screen.getAllByTestId(/^connection-card-claude-code-/)[0]).toHaveAttribute(
-      "data-testid",
-      "connection-card-claude-code-relay",
-    );
+    expect(screen.getByTestId("main-mixed-warning")).toHaveTextContent("主配置里有第三方接入");
     expect(within(screen.getByTestId("connection-card-claude-code-relay")).getByText("当前使用")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByTestId("activate-connection-claude-code-official"));
-    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    expect(configureCalls(calls)[0].args).toEqual(configureArgsOf("--use", "official"));
-    await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方"));
+    expect(screen.queryByTestId("activate-connection-claude-code-official")).toBeNull();
+    expect(screen.queryByTestId("activate-connection-claude-code-relay")).toBeNull();
 
     await userEvent.click(screen.getByTestId("reset-connection-claude-code-default"));
-    const resetConfirm = await screen.findByRole("dialog", { name: "应用 Claude Code 的官方 Provider" });
-    expect(configureCalls(calls)).toHaveLength(1);
-    expect(resetConfirm).toHaveTextContent("不会删除助手登录状态、密钥变量或其他 Provider 定义");
-    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-    await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
-    expect(configureCalls(calls)[1].args).toEqual(configureArgsOf("--use-default"));
-    await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("助手默认账号"));
+    const resetConfirm = await screen.findByRole("dialog", { name: "把 Claude Code 的主配置切回官方账号" });
+    expect(configureCalls(calls)).toHaveLength(0);
+    expect(resetConfirm).toHaveTextContent("不会删除官方登录状态、密钥变量或其他接入定义");
+    await userEvent.click(within(resetConfirm).getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    expect(configureCalls(calls)[0].args).toEqual(configureArgsOf("--use-default"));
+    await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方账号"));
+    expect(screen.queryByTestId("main-mixed-warning")).toBeNull();
   });
 
-  it("切换返回成功但实际配置没变时不误报成功，当前项仍按实际显示", async () => {
+  it("切回官方返回成功但实际配置没变时不误报成功，当前项仍按实际显示", async () => {
     const withProfiles: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
       active: "relay",
-      profiles: {
-        official: { label: "官方" },
-        relay: { label: "我的中转", base_url: "https://relay.example.com" },
-      },
+      profiles: { relay: { label: "我的中转", base_url: "https://relay.example.com" } },
     };
     setClaudeCurrentConfig(status.data.elements[0] as EngineElement, "relay");
     withProfiles["agents:configure"] = async () => {
-      (status.data.elements[0].spec.settings as { active?: string }).active = "official";
+      delete (status.data.elements[0].spec.settings as { active?: string }).active;
       return makeEnvelope(
         { domain: "agents", action: "configure", element: "agents:claude-code" },
         { command: "agents.configure" },
@@ -641,13 +642,13 @@ describe("助手运行参数", () => {
     };
     renderWithEngine(<AgentsPage />, withProfiles);
 
-    await userEvent.click(await screen.findByTestId("activate-connection-claude-code-official"));
+    await switchBackToOfficial();
     expect(await screen.findByText("写入已经返回成功，但状态回读没有确认生效")).toBeInTheDocument();
     // 库里的上次写入记录变了也不算：当前项跟着实际配置走
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("我的中转");
   });
 
-  it("工作台编辑当前接入：预填原值、唯一名称不可改，保存即带基准写进助手配置", async () => {
+  it("编辑主配置正在用的那套接入：预填原值、唯一名称不可改，只保存定义不写助手配置", async () => {
     const withProfiles = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
@@ -671,36 +672,24 @@ describe("助手运行参数", () => {
     expect(await screen.findByTestId("connection-note-claude-code-relay")).toHaveTextContent("旧备注");
     await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
     expect(await screen.findByRole("dialog", { name: "编辑 我的中转" })).toBeInTheDocument();
-    expect(screen.queryByText("1. 选择接入方式")).toBeNull();
     expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://old.example.com");
-    expect(screen.getByTestId("new-connection-note")).toHaveValue("旧备注");
-    expect(screen.queryByTestId("new-connection-activate")).toBeNull();
-    expect(screen.getByText(/外部改过时会拒绝写入并刷新/)).toBeInTheDocument();
-    expect(screen.getByTestId("connection-form-submit")).toHaveTextContent("保存并写入");
+    expect(screen.getByText(/保存只更新接入定义，不写助手配置/)).toBeInTheDocument();
+    expect(screen.getByTestId("connection-form-submit")).toHaveTextContent("保存修改");
     await userEvent.click(screen.getByTestId("new-connection-advanced"));
     expect(screen.getByTestId("new-connection-name")).toBeDisabled();
-    await userEvent.clear(screen.getByTestId("new-connection-label"));
-    await userEvent.type(screen.getByTestId("new-connection-label"), "新版中转");
-    await userEvent.clear(screen.getByTestId("new-connection-note"));
-    await userEvent.type(screen.getByTestId("new-connection-note"), "工作账号，月底到期");
     await userEvent.clear(screen.getByTestId("new-connection-base-url"));
     await userEvent.type(screen.getByTestId("new-connection-base-url"), "https://new.example.com");
-    await userEvent.clear(screen.getByTestId("new-connection-model"));
-    await userEvent.type(screen.getByTestId("new-connection-model"), "new-model");
     await userEvent.click(screen.getByTestId("connection-form-submit"));
 
-    // 编辑当前生效的那套：一条命令既写文件也更新库，被拒时两边都不动
-    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
-    const args = configureCalls(calls)[0].args!;
-    expect(args.slice(0, 6)).toEqual(configureArgsOf("--use", "relay"));
-    expect(args[6]).toBe("--connection");
-    expect(JSON.parse(args[7])).toEqual({
-      label: "新版中转",
-      note: "工作账号，月底到期",
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    expect(configureCalls(calls)).toHaveLength(0);
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(definition.settings.active).toBe("relay");
+    expect(definition.settings.unknown_runtime_flag).toBe("keep");
+    expect(definition.settings.profiles.relay).toMatchObject({
       base_url: "https://new.example.com",
       token_var: "RELAY_KEY",
-      model: "new-model",
       future_option: { mode: "keep" },
     });
   });
@@ -1040,7 +1029,7 @@ describe("助手运行参数", () => {
     expect(result).toHaveTextContent("密钥页");
   });
 
-  it("一键检查全部接入：并发回填成功与失败，汇总最快线路且不重复提交", async () => {
+  it("一键检查全部接入：并发回填成功与失败，汇总最快线路且不重复提交，不写主配置", async () => {
     const batchRoutes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
     const status = batchRoutes["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
@@ -1095,32 +1084,29 @@ describe("助手运行参数", () => {
     expect(screen.getByTestId("check-result-claude-code-relay")).toHaveTextContent("128ms");
     expect(screen.getByTestId("check-result-claude-code-broken")).toHaveTextContent("模型不可用");
     expect(checkAll).toBeEnabled();
-
-    await userEvent.click(screen.getByTestId("activate-fastest-connection"));
-    await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("Relay"));
-    const configure = configureCalls(calls);
-    expect(configure[configure.length - 1]?.args).toEqual(configureArgsOf("--use", "relay"));
+    // 主配置只放官方账号：检查只报告结果，不提供把最快线路写进主配置
     expect(screen.queryByTestId("activate-fastest-connection")).toBeNull();
+    expect(configureCalls(calls)).toHaveLength(0);
   });
 
-  it("没配接入配置的助手：工作台明确展示默认账号和新增入口", async () => {
+  it("没配接入配置的助手：工作台明确展示官方账号和新增入口", async () => {
     renderWithEngine(<AgentsPage />, routes());
     expect(await screen.findByTestId("connection-card-claude-code-default")).toHaveTextContent("当前使用");
     expect(screen.queryByTestId("reset-connection-claude-code-default")).toBeNull();
-    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("助手默认账号");
+    expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方账号");
+    expect(screen.queryByTestId("main-mixed-warning")).toBeNull();
     expect(screen.getByTestId("add-connection-button")).toBeEnabled();
   });
 
-  it("切换执行中只锁接入动作，并在按钮上展示真实进行态", async () => {
+  it("切回官方执行中只锁接入动作，并在按钮上展示真实进行态", async () => {
     const deferred: { release?: () => void } = {};
     const pendingRoutes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
     const status = pendingRoutes["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
     status.data.elements[0].spec.settings = {
-      profiles: {
-        relay: { label: "我的中转", base_url: "https://relay.example.com" },
-        official: { label: "官方", base_url: "https://api.anthropic.com" },
-      },
+      active: "relay",
+      profiles: { relay: { label: "我的中转", base_url: "https://relay.example.com" } },
     };
+    setClaudeCurrentConfig(status.data.elements[0] as EngineElement, "relay");
     pendingRoutes["agents:configure"] = () =>
       new Promise<Envelope>((resolve) => {
         deferred.release = () => resolve(makeEnvelope(
@@ -1130,15 +1116,15 @@ describe("助手运行参数", () => {
       });
     renderWithEngine(<AgentsPage />, pendingRoutes);
 
-    const activate = await screen.findByTestId("activate-connection-claude-code-relay");
-    await userEvent.click(activate);
-    await waitFor(() => expect(activate).toHaveTextContent("正在应用"));
-    expect(activate).toBeDisabled();
-    expect(screen.getByTestId("activate-connection-claude-code-official")).toBeDisabled();
+    await switchBackToOfficial();
+    const reset = screen.getByTestId("reset-connection-claude-code-default");
+    await waitFor(() => expect(reset).toHaveTextContent("正在切回"));
+    expect(reset).toBeDisabled();
+    expect(screen.getByTestId("edit-connection-claude-code-relay")).toBeDisabled();
     expect(screen.getByTestId("workbench-tab-automation")).toBeEnabled();
 
     deferred.release?.();
-    await waitFor(() => expect(activate).toHaveTextContent("应用"));
+    await waitFor(() => expect(reset).toHaveTextContent("切回官方账号"));
   });
 
   it("从厂商预设新增接入：保留完整定义并单独保存凭据，但不自动应用", async () => {
@@ -1299,7 +1285,7 @@ describe("助手运行参数", () => {
     }));
     renderWithEngine(<AgentsPage />, twoAgents);
 
-    expect(await screen.findByTestId("active-connection-summary")).toHaveTextContent("助手默认账号");
+    expect(await screen.findByTestId("active-connection-summary")).toHaveTextContent("官方账号");
     await userEvent.click(screen.getByTestId("connection-agent-codex"));
     expect(screen.getByTestId("connection-agent-codex")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("GLM Coding");

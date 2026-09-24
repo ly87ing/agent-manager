@@ -172,6 +172,13 @@ fn file_bytes(path: &Path) -> Vec<u8> {
     fs::read(path).unwrap()
 }
 
+/// 旧版本曾把第三方接入写进主配置：直接写出那份实际配置，库里记为上次写入的那套。
+/// 主配置现在只放官方账号，这类状态只会来自旧版本或手改，用它测切回官方与回填。
+fn seed_legacy_claude(ctx: &Context, settings: Value, file: Value) {
+    define_settings(ctx, settings);
+    write_settings_file(ctx, &file);
+}
+
 #[test]
 fn 写入只动自己那几条路径_别人的键原样保留() {
     let (base, ctx) = temp_ctx("merge");
@@ -184,12 +191,11 @@ fn 写入只动自己那几条路径_别人的键原样保留() {
             "env": {"MY_OWN": "keep-me"}
         }),
     );
-    define(
+    let env = configure(
         &ctx,
-        json!({"base_url": "https://api.example.com", "model": "claude-opus-5"}),
+        "claude-code",
+        &["--runtime", r#"{"claude_effort_level": "high"}"#],
     );
-
-    let env = configure(&ctx, "claude-code", &["--use", "p"]);
     assert!(env.ok, "{:?}", env.errors);
     assert!(env.lock.held, "写动作要取排他锁");
 
@@ -200,11 +206,7 @@ fn 写入只动自己那几条路径_别人的键原样保留() {
     );
     assert_eq!(after["statusLine"]["command"], "/x/statusline.sh");
     assert_eq!(after["env"]["MY_OWN"], "keep-me");
-    assert_eq!(
-        after["env"]["ANTHROPIC_BASE_URL"],
-        "https://api.example.com"
-    );
-    assert_eq!(after["env"]["ANTHROPIC_MODEL"], "claude-opus-5");
+    assert_eq!(after["effortLevel"], "high");
 
     let _ = fs::remove_dir_all(&base);
 }
@@ -216,15 +218,14 @@ fn 缺_base_或写法不是恰好一种时拒绝_且零写() {
     let db_before = db_bytes(&ctx);
 
     for args in [
-        vec!["--only", "agents:claude-code", "--use", "p"],
+        vec!["--only", "agents:claude-code", "--use-default"],
         vec!["--only", "agents:claude-code", "--base", "x"],
         vec![
             "--only",
             "agents:claude-code",
             "--base",
             "x",
-            "--use",
-            "p",
+            "--save-current",
             "--use-default",
         ],
         vec![
@@ -288,17 +289,16 @@ fn 状态输出实际值_写入基准与当前接入_缺库不建库且零写() 
 }
 
 #[test]
-fn 外部改了地址_旧基准被拒_切换时存成导入项_切回写回外部地址() {
+fn 外部改了地址_旧基准被拒_切回官方时存成导入项() {
     let (base, ctx) = temp_ctx("external-url");
-    define_settings(
+    seed_legacy_claude(
         &ctx,
         json!({"active": "p", "profiles": {
             "p": {"base_url": "https://api.example.com"},
             "b": {"base_url": "https://b.example.com"}
         }}),
+        json!({"env": {"ANTHROPIC_BASE_URL": "https://api.example.com"}}),
     );
-    let ok = configure(&ctx, "claude-code", &["--use", "p"]);
-    assert!(ok.ok, "{:?}", ok.errors);
     let stale = base_of(&ctx, "claude-code");
 
     // 本工具以外把地址改掉
@@ -319,7 +319,7 @@ fn 外部改了地址_旧基准被拒_切换时存成导入项_切回写回外�
 
     // 旧基准：拒绝，文件与库一个字节都不动
     let db_before = db_bytes(&ctx);
-    let refused = configure_with_base(&ctx, "claude-code", &stale, &["--use", "b"]);
+    let refused = configure_with_base(&ctx, "claude-code", &stale, &["--use-default"]);
     assert!(!refused.ok);
     assert_eq!(refused.errors[0].code, "AGENT_CONFIG_CHANGED");
     assert!(refused.errors[0].message.contains("已在外部修改"));
@@ -329,8 +329,8 @@ fn 外部改了地址_旧基准被拒_切换时存成导入项_切回写回外�
     );
     assert_eq!(db_bytes(&ctx), db_before);
 
-    // 新基准：先把外部地址存成导入项，再写目标
-    let switched = configure(&ctx, "claude-code", &["--use", "b"]);
+    // 新基准：先把外部地址存成导入项，再撤掉主配置里的接入键
+    let switched = configure(&ctx, "claude-code", &["--use-default"]);
     assert!(switched.ok, "{:?}", switched.errors);
     assert_eq!(switched.data["backfill"]["created"], true);
     let imported = switched.data["backfill"]["name"]
@@ -347,27 +347,20 @@ fn 外部改了地址_旧基准被拒_切换时存成导入项_切回写回外�
         "https://api.example.com",
         "原来那套不被覆盖"
     );
+    assert!(settings_file(&ctx)["env"]
+        .get("ANTHROPIC_BASE_URL")
+        .is_none());
     assert_eq!(
-        settings_file(&ctx)["env"]["ANTHROPIC_BASE_URL"],
-        "https://b.example.com"
-    );
-    assert_eq!(
-        current_config(&ctx, "claude-code")["current"]["profile"],
-        "b"
+        current_config(&ctx, "claude-code")["current"]["default"],
+        true
     );
 
-    // 切回导入项：外部地址写回
+    // 导入项只能留作备选或建成独立环境，不能再写回主配置
     let back = configure(&ctx, "claude-code", &["--use", &imported]);
-    assert!(back.ok, "{:?}", back.errors);
-    assert_eq!(back.data["backfill"], Value::Null, "b 已保存，不再导入");
-    assert_eq!(
-        settings_file(&ctx)["env"]["ANTHROPIC_BASE_URL"],
-        "https://hand-edited.example.com"
-    );
-    assert_eq!(
-        current_config(&ctx, "claude-code")["current"]["profile"],
-        imported.as_str()
-    );
+    assert_eq!(back.errors[0].code, "AGENT_MAIN_OFFICIAL_ONLY");
+    assert!(settings_file(&ctx)["env"]
+        .get("ANTHROPIC_BASE_URL")
+        .is_none());
 
     let _ = fs::remove_dir_all(&base);
 }
@@ -375,14 +368,14 @@ fn 外部改了地址_旧基准被拒_切换时存成导入项_切回写回外�
 #[test]
 fn 身份一致只改了模型_回填进上次写入的那套_不新建导入项() {
     let (base, ctx) = temp_ctx("identity");
-    define_settings(
+    seed_legacy_claude(
         &ctx,
         json!({"active": "relay", "profiles": {
             "relay": {"base_url": "https://relay.example.com", "model": "m1", "note": "工作线路"},
             "other": {"base_url": "https://other.example.com"}
         }}),
+        json!({"env": {"ANTHROPIC_BASE_URL": "https://relay.example.com", "ANTHROPIC_MODEL": "m1"}}),
     );
-    assert!(configure(&ctx, "claude-code", &["--use", "relay"]).ok);
 
     let mut current = settings_file(&ctx);
     current["env"]["ANTHROPIC_MODEL"] = json!("m2");
@@ -392,7 +385,7 @@ fn 身份一致只改了模型_回填进上次写入的那套_不新建导入项
     assert_eq!(status["current"]["profile"], Value::Null);
     assert_eq!(status["current"]["drifted_from"], "relay");
 
-    let switched = configure(&ctx, "claude-code", &["--use", "other"]);
+    let switched = configure(&ctx, "claude-code", &["--use-default"]);
     assert!(switched.ok, "{:?}", switched.errors);
     assert_eq!(switched.data["backfill"]["created"], false);
     assert_eq!(switched.data["backfill"]["name"], "relay");
@@ -403,12 +396,13 @@ fn 身份一致只改了模型_回填进上次写入的那套_不新建导入项
     assert_eq!(profiles["relay"]["note"], "工作线路", "未知字段原样保留");
 
     // 地址也换了：身份不同，新建导入项，relay 不被覆盖
-    assert!(configure(&ctx, "claude-code", &["--use", "relay"]).ok);
-    assert_eq!(settings_file(&ctx)["env"]["ANTHROPIC_MODEL"], "m2");
-    let mut current = settings_file(&ctx);
-    current["env"]["ANTHROPIC_BASE_URL"] = json!("https://third.example.com");
-    write_settings_file(&ctx, &current);
-    let switched = configure(&ctx, "claude-code", &["--use", "other"]);
+    let saved = profiles_in_db(&ctx, "claude-code");
+    seed_legacy_claude(
+        &ctx,
+        json!({"active": "relay", "profiles": saved}),
+        json!({"env": {"ANTHROPIC_BASE_URL": "https://third.example.com", "ANTHROPIC_MODEL": "m2"}}),
+    );
+    let switched = configure(&ctx, "claude-code", &["--use-default"]);
     assert!(switched.ok, "{:?}", switched.errors);
     assert_eq!(switched.data["backfill"]["created"], true);
     assert_eq!(
@@ -420,7 +414,7 @@ fn 身份一致只改了模型_回填进上次写入的那套_不新建导入项
 }
 
 #[test]
-fn 首次切换把用户手配的接入存成导入项_不丢() {
+fn 首次切回官方把用户手配的接入存成导入项_不丢() {
     let (base, ctx) = temp_ctx("first-run-existing");
     // 从没用本工具写过，但用户自己配了地址与模型
     write_settings_file(
@@ -429,16 +423,15 @@ fn 首次切换把用户手配的接入存成导入项_不丢() {
     );
     define(&ctx, json!({"base_url": "https://api.example.com"}));
 
-    let switched = configure(&ctx, "claude-code", &["--use", "p"]);
+    let switched = configure(&ctx, "claude-code", &["--use-default"]);
     assert!(switched.ok, "{:?}", switched.errors);
     let imported = switched.data["backfill"]["name"].as_str().unwrap();
     let saved = &profiles_in_db(&ctx, "claude-code")[imported];
     assert_eq!(saved["base_url"], "https://mine.example.com");
     assert_eq!(saved["model"], "mine-model");
-    assert_eq!(
-        settings_file(&ctx)["env"]["ANTHROPIC_BASE_URL"],
-        "https://api.example.com"
-    );
+    assert!(settings_file(&ctx)["env"]
+        .get("ANTHROPIC_BASE_URL")
+        .is_none());
 
     let _ = fs::remove_dir_all(&base);
 }
@@ -525,13 +518,13 @@ fn assert_no_plaintext(ctx: &Context, envelopes: &[&Envelope]) {
 }
 
 #[test]
-fn 实际令牌没保存且没选密钥文件_切换被拒_文件与库不变() {
+fn 实际令牌没保存且没选密钥文件_切回官方被拒_文件与库不变() {
     let (base, ctx) = temp_ctx("token-refused");
     seed_live_token(&ctx);
     let before = file_bytes(&ctx.home_dir.join(".claude/settings.json"));
     let db_before = db_bytes(&ctx);
 
-    let refused = configure(&ctx, "claude-code", &["--use", "p"]);
+    let refused = configure(&ctx, "claude-code", &["--use-default"]);
     assert!(!refused.ok);
     assert_eq!(refused.errors[0].code, "AGENT_LIVE_TOKEN_UNSAVED");
     assert!(refused.errors[0].message.contains("密钥"));
@@ -546,12 +539,12 @@ fn 实际令牌没保存且没选密钥文件_切换被拒_文件与库不变() 
 }
 
 #[test]
-fn 选了密钥文件后切换_实际令牌写进密钥文件_库与记录没有明文_切回原样写回() {
+fn 选了密钥文件后切回官方_实际令牌写进密钥文件_库与记录没有明文_主配置不再有令牌() {
     let (base, ctx) = temp_ctx("token-adopted");
     let secrets = configure_secret_source(&ctx);
     seed_live_token(&ctx);
 
-    let switched = configure(&ctx, "claude-code", &["--use", "p"]);
+    let switched = configure(&ctx, "claude-code", &["--use-default"]);
     assert!(switched.ok, "{:?}", switched.errors);
     assert_eq!(switched.data["backfill"]["token"], "adopted");
     let var = switched.data["backfill"]["token_var"]
@@ -581,27 +574,28 @@ fn 选了密钥文件后切换_实际令牌写进密钥文件_库与记录没有
         .get("ANTHROPIC_AUTH_TOKEN")
         .is_none());
 
+    // 令牌只留在密钥文件里：不能再写回主配置，要用就建成独立环境
     let back = configure(&ctx, "claude-code", &["--use", &imported]);
-    assert!(back.ok, "{:?}", back.errors);
-    assert_eq!(
-        settings_file(&ctx)["env"]["ANTHROPIC_AUTH_TOKEN"],
-        LIVE_TOKEN
-    );
-    assert_eq!(
-        current_config(&ctx, "claude-code")["config"]["credential"]["saved_var"],
-        var.as_str()
-    );
+    assert_eq!(back.errors[0].code, "AGENT_MAIN_OFFICIAL_ONLY");
+    assert!(!contains_bytes(
+        &file_bytes(&ctx.home_dir.join(".claude/settings.json")),
+        LIVE_TOKEN.as_bytes()
+    ));
     assert_no_plaintext(&ctx, &[&switched, &back]);
 
     let _ = fs::remove_dir_all(&base);
 }
 
 #[test]
-fn 显式放弃实际令牌_切换成功_库里没有明文() {
+fn 显式放弃实际令牌_切回官方成功_库里没有明文() {
     let (base, ctx) = temp_ctx("token-discarded");
     seed_live_token(&ctx);
 
-    let switched = configure(&ctx, "claude-code", &["--use", "p", "--discard-live-token"]);
+    let switched = configure(
+        &ctx,
+        "claude-code",
+        &["--use-default", "--discard-live-token"],
+    );
     assert!(switched.ok, "{:?}", switched.errors);
     assert_eq!(switched.data["backfill"]["token"], "discarded");
     let imported = switched.data["backfill"]["name"].as_str().unwrap();
@@ -614,7 +608,7 @@ fn 显式放弃实际令牌_切换成功_库里没有明文() {
 }
 
 #[test]
-fn 实际接入存不下时拒绝并说明_显式放弃后才切换() {
+fn 实际接入存不下时拒绝并说明_显式放弃后才切回官方() {
     let (base, ctx) = temp_ctx("unrepresentable");
     write_settings_file(
         &ctx,
@@ -628,7 +622,7 @@ fn 实际接入存不下时拒绝并说明_显式放弃后才切换() {
     let before = file_bytes(&ctx.home_dir.join(".claude/settings.json"));
     let db_before = db_bytes(&ctx);
 
-    let refused = configure(&ctx, "claude-code", &["--use", "p"]);
+    let refused = configure(&ctx, "claude-code", &["--use-default"]);
     assert!(!refused.ok);
     assert_eq!(refused.errors[0].code, "AGENT_LIVE_UNREPRESENTABLE");
     assert!(
@@ -644,15 +638,13 @@ fn 实际接入存不下时拒绝并说明_显式放弃后才切换() {
     );
     assert_eq!(db_bytes(&ctx), db_before);
 
-    let switched = configure(&ctx, "claude-code", &["--use", "p", "--discard-live"]);
+    let switched = configure(&ctx, "claude-code", &["--use-default", "--discard-live"]);
     assert!(switched.ok, "{:?}", switched.errors);
     assert_eq!(switched.data["discarded_live"], true);
     assert_eq!(switched.data["backfill"], Value::Null);
     let after = settings_file(&ctx);
-    assert_eq!(
-        after["env"]["ANTHROPIC_BASE_URL"],
-        "https://api.example.com"
-    );
+    assert!(after["env"].get("ANTHROPIC_BASE_URL").is_none());
+    assert!(after["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
     assert!(after["env"].get("ANTHROPIC_API_KEY").is_none());
     assert_eq!(
         profiles_in_db(&ctx, "claude-code")
@@ -794,16 +786,9 @@ fn claude_智能自动写入_auto_且不需要高风险确认() {
 }
 
 #[test]
-fn 令牌只存变量名_取不到值时拒绝写入_审计不记取值() {
+fn 旧版本写进主配置的令牌_状态按变量识别且不输出取值_切回官方后只留在密钥文件() {
     let (base, ctx) = temp_ctx("token");
     configure_secret_source(&ctx);
-    define(&ctx, json!({"token_var": "MY_GATEWAY_TOKEN"}));
-
-    let refused = configure(&ctx, "claude-code", &["--use", "p"]);
-    assert!(!refused.ok, "变量没取值就写上去，助手会以为配好了");
-    assert!(refused.errors[0].message.contains("MY_GATEWAY_TOKEN"));
-
-    // 在密钥页填上取值
     const SECRET: &str = "sk-gateway-secret-value";
     let set = execute(
         &ctx,
@@ -813,30 +798,39 @@ fn 令牌只存变量名_取不到值时拒绝写入_审计不记取值() {
         ),
     );
     assert!(set.ok, "{:?}", set.errors);
+    seed_legacy_claude(
+        &ctx,
+        json!({"active": "p", "profiles": {"p": {"token_var": "MY_GATEWAY_TOKEN"}}}),
+        json!({"env": {"ANTHROPIC_AUTH_TOKEN": SECRET}}),
+    );
 
-    let ok = configure(&ctx, "claude-code", &["--use", "p"]);
-    assert!(ok.ok, "{:?}", ok.errors);
-    // settings.json 的 env 不做变量展开，只能落真值；库里存的仍是变量名
-    assert_eq!(settings_file(&ctx)["env"]["ANTHROPIC_AUTH_TOKEN"], SECRET);
-    let policy = execute(&ctx, &request("policy:get", &[]));
-    let stored = serde_json::to_string(&policy.data).unwrap();
-    assert!(!stored.contains(SECRET), "定义库里不许出现取值");
-    assert!(stored.contains("MY_GATEWAY_TOKEN"), "库里存的是变量名");
-    // 审计只记变量名，不记取值
-    let runs = execute(&ctx, &request("runs:list", &[]));
-    assert!(!serde_json::to_string(&runs.data).unwrap().contains(SECRET));
-    assert!(!serde_json::to_string(&ok.data).unwrap().contains(SECRET));
-    // 当前接入按内容识别：令牌变量的解析值与实际一致
+    // 当前接入按内容识别：令牌变量的解析值与实际一致；状态不输出取值
     let current = current_config(&ctx, "claude-code");
     assert_eq!(current["current"]["profile"], "p");
     assert_eq!(
         current["config"]["credential"]["saved_var"],
         "MY_GATEWAY_TOKEN"
     );
+    assert!(!current.to_string().contains(SECRET));
+
+    // 切回官方：令牌已在变量里，不再导入；主配置里不再有令牌
+    let cleared = configure(&ctx, "claude-code", &["--use-default"]);
+    assert!(cleared.ok, "{:?}", cleared.errors);
+    assert_eq!(cleared.data["backfill"], Value::Null);
+    assert!(settings_file(&ctx)["env"]
+        .get("ANTHROPIC_AUTH_TOKEN")
+        .is_none());
+    let policy = execute(&ctx, &request("policy:get", &[]));
+    let stored = serde_json::to_string(&policy.data).unwrap();
+    assert!(!stored.contains(SECRET), "定义库里不许出现取值");
+    let runs = execute(&ctx, &request("runs:list", &[]));
+    assert!(!serde_json::to_string(&runs.data).unwrap().contains(SECRET));
+    assert!(!serde_json::to_string(&cleared.data)
+        .unwrap()
+        .contains(SECRET));
 
     let _ = fs::remove_dir_all(&base);
 }
-
 #[test]
 fn 既不是_claude_也不是_codex_的助手拒绝写运行参数_且零写() {
     let (base, ctx) = temp_ctx("kind");
@@ -864,7 +858,7 @@ fn 既不是_claude_也不是_codex_的助手拒绝写运行参数_且零写() {
     );
     assert!(env.ok, "{:?}", env.errors);
 
-    let refused = configure(&ctx, "opencode", &["--use", "p"]);
+    let refused = configure(&ctx, "opencode", &["--use-default"]);
     assert!(!refused.ok);
     assert!(!ctx.home_dir.join(".claude/settings.json").exists());
     assert!(!ctx.home_dir.join(".codex/config.toml").exists());
@@ -880,7 +874,7 @@ fn 非法地址与变量名在写之前就被挡住() {
         json!({"token_var": "has-dash"}),
     ] {
         define(&ctx, bad);
-        let refused = configure(&ctx, "claude-code", &["--use", "p"]);
+        let refused = configure(&ctx, "claude-code", &["--use-default"]);
         assert!(!refused.ok, "非法输入不该落地");
         assert!(!ctx.home_dir.join(".claude/settings.json").exists());
     }
@@ -890,11 +884,11 @@ fn 非法地址与变量名在写之前就被挡住() {
 #[test]
 fn 切回默认只撤接入键_不碰别人的() {
     let (base, ctx) = temp_ctx("clear");
-    define(
+    seed_legacy_claude(
         &ctx,
-        json!({"base_url": "https://api.example.com", "model": "m1"}),
+        json!({"active": "p", "profiles": {"p": {"base_url": "https://api.example.com", "model": "m1"}}}),
+        json!({"env": {"ANTHROPIC_BASE_URL": "https://api.example.com", "ANTHROPIC_MODEL": "m1"}}),
     );
-    assert!(configure(&ctx, "claude-code", &["--use", "p"]).ok);
 
     // 用户随后往里加了自己的东西
     let mut current = settings_file(&ctx);
@@ -929,139 +923,43 @@ fn 缺库时状态读取不建库_配置写入才建() {
 }
 
 #[test]
-fn 切换接入配置一步到位_库里与文件一起变() {
-    let (base, ctx) = temp_ctx("switch");
+fn 主配置拒绝写入第三方接入_文件与库都不动() {
+    let (base, ctx) = temp_ctx("main-official-only");
     define_settings(
         &ctx,
-        json!({
-            "active": "official",
-            "profiles": {
-                "official": {"label": "官方"},
-                "relay": {"label": "我的中转", "base_url": "https://relay.example.com", "model": "relay-model"}
-            }
-        }),
+        json!({"profiles": {"relay": {"base_url": "https://relay.example.com", "model": "m"}}}),
     );
-    // 先按 official 落一次
-    assert!(configure(&ctx, "claude-code", &["--use", "official"]).ok);
-    assert!(
-        !ctx.home_dir.join(".claude/settings.json").exists()
-            || settings_file(&ctx).get("env").is_none(),
-        "官方配置不需要环境变量"
-    );
+    write_settings_file(&ctx, &json!({"env": {"MY_OWN": "keep-me"}}));
+    let before = file_bytes(&ctx.home_dir.join(".claude/settings.json"));
+    let db_before = db_bytes(&ctx);
 
-    // 切到中转：一条命令既改库也写文件
-    let switched = configure(&ctx, "claude-code", &["--use", "relay"]);
-    assert!(switched.ok, "{:?}", switched.errors);
-    assert_eq!(switched.data["active"], "relay");
-    assert_eq!(switched.data["current"], "relay");
-    let after = settings_file(&ctx);
+    for args in [
+        vec!["--use", "relay"],
+        vec!["--use", "nope"],
+        vec![
+            "--use",
+            "relay",
+            "--connection",
+            r#"{"base_url": "https://x.example.com"}"#,
+        ],
+    ] {
+        let refused = configure(&ctx, "claude-code", &args);
+        assert!(!refused.ok, "{args:?}");
+        assert_eq!(
+            refused.errors[0].code, "AGENT_MAIN_OFFICIAL_ONLY",
+            "{args:?}"
+        );
+        assert!(refused.errors[0].message.contains("建成独立环境"));
+    }
     assert_eq!(
-        after["env"]["ANTHROPIC_BASE_URL"],
-        "https://relay.example.com"
-    );
-    assert_eq!(after["env"]["ANTHROPIC_MODEL"], "relay-model");
-
-    // 库里的上次写入记录也跟着变了
-    assert_eq!(settings_in_db(&ctx, "claude-code")["active"], "relay");
-
-    // 再切回官方：上一套留下的变量一个都不许剩
-    let back = configure(&ctx, "claude-code", &["--use", "official"]);
-    assert!(back.ok, "{:?}", back.errors);
-    assert!(
-        settings_file(&ctx).get("env").is_none(),
-        "切回后不得残留上一套的变量"
-    );
-    assert_eq!(
-        current_config(&ctx, "claude-code")["current"]["profile"],
-        "official"
-    );
-
-    let _ = fs::remove_dir_all(&base);
-}
-
-#[test]
-fn 切到不存在的接入配置被拒绝_且不动文件() {
-    let (base, ctx) = temp_ctx("switch-missing");
-    define_settings(
-        &ctx,
-        json!({"active": "p", "profiles": {"p": {"base_url": "https://api.example.com"}}}),
-    );
-    assert!(configure(&ctx, "claude-code", &["--use", "p"]).ok);
-    let before = fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap();
-
-    let refused = configure(&ctx, "claude-code", &["--use", "nope"]);
-    assert!(!refused.ok);
-    assert_eq!(
-        fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap(),
+        file_bytes(&ctx.home_dir.join(".claude/settings.json")),
         before,
         "被拒时一个字节都不许动"
     );
+    assert_eq!(db_bytes(&ctx), db_before);
 
     let _ = fs::remove_dir_all(&base);
 }
-
-#[test]
-fn 编辑当前接入_写文件并更新库_旧基准被拒() {
-    let (base, ctx) = temp_ctx("edit-current");
-    define(
-        &ctx,
-        json!({"base_url": "https://old.example.com", "model": "m1", "note": "备注"}),
-    );
-    assert!(configure(&ctx, "claude-code", &["--use", "p"]).ok);
-    let stale = base_of(&ctx, "claude-code");
-    // 外部顺手加了小任务模型：旧基准作废
-    let mut current = settings_file(&ctx);
-    current["env"]["ANTHROPIC_SMALL_FAST_MODEL"] = json!("small");
-    write_settings_file(&ctx, &current);
-    let edited = file_bytes(&ctx.home_dir.join(".claude/settings.json"));
-    let connection = r#"{"label": "新名字", "note": "备注", "base_url": "https://new.example.com", "model": "m2"}"#;
-
-    let refused = configure_with_base(
-        &ctx,
-        "claude-code",
-        &stale,
-        &["--use", "p", "--connection", connection],
-    );
-    assert!(!refused.ok);
-    assert_eq!(refused.errors[0].code, "AGENT_CONFIG_CHANGED");
-    assert_eq!(
-        file_bytes(&ctx.home_dir.join(".claude/settings.json")),
-        edited
-    );
-    assert_eq!(
-        profiles_in_db(&ctx, "claude-code")["p"]["base_url"],
-        "https://old.example.com"
-    );
-
-    let applied = configure(
-        &ctx,
-        "claude-code",
-        &["--use", "p", "--connection", connection],
-    );
-    assert!(applied.ok, "{:?}", applied.errors);
-    let after = settings_file(&ctx);
-    assert_eq!(
-        after["env"]["ANTHROPIC_BASE_URL"],
-        "https://new.example.com"
-    );
-    assert_eq!(after["env"]["ANTHROPIC_MODEL"], "m2");
-    assert!(after["env"].get("ANTHROPIC_SMALL_FAST_MODEL").is_none());
-    let saved = &profiles_in_db(&ctx, "claude-code")["p"];
-    assert_eq!(saved["label"], "新名字");
-    assert_eq!(saved["base_url"], "https://new.example.com");
-    assert_eq!(saved["note"], "备注");
-    assert_eq!(
-        profiles_in_db(&ctx, "claude-code")
-            .as_object()
-            .unwrap()
-            .len(),
-        1,
-        "编辑当前那套不产生导入项"
-    );
-
-    let _ = fs::remove_dir_all(&base);
-}
-
 #[test]
 fn 内置状态栏会部署脚本并指过去_切回不碰只撤自己那条() {
     let (base, ctx) = temp_ctx("statusline");
@@ -1250,12 +1148,11 @@ fn 用户自己的状态栏不被碰_也不算外部修改() {
         &ctx,
         &json!({"statusLine": {"type": "command", "command": "/x/mine.sh"}}),
     );
-    define_settings(
+    let env = configure(
         &ctx,
-        json!({"active": "p", "profiles": {"p": {"base_url": "https://api.example.com"}}}),
+        "claude-code",
+        &["--runtime", r#"{"claude_effort_level": "high"}"#],
     );
-
-    let env = configure(&ctx, "claude-code", &["--use", "p"]);
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(
         settings_file(&ctx)["statusLine"]["command"],
@@ -1278,60 +1175,19 @@ fn 用户自己的状态栏不被碰_也不算外部修改() {
 }
 
 #[test]
-fn 两种认证方式各写各的环境变量_编辑当前那套立即生效() {
-    let (base, ctx) = temp_ctx("auth");
-    configure_secret_source(&ctx);
-    const SECRET: &str = "sk-relay-secret";
-    assert!(
-        execute(
-            &ctx,
-            &request("secrets:set", &["--var", "RELAY_KEY", "--value", SECRET])
-        )
-        .ok
-    );
-
-    define_settings(
-        &ctx,
-        json!({"active": "p", "profiles": {"p": {"token_var": "RELAY_KEY", "auth": "api_key"}}}),
-    );
-    assert!(configure(&ctx, "claude-code", &["--use", "p"]).ok);
-    let after = settings_file(&ctx);
-    assert_eq!(after["env"]["ANTHROPIC_API_KEY"], SECRET);
-    assert!(after["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
-
-    // 换成 Bearer：上一个变量要消失，否则两个头一起发出去
-    let edited = configure(
-        &ctx,
-        "claude-code",
-        &[
-            "--use",
-            "p",
-            "--connection",
-            r#"{"token_var": "RELAY_KEY", "auth": "token"}"#,
-        ],
-    );
-    assert!(edited.ok, "{:?}", edited.errors);
-    let after = settings_file(&ctx);
-    assert_eq!(after["env"]["ANTHROPIC_AUTH_TOKEN"], SECRET);
-    assert!(after["env"].get("ANTHROPIC_API_KEY").is_none());
-
-    let _ = fs::remove_dir_all(&base);
-}
-
-#[test]
 fn 切回默认会撤掉接入配置_库里的上次写入记录也清空() {
     let (base, ctx) = temp_ctx("use-default");
-    define_settings(
+    seed_legacy_claude(
         &ctx,
         json!({
             "active": "relay",
             "profiles": {"relay": {"base_url": "https://relay.example.com"}}
         }),
+        json!({"env": {"ANTHROPIC_BASE_URL": "https://relay.example.com"}}),
     );
-    assert!(configure(&ctx, "claude-code", &["--use", "relay"]).ok);
     assert_eq!(
-        settings_file(&ctx)["env"]["ANTHROPIC_BASE_URL"],
-        "https://relay.example.com"
+        current_config(&ctx, "claude-code")["current"]["profile"],
+        "relay"
     );
 
     let back = configure(&ctx, "claude-code", &["--use-default"]);
@@ -1361,10 +1217,13 @@ fn 配置文件是符号链接时写到最终目标_链接本身不变() {
     fs::write(&real, br#"{"env": {"MY_OWN": "keep-me"}}"#).unwrap();
     let link = ctx.home_dir.join(".claude/settings.json");
     symlink(&real, &link).unwrap();
-    define(&ctx, json!({"base_url": "https://api.example.com"}));
 
     assert_eq!(current_config(&ctx, "claude-code")["state"], "ready");
-    let applied = configure(&ctx, "claude-code", &["--use", "p"]);
+    let applied = configure(
+        &ctx,
+        "claude-code",
+        &["--runtime", r#"{"claude_effort_level": "high"}"#],
+    );
     assert!(applied.ok, "{:?}", applied.errors);
     assert!(fs::symlink_metadata(&link)
         .unwrap()
@@ -1372,10 +1231,7 @@ fn 配置文件是符号链接时写到最终目标_链接本身不变() {
         .is_symlink());
     assert_eq!(fs::read_link(&link).unwrap(), real);
     let written: Value = serde_json::from_slice(&fs::read(&real).unwrap()).unwrap();
-    assert_eq!(
-        written["env"]["ANTHROPIC_BASE_URL"],
-        "https://api.example.com"
-    );
+    assert_eq!(written["effortLevel"], "high");
     assert_eq!(written["env"]["MY_OWN"], "keep-me");
     assert_eq!(
         dotfiles.read_dir().unwrap().count(),
@@ -1385,7 +1241,12 @@ fn 配置文件是符号链接时写到最终目标_链接本身不变() {
 
     // 断链：拒绝，不凭空造文件
     fs::remove_file(&real).unwrap();
-    let refused = configure_with_base(&ctx, "claude-code", &"0".repeat(64), &["--use", "p"]);
+    let refused = configure_with_base(
+        &ctx,
+        "claude-code",
+        &"0".repeat(64),
+        &["--runtime", r#"{"claude_effort_level": "low"}"#],
+    );
     assert!(!refused.ok);
     assert!(!real.exists());
 
@@ -1397,12 +1258,16 @@ fn 无法解析的配置文件拒绝写入_不当成空文件覆盖() {
     let (base, ctx) = temp_ctx("invalid-json");
     let broken = b"{\"env\": {\"MY_OWN\": \"keep-me\"},";
     fs::write(ctx.home_dir.join(".claude/settings.json"), broken).unwrap();
-    define(&ctx, json!({"base_url": "https://api.example.com"}));
     let current = current_config(&ctx, "claude-code");
     assert_eq!(current["state"], "invalid");
     assert_eq!(current["base"], Value::Null, "没有基准，界面不能写");
 
-    let refused = configure_with_base(&ctx, "claude-code", &"0".repeat(64), &["--use", "p"]);
+    let refused = configure_with_base(
+        &ctx,
+        "claude-code",
+        &"0".repeat(64),
+        &["--runtime", r#"{"claude_effort_level": "high"}"#],
+    );
     assert!(!refused.ok);
     assert!(refused.errors[0].message.contains("不是合法的 JSON"));
     assert_eq!(
@@ -1428,7 +1293,7 @@ fn 写助手配置失败时回滚密钥文件与库() {
     // 助手配置目录只读：密钥文件已写入之后，settings.json 的原子替换失败
     let claude_dir = ctx.home_dir.join(".claude");
     fs::set_permissions(&claude_dir, fs::Permissions::from_mode(0o500)).unwrap();
-    let failed = configure_with_base(&ctx, "claude-code", &base_digest, &["--use", "p"]);
+    let failed = configure_with_base(&ctx, "claude-code", &base_digest, &["--use-default"]);
     fs::set_permissions(&claude_dir, fs::Permissions::from_mode(0o700)).unwrap();
 
     assert!(!failed.ok, "只读目录下不该写成功");
@@ -1476,6 +1341,39 @@ fn codex_config(ctx: &Context) -> String {
     fs::read_to_string(ctx.home_dir.join(".codex/config.toml")).unwrap()
 }
 
+/// 旧版本曾把第三方接入写进 Codex 主配置：写出当时的 config.toml，库里记下本工具写过的表。
+/// 归属表由一次真实写入建出，结构与引擎一致。
+fn seed_legacy_codex(ctx: &Context, settings: Value, config: &str, owned: &[&str]) {
+    define_codex(ctx, settings);
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    let created = configure(
+        ctx,
+        "codex",
+        &["--runtime", r#"{"codex_web_search": "live"}"#],
+    );
+    assert!(created.ok, "{:?}", created.errors);
+    fs::write(ctx.home_dir.join(".codex/config.toml"), config).unwrap();
+    let conn = rusqlite::Connection::open(store::db_path(ctx)).unwrap();
+    conn.execute(
+        "UPDATE agent_settings_bindings SET owned_providers = ?1 WHERE agent_id = 'codex'",
+        [serde_json::to_string(owned).unwrap()],
+    )
+    .unwrap();
+}
+
+/// 旧版本为一套带凭据变量的接入写出的 provider 表。
+fn legacy_codex_table(name: &str, base_url: &str, token_var: Option<&str>) -> String {
+    let mut table =
+        format!("\n[model_providers.{name}]\nname = \"{name}\"\nbase_url = \"{base_url}\"\n");
+    if let Some(var) = token_var {
+        table.push_str(&format!(
+            "env_key = \"{var}\"\nrequires_openai_auth = true\n"
+        ));
+    }
+    table.push_str("wire_api = \"responses\"\n");
+    table
+}
+
 #[test]
 fn codex_普通运行设置保留认证并拒绝把配置路径指向认证文件() {
     let (base, ctx) = temp_ctx("codex-auth-boundary");
@@ -1503,18 +1401,17 @@ fn codex_普通运行设置保留认证并拒绝把配置路径指向认证文�
             "local": {"base_url": "http://127.0.0.1:11434/v1"}
         }}),
     );
-    let applied = configure(&ctx, "codex", &["--use", "relay"]);
+    let applied = configure(
+        &ctx,
+        "codex",
+        &["--runtime", r#"{"codex_web_search": "live"}"#],
+    );
     assert!(applied.ok, "{:?}", applied.errors);
-    let config = codex_config(&ctx);
-    assert!(config.contains("env_key = \"RELAY_KEY\""));
-    assert!(config.contains("requires_openai_auth = true"));
+    assert!(codex_config(&ctx).contains("web_search = \"live\""));
     assert_eq!(fs::read(&auth_path).unwrap(), auth_bytes);
 
-    let keyless = configure(&ctx, "codex", &["--use", "local"]);
-    assert!(keyless.ok, "{:?}", keyless.errors);
-    let keyless_config = codex_config(&ctx);
-    assert!(!keyless_config.contains("env_key ="));
-    assert!(!keyless_config.contains("requires_openai_auth"));
+    let cleared = configure(&ctx, "codex", &["--use-default"]);
+    assert!(cleared.ok, "{:?}", cleared.errors);
     assert_eq!(fs::read(&auth_path).unwrap(), auth_bytes);
 
     let dangerous = json!({
@@ -1542,7 +1439,11 @@ fn codex_普通运行设置保留认证并拒绝把配置路径指向认证文�
     );
     assert!(saved.ok, "{:?}", saved.errors);
 
-    let refused = configure(&ctx, "codex", &["--use", "relay"]);
+    let refused = configure(
+        &ctx,
+        "codex",
+        &["--runtime", r#"{"codex_web_search": "cached"}"#],
+    );
     assert!(!refused.ok);
     assert!(
         refused.errors[0].message.contains("只允许写 config.toml"),
@@ -1575,15 +1476,11 @@ fn codex_写入只动自己那几项_用户的四百行配置原样保留() {
         ),
     )
     .unwrap();
-    define_codex(
+    let env = configure(
         &ctx,
-        json!({
-            "active": "relay",
-            "profiles": {"relay": {"label": "我的中转", "base_url": "https://relay.example.com/v1", "token_var": "RELAY_KEY", "model": "gpt-5"}}
-        }),
+        "codex",
+        &["--runtime", r#"{"codex_web_search": "live"}"#],
     );
-
-    let env = configure(&ctx, "codex", &["--use", "relay"]);
     assert!(env.ok, "{:?}", env.errors);
 
     let after = codex_config(&ctx);
@@ -1598,65 +1495,39 @@ fn codex_写入只动自己那几项_用户的四百行配置原样保留() {
         "MCP 域的受管段不归我们管"
     );
     // 我们的东西写上了
-    assert!(after.contains("[model_providers.relay]"), "{after}");
-    assert!(after.contains("base_url = \"https://relay.example.com/v1\""));
-    assert!(
-        after.contains("env_key = \"RELAY_KEY\""),
-        "令牌只写变量名，Codex 自己去读"
-    );
-    assert!(after.contains("wire_api = \"responses\""));
-    assert!(after.contains("model_provider = \"relay\""));
-    assert!(after.contains("model = \"gpt-5\""));
-    // 令牌取值不该出现在配置里（Codex 用 env_key 指向变量名）
-    assert!(!after.contains("sk-"));
+    assert!(after.contains("web_search = \"live\""), "{after}");
 
     let _ = fs::remove_dir_all(&base);
 }
 
 #[test]
-fn codex_切换与切回默认_上一套的接入方式不残留() {
+fn codex_旧版本写进主配置的接入方式_切回官方后不残留() {
     let (base, ctx) = temp_ctx("codex-switch");
-    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
-    define_codex(
+    let legacy = format!(
+        "model_provider = \"a\"\n{}",
+        legacy_codex_table("a", "https://a.example.com/v1", None)
+    );
+    seed_legacy_codex(
         &ctx,
-        json!({
-            "active": "a",
-            "profiles": {
-                "a": {"base_url": "https://a.example.com/v1"},
-                "b": {"base_url": "https://b.example.com/v1"}
-            }
-        }),
+        json!({"active": "a", "profiles": {"a": {"base_url": "https://a.example.com/v1"}}}),
+        &legacy,
+        &["a"],
     );
-    assert!(configure(&ctx, "codex", &["--use", "a"]).ok);
-    assert!(codex_config(&ctx).contains("[model_providers.a]"));
-
-    let switched = configure(&ctx, "codex", &["--use", "b"]);
-    assert!(switched.ok, "{:?}", switched.errors);
-    let after = codex_config(&ctx);
-    assert!(after.contains("[model_providers.b]"));
-    assert!(
-        !after.contains("[model_providers.a]"),
-        "上一套必须撤干净：{after}"
-    );
-    assert!(after.contains("model_provider = \"b\""));
-    assert_eq!(
-        after.matches("model_provider =").count(),
-        1,
-        "不能留下两行赋值"
-    );
+    assert_eq!(current_config(&ctx, "codex")["current"]["profile"], "a");
 
     let back = configure(&ctx, "codex", &["--use-default"]);
     assert!(back.ok, "{:?}", back.errors);
+    assert_eq!(back.data["backfill"], Value::Null, "实际仍是 a，不用回填");
     let after = codex_config(&ctx);
     assert!(
         !after.contains("model_providers"),
-        "切回默认后不留接入方式：{after}"
+        "切回官方后不留接入方式：{after}"
     );
     assert!(!after.contains("model_provider ="));
+    assert_eq!(owned_providers(&ctx), json!([]));
 
     let _ = fs::remove_dir_all(&base);
 }
-
 fn owned_providers(ctx: &Context) -> Value {
     let conn = rusqlite::Connection::open(store::db_path(ctx)).unwrap();
     let raw: String = conn
@@ -1696,9 +1567,8 @@ fn has_owned_providers_column(ctx: &Context) -> bool {
 }
 
 #[test]
-fn codex_用户自己的_provider_在写入_切换_清空后都逐字节保留() {
+fn codex_用户自己的_provider_在运行设置与切回官方时都逐字节保留() {
     let (base, ctx) = temp_ctx("codex-user-provider");
-    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
     let mine = concat!(
         "# 我自己的接入，别动\n",
         "[model_providers.mine]\n",
@@ -1708,76 +1578,39 @@ fn codex_用户自己的_provider_在写入_切换_清空后都逐字节保留()
         "[model_providers.mine.http_headers]\n",
         "X-Team = \"t\"\n",
     );
-    let path = ctx.home_dir.join(".codex/config.toml");
-    fs::write(&path, mine).unwrap();
-    define_codex(
+    let legacy = format!(
+        "model_provider = \"a\"\n{mine}{}",
+        legacy_codex_table("a", "https://a.example.com/v1", None)
+    );
+    seed_legacy_codex(
         &ctx,
-        json!({
-            "active": "a",
-            "profiles": {
-                "a": {"base_url": "https://a.example.com/v1"},
-                "b": {"base_url": "https://b.example.com/v1"}
-            }
-        }),
+        json!({"active": "a", "profiles": {"a": {"base_url": "https://a.example.com/v1"}}}),
+        &legacy,
+        &["a"],
     );
 
-    let applied = configure(&ctx, "codex", &["--use", "a"]);
-    assert!(applied.ok, "{:?}", applied.errors);
+    let runtime = configure(
+        &ctx,
+        "codex",
+        &["--runtime", r#"{"codex_web_search": "cached"}"#],
+    );
+    assert!(runtime.ok, "{:?}", runtime.errors);
     assert!(codex_config(&ctx).contains(mine), "{}", codex_config(&ctx));
-    assert_eq!(owned_providers(&ctx), json!(["a"]));
-
-    let switched = configure(&ctx, "codex", &["--use", "b"]);
-    assert!(switched.ok, "{:?}", switched.errors);
-    assert!(codex_config(&ctx).contains(mine), "{}", codex_config(&ctx));
-    assert_eq!(owned_providers(&ctx), json!(["b"]));
+    assert_eq!(owned_providers(&ctx), json!(["a"]), "运行设置不改归属记录");
 
     let cleared = configure(&ctx, "codex", &["--use-default"]);
     assert!(cleared.ok, "{:?}", cleared.errors);
     let after = codex_config(&ctx);
     assert!(after.contains(mine), "{after}");
-    assert!(!after.contains("[model_providers.b]"), "{after}");
+    assert!(!after.contains("[model_providers.a]"), "{after}");
     assert_eq!(owned_providers(&ctx), json!([]));
 
     let _ = fs::remove_dir_all(&base);
 }
-
 #[test]
-fn codex_从_a_切到_b_按库里记录撤表_文件不留本工具注释() {
-    let (base, ctx) = temp_ctx("codex-owned-switch");
-    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
-    define_codex(
-        &ctx,
-        json!({
-            "active": "a",
-            "profiles": {
-                "a": {"base_url": "https://a.example.com/v1", "token_var": "A_KEY"},
-                "b": {"base_url": "https://b.example.com/v1"}
-            }
-        }),
-    );
-    assert!(configure(&ctx, "codex", &["--use", "a"]).ok);
-    let first = codex_config(&ctx);
-    assert!(first.contains("[model_providers.a]"));
-    assert!(!first.contains("agent-manager"), "{first}");
-    assert_eq!(owned_providers(&ctx), json!(["a"]));
-
-    let switched = configure(&ctx, "codex", &["--use", "b"]);
-    assert!(switched.ok, "{:?}", switched.errors);
-    let after = codex_config(&ctx);
-    assert!(!after.contains("[model_providers.a]"), "{after}");
-    assert!(!after.contains("A_KEY"), "{after}");
-    assert!(after.contains("[model_providers.b]"), "{after}");
-    assert!(!after.contains("agent-manager"), "{after}");
-    assert_eq!(owned_providers(&ctx), json!(["b"]));
-
-    let _ = fs::remove_dir_all(&base);
-}
-
-#[test]
-fn codex_旧库缺列加旧注释文件_用状态给的基准切换_写入后补列并迁走注释() {
+fn codex_旧库缺列加旧注释文件_用状态给的基准切回官方_写入后补列并迁走注释() {
     let (base, ctx) = temp_ctx("codex-legacy-db");
-    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
-    define_codex(
+    seed_legacy_codex(
         &ctx,
         json!({
             "active": "relay",
@@ -1786,8 +1619,12 @@ fn codex_旧库缺列加旧注释文件_用状态给的基准切换_写入后补
                 "next": {"base_url": "https://next.example.com/v1"}
             }
         }),
+        &format!(
+            "model_provider = \"relay\"\n{}",
+            legacy_codex_table("relay", "https://relay.example.com/v1", Some("RELAY_KEY"))
+        ),
+        &["relay"],
     );
-    assert!(configure(&ctx, "codex", &["--use", "relay"]).ok);
 
     let fresh_schema = bindings_schema(&ctx);
     assert_eq!(
@@ -1829,7 +1666,7 @@ fn codex_旧库缺列加旧注释文件_用状态给的基准切换_写入后补
     assert!(!has_owned_providers_column(&ctx), "查询不得写库");
     assert_eq!(fs::read_to_string(&path).unwrap(), legacy);
 
-    let switched = configure(&ctx, "codex", &["--use", "next"]);
+    let switched = configure(&ctx, "codex", &["--use-default"]);
     assert!(switched.ok, "{:?}", switched.errors);
     assert_eq!(switched.data["backfill"], Value::Null);
     assert_eq!(
@@ -1837,11 +1674,11 @@ fn codex_旧库缺列加旧注释文件_用状态给的基准切换_写入后补
         fresh_schema,
         "补列库与新建库结构一致"
     );
-    assert_eq!(owned_providers(&ctx), json!(["next"]));
+    assert_eq!(owned_providers(&ctx), json!([]));
 
     let after = codex_config(&ctx);
     assert!(!after.contains("[model_providers.relay]"), "{after}");
-    assert!(after.contains("[model_providers.next]"), "{after}");
+    assert!(!after.contains("model_provider ="), "{after}");
     assert!(
         after.contains(
             "# 我的注释\n[model_providers.mine]\nbase_url = \"https://mine.example.com/v1\"\n"
@@ -1924,41 +1761,21 @@ fn codex_智能自动保留沙箱并启用自动审查() {
 }
 
 #[test]
-fn codex_内置接入方式名被拒_缺地址也被拒() {
-    let (base, ctx) = temp_ctx("codex-reserved");
-    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
-
-    // openai / ollama / lmstudio 是 Codex 内置的，覆盖不了
-    define_codex(
-        &ctx,
-        json!({"active": "openai", "profiles": {"openai": {"base_url": "https://x.example.com/v1"}}}),
-    );
-    let refused = configure(&ctx, "codex", &["--use", "openai"]);
-    assert!(!refused.ok, "内置名字不该放行");
-
-    // 自定义接入方式没有默认地址，只填令牌变量名不成立
-    define_codex(
-        &ctx,
-        json!({"active": "relay", "profiles": {"relay": {"token_var": "RELAY_KEY"}}}),
-    );
-    let refused = configure(&ctx, "codex", &["--use", "relay"]);
-    assert!(!refused.ok, "缺地址要当场说清楚");
-
-    let _ = fs::remove_dir_all(&base);
-}
-
-#[test]
-fn codex_外部改了本工具写的表地址_旧基准被拒_切换时存成导入项_切回写回() {
+fn codex_外部改了本工具写的表地址_旧基准被拒_切回官方时存成导入项() {
     let (base, ctx) = temp_ctx("codex-external");
-    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
-    define_codex(
+    seed_legacy_codex(
         &ctx,
         json!({"active": "relay", "profiles": {
             "relay": {"base_url": "https://relay.example.com/v1", "token_var": "RELAY_KEY", "model": "gpt-5"},
             "b": {"base_url": "https://b.example.com/v1"}
         }}),
+        &format!(
+            "model_provider = \"relay\"\nmodel = \"gpt-5\"\n{}",
+            legacy_codex_table("relay", "https://relay.example.com/v1", Some("RELAY_KEY"))
+        ),
+        &["relay"],
     );
-    assert!(configure(&ctx, "codex", &["--use", "relay"]).ok);
+    assert_eq!(current_config(&ctx, "codex")["current"]["profile"], "relay");
     let stale = base_of(&ctx, "codex");
 
     // 本工具以外把地址改掉
@@ -1972,12 +1789,12 @@ fn codex_外部改了本工具写的表地址_旧基准被拒_切换时存成导
     assert_eq!(status["config"]["base_url"], "https://hand.example.com/v1");
     assert_eq!(status["current"]["profile"], Value::Null);
 
-    let refused = configure_with_base(&ctx, "codex", &stale, &["--use", "b"]);
+    let refused = configure_with_base(&ctx, "codex", &stale, &["--use-default"]);
     assert!(!refused.ok);
     assert_eq!(refused.errors[0].code, "AGENT_CONFIG_CHANGED");
     assert_eq!(codex_config(&ctx), edited, "拒绝时一个字节都不许动");
 
-    let switched = configure(&ctx, "codex", &["--use", "b"]);
+    let switched = configure(&ctx, "codex", &["--use-default"]);
     assert!(switched.ok, "{:?}", switched.errors);
     assert_eq!(switched.data["backfill"]["created"], true);
     let imported = switched.data["backfill"]["name"]
@@ -1990,27 +1807,17 @@ fn codex_外部改了本工具写的表地址_旧基准被拒_切换时存成导
     assert_eq!(saved["model"], "gpt-5");
     let after = codex_config(&ctx);
     assert!(!after.contains("[model_providers.relay]"), "{after}");
-    assert!(after.contains("[model_providers.b]"), "{after}");
-    assert_eq!(owned_providers(&ctx), json!(["b"]));
+    assert!(!after.contains("model_provider ="), "{after}");
+    assert_eq!(owned_providers(&ctx), json!([]));
 
     let back = configure(&ctx, "codex", &["--use", &imported]);
-    assert!(back.ok, "{:?}", back.errors);
-    let after = codex_config(&ctx);
-    assert!(
-        after.contains("base_url = \"https://hand.example.com/v1\""),
-        "{after}"
-    );
-    assert!(
-        after.contains(&format!("model_provider = \"{imported}\"")),
-        "{after}"
-    );
-    assert_eq!(owned_providers(&ctx), json!([imported]));
+    assert_eq!(back.errors[0].code, "AGENT_MAIN_OFFICIAL_ONLY");
+    assert_eq!(codex_config(&ctx), after);
 
     let _ = fs::remove_dir_all(&base);
 }
-
 #[test]
-fn codex_首次切换保留用户自己的运行参数_模型存进导入项() {
+fn codex_首次切回官方保留用户自己的运行参数_模型存进导入项() {
     let (base, ctx) = temp_ctx("codex-first-run");
     fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
     // 从没用本工具写过，但用户自己设了模型与审批策略
@@ -2027,7 +1834,7 @@ fn codex_首次切换保留用户自己的运行参数_模型存进导入项() {
     assert_eq!(runtime["automation_mode"], "custom");
     assert_eq!(runtime["automation_raw"]["approval_policy"], "never");
 
-    let switched = configure(&ctx, "codex", &["--use", "relay"]);
+    let switched = configure(&ctx, "codex", &["--use-default"]);
     assert!(switched.ok, "{:?}", switched.errors);
     let imported = switched.data["backfill"]["name"].as_str().unwrap();
     assert_eq!(
@@ -2037,15 +1844,15 @@ fn codex_首次切换保留用户自己的运行参数_模型存进导入项() {
     let after = codex_config(&ctx);
     assert!(
         after.contains("approval_policy = \"never\""),
-        "切换不碰运行参数：{after}"
+        "切回官方不碰运行参数：{after}"
     );
-    assert!(after.contains("model = \"other\""), "{after}");
+    assert!(!after.contains("model ="), "模型随接入存进导入项：{after}");
 
     let _ = fs::remove_dir_all(&base);
 }
 
 #[test]
-fn codex_用户自己的当前接入方式只被引用_不复制不认领_切回只写顶层键() {
+fn codex_用户自己的当前接入方式只被引用_不复制不认领_切回官方只撤顶层键() {
     let (base, ctx) = temp_ctx("codex-reference");
     fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
     let user_table = concat!(
@@ -2073,7 +1880,7 @@ fn codex_用户自己的当前接入方式只被引用_不复制不认领_切回
         Value::Null
     );
 
-    let switched = configure(&ctx, "codex", &["--use", "relay"]);
+    let switched = configure(&ctx, "codex", &["--use-default"]);
     assert!(switched.ok, "{:?}", switched.errors);
     let imported = switched.data["backfill"]["name"]
         .as_str()
@@ -2083,188 +1890,19 @@ fn codex_用户自己的当前接入方式只被引用_不复制不认领_切回
     assert_eq!(saved["provider_ref"], "kimi");
     assert_eq!(saved["model"], "k2");
     assert!(saved.get("base_url").is_none(), "不复制那张表");
-    assert!(
-        codex_config(&ctx).contains(user_table),
-        "用户的表逐字节保留"
-    );
-    assert_eq!(owned_providers(&ctx), json!(["relay"]));
+    let after = codex_config(&ctx);
+    assert!(after.contains(user_table), "用户的表逐字节保留：{after}");
+    assert!(!after.contains("model_provider ="), "{after}");
+    assert!(!after.contains("model = \"k2\""), "{after}");
+    assert_eq!(owned_providers(&ctx), json!([]), "引用不认领");
+    assert_eq!(current_config(&ctx, "codex")["current"]["default"], true);
 
     let back = configure(&ctx, "codex", &["--use", &imported]);
-    assert!(back.ok, "{:?}", back.errors);
-    let after = codex_config(&ctx);
-    assert!(after.contains("model_provider = \"kimi\""), "{after}");
-    assert!(after.contains("model = \"k2\""), "{after}");
-    assert!(after.contains(user_table), "{after}");
-    assert!(!after.contains("[model_providers.relay]"), "{after}");
-    assert_eq!(owned_providers(&ctx), json!([]), "引用不认领");
-    assert_eq!(
-        current_config(&ctx, "codex")["current"]["profile"],
-        imported.as_str()
-    );
-
-    // 引用的表被用户删掉之后：切到它拒绝并说明
-    assert!(configure(&ctx, "codex", &["--use", "relay"]).ok);
-    let without = codex_config(&ctx).replace(user_table, "");
-    fs::write(&path, &without).unwrap();
-    let refused = configure(&ctx, "codex", &["--use", &imported]);
-    assert!(!refused.ok);
-    assert!(
-        refused.errors[0].message.contains("已不在 config.toml 中"),
-        "{:?}",
-        refused.errors
-    );
-    assert_eq!(codex_config(&ctx), without);
+    assert_eq!(back.errors[0].code, "AGENT_MAIN_OFFICIAL_ONLY");
+    assert_eq!(codex_config(&ctx), after);
 
     let _ = fs::remove_dir_all(&base);
 }
-
-/// 库里 agent_settings_bindings 有没有 codex 这一行；表不存在也算没有。
-fn has_codex_binding(ctx: &Context) -> bool {
-    let conn = rusqlite::Connection::open(store::db_path(ctx)).unwrap();
-    let exists: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='agent_settings_bindings'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    exists == 1
-        && conn
-            .query_row(
-                "SELECT COUNT(*) FROM agent_settings_bindings WHERE agent_id = 'codex'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap()
-            == 1
-}
-
-fn header_count(text: &str, header: &str) -> usize {
-    text.lines().filter(|line| line.trim() == header).count()
-}
-
-/// 用户手写的同名 relay（带子表），旁边还有别的 provider 与同名 MCP 表。
-const USER_RELAY: &str = concat!(
-    "# 我自己的 relay\n",
-    "[model_providers.relay]\n",
-    "name = \"Hand Relay\"\n",
-    "base_url = \"https://hand.example.com/v1\"\n",
-    "\n",
-    "[model_providers.relay.http_headers]\n",
-    "X-Hand = \"1\"\n",
-    "\n",
-);
-const USER_OTHERS: &str = concat!(
-    "[model_providers.mine]\n",
-    "name = \"Mine\"\n",
-    "base_url  =  \"https://mine.example.com/v1\"   # 手写的对齐\n",
-    "\n",
-    "[mcp_servers.relay]\n",
-    "command = \"relay-mcp\"\n",
-);
-
-#[test]
-fn codex_用户自己的同名_provider_写入被拒_换名后写入且用户表逐字节保留() {
-    let (base, ctx) = temp_ctx("codex-provider-collision");
-    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
-    let path = ctx.home_dir.join(".codex/config.toml");
-    let original = format!("{USER_RELAY}{USER_OTHERS}");
-    fs::write(&path, &original).unwrap();
-    define_codex(
-        &ctx,
-        json!({"active": "relay", "profiles": {"relay": {"base_url": "https://relay.example.com/v1", "token_var": "RELAY_KEY"}}}),
-    );
-
-    let refused = configure(&ctx, "codex", &["--use", "relay"]);
-    assert!(!refused.ok, "追加同名表会生成重复表，必须拒绝");
-    assert_eq!(refused.errors[0].code, "AGENT_ERROR");
-    assert!(
-        refused.errors[0].message.contains("拒绝覆盖")
-            && refused.errors[0]
-                .message
-                .contains("config.toml 中已有你自己的同名接入方式 relay")
-            && refused.errors[0].message.contains("换个名字"),
-        "{:?}",
-        refused.errors
-    );
-    assert_eq!(codex_config(&ctx), original, "拒绝时一个字节都不许动");
-    assert!(!has_codex_binding(&ctx), "拒绝时库里不许记下认领");
-
-    // 接管通道已退役：带上旧标志也不会替换用户的表
-    let takeover = configure(&ctx, "codex", &["--use", "relay", "--allow-takeover"]);
-    assert!(!takeover.ok);
-    assert_eq!(codex_config(&ctx), original);
-
-    // 换个名字：写入成功，用户那张表与子表逐字节保留
-    let renamed = configure(
-        &ctx,
-        "codex",
-        &[
-            "--use",
-            "relay2",
-            "--connection",
-            r#"{"base_url": "https://relay.example.com/v1", "token_var": "RELAY_KEY"}"#,
-        ],
-    );
-    assert!(renamed.ok, "{:?}", renamed.errors);
-    let after = codex_config(&ctx);
-    assert!(after.parse::<toml::Value>().is_ok(), "{after}");
-    assert!(after.contains(USER_RELAY), "{after}");
-    assert!(after.contains(USER_OTHERS), "{after}");
-    assert_eq!(
-        header_count(&after, "[model_providers.relay]"),
-        1,
-        "{after}"
-    );
-    assert_eq!(
-        header_count(&after, "[model_providers.relay2]"),
-        1,
-        "{after}"
-    );
-    assert_eq!(owned_providers(&ctx), json!(["relay2"]));
-
-    let _ = fs::remove_dir_all(&base);
-}
-
-#[test]
-fn codex_本工具自己写过的同名_provider_再次写入不受影响() {
-    let (base, ctx) = temp_ctx("codex-provider-own");
-    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
-    fs::write(ctx.home_dir.join(".codex/config.toml"), USER_OTHERS).unwrap();
-    define_codex(
-        &ctx,
-        json!({"active": "relay", "profiles": {"relay": {"base_url": "https://relay.example.com/v1"}}}),
-    );
-    let first = configure(&ctx, "codex", &["--use", "relay"]);
-    assert!(first.ok, "{:?}", first.errors);
-    assert_eq!(owned_providers(&ctx), json!(["relay"]));
-
-    // 编辑当前那套：写文件并更新库，同一张表原位替换
-    let second = configure(
-        &ctx,
-        "codex",
-        &[
-            "--use",
-            "relay",
-            "--connection",
-            r#"{"base_url": "https://relay2.example.com/v1"}"#,
-        ],
-    );
-    assert!(second.ok, "{:?}", second.errors);
-    let after = codex_config(&ctx);
-    assert!(after.parse::<toml::Value>().is_ok(), "{after}");
-    assert_eq!(
-        header_count(&after, "[model_providers.relay]"),
-        1,
-        "{after}"
-    );
-    assert!(after.contains("https://relay2.example.com/v1"), "{after}");
-    assert!(after.contains(USER_OTHERS), "{after}");
-    assert_eq!(owned_providers(&ctx), json!(["relay"]));
-
-    let _ = fs::remove_dir_all(&base);
-}
-
 // ---------- 可用性检查 ----------
 
 #[test]
@@ -2347,7 +1985,11 @@ fn 检查不改配置文件_也不动生效的那套() {
         )
         .ok
     );
-    assert!(configure(&ctx, "claude-code", &["--use", "a"]).ok);
+    // 旧版本写进主配置的 a：当前生效的那套
+    write_settings_file(
+        &ctx,
+        &json!({"env": {"ANTHROPIC_BASE_URL": "https://127.0.0.1:1", "ANTHROPIC_MODEL": "m", "ANTHROPIC_AUTH_TOKEN": "v"}}),
+    );
     let before = fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap();
 
     // --use 测的是另一套，但不该把生效的那套切过去

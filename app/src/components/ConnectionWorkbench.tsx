@@ -76,7 +76,6 @@ export function ConnectionWorkbench({
   onSelectAgent,
   onAdd,
   onImport,
-  onSwitch,
   onResetDefault,
   aliases,
   onAddLaunch,
@@ -104,7 +103,6 @@ export function ConnectionWorkbench({
   onSelectAgent: (agentId: string) => void;
   onAdd: (element: EngineElement) => void;
   onImport: (element: EngineElement) => void;
-  onSwitch: (element: EngineElement, connection: string) => void;
   onResetDefault: (element: EngineElement) => void;
   aliases: Record<string, string>;
   onAddLaunch: (element: EngineElement) => void;
@@ -166,7 +164,7 @@ export function ConnectionWorkbench({
   const summary = activeEntry
     ? activeEntry.label || activeEntry.name
     : current?.default
-      ? "助手默认账号"
+      ? "官方账号"
       : unsaved
         ? "当前实际配置（未保存）"
         : "无法读取实际配置";
@@ -427,22 +425,21 @@ export function ConnectionWorkbench({
                 <p className="text-success">
                   最快：{fastest.connection.label || fastest.connection.name} {fastest.result.latencyMs}ms
                 </p>
-                {fastest.connection.name !== active && (
-                  <button
-                    type="button"
-                    data-testid="activate-fastest-connection"
-                    disabled={busyTarget !== null}
-                    onClick={() => onSwitch(selected, fastest.connection.name)}
-                    className="rounded border border-success/30 bg-success/10 px-2.5 py-1 text-xs font-medium text-success hover:bg-success/15 disabled:opacity-50"
-                  >
-                    启用最快接入
-                  </button>
-                )}
               </div>
             )}
           </div>
         )}
 
+        {tab === "providers" && current && !current.default && (
+          <p
+            role="status"
+            data-testid="main-mixed-warning"
+            className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning"
+          >
+            主配置里有第三方接入，和官方账号用的是同一个配置目录。点「官方账号」卡片上的「切回官方账号」，
+            这份第三方配置会先保存为接入；要继续用它，在它的菜单里选「建成独立环境」。
+          </p>
+        )}
         {tab === "providers" && <div className="flex flex-col gap-3">
             {unsaved && currentConfig?.config && (
               <LiveConfigCard
@@ -471,9 +468,6 @@ export function ConnectionWorkbench({
                 busy={busyTarget === key}
                 disabled={busyTarget !== null || Boolean(writeBlocked)}
                 check={checkResults[key]}
-                onActivate={kind && connection && !isCurrent
-                  ? () => onSwitch(selected, connectionName)
-                  : undefined}
                 onReset={kind && !connection && !isCurrent ? () => onResetDefault(selected) : undefined}
                 onCheck={kind && connection ? () => onCheck(selected, connection.name) : undefined}
                 onEdit={kind && connection ? () => onEdit(selected, connection) : undefined}
@@ -566,7 +560,6 @@ function ConnectionCard({
   busy,
   disabled,
   check,
-  onActivate,
   onReset,
   onCheck,
   onEdit,
@@ -583,7 +576,6 @@ function ConnectionCard({
   busy: boolean;
   disabled: boolean;
   check?: ConnectionCheckResult;
-  onActivate?: () => void;
   onReset?: () => void;
   onCheck?: () => void;
   onEdit?: () => void;
@@ -613,7 +605,7 @@ function ConnectionCard({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-lg font-semibold text-foreground">
-            {connection ? connection.label || connection.name : "助手默认账号"}
+            {connection ? connection.label || connection.name : "官方账号"}
           </h3>
           {active && (
             <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2.5 py-1 text-xs font-medium text-success">
@@ -645,18 +637,6 @@ function ConnectionCard({
             {check.ok && check.latencyMs > 0 ? `${check.latencyMs}ms` : check.detail}
           </span>
         )}
-        {onActivate && (
-          <button
-            type="button"
-            data-testid={`activate-connection-${agentId}-${id}`}
-            disabled={disabled}
-            onClick={onActivate}
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
-            {busy ? "正在应用…" : "应用"}
-          </button>
-        )}
         {onReset && (
           <button
             type="button"
@@ -666,7 +646,7 @@ function ConnectionCard({
             className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
-            {busy ? "正在应用…" : "应用"}
+            {busy ? "正在切回…" : "切回官方账号"}
           </button>
         )}
         {onEdit && (

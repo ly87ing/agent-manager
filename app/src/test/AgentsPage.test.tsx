@@ -102,7 +102,7 @@ describe("助手页产品边界", () => {
 
     expect(await screen.findByTestId("connection-workbench")).toBeInTheDocument();
     expect(screen.getByTestId("add-connection-button")).toBeEnabled();
-    expect(screen.getByTestId("connection-card-claude-code-default")).toHaveTextContent("助手默认账号");
+    expect(screen.getByTestId("connection-card-claude-code-default")).toHaveTextContent("官方账号");
     expect(screen.getAllByText("默认环境").length).toBeGreaterThan(0);
     // 当前以客户端实际配置为准：对不上已保存接入就是未保存的实际配置，不报「尚未生效」
     expect(screen.getByText(/当前接入：当前实际配置（未保存）/)).toBeInTheDocument();
@@ -122,7 +122,9 @@ describe("助手页产品边界", () => {
     await userEvent.click(screen.getByTestId("workbench-tab-providers"));
     expect(screen.getByTestId("connection-card-claude-code-live")).toHaveTextContent("https://claude.example.com");
     expect(screen.queryByText(/当前 Provider 尚未应用/)).toBeNull();
-    expect(screen.getByTestId("reset-connection-claude-code-default")).toHaveTextContent("应用");
+    expect(screen.getByTestId("reset-connection-claude-code-default")).toHaveTextContent("切回官方账号");
+    // 实际配置里有第三方接入：明确提示与官方账号混在同一个配置目录
+    expect(screen.getByTestId("main-mixed-warning")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "实例" })).toBeNull();
     expect(screen.queryByText("本机配置状态")).toBeNull();
     expect(screen.queryByText("状态栏：用量状态栏")).toBeNull();
@@ -215,7 +217,7 @@ describe("助手页产品边界", () => {
     expect(within(cards[0]).getByText("当前使用")).toBeInTheDocument();
   });
 
-  it("点击 Provider 后仍通过 configure 写入并以状态回读确认", async () => {
+  it("切回官方账号通过 configure 写入并以状态回读确认", async () => {
     const repairRoutes: Record<string, Envelope | (() => Promise<Envelope>)> = routes();
     const status = repairRoutes["agents:status"] as { data: { elements: EngineElement[] } };
     (status.data.elements[0].spec as Record<string, any>).settings = {
@@ -258,7 +260,7 @@ describe("助手页产品边界", () => {
       BASE,
       "--use-default",
     ]);
-    await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("助手默认账号"));
+    await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方账号"));
   });
 
   it("不再展示 Claude 与 Codex 之外的客户端", async () => {

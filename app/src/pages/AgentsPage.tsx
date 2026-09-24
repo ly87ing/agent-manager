@@ -314,32 +314,7 @@ export default function AgentsPage({
         submission.connection,
         connectionForm?.preserveUnknownFrom,
       );
-      const editingCurrent = connectionForm?.variant === "edit"
-        && currentConnectionOf(element)?.profile === submission.connection.name;
-      if (editingCurrent) {
-        // 编辑当前生效的那套：先存凭据取值，再把新定义写进助手配置并同步更新库，一条命令同成同败
-        if (submission.secretValue) {
-          const secret = await runEngine("secrets:set", [
-            "--var",
-            submission.connection.tokenVar,
-            "--value",
-            submission.secretValue,
-          ]);
-          if (!secret.ok) {
-            setConnectionFormError(
-              `凭据没有写入外部文件，接入也没有修改：${secret.errors[0]?.message ?? "请先在“设置 → 密钥”选择外部文件，或从进程环境提供这个变量"}`,
-            );
-            return;
-          }
-        }
-        const profiles = ((definition.settings as Record<string, unknown> | undefined)?.profiles ?? {}) as Record<string, Record<string, unknown>>;
-        setConnectionForm(null);
-        await runConfigure(
-          { agentId, use: submission.connection.name, connection: profiles[submission.connection.name] ?? {} },
-          { message: `已修改并写入 ${submission.connection.label || submission.connection.name}` },
-        );
-        return;
-      }
+      // 主配置只放官方账号：编辑接入只保存定义，不写助手配置（包括主配置里旧版本留下的那套）
       const saved = await definitionOps.saveDefinition({ name: agentId, definition, isNew: false });
       if (!saved) {
         setConnectionFormError("接入没有保存，请根据提示修正后重试");
@@ -376,7 +351,7 @@ export default function AgentsPage({
     if (connectionRemovingBusy) return;
     const definition = element.spec as Record<string, unknown>;
     if (currentConnectionOf(element)?.profile === connection.name) {
-      toast.error("当前接入不能删除，请先切换到其他接入或助手默认账号");
+      toast.error("主配置正在使用这套接入，不能删除；请先切回官方账号");
       return;
     }
     const agentId = element.id.replace(/^agents:/, "");
@@ -645,12 +620,6 @@ export default function AgentsPage({
           setConnectionForm({ agent: element });
         }}
         onImport={setConnectionImportAgent}
-        onSwitch={(element, connection) =>
-          void runConfigure(
-            { agentId: element.id.replace(/^agents:/, ""), use: connection },
-            { message: `已切换 ${element.id.replace(/^agents:/, "")} 的接入配置` },
-          )
-        }
         onResetDefault={setConnectionResetting}
         aliases={aliasSource.source?.aliases ?? {}}
         onAddLaunch={(element) => {
@@ -849,10 +818,6 @@ export default function AgentsPage({
           existingNames={connectionsOf(connectionForm.agent.spec as Record<string, unknown>).map((item) => item.name)}
           initialConnection={connectionForm.initial}
           variant={connectionForm.variant}
-          editingCurrent={
-            connectionForm.variant === "edit"
-            && currentConnectionOf(connectionForm.agent)?.profile === connectionForm.initial?.name
-          }
           busy={connectionSaving}
           error={connectionFormError}
           onOpenSecrets={onOpenSecrets}
@@ -878,7 +843,7 @@ export default function AgentsPage({
       {connectionRemoving && (
         <ConfirmModal
           title={`删除接入 ${connectionRemoving.connection.label || connectionRemoving.connection.name}`}
-          description="只删除本应用保存的这套接入，不会删除凭据变量。当前正在使用的接入必须先切换到其他接入或助手默认账号。"
+          description="只删除本应用保存的这套接入，不会删除凭据变量。主配置正在使用的那套要先切回官方账号。"
           risk="write-local"
           riskLabel="删除接入"
           confirmLabel="确认删除"
@@ -889,16 +854,16 @@ export default function AgentsPage({
       )}
       {connectionResetting && (
         <ConfirmModal
-          title={`应用 ${(connectionResetting.spec as AgentsSpec).display_name ?? connectionResetting.id.replace(/^agents:/, "")} 的官方 Provider`}
-          description="撤掉助手配置里的接入地址、模型与令牌，改用助手自己的账号与默认地址；切换前还没保存的实际配置会先保存成接入配置。不会删除助手登录状态、密钥变量或其他 Provider 定义；已经打开的助手需要重启后生效。"
+          title={`把 ${(connectionResetting.spec as AgentsSpec).display_name ?? connectionResetting.id.replace(/^agents:/, "")} 的主配置切回官方账号`}
+          description="撤掉主配置里的第三方接入地址、模型与令牌，改用助手自己的官方账号；还没保存的这份第三方配置会先保存成接入，之后可以建成独立环境继续用。不会删除官方登录状态、密钥变量或其他接入定义；已经打开的助手需要重启后生效。"
           risk="write-local"
-          riskLabel="应用官方 Provider"
-          confirmLabel="确认应用"
+          riskLabel="切回官方账号"
+          confirmLabel="确认切回"
           executing={configuringTarget === `${connectionResetting.id.replace(/^agents:/, "")}/default`}
           onConfirm={() => {
             const agentId = connectionResetting.id.replace(/^agents:/, "");
             setConnectionResetting(null);
-            void runConfigure({ agentId, use: "" }, { message: `已切回 ${agentId} 的默认账号` });
+            void runConfigure({ agentId, use: "" }, { message: `已把 ${agentId} 的主配置切回官方账号` });
           }}
           onClose={() => setConnectionResetting(null)}
         />
