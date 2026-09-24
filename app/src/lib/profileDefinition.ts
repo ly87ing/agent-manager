@@ -10,6 +10,8 @@
  *   MCP 写 `<配置目录>/config.toml`
  */
 
+import type { ConnectionEntry } from "./agentDefinitionForm";
+
 export type ProfileKind = "claude" | "codex";
 
 /** Codex 叠加配置的固定名字，与引擎侧保持一致。 */
@@ -25,9 +27,21 @@ export interface ProfileFormInput {
   baseUrl: string;
   /** 鉴权取值所在的环境变量名；库里只存这个名字，永远不存取值。 */
   tokenVar: string;
+  /** Claude 凭据走哪个请求头：token = Authorization: Bearer，api_key = x-api-key。 */
+  authHeader: "token" | "api_key";
   model: string;
   /** 启动命令每次都带上的参数。 */
   extraArgs: string;
+  /** 表单不单独编辑的其他 env 变量（小模型、模型别名、超时等），编辑时原样保留。 */
+  extraEnv: Record<string, string>;
+}
+
+/** 表单自己管理的 Claude env 变量；其余 env 进 extraEnv 原样往返。 */
+const CLAUDE_FORM_ENV = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
+
+/** Claude 凭据请求头对应的变量名（官方网关文档的两种写法）。 */
+export function claudeCredentialEnv(authHeader: ProfileFormInput["authHeader"]): string {
+  return authHeader === "api_key" ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN";
 }
 
 /** 实例名规则：同时是启动命令名，与别名域一致。 */
@@ -65,8 +79,11 @@ export function buildProfileDefinition(input: ProfileFormInput, baseBin: string)
   };
   if (input.kind === "claude") {
     const env: Record<string, string> = {};
+    for (const [name, value] of Object.entries(input.extraEnv)) {
+      if (!CLAUDE_FORM_ENV.includes(name)) env[name] = value;
+    }
     if (input.baseUrl.trim()) env.ANTHROPIC_BASE_URL = input.baseUrl.trim();
-    if (input.tokenVar.trim()) env.ANTHROPIC_AUTH_TOKEN = `\${${input.tokenVar.trim()}}`;
+    if (input.tokenVar.trim()) env[claudeCredentialEnv(input.authHeader)] = `\${${input.tokenVar.trim()}}`;
     if (Object.keys(env).length > 0) profile.env = env;
   } else {
     if (input.baseUrl.trim()) profile.base_url = input.baseUrl.trim();
@@ -210,8 +227,16 @@ export function parseProfileDefinition(id: string, definition: Record<string, un
   const baseAgent = typeof profile.base_agent === "string" ? profile.base_agent : "claude-code";
   const kind: ProfileKind = profile.kind === "codex" || baseAgent === "codex" ? "codex" : "claude";
   const env = (profile.env ?? {}) as Record<string, string>;
-  const tokenRef = kind === "claude" ? env.ANTHROPIC_AUTH_TOKEN : (profile.env_key as string | undefined);
+  const authHeader: ProfileFormInput["authHeader"] =
+    kind === "claude" && env.ANTHROPIC_API_KEY !== undefined && env.ANTHROPIC_AUTH_TOKEN === undefined ? "api_key" : "token";
+  const tokenRef = kind === "claude" ? env[claudeCredentialEnv(authHeader)] : (profile.env_key as string | undefined);
   const tokenVar = tokenRef ? tokenRef.replace(/^\$\{/, "").replace(/\}$/, "") : "";
+  const extraEnv: Record<string, string> = {};
+  if (kind === "claude") {
+    for (const [name, value] of Object.entries(env)) {
+      if (!CLAUDE_FORM_ENV.includes(name)) extraEnv[name] = value;
+    }
+  }
   return {
     id,
     displayName: typeof definition.display_name === "string" ? definition.display_name : id,
@@ -220,7 +245,70 @@ export function parseProfileDefinition(id: string, definition: Record<string, un
     configDir: typeof profile.config_dir === "string" ? profile.config_dir : defaultConfigDir(kind, id),
     baseUrl: kind === "claude" ? (env.ANTHROPIC_BASE_URL ?? "") : ((profile.base_url as string | undefined) ?? ""),
     tokenVar,
+    authHeader,
     model: typeof profile.model === "string" ? profile.model : "",
     extraArgs: "",
+    extraEnv,
+  };
+}
+
+/** 接入名 → 可用的环境名：小写字母、数字与连字符，且避开已有名字。 */
+function profileIdFor(name: string, existingIds: string[]): string {
+  const stem =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "") || "relay";
+  const taken = new Set(existingIds);
+  let id = stem;
+  let n = 2;
+  while (taken.has(id)) {
+    id = `${stem}-${n}`;
+    n += 1;
+  }
+  return id;
+}
+
+/**
+ * 把一套接入配置建成独立环境的表单初值。第三方凭据只放进这个新环境自己的配置目录，
+ * 主配置保留给官方账号；凭据仍只引用同一个变量名，不复制取值。
+ *
+ * 返回表单初值与没能带过去的字段（Codex 独立环境不写超时）。引用 config.toml 里已有
+ * 接入方式的 Codex 接入没法搬进独立目录，返回 null。
+ */
+export function connectionToProfileInput(
+  agent: { id: string; kind: ProfileKind },
+  connection: ConnectionEntry,
+  existingIds: string[],
+): { input: ProfileFormInput; dropped: string[] } | null {
+  if (connection.providerRef) return null;
+  const id = profileIdFor(connection.name, existingIds);
+  const extraEnv: Record<string, string> = {};
+  const dropped: string[] = [];
+  if (agent.kind === "claude") {
+    if (connection.smallFastModel.trim()) extraEnv.ANTHROPIC_SMALL_FAST_MODEL = connection.smallFastModel.trim();
+    if (connection.aliasOpus.trim()) extraEnv.ANTHROPIC_DEFAULT_OPUS_MODEL = connection.aliasOpus.trim();
+    if (connection.aliasSonnet.trim()) extraEnv.ANTHROPIC_DEFAULT_SONNET_MODEL = connection.aliasSonnet.trim();
+    if (connection.aliasHaiku.trim()) extraEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL = connection.aliasHaiku.trim();
+    if (connection.timeoutMs.trim()) extraEnv.API_TIMEOUT_MS = connection.timeoutMs.trim();
+  } else if (connection.timeoutMs.trim()) {
+    dropped.push("请求超时");
+  }
+  return {
+    input: {
+      id,
+      displayName: connection.label.trim() || connection.name,
+      baseAgent: agent.id,
+      kind: agent.kind,
+      configDir: defaultConfigDir(agent.kind, id),
+      baseUrl: connection.baseUrl.trim(),
+      tokenVar: connection.tokenVar.trim(),
+      authHeader: connection.auth,
+      model: connection.model.trim(),
+      extraArgs: "",
+      extraEnv,
+    },
+    dropped,
   };
 }

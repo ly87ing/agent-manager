@@ -816,6 +816,53 @@ describe("助手运行参数", () => {
     expect(calls.some((call) => call.command === "secrets:set")).toBe(false);
   });
 
+  it("工作台把接入建成独立环境：预填新建表单，保存只写实例定义，不切主配置、不读凭据", async () => {
+    const withProfiles = routes();
+    const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "official",
+      profiles: {
+        official: { label: "官方" },
+        relay: {
+          label: "我的中转",
+          base_url: "https://relay.example.com",
+          auth: "api_key",
+          token_var: "RELAY_KEY",
+          model: "relay-model",
+          small_fast_model: "relay-small",
+        },
+      },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
+
+    await userEvent.click(await screen.findByLabelText("管理 我的中转"));
+    await userEvent.click(screen.getByTestId("make-profile-claude-code-relay"));
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    expect(within(dialog).getByTestId("profile-id-input")).toHaveValue("relay");
+    expect(within(dialog).getByTestId("profile-base-url")).toHaveValue("https://relay.example.com");
+    expect(within(dialog).getByTestId("profile-token-var")).toHaveValue("RELAY_KEY");
+    expect(within(dialog).getByTestId("profile-auth-header")).toHaveValue("api_key");
+    expect(within(dialog).getByTestId("profile-extra-env")).toHaveTextContent("ANTHROPIC_SMALL_FAST_MODEL");
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const saved = calls.find((call) => call.command === "policy:set")!;
+    expect(saved.args![saved.args!.indexOf("--key") + 1]).toBe("agents.definitions.relay");
+    const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(definition.profile).toMatchObject({
+      base_agent: "claude-code",
+      config_dir: "~/.claude-relay",
+      model: "relay-model",
+      env: {
+        ANTHROPIC_BASE_URL: "https://relay.example.com",
+        ANTHROPIC_API_KEY: "${RELAY_KEY}",
+        ANTHROPIC_SMALL_FAST_MODEL: "relay-small",
+      },
+    });
+    expect(configureCalls(calls)).toHaveLength(0);
+    expect(calls.some((call) => call.command === "secrets:set")).toBe(false);
+  });
+
   it("工作台导入接入：先预览，只保存定义且不启用、不写凭据", async () => {
     const withProfiles = routes();
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);

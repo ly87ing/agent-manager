@@ -3,6 +3,7 @@ import {
   PROFILE_ID_RE,
   authTerminalCommand,
   buildProfileDefinition,
+  connectionToProfileInput,
   defaultConfigDir,
   fixLaunchCommandTilde,
   launchCommandNeedsTildeFix,
@@ -12,6 +13,7 @@ import {
   profileMcpConfig,
   shellConfigDir,
 } from "../lib/profileDefinition";
+import { emptyConnection } from "../lib/agentDefinitionForm";
 
 const claudeInput = {
   id: "cc-ly",
@@ -21,6 +23,8 @@ const claudeInput = {
   configDir: "~/.claude-cc-ly",
   baseUrl: "https://api.example.com",
   tokenVar: "MY_TOKEN",
+  authHeader: "token" as const,
+  extraEnv: {} as Record<string, string>,
   model: "",
   extraArgs: "--dangerously-skip-permissions",
 };
@@ -130,5 +134,85 @@ describe("启动命令里的配置目录", () => {
     expect(normalizeConfigDir("$HOME/.claude-work")).toBe("~/.claude-work");
     expect(normalizeConfigDir("~/.claude-work/")).toBe("~/.claude-work");
     expect(normalizeConfigDir("$HOME")).toBe("~");
+  });
+
+  it("Claude 凭据请求头二选一，编辑往返不丢；表单不认识的 env 原样保留", () => {
+    const def = buildProfileDefinition({ ...claudeInput, authHeader: "api_key" }, "claude") as Record<string, any>;
+    expect(def.profile.env.ANTHROPIC_API_KEY).toBe("${MY_TOKEN}");
+    expect(def.profile.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    const parsed = parseProfileDefinition("cc-ly", {
+      profile: {
+        base_agent: "claude-code",
+        config_dir: "~/.claude-cc-ly",
+        env: {
+          ANTHROPIC_BASE_URL: "https://api.example.com",
+          ANTHROPIC_API_KEY: "${MY_TOKEN}",
+          ANTHROPIC_SMALL_FAST_MODEL: "small",
+          API_TIMEOUT_MS: "600000",
+        },
+      },
+    });
+    expect(parsed.authHeader).toBe("api_key");
+    expect(parsed.tokenVar).toBe("MY_TOKEN");
+    expect(parsed.extraEnv).toEqual({ ANTHROPIC_SMALL_FAST_MODEL: "small", API_TIMEOUT_MS: "600000" });
+    const rebuilt = buildProfileDefinition(parsed, "claude") as Record<string, any>;
+    expect(rebuilt.profile.env).toEqual({
+      ANTHROPIC_BASE_URL: "https://api.example.com",
+      ANTHROPIC_API_KEY: "${MY_TOKEN}",
+      ANTHROPIC_SMALL_FAST_MODEL: "small",
+      API_TIMEOUT_MS: "600000",
+    });
+  });
+
+  it("接入建成独立环境：带上地址、凭据变量名、请求头、模型与别名，名字可用且不重名", () => {
+    const connection = {
+      ...emptyConnection("GLM_4.5"),
+      label: "GLM 4.5",
+      baseUrl: "https://open.bigmodel.cn/api/anthropic",
+      auth: "api_key" as const,
+      tokenVar: "GLM_API_KEY",
+      model: "glm-4.5",
+      smallFastModel: "glm-4.5-air",
+      aliasOpus: "glm-4.5",
+      timeoutMs: "3000000",
+    };
+    const made = connectionToProfileInput({ id: "claude-code", kind: "claude" }, connection, ["glm-4-5"])!;
+    expect(made.dropped).toEqual([]);
+    expect(made.input).toMatchObject({
+      id: "glm-4-5-2",
+      displayName: "GLM 4.5",
+      baseAgent: "claude-code",
+      configDir: "~/.claude-glm-4-5-2",
+      baseUrl: "https://open.bigmodel.cn/api/anthropic",
+      tokenVar: "GLM_API_KEY",
+      authHeader: "api_key",
+      model: "glm-4.5",
+    });
+    expect(PROFILE_ID_RE.test(made.input.id)).toBe(true);
+    const def = buildProfileDefinition(made.input, "claude") as Record<string, any>;
+    expect(def.profile.env).toEqual({
+      ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic",
+      ANTHROPIC_API_KEY: "${GLM_API_KEY}",
+      ANTHROPIC_SMALL_FAST_MODEL: "glm-4.5-air",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "glm-4.5",
+      API_TIMEOUT_MS: "3000000",
+    });
+  });
+
+  it("Codex 接入建成独立环境：超时不带过去并如实说明；引用主配置接入方式的不能搬", () => {
+    const connection = {
+      ...emptyConnection("kimi"),
+      baseUrl: "https://api.kimi.com/coding/v1",
+      tokenVar: "KIMI_API_KEY",
+      timeoutMs: "90000",
+    };
+    const made = connectionToProfileInput({ id: "codex", kind: "codex" }, connection, [])!;
+    expect(made.dropped).toEqual(["请求超时"]);
+    expect(made.input.configDir).toBe("~/.codex-kimi");
+    const def = buildProfileDefinition(made.input, "codex") as Record<string, any>;
+    expect(def.profile).toMatchObject({ base_url: "https://api.kimi.com/coding/v1", env_key: "KIMI_API_KEY" });
+    expect(
+      connectionToProfileInput({ id: "codex", kind: "codex" }, { ...connection, providerRef: "ollama" }, []),
+    ).toBeNull();
   });
 });

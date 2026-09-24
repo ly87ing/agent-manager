@@ -24,6 +24,7 @@ import {
   parseProfileDefinition,
   profileKindOf,
   profileLaunchValue,
+  connectionToProfileInput,
   type ProfileFormInput,
 } from "../lib/profileDefinition";
 import { runEngine } from "../lib/engine";
@@ -420,6 +421,29 @@ export default function AgentsPage({
     }
   };
 
+  /**
+   * 把接入建成独立环境：打开预填好的新建表单，保存后照常写定义与启动命令。凭据仍引用同一个
+   * 变量名；第三方凭据只进新环境的目录，主配置留给官方账号。
+   */
+  const makeProfileFromConnection = (element: EngineElement, connection: ConnectionEntry) => {
+    const kind = connectionKindOf(element);
+    if (!kind) return;
+    const made = connectionToProfileInput(
+      { id: element.id.replace(/^agents:/, ""), kind },
+      connection,
+      elements.map((item) => item.id.replace(/^agents:/, "")),
+    );
+    if (!made) {
+      toast.error("这套接入引用主配置 config.toml 里的接入方式，没法搬进独立目录");
+      return;
+    }
+    if (made.dropped.length > 0) {
+      toast.warning(`独立环境不支持：${made.dropped.join("、")}，没有带过去`);
+    }
+    setProfileDuplicating(true);
+    setProfileForm(made.input);
+  };
+
   /** 分享内容不含凭据取值；导入只保存定义，不启用、不写助手配置。 */
   const exportConnection = async (element: EngineElement, connection: ConnectionEntry) => {
     const kind = connectionKindOf(element);
@@ -669,6 +693,7 @@ export default function AgentsPage({
             preserveUnknownFrom: connection.name,
           });
         }}
+        onMakeProfile={(element, connection) => makeProfileFromConnection(element, connection)}
         onExport={(element, connection) => void exportConnection(element, connection)}
         onRemove={(element, connection) => setConnectionRemoving({ agent: element, connection })}
         onMove={(element, connection, direction) => void moveConnection(element, connection, direction)}

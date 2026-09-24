@@ -47,6 +47,9 @@ export function ProfileFormDialog({
   const [configDir, setConfigDir] = useState(initial?.configDir ?? "");
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
   const [tokenVar, setTokenVar] = useState(initial?.tokenVar ?? "");
+  const [authHeader, setAuthHeader] = useState<ProfileFormInput["authHeader"]>(initial?.authHeader ?? "token");
+  /** 表单不单独编辑的 env（小模型、模型别名、超时等），原样带回定义。 */
+  const extraEnv = initial?.extraEnv ?? {};
   const [model, setModel] = useState(initial?.model ?? "");
   const [extraArgs, setExtraArgs] = useState(initial?.extraArgs ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -63,8 +66,10 @@ export function ProfileFormDialog({
     configDir: effectiveConfigDir,
     baseUrl,
     tokenVar,
+    authHeader,
     model,
     extraArgs,
+    extraEnv,
   };
   const launch = id ? profileLaunchValue(input, baseBinOf(baseAgent)) : "";
   const managedConfigFile = `${effectiveConfigDir.replace(/\/$/, "")}/${kind === "codex" ? "agent-manager.config.toml" : "settings.json"}`;
@@ -275,6 +280,26 @@ export function ProfileFormDialog({
                     />
                   </label>
                 </div>
+                {kind === "claude" && (
+                  <label className="mt-4 block text-sm font-medium text-foreground" htmlFor="profile-auth-header">
+                    凭据请求头
+                    <select
+                      id="profile-auth-header"
+                      value={authHeader}
+                      onChange={(event) => setAuthHeader(event.target.value === "api_key" ? "api_key" : "token")}
+                      data-testid="profile-auth-header"
+                      className="mt-2 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm"
+                    >
+                      <option value="token">Authorization: Bearer（ANTHROPIC_AUTH_TOKEN）</option>
+                      <option value="api_key">x-api-key（ANTHROPIC_API_KEY）</option>
+                    </select>
+                  </label>
+                )}
+                {Object.keys(extraEnv).length > 0 && (
+                  <p data-testid="profile-extra-env" className="mt-3 text-xs text-muted-foreground">
+                    另外保留的环境变量：<span className="font-mono">{Object.keys(extraEnv).sort().join("、")}</span>
+                  </p>
+                )}
                 <p className="mt-3 rounded-lg border border-info/20 bg-info/5 px-3 py-2 text-xs text-muted-foreground">
                   这里只保存变量名，不保存密钥值。取值来自「设置 → 密钥」选择的外部文件，或启动进程的环境变量。
                 </p>

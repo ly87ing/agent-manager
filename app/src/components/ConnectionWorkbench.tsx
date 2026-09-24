@@ -86,6 +86,7 @@ export function ConnectionWorkbench({
   onCheckAll,
   onEdit,
   onDuplicate,
+  onMakeProfile,
   onExport,
   onRemove,
   onMove,
@@ -113,6 +114,8 @@ export function ConnectionWorkbench({
   onCheckAll: (element: EngineElement, connections: ConnectionEntry[]) => void;
   onEdit: (element: EngineElement, connection: ConnectionEntry) => void;
   onDuplicate: (element: EngineElement, connection: ConnectionEntry) => void;
+  /** 把这套接入建成独立环境：第三方凭据放进新环境自己的目录，主配置留给官方账号。 */
+  onMakeProfile?: (element: EngineElement, connection: ConnectionEntry) => void;
   onExport: (element: EngineElement, connection: ConnectionEntry) => void;
   onRemove: (element: EngineElement, connection: ConnectionEntry) => void;
   onMove: (element: EngineElement, connection: ConnectionEntry, direction: "up" | "down") => void;
@@ -475,6 +478,7 @@ export function ConnectionWorkbench({
                 onCheck={kind && connection ? () => onCheck(selected, connection.name) : undefined}
                 onEdit={kind && connection ? () => onEdit(selected, connection) : undefined}
                 onDuplicate={kind && connection ? () => onDuplicate(selected, connection) : undefined}
+                onMakeProfile={kind && connection && onMakeProfile ? () => onMakeProfile(selected, connection) : undefined}
                 onExport={kind && connection ? () => onExport(selected, connection) : undefined}
                 onRemove={kind && connection ? () => onRemove(selected, connection) : undefined}
                 onMoveUp={kind && connection && index > 0 ? () => onMove(selected, connection, "up") : undefined}
@@ -567,6 +571,7 @@ function ConnectionCard({
   onCheck,
   onEdit,
   onDuplicate,
+  onMakeProfile,
   onExport,
   onRemove,
   onMoveUp,
@@ -583,6 +588,7 @@ function ConnectionCard({
   onCheck?: () => void;
   onEdit?: () => void;
   onDuplicate?: () => void;
+  onMakeProfile?: () => void;
   onExport?: () => void;
   onRemove?: () => void;
   onMoveUp?: () => void;
@@ -677,7 +683,7 @@ function ConnectionCard({
             {connection ? "编辑" : "添加 Provider"}
           </button>
         )}
-        {connection && (onCheck || onEdit || onDuplicate || onExport || onRemove || onMoveUp || onMoveDown) && (
+        {connection && (onCheck || onEdit || onDuplicate || onMakeProfile || onExport || onRemove || onMoveUp || onMoveDown) && (
           <details className="group relative">
             <summary aria-label={`管理 ${connection.label || connection.name}`} className="inline-flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-lg border text-muted-foreground hover:bg-accent">
               <MoreHorizontal className="h-4 w-4" aria-hidden />
@@ -723,6 +729,20 @@ function ConnectionCard({
                 className="rounded px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
               >
                 创建副本
+              </button>
+            )}
+            {onMakeProfile && connection && (
+              <button
+                type="button"
+                data-testid={`make-profile-${agentId}-${id}`}
+                disabled={disabled || Boolean(connection.providerRef)}
+                title={connection.providerRef
+                  ? "这套接入引用主配置 config.toml 里的接入方式，没法搬进独立目录"
+                  : "新建一个独立环境使用这套接入，官方账号留在主配置"}
+                onClick={(event) => runMenuAction(event, onMakeProfile)}
+                className="rounded px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                建成独立环境
               </button>
             )}
             {onExport && (
