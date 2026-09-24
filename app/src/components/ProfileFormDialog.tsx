@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { ArrowLeft, Bot, Folder, KeyRound, Play, Terminal } from "lucide-react";
+import { ArrowLeft, Bot, CopyPlus, Folder, KeyRound, Play, Terminal } from "lucide-react";
 import { hasPresetArgs, presetsForCommand, togglePresetArgs } from "../lib/agentPresets";
 import { cn } from "../lib/utils";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { detectSystemPlatform, urlHasUserinfo } from "../lib/agentDefinitionForm";
+import { ALL_SEED_ITEMS, type SeedItem } from "../lib/profileSeed";
+import { ProfileSeedPicker } from "./ProfileSeedPicker";
 import {
   PROFILE_ID_RE,
   SUBPROCESS_SCRUB_ENV,
@@ -46,7 +48,8 @@ export function ProfileFormDialog({
   isEdit?: boolean;
   existingIds: string[];
   baseBinOf: (agentId: string) => string;
-  onSubmit: (input: ProfileFormInput) => void;
+  /** 新建时另带要从默认环境带上的设置（编辑时为空）。 */
+  onSubmit: (input: ProfileFormInput, options: { seedItems: SeedItem[] }) => void;
   /** 用表单里的地址与凭据变量问接口能用哪些模型；失败时返回原因。只在点按钮时才联网。 */
   onFetchModels?: (draft: { kind: ProfileKind; baseUrl: string; tokenVar: string }) => Promise<string[] | string>;
   onClose: () => void;
@@ -78,6 +81,8 @@ export function ProfileFormDialog({
   );
   const [model, setModel] = useState(initial?.model ?? "");
   const [extraArgs, setExtraArgs] = useState(initial?.extraArgs ?? "");
+  /** 新建时从默认环境带上的设置：默认全选，与默认环境用起来一样；编辑已有环境时不在表单里带。 */
+  const [seedItems, setSeedItems] = useState<SeedItem[]>(ALL_SEED_ITEMS);
   const [error, setError] = useState<string | null>(null);
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
 
@@ -147,7 +152,7 @@ export function ProfileFormDialog({
       setError("填了鉴权变量名就要填接口地址：凭据只配合这个环境自己的接口使用");
       return;
     }
-    onSubmit(input);
+    onSubmit(input, { seedItems: isEdit ? [] : seedItems });
   };
 
   return (
@@ -483,6 +488,23 @@ export function ProfileFormDialog({
                 )}
               </section>
 
+              {!isEdit && (
+                <section className="rounded-xl border bg-card p-5 shadow-sm" aria-labelledby="profile-seed-heading" data-testid="profile-seed-section">
+                  <div className="mb-4 flex items-start gap-3">
+                    <span className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <CopyPlus className="h-5 w-5" aria-hidden />
+                    </span>
+                    <div>
+                      <h3 id="profile-seed-heading" className="font-semibold text-foreground">5. 从默认环境带上</h3>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        独立环境不读主配置里的设置。勾选的项在创建后从默认环境复制一份进来，之后也可以在卡片上再带。
+                      </p>
+                    </div>
+                  </div>
+                  <ProfileSeedPicker kind={kind} selected={seedItems} onChange={setSeedItems} testIdPrefix="profile-seed" />
+                </section>
+              )}
+
               {error && (
                 <p role="alert" data-testid="profile-form-error" className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
                   {error}
@@ -542,7 +564,9 @@ export function ProfileFormDialog({
               </section>
 
               <p className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-xs leading-5 text-muted-foreground">
-                保存只记录这套定义，不会改配置文件。回到助手页点击「写入配置」后才会落地。
+                {isEdit
+                  ? "保存只更新这套定义；实际配置已存在时不自动覆盖，回到卡片上对比后再写入。"
+                  : "创建后写好这个环境的配置（Codex 官方账号环境没有要写的）与启动命令，再按勾选从默认环境带上设置。"}
               </p>
             </aside>
           </div>
@@ -551,7 +575,7 @@ export function ProfileFormDialog({
 
       <footer className="flex-none border-t bg-card px-6 py-4">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4">
-          <span className="hidden text-xs text-muted-foreground sm:block">保存定义后，你仍可在写入前继续检查和修改</span>
+          <span className="hidden text-xs text-muted-foreground sm:block">之后可以在卡片上继续检查、修改与写入</span>
           <div className="ml-auto flex items-center gap-3">
             <button type="button" onClick={onClose} className="rounded-lg border bg-background px-5 py-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
               取消

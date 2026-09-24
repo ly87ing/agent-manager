@@ -66,7 +66,7 @@ Claude Code 和 Codex 的内置默认渠道均为官方 `native` 命令；brew �
 
 `rules:apply` 每次写一个目标的实际文件，必须带 `--only` 与 `--base`，新内容四选一：直接编辑（`--value`）、已保存模板（`--template`）、来源规则（`--source-rule <集合>/<名字>`）、另一目标的实际正文（`--from`）。写入前重读实际内容与 `base` 比对，不一致即拒绝并提示「已在外部修改」，文件与库不变；写入取全局排他锁，做文件字节 CAS、失败回滚与审计，审计只记 id 与摘要。用模板、来源规则或复制覆盖前先回填：目标现有内容非空且对不上任何已保存模板、来源规则或上次从来源写入的那一版时，自动另存为备份模板（名称含目标与时间）；现有内容疑似含凭据时不入库，改为拒绝覆盖。直接编辑不另存备份。规则没有「同步」与「接管」，不产生「待同步」。
 
-规则模板（`rule_templates`）由 `rules:save-template`（修改带 revision CAS）与 `rules:delete-template` 维护，只写库、不动文件、不取 apply 锁。规则内容不编进程序：推荐规则由技能来源提供，与技能共用集合定义、镜像目录与「更新资源库」——git 集合读数据目录里仓库镜像的 `rules/*.md`，本地目录集合读登记目录的 `rules/*.md`（改了即时生效），`README.md` 除外；只读、从不入库，界面应用前展示与目标现有内容的差异。应用来源规则时在库里记下「目标 → 规则 id + 写入摘要」（`rule_source_applied`，归属记录），据此判断来源有新版本而文件还是上次写入的那一版，界面提示「更新到新版本」；文件在外部被改过只说明情况，不标可更新；文件已与来源规则一致时应用只记下跟随、不改文件；用别的内容写入则清掉记录。审计记规则 id、摘要与 git 来源的提交号。作者维护的规则在 agent-skills 仓库 `rules/`（2026-09-23 从本仓 `agent-rule/rules` 连同历史迁出），旧库迁移判定用的旧版共享规则冻结在 `engine-rs/assets/legacy-rules/`。`profiles:apply` 不再渲染或检测实例规则文件；新建实例不自动写规则文件，可在规则页从主助手复制。
+规则模板（`rule_templates`）由 `rules:save-template`（修改带 revision CAS）与 `rules:delete-template` 维护，只写库、不动文件、不取 apply 锁。规则内容不编进程序：推荐规则由技能来源提供，与技能共用集合定义、镜像目录与「更新资源库」——git 集合读数据目录里仓库镜像的 `rules/*.md`，本地目录集合读登记目录的 `rules/*.md`（改了即时生效），`README.md` 除外；只读、从不入库，界面应用前展示与目标现有内容的差异。应用来源规则时在库里记下「目标 → 规则 id + 写入摘要」（`rule_source_applied`，归属记录），据此判断来源有新版本而文件还是上次写入的那一版，界面提示「更新到新版本」；文件在外部被改过只说明情况，不标可更新；文件已与来源规则一致时应用只记下跟随、不改文件；用别的内容写入则清掉记录。审计记规则 id、摘要与 git 来源的提交号。作者维护的规则在 agent-skills 仓库 `rules/`（2026-09-23 从本仓 `agent-rule/rules` 连同历史迁出），旧库迁移判定用的旧版共享规则冻结在 `engine-rs/assets/legacy-rules/`。`profiles:apply` 不再渲染或检测实例规则文件；新建实例时用户勾选「从默认环境带上」规则文件才复制（`profiles:seed` 经 `rules:apply --from`），也可在规则页从主助手复制。
 
 旧的共享 + 助手专用来源（`rules.shared` / `rules.claude` / `rules.codex`）已退役；hooks 与别名来源同样已退役（见「Aliases 原生域状态」「Hooks 原生域状态」），`sources:get/set` 已整体移除。旧库 `rule_sources` 中用户改过、且与内置不同的内容在写路径迁移成「旧规则来源（Claude）」「旧规则来源（Codex）」模板（按旧规则渲染共享 + 对应专用来源），读路径即时推导同一结果；迁移不改实际文件、不删旧表，旧 `rule_target_bindings` 不再作为写入门槛。配置备份导出 `rule_templates`，旧备份里的 `rules.*` 来源导入时同样转成旧来源模板。
 
@@ -349,6 +349,24 @@ AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、�
 保存后照常写实例定义与启动命令，不切换也不改主配置。引用主配置 `config.toml` 里接入方式的 Codex
 接入没法搬进独立目录，这一项置灰。实例表单的 Claude 凭据请求头可选 Bearer（`ANTHROPIC_AUTH_TOKEN`）
 或 x-api-key（`ANTHROPIC_API_KEY`），表单不单独编辑的其他 env 编辑时原样保留。
+
+从默认环境带上设置（`profiles:seed --only profiles:<实例> --items <项,…>`，取 apply 锁）：独立环境有自己的
+配置目录，助手不再读主配置里的用户级设置；CC Switch 在同一目录里切换接入，这些自然都在。这里改为复制一次：
+新建表单的「从默认环境带上」默认勾选全部五项，创建后（写好配置与启动命令之后）执行；卡片上可随时再带。可带的项
+与来源——权限（Claude `settings.json` 的 `permissions`；Codex 的 `approval_policy`、`approvals_reviewer`、
+`sandbox_mode`、`sandbox_workspace_write`、`default_permissions`、`permissions`，作为一组整体带，实例里有其中
+任一个就不带，免得两套写法拼在一起）、状态栏（Claude `statusLine`；Codex `[tui]` 的 `status_line` 与
+`status_line_use_colors`）、Hooks、规则文件（`CLAUDE.md` / `AGENTS.md`）与 MCP 服务。规矩：只补实例里还没有的，
+已有的不动（同名 MCP 条目也不动）；凭据一律不带——`env` 与 `apiKeyHelper` 不在可选项里，含明文凭据的 MCP 条目
+（像凭据的 env 字面量、字面量请求头、地址里的账号密码、Codex 的 `bearer_token`）整条跳过并点名，要带就在 MCP 页
+逐条复制；各项走各自的负责人：权限与状态栏没有别的域管，由这里写（写前按读到的字节比对、原子换入，Codex 合并后
+做加载前自检）；Hooks、规则与 MCP 分别调用 `hooks:apply --value`、`rules:apply --from` 与 `mcp:apply --action
+copy`，与在各自页面上操作是同一套写前比对、链接解析与审计。各项互不牵连，一项失败照常做下一项，逐项返回
+`copied` / `exists` / `absent` / `skipped` / `failed` 与说明；实例配置目录还没有时由实例域建好（0700）。审计只记
+带了哪些项与各自结果，不记内容。技能不在其中，在技能页按环境分配。2026-09-24 用隔离 HOME 与编译出的引擎
+CLI 实测：两类实例五项都带上，主配置字节不变，实例文件 0600、目录 0700，真实 `claude mcp list` 与 `codex mcp
+list` 在实例目录里只列出不含明文凭据的那一条，Codex 能加载合并后的 `config.toml`；再带一次全部 `exists` /
+`skipped` 且实例文件字节不变。
 
 接入卡片也可直接复制。副本预填地址、模型、凭据变量名和来源 profile 的未知扩展字段，唯一名称
 按 `<原名>-copy`、`<原名>-copy-2` 依次避让且不超过 64 字符；不会读取或复制凭据取值，默认只保存

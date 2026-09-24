@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:adopt / agents:configure|check|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:adopt|seed / agents:configure|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -62,6 +62,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("aliases", "discard-legacy") => true,
         // 以实例的实际配置更新实例定义：只写库，不动实例文件
         ("profiles", "adopt") => true,
+        // 把默认环境的权限、状态栏、hooks、规则与 MCP 一次性带进实例：只补实例没有的
+        ("profiles", "seed") => true,
         // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
         ("agents", "configure") => true,
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
@@ -128,6 +130,8 @@ enum ArgValueKind {
     TemplateName,
     /// 规则模板 revision：64 位小写 sha256。
     Revision,
+    /// profiles:seed 要带的项：逗号分隔，只能是引擎认得的几项（引擎再校验一次）。
+    SeedItems,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -185,6 +189,10 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--base", ArgValueKind::RuleBase));
         }
         // 只读发现：--only 取域名（agents/skills/mcp），引擎侧再做词汇表校验
+        ("profiles", "seed") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--items", ArgValueKind::SeedItems));
+        }
         ("system", "discover") => specs.push(("--only", ArgValueKind::ElementId)),
         ("runs", "get") => {
             specs.push(("--run", ArgValueKind::RunId));
@@ -311,6 +319,17 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
     match kind {
         ArgValueKind::Flag => Ok(()),
         ArgValueKind::ElementId => validate_element_id(value),
+        ArgValueKind::SeedItems => {
+            const ITEMS: &[&str] = &["permissions", "statusline", "hooks", "rules", "mcp"];
+            if !value.is_empty() && value.split(',').all(|item| ITEMS.contains(&item)) {
+                Ok(())
+            } else {
+                Err(EngineError::new(
+                    "invalid_args",
+                    format!("非法的带入项 '{value}'（只能从 {} 里选）", ITEMS.join("、")),
+                ))
+            }
+        }
         ArgValueKind::RunId => validate_run_id(value),
         ArgValueKind::PolicyLayer => {
             if value == "local" {
@@ -670,6 +689,7 @@ mod tests {
             "profiles:status",
             "profiles:apply",
             "profiles:adopt",
+            "profiles:seed",
             "secrets:status",
             "secrets:set",
             "secrets:source",
@@ -1324,6 +1344,39 @@ mod tests {
         assert!(validate_args(
             "profiles:apply",
             &args(&["--only", "profiles:cc-ly", "--allow-takeover"])
+        )
+        .is_err());
+        // seed：只认那几项，逗号分隔；凭据相关的 env / apiKeyHelper 不在其中
+        assert!(validate_args(
+            "profiles:seed",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--items",
+                "permissions,hooks,mcp"
+            ])
+        )
+        .is_ok());
+        for items in ["", "env", "permissions,env", "mcp;rm", "permissions, hooks"] {
+            assert!(
+                validate_args(
+                    "profiles:seed",
+                    &args(&["--only", "profiles:cc-ly", "--items", items])
+                )
+                .is_err(),
+                "--items {items:?} 应拒绝"
+            );
+        }
+        assert!(validate_args(
+            "profiles:seed",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--items",
+                "mcp",
+                "--base",
+                &base
+            ])
         )
         .is_err());
     }

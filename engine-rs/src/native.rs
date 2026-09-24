@@ -166,6 +166,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let is_hook_apply = request.command.replace('.', ":") == "hooks:apply";
     let is_alias_apply = request.command.replace('.', ":") == "aliases:apply";
     let is_profile_apply = request.command.replace('.', ":") == "profiles:apply";
+    let is_profile_seed = request.command.replace('.', ":") == "profiles:seed";
     // 运行参数写助手配置文件，与别的写动作同样要排他；校验在 configure 内部做，
     // 这里只负责取锁。
     let is_agent_configure = matches!(
@@ -316,6 +317,29 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         }
     } else if is_profile_apply {
         match crate::native_profiles::preflight_apply(ctx, request) {
+            Ok(()) => (true, "Profiles", "PROFILE_ERROR"),
+            Err(err) => {
+                let env = Envelope::new(
+                    request.command.replacen(':', ".", 1),
+                    mode_of(request),
+                    Lock {
+                        held: false,
+                        pid: None,
+                    },
+                    request.run_id.clone(),
+                    Value::Object(Map::new()),
+                    vec![],
+                    vec![diagnostic(
+                        "PROFILE_ERROR",
+                        None,
+                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
+                    )],
+                );
+                return env;
+            }
+        }
+    } else if is_profile_seed {
+        match crate::native_profiles::preflight_seed(ctx, request) {
             Ok(()) => (true, "Profiles", "PROFILE_ERROR"),
             Err(err) => {
                 let env = Envelope::new(
@@ -520,9 +544,11 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
                 .map(|data| (data, vec![]))
                 .map_err(|err| DispatchError::new("HOOK_ERROR", format!("{err:#}")))
         }
-        ("profiles", "status" | "apply" | "adopt") => crate::native_profiles::handle(ctx, request)
-            .map(|data| (data, vec![]))
-            .map_err(|err| DispatchError::new("PROFILE_ERROR", format!("{err:#}"))),
+        ("profiles", "status" | "apply" | "adopt" | "seed") => {
+            crate::native_profiles::handle(ctx, request)
+                .map(|data| (data, vec![]))
+                .map_err(|err| DispatchError::new("PROFILE_ERROR", format!("{err:#}")))
+        }
         // 别名以 rc 文件受管区块的实际行为准：apply 写文件（取锁），丢弃旧版保存的别名只写库
         ("aliases", "status" | "apply" | "discard-legacy") => {
             crate::native_aliases::handle(ctx, request)

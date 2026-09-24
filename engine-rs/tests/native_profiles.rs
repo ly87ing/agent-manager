@@ -1276,3 +1276,364 @@ fn 查余额只对有官方接口的厂商_没取值不发请求() {
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+fn seed(ctx: &Context, id: &str, items: &str) -> agent_manager_engine::Envelope {
+    execute(
+        ctx,
+        &request(
+            "profiles:seed",
+            &["--only", &format!("profiles:{id}"), "--items", items],
+        ),
+    )
+}
+
+fn seed_states(env: &agent_manager_engine::Envelope) -> Vec<(String, String)> {
+    env.data["results"]
+        .as_array()
+        .expect("有 results")
+        .iter()
+        .map(|r| {
+            (
+                r["item"].as_str().unwrap().to_string(),
+                r["state"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+fn states(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect()
+}
+
+/// 实例目录下全部文件的字节快照（比对「没有写」用）。
+fn snapshot_dir(dir: &std::path::Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(path) = stack.pop() {
+        for entry in std::fs::read_dir(&path).unwrap() {
+            let p = entry.unwrap().path();
+            if p.is_dir() {
+                stack.push(p);
+            } else {
+                out.push((p.clone(), std::fs::read(&p).unwrap()));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn 默认环境的设置可一次性带进_claude_独立环境_只补没有的_不带凭据() {
+    let (root, ctx) = temp_ctx("seed-claude");
+    std::env::set_var("AM_TEST_SEED_CLAUDE_TOKEN", "seed-token-value");
+    let main_dir = ctx.home_dir.join(".claude");
+    std::fs::create_dir_all(&main_dir).unwrap();
+    let main_settings = serde_json::json!({
+        "permissions": {"allow": ["Bash(ls:*)"], "defaultMode": "acceptEdits"},
+        "statusLine": {"type": "command", "command": "~/.claude/statusline.sh"},
+        "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo done"}]}]},
+        "env": {"ANTHROPIC_AUTH_TOKEN": "main-secret-token"},
+        "apiKeyHelper": "~/bin/key.sh"
+    });
+    std::fs::write(
+        main_dir.join("settings.json"),
+        serde_json::to_vec_pretty(&main_settings).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(main_dir.join("CLAUDE.md"), "# 我的规则\n").unwrap();
+    let main_claude_json = serde_json::json!({
+        "oauthAccount": {"emailAddress": "YOUR_EMAIL"},
+        "mcpServers": {
+            "fs": {"type": "stdio", "command": "npx", "args": ["-y", "fs-mcp"], "env": {"LOG": "debug"}},
+            "gh": {"type": "stdio", "command": "gh-mcp", "env": {"GITHUB_TOKEN": "literal-token-value"}},
+            "dup": {"type": "stdio", "command": "from-main"}
+        }
+    });
+    std::fs::write(
+        ctx.home_dir.join(".claude.json"),
+        serde_json::to_vec_pretty(&main_claude_json).unwrap(),
+    )
+    .unwrap();
+    let main_before = snapshot_dir(&main_dir);
+    let main_json_before = std::fs::read(ctx.home_dir.join(".claude.json")).unwrap();
+
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_SEED_CLAUDE_TOKEN")
+    ));
+    let dir = ctx.home_dir.join(".claude-ly");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(".claude.json"),
+        r#"{"mcpServers":{"dup":{"type":"stdio","command":"instance-own"}}}"#,
+    )
+    .unwrap();
+    let apply = apply_now(&ctx, "cc-ly");
+    assert!(apply.ok, "{:?}", apply.errors);
+    let state_before = element(&status(&ctx), "cc-ly")["state"].clone();
+
+    let env = seed(&ctx, "cc-ly", "permissions,statusline,hooks,rules,mcp");
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(
+        seed_states(&env),
+        states(&[
+            ("permissions", "copied"),
+            ("statusline", "copied"),
+            ("hooks", "copied"),
+            ("rules", "copied"),
+            ("mcp", "copied"),
+        ])
+    );
+    let mcp = &env.data["results"][4];
+    assert_eq!(mcp["skipped"], serde_json::json!(["gh"]), "{mcp}");
+    let detail = mcp["detail"].as_str().unwrap();
+    assert!(
+        detail.contains("已复制 fs") && detail.contains("dup"),
+        "{detail}"
+    );
+    assert!(!detail.contains("literal-token-value"));
+
+    let settings = claude_settings(&ctx, ".claude-ly");
+    assert_eq!(settings["permissions"], main_settings["permissions"]);
+    assert_eq!(settings["statusLine"], main_settings["statusLine"]);
+    assert_eq!(settings["hooks"], main_settings["hooks"]);
+    assert!(settings.get("apiKeyHelper").is_none(), "凭据命令不带");
+    assert_eq!(
+        settings["env"]["ANTHROPIC_AUTH_TOKEN"], "seed-token-value",
+        "实例自己的凭据不被主配置的 env 覆盖"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap(),
+        "# 我的规则\n"
+    );
+    let instance_json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join(".claude.json")).unwrap()).unwrap();
+    let servers = instance_json["mcpServers"].as_object().unwrap();
+    assert_eq!(servers["fs"]["command"], "npx");
+    assert_eq!(servers["dup"]["command"], "instance-own", "同名条目不动");
+    assert!(!servers.contains_key("gh"), "含明文凭据的条目不带");
+    assert!(
+        instance_json.get("oauthAccount").is_none(),
+        "不带主配置的账号字段"
+    );
+
+    // 主配置一个字节都没动
+    assert_eq!(snapshot_dir(&main_dir), main_before);
+    assert_eq!(
+        std::fs::read(ctx.home_dir.join(".claude.json")).unwrap(),
+        main_json_before
+    );
+    // 带进来的都不是实例定义管的字段：实例状态不变
+    assert_eq!(element(&status(&ctx), "cc-ly")["state"], state_before);
+
+    // 再带一次：都已有，什么都不写
+    let instance_before = snapshot_dir(&dir);
+    let again = seed(&ctx, "cc-ly", "permissions,statusline,hooks,rules,mcp");
+    assert!(again.ok, "{:?}", again.errors);
+    assert_eq!(
+        seed_states(&again),
+        states(&[
+            ("permissions", "exists"),
+            ("statusline", "exists"),
+            ("hooks", "exists"),
+            ("rules", "exists"),
+            ("mcp", "skipped"),
+        ])
+    );
+    assert_eq!(snapshot_dir(&dir), instance_before);
+
+    // 审计只记项与结果
+    let runs = execute(&ctx, &request("runs:get", &["--run", "profiles-test"]));
+    assert!(runs.ok, "{:?}", runs.errors);
+    let text = serde_json::to_string(&runs.data).unwrap();
+    assert!(text.contains("profiles:seed"), "{text}");
+    for secret in [
+        "literal-token-value",
+        "main-secret-token",
+        "echo done",
+        "我的规则",
+    ] {
+        assert!(!text.contains(secret), "审计里出现了内容 {secret}");
+    }
+    std::env::remove_var("AM_TEST_SEED_CLAUDE_TOKEN");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn 默认环境的设置可一次性带进_codex_独立环境_不破坏接入_状态栏在_tui_下() {
+    let (root, ctx) = temp_ctx("seed-codex");
+    std::env::set_var("AM_TEST_SEED_CODEX_TOKEN", "seed-codex-value");
+    let main_dir = ctx.home_dir.join(".codex");
+    std::fs::create_dir_all(&main_dir).unwrap();
+    std::fs::write(
+        main_dir.join("config.toml"),
+        r#"model = "gpt-5.5"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = true
+
+[tui]
+status_line = ["model", "cwd"]
+
+[mcp_servers.fs]
+command = "npx"
+args = ["-y", "fs-mcp"]
+
+[mcp_servers.gh]
+command = "gh-mcp"
+env = { GITHUB_TOKEN = "literal-token-value" }
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        main_dir.join("hooks.json"),
+        r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo codex"}]}]}}"#,
+    )
+    .unwrap();
+    std::fs::write(main_dir.join("AGENTS.md"), "codex rules\n").unwrap();
+    let main_before = snapshot_dir(&main_dir);
+
+    assert!(save_definition(
+        &ctx,
+        "cx-work",
+        r#"{"display_name":"Codex · work","bin":"codex","mcp_config":{"path":"~/.codex-work/config.toml","format":"toml"},"profile":{"base_agent":"codex","config_dir":"~/.codex-work","base_url":"https://api.example.com/v1","env_key":"AM_TEST_SEED_CODEX_TOKEN","model":"gpt-5.5"},"_delete":false,"_replace":true}"#
+    ));
+    let apply = apply_now(&ctx, "cx-work");
+    assert!(apply.ok, "{:?}", apply.errors);
+    let dir = ctx.home_dir.join(".codex-work");
+
+    let env = seed(&ctx, "cx-work", "permissions,statusline,hooks,rules,mcp");
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(
+        seed_states(&env),
+        states(&[
+            ("permissions", "copied"),
+            ("statusline", "copied"),
+            ("hooks", "copied"),
+            ("rules", "copied"),
+            ("mcp", "copied"),
+        ]),
+        "{}",
+        env.data
+    );
+    let doc: toml::Table = std::fs::read_to_string(dir.join("config.toml"))
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(doc["approval_policy"].as_str(), Some("on-request"));
+    assert_eq!(doc["sandbox_mode"].as_str(), Some("workspace-write"));
+    assert_eq!(
+        doc["sandbox_workspace_write"]["network_access"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(doc["tui"]["status_line"].as_array().map(Vec::len), Some(2));
+    assert_eq!(doc["mcp_servers"]["fs"]["command"].as_str(), Some("npx"));
+    assert!(
+        doc["mcp_servers"].get("gh").is_none(),
+        "含明文凭据的条目不带"
+    );
+    assert_eq!(
+        doc["model_provider"].as_str(),
+        Some("agent-manager"),
+        "实例自己的接入原样保留"
+    );
+    let hooks: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("hooks.json")).unwrap()).unwrap();
+    assert_eq!(
+        hooks["hooks"]["Stop"][0]["hooks"][0]["command"],
+        "echo codex"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("AGENTS.md")).unwrap(),
+        "codex rules\n"
+    );
+    assert_eq!(snapshot_dir(&main_dir), main_before, "主配置不动");
+    std::env::remove_var("AM_TEST_SEED_CODEX_TOKEN");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn 带设置的前提不满足时拒绝且零写_各项失败互不牵连() {
+    let (root, ctx) = temp_ctx("seed-guard");
+    std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
+    std::fs::write(
+        ctx.home_dir.join(".claude/settings.json"),
+        r#"{"permissions":{"allow":["Bash(ls:*)"]}}"#,
+    )
+    .unwrap();
+    std::fs::write(ctx.home_dir.join(".claude/CLAUDE.md"), "rules\n").unwrap();
+    assert!(save_definition(
+        &ctx,
+        "cc-work",
+        r#"{"display_name":"Claude Code · work","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-work","model":"opus"},"_delete":false,"_replace":true}"#
+    ));
+
+    // 未知实例、坏参数、不安全的目录：拒绝，什么都不建
+    assert!(!seed(&ctx, "nope", "rules").ok);
+    assert!(!seed(&ctx, "cc-work", "env").ok);
+    assert!(
+        !execute(
+            &ctx,
+            &request("profiles:seed", &["--only", "profiles:cc-work"])
+        )
+        .ok
+    );
+    let _ = save_definition(
+        &ctx,
+        "cc-main",
+        r#"{"display_name":"Claude Code · main","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude","model":"opus"},"_delete":false,"_replace":true}"#,
+    );
+    assert!(
+        !seed(&ctx, "cc-main", "rules").ok,
+        "不能把主配置目录当实例目录"
+    );
+    assert!(!ctx.home_dir.join(".claude-work").exists());
+
+    // 目录还没建（官方账号 Codex 环境还没写过配置时就是这样）：由实例域建好（仅本人可访问）再带
+    let dir = ctx.home_dir.join(".claude-work");
+    let env = seed(&ctx, "cc-work", "rules");
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(seed_states(&env), states(&[("rules", "copied")]));
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+    }
+    std::fs::remove_file(dir.join("CLAUDE.md")).unwrap();
+
+    // 实例 settings.json 损坏：权限项失败，规则照常带
+    std::fs::write(dir.join("settings.json"), "{ not json").unwrap();
+    let env = seed(&ctx, "cc-work", "permissions,rules");
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(
+        seed_states(&env),
+        states(&[("permissions", "failed"), ("rules", "copied")])
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("settings.json")).unwrap(),
+        "{ not json",
+        "损坏的文件原样不动"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap(),
+        "rules\n"
+    );
+
+    // 主配置里没有的项：报「没有」，不写
+    std::fs::write(dir.join("settings.json"), "{}\n").unwrap();
+    let env = seed(&ctx, "cc-work", "statusline");
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(seed_states(&env), states(&[("statusline", "absent")]));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("settings.json")).unwrap(),
+        "{}\n"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}

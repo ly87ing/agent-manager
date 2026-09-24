@@ -101,6 +101,19 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
     "profiles:status": makeEnvelope({ domain: "profiles", elements: profiles }, { command: "profiles.status" }),
     "profiles:apply": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply" }),
     "profiles:adopt": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.adopt" }),
+    "profiles:seed": makeEnvelope(
+      {
+        domain: "profiles",
+        action: "seed",
+        element: "profiles:cc-work",
+        results: [
+          { item: "permissions", state: "copied", detail: "已带上权限规则" },
+          { item: "hooks", state: "copied", detail: "已带上 1 条 hooks" },
+          { item: "rules", state: "absent", detail: "默认环境没有 CLAUDE.md" },
+        ],
+      },
+      { command: "profiles.seed" },
+    ),
     "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
     "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
     "policy:set": makeEnvelope(makePolicyData(), { command: "policy.set" }),
@@ -222,6 +235,111 @@ describe("助手实例", () => {
     expect(configWrite.args).toEqual(["--only", "profiles:cc-home", "--base", "missing"]);
     const aliasWrite = calls.find((call) => call.command === "aliases:apply")!;
     expect(calls.indexOf(configWrite)).toBeLessThan(calls.indexOf(aliasWrite));
+  });
+
+  it("新建环境默认从默认环境带上全部设置；取消勾选的不带，且在写好配置与启动命令之后才带", async () => {
+    const { calls } = renderWithEngine(
+      <AgentsPage />,
+      routes([profileElement(), profileElement({ id: "profiles:cc-work" })]),
+    );
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    const section = within(dialog).getByTestId("profile-seed-section");
+    for (const item of ["permissions", "statusline", "hooks", "rules", "mcp"]) {
+      expect(within(section).getByTestId(`profile-seed-${item}`)).toBeChecked();
+    }
+    // 说清楚来源与不带什么
+    expect(section).toHaveTextContent("CLAUDE.md");
+    expect(section).toHaveTextContent("凭据（env、apiKeyHelper）不带");
+    await userEvent.click(within(section).getByTestId("profile-seed-statusline"));
+    await userEvent.click(within(section).getByTestId("profile-seed-mcp"));
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+
+    await waitFor(() => expect(calls.some((call) => call.command === "profiles:seed")).toBe(true));
+    const seedCall = calls.find((call) => call.command === "profiles:seed")!;
+    expect(seedCall.args).toEqual(["--only", "profiles:cc-work", "--items", "permissions,hooks,rules"]);
+    const aliasWrite = calls.find((call) => call.command === "aliases:apply")!;
+    const configWrite = calls.find((call) => call.command === "profiles:apply")!;
+    expect(calls.indexOf(seedCall)).toBeGreaterThan(calls.indexOf(configWrite));
+    expect(calls.indexOf(seedCall)).toBeGreaterThan(calls.indexOf(aliasWrite));
+    expect(await screen.findByText("已从默认环境带上：权限规则、Hooks")).toBeInTheDocument();
+  });
+
+  it("新建时全都不勾就不带；编辑已有环境不在表单里带", async () => {
+    const { calls } = renderWithEngine(
+      <AgentsPage />,
+      routes([profileElement(), profileElement({ id: "profiles:cc-work" })]),
+    );
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    let dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    for (const item of ["permissions", "statusline", "hooks", "rules", "mcp"]) {
+      await userEvent.click(within(dialog).getByTestId(`profile-seed-${item}`));
+    }
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
+    expect(calls.some((call) => call.command === "profiles:seed")).toBe(false);
+
+    await userEvent.click(await screen.findByTestId("profile-edit-cc-ly"));
+    dialog = await screen.findByRole("dialog", { name: "编辑独立环境" });
+    expect(within(dialog).queryByTestId("profile-seed-section")).toBeNull();
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "编辑独立环境" })).toBeNull());
+    expect(calls.some((call) => call.command === "profiles:seed")).toBe(false);
+  });
+
+  it("卡片上可以再从默认环境带上：按勾选的项执行，逐项就地显示结果；被拒时说明原因", async () => {
+    let reject = false;
+    const routeMap = {
+      ...routes(),
+      "profiles:seed": async (args: string[]) =>
+        reject
+          ? makeEnvelope(null, {
+              command: "profiles.seed",
+              ok: false,
+              errors: [{ code: "PROFILE_ERROR", element: null, message: "[cc-ly] 实例已停用，不带设置" }],
+            })
+          : makeEnvelope(
+              {
+                domain: "profiles",
+                action: "seed",
+                element: "profiles:cc-ly",
+                results: args[3].split(",").map((item) =>
+                  item === "mcp"
+                    ? { item, state: "skipped", detail: "含明文凭据或格式不认识、没有复制：gh（需要的话在 MCP 页逐条复制）", skipped: ["gh"] }
+                    : { item, state: "exists", detail: "独立环境已有，没有改" },
+                ),
+              },
+              { command: "profiles.seed" },
+            ),
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
+    await openInstanceManager();
+    const card = await screen.findByTestId("profile-card-cc-ly");
+    expect(within(card).queryByTestId("profile-seed-panel-cc-ly")).toBeNull();
+    await userEvent.click(within(card).getByTestId("profile-seed-cc-ly"));
+    const panel = within(card).getByTestId("profile-seed-panel-cc-ly");
+    await userEvent.click(within(panel).getByTestId("profile-seed-cc-ly-permissions"));
+    await userEvent.click(within(panel).getByTestId("profile-seed-cc-ly-statusline"));
+    await userEvent.click(within(panel).getByTestId("profile-seed-cc-ly-hooks"));
+    await userEvent.click(within(panel).getByTestId("profile-seed-run-cc-ly"));
+    expect(await within(panel).findByTestId("profile-seed-result-cc-ly-mcp")).toHaveTextContent(
+      "MCP 服务：含明文凭据或格式不认识、没有复制：gh",
+    );
+    expect(within(panel).getByTestId("profile-seed-result-cc-ly-rules")).toHaveTextContent("规则文件：独立环境已有，没有改");
+    const call = calls.find((item) => item.command === "profiles:seed")!;
+    expect(call.args).toEqual(["--only", "profiles:cc-ly", "--items", "rules,mcp"]);
+
+    reject = true;
+    await userEvent.click(within(panel).getByTestId("profile-seed-run-cc-ly"));
+    expect(await within(panel).findByTestId("profile-seed-error-cc-ly")).toHaveTextContent("实例已停用，不带设置");
+    // 什么都不勾时不能点
+    await userEvent.click(within(panel).getByTestId("profile-seed-cc-ly-rules"));
+    await userEvent.click(within(panel).getByTestId("profile-seed-cc-ly-mcp"));
+    expect(within(panel).getByTestId("profile-seed-run-cc-ly")).toBeDisabled();
   });
 
   it("实例卡片把还没置空的外部凭据变量合并成一句说明，不逐条铺开", async () => {

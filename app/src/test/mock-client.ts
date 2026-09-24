@@ -1398,6 +1398,26 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
           { command: "agents.models" },
         );
       }
+      if (command === "profiles:seed") {
+        const id = (argOf(args, "--only") ?? "").replace(/^profiles:/, "");
+        const items = (argOf(args, "--items") ?? "").split(",").filter(Boolean);
+        const demo: Record<string, { state: string; detail: string; skipped?: string[] }> = {
+          permissions: { state: "copied", detail: "已带上权限规则" },
+          statusline: { state: "absent", detail: "默认环境没有设置状态栏" },
+          hooks: { state: "copied", detail: "已带上 2 条 hooks" },
+          rules: { state: "exists", detail: "独立环境已有 CLAUDE.md，没有改" },
+          mcp: { state: "copied", detail: "已复制 fs；含明文凭据或格式不认识、没有复制：gh（需要的话在 MCP 页逐条复制）", skipped: ["gh"] },
+        };
+        return makeEnvelope(
+          {
+            domain: "profiles",
+            action: "seed",
+            element: `profiles:${id}`,
+            results: items.map((item) => ({ item, ...(demo[item] ?? { state: "absent", detail: "" }) })),
+          },
+          { command: "profiles.seed", run_id: runId },
+        );
+      }
       if (command === "rules:apply") return applyRules(args, runId);
       if (command === "rules:save-template") return saveRuleTemplate(args);
       if (command === "rules:delete-template") return deleteRuleTemplate(args);

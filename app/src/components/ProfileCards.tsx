@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Activity, Copy, FolderTree, Loader2, PlayCircle, Plus, Sparkles, Terminal, Trash2, Wrench } from "lucide-react";
+import { Activity, Copy, CopyPlus, FolderTree, Loader2, PlayCircle, Plus, Sparkles, Terminal, Trash2, Wrench } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
 import type { OfficialAuthStatus } from "../lib/observed";
 import type { ProfileObserved, ProfileSpec } from "../lib/contract";
@@ -10,6 +10,8 @@ import { StateBadge } from "./StateBadge";
 import { cn } from "../lib/utils";
 import { overrideEffect } from "../lib/overrideEffects";
 import { balanceSupported } from "../lib/balance";
+import { ALL_SEED_ITEMS, seedLabel, seedStateText, type SeedItem, type SeedResult } from "../lib/profileSeed";
+import { ProfileSeedPicker } from "./ProfileSeedPicker";
 
 /** 实例状态 → 一句话说明用户现在处于什么位置。 */
 const STATE_NOTE: Record<string, string> = {
@@ -39,6 +41,7 @@ export function ProfileCard({
   onCheckAuth,
   onCheckEndpoint,
   onCheckBalance,
+  onSeed,
 }: {
   element: EngineElement;
   bin: string;
@@ -64,7 +67,22 @@ export function ProfileCard({
   onCheckEndpoint?: () => Promise<{ ok: boolean; detail: string; latencyMs: number }>;
   /** 查这个环境凭据的余额（只对有官方余额接口的厂商）；返回一行结果或失败原因。 */
   onCheckBalance?: () => Promise<string>;
+  /** 从默认环境把勾选的设置带进这个环境；返回逐项结果或失败原因。 */
+  onSeed?: (items: SeedItem[]) => Promise<SeedResult[] | string>;
 }) {
+  const [seedOpen, setSeedOpen] = useState(false);
+  const [seedItems, setSeedItems] = useState<SeedItem[]>(ALL_SEED_ITEMS);
+  const [seeding, setSeeding] = useState(false);
+  const [seedOutcome, setSeedOutcome] = useState<SeedResult[] | string | null>(null);
+  const runSeed = async () => {
+    if (!onSeed || seedItems.length === 0) return;
+    setSeeding(true);
+    try {
+      setSeedOutcome(await onSeed(seedItems));
+    } finally {
+      setSeeding(false);
+    }
+  };
   const [balance, setBalance] = useState<string | null>(null);
   const [balanceBusy, setBalanceBusy] = useState(false);
   const [endpointCheck, setEndpointCheck] = useState<{ ok: boolean; detail: string; latencyMs: number } | null>(null);
@@ -352,6 +370,64 @@ export function ProfileCard({
         </p>
       )}
 
+      {seedOpen && onSeed && (
+        <div data-testid={`profile-seed-panel-${id}`} className="mt-3 rounded-lg border bg-muted/30 p-3">
+          <p className="mb-2 text-xs font-medium text-foreground">从默认环境带上</p>
+          <ProfileSeedPicker
+            kind={spec.kind === "codex" ? "codex" : "claude"}
+            selected={seedItems}
+            onChange={setSeedItems}
+            testIdPrefix={`profile-seed-${id}`}
+          />
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              data-testid={`profile-seed-run-${id}`}
+              disabled={seeding || seedItems.length === 0}
+              onClick={() => void runSeed()}
+              className="inline-flex items-center gap-1 rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/15 disabled:opacity-50"
+            >
+              {seeding && <Loader2 className="h-3 w-3 animate-spin" aria-hidden />}
+              {seeding ? "正在带…" : "带上"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSeedOpen(false);
+                setSeedOutcome(null);
+              }}
+              className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
+            >
+              收起
+            </button>
+          </div>
+          {typeof seedOutcome === "string" && (
+            <p data-testid={`profile-seed-error-${id}`} className="mt-2 text-xs text-destructive">
+              {seedOutcome}
+            </p>
+          )}
+          {Array.isArray(seedOutcome) && (
+            <ul data-testid={`profile-seed-results-${id}`} className="mt-2 space-y-1 text-xs">
+              {seedOutcome.map((result) => (
+                <li
+                  key={result.item}
+                  data-testid={`profile-seed-result-${id}-${result.item}`}
+                  className={cn(
+                    result.state === "copied"
+                      ? "text-success"
+                      : result.state === "failed"
+                        ? "text-destructive"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  {seedLabel(result.item)}：{result.detail || seedStateText(result.state)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
         {thirdParty && onCheckEndpoint && (
           <button
@@ -423,6 +499,18 @@ export function ProfileCard({
         >
           <Copy className="h-3 w-3" aria-hidden /> 复制
         </button>
+        {onSeed && (
+          <button
+            type="button"
+            data-testid={`profile-seed-${id}`}
+            aria-expanded={seedOpen}
+            onClick={() => setSeedOpen((open) => !open)}
+            title="把默认环境的权限、状态栏、Hooks、规则与 MCP 复制一份进这个环境；只补这里没有的，凭据不带"
+            className="inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
+          >
+            <CopyPlus className="h-3 w-3" aria-hidden /> 从默认环境带上
+          </button>
+        )}
         <button
           type="button"
           data-testid={`profile-skills-${id}`}

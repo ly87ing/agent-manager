@@ -59,6 +59,8 @@ import type { AgentsSpec, OfficialAuthStatus } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
 import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource } from "../lib/useAliasSource";
 import { useDirectApply } from "../lib/useDirectApply";
+import { useExecutions } from "../lib/execution";
+import { seedArgs, summarizeSeed, type SeedItem, type SeedResult } from "../lib/profileSeed";
 
 /** 用定义覆盖实例实际配置前的说明：实例文件自己设了、定义没声明的凭据相关变量会被置空，点名说出来。 */
 function overwriteDescription(element: EngineElement): string {
@@ -87,6 +89,7 @@ export default function AgentsPage({
   // 实例（同一助手的多套独立配置）：定义与 agents 共用，状态与写入走 profiles 域
   const profilesQuery = useEngineQuery<StatusData>("profiles:status");
   const profileApply = useDirectApply();
+  const { execute } = useExecutions();
   const [profileForm, setProfileForm] = useState<ProfileFormInput | "new" | null>(null);
   /** 复制实例：表单带着预填内容，但名称与配置目录仍要能改（否则两个实例指同一套配置）。 */
   const [profileDuplicating, setProfileDuplicating] = useState(false);
@@ -532,8 +535,40 @@ export default function AgentsPage({
     return applied?.ok === true;
   };
 
-  /** 保存实例：写定义、（第三方环境与 Claude 环境）写好配置，再把启动命令存成同名快捷命令。 */
-  const saveProfile = async (input: ProfileFormInput) => {
+  /**
+   * 从默认环境把勾选的设置带进独立环境（只补环境里没有的，凭据不带）。返回逐项结果或失败原因；
+   * 执行记录照常留在任务记录里。
+   */
+  const seedProfile = async (id: string, items: SeedItem[]): Promise<SeedResult[] | string> => {
+    const envelope = await execute({
+      command: "profiles:seed",
+      args: seedArgs(id, items),
+      label: `从默认环境带设置到 ${id}`,
+      silent: true,
+    });
+    if (!envelope) return "调用失败，详见任务记录";
+    if (!envelope.ok) return envelope.errors[0]?.message ?? "没有带上，详见任务记录";
+    return (envelope.data as { results?: SeedResult[] } | null)?.results ?? [];
+  };
+
+  const toastSeed = (id: string, outcome: SeedResult[] | string) => {
+    if (typeof outcome === "string") {
+      toast.error(`没有从默认环境带上设置到 ${id}：${outcome}`, {
+        description: "可以稍后在环境卡片上点「从默认环境带上」再试。",
+      });
+      return;
+    }
+    const summary = summarizeSeed(outcome);
+    (summary.failed ? toast.warning : toast.success)(summary.title, {
+      description: summary.description || undefined,
+    });
+  };
+
+  /**
+   * 保存实例：写定义、（第三方环境与 Claude 环境）写好配置，再把启动命令存成同名快捷命令；新建时
+   * 最后按勾选从默认环境带上设置。
+   */
+  const saveProfile = async (input: ProfileFormInput, seedItems: SeedItem[] = []) => {
     const definition = buildProfileDefinition(input, baseBinOf(input.baseAgent));
     let envelope;
     try {
@@ -579,6 +614,7 @@ export default function AgentsPage({
     }
     setProfileForm(null);
     setProfileDuplicating(false);
+    if (seedItems.length > 0) toastSeed(input.id, await seedProfile(input.id, seedItems));
     void profilesQuery.refetch();
   };
 
@@ -831,6 +867,7 @@ export default function AgentsPage({
                     }
                   }}
                   onCheckBalance={() => fetchBalance(["--only", element.id])}
+                  onSeed={(items) => seedProfile(id, items)}
                   onCheckEndpoint={async () => {
                     try {
                       const envelope = await runEngine<{ ok?: boolean; detail?: string; latency_ms?: number }>(
@@ -998,7 +1035,7 @@ export default function AgentsPage({
           existingIds={elements.map((element) => element.id.replace(/^agents:/, ""))}
           baseBinOf={baseBinOf}
           onFetchModels={fetchModelsForDraft}
-          onSubmit={(input) => void saveProfile(input)}
+          onSubmit={(input, options) => void saveProfile(input, options.seedItems)}
           onClose={() => {
             setProfileForm(null);
             setProfileDuplicating(false);
