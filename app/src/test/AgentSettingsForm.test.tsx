@@ -1146,6 +1146,35 @@ describe("助手运行参数", () => {
     expect(configureCalls(calls)).toHaveLength(0);
   });
 
+  it("官方账号卡片可按需检查登录，登录与退出命令只复制不执行", async () => {
+    const withAuth = routes({
+      "agents:auth-status": makeEnvelope(
+        { element: "agents:claude-code", state: "logged-in", logged_in: true, method: "console", third_party: false, mixed: false, reason: null },
+        { command: "agents.auth-status" },
+      ),
+    });
+    const written: string[] = [];
+    Object.assign(navigator, {
+      clipboard: { writeText: async (text: string) => void written.push(text) },
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, withAuth);
+
+    const panel = await screen.findByTestId("main-auth-status-claude-code");
+    expect(within(panel).getByTestId("main-auth-text-claude-code")).toHaveTextContent("未检查");
+    // 刷新页面时不调用官方命令，只在点「检查登录」时查一次
+    expect(calls.some((call) => call.command === "agents:auth-status")).toBe(false);
+    await userEvent.click(within(panel).getByTestId("main-auth-check-claude-code"));
+    await waitFor(() => expect(within(panel).getByTestId("main-auth-text-claude-code")).toHaveTextContent("已登录（Claude Console 账号）"));
+    expect(calls.find((call) => call.command === "agents:auth-status")?.args).toEqual(["--only", "agents:claude-code"]);
+
+    await userEvent.click(within(panel).getByTestId("main-claude-code-auth-login"));
+    await userEvent.click(within(panel).getByTestId("main-claude-code-auth-logout"));
+    await waitFor(() => expect(written).toEqual(["claude auth login", "claude auth logout"]));
+    // 主配置的命令不带配置目录变量，也不触发任何写入
+    expect(written.join("\n")).not.toContain("CLAUDE_CONFIG_DIR");
+    expect(configureCalls(calls)).toHaveLength(0);
+  });
+
   it("没配接入配置的助手：工作台明确展示官方账号和新增入口", async () => {
     renderWithEngine(<AgentsPage />, routes());
     expect(await screen.findByTestId("connection-card-claude-code-default")).toHaveTextContent("当前使用");

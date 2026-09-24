@@ -1,9 +1,10 @@
-import { useState, type MouseEvent } from "react";
+import { Fragment, useState, type MouseEvent } from "react";
 import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Download, Loader2, MoreHorizontal, Pencil, Save, Settings2, Terminal, Trash2, Upload } from "lucide-react";
 import { AgentRuntimePanel } from "./AgentRuntimePanel";
 import { ConfigFileEditor } from "./ConfigFileEditor";
+import { OfficialAuthPanel } from "./OfficialAuthPanel";
 import type { EngineElement } from "../lib/contract";
-import type { AgentCurrentConfig, AgentsObserved, AgentsSpec } from "../lib/observed";
+import type { AgentCurrentConfig, AgentsObserved, AgentsSpec, OfficialAuthStatus } from "../lib/observed";
 import {
   isPlainHttpUrl,
   parseInitialToFormValues,
@@ -117,6 +118,7 @@ export function ConnectionWorkbench({
   onSaveCurrent,
   onFixStatusline,
   onClearEnvOverrides,
+  onCheckAuth,
 }: {
   agents: EngineElement[];
   selectedAgentId: string | null;
@@ -137,6 +139,8 @@ export function ConnectionWorkbench({
   onDuplicate: (element: EngineElement, connection: ConnectionEntry) => void;
   /** 把这套接入建成独立环境：第三方凭据放进新环境自己的目录，主配置留给官方账号。 */
   onMakeProfile?: (element: EngineElement, connection: ConnectionEntry) => void;
+  /** 用官方命令查一次主配置的官方账号登录状态；失败时返回原因。 */
+  onCheckAuth?: (element: EngineElement) => Promise<OfficialAuthStatus | string>;
   onExport: (element: EngineElement, connection: ConnectionEntry) => void;
   onRemove: (element: EngineElement, connection: ConnectionEntry) => void;
   onMove: (element: EngineElement, connection: ConnectionEntry, direction: "up" | "down") => void;
@@ -524,8 +528,8 @@ export function ConnectionWorkbench({
                 : -1;
               const isCurrent = connection ? active === connectionName : current?.default === true;
               return (
+              <Fragment key={connection?.name ?? "default"}>
               <ConnectionCard
-                key={connection?.name ?? "default"}
                 agentId={agentId}
                 connection={connection}
                 active={isCurrent}
@@ -542,6 +546,22 @@ export function ConnectionWorkbench({
                 onMoveUp={kind && connection && index > 0 ? () => onMove(selected, connection, "up") : undefined}
                 onMoveDown={kind && connection && index < form.connections.length - 1 ? () => onMove(selected, connection, "down") : undefined}
               />
+              {!connection && kind && onCheckAuth && (
+                <OfficialAuthPanel
+                  key={`auth-${agentId}`}
+                  kind={kind}
+                  bin={bin}
+                  testIds={{
+                    root: `main-auth-status-${agentId}`,
+                    text: `main-auth-text-${agentId}`,
+                    check: `main-auth-check-${agentId}`,
+                    mixed: `main-auth-mixed-${agentId}`,
+                    commands: `main-${agentId}`,
+                  }}
+                  onCheck={() => onCheckAuth(selected)}
+                />
+              )}
+              </Fragment>
               );
             })}
         </div>}

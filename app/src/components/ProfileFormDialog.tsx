@@ -234,6 +234,11 @@ export function ProfileFormDialog({
                   />
                 </label>
                 <p className="mt-2 text-xs text-muted-foreground">登录、会话、技能与 MCP 都放在这里；不会覆盖助手的全局配置。</p>
+                {isEdit && initial?.configDir && configDir.trim() && configDir.trim().replace(/\/$/, "") !== initial.configDir.replace(/\/$/, "") && (
+                  <p data-testid="profile-config-dir-moved" className="mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+                    换了配置目录：官方登录按目录保存（macOS 钥匙串条目也按目录路径区分），原目录里的登录、会话与技能不会跟过来，需要在新目录重新登录；不再使用原目录的登录时，先用原来的退出命令在终端退出。
+                  </p>
+                )}
               </section>
 
               <section className="rounded-xl border bg-card p-5 shadow-sm" aria-labelledby="profile-access-heading">
@@ -298,6 +303,11 @@ export function ProfileFormDialog({
                       <option value="token">Authorization: Bearer（ANTHROPIC_AUTH_TOKEN）</option>
                       <option value="api_key">x-api-key（ANTHROPIC_API_KEY）</option>
                     </select>
+                    {authHeader === "api_key" && (
+                      <span data-testid="profile-api-key-approval" className="mt-1 block text-xs font-normal text-muted-foreground">
+                        按官方说明，交互模式第一次启动会询问是否使用这个 API key，选「是」后会记住；不确定用哪种时选 Bearer（官方网关文档的默认建议）。
+                      </span>
+                    )}
                   </label>
                 )}
                 {Object.keys(extraEnv).length > 0 && (

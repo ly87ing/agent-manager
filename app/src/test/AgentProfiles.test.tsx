@@ -439,6 +439,22 @@ describe("助手实例", () => {
     expect(within(card).getByTestId("profile-auth-mixed-cc-ly")).toHaveTextContent("两种凭据混在同一个配置目录");
   });
 
+  it("编辑时换了配置目录提示登录不会跟过去；选 x-api-key 时说明首次启动要确认", async () => {
+    renderWithEngine(<AgentsPage />, routes());
+    await openInstanceManager();
+    const card = await screen.findByTestId("profile-card-cc-ly");
+    await userEvent.click(within(card).getByTestId("profile-edit-cc-ly"));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).queryByTestId("profile-config-dir-moved")).toBeNull();
+    const dir = within(dialog).getByTestId("profile-config-dir");
+    await userEvent.clear(dir);
+    await userEvent.type(dir, "~/.claude-other");
+    expect(within(dialog).getByTestId("profile-config-dir-moved")).toHaveTextContent("原目录里的登录、会话与技能不会跟过来");
+    expect(within(dialog).queryByTestId("profile-api-key-approval")).toBeNull();
+    await userEvent.selectOptions(within(dialog).getByTestId("profile-auth-header"), "api_key");
+    expect(within(dialog).getByTestId("profile-api-key-approval")).toHaveTextContent("第一次启动会询问是否使用这个 API key");
+  });
+
   it("官方账号环境可以复制登录命令；查不到登录时如实说未登录", async () => {
     const official = routes([
       profileElement({ observed: { ...(profileElement().observed as Record<string, unknown>), third_party: false, env_refs: [] } }),

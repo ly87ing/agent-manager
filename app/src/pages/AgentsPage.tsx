@@ -715,6 +715,14 @@ export default function AgentsPage({
             { message: "已清理 env 里的单次会话覆盖变量" },
           )
         }
+        onCheckAuth={async (element) => {
+          try {
+            const envelope = await runEngine<OfficialAuthStatus>("agents:auth-status", ["--only", element.id]);
+            return envelope.ok ? envelope.data : envelope.errors[0]?.message ?? "未知错误";
+          } catch (err) {
+            return String(err);
+          }
+        }}
       />}
       {environmentView === "independent" && (
           <section data-testid="independent-environments" className="space-y-4 rounded-xl border bg-card p-5 shadow-sm">
@@ -942,7 +950,7 @@ export default function AgentsPage({
       {profileRemoving && (
         <ConfirmModal
           title={`移除独立环境 ${profileRemoving}`}
-          description="只停止管理这个独立环境并删掉它的启动命令；配置目录、登录状态与里面的内容都原样保留，需要的话请自行删除目录。"
+          description="只停止管理这个独立环境并删掉它的启动命令；配置目录、登录状态与里面的内容都原样保留。官方登录按目录保存（macOS 在钥匙串里按目录路径区分），不再使用时请先用实例卡片上的退出命令在终端退出，再自行删除目录。"
           risk="write-local"
           confirmLabel="确认移除"
           executing={false}
