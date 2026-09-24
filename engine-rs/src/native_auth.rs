@@ -28,17 +28,20 @@ const CLAUDE_PROBE_ENV_REMOVE: &[&str] = &[
 const CODEX_PROBE_ENV_REMOVE: &[&str] = &["CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"];
 const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
-/// 官方 CLI：先找 `<HOME>/.local/bin`（官方安装器的落点），再找 PATH。
+/// 官方 CLI：先找 `<HOME>/.local/bin`（官方安装器的落点），再找 PATH，最后是其他常见
+/// 安装目录（桌面应用的 PATH 里没有 Homebrew、npm 全局目录）。
 fn resolve_cli(home_dir: &Path, bin: &str) -> Option<std::path::PathBuf> {
     let local = home_dir.join(".local").join("bin").join(bin);
     if local.is_file() {
         return Some(local);
     }
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths)
-            .map(|dir| dir.join(bin))
-            .find(|path| path.is_file())
-    })
+    std::env::var_os("PATH")
+        .map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+        .unwrap_or_default()
+        .into_iter()
+        .chain(crate::native_agents::fallback_bin_dirs(home_dir))
+        .map(|dir| dir.join(bin))
+        .find(|path| path.is_file())
 }
 
 /// 该目录的 settings.json 是否自己声明了凭据：声明了时官方命令只报告它，
@@ -118,7 +121,9 @@ pub(crate) fn official_status(
     let cli = resolve_cli(home_dir, bin)
         .ok_or_else(|| format!("找不到 {bin} 命令，无法用官方命令确认登录状态"))?;
     let mut command = std::process::Command::new(&cli);
-    command.env("HOME", home_dir);
+    command
+        .env("HOME", home_dir)
+        .env("PATH", crate::native_agents::path_for_command(&cli));
     match kind {
         AuthKind::Claude => {
             command.args(["auth", "status"]);
@@ -417,6 +422,37 @@ mod tests {
         );
         assert!(!format!("{claude:?}{codex:?}").contains("sk-secret-value"));
         assert!(!format!("{claude:?}").contains("relay.example.com"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// 桌面应用的 PATH 里没有 npm 全局目录：命令装在那里也要找得到，且它要靠同目录的
+    /// 解释器（npm 装的助手是 node 脚本）才能跑起来。
+    #[test]
+    fn npm_全局目录里的命令也能找到_并能用同目录的解释器运行() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = std::env::temp_dir().join(format!("am-auth-npm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let bin = home.join(".npm-global/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let interpreter = format!("am-fake-node-{}", std::process::id());
+        let cli = format!("am-npm-codex-{}", std::process::id());
+        for (name, body) in [
+            (interpreter.as_str(), "#!/bin/sh\nexec /bin/sh \"$@\"\n".to_string()),
+            (
+                cli.as_str(),
+                format!("#!/usr/bin/env {interpreter}\necho 'Not logged in' >&2\nexit 1\n"),
+            ),
+        ] {
+            let path = bin.join(name);
+            std::fs::write(&path, body).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let dir = home.join(".codex-relay");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        assert_eq!(resolve_cli(&home, &cli), Some(bin.join(&cli)));
+        let status = official_status(&home, AuthKind::Codex, &cli, Some(&dir));
+        assert_eq!(status.map(|s| s.logged_in), Ok(false));
         let _ = std::fs::remove_dir_all(&home);
     }
 }

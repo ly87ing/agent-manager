@@ -245,7 +245,31 @@ pub(crate) fn load_definitions(ctx: &Context) -> Result<Vec<AgentDef>> {
 
 // ---------- 只读探测 ----------
 
-/// PATH 与 ~/.local/bin 下解析 bin（home_dir 注入，测试替身）。
+/// PATH 之外还要查的常见安装目录：官方安装器、npm/volta/bun 全局目录与 Homebrew。
+/// 桌面应用从访达启动时 PATH 只有系统目录，不补这些就找不到用户装好的助手
+/// （CC Switch 等同类工具查的也是这一组）。
+pub(crate) fn fallback_bin_dirs(home_dir: &Path) -> Vec<PathBuf> {
+    vec![
+        home_dir.join(".local").join("bin"),
+        home_dir.join(".npm-global").join("bin"),
+        home_dir.join(".volta").join("bin"),
+        home_dir.join(".bun").join("bin"),
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ]
+}
+
+/// 执行已解析出的命令时用的 PATH：命令所在目录放最前，再接继承的 PATH。npm 装的助手是
+/// node 脚本，node 一般与它在同一目录；桌面应用继承的 PATH 里没有这个目录。
+pub(crate) fn path_for_command(bin_path: &Path) -> std::ffi::OsString {
+    let mut dirs: Vec<PathBuf> = bin_path.parent().map(Path::to_path_buf).into_iter().collect();
+    if let Some(paths) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&paths));
+    }
+    std::env::join_paths(dirs).unwrap_or_default()
+}
+
+/// 解析 bin：先 PATH，再 `fallback_bin_dirs`（home_dir 注入，测试替身）。
 pub(crate) fn resolve_bin(home_dir: &Path, bin: &str) -> Option<PathBuf> {
     if bin.is_empty() {
         return None;
@@ -253,7 +277,7 @@ pub(crate) fn resolve_bin(home_dir: &Path, bin: &str) -> Option<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).collect())
         .unwrap_or_default();
-    dirs.push(home_dir.join(".local").join("bin"));
+    dirs.extend(fallback_bin_dirs(home_dir));
     dirs.into_iter()
         .map(|dir| dir.join(bin))
         .find(|p| p.is_file())
@@ -383,6 +407,7 @@ pub(crate) fn probe_version(bin_path: &Path) -> Option<String> {
     let mut command = Command::new(bin_path);
     command
         .arg("--version")
+        .env("PATH", path_for_command(bin_path))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

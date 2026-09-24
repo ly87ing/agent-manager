@@ -11,7 +11,7 @@ use super::saved::{self, SavedRow};
 use super::targets::Format;
 use crate::native::Context;
 
-/// stdio 命令能否在本机解析（只读：查 PATH 与官方安装器常用的 ~/.local/bin）。
+/// stdio 命令能否在本机解析（只读：查 PATH 与常见安装目录）。
 ///
 /// 这是配完之后最容易踩的坑——命令没装，助手启动时才报错。只做存在性判断，
 /// 不执行它，也不对远程服务做网络探测。
@@ -22,7 +22,7 @@ fn command_resolvable(command: &str, home_dir: &std::path::Path) -> bool {
     let mut dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).collect())
         .unwrap_or_default();
-    dirs.push(home_dir.join(".local").join("bin"));
+    dirs.extend(crate::native_agents::fallback_bin_dirs(home_dir));
     dirs.into_iter().any(|dir| dir.join(command).is_file())
 }
 
