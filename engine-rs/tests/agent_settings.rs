@@ -228,20 +228,28 @@ fn 缺_base_或写法不是恰好一种时拒绝_且零写() {
             "--save-current",
             "--use-default",
         ],
-        vec![
-            "--only",
-            "agents:claude-code",
-            "--base",
-            "x",
-            "--save-current",
-            "--connection",
-            "{}",
-        ],
     ] {
         let env = execute(&ctx, &request("agents:configure", &args));
         assert!(!env.ok, "{args:?}");
         assert_eq!(env.errors[0].code, "USAGE_ERROR", "{args:?}");
     }
+    // --connection 是停用的写入第三方接入的选项：与 --use 同样按「主配置只放官方账号」拒绝
+    let retired = execute(
+        &ctx,
+        &request(
+            "agents:configure",
+            &[
+                "--only",
+                "agents:claude-code",
+                "--base",
+                "x",
+                "--save-current",
+                "--connection",
+                "{}",
+            ],
+        ),
+    );
+    assert_eq!(retired.errors[0].code, "AGENT_MAIN_OFFICIAL_ONLY");
     assert!(!ctx.home_dir.join(".claude/settings.json").exists());
     assert_eq!(db_bytes(&ctx), db_before);
 
