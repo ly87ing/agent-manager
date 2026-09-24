@@ -13,9 +13,11 @@
 //! - Claude 的 `--fork-session` 会新建一个会话文件，把之前的回复（同一个 message.id、同样的
 //!   用量）原样抄进去；因此按 message.id 在所有文件之间去重，去重键存库（8 字节摘要）。
 //! - Codex 复制型分叉与子代理的会话文件开头抄了父会话的记录（含 `token_count`），抄完写一条
-//!   `thread_settings_applied`；这段前缀不算，只取它的累计值作为本会话的起点。
+//!   归属本会话的 `thread_settings_applied`；这段前缀不算，只取它的累计值作为本会话的起点。
+//!   前缀里抄来的标记保留父会话的归属，不当成结束（见 `codex_prefix_end`）。
 //! - Codex 同一累计值重发的 `token_count`（如限额更新时）只算一次：累计值变了才是新的用量。
-//! - Claude 文件被截断时从头重读（有 message.id 去重兜底）；Codex 的不重读，接着往后读。
+//! - Claude 文件被截断时从头重读（有 message.id 去重兜底）；Codex 的不重读，从当前最后一个
+//!   完整行之后接着读。
 //!
 //! 独立环境（实例）的会话在各自配置目录下，同样统计，助手一栏记作 `claude:<实例>` /
 //! `codex:<实例>`。
@@ -85,6 +87,9 @@ fn ensure_tables(conn: &Connection) -> Result<bool> {
         conn.execute_batch(
             "ALTER TABLE usage_scan_state ADD COLUMN fork_pending INTEGER NOT NULL DEFAULT 0",
         )?;
+    }
+    if !columns.iter().any(|name| name == "fork_owner") {
+        conn.execute_batch("ALTER TABLE usage_scan_state ADD COLUMN fork_owner TEXT")?;
     }
     let fresh = !table_exists(conn, "usage_seen_messages")?;
     conn.execute_batch(SEEN_DDL)?;
@@ -226,18 +231,81 @@ struct CodexFile {
     model: Option<String>,
     /// 上一条计入（或作为起点）的累计值；同一累计值重发不再算。
     last_total: Option<String>,
-    /// 分叉文件还没读到 `thread_settings_applied`：之前的 `token_count` 是抄来的。
+    /// 分叉文件还没读到结束抄来前缀的 `thread_settings_applied`：之前的 `token_count` 是抄来的。
     fork_pending: bool,
+    /// 分叉文件自己的会话 id（`session_meta.id`），用来认出哪条标记是它自己的。
+    fork_owner: Option<String>,
 }
 
-/// 处理一段 Codex 会话记录，返回这段里新增的用量。
-fn codex_chunk_usage(chunk: &str, state: &mut CodexFile, agent: &str) -> Vec<(Bucket, Tokens)> {
+/// 文件多久没变才算写完。分叉文件读到末尾还没见到自己的标记时，写完了说明是不写标记的旧版本，
+/// 还在变就可能正写到一半（抄来的前缀与标记是同一次追加写入的），等下次再读。
+const CODEX_SETTLE_SECS: u64 = 30;
+
+/// 分叉文件的抄来前缀在哪条 `thread_settings_applied` 处结束：返回那一行在 `text` 里的起始字节。
+///
+/// 新版本（`rust-v0.156.1` 已是）的标记带 `thread_id`（归属会话），抄来的父会话标记保留原
+/// 归属——分叉的分叉、父会话恢复过都会让前缀里夹着别人的标记——只有归属本会话的那条才结束
+/// 前缀。更早的标记不带归属：本段里没有本会话的标记时，第一条不带归属的就是结束。不知道本会话
+/// id 时第一条标记就是结束。
+fn codex_prefix_end(text: &str, owner: Option<&str>) -> Option<usize> {
+    let mut first_any = None;
+    let mut first_anonymous = None;
+    let mut position = 0;
+    for line in text.split_inclusive('\n') {
+        let start = position;
+        position += line.len();
+        if !line.contains("thread_settings_applied") {
+            continue;
+        }
+        let Ok(event) = serde_json::from_str::<Value>(line.trim_end()) else {
+            continue;
+        };
+        let Some(payload) = event.get("payload") else {
+            continue;
+        };
+        if payload.get("type").and_then(Value::as_str) != Some("thread_settings_applied") {
+            continue;
+        }
+        first_any.get_or_insert(start);
+        match payload.get("thread_id").and_then(Value::as_str) {
+            Some(id) if owner == Some(id) => return Some(start),
+            Some(_) => {}
+            None => {
+                first_anonymous.get_or_insert(start);
+            }
+        }
+    }
+    if owner.is_none() {
+        first_any
+    } else {
+        first_anonymous
+    }
+}
+
+/// 处理一段 Codex 会话记录，返回这段里新增的用量；第二项是只消费到哪个字节（分叉文件的前缀
+/// 还没结束、文件又还在变时，下次从前缀开头重读），`None` 表示整段都已处理。`settled` 表示
+/// 文件已有一阵没变。
+fn codex_chunk_usage(
+    chunk: &str,
+    state: &mut CodexFile,
+    agent: &str,
+    settled: bool,
+) -> (Vec<(Bucket, Tokens)>, Option<usize>) {
     let mut out = Vec::new();
-    // 分叉文件里、标记之前的 token_count：先扣住，读到标记就作废
+    // 分叉文件里、结束标记之前的 token_count：先扣住，读到结束标记就作废
     let mut held: Vec<(Bucket, Tokens, Option<String>)> = Vec::new();
     let mut held_total: Option<String> = None;
-    for line in chunk.lines() {
-        let Ok(event) = serde_json::from_str::<Value>(line) else {
+    let mut pending_from = state.fork_pending.then_some(0);
+    let mut prefix_end = if state.fork_pending {
+        codex_prefix_end(chunk, state.fork_owner.as_deref())
+    } else {
+        None
+    };
+    let mut position = 0;
+    for raw in chunk.split_inclusive('\n') {
+        let start = position;
+        position += raw.len();
+        let Ok(event) = serde_json::from_str::<Value>(raw.trim_end()) else {
             continue;
         };
         let Some(payload) = event.get("payload") else {
@@ -246,6 +314,14 @@ fn codex_chunk_usage(chunk: &str, state: &mut CodexFile, agent: &str) -> Vec<(Bu
         if event.get("type").and_then(Value::as_str) == Some("session_meta") {
             if codex_is_fork(payload) {
                 state.fork_pending = true;
+                state.fork_owner = payload
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_string);
+                pending_from = Some(position);
+                prefix_end = codex_prefix_end(&chunk[position..], state.fork_owner.as_deref())
+                    .map(|end| end + position);
             }
             continue;
         }
@@ -253,13 +329,14 @@ fn codex_chunk_usage(chunk: &str, state: &mut CodexFile, agent: &str) -> Vec<(Bu
             state.model = Some(found.to_string());
         }
         match payload.get("type").and_then(Value::as_str) {
-            Some("thread_settings_applied") if state.fork_pending => {
-                // 抄来的父会话记录到此为止：它们的用量已记在父会话名下
+            // 抄来的父会话记录到此为止：它们的用量已记在父会话名下；其余标记是抄来的
+            Some("thread_settings_applied") if state.fork_pending && prefix_end == Some(start) => {
                 if held_total.is_some() {
                     state.last_total = held_total.take();
                 }
                 held.clear();
                 state.fork_pending = false;
+                pending_from = None;
             }
             Some("token_count") => {
                 let Some(info) = payload.get("info").filter(|info| !info.is_null()) else {
@@ -293,8 +370,12 @@ fn codex_chunk_usage(chunk: &str, state: &mut CodexFile, agent: &str) -> Vec<(Bu
             _ => {}
         }
     }
-    // 分叉文件读完这一段还没见到标记：不写这个标记的旧版本，分不清哪些是抄来的，按普通文件算
     if state.fork_pending && !held.is_empty() {
+        if !settled {
+            // 可能正写到一半：前缀先不消费，下次从前缀开头重读
+            return (out, pending_from);
+        }
+        // 文件已不再变仍没有结束标记：不写标记的旧版本，分不清哪些是抄来的，按普通文件算
         state.fork_pending = false;
         for (bucket, tokens, total) in held {
             if total.is_some() && total == state.last_total {
@@ -306,7 +387,7 @@ fn codex_chunk_usage(chunk: &str, state: &mut CodexFile, agent: &str) -> Vec<(Bu
             out.push((bucket, tokens));
         }
     }
-    out
+    (out, None)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -386,22 +467,49 @@ struct ScanState {
     moved: bool,
 }
 
+/// 截断后接着读的位置：当前最后一个完整行之后。Codex 可能正写到一半，停在半截行里会让那一行
+/// 下次读成残片、被跳过；往前 1 MiB 内找不到换行就停在末尾。
+fn last_line_boundary(path: &Path, size: u64) -> u64 {
+    const WINDOW: u64 = 1024 * 1024;
+    let from = size.saturating_sub(WINDOW);
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return size;
+    };
+    let mut buf = Vec::new();
+    if file.seek(SeekFrom::Start(from)).is_err()
+        || file
+            .by_ref()
+            .take(size - from)
+            .read_to_end(&mut buf)
+            .is_err()
+    {
+        return size;
+    }
+    match buf.iter().rposition(|byte| *byte == b'\n') {
+        Some(index) => from + index as u64 + 1,
+        None if from == 0 => 0,
+        None => size,
+    }
+}
+
 /// 上次扫到哪里。文件变小说明被重写过：Claude 从头重读（有 message.id 去重兜底），Codex
-/// 不重读（分不清哪些已经算过），从当前末尾接着往后读。
+/// 不重读（分不清哪些已经算过），从当前最后一个完整行之后接着往后读。
 fn load_scan_state(conn: &Connection, path: &str, size: u64, kind: SessionKind) -> ScanState {
-    let row: Option<(i64, Option<String>, Option<String>, i64)> = conn
+    type Row = (i64, Option<String>, Option<String>, i64, Option<String>);
+    let row: Option<Row> = conn
         .query_row(
-            "SELECT offset, model, last_total, fork_pending FROM usage_scan_state WHERE path = ?1",
+            "SELECT offset, model, last_total, fork_pending, fork_owner FROM usage_scan_state WHERE path = ?1",
             [path],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
         )
         .ok();
     match row {
-        Some((offset, model, last_total, fork_pending)) => {
+        Some((offset, model, last_total, fork_pending, fork_owner)) => {
             let codex = CodexFile {
                 model,
                 last_total,
                 fork_pending: fork_pending != 0,
+                fork_owner,
             };
             let offset = offset as u64;
             if offset <= size {
@@ -412,7 +520,7 @@ fn load_scan_state(conn: &Connection, path: &str, size: u64, kind: SessionKind) 
                 }
             } else if kind == SessionKind::Codex {
                 ScanState {
-                    offset: size,
+                    offset: last_line_boundary(Path::new(path), size),
                     codex,
                     moved: true,
                 }
@@ -509,6 +617,11 @@ pub(crate) fn scan(ctx: &Context, req: &Request) -> Result<Value, DispatchError>
             continue;
         };
         let size = meta.len();
+        let settled = meta
+            .modified()
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age.as_secs() >= CODEX_SETTLE_SECS);
         let key = path.display().to_string();
         let mut state = load_scan_state(&tx, &key, size, *kind);
         let chunk = if state.offset >= size {
@@ -516,7 +629,7 @@ pub(crate) fn scan(ctx: &Context, req: &Request) -> Result<Value, DispatchError>
         } else {
             read_new_lines(path, state.offset)
         };
-        let new_offset = match &chunk {
+        let mut new_offset = match &chunk {
             Some((_, new_offset)) => *new_offset,
             // 没有新的完整行；Codex 截断后跳到末尾的偏移仍要记下
             None if state.moved => state.offset,
@@ -537,18 +650,24 @@ pub(crate) fn scan(ctx: &Context, req: &Request) -> Result<Value, DispatchError>
                     }
                 }
                 SessionKind::Codex => {
-                    for (bucket, tokens) in codex_chunk_usage(chunk, &mut state.codex, agent) {
+                    let (usage, consumed) =
+                        codex_chunk_usage(chunk, &mut state.codex, agent, settled);
+                    for (bucket, tokens) in usage {
                         totals.entry(bucket).or_default().add(&tokens);
+                    }
+                    if let Some(consumed) = consumed {
+                        new_offset = state.offset + consumed as u64;
                     }
                 }
             }
         }
         tx.execute(
-            "INSERT INTO usage_scan_state (path, offset, size, model, updated_at, last_total, fork_pending)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO usage_scan_state (path, offset, size, model, updated_at, last_total, fork_pending, fork_owner)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT(path) DO UPDATE SET offset=excluded.offset, size=excluded.size,
                  model=excluded.model, updated_at=excluded.updated_at,
-                 last_total=excluded.last_total, fork_pending=excluded.fork_pending",
+                 last_total=excluded.last_total, fork_pending=excluded.fork_pending,
+                 fork_owner=excluded.fork_owner",
             rusqlite::params![
                 &key,
                 new_offset as i64,
@@ -557,6 +676,7 @@ pub(crate) fn scan(ctx: &Context, req: &Request) -> Result<Value, DispatchError>
                 chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
                 state.codex.last_total,
                 state.codex.fork_pending as i64,
+                state.codex.fork_owner,
             ],
         )
         .map_err(DispatchError::from)?;
@@ -788,7 +908,7 @@ mod tests {
             })),
         ]
         .join("\n");
-        let usage = codex_chunk_usage(&chunk, &mut state, "codex");
+        let usage = codex_chunk_usage(&chunk, &mut state, "codex", true).0;
         assert_eq!(state.model.as_deref(), Some("gpt-5.6-sol"));
         assert_eq!(usage.len(), 1);
         let (bucket, tokens) = &usage[0];
@@ -810,13 +930,16 @@ mod tests {
             codex_line("2026-09-17T09:00:01Z", token_count(100, 100, 10)),
         ]
         .join("\n");
-        assert_eq!(codex_chunk_usage(&first, &mut state, "codex").len(), 1);
+        assert_eq!(
+            codex_chunk_usage(&first, &mut state, "codex", true).0.len(),
+            1
+        );
         let later = [
             codex_line("2026-09-17T09:01:00Z", token_count(100, 100, 10)),
             codex_line("2026-09-17T09:02:00Z", token_count(160, 60, 5)),
         ]
         .join("\n");
-        let usage = codex_chunk_usage(&later, &mut state, "codex");
+        let usage = codex_chunk_usage(&later, &mut state, "codex", true).0;
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].1.input, 60);
     }
@@ -837,7 +960,9 @@ mod tests {
         ]
         .join("\n");
         // 标记还没写到：先扣住，不算也不当成旧版本
-        assert!(codex_chunk_usage(&meta, &mut state, "codex").is_empty());
+        assert!(codex_chunk_usage(&meta, &mut state, "codex", true)
+            .0
+            .is_empty());
         assert!(state.fork_pending);
         let rest = [
             codex_line("2026-09-17T10:00:00Z", token_count(1000, 1000, 50)),
@@ -851,7 +976,7 @@ mod tests {
             codex_line("2026-09-17T10:00:02Z", token_count(3050, 1000, 50)),
         ]
         .join("\n");
-        let usage = codex_chunk_usage(&rest, &mut state, "codex");
+        let usage = codex_chunk_usage(&rest, &mut state, "codex", true).0;
         assert_eq!(usage.len(), 1, "只算分叉后自己的那一次");
         assert!(!state.fork_pending);
 
@@ -865,7 +990,10 @@ mod tests {
             ),
             codex_line("2026-09-17T10:00:02Z", token_count(3050, 1000, 50))
         );
-        assert_eq!(codex_chunk_usage(&whole, &mut once, "codex").len(), 1);
+        assert_eq!(
+            codex_chunk_usage(&whole, &mut once, "codex", true).0.len(),
+            1
+        );
 
         // 真实 0.156.1 exec fork：标记在前，第一条 token_count 就是自己的
         let mut referenced = CodexFile::default();
@@ -882,7 +1010,12 @@ mod tests {
             codex_line("2026-09-17T10:00:02Z", token_count(3150, 1050, 0)),
         ]
         .join("\n");
-        assert_eq!(codex_chunk_usage(&real, &mut referenced, "codex").len(), 1);
+        assert_eq!(
+            codex_chunk_usage(&real, &mut referenced, "codex", true)
+                .0
+                .len(),
+            1
+        );
 
         // 子代理的会话元信息同样按分叉处理
         let spawned = json!({"timestamp": "t", "type": "session_meta", "payload": {"id": "sub",
@@ -904,8 +1037,118 @@ mod tests {
             codex_line("2026-09-17T10:00:01Z", token_count(200, 100, 1)),
         ]
         .join("\n");
-        assert_eq!(codex_chunk_usage(&chunk, &mut state, "codex").len(), 2);
+        assert_eq!(
+            codex_chunk_usage(&chunk, &mut state, "codex", true).0.len(),
+            2
+        );
         assert!(!state.fork_pending);
+    }
+
+    fn marker(owner: Option<&str>) -> String {
+        let mut payload = json!({"type": "thread_settings_applied"});
+        if let Some(owner) = owner {
+            payload["thread_id"] = json!(owner);
+        }
+        codex_line("2026-09-17T10:00:00Z", payload)
+    }
+
+    /// 分叉的分叉、或父会话恢复过：抄来的前缀里夹着父会话自己的标记（保留原归属），只有归属
+    /// 本会话的标记才结束前缀；父会话自己那段用量不再算一遍。
+    #[test]
+    fn codex_前缀里抄来的标记不当成结束_只认本会话的() {
+        let meta = json!({"timestamp": "t", "type": "session_meta",
+            "payload": {"id": "grandchild", "forked_from_id": "child"}})
+        .to_string();
+        let chunk = [
+            meta,
+            // 祖父会话的用量
+            codex_line("2026-09-17T10:00:00Z", token_count(1000, 1000, 50)),
+            // 子会话自己的标记与用量，都是抄来的
+            marker(Some("child")),
+            codex_line("2026-09-17T10:00:00Z", token_count(2050, 1000, 50)),
+            // 本会话的标记
+            marker(Some("grandchild")),
+            codex_line("2026-09-17T10:00:01Z", token_count(3100, 1000, 50)),
+        ]
+        .join("\n");
+        let mut state = CodexFile::default();
+        let (usage, consumed) = codex_chunk_usage(&chunk, &mut state, "codex", true);
+        assert_eq!(usage.len(), 1, "只算本会话自己的那一次");
+        assert_eq!(consumed, None);
+        assert!(!state.fork_pending);
+
+        // 不带归属的旧标记：本段里找不到本会话的标记时，第一条就是结束
+        let old = [
+            json!({"timestamp": "t", "type": "session_meta", "payload": {"id": "c", "forked_from_id": "p"}}).to_string(),
+            codex_line("2026-09-17T10:00:00Z", token_count(1000, 1000, 50)),
+            marker(None),
+            codex_line("2026-09-17T10:00:01Z", token_count(2050, 1000, 50)),
+        ]
+        .join("\n");
+        let mut state = CodexFile::default();
+        assert_eq!(
+            codex_chunk_usage(&old, &mut state, "codex", true).0.len(),
+            1
+        );
+    }
+
+    /// 读到前缀中途、文件还在变：前缀先不消费也不算，下次从前缀开头重读；本会话的标记写到后
+    /// 只算自己的。文件已不再变仍没有标记，才按不写标记的旧版本整份算。
+    #[test]
+    fn codex_分叉前缀读到一半时等下次_不提前按旧版本算() {
+        let meta = json!({"timestamp": "t", "type": "session_meta",
+            "payload": {"id": "child", "forked_from_id": "parent"}})
+        .to_string();
+        let copied = [
+            codex_line("2026-09-17T10:00:00Z", token_count(1000, 1000, 50)),
+            marker(Some("parent")),
+            codex_line("2026-09-17T10:00:00Z", token_count(2050, 1000, 50)),
+        ]
+        .join("\n");
+        let partial = format!("{meta}\n{copied}\n");
+        let mut state = CodexFile::default();
+        let (usage, consumed) = codex_chunk_usage(&partial, &mut state, "codex", false);
+        assert!(usage.is_empty());
+        assert_eq!(
+            consumed,
+            Some(meta.len() + 1),
+            "停在会话元信息之后、前缀开头"
+        );
+        assert!(state.fork_pending);
+        assert_eq!(state.fork_owner.as_deref(), Some("child"));
+
+        // 下次从前缀开头读到完整的一次追加
+        let rest = format!(
+            "{copied}\n{}\n{}\n",
+            marker(Some("child")),
+            codex_line("2026-09-17T10:00:02Z", token_count(3100, 1000, 50))
+        );
+        let (usage, consumed) = codex_chunk_usage(&rest, &mut state, "codex", false);
+        assert_eq!(usage.len(), 1);
+        assert_eq!(consumed, None);
+        assert!(!state.fork_pending);
+
+        // 同样的前缀，文件已不再变：按旧版本整份算
+        let mut settled = CodexFile::default();
+        assert_eq!(
+            codex_chunk_usage(&partial, &mut settled, "codex", true)
+                .0
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn codex_截断后停在最后一个完整行之后() {
+        let dir = std::env::temp_dir().join(format!("am-usage-boundary-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("r.jsonl");
+        std::fs::write(&path, "{\"a\":1}\n{\"half\":").unwrap();
+        assert_eq!(last_line_boundary(&path, 16), 8);
+        std::fs::write(&path, "{\"half\":").unwrap();
+        assert_eq!(last_line_boundary(&path, 8), 0, "整份只有半行：从头读");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
