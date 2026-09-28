@@ -67,9 +67,18 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
       { command: "secrets.set" },
     ),
     "aliases:status": makeEnvelope(makeAliasStatus({}), { command: "aliases.status" }),
+    "profiles:preview": makeEnvelope({
+      path: "/isolated/settings.json", exists: false, content: "{\"env\":{}}", files: [],
+    }, { command: "profiles.preview" }),
     "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
     ...overrides,
   };
+}
+
+async function submitProfileAfterPreview(dialog: HTMLElement) {
+  const submit = within(dialog).getByTestId("profile-form-submit");
+  await waitFor(() => expect(submit).toBeEnabled());
+  await userEvent.click(submit);
 }
 
 /** 运行设置直接在页签里，不再弹对话框。 */
@@ -997,7 +1006,7 @@ describe("助手运行参数", () => {
     // 官方已弃用 ANTHROPIC_SMALL_FAST_MODEL：旧接入的小任务模型按官方替代写成 Haiku 别名
     expect(within(dialog).getByTestId("profile-extra-env")).toHaveTextContent("ANTHROPIC_DEFAULT_HAIKU_MODEL");
     expect(within(dialog).getByTestId("profile-extra-env")).not.toHaveTextContent("ANTHROPIC_SMALL_FAST_MODEL");
-    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await submitProfileAfterPreview(dialog);
 
     await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
     const saved = calls.find((call) => call.command === "policy:set")!;
@@ -1035,7 +1044,7 @@ describe("助手运行参数", () => {
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
     await userEvent.click(await screen.findByTestId("make-profile-quick-claude-code-relay"));
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
-    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await submitProfileAfterPreview(dialog);
     expect(await screen.findByText("已保存独立环境 relay，但配置没有写入，启动命令也先不写")).toBeInTheDocument();
     expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
   });

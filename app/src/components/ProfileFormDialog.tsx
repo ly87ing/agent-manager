@@ -132,6 +132,8 @@ export function ProfileFormDialog({
     && (!tokenVar.trim() || /^[A-Za-z_][A-Za-z0-9_]*$/.test(tokenVar.trim()))
     && (kind !== "claude" || !baseUrl.trim() || Boolean(tokenVar.trim()))
     && (kind !== "codex" || !tokenVar.trim() || Boolean(baseUrl.trim()));
+  const waitingForPreview = !isEdit && previewReady
+    && (previewBusy || preview?.key !== previewKey || typeof preview.result === "string");
   const managedConfigFile = `${effectiveConfigDir.replace(/\/$/, "")}/${kind === "codex" ? "config.toml" : "settings.json"}`;
   const mcpConfigFile = profileMcpConfig(kind, effectiveConfigDir).path;
   const skillsDir = profileSkillsDir(effectiveConfigDir);
@@ -671,7 +673,8 @@ export function ProfileFormDialog({
               type="button"
               onClick={submit}
               data-testid="profile-form-submit"
-              className="rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              disabled={waitingForPreview}
+              className="rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {isEdit ? "保存修改" : "创建独立环境"}
             </button>

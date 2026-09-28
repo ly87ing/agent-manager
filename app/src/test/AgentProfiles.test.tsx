@@ -99,6 +99,9 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
       { command: "agents.status" },
     ),
     "profiles:status": makeEnvelope({ domain: "profiles", elements: profiles }, { command: "profiles.status" }),
+    "profiles:preview": makeEnvelope({
+      path: "/isolated/settings.json", exists: false, content: "{\"env\":{}}", files: [],
+    }, { command: "profiles.preview" }),
     "profiles:apply": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply" }),
     "profiles:adopt": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.adopt" }),
     "profiles:seed": makeEnvelope(
@@ -127,6 +130,12 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
       { command: "aliases.status" },
     ),
   };
+}
+
+async function submitAfterPreview(dialog: HTMLElement, testId: "profile-form-submit" | "connection-form-submit") {
+  const submit = within(dialog).getByTestId(testId);
+  await waitFor(() => expect(submit).toBeEnabled());
+  await userEvent.click(submit);
 }
 
 describe("助手实例", () => {
@@ -161,7 +170,9 @@ describe("助手实例", () => {
     await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://api.example.com");
     expect(calls.some((call) => call.command === "profiles:preview")).toBe(false);
     await userEvent.type(within(dialog).getByTestId("profile-token-var"), "DEMO_KEY");
+    expect(within(dialog).getByTestId("profile-form-submit")).toBeDisabled();
     const preview = await within(dialog).findByTestId("profile-draft-preview-content");
+    expect(within(dialog).getByTestId("profile-form-submit")).toBeEnabled();
     expect(preview).toHaveTextContent("https://api.example.com");
     expect(preview).toHaveTextContent("${DEMO_KEY}");
     expect(within(dialog).getByTestId("profile-draft-preview-file-0")).toHaveTextContent("# Shared rule");
@@ -172,6 +183,7 @@ describe("助手实例", () => {
     ]);
     expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
     await userEvent.type(within(dialog).getByTestId("profile-base-url"), "/v1");
+    expect(within(dialog).getByTestId("profile-form-submit")).toBeDisabled();
     expect(within(dialog).queryByTestId("profile-draft-preview-content")).toBeNull();
     expect(within(dialog).getByText("表单已更改，正在更新预览。")).toBeInTheDocument();
     expect(await within(dialog).findByTestId("profile-draft-preview-content")).toHaveTextContent("https://api.example.com/v1");
@@ -185,6 +197,42 @@ describe("助手实例", () => {
     ]));
     await within(dialog).findByTestId("profile-draft-preview-content");
     expect(within(dialog).queryByTestId("profile-draft-preview-file-0")).toBeNull();
+  });
+
+  it("新建环境预览失败时不保存定义或写入配置", async () => {
+    const all = routes();
+    all["profiles:preview"] = makeEnvelope(null, {
+      command: "profiles.preview", ok: false,
+      errors: [{ code: "PREVIEW_ERROR", element: null, message: "测试预览失败" }],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await openNewProfileForm();
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "demo");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("测试预览失败");
+    expect(within(dialog).getByTestId("profile-form-submit")).toBeDisabled();
+    expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+  });
+
+  it("手动重读环境预览期间不能提交旧候选", async () => {
+    const all: Record<string, Envelope | (() => Promise<Envelope>)> = routes();
+    const result = makeEnvelope({ path: "/isolated/settings.json", exists: false, content: "{}", files: [] }, { command: "profiles.preview" });
+    let releaseRefresh: ((value: Envelope) => void) | undefined;
+    let previewCalls = 0;
+    all["profiles:preview"] = async () => {
+      previewCalls += 1;
+      return previewCalls === 2 ? new Promise<Envelope>((resolve) => { releaseRefresh = resolve; }) : result;
+    };
+    renderWithEngine(<AgentsPage />, all);
+    await openNewProfileForm();
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "demo");
+    await within(dialog).findByTestId("profile-draft-preview-content");
+    expect(within(dialog).getByTestId("profile-form-submit")).toBeEnabled();
+    await userEvent.click(within(dialog).getByTestId("profile-draft-preview-button"));
+    expect(within(dialog).getByTestId("profile-form-submit")).toBeDisabled();
+    releaseRefresh!(result);
+    await waitFor(() => expect(within(dialog).getByTestId("profile-form-submit")).toBeEnabled());
   });
 
   for (const saveTemplate of [false, true]) {
@@ -209,7 +257,7 @@ describe("助手实例", () => {
       expect(within(dialog).getByTestId("connection-environment-id")).toHaveValue("deepseek");
       expect(within(dialog).getByTestId("connection-save-template")).not.toBeChecked();
       if (saveTemplate) await userEvent.click(within(dialog).getByTestId("connection-save-template"));
-      await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+      await submitAfterPreview(dialog, "connection-form-submit");
       await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply")).toBe(true));
       const writes = calls.filter((call) => call.command === "policy:set");
       expect(writes.map((call) => call.args[call.args.indexOf("--key") + 1])).toEqual(saveTemplate
@@ -248,7 +296,9 @@ describe("助手实例", () => {
     expect(within(dialog).getByText("选定接入并填写有效的环境名后，可预览客户端配置文件和启动命令。")).toBeInTheDocument();
     await userEvent.type(within(dialog).getByTestId("connection-environment-id"), "deepseek");
     expect(within(dialog).getByTestId("connection-environment-launch-preview")).toHaveTextContent("alias deepseek=");
+    expect(within(dialog).getByTestId("connection-form-submit")).toBeDisabled();
     const content = await within(dialog).findByTestId("connection-preview-content-deepseek");
+    expect(within(dialog).getByTestId("connection-form-submit")).toBeEnabled();
     expect(content).toHaveTextContent("https://api.deepseek.com/anthropic");
     expect(content).toHaveTextContent("${DEEPSEEK_API_KEY}");
     expect(within(dialog).getByTestId("connection-preview-file-deepseek-0")).toHaveTextContent("# Shared rule");
@@ -258,11 +308,50 @@ describe("助手实例", () => {
     ]);
     expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
     await userEvent.click(within(dialog).getByTestId("connection-save-template"));
+    expect(within(dialog).getByTestId("connection-form-submit")).toBeDisabled();
     expect(within(dialog).queryByTestId("connection-preview-content-deepseek")).toBeNull();
     expect(within(dialog).getByText("表单或勾选目标已变化，正在更新预览。")).toBeInTheDocument();
     await waitFor(() => expect(calls.filter((call) => call.command === "profiles:preview")).toHaveLength(2));
     const updated = calls.filter((call) => call.command === "profiles:preview")[1];
     expect(JSON.parse(updated.args[updated.args.indexOf("--definition") + 1]).profile.source_connection).toBe("deepseek");
+  });
+
+  it("Provider 新建环境预览失败时不保存定义或写入配置", async () => {
+    const all = routes();
+    all["profiles:preview"] = makeEnvelope(null, {
+      command: "profiles.preview", ok: false,
+      errors: [{ code: "PREVIEW_ERROR", element: null, message: "测试预览失败" }],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await userEvent.click(await screen.findByTestId("new-environment-button"));
+    await userEvent.click(screen.getByTestId("new-environment-third-party"));
+    const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
+    await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("测试预览失败");
+    expect(within(dialog).getByTestId("connection-form-submit")).toBeDisabled();
+    expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+  });
+
+  it("手动重读 Provider 环境预览期间不能提交旧候选", async () => {
+    const all: Record<string, Envelope | (() => Promise<Envelope>)> = routes();
+    const result = makeEnvelope({ path: "/isolated/settings.json", exists: false, content: "{}", files: [] }, { command: "profiles.preview" });
+    let releaseRefresh: ((value: Envelope) => void) | undefined;
+    let previewCalls = 0;
+    all["profiles:preview"] = async () => {
+      previewCalls += 1;
+      return previewCalls === 2 ? new Promise<Envelope>((resolve) => { releaseRefresh = resolve; }) : result;
+    };
+    renderWithEngine(<AgentsPage />, all);
+    await userEvent.click(await screen.findByTestId("new-environment-button"));
+    await userEvent.click(screen.getByTestId("new-environment-third-party"));
+    const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
+    await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
+    await within(dialog).findByTestId("connection-preview-content-deepseek");
+    expect(within(dialog).getByTestId("connection-form-submit")).toBeEnabled();
+    await userEvent.click(within(dialog).getByTestId("connection-preview-button"));
+    expect(within(dialog).getByTestId("connection-form-submit")).toBeDisabled();
+    releaseRefresh!(result);
+    await waitFor(() => expect(within(dialog).getByTestId("connection-form-submit")).toBeEnabled());
   });
 
   it("第三方环境的凭据写入失败时保留表单，不保存环境或 Provider", async () => {
@@ -287,7 +376,7 @@ describe("助手实例", () => {
     const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
     await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
     await userEvent.type(within(dialog).getByTestId("new-connection-secret"), "fake-secret-value");
-    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    await submitAfterPreview(dialog, "connection-form-submit");
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("环境尚未创建");
     expect(within(dialog).getByTestId("new-connection-secret")).toHaveValue("fake-secret-value");
     expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
@@ -299,7 +388,7 @@ describe("助手实例", () => {
     await userEvent.click(screen.getByTestId("new-environment-third-party"));
     const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
     await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
-    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    await submitAfterPreview(dialog, "connection-form-submit");
     expect(await screen.findByText("已保存独立环境 deepseek，但配置没有写入，启动命令也先不写")).toBeInTheDocument();
     expect(calls.some((call) => call.command === "profiles:apply" || call.command === "aliases:apply")).toBe(false);
   });
@@ -425,7 +514,7 @@ describe("助手实例", () => {
     expect(within(dialog).getByTestId("profile-launch-preview")).toHaveTextContent(
       `alias cc-work='CLAUDE_CONFIG_DIR="$HOME/.claude-cc-work" claude --dangerously-skip-permissions'`,
     );
-    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await submitAfterPreview(dialog, "profile-form-submit");
 
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
     const defWrite = calls.find((call) => call.command === "policy:set")!;
@@ -459,7 +548,7 @@ describe("助手实例", () => {
     await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-home");
-    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await submitAfterPreview(dialog, "profile-form-submit");
 
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
     const defWrite = calls.find((call) => call.command === "policy:set")!;
@@ -489,7 +578,7 @@ describe("助手实例", () => {
     await userEvent.click(within(section).getByTestId("profile-seed-statusline"));
     await userEvent.click(within(section).getByTestId("profile-seed-mcp"));
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
-    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await submitAfterPreview(dialog, "profile-form-submit");
 
     await waitFor(() => expect(calls.some((call) => call.command === "profiles:seed")).toBe(true));
     const seedCall = calls.find((call) => call.command === "profiles:seed")!;
@@ -513,14 +602,14 @@ describe("助手实例", () => {
       await userEvent.click(within(dialog).getByTestId(`profile-seed-${item}`));
     }
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
-    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await submitAfterPreview(dialog, "profile-form-submit");
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
     expect(calls.some((call) => call.command === "profiles:seed")).toBe(false);
 
     await userEvent.click(await screen.findByTestId("profile-edit-cc-ly"));
     dialog = await screen.findByRole("dialog", { name: "编辑独立环境" });
     expect(within(dialog).queryByTestId("profile-seed-section")).toBeNull();
-    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await submitAfterPreview(dialog, "profile-form-submit");
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "编辑独立环境" })).toBeNull());
     expect(calls.some((call) => call.command === "profiles:seed")).toBe(false);
   });
@@ -772,7 +861,7 @@ describe("助手实例", () => {
     await userEvent.type(within(dialog).getByTestId("profile-token-var"), "LAN_TOKEN");
     expect(within(dialog).getByTestId("profile-plain-http")).toHaveTextContent("令牌将明文传输");
     expect(within(dialog).getByTestId("profile-scrub-subprocess-env")).toBeChecked();
-    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await submitAfterPreview(dialog, "profile-form-submit");
     await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
     let saved = calls.filter((call) => call.command === "policy:set").slice(-1)[0];
     let definition = JSON.parse(saved.args[saved.args.indexOf("--value") + 1]);
@@ -787,7 +876,7 @@ describe("助手实例", () => {
     dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-plain");
     await userEvent.click(within(dialog).getByTestId("profile-scrub-subprocess-env"));
-    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await submitAfterPreview(dialog, "profile-form-submit");
     await waitFor(() => expect(calls.filter((call) => call.command === "policy:set").length).toBe(2));
     saved = calls.filter((call) => call.command === "policy:set").slice(-1)[0];
     definition = JSON.parse(saved.args[saved.args.indexOf("--value") + 1]);
@@ -857,7 +946,7 @@ describe("助手实例", () => {
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
     await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://api.example.com");
     await userEvent.type(within(dialog).getByTestId("profile-token-var"), "WORK_TOKEN");
-    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await submitAfterPreview(dialog, "profile-form-submit");
     await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply")).toBe(true));
     expect(await screen.findByText(/配置没有写入，启动命令也先不写/)).toBeInTheDocument();
     expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
@@ -1301,7 +1390,7 @@ describe("助手实例", () => {
     expect(previewArgs).toContain(base);
     expect(previewArgs).toContain(definitionBase);
     expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
-    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    await submitAfterPreview(dialog, "connection-form-submit");
     await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(true));
     const update = calls.find((call) => call.command === "profiles:apply-definition")!;
     expect(previewArgs).toEqual(update.args);
@@ -1374,7 +1463,7 @@ describe("助手实例", () => {
     await userEvent.click(within(dialog).getByTestId("connection-update-cc-two"));
     expect(await within(dialog).findByTestId("connection-preview-content-cc-one")).toHaveTextContent("https://new.example.com");
     expect(await within(dialog).findByTestId("connection-preview-content-cc-two")).toHaveTextContent("https://new.example.com");
-    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    await submitAfterPreview(dialog, "connection-form-submit");
     expect(await screen.findByText("Provider 已保存，1 个环境已更新，1 个未确认")).toBeInTheDocument();
     expect(screen.getByText(/cc-one。请到对应环境卡片查看实际配置后再操作/)).toBeInTheDocument();
     expect(calls.filter((call) => call.command === "profiles:apply-definition").map((call) => call.args[1])).toEqual([
@@ -1434,7 +1523,7 @@ describe("助手实例", () => {
     expect(within(impact).getByTestId("connection-update-cc-ly")).toBeDisabled();
     await userEvent.click(within(impact).getByTestId("connection-override-cc-ly-baseUrl"));
     expect(within(impact).getByTestId("connection-update-cc-ly")).toBeChecked();
-    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    await submitAfterPreview(dialog, "connection-form-submit");
     await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(true));
     expect(candidate).toMatchObject({ env: { ANTHROPIC_BASE_URL: "https://new.example.com", ANTHROPIC_AUTH_TOKEN: "${MY_TOKEN}" } });
     expect(await screen.findByText("Provider 已保存，1 个独立环境已更新并回读")).toBeInTheDocument();
@@ -1462,7 +1551,7 @@ describe("助手实例", () => {
     const impact = within(dialog).getByTestId("connection-affected-cc-ly");
     expect(impact).toHaveTextContent("实际配置与定义不同");
     expect(within(impact).getByRole("checkbox")).toBeDisabled();
-    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    await submitAfterPreview(dialog, "connection-form-submit");
     await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
     expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
   });
@@ -1497,7 +1586,7 @@ describe("助手实例", () => {
     const impact = within(dialog).getByTestId("connection-affected-cc-ly");
     expect(impact).toHaveTextContent("旧环境同时匹配多个 Provider，不能自动判断来源");
     expect(within(impact).getByTestId("connection-update-cc-ly")).toBeDisabled();
-    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    await submitAfterPreview(dialog, "connection-form-submit");
     await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
     expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
   });

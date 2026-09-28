@@ -196,6 +196,9 @@ export function ConnectionFormDialog({
     }] : []),
   ];
   const previewKey = JSON.stringify(previewRequests);
+  const waitingForPreview = previewRequests.length > 0
+    && (previewBusy || preview?.key !== previewKey || preview.results.length !== previewRequests.length
+      || preview.results.some(({ result }) => typeof result === "string"));
 
   const refreshPreview = async () => {
     const serial = ++previewSerial.current;
@@ -993,7 +996,7 @@ export function ConnectionFormDialog({
           <button
             type="button"
             data-testid="connection-form-submit"
-            disabled={saveDisabled}
+            disabled={saveDisabled || waitingForPreview}
             onClick={() => submit()}
             className="inline-flex items-center gap-1.5 rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
