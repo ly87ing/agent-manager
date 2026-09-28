@@ -853,6 +853,8 @@ fn provider_candidate_preview_matches_apply_without_resolving_key_or_writing() {
     ];
     let preview = execute(&ctx, &request("profiles:preview", &args));
     assert!(preview.ok, "{:?}", preview.errors);
+    assert!(preview.data.get("file_base").is_none());
+    assert!(preview.data.get("content_base").is_none());
     let preview_content: serde_json::Value =
         serde_json::from_str(preview.data["content"].as_str().unwrap()).unwrap();
     assert_eq!(
@@ -881,6 +883,99 @@ fn provider_candidate_preview_matches_apply_without_resolving_key_or_writing() {
     let stale = execute(&ctx, &request("profiles:preview", &args));
     assert!(!stale.ok);
     std::env::remove_var("AM_PREVIEW_NEW");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn provider_exact_candidate_preview_binds_file_and_secret_without_saving_draft_key() {
+    let (root, ctx) = temp_ctx("provider-exact-candidate");
+    std::env::set_var("AM_EXACT_OLD", "old-test-token");
+    let global = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+    std::fs::write(&global, b"{\"main\":true}\n").unwrap();
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_EXACT_OLD")
+    ));
+    assert!(apply_now(&ctx, "cc-ly").ok);
+    let target = ctx.home_dir.join(".claude-ly/settings.json");
+    let before = std::fs::read(&target).unwrap();
+    let policy_before = execute(&ctx, &request("policy:get", &[])).data;
+    let base = base_of(&ctx, "cc-ly");
+    let definition_base = definition_base_of(&ctx, "cc-ly");
+    let candidate = r#"{"source_connection":"relay","env":{"ANTHROPIC_BASE_URL":"https://next.example.com","ANTHROPIC_AUTH_TOKEN":"${AM_EXACT_NEW}"}}"#;
+    let preview = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &[
+                "--only",
+                "profiles:cc-ly",
+                "--base",
+                &base,
+                "--definition-base",
+                &definition_base,
+                "--candidate",
+                candidate,
+                "--exact",
+                "--preview-secret-var",
+                "AM_EXACT_NEW",
+                "--preview-secret-value",
+                "draft-test-token",
+            ],
+        ),
+    );
+    assert!(preview.ok, "{:?}", preview.errors);
+    let content = preview.data["content"].as_str().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(content).unwrap();
+    assert_eq!(parsed["env"]["ANTHROPIC_AUTH_TOKEN"], "draft-test-token");
+    assert_eq!(std::fs::read(&target).unwrap(), before);
+    assert_eq!(
+        execute(&ctx, &request("policy:get", &[])).data,
+        policy_before
+    );
+    assert!(probe_log(&ctx).is_empty());
+
+    let file_base = preview.data["file_base"].as_str().unwrap();
+    let content_base = preview.data["content_base"].as_str().unwrap();
+    let apply_args = [
+        "--only",
+        "profiles:cc-ly",
+        "--base",
+        &base,
+        "--definition-base",
+        &definition_base,
+        "--candidate",
+        candidate,
+        "--preview-file-base",
+        file_base,
+        "--preview-content-base",
+        content_base,
+    ];
+    std::env::set_var("AM_EXACT_NEW", "different-test-token");
+    assert!(!execute(&ctx, &request("profiles:apply-definition", &apply_args)).ok);
+    assert_eq!(std::fs::read(&target).unwrap(), before);
+    assert_eq!(
+        execute(&ctx, &request("policy:get", &[])).data,
+        policy_before
+    );
+
+    std::env::set_var("AM_EXACT_NEW", "draft-test-token");
+    let mut external = before.clone();
+    external.push(b'\n');
+    std::fs::write(&target, &external).unwrap();
+    assert!(!execute(&ctx, &request("profiles:apply-definition", &apply_args)).ok);
+    assert_eq!(std::fs::read(&target).unwrap(), external);
+    std::fs::write(&target, &before).unwrap();
+    let applied = execute(&ctx, &request("profiles:apply-definition", &apply_args));
+    assert!(applied.ok, "{:?}", applied.errors);
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), content);
+    assert_eq!(std::fs::read(&global).unwrap(), b"{\"main\":true}\n");
+    let policy = execute(&ctx, &request("policy:get", &[])).data;
+    assert!(!policy.to_string().contains("draft-test-token"));
+    std::env::remove_var("AM_EXACT_OLD");
+    std::env::remove_var("AM_EXACT_NEW");
     let _ = std::fs::remove_dir_all(root);
 }
 

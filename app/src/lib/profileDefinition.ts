@@ -18,6 +18,8 @@ export interface ProfileDraftPreview {
   path: string;
   content: string;
   exists: boolean;
+  file_base?: string;
+  content_base?: string;
   will_write?: boolean;
   seed_results?: { item: string; state: string; detail: string }[];
   files?: { path: string; content: string; exists: boolean }[];
@@ -25,7 +27,8 @@ export interface ProfileDraftPreview {
 
 export type ProfilePreviewRequest =
   | { id: string; definition: Record<string, unknown>; seedItems?: string[] }
-  | { id: string; base: string; definitionBase: string; candidate: Record<string, unknown> };
+  | { id: string; base: string; definitionBase: string; candidate: Record<string, unknown>;
+      secretVar?: string; secretValue?: string };
 
 export interface ProfileFormInput {
   id: string;

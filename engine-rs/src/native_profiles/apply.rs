@@ -71,7 +71,7 @@ fn check_args(req: &Request, command: &str) -> Result<()> {
 }
 
 /// 更新定义并写入文件只接受候选受管字段和两个独立的写入基准。
-fn check_update_args(req: &Request) -> Result<()> {
+fn check_update_args(req: &Request, preview: bool) -> Result<()> {
     if req.flag("--dry-run") {
         bail!("profiles:apply-definition 不支持 --dry-run");
     }
@@ -83,7 +83,25 @@ fn check_update_args(req: &Request) -> Result<()> {
                     bail!("profiles:apply-definition 的 {arg} 缺少取值");
                 }
             }
-            other => bail!("profiles:apply-definition 不支持参数 '{other}'"),
+            "--preview-file-base" | "--preview-content-base" if !preview => {
+                if iter.next().is_none() {
+                    bail!("profiles:apply-definition 的 {arg} 缺少取值");
+                }
+            }
+            "--exact" if preview => {}
+            "--preview-secret-var" | "--preview-secret-value" if preview => {
+                if iter.next().is_none() {
+                    bail!("profiles:preview 的 {arg} 缺少取值");
+                }
+            }
+            other => bail!(
+                "{} 不支持参数 '{other}'",
+                if preview {
+                    "profiles:preview"
+                } else {
+                    "profiles:apply-definition"
+                }
+            ),
         }
     }
     Ok(())
@@ -222,7 +240,7 @@ fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
     plan_for_def(ctx, req, find_def(ctx, &id)?, &crate::secret_values::lookup)
 }
 
-/// 已保存实例按写入计划预览真实取值；表单草稿保留变量引用，保存时重算。
+/// 已保存实例按写入计划预览真实取值；新建草稿保留变量引用。
 pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
     if req.args.len() == 4 && req.args[0] == "--only" && req.args[2] == "--base" {
         let plan = plan(ctx, req)?;
@@ -245,8 +263,36 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         }));
     }
     if req.args.iter().any(|arg| arg == "--candidate") {
-        let (plan, _, _) =
-            plan_update_with_resolver(ctx, req, &|name| Some(format!("${{{name}}}")))?;
+        let exact = req.flag("--exact");
+        let secret_var = req.value("--preview-secret-var");
+        let secret_value = req.value("--preview-secret-value");
+        if secret_var.is_some() != secret_value.is_some() || (secret_var.is_some() && !exact) {
+            bail!("预览密钥取值必须与变量名一起提供，且只能用于真实内容预览");
+        }
+        if let Some(name) = secret_var {
+            if !crate::secret_values::valid_var_name(name) {
+                bail!("预览密钥变量名格式不正确");
+            }
+        }
+        if secret_value.is_some_and(|value| value.chars().any(char::is_control)) {
+            bail!("预览密钥取值不能包含控制字符");
+        }
+        let (plan, _, _) = if exact {
+            plan_update_with_resolver(
+                ctx,
+                req,
+                &|name| {
+                    if secret_var == Some(name) {
+                        secret_value.map(str::to_string)
+                    } else {
+                        crate::secret_values::lookup(name)
+                    }
+                },
+                true,
+            )?
+        } else {
+            plan_update_with_resolver(ctx, req, &|name| Some(format!("${{{name}}}")), true)?
+        };
         if plan
             .previous
             .as_ref()
@@ -255,13 +301,19 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         {
             bail!("配置文件超过安全读取上限");
         }
-        return Ok(json!({
+        let content_base = exact.then(|| crate::native_mcp::model::sha256_hex_bytes(&plan.content));
+        let mut result = json!({
             "element": format!("profiles:{}", plan.def.id),
             "path": format!("{}/{}", plan.def.config_dir_raw, plan.file),
             "format": if plan.def.kind.as_str() == "codex" { "toml" } else { "json" },
             "exists": plan.previous.is_some(),
             "content": String::from_utf8(plan.content).map_err(|_| anyhow!("预览结果不是 UTF-8 文本"))?,
-        }));
+        });
+        if let Some(content_base) = content_base {
+            result["file_base"] = file_base(plan.previous.as_deref()).into();
+            result["content_base"] = content_base.into();
+        }
+        return Ok(result);
     }
     if !matches!(req.args.len(), 4 | 6)
         || req.args[0] != "--only"
@@ -331,15 +383,16 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
 
 /// 从现有完整定义生成候选；只替换实例负责的字段，未知元数据原样保留。
 fn plan_update(ctx: &Context, req: &Request) -> Result<(Plan, Value, String)> {
-    plan_update_with_resolver(ctx, req, &crate::secret_values::lookup)
+    plan_update_with_resolver(ctx, req, &crate::secret_values::lookup, false)
 }
 
 fn plan_update_with_resolver(
     ctx: &Context,
     req: &Request,
     resolve: &dyn Fn(&str) -> Option<String>,
+    preview: bool,
 ) -> Result<(Plan, Value, String)> {
-    check_update_args(req)?;
+    check_update_args(req, preview)?;
     let id = parse_only(req)?;
     let expected = req
         .value("--definition-base")

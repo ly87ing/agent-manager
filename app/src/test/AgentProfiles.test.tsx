@@ -1352,6 +1352,7 @@ describe("助手实例", () => {
     const base = "a".repeat(64);
     const definitionBase = "b".repeat(64);
     let appliedCandidate: Record<string, unknown> | null = null;
+    let previewHasDigests = false;
     const all = routes([profileElement({
       state: "managed-ok",
       observed: {
@@ -1398,8 +1399,14 @@ describe("助手实例", () => {
     all["profiles:preview"] = async (args) => makeEnvelope({
       path: "~/.claude-cc-ly/settings.json",
       exists: true,
-      content: JSON.stringify({ env: JSON.parse(args[args.indexOf("--candidate") + 1]).env }),
+      ...(previewHasDigests ? { file_base: "e".repeat(64), content_base: "f".repeat(64) } : {}),
+      content: JSON.stringify({ env: {
+        ...JSON.parse(args[args.indexOf("--candidate") + 1]).env,
+        ANTHROPIC_AUTH_TOKEN: args.includes("--preview-secret-value")
+          ? args[args.indexOf("--preview-secret-value") + 1] : "existing-key",
+      } }),
     }, { command: "profiles.preview" });
+    all["secrets:set"] = makeEnvelope({}, { command: "secrets.set" });
     const { calls } = renderWithEngine(<AgentsPage />, all);
     await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
     const dialog = await screen.findByRole("dialog", { name: "编辑 Relay" });
@@ -1411,15 +1418,35 @@ describe("助手实例", () => {
     expect(within(dialog).getByText("只保存 Provider 模板时，客户端配置文件和启动命令不变。")).toBeInTheDocument();
     expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
     await userEvent.click(within(impact).getByRole("checkbox"));
+    expect(await within(dialog).findByText("预览缺少写入校验信息，请重新读取")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("connection-form-submit")).toBeDisabled();
+    previewHasDigests = true;
+    await userEvent.click(within(dialog).getByTestId("connection-preview-button"));
     expect(await within(dialog).findByTestId("connection-preview-content-cc-ly")).toHaveTextContent("https://new.example.com");
     const previewArgs = calls.find((call) => call.command === "profiles:preview")!.args;
     expect(previewArgs).toContain(base);
     expect(previewArgs).toContain(definitionBase);
+    expect(previewArgs).toContain("--exact");
     expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
+    await userEvent.type(within(dialog).getByTestId("new-connection-secret"), "fresh-test-key");
+    await waitFor(() => expect(within(dialog).getByTestId("connection-preview-content-cc-ly")).toHaveTextContent("fresh-test-key"));
+    const previewCalls = calls.filter((call) => call.command === "profiles:preview");
+    const exactArgs = previewCalls[previewCalls.length - 1].args;
+    expect(exactArgs).toContain("--preview-secret-value");
+    expect(exactArgs).toContain("fresh-test-key");
     await submitAfterPreview(dialog, "connection-form-submit");
     await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(true));
     const update = calls.find((call) => call.command === "profiles:apply-definition")!;
-    expect(previewArgs).toEqual(update.args);
+    expect(update.args).toEqual([
+      "--only", "profiles:cc-ly", "--base", base,
+      "--definition-base", definitionBase,
+      "--candidate", exactArgs[exactArgs.indexOf("--candidate") + 1],
+      "--preview-file-base", "e".repeat(64),
+      "--preview-content-base", "f".repeat(64),
+    ]);
+    expect(update.args).not.toContain("fresh-test-key");
+    expect(calls.findIndex((call) => call.command === "secrets:set")).toBeLessThan(
+      calls.findIndex((call) => call.command === "profiles:apply-definition"));
     expect(update.args).toContain(base);
     expect(update.args).toContain(definitionBase);
     expect(appliedCandidate).toMatchObject({
@@ -1472,6 +1499,7 @@ describe("助手实例", () => {
     all["profiles:preview"] = async (args) => makeEnvelope({
       path: `~/.claude-${args[1].replace("profiles:", "")}/settings.json`, exists: true,
       content: JSON.stringify(JSON.parse(args[args.indexOf("--candidate") + 1])),
+      file_base: "e".repeat(64), content_base: "f".repeat(64),
     }, { command: "profiles.preview" });
     all["profiles:apply-definition"] = async (args) => {
       if (args[1] === "profiles:cc-one") {

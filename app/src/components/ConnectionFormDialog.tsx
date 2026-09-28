@@ -46,6 +46,8 @@ export interface ConnectionSubmission {
   profileUpdates?: string[];
   /** 对实例自己保留的字段，用户逐字段选择改为当前 Provider 值。 */
   profileOverrides?: Record<string, string[]>;
+  /** 与本次真实内容预览绑定的逐环境文件摘要。 */
+  previewBases?: Record<string, { fileBase: string; contentBase: string }>;
 }
 
 export interface ConnectionProfileImpact {
@@ -193,6 +195,7 @@ export function ConnectionFormDialog({
       base: profile.base,
       definitionBase: profile.definitionBase,
       candidate: profile.update.candidate,
+      ...(secretValue ? { secretVar: connection?.tokenVar.trim(), secretValue } : {}),
     }] : []),
   ];
   const previewKey = JSON.stringify(previewRequests);
@@ -206,7 +209,9 @@ export function ConnectionFormDialog({
     try {
       const results: { id: string; result: ProfileDraftPreview | string }[] = [];
       for (const request of previewRequests) {
-        results.push({ id: request.id, result: await onPreview(request) });
+        const result = await onPreview(request);
+        results.push({ id: request.id, result: "candidate" in request && typeof result !== "string"
+          && (!result.file_base || !result.content_base) ? "预览缺少写入校验信息，请重新读取" : result });
       }
       if (serial === previewSerial.current) setPreview({ key: previewKey, results });
     } finally {
@@ -324,6 +329,16 @@ export function ConnectionFormDialog({
         return;
       }
     }
+    const previewBases: Record<string, { fileBase: string; contentBase: string }> = {};
+    for (const profile of selectedUpdates) {
+      const result = preview?.results.find((item) => item.id === profile.id)?.result;
+      if (preview?.key !== previewKey || !result || typeof result === "string"
+        || !result.file_base || !result.content_base) {
+        setLocalError("已选环境的文件预览已失效，请重新读取");
+        return;
+      }
+      previewBases[profile.id] = { fileBase: result.file_base, contentBase: result.content_base };
+    }
     onSubmit({
       connection: {
         ...connection,
@@ -341,6 +356,7 @@ export function ConnectionFormDialog({
       profileUpdates: selectedUpdates.map((profile) => profile.id),
       profileOverrides: Object.fromEntries(selectedUpdates.map((profile) =>
         [profile.id, selectedOverrides[profile.id] ?? []])),
+      previewBases,
     });
   };
 
@@ -947,7 +963,9 @@ export function ConnectionFormDialog({
                 {previewRequests.length === 0 && <p className="text-muted-foreground">{intent === "environment"
                   ? "选定接入并填写有效的环境名后，可预览客户端配置文件和启动命令。"
                   : "只保存 Provider 模板时，客户端配置文件和启动命令不变。"}</p>}
-                {previewRequests.length > 0 && <p className="text-muted-foreground">按当前实际文件及勾选的共用设置合并计算；凭据变量保留引用形式，保存时重新校验。Hooks、规则及 MCP 文件原文可能含敏感值，仅在本机查看，请勿直接分享。</p>}
+                {previewRequests.length > 0 && <p className="text-muted-foreground">{selectedUpdates.length > 0
+                  ? "已选环境按真实密钥取值计算最终文件；新建环境草稿仍以变量引用展示。保存时会重新校验原文件和候选内容。预览原文可能含敏感值，仅在本机查看，请勿分享。"
+                  : "按当前实际文件及勾选的共用设置合并计算；凭据变量保留引用形式，保存时重新校验。Hooks、规则及 MCP 文件原文可能含敏感值，仅在本机查看，请勿直接分享。"}</p>}
                 {preview && preview.key !== previewKey && previewRequests.length > 0
                   && <p className="text-muted-foreground">表单或勾选目标已变化，正在更新预览。</p>}
                 {preview?.key === previewKey && preview.results.map(({ id, result }) => (

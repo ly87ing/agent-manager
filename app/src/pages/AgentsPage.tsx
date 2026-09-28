@@ -527,6 +527,11 @@ export default function AgentsPage({
         const failed: string[] = [];
         for (const entry of updates) {
           if (!entry) continue;
+          const previewBase = submission.previewBases?.[entry.impact.id];
+          if (!previewBase) {
+            failed.push(`${entry.impact.id}（缺少有效预览）`);
+            continue;
+          }
           const result = await execute({
             command: "profiles:apply-definition",
             label: `更新独立环境 ${entry.impact.id}`,
@@ -535,6 +540,8 @@ export default function AgentsPage({
               "--base", entry.impact.base!,
               "--definition-base", entry.impact.definitionBase!,
               "--candidate", JSON.stringify(entry.update.candidate),
+              "--preview-file-base", previewBase.fileBase,
+              "--preview-content-base", previewBase.contentBase,
             ],
             silent: true,
           });
@@ -1288,6 +1295,9 @@ export default function AgentsPage({
                   "--base", request.base,
                   "--definition-base", request.definitionBase,
                   "--candidate", JSON.stringify(request.candidate),
+                  "--exact",
+                  ...(request.secretValue ? ["--preview-secret-var", request.secretVar!,
+                    "--preview-secret-value", request.secretValue] : []),
                 ];
             try {
               const result = await runEngine<ProfileDraftPreview>("profiles:preview", args);

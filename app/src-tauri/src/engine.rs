@@ -203,6 +203,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--base", ArgValueKind::RuleBase));
             specs.push(("--definition-base", ArgValueKind::Digest));
             specs.push(("--candidate", ArgValueKind::JsonValue));
+            specs.push(("--preview-file-base", ArgValueKind::RuleBase));
+            specs.push(("--preview-content-base", ArgValueKind::Digest));
         }
         // 只读发现：--only 取域名（agents/skills/mcp），引擎侧再做词汇表校验
         ("profiles", "seed") => {
@@ -225,6 +227,9 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--base", ArgValueKind::RuleBase));
             specs.push(("--definition-base", ArgValueKind::Digest));
             specs.push(("--candidate", ArgValueKind::JsonValue));
+            specs.push(("--exact", ArgValueKind::Flag));
+            specs.push(("--preview-secret-var", ArgValueKind::VarName));
+            specs.push(("--preview-secret-value", ArgValueKind::SecretValue));
         }
         ("profiles", "shared-apply") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -1522,6 +1527,35 @@ mod tests {
             ])
         )
         .is_ok());
+        assert!(validate_args(
+            "profiles:preview",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--base",
+                &base,
+                "--definition-base",
+                &base,
+                "--candidate",
+                "{}",
+                "--exact",
+                "--preview-secret-var",
+                "RELAY_KEY",
+                "--preview-secret-value",
+                "draft-key",
+            ])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "profiles:preview",
+            &args(&[
+                "--preview-secret-var",
+                "RELAY_KEY",
+                "--preview-secret-value",
+                "bad\nkey"
+            ])
+        )
+        .is_err());
         for command in ["profiles:apply", "profiles:adopt"] {
             assert!(
                 validate_args(
@@ -1602,6 +1636,10 @@ mod tests {
                 &base,
                 "--candidate",
                 candidate,
+                "--preview-file-base",
+                "missing",
+                "--preview-content-base",
+                &base,
             ])
         )
         .is_ok());
