@@ -397,6 +397,23 @@ describe("Provider 编辑影响预览", () => {
       { field: "model", state: "same", definition: "old-model" },
     ])).toBe(false);
   });
+
+  it("上次未勾选的环境可再次逐字段补同步，自定义字段默认保留", () => {
+    const provider = { ...emptyConnection("relay"), baseUrl: "https://new.example.com", tokenVar: "NEW_KEY", model: "new-model" };
+    const definition = buildProfileDefinition({
+      ...claudeInput, sourceConnection: "relay", baseUrl: "https://old.example.com",
+      tokenVar: "OLD_KEY", model: "my-model", extraEnv: { MINE: "keep" },
+    }, "claude");
+    const preview = profileConnectionUpdate("cc-ly", definition, provider, provider, "claude")!;
+    expect(preview.changes).toEqual([]);
+    expect(preview.overrides.map((item) => item.key)).toEqual(["baseUrl", "model", "credential"]);
+    const selected = profileConnectionUpdate("cc-ly", definition, provider, provider, "claude", ["baseUrl", "credential"])!;
+    expect(selected.changes.map((item) => item.field)).toEqual(["API 地址", "凭据变量 / 请求头"]);
+    expect(selected.candidate).toMatchObject({
+      source_connection: "relay", model: "my-model",
+      env: { ANTHROPIC_BASE_URL: "https://new.example.com", ANTHROPIC_AUTH_TOKEN: "${NEW_KEY}", MINE: "keep" },
+    });
+  });
 });
 
 describe("子代理模型随接入进独立环境", () => {

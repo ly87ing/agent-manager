@@ -26,6 +26,8 @@ export interface ConnectionSubmission {
   thenMakeProfile?: boolean;
   /** 用户逐环境勾选的更新目标；未勾选的环境不写入。 */
   profileUpdates?: string[];
+  /** 对实例自己保留的字段，用户逐字段选择改为当前 Provider 值。 */
+  profileOverrides?: Record<string, string[]>;
 }
 
 export interface ConnectionProfileImpact {
@@ -95,6 +97,7 @@ export function ConnectionFormDialog({
   );
   const [secretValue, setSecretValue] = useState("");
   const [selectedProfiles, setSelectedProfiles] = useState<string[]>([]);
+  const [selectedOverrides, setSelectedOverrides] = useState<Record<string, string[]>>({});
   const [localError, setLocalError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(!duplicating && Boolean(
     initialConnection?.timeoutMs || initialConnection?.smallFastModel || initialConnection?.aliasOpus
@@ -120,7 +123,8 @@ export function ConnectionFormDialog({
   const impacts = editing && initialConnection && connection
     ? affectedProfiles.map((profile) => ({
         ...profile,
-        update: profileConnectionUpdate(profile.id, profile.definition, initialConnection, connection, kind),
+        update: profileConnectionUpdate(profile.id, profile.definition, initialConnection, connection, kind,
+          selectedOverrides[profile.id] ?? []),
       }))
     : [];
   const selectedUpdates = impacts.filter((profile) => selectedProfiles.includes(profile.id)
@@ -217,6 +221,8 @@ export function ConnectionFormDialog({
       secretValue,
       thenMakeProfile,
       profileUpdates: selectedUpdates.map((profile) => profile.id),
+      profileOverrides: Object.fromEntries(selectedUpdates.map((profile) =>
+        [profile.id, selectedOverrides[profile.id] ?? []])),
     });
   };
 
@@ -712,30 +718,65 @@ export function ConnectionFormDialog({
                   <div className="mt-2 space-y-2">
                     {impacts.map((profile) => {
                       const changes = profile.update?.changes ?? [];
-                      const selectable = changes.length > 0
-                        && (profile.state === "managed-ok" || profile.state === "not-materialized")
+                      const overrides = profile.update?.overrides ?? [];
+                      const automaticChanges = changes.filter((change) => !overrides.some((item) => item.field === change.field));
+                      const writable = (profile.state === "managed-ok" || profile.state === "not-materialized")
                         && Boolean(profile.base && profile.definitionBase) && !profile.blockedReason;
+                      const selectable = changes.length > 0 && writable;
                       return (
-                        <label key={profile.id} data-testid={`connection-affected-${profile.id}`} className="block rounded border p-2">
-                          <span className="flex items-center gap-2 font-medium text-foreground">
+                        <div key={profile.id} data-testid={`connection-affected-${profile.id}`} className="rounded border p-2">
+                          <label className="flex items-center gap-2 font-medium text-foreground">
                             <input
                               type="checkbox"
                               data-testid={`connection-update-${profile.id}`}
                               disabled={!selectable || busy}
                               checked={selectable && selectedProfiles.includes(profile.id)}
-                              onChange={(event) => setSelectedProfiles((current) => event.target.checked
-                                ? [...current, profile.id]
-                                : current.filter((id) => id !== profile.id))}
+                              onChange={(event) => {
+                                if (!event.target.checked) {
+                                  setSelectedOverrides((current) => ({ ...current, [profile.id]: [] }));
+                                }
+                                setSelectedProfiles((current) => event.target.checked
+                                  ? [...new Set([...current, profile.id])]
+                                  : current.filter((id) => id !== profile.id));
+                              }}
                             />
                             {profile.label} <code className="font-normal text-muted-foreground">{profile.id}</code>
-                          </span>
-                          {!selectable && <p className="mt-1 text-warning">{profile.blockedReason ?? (!profile.update ? "Provider 缺少可写的地址或凭据变量，不能更新环境。" : profile.state === "drifted" ? "实际配置与定义不同，先在环境卡片处理差异。" : profile.state === "unsupported" || profile.state === "disabled" ? "环境当前不可写。" : changes.length === 0 ? "这次没有可带入的字段变化。" : "无法读取完整写入基准，请刷新后重试。")}</p>}
-                          {changes.length > 0 && (
+                          </label>
+                          {!writable && <p className="mt-1 text-warning">{profile.blockedReason ?? (!profile.update ? "Provider 缺少可写的地址或凭据变量，不能更新环境。" : profile.state === "drifted" ? "实际配置与定义不同，先在环境卡片处理差异。" : profile.state === "unsupported" || profile.state === "disabled" ? "环境当前不可写。" : "无法读取完整写入基准，请刷新后重试。")}</p>}
+                          {writable && changes.length === 0 && overrides.length === 0 && <p className="mt-1 text-muted-foreground">这次没有可带入的字段变化。</p>}
+                          {automaticChanges.length > 0 && (
                             <ul className="mt-1 space-y-0.5 pl-5 text-muted-foreground">
-                              {changes.map((change) => <li key={change.field} className="list-disc break-all">{change.field}：{change.before} → {change.after}</li>)}
+                              {automaticChanges.map((change) => <li key={change.field} className="list-disc break-all">{change.field}：{change.before} → {change.after}</li>)}
                             </ul>
                           )}
-                        </label>
+                          {overrides.length > 0 && (
+                            <div className="mt-2 space-y-1 border-t pt-2 text-muted-foreground">
+                              <p>以下字段与当前 Provider 不同；默认保留环境自己的值，勾选才覆盖：</p>
+                              {overrides.map((change) => (
+                                <label key={change.key} className="flex items-start gap-2 break-all">
+                                  <input
+                                    type="checkbox"
+                                    data-testid={`connection-override-${profile.id}-${change.key}`}
+                                    disabled={!writable || busy}
+                                    checked={(selectedOverrides[profile.id] ?? []).includes(change.key)}
+                                    onChange={(event) => {
+                                      const next = event.target.checked
+                                        ? [...new Set([...(selectedOverrides[profile.id] ?? []), change.key])]
+                                        : (selectedOverrides[profile.id] ?? []).filter((key) => key !== change.key);
+                                      setSelectedOverrides((current) => ({ ...current, [profile.id]: next }));
+                                      setSelectedProfiles((current) => event.target.checked
+                                        ? [...new Set([...current, profile.id])]
+                                        : next.length === 0 && automaticChanges.length === 0
+                                          ? current.filter((id) => id !== profile.id)
+                                          : current);
+                                    }}
+                                  />
+                                  <span>{change.field}：{change.before} → {change.after}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       );
                     })}
                   </div>

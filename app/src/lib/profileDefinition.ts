@@ -385,6 +385,16 @@ export interface ProfileConnectionChange {
   after: string;
 }
 
+export interface ProfileConnectionOverride extends ProfileConnectionChange {
+  key: string;
+}
+
+const CLAUDE_CONNECTION_ENV = [
+  "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL",
+  "CLAUDE_CODE_SUBAGENT_MODEL", "API_TIMEOUT_MS",
+];
+
 /**
  * Provider 编辑预览：只更新环境中仍等于旧 Provider 的字段，实例自行改过的值保留。
  * 返回引擎可原子写入的受管字段；凭据始终是变量引用，不包含取值。
@@ -395,7 +405,8 @@ export function profileConnectionUpdate(
   previous: ConnectionEntry,
   next: ConnectionEntry,
   kind: ProfileKind,
-): { candidate: Record<string, unknown>; changes: ProfileConnectionChange[] } | null {
+  selectedOverrides: string[] = [],
+): { candidate: Record<string, unknown>; changes: ProfileConnectionChange[]; overrides: ProfileConnectionOverride[] } | null {
   const current = parseProfileDefinition(id, definition);
   if (!current.baseUrl.trim() || !current.tokenVar.trim() || !next.baseUrl.trim() || !next.tokenVar.trim()) return null;
   const agent = { id: current.baseAgent, kind };
@@ -433,13 +444,38 @@ export function profileConnectionUpdate(
   if (!current.sourceConnection) {
     changes.push({ field: "来源关联", before: "按地址推断", after: next.name });
   }
+  // 旧 Provider 已保存但环境未勾选，或实例自行改过字段时，无法从当前值判断修改意图。
+  // 仅把这些差异列为显式选择；不勾选就保留实例自己的定义。
+  const overrides: ProfileConnectionOverride[] = [];
+  const offer = (key: string, field: string, before: string, after: string, update: () => void) => {
+    if (before === after) return;
+    const change = { key, field, before: show(before), after: show(after) };
+    overrides.push(change);
+    if (selectedOverrides.includes(key)) {
+      update();
+      changes.push(change);
+    }
+  };
+  offer("baseUrl", "API 地址", proposed.baseUrl, newInput.baseUrl, () => { proposed.baseUrl = newInput.baseUrl; });
+  offer("model", "默认模型", proposed.model, newInput.model, () => { proposed.model = newInput.model; });
+  offer("credential", "凭据变量 / 请求头",
+    `${proposed.tokenVar} / ${proposed.authHeader}`, `${newInput.tokenVar} / ${newInput.authHeader}`,
+    () => { proposed.tokenVar = newInput.tokenVar; proposed.authHeader = newInput.authHeader; });
+  for (const name of CLAUDE_CONNECTION_ENV) {
+    const before = proposed.extraEnv[name];
+    const after = newInput.extraEnv[name];
+    offer(`env.${name}`, name, before ?? "", after ?? "", () => {
+      if (after === undefined) delete proposed.extraEnv[name];
+      else proposed.extraEnv[name] = after;
+    });
+  }
   const profile = buildProfileDefinition(proposed, "").profile as Record<string, unknown>;
   const candidate: Record<string, unknown> = { source_connection: next.name };
   const keys = kind === "claude" ? ["env", "model"] : ["base_url", "env_key", "wire_api", "model"];
   for (const key of keys) {
     if (profile[key] !== undefined) candidate[key] = profile[key];
   }
-  return { candidate, changes };
+  return { candidate, changes, overrides };
 }
 
 /** 更新后从 profiles:status 核对每个候选字段都已在实际文件中生效。 */

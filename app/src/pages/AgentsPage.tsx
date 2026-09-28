@@ -399,7 +399,8 @@ export default function AgentsPage({
       const updates = selectedIds.map((id) => {
         const impact = impacts.find((item) => item.id === id);
         const update = impact && previous && kind
-          ? profileConnectionUpdate(id, impact.definition, previous, submission.connection, kind)
+          ? profileConnectionUpdate(id, impact.definition, previous, submission.connection, kind,
+            submission.profileOverrides?.[id] ?? [])
           : null;
         return impact && update ? { impact, update } : null;
       });

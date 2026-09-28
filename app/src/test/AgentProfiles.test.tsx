@@ -970,6 +970,63 @@ describe("助手实例", () => {
     expect(await screen.findByText("Provider 已保存，1 个独立环境已更新并回读")).toBeInTheDocument();
   });
 
+  it("Provider 上次保存时未同步的环境，再打开编辑可逐字段补同步", async () => {
+    const definition = {
+      display_name: "Claude Code · ly",
+      profile: {
+        base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-cc-ly", source_connection: "relay",
+        env: { ANTHROPIC_BASE_URL: "https://old.example.com", ANTHROPIC_AUTH_TOKEN: "${MY_TOKEN}" },
+      },
+    };
+    let candidate: Record<string, unknown> | null = null;
+    const all = routes([profileElement({
+      state: "managed-ok",
+      observed: {
+        ...(profileElement().observed as Record<string, unknown>),
+        base: "a".repeat(64), definition_base: "b".repeat(64), target_exists: true,
+      },
+    })]) as Record<string, Envelope | ((args: string[]) => Promise<Envelope>)>;
+    const agent = (all["agents:status"] as Envelope<{ elements: { spec: Record<string, unknown> }[] }>).data.elements[0];
+    (agent as any).observed.current_config = { state: "missing", base: "missing", config: null, current: null };
+    agent.spec.settings = {
+      profiles: { relay: { label: "Relay", base_url: "https://new.example.com", auth: "token", token_var: "MY_TOKEN", model: "" } },
+    };
+    all["policy:get"] = async () => makeEnvelope(makePolicyData({ effective: {
+      agents: { definitions: { "cc-ly": candidate
+        ? { ...definition, profile: { ...definition.profile, ...candidate } }
+        : definition } },
+    } }), { command: "policy.get" });
+    all["profiles:status"] = async () => makeEnvelope({ domain: "profiles", elements: [profileElement({
+      state: "managed-ok",
+      observed: {
+        ...(profileElement().observed as Record<string, unknown>),
+        base: candidate ? "c".repeat(64) : "a".repeat(64),
+        definition_base: candidate ? "d".repeat(64) : "b".repeat(64),
+        target_exists: true,
+        fields: [
+          { field: "env.ANTHROPIC_BASE_URL", state: "same", definition: candidate ? "https://new.example.com" : "https://old.example.com" },
+          { field: "env.ANTHROPIC_AUTH_TOKEN", state: "same", definition: "${MY_TOKEN}" },
+        ],
+      },
+    })] }, { command: "profiles.status" });
+    all["profiles:apply-definition"] = async (args) => {
+      candidate = JSON.parse(args[args.indexOf("--candidate") + 1]);
+      return makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply-definition" });
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
+    const dialog = await screen.findByRole("dialog", { name: "编辑 Relay" });
+    const impact = within(dialog).getByTestId("connection-affected-cc-ly");
+    expect(impact).toHaveTextContent("API 地址：https://old.example.com → https://new.example.com");
+    expect(within(impact).getByTestId("connection-update-cc-ly")).toBeDisabled();
+    await userEvent.click(within(impact).getByTestId("connection-override-cc-ly-baseUrl"));
+    expect(within(impact).getByTestId("connection-update-cc-ly")).toBeChecked();
+    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(true));
+    expect(candidate).toMatchObject({ env: { ANTHROPIC_BASE_URL: "https://new.example.com", ANTHROPIC_AUTH_TOKEN: "${MY_TOKEN}" } });
+    expect(await screen.findByText("Provider 已保存，1 个独立环境已更新并回读")).toBeInTheDocument();
+  });
+
   it("实际环境已偏离定义时不能从 Provider 编辑直接覆盖", async () => {
     const all = routes([profileElement({
       state: "drifted",
