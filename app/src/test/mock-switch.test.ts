@@ -27,7 +27,6 @@ describe("dev-only mock 开关", () => {
       "profiles:status",
       "usage:status",
       "usage:scan",
-      "agents:apply",
       "mcp:apply",
       "skills:apply",
       "rules:apply",

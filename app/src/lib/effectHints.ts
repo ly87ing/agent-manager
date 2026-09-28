@@ -27,9 +27,6 @@ export function effectHint(command: string, args: readonly string[] = []): strin
       return "助手下次启动时加载；正在跑的会话不受影响。";
     case "skills:apply":
       return "助手下次启动时扫描技能目录；正在跑的会话看不到刚加的技能。";
-    case "agents:apply":
-      // 安装/升级/卸载本身就是即时结果，不需要额外说明
-      return null;
     default:
       return null;
   }

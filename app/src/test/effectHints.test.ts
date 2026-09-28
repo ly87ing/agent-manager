@@ -22,8 +22,7 @@ describe("生效提示", () => {
     expect(hint).not.toContain("Codex");
   });
 
-  it("安装类动作本身就是即时结果，不额外解释", () => {
-    expect(effectHint("agents:apply")).toBeNull();
+  it("其他命令不额外解释", () => {
     expect(effectHint("policy:set")).toBeNull();
     expect(effectHint("runs:clear")).toBeNull();
   });

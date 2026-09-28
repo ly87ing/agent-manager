@@ -114,7 +114,6 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
       },
       { command: "profiles.seed" },
     ),
-    "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
     "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
     "policy:set": makeEnvelope(makePolicyData(), { command: "policy.set" }),
     "aliases:status": makeEnvelope(

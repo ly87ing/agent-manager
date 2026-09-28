@@ -37,7 +37,6 @@ function agentRoutes(): Record<string, Envelope> {
       { command: "agents.status" },
     ),
     "profiles:status": makeEnvelope({ domain: "profiles", elements: [] }, { command: "profiles.status" }),
-    "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
     "aliases:status": makeEnvelope(makeAliasStatus({ claude: "claude" }), { command: "aliases.status" }),
     "aliases:preview": makeEnvelope({
       files: [{ target: "aliases:zshrc", path: "/isolated/.zshrc", exists: true, content: "# 保留用户内容\n" }],

@@ -27,17 +27,15 @@ impl EngineError {
 
 // ---------- 命令面白名单 ----------
 
-/// 支持 status + apply 的域（对齐引擎 APPLY_DOMAINS；secrets 只读）。
-const READ_WRITE_DOMAINS: &[&str] = &[
-    "agents", "mcp", "skills", "rules", "hooks", "aliases", "profiles",
-];
+/// 桌面界面仍使用 status + apply 的域；助手安装生命周期只保留在 CLI。
+const READ_WRITE_DOMAINS: &[&str] = &["mcp", "skills", "rules", "hooks", "aliases", "profiles"];
 
 pub fn validate_command(command: &str) -> Result<(), EngineError> {
     let rejected = || {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / mcp:preview|hooks:preview|aliases:preview / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:config-file|preview|apply-definition|adopt|seed|shared-status|shared-preview|shared-apply / agents:configure|preview-runtime|preview-default|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 mcp/skills/rules/hooks/aliases/profiles:status|apply / mcp:preview|hooks:preview|aliases:preview / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:config-file|preview|apply-definition|adopt|seed|shared-status|shared-preview|shared-apply / agents:status|configure|preview-runtime|preview-default|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -81,6 +79,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("agents", "auth-status") => true,
         // 配置文件原文：仅用户主动展开时读，可能含凭据；整文件按基准写回
         ("agents", "config-file" | "edit-config") => true,
+        ("agents", "status") => true,
         // 用量：status 只读，scan 读会话文件后写聚合，clear 清空重来
         ("usage", "status" | "scan" | "clear") => true,
         (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
@@ -108,8 +107,6 @@ enum ArgValueKind {
     DotKey,
     /// policy:set 的 JSON 值——合法性即 JSON 可解析。
     JsonValue,
-    /// agents:apply 的显式生命周期动作：仅 install/upgrade/uninstall。
-    AgentAction,
     SkillAction,
     McpAction,
     /// secrets:set 的变量名：与 ${VAR} 占位符同形。
@@ -294,10 +291,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         }
         (_, "apply") | ("mcp", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
-            if domain == "agents" {
-                specs.push(("--allow-uninstall", ArgValueKind::Flag));
-                specs.push(("--action", ArgValueKind::AgentAction));
-            }
             if domain == "skills" {
                 specs.push(("--agent", ArgValueKind::ElementId));
                 specs.push(("--action", ArgValueKind::SkillAction));
@@ -557,13 +550,6 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
             .map_err(|err| {
                 EngineError::new("invalid_args", format!("--value 不是合法 JSON: {err}"))
             }),
-        ArgValueKind::AgentAction => match value {
-            "install" | "upgrade" | "uninstall" => Ok(()),
-            _ => Err(EngineError::new(
-                "invalid_args",
-                format!("非法动作 '{value}'（仅 install|upgrade|uninstall）"),
-            )),
-        },
         ArgValueKind::SkillAction => match value {
             "add" | "update" | "enable" | "disable" | "remove" | "remove-link" => Ok(()),
             _ => Err(EngineError::new("invalid_args", "非法 skills action")),
@@ -723,7 +709,6 @@ mod tests {
     fn command_whitelist_covers_contract_surface_and_rejects_injection() {
         for command in [
             "agents:status",
-            "agents:apply",
             "agents:configure",
             "agents:preview-runtime",
             "agents:preview-default",
@@ -782,6 +767,7 @@ mod tests {
         }
 
         for command in [
+            "agents:apply",
             "agents:update",
             "agents:plan",
             "mcp:plan",
@@ -834,19 +820,6 @@ mod tests {
 
     #[test]
     fn args_cover_command_aware_whitelist_and_reject_invalid_values() {
-        for action in ["install", "upgrade", "uninstall"] {
-            assert!(validate_args(
-                "agents:apply",
-                &[
-                    "--only".into(),
-                    "agents:codex".into(),
-                    "--action".into(),
-                    action.into(),
-                    "--allow-uninstall".into(),
-                ]
-            )
-            .is_ok());
-        }
         for action in ["add", "update", "enable", "disable", "remove"] {
             assert!(validate_args(
                 "skills:apply",
@@ -917,7 +890,6 @@ mod tests {
                     "disable".into(),
                 ],
             ),
-            ("agents:apply", vec!["--allow-uninstall".into()]),
             (
                 "runs:get",
                 vec!["--run".into(), "gui-20260906T010203Z-ab12cd".into()],
@@ -953,7 +925,6 @@ mod tests {
             // plan 命令已被命令面拒绝，参数校验不会到达此处；--dry-run 已从白名单移除。
             ("mcp:status", vec!["--dry-run".into()]),
             ("mcp:apply", vec!["--dry-run".into()]),
-            ("agents:apply", vec!["--dry-run".into()]),
             ("rules:apply", vec!["--dry-run".into()]),
             ("policy:set", vec!["--dry-run".into()]),
             ("sources:set", vec!["--dry-run".into()]),
@@ -1008,11 +979,6 @@ mod tests {
                 ],
             ),
             ("policy:set", vec!["--layer".into(), "baseline".into()]),
-            ("agents:apply", vec!["--action".into(), "reinstall".into()]),
-            (
-                "agents:apply",
-                vec!["--action".into(), "install; rm -rf /".into()],
-            ),
             ("skills:apply", vec!["--action".into(), "INSTALL".into()]),
             ("mcp:status", vec!["; rm -rf /".into()]),
             ("mcp:status", vec!["$(reboot)".into()]),
@@ -1178,7 +1144,6 @@ mod tests {
             ("mcp:status", vec!["--allow-takeover".into()]),
             ("hooks:status", vec!["--allow-takeover".into()]),
             ("skills:status", vec!["--allow-takeover".into()]),
-            ("agents:apply", vec!["--allow-takeover".into()]),
             ("rules:status", vec!["--allow-takeover".into()]),
             // 规则以实际文件为准，没有「接管」：直接编辑本身就是写实际文件
             (

@@ -49,7 +49,6 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
       },
       { command: "agents.status" },
     ),
-    "agents:apply": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.apply" }),
     "agents:configure": makeEnvelope(
       { domain: "agents", action: "configure", element: "agents:claude-code" },
       { command: "agents.configure" },

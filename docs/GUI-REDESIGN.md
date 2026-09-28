@@ -352,7 +352,7 @@ Claude 写 `settings.json` 的 env；Codex 写实例目录 `config.toml` 里 `[m
 
 AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、当前版本和安装来源只在
 「设置 → 客户端诊断」只读展示，不联网更新、不执行脚本；实际安装和更新交给官方安装器或系统
-包管理器。第一阶段不迁移或删除数据库中既有 `providers.*.install/upgrade/uninstall` 字段，旧定义
+包管理器。桌面桥接不放行 `agents:apply`；Rust CLI 仍保留显式生命周期命令。第一阶段不迁移或删除数据库中既有 `providers.*.install/upgrade/uninstall` 字段，旧定义
 仍可无损读回；这些字段只是兼容保留，不再提供用户编辑入口。后续物理清理必须单独完成调用、CLI、
 打包和迁移审计。
 
