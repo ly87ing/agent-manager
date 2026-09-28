@@ -96,8 +96,10 @@ Hooks 以各助手的实际配置为准。目标是主 Claude（`~/.claude/setti
 `secrets:status` 的 `provider_keys` 另列接入配置与独立环境引用的凭据变量：用在哪些接入与环境、有没有取值、
 来自外部文件还是进程环境（只有变量名，不含取值，零写）。独立环境写配置时把取值写进了自己的文件（0600）；
 `profiles:status` 把这一项标为 `purpose: "credential"` 并带变量名，改了取值后状态为不一致，卡片单独写明「密钥换过了，
-这个环境还在用旧的」，按钮是「写入新密钥」（只剩凭据不同时直接写，不弹覆盖确认），不混进一般差异，也不提供「以
+这个环境还在用旧的」，按钮是「写入新密钥」，不混进一般差异，也不提供「以
 实际配置更新定义」。卡片平时也写明凭据来自密钥文件的哪个变量、值写在环境的哪个文件、是否与密钥文件一致。SQLite 只保存路径，状态、日志与配置备份都不含取值；历史数据库值只显示数量并通过输入确认词显式迁移，写文件成功后才删旧表。设置页「配置工具」可达客户端诊断、Aliases 与 Secrets，Aliases 以 rc 文件受管区块为准（见「Aliases 原生域状态」）。按 2026-09-12 产品裁决，Tools 域、快照（`snapshots:*`）与 `system:converge` 已退役，相关页面、Tauri 白名单与契约 schema 已移除；`system:refresh-upstream` 已接线 Rust dispatcher：探测宇宙为 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表，三域 status 只读回填 freshness（缺表/缺行一律 unknown，status 零写零网络），`--offline` 拒绝。
+
+已保存的独立环境执行「写入配置」「用定义覆盖实际配置」或「写入新密钥」前，`profiles:preview --only … --base …` 使用真实密钥取值和写入计划展示目标文件的完整路径与候选原文；原文可能含凭据，只在本机查看。预览失败不能确认，取消零写。确认时同时校验预览时的原文件摘要与候选内容摘要；外部文件、定义或密钥变化导致候选不一致时拒绝本次写入，须重新预览。新建环境的草稿预览仍保留变量引用形式。
 
 SQLite 核心、Tauri bridge、设置页面、主要资源页面布局、Agent 原生生命周期、Skills 原生域、MCP 原生域、Rules 原生域、Hooks 原生域、Aliases 原生域、Runs SQLite 操作记录及 Python 清理已完成。内置技能仓库只作推荐来源（`skills:status.recommendations`），添加后才成为用户集合且不自动分配给任何助手；技能页另展示各助手技能目录的实际条目（`skills:status.installed`）；集合与 Skill×Agent 均支持独立更新、启停和移除；启用通过内容寻址快照与安全软连接落地；status 只读零写，真实 apply 具备进程锁与操作审计。任务记录基于 `operation_logs` 审计实际操作，保留期由 `log_retention_days` 控制（0 为不自动清理），执行中心提供二次确认清空。Hooks 原生域以实际配置为准（见「Hooks 原生域状态」），hooks 专用 `sources:get/set` 已退役。验收基线提交 `5a110be3` 的候选包已完成主要真实 GUI E2E（旧版 plan→confirm 交互，现已失效，不证明本轮直接 apply 新交互）；2026-09-09 Darwin x86_64 DMG 的只读挂载、仓库外复制、无 Python、路径脱敏和 5 秒启动验收早于当前 Rules/MCP/Hooks/Secrets 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks/Secrets/system:audit GUI 业务闭环；签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
 
@@ -196,7 +198,7 @@ Codex 侧读 `<CODEX_HOME>/sessions/**/rollout-*.jsonl` 里最后一条 `rate_li
 `agents:preview-default` 按当前实际文件和写入基准展示切回后的完整 `settings.json` / `config.toml`；预览
 完成前或报错时不能确认，报错可关闭旧操作并重读实际状态。实际写入仍重新校验基准，未保存的第三方接入仍须
 先安全回填；确认框另带预览时的整文件摘要，预览后连非受管注释发生变化也拒绝本次写入并要求重新预览，
-避免显示的完整原文与实际写入不一致。其他配置写入仍按各自受管字段的基准处理；预览不改文件、数据库或密钥文件。
+避免显示的完整原文与实际写入不一致。预览不改文件、数据库或密钥文件。
 
 **接入配置**：`settings.profiles` 存多套各家中转站的接入定义，作为备选保存、测试、导入导出，
 或建成独立环境。每套含地址、令牌变量名、令牌走哪个头（`token` → `ANTHROPIC_AUTH_TOKEN` 的

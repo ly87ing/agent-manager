@@ -128,6 +128,124 @@ fn apply_now(ctx: &Context, id: &str) -> agent_manager_engine::Envelope {
 }
 
 #[test]
+fn saved_profile_preview_matches_write_and_rejects_changed_file_or_secret() {
+    let (root, ctx) = temp_ctx("saved-profile-preview");
+    std::env::set_var("AM_TEST_SAVED_PREVIEW", "preview-token");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_SAVED_PREVIEW")
+    ));
+    let target = ctx.home_dir.join(".claude-ly/settings.json");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    let original = b"{\"theme\":\"keep\"}\n";
+    std::fs::write(&target, original).unwrap();
+    let global = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+    std::fs::write(&global, b"{\"model\":\"keep\"}\n").unwrap();
+    let global_before = std::fs::read(&global).unwrap();
+    let base = base_of(&ctx, "cc-ly");
+    let args = ["--only", "profiles:cc-ly", "--base", &base];
+    let db_before = std::fs::read(ctx.data_dir.join("native-manager.db")).unwrap();
+    let preview = execute(&ctx, &request("profiles:preview", &args));
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(std::fs::read(&target).unwrap(), original);
+    assert_eq!(
+        std::fs::read(ctx.data_dir.join("native-manager.db")).unwrap(),
+        db_before
+    );
+    let candidate = preview.data["content"].as_str().unwrap();
+    assert!(candidate.contains("preview-token"));
+    let file_base = preview.data["file_base"].as_str().unwrap();
+    let content_base = preview.data["content_base"].as_str().unwrap();
+    let confirmed = [
+        "--only",
+        "profiles:cc-ly",
+        "--base",
+        &base,
+        "--preview-file-base",
+        file_base,
+        "--preview-content-base",
+        content_base,
+    ];
+
+    std::fs::write(&target, b"{\"theme\":\"changed\"}\n").unwrap();
+    assert!(!execute(&ctx, &request("profiles:apply", &confirmed)).ok);
+    assert_eq!(
+        std::fs::read(&target).unwrap(),
+        b"{\"theme\":\"changed\"}\n"
+    );
+    std::fs::write(&target, original).unwrap();
+    std::env::set_var("AM_TEST_SAVED_PREVIEW", "new-token");
+    assert!(!execute(&ctx, &request("profiles:apply", &confirmed)).ok);
+    assert_eq!(std::fs::read(&target).unwrap(), original);
+    std::env::set_var("AM_TEST_SAVED_PREVIEW", "preview-token");
+    let done = execute(&ctx, &request("profiles:apply", &confirmed));
+    assert!(done.ok, "{:?}", done.errors);
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), candidate);
+    assert_eq!(std::fs::read(&global).unwrap(), global_before);
+    assert!(!std::fs::read(ctx.data_dir.join("native-manager.db"))
+        .unwrap()
+        .windows(b"preview-token".len())
+        .any(|bytes| bytes == b"preview-token"));
+    std::env::remove_var("AM_TEST_SAVED_PREVIEW");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn saved_codex_profile_preview_preserves_other_settings_and_matches_write() {
+    let (root, ctx) = temp_ctx("saved-codex-preview");
+    std::env::set_var("AM_TEST_CODEX_SAVED_PREVIEW", "codex-preview-token");
+    assert!(save_definition(
+        &ctx,
+        "cx-work",
+        r#"{"display_name":"Codex work","bin":"codex","profile":{"base_agent":"codex","kind":"codex","config_dir":"~/.codex-work","base_url":"https://relay.example.com/v1","env_key":"AM_TEST_CODEX_SAVED_PREVIEW","wire_api":"responses","model":"work-model"}}"#
+    ));
+    let target = ctx.home_dir.join(".codex-work/config.toml");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    let original = b"[mcp_servers.fs]\ncommand = \"npx\"\n";
+    std::fs::write(&target, original).unwrap();
+    let base = base_of(&ctx, "cx-work");
+    let preview = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &["--only", "profiles:cx-work", "--base", &base],
+        ),
+    );
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(std::fs::read(&target).unwrap(), original);
+    let candidate = preview.data["content"].as_str().unwrap();
+    let doc: toml::Table = candidate.parse().unwrap();
+    assert_eq!(doc["mcp_servers"]["fs"]["command"].as_str(), Some("npx"));
+    assert_eq!(doc["model"].as_str(), Some("work-model"));
+    assert_eq!(
+        doc["model_providers"]["agent-manager"]["experimental_bearer_token"].as_str(),
+        Some("codex-preview-token")
+    );
+    let done = execute(
+        &ctx,
+        &request(
+            "profiles:apply",
+            &[
+                "--only",
+                "profiles:cx-work",
+                "--base",
+                &base,
+                "--preview-file-base",
+                preview.data["file_base"].as_str().unwrap(),
+                "--preview-content-base",
+                preview.data["content_base"].as_str().unwrap(),
+            ],
+        ),
+    );
+    assert!(done.ok, "{:?}", done.errors);
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), candidate);
+    std::env::remove_var("AM_TEST_CODEX_SAVED_PREVIEW");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn provider_candidate_updates_one_profile_definition_and_live_file_together() {
     let (root, ctx) = temp_ctx("provider-candidate");
     std::env::set_var("AM_TEST_PROVIDER_CANDIDATE", "candidate-token-value");

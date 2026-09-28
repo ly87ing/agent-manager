@@ -101,6 +101,7 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
     "profiles:status": makeEnvelope({ domain: "profiles", elements: profiles }, { command: "profiles.status" }),
     "profiles:preview": makeEnvelope({
       path: "/isolated/settings.json", exists: false, content: "{\"env\":{}}", files: [],
+      file_base: "missing", content_base: "d".repeat(64),
     }, { command: "profiles.preview" }),
     "profiles:apply": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply" }),
     "profiles:adopt": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.adopt" }),
@@ -1037,14 +1038,35 @@ describe("助手实例", () => {
     expect(within(dialog).getByTestId("profile-launch-preview")).toHaveTextContent("--dangerously-skip-permissions");
   });
 
-  it("写入配置触发 profiles:apply，限定在该实例并带实际内容的基准", async () => {
+  it("写入配置先预览完整文件，确认后按原文件和候选摘要写入", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();
     await userEvent.click(await screen.findByTestId("profile-apply-cc-ly"));
+    expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
+    const dialog = await screen.findByRole("dialog", { name: "写入 cc-ly 的配置" });
+    expect(within(dialog).getByTestId("profile-apply-file-preview")).toHaveTextContent("/isolated/settings.json");
+    expect(calls.find((call) => call.command === "profiles:preview")?.args).toEqual(["--only", "profiles:cc-ly", "--base", "missing"]);
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认写入" }));
     await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply")).toBe(true));
     const apply = calls.find((call) => call.command === "profiles:apply")!;
-    expect(apply.args).toEqual(["--only", "profiles:cc-ly", "--base", "missing"]);
+    expect(apply.args).toEqual(["--only", "profiles:cc-ly", "--base", "missing", "--preview-file-base", "missing", "--preview-content-base", "d".repeat(64)]);
     expect(apply.args).not.toContain("--allow-takeover");
+  });
+
+  it("实例文件预览失败时不能写入，取消也不会写入", async () => {
+    const all = routes();
+    all["profiles:preview"] = makeEnvelope(null, {
+      ok: false, command: "profiles.preview",
+      errors: [{ code: "STALE", element: null, message: "实际文件已变化" }],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("profile-apply-cc-ly"));
+    const dialog = await screen.findByRole("dialog", { name: "写入 cc-ly 的配置" });
+    expect(await within(dialog).findByText("实际文件已变化")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "确认写入" })).toBeDisabled();
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
   });
 
   it("实际配置与定义不同时列出差异；覆盖要先确认，也可以以实际配置更新定义", async () => {
@@ -1079,9 +1101,10 @@ describe("助手实例", () => {
     expect(apply).toHaveTextContent("用定义覆盖实际配置");
     await userEvent.click(apply);
     expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
+    await screen.findByTestId("profile-apply-file-preview");
     await userEvent.click(await screen.findByRole("button", { name: "确认覆盖" }));
     await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply")).toBe(true));
-    expect(calls.find((call) => call.command === "profiles:apply")!.args).toEqual(["--only", "profiles:cc-ly", "--base", base]);
+    expect(calls.find((call) => call.command === "profiles:apply")!.args).toEqual(["--only", "profiles:cc-ly", "--base", base, "--preview-file-base", "missing", "--preview-content-base", "d".repeat(64)]);
 
     // 采纳：以实际配置更新定义
     await userEvent.click(screen.getByTestId("profile-adopt-cc-ly"));
@@ -1268,7 +1291,7 @@ describe("助手实例", () => {
     expect(JSON.parse(call.args[1])).toEqual({ kind: "claude", base_url: "https://relay.example.com", token_var: "RELAY_KEY" });
   });
 
-  it("密钥换了还没写进环境：卡片单独说明，按钮是「写入新密钥」，直接写不弹覆盖确认", async () => {
+  it("密钥换了还没写进环境：卡片单独说明，写入前预览目标文件", async () => {
     const base = profileElement();
     const stale = profileElement({
       state: "drifted",
@@ -1295,10 +1318,13 @@ describe("助手实例", () => {
     const write = within(card).getByTestId("profile-apply-cc-ly");
     expect(write).toHaveTextContent("写入新密钥");
     await userEvent.click(write);
+    expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
+    const dialog = await screen.findByRole("dialog", { name: "写入 cc-ly 的新密钥" });
+    expect(within(dialog).getByTestId("profile-apply-file-preview")).toHaveTextContent("/isolated/settings.json");
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认写入新密钥" }));
     await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply")).toBe(true));
-    expect(screen.queryByRole("dialog")).toBeNull();
     const apply = calls.find((call) => call.command === "profiles:apply")!;
-    expect(apply.args).toEqual(["--only", "profiles:cc-ly", "--base", "b".repeat(64)]);
+    expect(apply.args).toEqual(["--only", "profiles:cc-ly", "--base", "b".repeat(64), "--preview-file-base", "missing", "--preview-content-base", "d".repeat(64)]);
   });
 
   it("移除实例需确认，且只停止管理、不动配置目录", async () => {

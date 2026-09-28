@@ -46,7 +46,7 @@ fn parse_base(req: &Request) -> Result<String> {
     Ok(base.to_string())
 }
 
-/// 严格参数：只接受 `--only <id> --base <digest>`。
+/// 实例写入可额外带预览时的原文件与候选内容摘要；采纳仍只接受原有参数。
 fn check_args(req: &Request, command: &str) -> Result<()> {
     if req.flag("--dry-run") {
         bail!("{command} 已退役 --dry-run，拒绝该参数");
@@ -55,7 +55,14 @@ fn check_args(req: &Request, command: &str) -> Result<()> {
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--only" | "--base" => {
-                iter.next();
+                if iter.next().is_none() {
+                    bail!("{command} 的 {arg} 缺少取值");
+                }
+            }
+            "--preview-file-base" | "--preview-content-base" if command == "profiles:apply" => {
+                if iter.next().is_none() {
+                    bail!("{command} 的 {arg} 缺少取值");
+                }
             }
             other => bail!("{command} 不支持参数 '{other}'"),
         }
@@ -164,6 +171,12 @@ fn plan_for_def(
     if model::live_base(def.kind, previous.as_deref())? != base {
         return Err(stale(&def, &file));
     }
+    if let Some(expected) = req.value("--preview-file-base") {
+        check_preview_base(expected, "--preview-file-base")?;
+        if file_base(previous.as_deref()) != expected {
+            return Err(stale(&def, &file));
+        }
+    }
     let recorded = recorded_paths(ctx, &def, &file)?;
     // 渲染：变量缺失、现有文件损坏在取锁前就暴露
     let rendered = model::render_all(&def, &|_| previous.clone(), resolve, &recorded)?;
@@ -172,6 +185,14 @@ fn plan_for_def(
         .next()
         .map(|target| target.content)
         .ok_or_else(|| anyhow!("[{}] 没有要写的文件", def.id))?;
+    if let Some(expected) = req.value("--preview-content-base") {
+        if !crate::native_mcp::model::is_sha256_hex(expected) {
+            bail!("--preview-content-base 必须是 64 位小写 sha256");
+        }
+        if crate::native_mcp::model::sha256_hex_bytes(&content) != expected {
+            bail!("[{}] 写入内容已变化，没有写入；请重新预览", def.id);
+        }
+    }
     Ok(Plan {
         def,
         dir,
@@ -182,14 +203,47 @@ fn plan_for_def(
     })
 }
 
+fn check_preview_base(value: &str, arg: &str) -> Result<()> {
+    if value != model::BASE_MISSING && !crate::native_mcp::model::is_sha256_hex(value) {
+        bail!("{arg} 必须是 64 位小写 sha256 或 missing");
+    }
+    Ok(())
+}
+
+fn file_base(bytes: Option<&[u8]>) -> String {
+    bytes
+        .map(crate::native_mcp::model::sha256_hex_bytes)
+        .unwrap_or_else(|| model::BASE_MISSING.to_string())
+}
+
 fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
     check_args(req, "profiles:apply")?;
     let id = parse_only(req)?;
     plan_for_def(ctx, req, find_def(ctx, &id)?, &crate::secret_values::lookup)
 }
 
-/// 按表单草稿只读渲染目标文件。变量取值保留引用形式，不读取密钥来源；保存时仍按实际文件重新计算。
+/// 已保存实例按写入计划预览真实取值；表单草稿保留变量引用，保存时重算。
 pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
+    if req.args.len() == 4 && req.args[0] == "--only" && req.args[2] == "--base" {
+        let plan = plan(ctx, req)?;
+        if plan
+            .previous
+            .as_ref()
+            .is_some_and(|bytes| bytes.len() > MAX_PREVIEW_BYTES)
+            || plan.content.len() > MAX_PREVIEW_BYTES
+        {
+            bail!("配置文件超过安全读取上限");
+        }
+        return Ok(json!({
+            "element": format!("profiles:{}", plan.def.id),
+            "path": format!("{}/{}", plan.def.config_dir_raw, plan.file),
+            "format": if plan.def.kind.as_str() == "codex" { "toml" } else { "json" },
+            "exists": plan.previous.is_some(),
+            "file_base": file_base(plan.previous.as_deref()),
+            "content_base": crate::native_mcp::model::sha256_hex_bytes(&plan.content),
+            "content": String::from_utf8(plan.content).map_err(|_| anyhow!("预览结果不是 UTF-8 文本"))?,
+        }));
+    }
     if req.args.iter().any(|arg| arg == "--candidate") {
         let (plan, _, _) =
             plan_update_with_resolver(ctx, req, &|name| Some(format!("${{{name}}}")))?;

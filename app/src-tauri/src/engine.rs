@@ -313,6 +313,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             // 实例配置以实际文件为准：写入带 status 给出的基准，外部改过就被拒；「接管」已退役
             if domain == "profiles" {
                 specs.push(("--base", ArgValueKind::RuleBase));
+                specs.push(("--preview-file-base", ArgValueKind::RuleBase));
+                specs.push(("--preview-content-base", ArgValueKind::Digest));
             }
         }
         _ => {}
@@ -1540,6 +1542,49 @@ mod tests {
             )
             .is_err());
         }
+        assert!(validate_args(
+            "profiles:preview",
+            &args(&["--only", "profiles:cc-ly", "--base", &base])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "profiles:apply",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--base",
+                &base,
+                "--preview-file-base",
+                "missing",
+                "--preview-content-base",
+                &base
+            ])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "profiles:apply",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--base",
+                &base,
+                "--preview-content-base",
+                "missing"
+            ])
+        )
+        .is_err());
+        assert!(validate_args(
+            "profiles:adopt",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--base",
+                &base,
+                "--preview-file-base",
+                "missing"
+            ])
+        )
+        .is_err());
         assert!(validate_args(
             "profiles:apply",
             &args(&["--only", "profiles:cc-ly", "--allow-takeover"])

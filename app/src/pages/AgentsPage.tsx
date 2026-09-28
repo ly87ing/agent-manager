@@ -6,6 +6,7 @@ import { ProfileFormDialog } from "../components/ProfileFormDialog";
 import { AliasApplyConfirm } from "../components/AliasApplyConfirm";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ResetDefaultConfirm } from "../components/ResetDefaultConfirm";
+import { ProfileApplyConfirm } from "../components/ProfileApplyConfirm";
 import {
   ConnectionFormDialog,
   type ConnectionProfileImpact,
@@ -126,8 +127,7 @@ export default function AgentsPage({
   /** 复制实例：表单带着预填内容，但名称与配置目录仍要能改（否则两个实例指同一套配置）。 */
   const [profileDuplicating, setProfileDuplicating] = useState(false);
   const [profileRemoving, setProfileRemoving] = useState<string | null>(null);
-  // 实际配置与实例定义不同时，用定义覆盖实际配置前先确认
-  const [profileOverwriting, setProfileOverwriting] = useState<EngineElement | null>(null);
+  const [profileWriting, setProfileWriting] = useState<{ element: EngineElement; credentialOnly: boolean } | null>(null);
   /** 日常接入工作台当前查看的主助手；null 时跟随列表里的第一个。 */
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [connectionForm, setConnectionForm] = useState<{
@@ -364,11 +364,12 @@ export default function AgentsPage({
   const profileBaseOf = (element: EngineElement): string =>
     ((element.observed as unknown as { base?: string | null }).base ?? "missing");
 
-  const writeProfile = (element: EngineElement) =>
+  const writeProfile = (element: EngineElement, fileBase: string, contentBase: string) =>
     profileApply.apply({
       command: "profiles:apply",
       label: `写入实例配置 ${element.id.replace(/^profiles:/, "")}`,
-      args: ["--only", element.id, "--base", profileBaseOf(element)],
+      args: ["--only", element.id, "--base", profileBaseOf(element),
+        "--preview-file-base", fileBase, "--preview-content-base", contentBase],
     });
 
   const runCheckAll = async (agentId: string, profiles: string[]): Promise<void> => {
@@ -1176,14 +1177,8 @@ export default function AgentsPage({
                   }}
                   bin={baseBinOf((element.spec as unknown as { base_agent?: string }).base_agent ?? id)}
                   busy={profileApply.executing}
-                  onApply={() => {
-                    if (element.state === "drifted") {
-                      setProfileOverwriting(element);
-                      return;
-                    }
-                    void writeProfile(element);
-                  }}
-                  onWriteCredential={() => void writeProfile(element)}
+                  onApply={() => setProfileWriting({ element, credentialOnly: false })}
+                  onWriteCredential={() => setProfileWriting({ element, credentialOnly: true })}
                   onAdopt={() =>
                     void profileApply.apply({
                       command: "profiles:adopt",
@@ -1382,19 +1377,24 @@ export default function AgentsPage({
         />
       )}
 
-      {profileOverwriting && (
-        <ConfirmModal
-          title={`用定义覆盖 ${profileOverwriting.id.replace(/^profiles:/, "")} 的实际配置`}
-          description={overwriteDescription(profileOverwriting)}
-          risk="write-local"
-          confirmLabel="确认覆盖"
+      {profileWriting && (
+        <ProfileApplyConfirm
+          element={profileWriting.element}
+          base={profileBaseOf(profileWriting.element)}
+          credentialOnly={profileWriting.credentialOnly}
+          description={profileWriting.element.state === "drifted" && !profileWriting.credentialOnly
+            ? overwriteDescription(profileWriting.element)
+            : profileWriting.credentialOnly
+              ? "把当前密钥值写进这个独立环境的配置文件。"
+              : "按实例定义写入配置文件。"}
           executing={profileApply.executing}
-          onConfirm={() => {
-            const target = profileOverwriting;
-            setProfileOverwriting(null);
-            void writeProfile(target);
+          onConfirm={(fileBase, contentBase) => {
+            const target = profileWriting.element;
+            setProfileWriting(null);
+            void writeProfile(target, fileBase, contentBase);
           }}
-          onClose={() => setProfileOverwriting(null)}
+          onClose={() => setProfileWriting(null)}
+          onRefresh={() => { setProfileWriting(null); void profilesQuery.refetch(); }}
         />
       )}
 
