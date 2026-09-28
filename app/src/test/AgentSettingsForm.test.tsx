@@ -873,8 +873,7 @@ describe("助手运行参数", () => {
     withProfiles["profiles:apply"] = makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply" });
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
-    await userEvent.click(await screen.findByLabelText("管理 我的中转"));
-    await userEvent.click(screen.getByTestId("make-profile-claude-code-relay"));
+    await userEvent.click(await screen.findByTestId("make-profile-quick-claude-code-relay"));
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     expect(within(dialog).getByTestId("profile-id-input")).toHaveValue("relay");
     expect(within(dialog).getByTestId("profile-base-url")).toHaveValue("https://relay.example.com");
@@ -919,8 +918,7 @@ describe("助手运行参数", () => {
     };
     // 没有注册 profiles:status：模拟引擎调用本身失败
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
-    await userEvent.click(await screen.findByLabelText("管理 我的中转"));
-    await userEvent.click(screen.getByTestId("make-profile-claude-code-relay"));
+    await userEvent.click(await screen.findByTestId("make-profile-quick-claude-code-relay"));
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
     expect(await screen.findByText("已保存独立环境 relay，但配置没有写入，启动命令也先不写")).toBeInTheDocument();
@@ -956,7 +954,10 @@ describe("助手运行参数", () => {
     renderWithEngine(<AgentsPage />, withProfiles);
     expect(await screen.findByTestId("connection-instances-claude-code-glm")).toHaveTextContent("已建成独立环境：cc-glm");
     expect(screen.queryByTestId("make-profile-quick-claude-code-glm")).toBeNull();
+    await userEvent.click(screen.getByLabelText("管理 智谱"));
+    expect(screen.getByTestId("make-profile-claude-code-glm")).toBeInTheDocument();
     expect(screen.getByTestId("connection-unused-claude-code-kimi")).toHaveTextContent("还没建成独立环境");
+    expect(screen.queryByTestId("make-profile-claude-code-kimi")).toBeNull();
     await userEvent.click(screen.getByTestId("make-profile-quick-claude-code-kimi"));
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     expect(within(dialog).getByTestId("profile-base-url")).toHaveValue("https://api.moonshot.cn/anthropic");

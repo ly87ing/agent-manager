@@ -531,7 +531,7 @@ export function ConnectionWorkbench({
           >
             主配置里有第三方接入，和官方账号用的是同一个配置目录：{name} 现在把请求发往第三方，用的是配置里的令牌。
             点「官方账号」上的「切回官方账号」（会先让你确认改动范围），这份第三方配置会先保存为接入；要继续用它，
-            在它的菜单里选「建成独立环境」。
+            在接入卡片上点「建成独立环境」。
           </p>
         )}
         {tab === "providers" && <div className="flex flex-col gap-3">
@@ -961,7 +961,7 @@ function ConnectionCard({
                 创建副本
               </button>
             )}
-            {onMakeProfile && connection && (
+            {onMakeProfile && connection && (instances.length > 0 || Boolean(connection.providerRef)) && (
               <button
                 type="button"
                 data-testid={`make-profile-${agentId}-${id}`}
