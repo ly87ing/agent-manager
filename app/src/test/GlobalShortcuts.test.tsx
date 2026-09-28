@@ -35,7 +35,7 @@ describe("全局快捷键", () => {
     expect(await screen.findByRole("heading", { name: "助手" })).toBeInTheDocument();
     // 侧边栏底部的快捷键说明
     expect(screen.getByText("快捷键")).toBeInTheDocument();
-    expect(screen.getByText("账号快切")).toBeInTheDocument();
+    expect(screen.getByText("账号与环境")).toBeInTheDocument();
     expect(screen.getByText("打开设置")).toBeInTheDocument();
     expect(screen.getByText("聚焦页内搜索")).toBeInTheDocument();
 
@@ -85,6 +85,6 @@ describe("全局快捷键", () => {
     expect(within(nav).getByRole("button", { name: "MCP" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("heading", { name: "设置" })).toBeNull();
     await userEvent.keyboard("{Meta>}{Shift>}k{/Shift}{/Meta}");
-    expect(screen.queryByRole("dialog", { name: "账号快切" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "账号与环境" })).toBeNull();
   }, 15000);
 });

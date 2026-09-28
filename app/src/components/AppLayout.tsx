@@ -83,7 +83,7 @@ export function AppLayout({
               <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">⌘K</kbd>搜索与执行
             </li>
             <li className="flex items-center gap-1.5">
-              <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">⌘⇧K</kbd>账号快切
+              <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">⌘⇧K</kbd>账号与环境
             </li>
             <li className="flex items-center gap-1.5">
               <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">⌘,</kbd>打开设置

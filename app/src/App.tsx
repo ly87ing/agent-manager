@@ -61,7 +61,7 @@ export default function App() {
   /** 「skills:<名称>」跳转带进来的技能搜索词：总览「去处理」直接定位到那一行。 */
   const [skillSearch, setSkillSearch] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [paletteScope, setPaletteScope] = useState<"all" | "connections">("all");
+  const [paletteScope, setPaletteScope] = useState<"all" | "quick">("all");
   const [paletteConnectionTarget, setPaletteConnectionTarget] = useState<{ keyword: string; itemId: string } | null>(null);
   const update = useUpdateCheck();
 
@@ -73,9 +73,9 @@ export default function App() {
         event.preventDefault();
         setActivePage("settings");
       } else if (event.key.toLowerCase() === "k") {
-        // ⌘K 搜全部；⌘⇧K 只看接入，减少高频切换前的输入。
+        // ⌘K 搜全部；⌘⇧K 只看官方账号与独立环境。
         event.preventDefault();
-        const nextScope = event.shiftKey ? "connections" : "all";
+        const nextScope = event.shiftKey ? "quick" : "all";
         setPaletteConnectionTarget(null);
         setPaletteOpen((prev) => (prev && paletteScope === nextScope ? false : true));
         setPaletteScope(nextScope);
@@ -111,7 +111,7 @@ export default function App() {
           });
           setPaletteOpen(true);
         } else {
-          setPaletteScope("connections");
+          setPaletteScope("quick");
           setPaletteConnectionTarget({
             keyword: `${action.agentName} · ${action.profileLabel}`,
             itemId: `connection:${action.agentId}:${action.profile || "default"}`,

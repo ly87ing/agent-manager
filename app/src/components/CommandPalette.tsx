@@ -91,8 +91,8 @@ export function CommandPalette({
   onOpenAgentSkills,
 }: {
   open: boolean;
-  /** 账号快切模式只保留各助手的「官方账号」项；执行路径与完整命令面板相同。 */
-  scope?: "all" | "connections";
+  /** 高频入口只列官方账号、独立环境及其已有启动命令；动作沿用完整命令面板。 */
+  scope?: "all" | "quick";
   /** 托盘目标会带精确查询，打开后直接把焦点落在对应接入。 */
   initialKeyword?: string | null;
   initialItemId?: string | null;
@@ -421,8 +421,8 @@ export function CommandPalette({
   }, [agents.data, skills.data, mcp.data, profiles.data, aliasValues, switchingTarget, refreshUpstream, switchConnection, onNavigate, onNavigateProfile, onOpenAgentSkills]);
 
   const filtered = useMemo(() => {
-    const scoped = scope === "connections"
-      ? items.filter((item) => item.group === "官方账号")
+    const scoped = scope === "quick"
+      ? items.filter((item) => item.group === "官方账号" || item.group === "独立环境")
       : items;
     return targetItemId
       ? scoped.filter((item) => item.id === targetItemId)
@@ -457,7 +457,7 @@ export function CommandPalette({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={scope === "connections" ? "账号快切" : "命令面板"}
+        aria-label={scope === "quick" ? "账号与环境" : "命令面板"}
         data-testid="command-palette"
         className="w-full max-w-xl overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
         onKeyDown={(event) => {
@@ -487,15 +487,15 @@ export function CommandPalette({
               setKeyword(event.target.value);
             }}
             data-testid="command-palette-input"
-            aria-label={scope === "connections" ? "搜索助手" : "搜索资源、页面与动作"}
-            placeholder={scope === "connections" ? "搜索助手名称…" : "搜索助手、技能、MCP、实例，或直接执行常用动作…"}
+            aria-label={scope === "quick" ? "搜索账号与环境" : "搜索资源、页面与动作"}
+            placeholder={scope === "quick" ? "搜索官方账号、独立环境或启动命令…" : "搜索助手、技能、MCP、实例，或直接执行常用动作…"}
             className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
         <div className="max-h-[50vh] overflow-y-auto p-2">
           {filtered.length === 0 ? (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-              {scope === "connections" ? "没有匹配的助手。" : "没有匹配的资源或动作。"}
+              {scope === "quick" ? "没有匹配的账号或环境。" : "没有匹配的资源或动作。"}
             </p>
           ) : (
             Object.entries(groups).map(([group, groupItems]) => (

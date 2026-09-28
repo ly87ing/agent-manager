@@ -170,9 +170,9 @@ async function openPalette() {
   return screen.findByTestId("command-palette");
 }
 
-async function openConnectionSwitcher() {
+async function openAccountAndEnvironmentPalette() {
   await userEvent.keyboard("{Meta>}{Shift>}k{/Shift}{/Meta}");
-  return screen.findByRole("dialog", { name: "账号快切" });
+  return screen.findByRole("dialog", { name: "账号与环境" });
 }
 
 describe("命令面板", () => {
@@ -192,18 +192,18 @@ describe("命令面板", () => {
     expect(palette).not.toBeInTheDocument();
   });
 
-  it("⌘⇧K 打开账号快切：只列各助手的官方账号，不列第三方接入", async () => {
+  it("⌘⇧K 只列官方账号与独立环境，不列主配置第三方接入或其他资源", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
 
-    const switcher = await openConnectionSwitcher();
+    const switcher = await openAccountAndEnvironmentPalette();
     expect(within(switcher).getByTestId("command-item-connection:claude-code:default")).toHaveTextContent("Claude Code · 官方账号");
     expect(within(switcher).queryByTestId("command-item-connection:claude-code:kimi")).toBeNull();
     expect(within(switcher).queryByTestId("command-item-page:agents")).toBeNull();
     expect(within(switcher).queryByTestId("command-item-action:apply-rules")).toBeNull();
 
-    const input = within(switcher).getByRole("textbox", { name: "搜索助手" });
+    const input = within(switcher).getByRole("textbox", { name: "搜索账号与环境" });
     await userEvent.type(input, "月度套餐");
     expect(within(switcher).queryByTestId("command-item-connection:claude-code:default")).toBeNull();
 
@@ -212,7 +212,7 @@ describe("命令面板", () => {
     expect(screen.getByTestId("command-item-page:agents")).toBeInTheDocument();
   });
 
-  it("按启动名搜索独立环境、复制启动名并直达具体卡片，全程不写客户端配置", async () => {
+  it("⌘⇧K 按启动名搜索独立环境、复制启动名并直达卡片，全程不写客户端配置", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     const writeText = vi.fn(async () => {});
     const originalClipboard = navigator.clipboard;
@@ -233,11 +233,11 @@ describe("命令面板", () => {
     testRoutes["aliases:status"] = makeEnvelope(makeAliasStatus({ "cc-work": 'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude' }), { command: "aliases.status" });
     const { calls } = renderWithEngine(<App />, testRoutes);
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
-    await openPalette();
+    await openAccountAndEnvironmentPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "cc-work");
     await userEvent.click(await screen.findByTestId("command-item-profile-launch:cc-work:cc-work"));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("cc-work"));
-    await openPalette();
+    await openAccountAndEnvironmentPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "工作账号");
     await userEvent.click(await screen.findByTestId("command-item-profile:cc-work"));
     const card = await screen.findByTestId("profile-card-cc-work");
@@ -310,7 +310,7 @@ describe("命令面板", () => {
     testRoutes["aliases:status"] = makeEnvelope(makeAliasStatus({ pending: 'CLAUDE_CONFIG_DIR="$HOME/.claude-pending" claude' }), { command: "aliases.status" });
     renderWithEngine(<App />, testRoutes);
     await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
-    await openPalette();
+    await openAccountAndEnvironmentPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "待写入");
     expect(await screen.findByTestId("command-item-profile:pending")).toHaveTextContent("配置尚未可用");
     expect(screen.queryByTestId("command-item-profile-launch:pending:pending")).toBeNull();
@@ -329,7 +329,7 @@ describe("命令面板", () => {
     await userEvent.type(screen.getByTestId("command-palette-input"), "同步规则");
     expect(screen.queryByTestId("command-item-action:apply-rules")).toBeNull();
     await userEvent.clear(screen.getByTestId("command-palette-input"));
-    // 快捷命令每次编辑都直接写回 rc 文件，没有「同步」可做（执行通道见下方账号快切用例）
+    // 快捷命令每次编辑都直接写回 rc 文件，没有「同步」可做（执行通道见下方官方账号用例）
     await userEvent.type(screen.getByTestId("command-palette-input"), "同步终端快捷命令");
     expect(screen.queryByTestId("command-item-action:apply-aliases")).toBeNull();
     expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
