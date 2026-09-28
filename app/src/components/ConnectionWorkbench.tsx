@@ -7,7 +7,7 @@ import type { EngineElement } from "../lib/contract";
 import type { AgentCurrentConfig, AgentsObserved, AgentsSpec, OfficialAuthStatus } from "../lib/observed";
 import {
   isPlainHttpUrl,
-  parseInitialToFormValues,
+  connectionEntriesOf,
   type ConnectionEntry,
 } from "../lib/agentDefinitionForm";
 import { connectionKindOf } from "../lib/agentManagement";
@@ -159,11 +159,11 @@ export function ConnectionWorkbench({
   const automationLabel = automationLabelOf(selected);
   const management = (selected.observed as AgentsObserved).management;
   const runtimeFields = management?.runtime_fields ?? [];
-  const form = parseInitialToFormValues(agentId, selected.spec as Record<string, unknown>);
+  const connections = connectionEntriesOf(selected.spec as Record<string, unknown>);
   // 当前项以实际配置为准：引擎按内容识别，库里的 active 只是上次写入记录
   const current = currentConnectionOf(selected);
   const active = current?.profile ?? "";
-  const activeEntry = form.connections.find((item) => item.name === active);
+  const activeEntry = connections.find((item) => item.name === active);
   const unsaved = hasUnsavedLive(current);
   const writeBlocked = unwritableReason(selected);
   const kind = connectionKindOf(selected);
@@ -185,7 +185,7 @@ export function ConnectionWorkbench({
   const fatalIssues = currentConfig?.config?.fatal_issues ?? [];
   const defaultPermissions = currentConfig?.config?.default_permissions ?? null;
   const driftedEntry = current?.drifted_from
-    ? form.connections.find((item) => item.name === current.drifted_from)
+    ? connections.find((item) => item.name === current.drifted_from)
     : undefined;
   const official = isOfficial(current);
   const envState = kind ? defaultEnvState(kind, current, currentConfig?.config) : null;
@@ -198,24 +198,24 @@ export function ConnectionWorkbench({
       : unsaved
         ? "当前实际配置（未保存）"
         : "无法读取实际配置";
-  const connectionCheckStates = form.connections
+  const connectionCheckStates = connections
     .map((connection) => ({ connection, result: checkResults[`${agentId}/${connection.name}`] }));
   const connectionChecks = connectionCheckStates.filter(
     (item): item is { connection: ConnectionEntry; result: ConnectionCheckResult } =>
       Boolean(item.result && !item.result.pending),
   );
-  const allChecked = form.connections.length > 0 && connectionChecks.length === form.connections.length;
+  const allChecked = connections.length > 0 && connectionChecks.length === connections.length;
   const fastest = connectionChecks
     .filter((item) => item.result.ok && item.result.latencyMs > 0)
     .sort((a, b) => a.result.latencyMs - b.result.latencyMs)[0];
   const checkingAll = checkingAllAgentId === agentId;
   // 主配置正在用的那套已保存第三方接入放进「账号」一节；其余接入只在独立环境里用
   const mainThirdParty = thirdParty && activeEntry ? activeEntry : null;
-  const savedEntries = form.connections.filter((connection) => connection !== mainThirdParty);
+  const savedEntries = connections.filter((connection) => connection !== mainThirdParty);
 
   const renderCard = (connection: ConnectionEntry, inMain: boolean) => {
     const key = `${agentId}/${connection.name}`;
-    const index = form.connections.findIndex((item) => item.name === connection.name);
+    const index = connections.findIndex((item) => item.name === connection.name);
     return (
       <ConnectionCard
         key={connection.name}
@@ -235,7 +235,7 @@ export function ConnectionWorkbench({
         onExport={kind ? () => onExport(selected, connection) : undefined}
         onRemove={kind ? () => onRemove(selected, connection) : undefined}
         onMoveUp={kind && index > 0 ? () => onMove(selected, connection, "up") : undefined}
-        onMoveDown={kind && index < form.connections.length - 1 ? () => onMove(selected, connection, "down") : undefined}
+        onMoveDown={kind && index < connections.length - 1 ? () => onMove(selected, connection, "down") : undefined}
       />
     );
   };
@@ -543,7 +543,7 @@ export function ConnectionWorkbench({
                 agentId={agentId}
                 config={currentConfig.config}
                 driftedLabel={driftedEntry ? driftedEntry.label || driftedEntry.name : null}
-                unverified={(current?.unverified ?? []).map((item) => form.connections.find((entry) => entry.name === item)?.label || item)}
+                unverified={(current?.unverified ?? []).map((item) => connections.find((entry) => entry.name === item)?.label || item)}
                 busy={busyTarget === `${agentId}/save-current`}
                 disabled={busyTarget !== null || Boolean(writeBlocked)}
                 onSave={kind ? () => onSaveCurrent(selected) : undefined}
@@ -590,12 +590,12 @@ export function ConnectionWorkbench({
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {form.connections.length > 1 && (
+              {connections.length > 1 && (
                 <button
                   type="button"
                   data-testid="check-all-connections-button"
                   disabled={!kind || checkingAll || connectionCheckStates.some((item) => item.result?.pending)}
-                  onClick={() => onCheckAll(selected, form.connections)}
+                  onClick={() => onCheckAll(selected, connections)}
                   title="检查全部接入"
                   aria-label="检查全部接入"
                   className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
@@ -624,13 +624,13 @@ export function ConnectionWorkbench({
               </button>
             </div>
           </div>
-        {form.connections.length > 1 && connectionChecks.length > 0 && (
+        {connections.length > 1 && connectionChecks.length > 0 && (
           <div
             data-testid="connection-check-summary"
             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm"
           >
             <p className="text-muted-foreground">
-              接入检查：已完成 {connectionChecks.length}/{form.connections.length}，
+              接入检查：已完成 {connectionChecks.length}/{connections.length}，
               <strong className="font-medium text-foreground">
                 {connectionChecks.filter((item) => item.result.ok).length} 个可用
               </strong>

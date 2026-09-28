@@ -46,7 +46,7 @@ import {
   connectionsOf,
   duplicateConnectionDraft,
   moveAgentConnection,
-  parseInitialToFormValues,
+  connectionEntriesOf,
   serializeConnectionBundle,
   removeAgentConnection,
   runtimeRequiresYoloConfirmation,
@@ -395,7 +395,7 @@ export default function AgentsPage({
       if (!definition || typeof definition !== "object") return [];
       const observed = status?.observed as { base?: string | null; definition_base?: string | null } | undefined;
       const source = ((definition as Record<string, any>).profile as Record<string, unknown> | undefined)?.source_connection;
-      const matches = source ? 1 : parseInitialToFormValues(agentId, element.spec as Record<string, unknown>).connections
+      const matches = source ? 1 : connectionEntriesOf(element.spec as Record<string, unknown>)
         .filter((candidate) => instancesUsingConnection({ [id]: definition }, agentId, candidate).length > 0).length;
       return [{
         id, label, definition: definition as Record<string, unknown>,
