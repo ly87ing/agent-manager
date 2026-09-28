@@ -551,7 +551,7 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
                 .map_err(|err| DispatchError::new("RULE_ERROR", format!("{err:#}")))
         }
         // hooks 以实际配置为准：apply 写文件（取锁），丢弃旧版保存的 hooks 只写库
-        ("hooks", "status" | "apply" | "discard-legacy") => {
+        ("hooks", "status" | "preview" | "apply" | "discard-legacy") => {
             crate::native_hooks::handle(ctx, request)
                 .map(|data| (data, vec![]))
                 .map_err(|err| DispatchError::new("HOOK_ERROR", format!("{err:#}")))

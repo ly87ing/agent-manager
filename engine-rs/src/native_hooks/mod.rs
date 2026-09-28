@@ -4,6 +4,7 @@
 //!   以及清理建议与旧版本保存的 hooks（未生效）建议；只读零写。
 //! - `hooks:apply`：写一个目标的实际文件（直接编辑 / 清理一条建议 / 加入一条旧版 hook），
 //!   base CAS，取 apply 锁。
+//! - `hooks:preview`：复用写入计划，只读展示目标文件的完整候选原文。
 //! - `hooks:discard-legacy`：丢弃一条旧版本保存的 hook，只写库。
 
 pub(crate) mod apply;
@@ -28,6 +29,7 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             status::build_status(ctx)
         }
         "hooks:apply" => apply::apply(ctx, req),
+        "hooks:preview" => apply::preview(ctx, req),
         "hooks:discard-legacy" => legacy::discard(ctx, req),
         _ => bail!("hooks 域不支持命令 '{}'", req.command),
     }

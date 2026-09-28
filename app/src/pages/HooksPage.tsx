@@ -312,7 +312,7 @@ function EditDialog({ element, onClose }: { element: EngineElement; onClose: () 
           保存即写入 <span className="font-mono">{observed.target}</span>
           {specOf(element).scope === "hooks-key" ? "（只改 hooks 键）" : ""}；打开编辑后若文件被别处改过，保存会被拒绝，不会覆盖。
         </p>
-        <HooksEditor initialHooks={observed.hooks ?? {}} busy={directApply.executing} onSave={(hooks) => void save(hooks)} onCancel={onClose} />
+        <HooksEditor initialHooks={observed.hooks ?? {}} target={element.id} base={observed.base ?? undefined} busy={directApply.executing} onSave={(hooks) => void save(hooks)} onCancel={onClose} />
         {error && (
           <p role="alert" data-testid="hooks-save-error" className="mt-2 text-sm text-destructive">
             {error}

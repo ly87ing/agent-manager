@@ -966,7 +966,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
 
   // ---- Hooks：实际配置为准 + 建议（内存态演示） ----
   type MockHookSuggestion = { id: string; event: string; matcher: string | null; command: string };
-  type MockHooksElement = { id: string; state: string; spec: { name: string; kind: string }; observed: { hooks: Record<string, unknown[]>; base: string; hook_count: number; cleanup: MockHookSuggestion[]; legacy: MockHookSuggestion[]; target_exists: boolean } };
+  type MockHooksElement = { id: string; state: string; spec: { name: string; kind: string }; observed: { target: string; hooks: Record<string, unknown[]>; base: string; hook_count: number; cleanup: MockHookSuggestion[]; legacy: MockHookSuggestion[]; target_exists: boolean } };
   const hooksElements = () => (routes["hooks:status"].data as { elements: MockHooksElement[] }).elements;
   const hookError = (command: string, message: string): Envelope =>
     makeEnvelope({}, { command, ok: false, errors: [{ code: "HOOK_ERROR", element: null, message }] });
@@ -986,6 +986,14 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     return out;
   };
   let hooksRevision = 0;
+  const previewHooks = (args: string[]): Envelope => {
+    const target = hooksElements().find((item) => item.id === argOf(args, "--only"));
+    if (!target) return hookError("hooks.preview", "Hooks 目标不存在");
+    if (argOf(args, "--base") !== target.observed.base) return hookError("hooks.preview", "目标已在外部修改，请刷新后重试");
+    const hooks = JSON.parse(argOf(args, "--value") ?? "{}") as Record<string, unknown[]>;
+    const root = target.spec.kind === "claude" ? { theme: "dark", hooks } : { hooks };
+    return makeEnvelope({ path: target.observed.target, content: `${JSON.stringify(root, null, 2)}\n`, exists: target.observed.target_exists, will_write: true }, { command: "hooks.preview" });
+  };
   const applyHooks = (args: string[], runId: string): Envelope => {
     const target = hooksElements().find((item) => item.id === argOf(args, "--only"));
     if (!target) return hookError("hooks.apply", "参数错误: --only 目标无效");
@@ -1507,6 +1515,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       if (command === "rules:save-template") return saveRuleTemplate(args);
       if (command === "rules:delete-template") return deleteRuleTemplate(args);
       if (command === "hooks:apply") return applyHooks(args, runId);
+      if (command === "hooks:preview") return previewHooks(args);
       if (command === "hooks:discard-legacy") return discardLegacyHook(args);
       if (command === "aliases:status") return aliasStatus();
       if (command === "aliases:apply") return applyAliases(args, runId);

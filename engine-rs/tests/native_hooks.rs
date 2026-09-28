@@ -127,6 +127,46 @@ fn apply_value(ctx: &Context, id: &str, base: &str, hooks: &Value) -> Envelope {
     apply(ctx, id, base, &["--value", &hooks.to_string()])
 }
 
+#[test]
+fn preview_matches_actual_file_and_never_writes_before_apply() {
+    for (id, path) in [
+        ("hooks:claude", ".claude/settings.json"),
+        ("hooks:codex", ".codex/hooks.json"),
+    ] {
+        let (root, ctx) = temp_ctx(id);
+        let target = ctx.home_dir.join(path);
+        if id == "hooks:claude" {
+            write_json(&target, &json!({ "theme": "dark", "hooks": {} }));
+        }
+        let before = std::fs::read(&target).ok();
+        let base = base_of(&ctx, id);
+        let hooks = json!({ "Stop": [{ "hooks": [hook("echo preview")] }] });
+        let value = hooks.to_string();
+        let args = [
+            "--only",
+            id,
+            "--base",
+            base.as_str(),
+            "--value",
+            value.as_str(),
+        ];
+        let preview = run(&ctx, "hooks:preview", &args);
+        assert!(preview.ok, "{:?}", preview.errors);
+        assert_eq!(preview.data["path"], target.display().to_string());
+        assert_eq!(std::fs::read(&target).ok(), before);
+        assert!(!ctx.data_dir.exists());
+        let expected = preview.data["content"].as_str().unwrap().as_bytes();
+        let applied = run(&ctx, "hooks:apply", &args);
+        assert!(applied.ok, "{:?}", applied.errors);
+        assert_eq!(std::fs::read(&target).unwrap(), expected);
+
+        let stale = run(&ctx, "hooks:preview", &args);
+        assert!(!stale.ok);
+        assert!(stale.errors[0].message.contains("已在外部修改"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
 fn write_legacy_row(ctx: &Context, key: &str, value: &Value) {
     let conn = store::open_write(ctx).unwrap();
     conn.execute_batch(

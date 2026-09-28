@@ -617,6 +617,10 @@ function nativeHooksRoutes(): Record<string, Envelope> {
       { domain: "hooks", steps: [{ name: "hooks:write hooks:claude", ok: true, exit_code: 0 }], skipped: [] },
       { command: "hooks.apply" },
     ),
+    "hooks:preview": makeEnvelope(
+      { path: "/tmp/home/.claude/settings.json", content: '{"theme":"dark","hooks":{"Stop":[]}}', exists: true, will_write: true },
+      { command: "hooks.preview" },
+    ),
     "hooks:discard-legacy": makeEnvelope({ domain: "hooks", discarded: "legacy-0123456789abcdef", source_removed: true }, { command: "hooks.discard-legacy" }),
     "policy:get": makeEnvelope({ layers: { sqlite: null } }, { command: "policy.get" }),
   };
@@ -630,6 +634,23 @@ async function openHooksTab(routesMap: Record<string, Envelope>) {
 }
 
 describe("Hooks 页：实际配置为准", () => {
+  it("编辑输入后显示完整目标文件，改动后只使用当前输入的预览", async () => {
+    const { calls } = await openHooksTab(nativeHooksRoutes());
+    await userEvent.click(screen.getByRole("button", { name: "编辑 Claude Code Hooks" }));
+    const dialog = await screen.findByRole("dialog", { name: "编辑 Claude Code Hooks" });
+    expect(await within(dialog).findByTestId("hooks-preview-content")).toHaveTextContent('"theme":"dark"');
+    const first = calls.find((call) => call.command === "hooks:preview")!;
+    expect(first.args.slice(0, 5)).toEqual(["--only", "hooks:claude", "--base", CLAUDE_HOOKS_BASE, "--value"]);
+    await userEvent.clear(within(dialog).getByTestId("hooks-command-1"));
+    expect(within(dialog).queryByTestId("hooks-preview-content")).toBeNull();
+    await userEvent.type(within(dialog).getByTestId("hooks-command-1"), "echo new");
+    await waitFor(() => expect(calls.filter((call) => call.command === "hooks:preview").length).toBeGreaterThan(1));
+    const previews = calls.filter((call) => call.command === "hooks:preview");
+    const latest = previews[previews.length - 1];
+    expect(JSON.parse(latest.args[5]).PreToolUse[0].hooks[1].command).toBe("echo new");
+    expect(calls.some((call) => call.command === "hooks:apply")).toBe(false);
+  });
+
   it("逐目标展示实际 hooks 与两类建议；没有同步、接管与来源编辑入口", async () => {
     const { calls } = await openHooksTab(nativeHooksRoutes());
     const claude = screen.getByTestId("hooks-target-hooks:claude");

@@ -86,6 +86,8 @@ Hooks 以各助手的实际配置为准。目标是主 Claude（`~/.claude/setti
 
 `hooks:apply` 每次写一个目标的实际文件，必须带 `--only` 与 `--base`，新内容三选一：直接编辑（`--value` 完整 hooks 对象，只做上述骨架校验）、一条清理建议（`--cleanup`）、一条旧版本保存的 hook（`--legacy`）。写入前重读实际内容与 `base` 比对，不一致即拒绝并提示「已在外部修改」，文件与库不变；写入取全局排他锁，做文件字节 CAS、失败回滚与审计，审计只记 id 与摘要、不记命令。Claude 只替换 `hooks` 键（原位替换，其余键语义保留；为空时移除该键），与 `agents:configure` 各管各的键、互不覆盖；Codex 写 hooks.json 的 `hooks` 键，其余根键保留。Hooks 没有「同步」与「接管」，不产生「待同步」。
 
+结构化或原文编辑 Hooks 时，按行字段有效或原文形成 JSON 对象后自动调用只读 `hooks:preview`，与写入共用后端校验和渲染，展示完整目标文件路径与候选原文；输入变化立刻隐藏旧结果。无改动时明确说明不会写入。预览本身不创建文件或数据库，保存仍重新校验实际文件。
+
 内置 removed_signatures 只作「清理建议」：实际 hooks 里命中旧版本签名的 `command` 类型条目逐条列出，确认「清理」才移除那一条（同样带 `base`）；没有命中就不显示。旧库 `hook_sources` 里用户存过、与内置不同、而主助手实际配置里没有的 hook，以「旧版已保存的 hooks（未生效）」出现，可逐条「加入实际配置」（`hooks:apply --legacy`）或「丢弃」（`hooks:discard-legacy --legacy <id>`，只写库，删掉库里这一条，来源空了整行删除）；已在实际配置里的不重复提示。读路径即时推导，写路径清理：对主助手目标写入时，把写入前后已在实际配置里的条目从库里删掉；旧表损坏时只是不出建议，不挡住 Hooks 页。旧 `hook_target_bindings` 不再作为写入门槛。hooks 来源键随 `sources:get/set` 一并退役。`profiles:apply` 不再渲染实例 hooks（不写 hooks.json，也不碰实例 settings.json 的 `hooks` 键）；实例 hooks 在 Hooks 页按实际文件编辑，旧版本含 hooks 的实例写入指纹照常认。配置备份不带实际 hooks，只以 `hooks.*` 来源带上仍未生效的旧版 hooks，导入后同样作为未生效建议出现。
 
 `system:audit` 已接入 Rust dispatcher：只读聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态。密钥页先明确显示保存位置，再列变量与来源；用户选择权限为 `600` 的外部 `.env` 文件后才能填写或接管取值。没有现成文件时可就地新建：`secrets:source --path <路径> --create` 在文件不存在时以 0600 独占新建一个空文件（缺的上级目录 0700），已存在的文件不动，不能建在数据目录里，新建后校验不过就删掉；密钥页「新建一个」留空用 `~/.config/agent-manager/secrets.env`。接入表单第一次填 API Key 而还没有密钥文件时，保存前自动在这个默认位置新建，表单事先写明会建到哪。`secrets:status` 的 `source.names` 列出文件里已有的变量名（没有取值），接入表单据此在 API Key 下写明「已有值：留空保持不变」或「还没有：填上才能用」，独立环境表单同样提示。除 MCP 条目引用的变量外，

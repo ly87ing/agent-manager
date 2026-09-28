@@ -132,6 +132,29 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     Ok(())
 }
 
+/// 与 apply 共用写入计算，只返回目标文件的候选原文；不创建数据库或文件。
+pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
+    let parsed = args::parse_apply_args(req)?;
+    let (policy, rows) = status::load_snapshot(ctx)?;
+    let targets = model::resolve_targets(ctx, &policy);
+    let prep = prepare(&targets, &rows, &parsed)?;
+    let will_write = prep.new_bytes.is_some();
+    let bytes = prep.new_bytes.as_ref().or(prep.old_bytes.as_ref());
+    let content = match bytes {
+        Some(bytes) if bytes.len() <= 4 * 1024 * 1024 => {
+            Some(std::str::from_utf8(bytes).map_err(|_| anyhow!("目标文件不是 UTF-8"))?)
+        }
+        Some(_) => bail!("目标文件超过预览大小限制（4 MiB）"),
+        None => None,
+    };
+    Ok(json!({
+        "path": prep.target.path.display().to_string(),
+        "content": content,
+        "exists": prep.old_bytes.is_some(),
+        "will_write": will_write,
+    }))
+}
+
 fn source_meta(source: &Source) -> Value {
     match source {
         Source::Value(_) => json!({ "kind": "edit" }),

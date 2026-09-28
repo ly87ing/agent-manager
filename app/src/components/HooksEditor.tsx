@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { engineErrorMessage, runEngine } from "../lib/engine";
 import { HOOK_EVENTS, buildHooks, flattenHooks, hookRowError, hookSummary, hookType, type HookRow } from "../lib/hooksDefinition";
 
 type HookMap = Record<string, unknown>;
@@ -13,11 +14,15 @@ type HookMap = Record<string, unknown>;
  */
 export function HooksEditor({
   initialHooks,
+  target,
+  base,
   busy,
   onSave,
   onCancel,
 }: {
   initialHooks: HookMap;
+  target?: string;
+  base?: string;
   busy: boolean;
   onSave: (hooks: HookMap) => void;
   onCancel: () => void;
@@ -25,6 +30,50 @@ export function HooksEditor({
   const [rows, setRows] = useState<HookRow[]>(() => flattenHooks(initialHooks));
   const [raw, setRaw] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ key: string; path: string | null; content: string | null; error: string | null; willWrite: boolean } | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const previewSerial = useRef(0);
+
+  let draft: HookMap | null = null;
+  if (raw !== null) {
+    try {
+      const value: unknown = JSON.parse(raw);
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) draft = value as HookMap;
+    } catch {
+      // 输入尚未形成合法 JSON 时不发预览请求。
+    }
+  } else if (rows.every((row) => !hookRowError(row))) {
+    draft = buildHooks(rows);
+  }
+  const draftText = draft ? JSON.stringify(draft) : "";
+  const previewKey = target && base && draftText ? JSON.stringify([target, base, draftText]) : "";
+
+  useEffect(() => {
+    const serial = ++previewSerial.current;
+    if (!previewKey || !target || !base) {
+      setPreviewBusy(false);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setPreviewBusy(true);
+      void runEngine<{ path: string; content: string | null; will_write: boolean }>("hooks:preview", [
+        "--only", target, "--base", base, "--value", draftText,
+      ]).then((envelope) => {
+        if (serial !== previewSerial.current) return;
+        setPreview(envelope.ok
+          ? { key: previewKey, path: envelope.data.path, content: envelope.data.content, error: null, willWrite: envelope.data.will_write }
+          : { key: previewKey, path: null, content: null, error: envelope.errors[0]?.message ?? "预览失败", willWrite: false });
+      }).catch((reason) => {
+        if (serial === previewSerial.current) setPreview({ key: previewKey, path: null, content: null, error: engineErrorMessage(reason), willWrite: false });
+      }).finally(() => {
+        if (serial === previewSerial.current) setPreviewBusy(false);
+      });
+    }, 300);
+    return () => {
+      window.clearTimeout(timer);
+      previewSerial.current += 1;
+    };
+  }, [previewKey, target, base, draftText]);
 
   const parseRaw = (text: string): HookMap | null => {
     try {
@@ -191,6 +240,18 @@ export function HooksEditor({
           {error}
         </p>
       )}
+      {target && base && <section className="space-y-1 rounded border p-3 text-xs" data-testid="hooks-file-preview">
+        <h4 className="font-medium">目标配置文件预览</h4>
+        {!previewKey && <p className="text-muted-foreground">输入有效后显示完整文件。</p>}
+        {previewKey && (previewBusy || preview?.key !== previewKey) && <p className="text-muted-foreground">正在计算…</p>}
+        {preview?.key === previewKey && preview.error && <p role="alert" className="text-destructive">{preview.error}</p>}
+        {preview?.key === previewKey && preview.path && <>
+          <p className="break-all font-mono">{preview.path}</p>
+          {preview.content !== null && <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono" data-testid="hooks-preview-content">{preview.content}</pre>}
+          {!preview.willWrite && <p className="text-muted-foreground">内容未变，不会写入文件。</p>}
+        </>}
+        <p className="text-muted-foreground">只读预览；文件原文可能含敏感值，仅在本机查看。</p>
+      </section>}
       <div className="flex justify-end gap-2">
         <button type="button" disabled={busy} onClick={onCancel} className="rounded border px-4 py-2 text-sm">
           取消

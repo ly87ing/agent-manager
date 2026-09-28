@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / mcp:preview / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:config-file|preview|apply-definition|adopt|seed|shared-status|shared-preview|shared-apply / agents:configure|preview-runtime|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / mcp:preview|hooks:preview / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:config-file|preview|apply-definition|adopt|seed|shared-status|shared-preview|shared-apply / agents:configure|preview-runtime|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -62,7 +62,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("aliases", "discard-legacy") => true,
         // 以实例的实际配置更新实例定义：只写库，不动实例文件
         ("profiles", "adopt") => true,
-        ("mcp", "preview") => true,
+        ("mcp" | "hooks", "preview") => true,
         // 用户逐环境确认后同时更新定义与实际配置文件
         ("profiles", "apply-definition") => true,
         // 把默认环境的权限、状态栏、hooks、规则与 MCP 一次性带进实例：只补实例没有的
@@ -175,7 +175,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         }
         ("rules", "delete-template") => specs.push(("--template", ArgValueKind::TemplateId)),
         // Hooks 以实际配置为准：写一个目标，base 做 CAS；新 hooks 三选一（引擎再强制恰好一个）
-        ("hooks", "apply") => {
+        ("hooks", "apply" | "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--base", ArgValueKind::RuleBase));
             specs.push(("--value", ArgValueKind::JsonValue));
@@ -737,6 +737,7 @@ mod tests {
             "rules:save-template",
             "rules:delete-template",
             "hooks:status",
+            "hooks:preview",
             "hooks:apply",
             "hooks:discard-legacy",
             "aliases:status",
@@ -1654,6 +1655,17 @@ mod tests {
                 ]),
             ),
             (
+                "hooks:preview",
+                args(&[
+                    "--only",
+                    "hooks:claude",
+                    "--base",
+                    &base,
+                    "--value",
+                    r#"{"Stop":[{"hooks":[{"type":"command","command":"x"}]}]}"#,
+                ]),
+            ),
+            (
                 "hooks:apply",
                 args(&[
                     "--only",
@@ -1687,6 +1699,10 @@ mod tests {
         }
         for (command, list) in [
             ("hooks:status", args(&["--offline"])),
+            (
+                "hooks:preview",
+                args(&["--only", "hooks:claude", "--base", "bad"]),
+            ),
             (
                 "hooks:apply",
                 args(&["--only", "hooks:nope", "--base", "missing"]),
