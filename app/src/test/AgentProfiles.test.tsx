@@ -459,7 +459,15 @@ describe("助手实例", () => {
   });
 
   it("Linux 上第三方环境默认不开子进程隔离并说明要装 bubblewrap；已有环境保留原写法", async () => {
-    // 测试环境的 userAgent 就是 Linux
+    // 在 macOS runner 上也显式模拟 Linux，确保断言验证的是该平台分支。
+    const originalPlatform = navigator.platform;
+    const originalUserAgent = navigator.userAgent;
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "Linux x86_64" });
+    Object.defineProperty(navigator, "userAgent", { configurable: true, value: "Linux" });
+    onTestFinished(() => {
+      Object.defineProperty(navigator, "platform", { configurable: true, value: originalPlatform });
+      Object.defineProperty(navigator, "userAgent", { configurable: true, value: originalUserAgent });
+    });
     const withScrub = profileElement({ id: "profiles:cc-true" });
     const routeMap = routes([profileElement(), withScrub]);
     const policy = routeMap["policy:get"] as { data: { layers: { sqlite: { agents: { definitions: Record<string, any> } } } } };
