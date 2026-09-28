@@ -35,6 +35,7 @@ import {
   instancesUsingConnection,
   profileConnectionUpdate,
   profileConnectionReadbackMatches,
+  updateProfileDefinition,
   type ProfileFormInput,
   type ProfileDraftPreview,
   type ProfilePreviewRequest,
@@ -958,7 +959,9 @@ export default function AgentsPage({
         return false;
       }
     }
-    const definition = buildProfileDefinition(input, baseBinOf(input.baseAgent));
+    const definition = isEdit
+      ? updateProfileDefinition(input, baseBinOf(input.baseAgent), expectedDefinition as Record<string, unknown>)
+      : buildProfileDefinition(input, baseBinOf(input.baseAgent));
     let envelope;
     try {
       envelope = await runEngine("policy:set", [

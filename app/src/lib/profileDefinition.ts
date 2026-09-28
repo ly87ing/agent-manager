@@ -121,6 +121,37 @@ export function buildProfileDefinition(input: ProfileFormInput, baseBin: string)
   };
 }
 
+/** 编辑既有实例时只替换表单管理的字段，保留未暴露在表单中的定义。 */
+export function updateProfileDefinition(
+  input: ProfileFormInput,
+  baseBin: string,
+  original: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = buildProfileDefinition(input, baseBin);
+  const previousProfile = original.profile as Record<string, unknown>;
+  const nextProfile = next.profile as Record<string, unknown>;
+  const profile = { ...previousProfile, ...nextProfile };
+  const editableFields = input.kind === "claude" ? ["env", "model"] : ["base_url", "env_key", "model"];
+  for (const field of editableFields) {
+    if (!(field in nextProfile)) delete profile[field];
+  }
+
+  const updated: Record<string, unknown> = { ...original, ...next, profile };
+  if ("bin" in original) updated.bin = original.bin;
+  else delete updated.bin;
+
+  if (typeof previousProfile.config_dir === "string"
+    && normalizeConfigDir(input.configDir) === normalizeConfigDir(previousProfile.config_dir)) {
+    if ("skills_dir" in original) updated.skills_dir = original.skills_dir;
+    else delete updated.skills_dir;
+    if ("mcp_config" in original) updated.mcp_config = original.mcp_config;
+    else delete updated.mcp_config;
+  } else if (original.mcp_config && typeof original.mcp_config === "object" && !Array.isArray(original.mcp_config)) {
+    updated.mcp_config = { ...original.mcp_config, ...(next.mcp_config as Record<string, unknown>) };
+  }
+  return updated;
+}
+
 /** 实例的配置目录环境变量名。 */
 export function configEnvOf(kind: ProfileKind): string {
   return kind === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR";

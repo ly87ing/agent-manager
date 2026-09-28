@@ -18,6 +18,7 @@ import {
   profileLaunchValue,
   profileMcpConfig,
   shellConfigDir,
+  updateProfileDefinition,
 } from "../lib/profileDefinition";
 import { emptyConnection } from "../lib/agentDefinitionForm";
 
@@ -168,6 +169,41 @@ describe("启动命令里的配置目录", () => {
       ANTHROPIC_SMALL_FAST_MODEL: "small",
       API_TIMEOUT_MS: "600000",
     });
+  });
+
+  it("修改配置目录时更新技能与 MCP 目标，保留其他定义字段", () => {
+    const original = {
+      ...buildProfileDefinition(claudeInput, "claude"),
+      bin: "/isolated/custom-claude",
+      mcp_config: { path: "~/.claude-cc-ly/.claude.json", format: "json", future: "keep" },
+      future_root: "keep",
+      profile: { base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-cc-ly", future_profile: "keep" },
+    };
+    const updated = updateProfileDefinition({ ...claudeInput, configDir: "~/.claude-new" }, "claude", original);
+    expect(updated).toMatchObject({
+      bin: original.bin,
+      skills_dir: "~/.claude-new/skills",
+      mcp_config: { path: "~/.claude-new/.claude.json", format: "json", future: "keep" },
+      future_root: "keep",
+      profile: { config_dir: "~/.claude-new", future_profile: "keep" },
+    });
+  });
+
+  it("Codex 编辑清空地址、凭据和模型时移除对应字段", () => {
+    const input = { ...claudeInput, baseAgent: "codex", kind: "codex" as const, configDir: "~/.codex-work", baseUrl: "", tokenVar: "", model: "" };
+    const original = {
+      bin: "/isolated/custom-codex", future_root: "keep",
+      profile: {
+        base_agent: "codex", kind: "codex", config_dir: "~/.codex-work",
+        base_url: "https://api.example.com", env_key: "OLD_KEY", model: "old-model", future_profile: "keep",
+      },
+    };
+    const updated = updateProfileDefinition(input, "codex", original);
+    expect(updated.profile).toMatchObject({ wire_api: "responses", future_profile: "keep" });
+    expect(updated.profile).not.toHaveProperty("base_url");
+    expect(updated.profile).not.toHaveProperty("env_key");
+    expect(updated.profile).not.toHaveProperty("model");
+    expect(updated.bin).toBe(original.bin);
   });
 
   it("接入建成独立环境：带上地址、凭据变量名、请求头、模型与别名，名字可用且不重名", () => {

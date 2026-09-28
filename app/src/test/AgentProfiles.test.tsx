@@ -863,6 +863,45 @@ describe("助手实例", () => {
     expect(calls.some((call) => ["profiles:apply", "aliases:apply", "profiles:seed"].includes(call.command))).toBe(false);
   });
 
+  it("编辑环境只改表单字段，保留未知定义与自定义路径且清空模型生效", async () => {
+    const all = routes();
+    const original = {
+      display_name: "旧名称", bin: "/isolated/custom-claude",
+      skills_dir: "/isolated/custom-skills",
+      mcp_config: { path: "/isolated/custom-mcp.json", format: "json", future: "keep" },
+      future_root: { mode: "keep" },
+      profile: {
+        base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-cc-ly",
+        env: { ANTHROPIC_BASE_URL: "https://api.example.com", ANTHROPIC_AUTH_TOKEN: "${MY_TOKEN}", OTHER: "keep" },
+        model: "old-model", future_profile: { mode: "keep" },
+      },
+    };
+    const agents = all["agents:status"] as { data: { elements: { id: string; spec: Record<string, unknown> }[] } };
+    agents.data.elements.find((item) => item.id === "agents:cc-ly")!.spec = original;
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("profile-edit-cc-ly"));
+    const dialog = await screen.findByRole("dialog", { name: "编辑独立环境" });
+    await userEvent.clear(within(dialog).getByTestId("profile-display-name"));
+    await userEvent.type(within(dialog).getByTestId("profile-display-name"), "新名称");
+    await userEvent.clear(within(dialog).getByTestId("profile-model"));
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    const write = await waitFor(() => {
+      const found = calls.find((call) => call.command === "policy:set");
+      expect(found).toBeDefined();
+      return found!;
+    });
+    const saved = JSON.parse(write.args[write.args.indexOf("--value") + 1]);
+    expect(saved.display_name).toBe("新名称");
+    expect(saved.bin).toBe(original.bin);
+    expect(saved.skills_dir).toBe(original.skills_dir);
+    expect(saved.mcp_config).toEqual(original.mcp_config);
+    expect(saved.future_root).toEqual(original.future_root);
+    expect(saved.profile.future_profile).toEqual(original.profile.future_profile);
+    expect(saved.profile.env.OTHER).toBe("keep");
+    expect(saved.profile.model).toBeUndefined();
+  });
+
   it("共用设置写入被拒时保留差异，说明原因并可刷新", async () => {
     const routeMap = {
       ...routes(),
