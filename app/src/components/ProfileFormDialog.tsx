@@ -10,6 +10,7 @@ import { ProfileSeedPicker } from "./ProfileSeedPicker";
 import {
   PROFILE_ID_RE,
   SUBPROCESS_SCRUB_ENV,
+  buildProfileDefinition,
   configEnvOf,
   defaultConfigDir,
   isThirdPartyProfile,
@@ -19,6 +20,12 @@ import {
   type ProfileFormInput,
   type ProfileKind,
 } from "../lib/profileDefinition";
+
+export interface ProfileDraftPreview {
+  path: string;
+  content: string;
+  exists: boolean;
+}
 
 /**
  * 助手实例表单：为同一个助手再配一套独立配置。
@@ -39,6 +46,7 @@ export function ProfileFormDialog({
   existingIds,
   baseBinOf,
   onSubmit,
+  onPreview,
   onFetchModels,
   secretSource,
   onClose,
@@ -52,6 +60,7 @@ export function ProfileFormDialog({
   baseBinOf: (agentId: string) => string;
   /** 新建时另带要从默认环境带上的设置（编辑时为空）。 */
   onSubmit: (input: ProfileFormInput, options: { seedItems: SeedItem[] }) => void;
+  onPreview: (input: ProfileFormInput) => Promise<ProfileDraftPreview | string>;
   /** 用表单里的地址与凭据变量问接口能用哪些模型；失败时返回原因。只在点按钮时才联网。 */
   onFetchModels?: (draft: { kind: ProfileKind; baseUrl: string; tokenVar: string }) => Promise<string[] | string>;
   /** 密钥文件的状态：说明这个变量现在有没有值。 */
@@ -61,6 +70,8 @@ export function ProfileFormDialog({
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [modelsMessage, setModelsMessage] = useState<string | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [preview, setPreview] = useState<{ key: string; result: ProfileDraftPreview | string } | null>(null);
   const isEdit = isEditProp ?? Boolean(initial);
   const firstAgent = baseAgents[0]?.id ?? "claude-code";
   const [id, setId] = useState(initial?.id ?? "");
@@ -117,6 +128,7 @@ export function ProfileFormDialog({
     extraEnv,
   };
   const launch = id ? profileLaunchValue(input, baseBinOf(baseAgent)) : "";
+  const previewKey = JSON.stringify(buildProfileDefinition(input, baseBinOf(baseAgent)));
   const managedConfigFile = `${effectiveConfigDir.replace(/\/$/, "")}/${kind === "codex" ? "config.toml" : "settings.json"}`;
   const mcpConfigFile = profileMcpConfig(kind, effectiveConfigDir).path;
   const skillsDir = profileSkillsDir(effectiveConfigDir);
@@ -584,6 +596,33 @@ export function ProfileFormDialog({
                 <pre data-testid="profile-launch-preview" className="mt-3 whitespace-pre-wrap break-all rounded-lg border bg-muted px-3 py-3 font-mono text-xs leading-5 text-foreground">
                   {launch ? `alias ${id}='${launch}'` : "填写环境名后显示完整命令"}
                 </pre>
+              </section>
+
+              <section className="rounded-xl border bg-card p-5 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-foreground">目标配置文件预览</h3>
+                  <button type="button" data-testid="profile-draft-preview-button"
+                    disabled={previewBusy || !PROFILE_ID_RE.test(id)}
+                    onClick={async () => {
+                      setPreviewBusy(true);
+                      try {
+                        setPreview({ key: previewKey, result: await onPreview(input) });
+                      } finally {
+                        setPreviewBusy(false);
+                      }
+                    }}
+                    className="rounded border px-2.5 py-1 text-xs disabled:opacity-50"
+                  >{previewBusy ? "正在预览…" : "按当前填写预览"}</button>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">按当前目标文件合并计算，凭据变量保留引用形式；预览不检查凭据是否有值，保存时会重新读取并校验。文件原有内容可能含敏感值，请勿直接分享。</p>
+                {kind === "codex" && !thirdParty && <p className="mt-1 text-xs text-muted-foreground">Codex 官方环境创建时不写主配置文件。</p>}
+                {preview && preview.key !== previewKey && <p className="mt-2 text-xs text-muted-foreground">表单已更改，请重新预览。</p>}
+                {preview?.key === previewKey && (typeof preview.result === "string"
+                  ? <p role="alert" className="mt-2 text-xs text-destructive">{preview.result}</p>
+                  : <div className="mt-2 space-y-2">
+                      <p className="break-all font-mono text-xs text-muted-foreground">{preview.result.path}{preview.result.exists ? " · 合并现有文件" : " · 新文件"}</p>
+                      <pre data-testid="profile-draft-preview-content" className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded border bg-muted p-3 font-mono text-xs">{preview.result.content}</pre>
+                    </div>)}
               </section>
 
               <p className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-xs leading-5 text-muted-foreground">

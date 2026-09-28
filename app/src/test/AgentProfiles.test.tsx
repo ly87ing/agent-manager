@@ -141,6 +141,35 @@ describe("助手实例", () => {
     await userEvent.click(screen.getByTestId("new-environment-manual"));
   }
 
+  it("环境表单按当前输入预览将写入的配置，修改后不展示过期结果", async () => {
+    const all: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    all["profiles:preview"] = async (args) => {
+      const definition = JSON.parse(args[args.indexOf("--definition") + 1]);
+      return makeEnvelope({
+        path: `${definition.profile.config_dir}/settings.json`,
+        exists: false,
+        content: JSON.stringify({ env: definition.profile.env }),
+      }, { command: "profiles.preview" });
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await openNewProfileForm();
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "demo");
+    await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://api.example.com");
+    await userEvent.type(within(dialog).getByTestId("profile-token-var"), "DEMO_KEY");
+    await userEvent.click(within(dialog).getByTestId("profile-draft-preview-button"));
+    const preview = await within(dialog).findByTestId("profile-draft-preview-content");
+    expect(preview).toHaveTextContent("https://api.example.com");
+    expect(preview).toHaveTextContent("${DEMO_KEY}");
+    expect(calls.find((call) => call.command === "profiles:preview")?.args.slice(0, 2)).toEqual(["--only", "profiles:demo"]);
+    expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+    await userEvent.type(within(dialog).getByTestId("profile-base-url"), "/v1");
+    expect(within(dialog).queryByTestId("profile-draft-preview-content")).toBeNull();
+    expect(within(dialog).getByText("表单已更改，请重新预览。")).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByTestId("profile-draft-preview-button"));
+    expect(await within(dialog).findByTestId("profile-draft-preview-content")).toHaveTextContent("https://api.example.com/v1");
+  });
+
   for (const saveTemplate of [false, true]) {
     it(`第三方预设直接创建环境${saveTemplate ? "并可选保存 Provider 模板" : "且默认不保存重复模板"}`, async () => {
       let definitionSaved = false;

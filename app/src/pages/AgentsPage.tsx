@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AliasEditorDialog } from "../components/AliasEditorDialog";
 import { ProfileCard } from "../components/ProfileCards";
-import { ProfileFormDialog } from "../components/ProfileFormDialog";
+import { ProfileFormDialog, type ProfileDraftPreview } from "../components/ProfileFormDialog";
 import { ConfirmModal } from "../components/ConfirmModal";
 import {
   ConnectionFormDialog,
@@ -1348,6 +1348,17 @@ export default function AgentsPage({
           onFetchModels={fetchModelsForDraft}
           secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}
           onSubmit={(input, options) => void saveProfile(input, options.seedItems)}
+          onPreview={async (input) => {
+            try {
+              const result = await runEngine<ProfileDraftPreview>("profiles:preview", [
+                "--only", `profiles:${input.id}`,
+                "--definition", JSON.stringify(buildProfileDefinition(input, baseBinOf(input.baseAgent))),
+              ]);
+              return result.ok ? result.data : result.errors[0]?.message ?? "预览失败";
+            } catch (error) {
+              return `预览失败：${String(error)}`;
+            }
+          }}
           onClose={() => {
             setProfileForm(null);
             setProfileDuplicating(false);
