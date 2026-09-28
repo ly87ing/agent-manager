@@ -847,7 +847,9 @@ Codex 独立环境换 Key 验收（2026-09-27）：用当前源码编译的 Rust
 
 共用设置真实客户端加载验证：在一次性隔离 HOME、应用数据目录和模拟登录文件中建立 Claude/Codex 独立环境，将主环境的权限、状态栏、Hooks、规则及各一条 MCP 逐项复制到目标。`profiles:shared-status` 写后回读均为 `same`；隔离主配置和模拟登录文件的七份摘要不变。随后以隔离配置目录运行本机已安装的 Claude Code 2.1.283 和 Codex 0.156.0，分别执行 `claude mcp list` 与 `codex mcp list`，两者退出码均为 0，输出均包含复制后的测试 MCP；运行前后真实主配置和认证文件摘要不变。此项只证明两款客户端可从独立目录加载 MCP，未验证权限、状态栏、Hooks、规则的运行效果、模型请求、原生窗口或安装包。
 
-运行设置完整文件即时预览（2026-09-28）：`agents:preview-runtime` 只读重读目标文件，并与 `agents:configure` 共用运行参数渲染函数；输入变化后先显示改动键，随后显示当前实际文件合并后的完整 JSON/TOML，旧请求结果不会盖掉新输入。隔离 Rust 用例确认 Claude/Codex 的预览与随后写入逐字节一致、Codex 注释与用户字段保留、旧基准拒绝且文件不变、缺失文件预览不创建文件或数据库。前端全量 650 项、引擎和 Tauri 全套测试、构建与格式检查通过；DEV mock 浏览器回读到 Claude/Codex 完整文件。浏览器 mock 只证明界面交互，尚未在当前安装包或原生窗口验收；未读取或写入真实 Claude/Codex 配置。
+运行设置完整文件即时预览（2026-09-28）：`agents:preview-runtime` 只读重读目标文件，并与 `agents:configure` 共用运行参数渲染函数；输入变化后先显示改动键，随后显示当前实际文件合并后的完整 JSON/TOML，旧请求结果不会盖掉新输入。隔离 Rust 用例确认 Claude/Codex 的预览与随后写入逐字节一致、Codex 注释与用户字段保留、旧基准拒绝且文件不变、缺失文件预览不创建文件或数据库。前端全量 650 项、引擎和 Tauri 全套测试、构建与格式检查通过；DEV mock 浏览器回读到 Claude/Codex 完整文件。该阶段浏览器 mock 只证明界面交互，尚未在当前安装包或原生窗口验收；未读取或写入真实 Claude/Codex 配置。
+
+原生窗口补验（2026-09-28，当前源码调试构建）：以隔离 HOME、`AGENT_MANAGER_DATA_DIR` 和只回版本号的替身 `claude`/`codex` 启动 Tauri；在 Claude 运行设置选择「智能自动」，窗口自动显示包含原有 `theme`、`env` 与新增 `permissions.defaultMode` 的完整 `settings.json` 候选；在 Codex 选择同项，窗口自动显示保留原注释、模型和 `history` 的完整 `config.toml` 候选，并列出 `approval_policy`、`sandbox_mode` 与 `approvals_reviewer`。两份目标文件预览前后 SHA256 相同，隔离数据目录为空。在「启动命令」新增表单切换 Codex「智能自动」，alias 预览即时出现 `--approve-for-me`；取消后隔离 `.zshrc`、`.zprofile` 均未创建。仅验当前源码的调试构建与这些交互；安装包仍待单独验收，未操作真实 Claude/Codex 配置。
 
 ## 交付回执（2026-09-23，实际配置为准 x86_64 DMG 真机验收）
 
