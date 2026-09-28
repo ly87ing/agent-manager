@@ -154,10 +154,11 @@ describe("助手实例", () => {
     const { calls } = renderWithEngine(<AgentsPage />, all);
     await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    expect(calls.some((call) => call.command === "profiles:preview")).toBe(false);
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "demo");
     await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://api.example.com");
+    expect(calls.some((call) => call.command === "profiles:preview")).toBe(false);
     await userEvent.type(within(dialog).getByTestId("profile-token-var"), "DEMO_KEY");
-    await userEvent.click(within(dialog).getByTestId("profile-draft-preview-button"));
     const preview = await within(dialog).findByTestId("profile-draft-preview-content");
     expect(preview).toHaveTextContent("https://api.example.com");
     expect(preview).toHaveTextContent("${DEMO_KEY}");
@@ -165,8 +166,7 @@ describe("助手实例", () => {
     expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
     await userEvent.type(within(dialog).getByTestId("profile-base-url"), "/v1");
     expect(within(dialog).queryByTestId("profile-draft-preview-content")).toBeNull();
-    expect(within(dialog).getByText("表单已更改，请重新预览。")).toBeInTheDocument();
-    await userEvent.click(within(dialog).getByTestId("profile-draft-preview-button"));
+    expect(within(dialog).getByText("表单已更改，正在更新预览。")).toBeInTheDocument();
     expect(await within(dialog).findByTestId("profile-draft-preview-content")).toHaveTextContent("https://api.example.com/v1");
   });
 
@@ -822,7 +822,10 @@ describe("助手实例", () => {
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.click(within(within(dialog).getByTestId("profile-base-agent")).getByRole("button", { name: /Codex/ }));
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cx-relay");
+    expect(within(dialog).getByTestId("profile-draft-preview-button")).toBeDisabled();
     await userEvent.type(within(dialog).getByTestId("profile-token-var"), "RELAY_KEY");
+    expect(within(dialog).getByTestId("profile-draft-preview-button")).toBeDisabled();
+    expect(calls.some((call) => call.command === "profiles:preview")).toBe(false);
     expect(within(dialog).getByTestId("profile-launch-preview")).toHaveTextContent(
       `alias cx-relay='CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-cx-relay" codex'`,
     );

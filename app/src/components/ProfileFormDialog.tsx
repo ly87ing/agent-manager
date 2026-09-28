@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Bot, CopyPlus, Folder, KeyRound, Play, Terminal } from "lucide-react";
 import { hasPresetArgs, presetsForCommand, togglePresetArgs } from "../lib/agentPresets";
 import { cn } from "../lib/utils";
@@ -66,6 +66,7 @@ export function ProfileFormDialog({
   const [modelsMessage, setModelsMessage] = useState<string | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const previewSerial = useRef(0);
   const [preview, setPreview] = useState<{ key: string; result: ProfileDraftPreview | string } | null>(null);
   const isEdit = isEditProp ?? Boolean(initial);
   const firstAgent = baseAgents[0]?.id ?? "claude-code";
@@ -124,12 +125,43 @@ export function ProfileFormDialog({
   };
   const launch = id ? profileLaunchValue(input, baseBinOf(baseAgent)) : "";
   const previewKey = JSON.stringify(buildProfileDefinition(input, baseBinOf(baseAgent)));
+  const previewReady = PROFILE_ID_RE.test(id)
+    && (isEdit || !existingIds.includes(id))
+    && /^(~\/|\/)/.test(effectiveConfigDir)
+    && (!baseUrl.trim() || (/^https?:\/\/[^/]/.test(baseUrl.trim()) && !urlHasUserinfo(baseUrl)))
+    && (!tokenVar.trim() || /^[A-Za-z_][A-Za-z0-9_]*$/.test(tokenVar.trim()))
+    && (kind !== "claude" || !baseUrl.trim() || Boolean(tokenVar.trim()))
+    && (kind !== "codex" || (thirdParty && Boolean(baseUrl.trim()) && Boolean(tokenVar.trim())));
   const managedConfigFile = `${effectiveConfigDir.replace(/\/$/, "")}/${kind === "codex" ? "config.toml" : "settings.json"}`;
   const mcpConfigFile = profileMcpConfig(kind, effectiveConfigDir).path;
   const skillsDir = profileSkillsDir(effectiveConfigDir);
   /** 预设按该实例实际执行的命令给（实例的 bin 来自归属助手）。 */
   const presets = presetsForCommand(baseBinOf(baseAgent));
   const activeDangerPreset = presets.find((preset) => preset.danger && hasPresetArgs(extraArgs, preset));
+
+  const refreshPreview = async () => {
+    const serial = ++previewSerial.current;
+    setPreviewBusy(true);
+    try {
+      const result = await onPreview(input);
+      if (serial === previewSerial.current) setPreview({ key: previewKey, result });
+    } finally {
+      if (serial === previewSerial.current) setPreviewBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!previewReady) {
+      setPreviewBusy(false);
+      return;
+    }
+    setPreviewBusy(true);
+    const timer = window.setTimeout(() => void refreshPreview(), 300);
+    return () => {
+      window.clearTimeout(timer);
+      previewSerial.current += 1;
+    };
+  }, [previewKey, previewReady]);
 
   const submit = () => {
     if (!PROFILE_ID_RE.test(id)) {
@@ -597,21 +629,14 @@ export function ProfileFormDialog({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-semibold text-foreground">目标配置文件预览</h3>
                   <button type="button" data-testid="profile-draft-preview-button"
-                    disabled={previewBusy || !PROFILE_ID_RE.test(id)}
-                    onClick={async () => {
-                      setPreviewBusy(true);
-                      try {
-                        setPreview({ key: previewKey, result: await onPreview(input) });
-                      } finally {
-                        setPreviewBusy(false);
-                      }
-                    }}
+                    disabled={previewBusy || !previewReady}
+                    onClick={() => void refreshPreview()}
                     className="rounded border px-2.5 py-1 text-xs disabled:opacity-50"
-                  >{previewBusy ? "正在预览…" : "按当前填写预览"}</button>
+                  >{previewBusy ? "正在预览…" : "重新读取"}</button>
                 </div>
-                <p className="mt-2 text-xs text-muted-foreground">按当前目标文件合并计算，凭据变量保留引用形式；预览不检查凭据是否有值，保存时会重新读取并校验。文件原有内容可能含敏感值，请勿直接分享。</p>
+                <p className="mt-2 text-xs text-muted-foreground">有效输入会自动按当前目标文件合并计算，凭据变量保留引用形式；预览不检查凭据是否有值，保存时会重新读取并校验。文件原有内容可能含敏感值，请勿直接分享。</p>
                 {kind === "codex" && !thirdParty && <p className="mt-1 text-xs text-muted-foreground">Codex 官方环境创建时不写主配置文件。</p>}
-                {preview && preview.key !== previewKey && <p className="mt-2 text-xs text-muted-foreground">表单已更改，请重新预览。</p>}
+                {preview && preview.key !== previewKey && previewReady && <p className="mt-2 text-xs text-muted-foreground">表单已更改，正在更新预览。</p>}
                 {preview?.key === previewKey && (typeof preview.result === "string"
                   ? <p role="alert" className="mt-2 text-xs text-destructive">{preview.result}</p>
                   : <div className="mt-2 space-y-2">
