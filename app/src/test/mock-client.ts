@@ -1114,9 +1114,14 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     const value = args[args.indexOf("--value") + 1] ?? "";
     const normalize = (placeholder: string): string => /^\$\{([^}]+)\}$/.exec(placeholder)?.[1] ?? placeholder;
     const secretsData = routes["secrets:status"].data as {
-      elements: Array<{ observed: { variables?: Array<{ placeholder?: string; env_key?: string; resolved?: boolean; stored?: boolean }>; unresolved?: number } }>;
+      elements: Array<{ observed: { variables?: Array<{ placeholder?: string; env_key?: string; resolved?: boolean; stored?: boolean }>; unresolved?: number; source?: { names?: string[] } } }>;
     };
     const variables = secretsData.elements[0]?.observed.variables ?? [];
+    const source = secretsData.elements[0]?.observed.source;
+    if (source) {
+      const names = source.names ?? [];
+      source.names = value ? [...new Set([...names, variable])] : names.filter((name) => name !== variable);
+    }
     for (const item of variables) {
       if (normalize(item.placeholder ?? item.env_key ?? "") !== variable) continue;
       item.stored = value.length > 0;
@@ -1529,6 +1534,21 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         );
       }
       if (command === "agents:models") {
+        const rawDraft = argOf(args, "--draft");
+        if (rawDraft) {
+          const variable = (JSON.parse(rawDraft) as { token_var?: string }).token_var?.trim() ?? "";
+          const source = (routes["secrets:status"].data as {
+            elements: Array<{ observed: { source?: { names?: string[] } } }>;
+          }).elements[0]?.observed.source;
+          if (!variable || (!(source?.names ?? []).includes(variable) && !externallyResolvedSecrets.has(variable))) {
+            return makeEnvelope({}, {
+              command: "agents.models", ok: false,
+              errors: [{ code: "AGENT_ERROR", element: null, message: variable
+                ? `环境变量 ${variable} 还没有取值：先在密钥页填上（或保存接入时一并填写），再获取模型列表`
+                : "先填凭据变量名" }],
+            });
+          }
+        }
         return makeEnvelope(
           { endpoint: "https://api.example.com/v1/models", count: 3, models: ["mock-model-large", "mock-model-fast", "mock-model-mini"] },
           { command: "agents.models" },

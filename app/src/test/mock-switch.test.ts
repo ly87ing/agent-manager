@@ -180,4 +180,24 @@ describe("dev-only mock 开关", () => {
     const afterGrok = (after.data as Cells).elements.find((element) => element.id === "mcp:grok-search");
     expect(afterGrok?.observed.agents?.["claude-code"].vars?.TAVILY_API_KEY.resolved).toBe(true);
   });
+
+  it("mock 模型列表按已保存的变量取值决定是否可获取", async () => {
+    const client = createMockEngineClient();
+    const args = ["--draft", JSON.stringify({ kind: "claude", base_url: "https://api.example.com", token_var: "YOUR_TEST_KEY" })];
+    const missing = await client.run("agents:models", args);
+    expect(missing.ok).toBe(false);
+    expect(missing.errors[0]?.message).toContain("YOUR_TEST_KEY 还没有取值");
+
+    const saved = await client.run("secrets:set", ["--var", "YOUR_TEST_KEY", "--value", "YOUR_TEST_TOKEN"]);
+    expect(saved.ok).toBe(true);
+    const available = await client.run("agents:models", args);
+    expect(available.ok).toBe(true);
+    expect(available.data).toMatchObject({ count: 3, models: ["mock-model-large", "mock-model-fast", "mock-model-mini"] });
+    const status = await client.run("secrets:status");
+    expect(JSON.stringify(status)).not.toContain("YOUR_TEST_TOKEN");
+
+    await client.run("secrets:set", ["--var", "YOUR_TEST_KEY", "--value", ""]);
+    const removed = await client.run("agents:models", args);
+    expect(removed.ok).toBe(false);
+  });
 });
