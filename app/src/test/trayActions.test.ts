@@ -13,6 +13,23 @@ describe("托盘动作", () => {
       profileLabel: "Kimi Code",
     })).toBe(true);
     expect(isTrayAction({ type: "switch-connection", agentId: "claude-code" })).toBe(false);
+    expect(isTrayAction({
+      type: "open-environment",
+      agentId: "claude-code",
+      agentName: "Claude Code",
+      environmentId: "cc-work",
+      environmentName: "工作账号",
+      launchName: "cc-work",
+    })).toBe(true);
+    expect(isTrayAction({
+      type: "open-environment",
+      agentId: "claude-code",
+      agentName: "Claude Code",
+      environmentId: "cc-work",
+      environmentName: "工作账号",
+      launchName: null,
+    })).toBe(true);
+    expect(isTrayAction({ type: "open-environment", environmentId: "cc-work" })).toBe(false);
     expect(isTrayAction("quit")).toBe(false);
     expect(isTrayAction(undefined)).toBe(false);
   });

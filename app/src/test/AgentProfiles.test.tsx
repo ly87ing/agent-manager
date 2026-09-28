@@ -153,9 +153,10 @@ describe("助手实例", () => {
     );
     // 与该实例无关的命令不混进来
     expect(within(card).queryByTestId("profile-launch-cc-ly-claude")).toBeNull();
-    // 每条都能编辑、复制、删除
+    // 启动名可直接复制；复制一条会创建命令定义的副本
+    expect(within(card).getByTestId("profile-launch-name-cc-ly-cc-ly")).toHaveTextContent("复制启动名");
     expect(within(card).getByTestId("profile-launch-edit-cc-ly-cc-ly")).toBeInTheDocument();
-    expect(within(card).getByTestId("profile-launch-copy-cc-ly-cc-ly")).toBeInTheDocument();
+    expect(within(card).getByTestId("profile-launch-copy-cc-ly-cc-ly")).toHaveTextContent("复制一条");
     expect(within(card).getByTestId("profile-launch-remove-cc-ly-cc-ly")).toBeInTheDocument();
     // 实例多半是另一个账号，额度读它自己的配置目录，不是默认那份
     expect(within(card).getByTestId("profile-usage-cc-ly")).toHaveTextContent("7%");
@@ -163,6 +164,18 @@ describe("助手实例", () => {
     // 实例不再作为主助手卡片重复出现
     expect(screen.queryByTestId("manage-skills-agents:cc-ly")).toBeNull();
     expect(within(card).getByTestId("profile-skills-cc-ly")).toBeInTheDocument();
+  });
+
+  it("复制启动名只写剪贴板，不修改实际别名或环境", async () => {
+    const writeText = vi.fn(async () => {});
+    const originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    onTestFinished(() => { Object.defineProperty(navigator, "clipboard", { configurable: true, value: originalClipboard }); });
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    const card = await screen.findByTestId("profile-card-cc-ly");
+    await userEvent.click(within(card).getByTestId("profile-launch-name-cc-ly-cc-ly-yolo"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("cc-ly-yolo"));
+    expect(calls.some((call) => call.command.endsWith(":apply") || call.command === "policy:set")).toBe(false);
   });
 
   it("复制实例：预填内容但名称与配置目录可改，且默认换了目录", async () => {

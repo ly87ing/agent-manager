@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { toast } from "sonner";
 import { Activity, Copy, CopyPlus, FolderTree, Loader2, PlayCircle, Plus, Sparkles, Terminal, Trash2, Wrench } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
 import type { OfficialAuthStatus } from "../lib/observed";
@@ -124,7 +125,7 @@ export function ProfileCard({
   if (observed.invalid) {
     // 库里的定义按现在的规则解析不了（如旧版本存下的写法）：只给原因，以及编辑修正或移除
     return (
-      <section data-testid={`profile-card-${id}`} className="rounded-lg border bg-card p-5 shadow-sm">
+      <section id={`profile-card-${id}`} tabIndex={-1} data-testid={`profile-card-${id}`} className="rounded-lg border bg-card p-5 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <h3 className="min-w-0 text-base font-semibold text-foreground">
             {spec.display_name}
@@ -157,6 +158,8 @@ export function ProfileCard({
   }
   return (
     <section
+      id={`profile-card-${id}`}
+      tabIndex={-1}
       data-testid={`profile-card-${id}`}
       className="rounded-lg border bg-card p-5 shadow-sm transition-shadow hover:shadow-md"
     >
@@ -280,6 +283,18 @@ export function ProfileCard({
                   <div className="flex shrink-0 items-center gap-1">
                     <button
                       type="button"
+                      data-testid={`profile-launch-name-${id}-${cmd.name}`}
+                      onClick={() => {
+                        void navigator.clipboard.writeText(cmd.name)
+                          .then(() => toast.success(`已复制启动命令 ${cmd.name}`))
+                          .catch(() => toast.error("复制失败，请手动选中启动命令"));
+                      }}
+                      className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent"
+                    >
+                      复制启动名
+                    </button>
+                    <button
+                      type="button"
                       data-testid={`profile-launch-edit-${id}-${cmd.name}`}
                       onClick={() => onEditLaunch(cmd.name)}
                       className="rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent"
@@ -292,7 +307,7 @@ export function ProfileCard({
                       onClick={() => onDuplicateLaunch(cmd.name)}
                       className="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent"
                     >
-                      <Copy className="h-3 w-3" aria-hidden /> 复制
+                      <Copy className="h-3 w-3" aria-hidden /> 复制一条
                     </button>
                     <button
                       type="button"

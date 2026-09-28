@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AliasEditorDialog } from "../components/AliasEditorDialog";
 import { ProfileCard } from "../components/ProfileCards";
@@ -79,9 +79,11 @@ function overwriteDescription(element: EngineElement): string {
 export default function AgentsPage({
   onManageSkills,
   onOpenSecrets,
+  profileTarget,
 }: {
   onManageSkills?: (agentId: string) => void;
   onOpenSecrets?: () => void;
+  profileTarget?: { agentId: string; profileId: string } | null;
 } = {}) {
   const query = useEngineQuery<StatusData>("agents:status");
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
@@ -149,6 +151,18 @@ export default function AgentsPage({
   } | null>(null);
   /** 正在写入哪一个助手/接入；非空时禁止并发切换。 */
   const [configuringTarget, setConfiguringTarget] = useState<string | null>(null);
+  useEffect(() => {
+    if (profileTarget) setSelectedAgentId(`agents:${profileTarget.agentId}`);
+  }, [profileTarget]);
+  useEffect(() => {
+    if (!profileTarget || selectedAgentId !== `agents:${profileTarget.agentId}` || !profilesQuery.data?.ok) return;
+    const timer = window.setTimeout(() => {
+      const card = document.getElementById(`profile-card-${profileTarget.profileId}`);
+      card?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      card?.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [profileTarget, selectedAgentId, profilesQuery.data]);
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="助手状态读取失败" error={query.error} />;
 

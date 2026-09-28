@@ -1,8 +1,8 @@
 /**
  * 托盘动作的界面侧处理。
  *
- * 托盘只列各助手的「官方账号」项（主配置里有第三方接入时用它切回），执行交给界面侧现有
- * 通道处理，因此锁、确认、审计与双回读不另起一套。
+ * 托盘列出官方账号与独立环境。前者交给界面侧现有切换通道，后者只打开精确入口；
+ * 因此锁、确认、审计与双回读不另起一套。
  * 非 Tauri 环境（浏览器预览、单测）拿不到事件通道，直接静默跳过。
  */
 import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -16,7 +16,18 @@ export interface TrayConnection {
   current: boolean;
 }
 
-export type TrayAction = "search" | "takeover" | ({ type: "switch-connection" } & Omit<TrayConnection, "current">);
+export interface TrayEnvironment {
+  agentId: string;
+  agentName: string;
+  environmentId: string;
+  environmentName: string;
+  /** 来自实际别名文件；没有可用命令时只打开环境卡片。 */
+  launchName: string | null;
+}
+
+export type TrayAction = "search" | "takeover"
+  | ({ type: "switch-connection" } & Omit<TrayConnection, "current">)
+  | ({ type: "open-environment" } & TrayEnvironment);
 
 const TRAY_ACTION_EVENT = "tray-action";
 
@@ -24,18 +35,25 @@ export function isTrayAction(value: unknown): value is TrayAction {
   if (value === "search" || value === "takeover") return true;
   if (typeof value !== "object" || value === null) return false;
   const action = value as Record<string, unknown>;
-  return action.type === "switch-connection"
+  if (action.type === "switch-connection") {
+    return typeof action.agentId === "string"
+      && typeof action.agentName === "string"
+      && typeof action.profile === "string"
+      && typeof action.profileLabel === "string";
+  }
+  return action.type === "open-environment"
     && typeof action.agentId === "string"
     && typeof action.agentName === "string"
-    && typeof action.profile === "string"
-    && typeof action.profileLabel === "string";
+    && typeof action.environmentId === "string"
+    && typeof action.environmentName === "string"
+    && (action.launchName === null || typeof action.launchName === "string");
 }
 
 /** 用脱敏的 id/显示名刷新托盘菜单；浏览器预览中静默跳过。 */
-export async function publishTrayConnections(connections: TrayConnection[]): Promise<void> {
+export async function publishTrayConnections(connections: TrayConnection[], environments: TrayEnvironment[]): Promise<void> {
   if (!isTauri()) return;
   try {
-    await invoke("tray_set_connections", { connections });
+    await invoke("tray_set_connections", { connections, environments });
   } catch (error) {
     // 原生菜单更新失败应留下诊断；它不影响主界面继续工作。
     console.error("更新托盘接入菜单失败", error);

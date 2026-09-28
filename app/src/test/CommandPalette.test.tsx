@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import App from "../App";
 import type { Envelope, SettingsData } from "../lib/contract";
 import { setSettingsClient } from "../lib/settings";
-import { agentManagementFixture, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
+import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
 const trayEvents = vi.hoisted(() => ({
@@ -153,6 +153,7 @@ function routes(): Record<string, TestRoute> {
       { command: "mcp.status" },
     ),
     "profiles:status": makeEnvelope({ domain: "profiles", elements: [] }, { command: "profiles.status" }),
+    "aliases:status": makeEnvelope(makeAliasStatus({}), { command: "aliases.status" }),
     "rules:status": makeEnvelope({ domain: "rules", elements: [] }, { command: "rules.status" }),
     "system:discover": makeEnvelope(
       { domain: "discover", agents: [], skills: { items: [], groups: [] }, mcp: [], summary: {} },
@@ -209,6 +210,114 @@ describe("命令面板", () => {
     await userEvent.keyboard("{Escape}");
     await openPalette();
     expect(screen.getByTestId("command-item-page:agents")).toBeInTheDocument();
+  });
+
+  it("按启动名搜索独立环境、复制启动名并直达具体卡片，全程不写客户端配置", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    const writeText = vi.fn(async () => {});
+    const originalClipboard = navigator.clipboard;
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    onTestFinished(() => { Object.defineProperty(navigator, "clipboard", { configurable: true, value: originalClipboard }); });
+    const testRoutes = routes();
+    testRoutes["profiles:status"] = makeEnvelope({
+      domain: "profiles",
+      elements: [makeElement({
+        id: "profiles:cc-work",
+        domain: "profiles",
+        spec: { display_name: "工作账号", base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-work" },
+        observed: { config_dir: "~/.claude-work", config_dir_exists: true, fields: [], blocked_reason: null },
+        state: "managed-ok",
+        actions: [],
+      })],
+    }, { command: "profiles.status" });
+    testRoutes["aliases:status"] = makeEnvelope(makeAliasStatus({ "cc-work": 'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude' }), { command: "aliases.status" });
+    const { calls } = renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "cc-work");
+    await userEvent.click(await screen.findByTestId("command-item-profile-launch:cc-work:cc-work"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("cc-work"));
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "工作账号");
+    await userEvent.click(await screen.findByTestId("command-item-profile:cc-work"));
+    const card = await screen.findByTestId("profile-card-cc-work");
+    await waitFor(() => expect(card).toHaveFocus());
+    expect(calls.some((call) => call.command === "agents:configure" || call.command.endsWith(":apply"))).toBe(false);
+  });
+
+  it("托盘独立环境项只打开对应命令或卡片，不切换当前助手配置", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    const testRoutes = routes();
+    testRoutes["profiles:status"] = makeEnvelope({
+      domain: "profiles",
+      elements: [makeElement({
+        id: "profiles:cc-work",
+        domain: "profiles",
+        spec: { display_name: "工作账号", base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-work" },
+        observed: { config_dir: "~/.claude-work", config_dir_exists: true, fields: [], blocked_reason: null },
+        state: "managed-ok",
+        actions: [],
+      })],
+    }, { command: "profiles.status" });
+    testRoutes["aliases:status"] = makeEnvelope(makeAliasStatus({ "cc-work": 'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude' }), { command: "aliases.status" });
+    const { calls } = renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await waitFor(() => expect(trayEvents.listeners.size).toBe(1));
+    for (const listener of trayEvents.listeners) {
+      listener({ payload: {
+        type: "open-environment",
+        agentId: "claude-code", agentName: "Claude Code",
+        environmentId: "cc-work", environmentName: "工作账号", launchName: "cc-work",
+      } });
+    }
+    const palette = await screen.findByRole("dialog", { name: "命令面板" });
+    expect(within(palette).getByTestId("command-item-profile-launch:cc-work:cc-work")).toBeInTheDocument();
+    expect(within(palette).queryByTestId("command-item-connection:claude-code:default")).toBeNull();
+    await userEvent.keyboard("{Escape}");
+    for (const listener of trayEvents.listeners) {
+      listener({ payload: {
+        type: "open-environment",
+        agentId: "claude-code", agentName: "Claude Code",
+        environmentId: "cc-work", environmentName: "工作账号", launchName: null,
+      } });
+    }
+    expect(within(await screen.findByRole("dialog", { name: "命令面板" })).getByTestId("command-item-profile:cc-work")).toBeInTheDocument();
+    expect(calls.some((call) => call.command === "agents:configure" || call.command.endsWith(":apply"))).toBe(false);
+  });
+
+  it("未写入和缺启动命令的环境只提供定位入口，不误示为可启动", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    const testRoutes = routes();
+    testRoutes["profiles:status"] = makeEnvelope({
+      domain: "profiles",
+      elements: [
+        makeElement({
+          id: "profiles:pending",
+          domain: "profiles",
+          spec: { display_name: "待写入", base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-pending" },
+          observed: { config_dir: "~/.claude-pending", config_dir_exists: false },
+          state: "not-materialized",
+        }),
+        makeElement({
+          id: "profiles:no-launch",
+          domain: "profiles",
+          spec: { display_name: "缺命令", base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-no-launch" },
+          observed: { config_dir: "~/.claude-no-launch", config_dir_exists: true },
+          state: "managed-ok",
+        }),
+      ],
+    }, { command: "profiles.status" });
+    testRoutes["aliases:status"] = makeEnvelope(makeAliasStatus({ pending: 'CLAUDE_CONFIG_DIR="$HOME/.claude-pending" claude' }), { command: "aliases.status" });
+    renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "待写入");
+    expect(await screen.findByTestId("command-item-profile:pending")).toHaveTextContent("配置尚未可用");
+    expect(screen.queryByTestId("command-item-profile-launch:pending:pending")).toBeNull();
+    await userEvent.clear(screen.getByTestId("command-palette-input"));
+    await userEvent.type(screen.getByTestId("command-palette-input"), "缺命令");
+    expect(await screen.findByTestId("command-item-profile:no-launch")).toHaveTextContent("还没有启动命令");
+    expect(screen.queryByTestId("command-item-profile-launch:no-launch:no-launch")).toBeNull();
   });
 
   it("规则与终端快捷命令都以实际文件为准、逐条编辑，没有一键同步动作", async () => {

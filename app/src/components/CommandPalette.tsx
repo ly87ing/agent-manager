@@ -11,6 +11,8 @@ import {
   liveRefusalDescription,
 } from "../lib/agentCurrent";
 import { isOfficial } from "../lib/defaultEnvironment";
+import { parseAliasValue } from "../lib/aliasCommand";
+import { launchCommandsForProfile, profileKindOf } from "../lib/profileDefinition";
 import { useExecutions } from "../lib/execution";
 import { useEngineQuery } from "../lib/queries";
 import { useRefreshUpstream } from "../lib/queries";
@@ -20,6 +22,7 @@ import { ConfirmModal } from "./ConfirmModal";
 import {
   publishTrayConnections,
   type TrayConnection,
+  type TrayEnvironment,
 } from "../lib/trayActions";
 
 export interface CommandItem {
@@ -84,6 +87,7 @@ export function CommandPalette({
   initialItemId,
   onClose,
   onNavigate,
+  onNavigateProfile,
   onOpenAgentSkills,
 }: {
   open: boolean;
@@ -94,6 +98,7 @@ export function CommandPalette({
   initialItemId?: string | null;
   onClose: () => void;
   onNavigate: (page: string) => void;
+  onNavigateProfile: (agentId: string, profileId: string) => void;
   /** 选中某个助手/实例的技能时，跳到技能页并预选它。 */
   onOpenAgentSkills: (agentId: string) => void;
 }) {
@@ -118,7 +123,13 @@ export function CommandPalette({
   const skills = useEngineQuery<StatusData>("skills:status", [], { enabled: open });
   const mcp = useEngineQuery<StatusData>("mcp:status", [], { enabled: open });
   const profiles = useEngineQuery<StatusData>("profiles:status", [], { enabled: true });
+  const aliases = useEngineQuery<StatusData>("aliases:status", [], { enabled: true });
   const refetchAgents = agents.refetch;
+  const aliasValues = useMemo(() => Object.fromEntries(
+    (aliases.data?.ok ? aliases.data.data.aliases ?? [] : [])
+      .filter((item) => item.value !== null)
+      .map((item) => [item.name, item.value as string]),
+  ), [aliases.data]);
 
   const switchConnection = useCallback(
     async (
@@ -213,10 +224,37 @@ export function CommandPalette({
     return out;
   }, [agents.data, profiles.data]);
 
+  const trayEnvironments = useMemo<TrayEnvironment[]>(() => {
+    const out: TrayEnvironment[] = [];
+    for (const element of profiles.data?.ok ? profiles.data.data.elements : []) {
+      const id = element.id.replace(/^profiles:/, "");
+      const spec = element.spec as { base_agent?: string; display_name?: string; kind?: string; config_dir?: string };
+      const agentId = spec.base_agent;
+      if (!agentId) continue;
+      const agent = agents.data?.ok
+        ? agents.data.data.elements.find((item) => item.id === `agents:${agentId}`)
+        : undefined;
+      const agentName = (agent?.spec as { display_name?: string } | undefined)?.display_name ?? agentId;
+      const environmentName = spec.display_name ?? id;
+      const observed = element.observed as { config_dir?: string };
+      const configDir = observed.config_dir ?? spec.config_dir ?? "";
+      const ready = element.state === "managed-ok" || element.state === "drifted";
+      const commands = ready && configDir
+        ? launchCommandsForProfile(aliasValues, spec.kind === "codex" ? "codex" : profileKindOf(agentId), configDir, (value) => parseAliasValue(value).otherEnv)
+        : [];
+      for (const launchName of commands.length ? commands.map((command) => command.name) : [null]) {
+        out.push({ agentId, agentName, environmentId: id, environmentName, launchName });
+      }
+    }
+    return out;
+  }, [agents.data, profiles.data, aliasValues]);
+
   useEffect(() => {
-    // 两份状态都成功后才替换原生菜单，避免启动竞态或瞬时读取失败清空上一次可用菜单。
-    if (agents.data?.ok && profiles.data?.ok) void publishTrayConnections(trayConnections);
-  }, [agents.data?.ok, profiles.data?.ok, trayConnections]);
+    // 三份状态都成功后才替换原生菜单，避免瞬时读取失败清空上一次可用菜单。
+    if (agents.data?.ok && profiles.data?.ok && aliases.data?.ok) {
+      void publishTrayConnections(trayConnections, trayEnvironments);
+    }
+  }, [agents.data?.ok, profiles.data?.ok, aliases.data?.ok, trayConnections, trayEnvironments]);
 
   useEffect(() => {
     if (open) {
@@ -295,15 +333,47 @@ export function CommandPalette({
     }
     for (const element of profiles.data?.ok ? profiles.data.data.elements : []) {
       const id = element.id.replace(/^profiles:/, "");
-      const spec = element.spec as { display_name?: string; config_dir?: string };
+      const spec = element.spec as { display_name?: string; base_agent?: string; kind?: string; config_dir?: string };
+      const observed = element.observed as { config_dir?: string };
+      const agentId = spec.base_agent ?? "";
+      const agent = agents.data?.ok
+        ? agents.data.data.elements.find((item) => item.id === `agents:${agentId}`)
+        : undefined;
+      const agentName = (agent?.spec as { display_name?: string } | undefined)?.display_name ?? agentId;
+      const profileName = spec.display_name ?? id;
+      const configDir = observed.config_dir ?? spec.config_dir ?? "";
+      const commands = configDir
+        ? launchCommandsForProfile(
+          aliasValues,
+          spec.kind === "codex" ? "codex" : profileKindOf(agentId),
+          configDir,
+          (value) => parseAliasValue(value).otherEnv,
+        )
+        : [];
+      const ready = element.state === "managed-ok" || element.state === "drifted";
       out.push({
         id: `profile:${id}`,
-        label: spec.display_name ?? id,
-        hint: `实例 · ${spec.config_dir ?? ""}`,
-        keywords: `${id} profile 实例`,
-        group: "资源",
-        run: () => onNavigate("agents"),
+        label: `${agentName} · ${profileName}`,
+        hint: ready ? commands.length > 0 ? "查看环境" : "还没有启动命令" : "配置尚未可用",
+        keywords: `${agentId} ${id} ${commands.map((command) => command.name).join(" ")} profile 实例 环境`,
+        group: "独立环境",
+        run: () => onNavigateProfile(agentId, id),
       });
+      if (!ready) continue;
+      for (const command of commands) {
+        out.push({
+          id: `profile-launch:${id}:${command.name}`,
+          label: `${agentName} · ${profileName} · ${command.name}`,
+          hint: "复制启动命令",
+          keywords: `${agentId} ${id} ${command.name} 启动 环境`,
+          group: "独立环境",
+          run: () => {
+            void navigator.clipboard.writeText(command.name)
+              .then(() => toast.success(`已复制启动命令 ${command.name}`))
+              .catch(() => toast.error("复制失败，请到环境卡片查看启动命令"));
+          },
+        });
+      }
     }
     for (const element of skills.data?.ok ? skills.data.data.elements : []) {
       const id = element.id.replace(/^skill:/, "");
@@ -348,7 +418,7 @@ export function CommandPalette({
       },
     );
     return out;
-  }, [agents.data, skills.data, mcp.data, profiles.data, switchingTarget, refreshUpstream, switchConnection, onNavigate, onOpenAgentSkills]);
+  }, [agents.data, skills.data, mcp.data, profiles.data, aliasValues, switchingTarget, refreshUpstream, switchConnection, onNavigate, onNavigateProfile, onOpenAgentSkills]);
 
   const filtered = useMemo(() => {
     const scoped = scope === "connections"

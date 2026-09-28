@@ -57,6 +57,7 @@ export default function App() {
   const settings = useSettings();
   const [activePage, setActivePage] = useState<string>("agents");
   const [selectedSkillAgent, setSelectedSkillAgent] = useState<string | null>(null);
+  const [profileTarget, setProfileTarget] = useState<{ agentId: string; profileId: string } | null>(null);
   /** 「skills:<名称>」跳转带进来的技能搜索词：总览「去处理」直接定位到那一行。 */
   const [skillSearch, setSkillSearch] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -100,7 +101,16 @@ export default function App() {
           setPaletteOpen(true);
         }
         else if (action === "takeover") setActivePage("takeover");
-        else {
+        else if (action.type === "open-environment") {
+          setPaletteScope("all");
+          setPaletteConnectionTarget({
+            keyword: `${action.agentName} · ${action.environmentName}`,
+            itemId: action.launchName
+              ? `profile-launch:${action.environmentId}:${action.launchName}`
+              : `profile:${action.environmentId}`,
+          });
+          setPaletteOpen(true);
+        } else {
           setPaletteScope("connections");
           setPaletteConnectionTarget({
             keyword: `${action.agentName} · ${action.profileLabel}`,
@@ -143,6 +153,7 @@ export default function App() {
           {activePage === "dashboard" && <DashboardPage onNavigate={handleNavigate} />}
           {activePage === "agents" && (
             <AgentsPage
+              profileTarget={profileTarget}
               onManageSkills={(agentId) => {
                 setSelectedSkillAgent(agentId);
                 setSkillSearch(null);
@@ -188,6 +199,10 @@ export default function App() {
             setSkillSearch(null);
           }
           setActivePage(page);
+        }}
+        onNavigateProfile={(agentId, profileId) => {
+          setProfileTarget({ agentId, profileId });
+          setActivePage("agents");
         }}
         onOpenAgentSkills={(agentId) => {
           setSelectedSkillAgent(agentId);
