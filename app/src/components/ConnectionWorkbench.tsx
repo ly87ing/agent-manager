@@ -587,7 +587,7 @@ export function ConnectionWorkbench({
               </p>
             </div>
             <div className="flex items-center gap-2">
-              {form.connections.length > 0 && (
+              {form.connections.length > 1 && (
                 <button
                   type="button"
                   data-testid="check-all-connections-button"
@@ -621,7 +621,7 @@ export function ConnectionWorkbench({
               </button>
             </div>
           </div>
-        {connectionChecks.length > 0 && (
+        {form.connections.length > 1 && connectionChecks.length > 0 && (
           <div
             data-testid="connection-check-summary"
             className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-sm"
@@ -918,7 +918,7 @@ function ConnectionCard({
               {check?.pending ? "正在测试…" : "测试连接"}
             </button>
           )}
-            <div className="flex items-center" aria-label="调整接入顺序">
+            {(onMoveUp || onMoveDown) && <div className="flex items-center" aria-label="调整接入顺序">
               <button
                 type="button"
                 aria-label={`上移 ${connection.label || connection.name}`}
@@ -937,7 +937,7 @@ function ConnectionCard({
               >
                 <ArrowDown className="h-3.5 w-3.5" aria-hidden />
               </button>
-            </div>
+            </div>}
             {onDuplicate && (
               <button
                 type="button"

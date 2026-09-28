@@ -1156,6 +1156,30 @@ describe("助手运行参数", () => {
     expect(calls.some((call) => ["policy:set", "agents:configure", "secrets:set"].includes(call.command))).toBe(false);
   });
 
+  it("只有一套接入时保留单项测试，不显示重复的批量检查和排序", async () => {
+    const oneConnection = routes({
+      "agents:check": makeEnvelope(
+        { ok: true, detail: "连接正常", latency_ms: 72 },
+        { command: "agents.check" },
+      ),
+    });
+    const status = oneConnection["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
+    status.data.elements[0].spec.settings = {
+      active: "official",
+      profiles: { relay: { label: "Relay", base_url: "https://relay.example.com" } },
+    };
+    renderWithEngine(<AgentsPage />, oneConnection);
+
+    expect(await screen.findByTestId("third-party-section-claude-code")).toBeInTheDocument();
+    expect(screen.queryByTestId("check-all-connections-button")).toBeNull();
+    await userEvent.click(screen.getByLabelText("管理 Relay"));
+    expect(screen.queryByRole("button", { name: "上移 Relay" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "下移 Relay" })).toBeNull();
+    await userEvent.click(screen.getByTestId("check-connection-claude-code-relay"));
+    expect(await screen.findByTestId("check-result-claude-code-relay")).toHaveTextContent("72ms");
+    expect(screen.queryByTestId("connection-check-summary")).toBeNull();
+  });
+
   it("接入卡片可调整顺序，只保存定义且不触碰配置或认证", async () => {
     const withProfiles = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
