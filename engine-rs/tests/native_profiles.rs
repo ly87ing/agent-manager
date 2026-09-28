@@ -340,6 +340,79 @@ fn claude_profile(token_var: &str) -> String {
 }
 
 #[test]
+fn config_file_reads_only_the_selected_profile_and_refreshes_external_edits() {
+    let (root, ctx) = temp_ctx("config-file-readback");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_CONFIG_FILE")
+    ));
+    let target = ctx.home_dir.join(".claude-ly/settings.json");
+    let default = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(default.parent().unwrap()).unwrap();
+    std::fs::write(&default, "{\"default\":true}\n").unwrap();
+    let args = ["--only", "profiles:cc-ly"];
+    let missing = execute(&ctx, &request("profiles:config-file", &args));
+    assert!(missing.ok, "{:?}", missing.errors);
+    assert_eq!(missing.data["exists"], false);
+    assert!(
+        !target.parent().unwrap().exists(),
+        "只读操作不得创建实例目录"
+    );
+
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(
+        &target,
+        "{\"model\":\"one\",\"env\":{\"TOKEN\":\"secret\"}}\n",
+    )
+    .unwrap();
+    let first = execute(&ctx, &request("profiles:config-file", &args));
+    assert_eq!(first.data["path"], "~/.claude-ly/settings.json");
+    assert!(first.data["content"].as_str().unwrap().contains("\"one\""));
+    std::fs::write(&target, "{\"model\":\"two\"}\n").unwrap();
+    let second = execute(&ctx, &request("profiles:config-file", &args));
+    assert_eq!(second.data["content"], "{\"model\":\"two\"}\n");
+    assert_eq!(
+        std::fs::read_to_string(&default).unwrap(),
+        "{\"default\":true}\n"
+    );
+
+    assert!(save_definition(
+        &ctx,
+        "cx-show",
+        r#"{"display_name":"Codex Show","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-show","model":"gpt-demo"},"_replace":true}"#
+    ));
+    let codex_target = ctx.home_dir.join(".codex-show/config.toml");
+    std::fs::create_dir_all(codex_target.parent().unwrap()).unwrap();
+    std::fs::write(&codex_target, "model = \"gpt-demo\"\n").unwrap();
+    let codex = execute(
+        &ctx,
+        &request("profiles:config-file", &["--only", "profiles:cx-show"]),
+    );
+    assert!(codex.ok, "{:?}", codex.errors);
+    assert_eq!(codex.data["path"], "~/.codex-show/config.toml");
+    assert_eq!(codex.data["format"], "toml");
+    assert_eq!(codex.data["content"], "model = \"gpt-demo\"\n");
+
+    let auth = ctx.home_dir.join(".claude/.credentials.json");
+    std::fs::write(&auth, "dummy-auth-must-not-leak").unwrap();
+    std::fs::remove_file(&target).unwrap();
+    std::os::unix::fs::symlink(&auth, &target).unwrap();
+    let blocked = execute(&ctx, &request("profiles:config-file", &args));
+    assert!(!blocked.ok, "认证文件不能作为实例配置原文读出");
+    assert!(!format!("{:?}", blocked).contains("dummy-auth-must-not-leak"));
+
+    for bad in [
+        vec!["--only", "profiles:../.claude"],
+        vec!["--only", "agents:claude-code"],
+        vec!["--only", "profiles:cc-ly", "--value", "x"],
+    ] {
+        assert!(!execute(&ctx, &request("profiles:config-file", &bad)).ok);
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn claude_profile_writes_isolated_settings_without_touching_global() {
     let (root, ctx) = temp_ctx("claude-write");
     // 主实例配置：全程不得被改

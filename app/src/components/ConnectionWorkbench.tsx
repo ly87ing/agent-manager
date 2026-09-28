@@ -349,6 +349,24 @@ export function ConnectionWorkbench({
           </div>
         </div>
 
+        {kind && (
+          <div className="rounded-lg border">
+            <button
+              type="button"
+              data-testid="agent-edit-config-file"
+              aria-expanded={fileOpen}
+              onClick={() => setFileOpen((open) => !open)}
+              className="flex w-full flex-wrap items-center gap-2 px-3 py-2.5 text-left text-sm text-foreground hover:bg-accent/50"
+            >
+              {fileOpen ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronRight className="h-4 w-4" aria-hidden />}
+              <span className="font-medium">查看实际配置文件</span>
+              <span className="text-xs text-muted-foreground">原文可能含凭据</span>
+              <code className="min-w-0 break-all text-xs text-muted-foreground">{currentConfig?.target ?? currentConfig?.file ?? ""}</code>
+            </button>
+            {fileOpen && <ConfigFileEditor key={agentId} agentId={agentId} />}
+          </div>
+        )}
+
         <div aria-label="环境配置" role="tablist" className="flex gap-1 overflow-x-auto border-b">
           {([
             ["providers", "账号与登录"],
@@ -382,7 +400,7 @@ export function ConnectionWorkbench({
             <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
               {fatalIssues.map((issue) => <li key={issue}>{issue}</li>)}
             </ul>
-            <p className="mt-1 text-xs">到「运行设置」底部的「直接编辑配置文件」里改掉这些行。</p>
+            <p className="mt-1 text-xs">在上方展开「查看实际配置文件」改掉这些行。</p>
           </div>
         )}
         {tab === "automation" && (
@@ -435,23 +453,7 @@ export function ConnectionWorkbench({
               />
             )}
             {kind && writeBlocked && (
-              <p className="text-sm text-warning">{writeBlocked}；可以在下方直接编辑配置文件修好它。</p>
-            )}
-            {kind && (
-              <div className="rounded-lg border">
-                <button
-                  type="button"
-                  data-testid="agent-edit-config-file"
-                  aria-expanded={fileOpen}
-                  onClick={() => setFileOpen((open) => !open)}
-                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-foreground hover:bg-accent/50"
-                >
-                  {fileOpen ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronRight className="h-4 w-4" aria-hidden />}
-                  <span className="font-medium">直接编辑配置文件</span>
-                  <code className="min-w-0 truncate text-xs text-muted-foreground">{currentConfig?.target ?? currentConfig?.file ?? ""}</code>
-                </button>
-                {fileOpen && <ConfigFileEditor key={agentId} agentId={agentId} />}
-              </div>
+              <p className="text-sm text-warning">{writeBlocked}；可以展开上方的「查看实际配置文件」修好它。</p>
             )}
           </div>
         )}

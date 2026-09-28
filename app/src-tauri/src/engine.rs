@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:apply-definition|adopt|seed|shared-status|shared-apply / agents:configure|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:config-file|apply-definition|adopt|seed|shared-status|shared-apply / agents:configure|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -66,7 +66,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("profiles", "apply-definition") => true,
         // 把默认环境的权限、状态栏、hooks、规则与 MCP 一次性带进实例：只补实例没有的
         ("profiles", "seed") => true,
-        ("profiles", "shared-status" | "shared-apply") => true,
+        ("profiles", "shared-status" | "shared-apply" | "config-file") => true,
         // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
         ("agents", "configure") => true,
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
@@ -75,7 +75,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("agents", "models" | "balance") => true,
         // 官方账号登录状态：只读，用官方命令查一次
         ("agents", "auth-status") => true,
-        // 配置文件原文：读（凭据遮住）与整文件按基准写回
+        // 配置文件原文：仅用户主动展开时读，可能含凭据；整文件按基准写回
         ("agents", "config-file" | "edit-config") => true,
         // 用量：status 只读，scan 读会话文件后写聚合，clear 清空重来
         ("usage", "status" | "scan" | "clear") => true,
@@ -207,6 +207,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--items", ArgValueKind::SeedItems));
         }
         ("profiles", "shared-status") => specs.push(("--only", ArgValueKind::ElementId)),
+        ("profiles", "config-file") => specs.push(("--only", ArgValueKind::ElementId)),
         ("profiles", "shared-apply") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--item", ArgValueKind::ElementId));
@@ -707,6 +708,7 @@ mod tests {
             "aliases:apply",
             "aliases:discard-legacy",
             "profiles:status",
+            "profiles:config-file",
             "profiles:apply",
             "profiles:apply-definition",
             "profiles:adopt",
@@ -1352,6 +1354,14 @@ mod tests {
         let base = "b".repeat(64);
         let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert!(validate_command("profiles:adopt").is_ok());
+        assert!(
+            validate_args("profiles:config-file", &args(&["--only", "profiles:cc-ly"])).is_ok()
+        );
+        assert!(validate_args(
+            "profiles:config-file",
+            &args(&["--only", "profiles:cc-ly", "--value", "secret"])
+        )
+        .is_err());
         for command in ["profiles:apply", "profiles:adopt"] {
             assert!(
                 validate_args(

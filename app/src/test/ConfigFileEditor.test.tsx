@@ -67,6 +67,21 @@ describe("直接编辑配置文件", () => {
     expect(edits(calls)).toHaveLength(0);
   });
 
+  it("重新读取显示外部变化，有未保存改动时不丢编辑内容", async () => {
+    let content = CONTENT;
+    const { calls } = renderWithEngine(<ConfigFileEditor agentId="claude-code" />, {
+      "agents:config-file": async () => file({ content }),
+    });
+    await editorView("config-file-text");
+    content = CONTENT.replace('"dark"', '"solarized"');
+    await userEvent.click(screen.getByTestId("config-file-refresh"));
+    await waitFor(async () => expect(editorText(await editorView("config-file-text"))).toBe(content));
+    setEditorText(await editorView("config-file-text"), CONTENT.replace('"dark"', '"light"'));
+    expect(screen.getByTestId("config-file-refresh")).toBeDisabled();
+    expect(calls.filter((call) => call.command === "agents:config-file")).toHaveLength(2);
+    expect(edits(calls)).toHaveLength(0);
+  });
+
   it("不是合法 JSON 时不发写入", async () => {
     const { calls } = renderWithEngine(<ConfigFileEditor agentId="claude-code" />, { "agents:config-file": file() });
     const view = await editorView("config-file-text");

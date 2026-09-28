@@ -4,7 +4,7 @@ import { useExecutions } from "../lib/execution";
 import { diffLines, hasChanges } from "../lib/textDiff";
 import { cn } from "../lib/utils";
 
-// 编辑器只在展开「直接编辑配置文件」时才需要，单独打包按需加载
+// 编辑器只在展开「查看实际配置文件」时才需要，单独打包按需加载
 const CodeEditor = lazy(() => import("./CodeEditor"));
 
 /** agents:config-file 的返回：配置文件原文与整文件写入基准。 */
@@ -33,6 +33,8 @@ export function ConfigFileEditor({ agentId }: { agentId: string }) {
   const [busy, setBusy] = useState(false);
 
   const load = async (notice: string | null = null) => {
+    setFile(null);
+    setError(null);
     const envelope = await runEngine<AgentConfigFile>("agents:config-file", ["--only", `agents:${agentId}`]);
     if (!envelope.ok) {
       setError(envelope.errors[0]?.message ?? "读取配置文件失败");
@@ -104,7 +106,7 @@ export function ConfigFileEditor({ agentId }: { agentId: string }) {
   return (
     <div data-testid="config-file-editor" className="space-y-3 px-3 pb-3">
       <p className="text-xs text-muted-foreground">
-        这里是文件原文。表单没覆盖的设置在这里改；写入前会核对文件没被别处改过（包括助手自己改），被改过就不写。
+        这里是刚从目标文件读取的原文，可能含凭据，请勿直接分享。表单没覆盖的设置也可在这里改；写入前会核对文件没被别处改过。
       </p>
       {!file && !error && <p className="text-sm text-muted-foreground">正在读取…</p>}
       {file?.blocked_reason && (
@@ -178,6 +180,15 @@ export function ConfigFileEditor({ agentId }: { agentId: string }) {
         </p>
       )}
       <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          data-testid="config-file-refresh"
+          disabled={busy || changed}
+          onClick={() => void load()}
+          className="rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+        >
+          重新读取
+        </button>
         <button
           type="button"
           data-testid="config-file-reset"

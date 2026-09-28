@@ -164,7 +164,7 @@ describe("助手页产品边界", () => {
     expect(args).not.toContain("--rename-from");
   });
 
-  it("没有单独的「实际配置」页签：运行设置按实际值预填，文件原文收在底部按需展开", async () => {
+  it("默认环境卡片可按需查看实际配置文件，运行设置按实际值预填", async () => {
     const withFile: Record<string, Envelope> = {
       ...routes(),
       "agents:config-file": makeEnvelope(

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Activity, Copy, CopyPlus, FolderTree, Loader2, PlayCircle, Plus, Sparkles, Terminal, Trash2, Wrench } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
@@ -12,6 +12,14 @@ import { cn } from "../lib/utils";
 import { overrideEffect } from "../lib/overrideEffects";
 import { balanceSupported } from "../lib/balance";
 import { sharedItemLabel, type SharedItem } from "../lib/profileShared";
+import { runEngine } from "../lib/engine";
+
+interface ProfileConfigFile {
+  path: string;
+  exists: boolean;
+  content: string | null;
+  blocked_reason: string | null;
+}
 
 /** 实例状态 → 一句话说明用户现在处于什么位置。 */
 const STATE_NOTE: Record<string, string> = {
@@ -80,6 +88,10 @@ export function ProfileCard({
   const [sharedSelected, setSharedSelected] = useState<string[]>([]);
   const [sharedBusy, setSharedBusy] = useState(false);
   const [sharedOutcome, setSharedOutcome] = useState<string[]>([]);
+  const [fileOpen, setFileOpen] = useState(false);
+  const [file, setFile] = useState<ProfileConfigFile | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [fileBusy, setFileBusy] = useState(false);
   const loadShared = async () => {
     if (!onSharedStatus) return;
     setSharedBusy(true);
@@ -134,6 +146,30 @@ export function ProfileCard({
   const spec = element.spec as unknown as ProfileSpec;
   const observed = element.observed as unknown as ProfileObserved;
   const id = element.id.replace(/^profiles:/, "");
+  const loadFile = async () => {
+    setFileBusy(true);
+    setFile(null);
+    try {
+      const result = await runEngine<ProfileConfigFile>("profiles:config-file", ["--only", element.id]);
+      if (result.ok) {
+        setFile(result.data);
+        setFileError(null);
+      } else {
+        setFile(null);
+        setFileError(result.errors[0]?.message ?? "读取配置文件失败");
+      }
+    } catch (error) {
+      setFile(null);
+      setFileError(String(error));
+    } finally {
+      setFileBusy(false);
+    }
+  };
+  useEffect(() => {
+    if (fileOpen) void loadFile();
+    // 打开时、实际受管内容摘要变化后回读；其余外部改动可点刷新。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileOpen, observed.base, observed.target, element.id]);
   const blocked = observed.blocked_reason;
   const missingVars = (observed.env_refs ?? []).filter((ref) => ref.resolved === false);
   const allDiffers = (observed.fields ?? []).filter((field) => field.state !== "same");
@@ -284,6 +320,35 @@ export function ProfileCard({
           <span className="font-mono">{observed.config_dir}</span>
           {!observed.config_dir_exists && <span className="shrink-0 text-warning">（尚未创建）</span>}
         </p>
+      </div>
+
+      <div className="mt-3 rounded-md border">
+        <button
+          type="button"
+          data-testid={`profile-config-file-toggle-${id}`}
+          aria-expanded={fileOpen}
+          onClick={() => setFileOpen((open) => !open)}
+          className="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-xs hover:bg-accent/50"
+        >
+          <span className="font-medium text-foreground">查看实际配置文件</span>
+          <span className="text-muted-foreground">原文可能含凭据</span>
+          <code className="break-all text-muted-foreground">{observed.target}</code>
+        </button>
+        {fileOpen && (
+          <div className="space-y-2 border-t px-3 py-2 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-muted-foreground">从目标文件重新读取；原文可能含凭据，请勿直接分享。</span>
+              <button type="button" disabled={fileBusy} onClick={() => void loadFile()} className="shrink-0 rounded border px-2 py-1 disabled:opacity-50">刷新</button>
+            </div>
+            {fileBusy && <p>正在读取…</p>}
+            {fileError && <p role="alert" className="text-destructive">{fileError}</p>}
+            {file?.blocked_reason && <p role="alert" className="text-warning">{file.blocked_reason}</p>}
+            {file && !file.exists && <p>文件尚未创建。</p>}
+            {file?.content != null && file.exists && (
+              <pre data-testid={`profile-config-file-content-${id}`} className="max-h-80 overflow-auto whitespace-pre rounded bg-muted/40 p-2 font-mono text-[11px]">{file.content}</pre>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mt-3 border-t pt-3">

@@ -555,8 +555,8 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         }
         (
             "profiles",
-            "status" | "apply" | "apply-definition" | "adopt" | "seed" | "shared-status"
-            | "shared-apply",
+            "status" | "config-file" | "apply" | "apply-definition" | "adopt" | "seed"
+            | "shared-status" | "shared-apply",
         ) => crate::native_profiles::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("PROFILE_ERROR", format!("{err:#}"))),

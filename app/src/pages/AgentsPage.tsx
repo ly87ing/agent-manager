@@ -240,7 +240,7 @@ export default function AgentsPage({
     const base = element ? configureBaseOf(element) : null;
     if (!base) {
       toast.error("客户端配置文件暂不可读，没有写入", {
-        description: "到“运行设置”底部直接编辑配置文件查看原因；修好之后再试。",
+        description: "到默认环境卡片的“查看实际配置文件”查看原因；修好之后再试。",
       });
       return false;
     }

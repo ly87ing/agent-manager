@@ -151,7 +151,7 @@ export function CommandPalette({
         : undefined;
       const base = element ? configureBaseOf(element) : null;
       if (!base) {
-        toast.error("客户端配置文件暂不可读，接入没有切换", { description: "到助手页“运行设置”底部直接编辑配置文件查看原因。" });
+        toast.error("客户端配置文件暂不可读，接入没有切换", { description: "到助手页默认环境卡片的“查看实际配置文件”查看原因。" });
         return;
       }
       switchBusyRef.current = true;

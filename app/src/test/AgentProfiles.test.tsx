@@ -239,6 +239,27 @@ describe("助手实例", () => {
     expect(within(card).getByTestId("profile-skills-cc-ly")).toBeInTheDocument();
   });
 
+  it("实例文件按需读实际原文，刷新后展示外部修改", async () => {
+    const all: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    let content = '{"model":"one"}\n';
+    all["profiles:config-file"] = async () => makeEnvelope(
+      { element: "profiles:cc-ly", path: "~/.claude-cc-ly/settings.json", format: "json", exists: true, content, blocked_reason: null },
+      { command: "profiles.config-file" },
+    );
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await openInstanceManager();
+    const card = await screen.findByTestId("profile-card-cc-ly");
+    const toggle = within(card).getByTestId("profile-config-file-toggle-cc-ly");
+    expect(toggle).toHaveTextContent("~/.claude-cc-ly/settings.json");
+    expect(calls.some((call) => call.command === "profiles:config-file")).toBe(false);
+    await userEvent.click(toggle);
+    expect(await within(card).findByTestId("profile-config-file-content-cc-ly")).toHaveTextContent("one");
+    expect(calls.find((call) => call.command === "profiles:config-file")?.args).toEqual(["--only", "profiles:cc-ly"]);
+    content = '{"model":"two"}\n';
+    await userEvent.click(within(card).getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(within(card).getByTestId("profile-config-file-content-cc-ly")).toHaveTextContent("two"));
+  });
+
   for (const state of ["managed-ok", "not-materialized"] as const) {
     it(`没有启动命令时，${state} 状态不误称环境可用同名命令启动`, async () => {
       const withNoLaunch = routes([profileElement({ state })]);
