@@ -53,6 +53,10 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
       { domain: "agents", action: "configure", element: "agents:claude-code" },
       { command: "agents.configure" },
     ),
+    "agents:preview-default": makeEnvelope({
+      path: "/Users/demo/.claude/settings.json", exists: true, will_write: true,
+      content: '{"env":{"MY_OWN":"keep"}}',
+    }, { command: "agents.preview-default" }),
     "secrets:set": makeEnvelope(
       { domain: "secrets", variable: "RELAY_KEY", stored: true },
       { command: "secrets.set" },
@@ -93,6 +97,8 @@ function markUnsavedLive(element: EngineElement): void {
 async function switchBackToOfficial(): Promise<void> {
   await userEvent.click(await screen.findByTestId("reset-connection-claude-code-default"));
   const confirm = await screen.findByRole("dialog", { name: "把 Claude Code 的主配置切回官方账号" });
+  await waitFor(() => expect(within(confirm).getByTestId("confirm-modal-confirm")).toBeEnabled());
+  expect(within(confirm).getByTestId("switch-back-file-preview")).toHaveTextContent('"MY_OWN":"keep"');
   await userEvent.click(within(confirm).getByTestId("confirm-modal-confirm"));
 }
 
@@ -697,6 +703,8 @@ describe("助手运行参数", () => {
     expect(effects).toHaveTextContent("切之前这份第三方配置先保存成一套接入");
     expect(effects).toHaveTextContent("不会动官方账号的登录（系统钥匙串或 ~/.claude/.credentials.json");
     expect(effects).toHaveTextContent("运行设置（自动化档位、推理强度等）");
+    await waitFor(() => expect(within(resetConfirm).getByTestId("confirm-modal-confirm")).toBeEnabled());
+    expect(within(resetConfirm).getByTestId("switch-back-file-preview")).toHaveTextContent('"MY_OWN":"keep"');
     await userEvent.click(within(resetConfirm).getByTestId("confirm-modal-confirm"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     expect(configureCalls(calls)[0].args).toEqual(configureArgsOf("--use-default"));

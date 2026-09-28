@@ -267,7 +267,16 @@ describe("助手实例", () => {
   });
 
   it("第三方环境的凭据写入失败时保留表单，不保存环境或 Provider", async () => {
-    const activeRoutes = routes();
+    const activeRoutes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    activeRoutes["profiles:preview"] = async (args) => {
+      const definition = JSON.parse(args[args.indexOf("--definition") + 1]);
+      return makeEnvelope({
+        path: `${definition.profile.config_dir}/settings.json`,
+        exists: false,
+        content: JSON.stringify({ env: definition.profile.env }),
+        files: [],
+      }, { command: "profiles.preview" });
+    };
     activeRoutes["secrets:set"] = makeEnvelope({}, {
       command: "secrets.set",
       ok: false,

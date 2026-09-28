@@ -2860,6 +2860,64 @@ pub(crate) fn preview_runtime(ctx: &Context, req: &Request) -> Result<Value, Dis
     }))
 }
 
+/// `agents:preview-default`：只读展示切回官方账号后的完整主配置文件。
+pub(crate) fn preview_default(ctx: &Context, req: &Request) -> Result<Value, DispatchError> {
+    let usage = |message: &str| DispatchError::new("USAGE_ERROR", message.to_string());
+    let agent_error = |err: anyhow::Error| DispatchError::new("AGENT_ERROR", format!("{err:#}"));
+    let mut iter = req.args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--only" | "--base" => {
+                if iter.next().is_none() {
+                    return Err(usage("agents:preview-default 参数缺少取值"));
+                }
+            }
+            _ => return Err(usage("agents:preview-default 只接受 --only 与 --base")),
+        }
+    }
+    let id = req
+        .value("--only")
+        .ok_or_else(|| usage("agents:preview-default 需要 --only <助手>"))?
+        .trim_start_matches("agents:");
+    let base = req
+        .value("--base")
+        .filter(|base| !base.is_empty())
+        .ok_or_else(|| usage("agents:preview-default 需要 agents:status 给出的 --base"))?;
+    let (kind, path, _, existing) = editable_target(ctx, id).map_err(agent_error)?;
+    let bytes = existing.as_deref().unwrap_or_default();
+    let recorded = recorded_providers(ctx, id).map_err(agent_error)?;
+    if base_digest(kind, bytes, &recorded, &statusline_target(ctx)) != base {
+        return Err(DispatchError::new(
+            "AGENT_CONFIG_CHANGED",
+            "配置文件已在外部修改，请刷新后重新预览".to_string(),
+        ));
+    }
+    let live = Live::read(kind, bytes).map_err(agent_error)?;
+    let defs = crate::native_agents::load_definitions(ctx).map_err(agent_error)?;
+    let def = defs
+        .iter()
+        .find(|def| def.id == id)
+        .ok_or_else(|| DispatchError::new("AGENT_ERROR", format!("没有这个助手：{id}")))?;
+    let settings = parse(def.spec_ref()).map_err(agent_error)?;
+    let identified = identify(&live, &settings, &live.claimed(&recorded));
+    let content = if identified.official {
+        bytes.to_vec()
+    } else {
+        render_default_bytes(&live, &recorded).map_err(agent_error)?
+    };
+    let will_write = !identified.official
+        && content != bytes
+        && (existing.is_some() || !is_empty_config(kind, &content));
+    Ok(serde_json::json!({
+        "domain": "agents",
+        "element": format!("agents:{id}"),
+        "path": path.display().to_string(),
+        "exists": existing.is_some(),
+        "will_write": will_write,
+        "content": String::from_utf8(content).map_err(|err| agent_error(err.into()))?,
+    }))
+}
+
 /// 真实写入：`agents:configure --only <id> --base <摘要> <写法>`。
 ///
 /// 写法三选一：`--runtime <json>` 只改补丁里的运行参数；`--use-default` 撤掉接入键、切回

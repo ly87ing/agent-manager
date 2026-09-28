@@ -18,6 +18,10 @@ function routes(bin = "claude", id = "claude-code"): Record<string, Envelope> {
       { domain: "agents", action: "configure", element: `agents:${id}` },
       { command: "agents.configure" },
     ),
+    "agents:preview-default": makeEnvelope({
+      path: `/isolated/.${bin}/settings.json`, exists: true, will_write: true,
+      content: '{"env":{"MY_OWN":"keep"}}',
+    }, { command: "agents.preview-default" }),
     "agents:status": makeEnvelope(
       {
         domain: "agents",
@@ -372,6 +376,13 @@ describe("助手页产品边界", () => {
     const { calls } = renderWithEngine(<AgentsPage />, repairRoutes);
     await userEvent.click(await screen.findByTestId("reset-connection-claude-code-default"));
     expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
+    const preview = await screen.findByTestId("switch-back-file-preview");
+    expect(preview).toHaveTextContent('/isolated/.claude/settings.json');
+    expect(preview).toHaveTextContent('"MY_OWN":"keep"');
+    expect(calls.find((call) => call.command === "agents:preview-default")?.args).toEqual([
+      "--only", "agents:claude-code", "--base", BASE,
+    ]);
+    expect(screen.getByTestId("confirm-modal-confirm")).toBeEnabled();
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "agents:configure")).toBe(true));
@@ -383,6 +394,44 @@ describe("助手页产品边界", () => {
       "--use-default",
     ]);
     await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方账号"));
+  });
+
+  it("切回官方账号预览失败时不能确认，关闭后重读实际配置", async () => {
+    const all: Record<string, Envelope | (() => Promise<Envelope>)> = routes();
+    all["agents:preview-default"] = makeEnvelope({}, {
+      command: "agents.preview-default", ok: false,
+      errors: [{ code: "AGENT_CONFIG_CHANGED", element: null, message: "配置文件已在外部修改" }],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await userEvent.click(await screen.findByTestId("reset-connection-claude-code-default"));
+    const dialog = await screen.findByRole("dialog", { name: /切回官方账号/ });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("外部修改");
+    expect(within(dialog).getByTestId("confirm-modal-confirm")).toBeDisabled();
+    const readsBefore = calls.filter((call) => call.command === "agents:status").length;
+    await userEvent.click(within(dialog).getByRole("button", { name: "关闭并重新读取" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /切回官方账号/ })).toBeNull());
+    await waitFor(() => expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThan(readsBefore));
+    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
+  });
+
+  it("切回官方账号的完整文件尚未预览完成时不能执行", async () => {
+    let finishPreview: (() => void) | undefined;
+    const all: Record<string, Envelope | (() => Promise<Envelope>)> = routes();
+    all["agents:preview-default"] = () => new Promise<Envelope>((resolve) => {
+      finishPreview = () => resolve(makeEnvelope({
+        path: "/isolated/.claude/settings.json", exists: true, will_write: true,
+        content: '{"env":{"MY_OWN":"keep"}}',
+      }, { command: "agents.preview-default" }));
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await userEvent.click(await screen.findByTestId("reset-connection-claude-code-default"));
+    const dialog = await screen.findByRole("dialog", { name: /切回官方账号/ });
+    expect(within(dialog).getByTestId("confirm-modal-confirm")).toBeDisabled();
+    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
+    await waitFor(() => expect(finishPreview).toBeDefined());
+    finishPreview?.();
+    await waitFor(() => expect(within(dialog).getByTestId("confirm-modal-confirm")).toBeEnabled());
+    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
   });
 
   it("不再展示 Claude 与 Codex 之外的客户端", async () => {

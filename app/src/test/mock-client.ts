@@ -1232,6 +1232,34 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       exists: true, content,
     }, { command: "agents.preview-runtime" });
   };
+  const previewDefault = (args: string[]): Envelope => {
+    const element = argOf(args, "--only") ?? "";
+    const file = configFiles[element];
+    const agents = (routes["agents:status"].data as {
+      elements: Array<{ id: string; observed: { current_config?: { base?: string; target?: string } } }>;
+    }).elements;
+    const observed = agents.find((item) => item.id === element)?.observed.current_config;
+    if (!file || !observed || argOf(args, "--base") !== observed.base) {
+      return makeEnvelope({}, { command: "agents.preview-default", ok: false,
+        errors: [{ code: "AGENT_CONFIG_CHANGED", element, message: "配置文件已在外部修改，请刷新后重新预览" }] });
+    }
+    let content: string;
+    if (file.format === "json") {
+      const root = JSON.parse(file.content) as Record<string, unknown>;
+      const env = root.env as Record<string, unknown> | undefined;
+      if (env) {
+        for (const key of ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY",
+          "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
+          "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL", "API_TIMEOUT_MS"]) delete env[key];
+        if (Object.keys(env).length === 0) delete root.env;
+      }
+      content = `${JSON.stringify(root, null, 2)}\n`;
+    } else {
+      content = `${file.content.split("\n").filter((line) => !/^(model_provider|model)\s*=/.test(line)).join("\n").trimEnd()}\n`;
+    }
+    return makeEnvelope({ domain: "agents", element, path: observed.target ?? file.path,
+      exists: true, will_write: content !== file.content, content }, { command: "agents.preview-default" });
+  };
   const editConfigFile = (args: string[], runId: string): Envelope => {
     const element = argOf(args, "--only") ?? "";
     const file = configFiles[element];
@@ -1484,6 +1512,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       }
       if (command === "agents:configure") return configureAgent(args, runId);
       if (command === "agents:preview-runtime") return previewRuntime(args);
+      if (command === "agents:preview-default") return previewDefault(args);
       if (command === "agents:config-file") return readConfigFile(args);
       if (command === "agents:edit-config") return editConfigFile(args, runId);
       if (command === "agents:auth-status") {

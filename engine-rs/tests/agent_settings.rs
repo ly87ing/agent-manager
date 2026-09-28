@@ -142,6 +142,14 @@ fn preview_runtime(ctx: &Context, agent: &str, base: &str, patch: &str) -> Envel
     )
 }
 
+fn preview_default(ctx: &Context, agent: &str, base: &str) -> Envelope {
+    let only = format!("agents:{agent}");
+    execute(
+        ctx,
+        &request("agents:preview-default", &["--only", &only, "--base", base]),
+    )
+}
+
 fn profiles_in_db(ctx: &Context, agent: &str) -> Value {
     let policy = execute(ctx, &request("policy:get", &[]));
     assert!(policy.ok, "{:?}", policy.errors);
@@ -253,6 +261,115 @@ fn 运行参数完整预览与实际写入同字节_且预览零写() {
     let applied = configure_with_base(&ctx, "claude-code", &status_base, &["--runtime", patch]);
     assert!(applied.ok, "{:?}", applied.errors);
     assert_eq!(file_bytes(&path), content.as_bytes());
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn 切回官方账号预览与_claude_实际写入同字节_且预览零写() {
+    let (base, ctx) = temp_ctx("default-preview-claude");
+    let path = ctx.home_dir.join(".claude/settings.json");
+    write_settings_file(
+        &ctx,
+        &json!({
+            "env": {"ANTHROPIC_BASE_URL": "https://relay.example.com", "MY_OWN": "keep"},
+            "model": "claude-sonnet-5",
+            "hooks": {"SessionStart": []}
+        }),
+    );
+    let status_base = base_of(&ctx, "claude-code");
+    let old_file = file_bytes(&path);
+    let old_data = data_dir_bytes(&ctx);
+    let preview = preview_default(&ctx, "claude-code", &status_base);
+    assert!(preview.ok, "{:?}", preview.errors);
+    let content = preview.data["content"].as_str().unwrap();
+    assert_eq!(preview.data["path"], path.display().to_string());
+    assert_eq!(preview.data["will_write"], true);
+    let parsed: Value = serde_json::from_str(content).unwrap();
+    assert_eq!(parsed["env"]["MY_OWN"], "keep");
+    assert!(parsed["env"].get("ANTHROPIC_BASE_URL").is_none());
+    assert_eq!(parsed["model"], "claude-sonnet-5");
+    assert_eq!(file_bytes(&path), old_file);
+    assert_eq!(data_dir_bytes(&ctx), old_data);
+
+    let applied = configure_with_base(&ctx, "claude-code", &status_base, &["--use-default"]);
+    assert!(applied.ok, "{:?}", applied.errors);
+    assert_eq!(file_bytes(&path), content.as_bytes());
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn 切回官方账号预览保留_codex_用户表_外部改动拒绝旧基准() {
+    let (base, ctx) = temp_ctx("default-preview-codex");
+    define_codex(&ctx, json!({}));
+    let dir = ctx.home_dir.join(".codex");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.toml");
+    fs::write(
+        &path,
+        "model_provider = \"mine\"\nmodel = \"custom\"\n# 用户注释\n[model_providers.mine]\nname = \"Mine\"\nbase_url = \"https://relay.example.com/v1\"\nenv_key = \"MY_KEY\"\n",
+    )
+    .unwrap();
+    let status_base = base_of(&ctx, "codex");
+    let old_file = file_bytes(&path);
+    let old_data = data_dir_bytes(&ctx);
+    let preview = preview_default(&ctx, "codex", &status_base);
+    assert!(preview.ok, "{:?}", preview.errors);
+    let content = preview.data["content"].as_str().unwrap();
+    assert!(content.contains("# 用户注释"));
+    assert!(content.contains("[model_providers.mine]"));
+    assert!(!content.contains("model_provider ="));
+    assert_eq!(file_bytes(&path), old_file);
+    assert_eq!(data_dir_bytes(&ctx), old_data);
+
+    let applied = configure_with_base(&ctx, "codex", &status_base, &["--use-default"]);
+    assert!(applied.ok, "{:?}", applied.errors);
+    assert_eq!(file_bytes(&path), content.as_bytes());
+
+    fs::write(&path, "model_provider = \"external\"\n[model_providers.external]\nname = \"External\"\nbase_url = \"https://external.example.com/v1\"\n").unwrap();
+    let external = file_bytes(&path);
+    let stale = preview_default(&ctx, "codex", &status_base);
+    assert!(!stale.ok);
+    assert_eq!(stale.errors[0].code, "AGENT_CONFIG_CHANGED");
+    assert_eq!(file_bytes(&path), external);
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn 已是官方账号时预览保留模型原文字节_非法参数零写() {
+    let (base, ctx) = temp_ctx("default-preview-official");
+    let path = ctx.home_dir.join(".claude/settings.json");
+    fs::write(
+        &path,
+        "{\"model\":\"claude-sonnet-5\",\"env\":{\"MY_OWN\":\"keep\"}}\n",
+    )
+    .unwrap();
+    let status_base = base_of(&ctx, "claude-code");
+    let old_file = file_bytes(&path);
+    let old_data = data_dir_bytes(&ctx);
+    let preview = preview_default(&ctx, "claude-code", &status_base);
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(preview.data["will_write"], false);
+    assert_eq!(
+        preview.data["content"],
+        String::from_utf8(old_file.clone()).unwrap()
+    );
+    let bad = execute(
+        &ctx,
+        &request(
+            "agents:preview-default",
+            &[
+                "--only",
+                "agents:claude-code",
+                "--base",
+                &status_base,
+                "--use-default",
+            ],
+        ),
+    );
+    assert!(!bad.ok);
+    assert_eq!(bad.errors[0].code, "USAGE_ERROR");
+    assert_eq!(file_bytes(&path), old_file);
+    assert_eq!(data_dir_bytes(&ctx), old_data);
     let _ = fs::remove_dir_all(&base);
 }
 

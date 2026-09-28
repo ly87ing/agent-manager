@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / mcp:preview|hooks:preview|aliases:preview / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:config-file|preview|apply-definition|adopt|seed|shared-status|shared-preview|shared-apply / agents:configure|preview-runtime|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / mcp:preview|hooks:preview|aliases:preview / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:config-file|preview|apply-definition|adopt|seed|shared-status|shared-preview|shared-apply / agents:configure|preview-runtime|preview-default|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -72,7 +72,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
             "shared-status" | "shared-preview" | "shared-apply" | "config-file" | "preview",
         ) => true,
         // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
-        ("agents", "configure" | "preview-runtime") => true,
+        ("agents", "configure" | "preview-runtime" | "preview-default") => true,
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
         ("agents", "check") => true,
         // 列模型：同样会联网、只在界面上点它时才发；只读（除审计）
@@ -286,6 +286,10 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--base", ArgValueKind::Digest));
             specs.push(("--runtime", ArgValueKind::JsonValue));
+        }
+        ("agents", "preview-default") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--base", ArgValueKind::Digest));
         }
         (_, "apply") | ("mcp", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -721,6 +725,7 @@ mod tests {
             "agents:apply",
             "agents:configure",
             "agents:preview-runtime",
+            "agents:preview-default",
             "agents:check",
             "agents:models",
             "agents:balance",
@@ -1361,6 +1366,22 @@ mod tests {
         assert!(validate_command("agents:config-file").is_ok());
         assert!(validate_command("agents:edit-config").is_ok());
         assert!(validate_command("agents:preview-runtime").is_ok());
+        assert!(validate_args(
+            "agents:preview-default",
+            &args(&["--only", "agents:claude-code", "--base", &base])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "agents:preview-default",
+            &args(&[
+                "--only",
+                "agents:claude-code",
+                "--base",
+                &base,
+                "--use-default"
+            ])
+        )
+        .is_err());
         assert!(validate_args(
             "agents:preview-runtime",
             &args(&[
