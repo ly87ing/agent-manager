@@ -72,6 +72,7 @@ export function ProfileFormDialog({
 }) {
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [modelsMessage, setModelsMessage] = useState<string | null>(null);
+  const [modelsFor, setModelsFor] = useState<string | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
   const previewSerial = useRef(0);
@@ -107,6 +108,9 @@ export function ProfileFormDialog({
 
   const selectedAgent = baseAgents.find((agent) => agent.id === baseAgent);
   const kind = selectedAgent?.kind ?? baseAgents[0]?.kind ?? "claude";
+  const modelsKey = JSON.stringify([kind, baseUrl.trim(), tokenVar.trim()]);
+  const availableModels = modelsFor === modelsKey ? fetchedModels : null;
+  const availableModelsMessage = modelsFor === modelsKey ? modelsMessage : null;
   const effectiveConfigDir = configDir.trim() || defaultConfigDir(kind, id);
   const thirdParty = isThirdPartyProfile({ baseUrl, tokenVar });
   // Linux 上官方实现要用 bubblewrap 隔离子进程，没装时开了这项 Claude 会拒绝启动（2.1.281 实测）；
@@ -430,9 +434,11 @@ export function ProfileFormDialog({
                         type="button"
                         data-testid="profile-fetch-models"
                         disabled={fetchingModels || !baseUrl.trim() || !tokenVar.trim()}
-                        title="用上面的地址与凭据变量问接口能用哪些模型；只在点它时联网，不改任何配置"
+                        title="用上面的地址和密钥页已保存的凭据变量取值获取模型；只在点它时联网，不改任何配置"
                         onClick={async (event) => {
                           event.preventDefault();
+                          setModelsFor(modelsKey);
+                          setFetchedModels(null);
                           setFetchingModels(true);
                           setModelsMessage(null);
                           try {
@@ -454,17 +460,17 @@ export function ProfileFormDialog({
                       onChange={(event) => setModel(event.target.value)}
                       data-testid="profile-model"
                       placeholder="使用助手默认模型"
-                      list={fetchedModels ? "profile-model-options" : undefined}
+                      list={availableModels ? "profile-model-options" : undefined}
                       className="mt-2 h-11 w-full rounded-lg border border-input bg-background px-3 font-mono text-sm"
                     />
-                    {modelsMessage && (
-                      <span data-testid="profile-models-message" className={cn("mt-1 block text-xs font-normal", fetchedModels ? "text-muted-foreground" : "text-destructive")}>
-                        {modelsMessage}
+                    {availableModelsMessage && (
+                      <span data-testid="profile-models-message" className={cn("mt-1 block text-xs font-normal", availableModels ? "text-muted-foreground" : "text-destructive")}>
+                        {availableModelsMessage}
                       </span>
                     )}
-                    {fetchedModels && (
+                    {availableModels && (
                       <datalist id="profile-model-options">
-                        {fetchedModels.map((item) => (
+                        {availableModels.map((item) => (
                           <option key={item} value={item} />
                         ))}
                       </datalist>

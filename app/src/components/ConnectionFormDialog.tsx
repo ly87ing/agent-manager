@@ -115,6 +115,7 @@ export function ConnectionFormDialog({
 }) {
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [modelsMessage, setModelsMessage] = useState<string | null>(null);
+  const [modelsFor, setModelsFor] = useState<string | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
   const previewSerial = useRef(0);
@@ -135,6 +136,9 @@ export function ConnectionFormDialog({
   const [connection, setConnection] = useState<ConnectionEntry | null>(
     initialConnection ? { ...initialConnection } : null,
   );
+  const modelsKey = JSON.stringify([kind, connection?.baseUrl.trim() ?? "", connection?.tokenVar.trim() ?? ""]);
+  const availableModels = modelsFor === modelsKey ? fetchedModels : null;
+  const availableModelsMessage = modelsFor === modelsKey ? modelsMessage : null;
   const [secretValue, setSecretValue] = useState("");
   const [environmentId, setEnvironmentId] = useState("");
   const [environmentDir, setEnvironmentDir] = useState("");
@@ -592,8 +596,10 @@ export function ConnectionFormDialog({
                         type="button"
                         data-testid="connection-fetch-models"
                         disabled={fetchingModels || !connection.baseUrl.trim() || !connection.tokenVar.trim()}
-                        title="用上面的地址与凭据变量问接口能用哪些模型；只在点它时联网，不改任何配置"
+                        title="用上面的地址和密钥页已保存的凭据变量取值获取模型；只在点它时联网，不改任何配置"
                         onClick={async () => {
+                          setModelsFor(modelsKey);
+                          setFetchedModels(null);
                           setFetchingModels(true);
                           setModelsMessage(null);
                           try {
@@ -621,23 +627,23 @@ export function ConnectionFormDialog({
                     value={connection.model}
                     onChange={(event) => patch({ model: event.target.value })}
                     placeholder={kind === "claude" ? "例如：claude-sonnet-4-5" : "例如：gpt-5"}
-                    list={fetchedModels ? "connection-model-options" : undefined}
+                    list={availableModels ? "connection-model-options" : undefined}
                     className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                     spellCheck={false}
                   />
                 </label>
               </div>
-              {modelsMessage && (
+              {availableModelsMessage && (
                 <p
                   data-testid="connection-models-message"
-                  className={cn("text-xs", fetchedModels ? "text-muted-foreground" : "text-destructive")}
+                  className={cn("text-xs", availableModels ? "text-muted-foreground" : "text-destructive")}
                 >
-                  {modelsMessage}
+                  {availableModelsMessage}
                 </p>
               )}
-              {fetchedModels && (
+              {availableModels && (
                 <datalist id="connection-model-options" data-testid="connection-model-options">
-                  {fetchedModels.map((model) => (
+                  {availableModels.map((model) => (
                     <option key={model} value={model} />
                   ))}
                 </datalist>
@@ -816,7 +822,7 @@ export function ConnectionFormDialog({
                         data-testid="new-connection-alias-opus"
                         value={connection.aliasOpus}
                         onChange={(event) => patch({ aliasOpus: event.target.value })}
-                        list={fetchedModels ? "connection-model-options" : undefined}
+                        list={availableModels ? "connection-model-options" : undefined}
                         className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                       />
                     </label>
@@ -828,7 +834,7 @@ export function ConnectionFormDialog({
                         data-testid="new-connection-alias-sonnet"
                         value={connection.aliasSonnet}
                         onChange={(event) => patch({ aliasSonnet: event.target.value })}
-                        list={fetchedModels ? "connection-model-options" : undefined}
+                        list={availableModels ? "connection-model-options" : undefined}
                         className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                       />
                     </label>
@@ -840,7 +846,7 @@ export function ConnectionFormDialog({
                         data-testid="new-connection-alias-haiku"
                         value={connection.aliasHaiku}
                         onChange={(event) => patch({ aliasHaiku: event.target.value })}
-                        list={fetchedModels ? "connection-model-options" : undefined}
+                        list={availableModels ? "connection-model-options" : undefined}
                         className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                       />
                     </label>
@@ -852,7 +858,7 @@ export function ConnectionFormDialog({
                         data-testid="new-connection-alias-fable"
                         value={connection.aliasFable ?? ""}
                         onChange={(event) => patch({ aliasFable: event.target.value })}
-                        list={fetchedModels ? "connection-model-options" : undefined}
+                        list={availableModels ? "connection-model-options" : undefined}
                         className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                       />
                     </label>
@@ -864,7 +870,7 @@ export function ConnectionFormDialog({
                         data-testid="new-connection-subagent-model"
                         value={connection.subagentModel ?? ""}
                         onChange={(event) => patch({ subagentModel: event.target.value })}
-                        list={fetchedModels ? "connection-model-options" : undefined}
+                        list={availableModels ? "connection-model-options" : undefined}
                         placeholder="别名如 haiku，或完整模型名"
                         className="mt-1 w-full rounded border border-input p-2 font-mono text-sm"
                       />
