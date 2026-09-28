@@ -2801,6 +2801,17 @@ fn render_runtime_bytes(
     }
 }
 
+fn render_default_bytes(live: &Live, recorded: &[String]) -> Result<Vec<u8>> {
+    match live {
+        Live::Claude(root) => {
+            let mut root = root.as_object().cloned().unwrap_or_default();
+            write_claude_connection(&mut root, None, &|_| None)?;
+            pretty_json(root)
+        }
+        Live::Codex(codex) => Ok(clear_codex_connection(&codex.text, recorded).into_bytes()),
+    }
+}
+
 /// `agents:preview-runtime`：按当前文件计算运行参数补丁的完整结果，零写入。
 pub(crate) fn preview_runtime(ctx: &Context, req: &Request) -> Result<Value, DispatchError> {
     let usage = |message: &str| DispatchError::new("USAGE_ERROR", message.to_string());
@@ -2967,17 +2978,10 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
             }
             if matches!(args.action, Action::UseDefault) {
                 next.active = None;
-                new_bytes = Some(match &live {
-                    Live::Claude(root) => {
-                        let mut root = root.as_object().cloned().unwrap_or_default();
-                        write_claude_connection(&mut root, None, &|_| None).map_err(agent_error)?;
-                        pretty_json(root).map_err(agent_error)?
-                    }
-                    Live::Codex(codex) => {
-                        owned_after = Vec::new();
-                        clear_codex_connection(&codex.text, &recorded).into_bytes()
-                    }
-                });
+                new_bytes = Some(render_default_bytes(&live, &recorded).map_err(agent_error)?);
+                if kind == Kind::Codex {
+                    owned_after = Vec::new();
+                }
             }
         }
     }
