@@ -230,7 +230,6 @@ describe("助手实例", () => {
     expect(within(dialog).getByText("选定接入并填写有效的环境名后，可预览客户端配置文件和启动命令。")).toBeInTheDocument();
     await userEvent.type(within(dialog).getByTestId("connection-environment-id"), "deepseek");
     expect(within(dialog).getByTestId("connection-environment-launch-preview")).toHaveTextContent("alias deepseek=");
-    await userEvent.click(within(dialog).getByTestId("connection-preview-button"));
     const content = await within(dialog).findByTestId("connection-preview-content-deepseek");
     expect(content).toHaveTextContent("https://api.deepseek.com/anthropic");
     expect(content).toHaveTextContent("${DEEPSEEK_API_KEY}");
@@ -238,7 +237,10 @@ describe("助手实例", () => {
     expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
     await userEvent.click(within(dialog).getByTestId("connection-save-template"));
     expect(within(dialog).queryByTestId("connection-preview-content-deepseek")).toBeNull();
-    expect(within(dialog).getByText("表单或勾选目标已变化，请重新预览。")).toBeInTheDocument();
+    expect(within(dialog).getByText("表单或勾选目标已变化，正在更新预览。")).toBeInTheDocument();
+    await waitFor(() => expect(calls.filter((call) => call.command === "profiles:preview")).toHaveLength(2));
+    const updated = calls.filter((call) => call.command === "profiles:preview")[1];
+    expect(JSON.parse(updated.args[updated.args.indexOf("--definition") + 1]).profile.source_connection).toBe("deepseek");
   });
 
   it("第三方环境的凭据写入失败时保留表单，不保存环境或 Provider", async () => {
@@ -1211,7 +1213,6 @@ describe("助手实例", () => {
     expect(within(dialog).getByText("只保存 Provider 模板时，客户端配置文件和启动命令不变。")).toBeInTheDocument();
     expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
     await userEvent.click(within(impact).getByRole("checkbox"));
-    await userEvent.click(within(dialog).getByTestId("connection-preview-button"));
     expect(await within(dialog).findByTestId("connection-preview-content-cc-ly")).toHaveTextContent("https://new.example.com");
     const previewArgs = calls.find((call) => call.command === "profiles:preview")!.args;
     expect(previewArgs).toContain(base);

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import {
   CONNECTION_NAME_RE,
@@ -109,6 +109,7 @@ export function ConnectionFormDialog({
   const [modelsMessage, setModelsMessage] = useState<string | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const previewSerial = useRef(0);
   const [preview, setPreview] = useState<{
     key: string;
     results: { id: string; result: ProfileDraftPreview | string }[];
@@ -167,7 +168,8 @@ export function ConnectionFormDialog({
     && profile.update && profile.update.changes.length > 0
     && (profile.state === "managed-ok" || profile.state === "not-materialized")
     && profile.base && profile.definitionBase && !profile.blockedReason);
-  const newEnvironment = intent === "environment" && connection && PROFILE_ID_RE.test(environmentId.trim())
+  const newEnvironment = intent === "environment" && connection && !validationError && !duplicateName
+    && PROFILE_ID_RE.test(environmentId.trim())
     ? connectionToProfileInput({ id: agentId, kind }, connection, existingProfileIds)
     : null;
   const newEnvironmentInput = newEnvironment ? {
@@ -193,6 +195,33 @@ export function ConnectionFormDialog({
     }] : []),
   ];
   const previewKey = JSON.stringify(previewRequests);
+
+  const refreshPreview = async () => {
+    const serial = ++previewSerial.current;
+    setPreviewBusy(true);
+    try {
+      const results: { id: string; result: ProfileDraftPreview | string }[] = [];
+      for (const request of previewRequests) {
+        results.push({ id: request.id, result: await onPreview(request) });
+      }
+      if (serial === previewSerial.current) setPreview({ key: previewKey, results });
+    } finally {
+      if (serial === previewSerial.current) setPreviewBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (previewRequests.length === 0) {
+      setPreviewBusy(false);
+      return;
+    }
+    setPreviewBusy(true);
+    const timer = window.setTimeout(() => void refreshPreview(), 300);
+    return () => {
+      window.clearTimeout(timer);
+      previewSerial.current += 1;
+    };
+  }, [previewKey]);
 
   useLayoutEffect(() => {
     return () => restoreFocusRef.current?.focus();
@@ -906,27 +935,17 @@ export function ConnectionFormDialog({
                   {previewRequests.length > 0 && (
                     <button type="button" data-testid="connection-preview-button"
                       disabled={busy || previewBusy}
-                      onClick={async () => {
-                        setPreviewBusy(true);
-                        try {
-                          const results: { id: string; result: ProfileDraftPreview | string }[] = [];
-                          for (const request of previewRequests) {
-                            results.push({ id: request.id, result: await onPreview(request) });
-                          }
-                          setPreview({ key: previewKey, results });
-                        } finally {
-                          setPreviewBusy(false);
-                        }
-                      }}
+                      onClick={() => void refreshPreview()}
                       className="rounded border px-2.5 py-1 disabled:opacity-50"
-                    >{previewBusy ? "正在预览…" : "预览目标文件"}</button>
+                    >{previewBusy ? "正在预览…" : "重新读取"}</button>
                   )}
                 </div>
                 {previewRequests.length === 0 && <p className="text-muted-foreground">{intent === "environment"
                   ? "选定接入并填写有效的环境名后，可预览客户端配置文件和启动命令。"
                   : "只保存 Provider 模板时，客户端配置文件和启动命令不变。"}</p>}
                 {previewRequests.length > 0 && <p className="text-muted-foreground">按当前实际文件合并计算；凭据变量保留引用形式，保存时重新校验。现有文件可能含敏感值，请勿直接分享。</p>}
-                {preview && preview.key !== previewKey && <p className="text-muted-foreground">表单或勾选目标已变化，请重新预览。</p>}
+                {preview && preview.key !== previewKey && previewRequests.length > 0
+                  && <p className="text-muted-foreground">表单或勾选目标已变化，正在更新预览。</p>}
                 {preview?.key === previewKey && preview.results.map(({ id, result }) => (
                   <div key={id} className="space-y-1 border-t pt-2">
                     <p className="font-medium text-foreground">{id}</p>
