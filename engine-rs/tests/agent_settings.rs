@@ -131,6 +131,17 @@ fn configure_with_base(ctx: &Context, agent: &str, base: &str, args: &[&str]) ->
     execute(ctx, &request("agents:configure", &full))
 }
 
+fn preview_runtime(ctx: &Context, agent: &str, base: &str, patch: &str) -> Envelope {
+    let only = format!("agents:{agent}");
+    execute(
+        ctx,
+        &request(
+            "agents:preview-runtime",
+            &["--only", &only, "--base", base, "--runtime", patch],
+        ),
+    )
+}
+
 fn profiles_in_db(ctx: &Context, agent: &str) -> Value {
     let policy = execute(ctx, &request("policy:get", &[]));
     assert!(policy.ok, "{:?}", policy.errors);
@@ -208,6 +219,95 @@ fn 写入只动自己那几条路径_别人的键原样保留() {
     assert_eq!(after["env"]["MY_OWN"], "keep-me");
     assert_eq!(after["effortLevel"], "high");
 
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn 运行参数完整预览与实际写入同字节_且预览零写() {
+    let (base, ctx) = temp_ctx("runtime-preview-claude");
+    let path = ctx.home_dir.join(".claude/settings.json");
+    write_settings_file(
+        &ctx,
+        &json!({"env": {"MY_OWN": "keep"}, "hooks": {"SessionStart": []}}),
+    );
+    let old_file = file_bytes(&path);
+    let old_data = data_dir_bytes(&ctx);
+    let status_base = base_of(&ctx, "claude-code");
+    let patch = r#"{"claude_effort_level":"high"}"#;
+    let preview = preview_runtime(&ctx, "claude-code", &status_base, patch);
+    assert!(preview.ok, "{:?}", preview.errors);
+    let content = preview.data["content"].as_str().unwrap();
+    assert_eq!(preview.data["path"], path.display().to_string());
+    assert_eq!(preview.data["exists"], true);
+    assert_eq!(
+        serde_json::from_str::<Value>(content).unwrap()["env"]["MY_OWN"],
+        "keep"
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(content).unwrap()["effortLevel"],
+        "high"
+    );
+    assert_eq!(file_bytes(&path), old_file);
+    assert_eq!(data_dir_bytes(&ctx), old_data);
+
+    let applied = configure_with_base(&ctx, "claude-code", &status_base, &["--runtime", patch]);
+    assert!(applied.ok, "{:?}", applied.errors);
+    assert_eq!(file_bytes(&path), content.as_bytes());
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn codex_完整预览保留用户内容_外部改动后拒绝旧基准() {
+    let (base, ctx) = temp_ctx("runtime-preview-codex");
+    define_codex(&ctx, json!({}));
+    let dir = ctx.home_dir.join(".codex");
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("config.toml");
+    fs::write(&path, "# 自己的注释\nuser_instructions = \"keep\"\n").unwrap();
+    let status_base = base_of(&ctx, "codex");
+    let old_file = file_bytes(&path);
+    let old_data = data_dir_bytes(&ctx);
+    let patch = r#"{"codex_reasoning_effort":"high"}"#;
+    let preview = preview_runtime(&ctx, "codex", &status_base, patch);
+    assert!(preview.ok, "{:?}", preview.errors);
+    let content = preview.data["content"].as_str().unwrap();
+    assert!(content.contains("# 自己的注释"));
+    assert!(content.contains("user_instructions = \"keep\""));
+    assert!(content.contains("model_reasoning_effort = \"high\""));
+    assert_eq!(file_bytes(&path), old_file);
+    assert_eq!(data_dir_bytes(&ctx), old_data);
+
+    let applied = configure_with_base(&ctx, "codex", &status_base, &["--runtime", patch]);
+    assert!(applied.ok, "{:?}", applied.errors);
+    assert_eq!(file_bytes(&path), content.as_bytes());
+
+    fs::write(
+        &path,
+        "model_reasoning_effort = \"low\"\nuser_instructions = \"external\"\n",
+    )
+    .unwrap();
+    let changed = file_bytes(&path);
+    let stale = preview_runtime(&ctx, "codex", &status_base, patch);
+    assert!(!stale.ok);
+    assert_eq!(stale.errors[0].code, "AGENT_CONFIG_CHANGED");
+    assert_eq!(file_bytes(&path), changed);
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn 不存在的配置文件预览不创建文件或数据库() {
+    let (base, ctx) = temp_ctx("runtime-preview-missing");
+    let status_base = base_of(&ctx, "claude-code");
+    let preview = preview_runtime(
+        &ctx,
+        "claude-code",
+        &status_base,
+        r#"{"default_model":"claude-sonnet"}"#,
+    );
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(preview.data["exists"], false);
+    assert!(!ctx.home_dir.join(".claude/settings.json").exists());
+    assert!(!store::db_path(&ctx).exists());
     let _ = fs::remove_dir_all(&base);
 }
 

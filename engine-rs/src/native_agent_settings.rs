@@ -2786,6 +2786,69 @@ fn apply_settings_changes(settings: &mut Map<String, Value>, changes: &SettingsC
     }
 }
 
+fn render_runtime_bytes(
+    live: &Live,
+    patch: &RuntimePatch,
+    statusline_path: &Path,
+) -> Result<Vec<u8>> {
+    match live {
+        Live::Claude(root) => {
+            let mut root = root.as_object().cloned().unwrap_or_default();
+            write_claude_runtime(&mut root, patch, statusline_path);
+            pretty_json(root)
+        }
+        Live::Codex(codex) => Ok(write_codex_runtime(&codex.text, patch).into_bytes()),
+    }
+}
+
+/// `agents:preview-runtime`：按当前文件计算运行参数补丁的完整结果，零写入。
+pub(crate) fn preview_runtime(ctx: &Context, req: &Request) -> Result<Value, DispatchError> {
+    let usage = |message: &str| DispatchError::new("USAGE_ERROR", message.to_string());
+    let agent_error = |err: anyhow::Error| DispatchError::new("AGENT_ERROR", format!("{err:#}"));
+    let mut iter = req.args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--only" | "--base" | "--runtime" => {
+                if iter.next().is_none() {
+                    return Err(usage("agents:preview-runtime 参数缺少取值"));
+                }
+            }
+            _ => {
+                return Err(usage(
+                    "agents:preview-runtime 只接受 --only、--base 与 --runtime",
+                ))
+            }
+        }
+    }
+    let args = configure_args(req)?;
+    let Action::Runtime(raw) = args.action else {
+        return Err(usage("agents:preview-runtime 需要 --runtime <json>"));
+    };
+    let (kind, path, _, existing) = editable_target(ctx, &args.id).map_err(agent_error)?;
+    let bytes = existing.as_deref().unwrap_or_default();
+    let statusline_path = statusline_target(ctx);
+    let recorded = recorded_providers(ctx, &args.id).map_err(agent_error)?;
+    if base_digest(kind, bytes, &recorded, &statusline_path) != args.base {
+        return Err(DispatchError::new(
+            "AGENT_CONFIG_CHANGED",
+            "配置文件已在外部修改，请刷新后重新预览".to_string(),
+        ));
+    }
+    let live = Live::read(kind, bytes).map_err(agent_error)?;
+    let parsed = parse_runtime_patch(kind, &raw).map_err(|err| usage(&format!("{err:#}")))?;
+    if parsed.0.is_empty() {
+        return Err(usage("--runtime 里没有要改的运行参数"));
+    }
+    let content = render_runtime_bytes(&live, &parsed, &statusline_path).map_err(agent_error)?;
+    Ok(serde_json::json!({
+        "domain": "agents",
+        "element": format!("agents:{}", args.id),
+        "path": path.display().to_string(),
+        "exists": existing.is_some(),
+        "content": String::from_utf8(content).map_err(|err| agent_error(err.into()))?,
+    }))
+}
+
 /// 真实写入：`agents:configure --only <id> --base <摘要> <写法>`。
 ///
 /// 写法三选一：`--runtime <json>` 只改补丁里的运行参数；`--use-default` 撤掉接入键、切回
@@ -2884,14 +2947,8 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
                     "完全放开会关闭权限询问与沙箱，需要显式确认后再执行".to_string(),
                 ));
             }
-            new_bytes = Some(match &live {
-                Live::Claude(root) => {
-                    let mut root = root.as_object().cloned().unwrap_or_default();
-                    write_claude_runtime(&mut root, &parsed, &statusline_path);
-                    pretty_json(root).map_err(agent_error)?
-                }
-                Live::Codex(codex) => write_codex_runtime(&codex.text, &parsed).into_bytes(),
-            });
+            new_bytes =
+                Some(render_runtime_bytes(&live, &parsed, &statusline_path).map_err(agent_error)?);
             patch = Some(parsed);
         }
         Action::UseDefault | Action::SaveCurrent => {

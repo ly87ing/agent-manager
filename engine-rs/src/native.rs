@@ -518,6 +518,9 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("agents", "configure") => {
             crate::native_agent_settings::apply(ctx, request).map(|data| (data, vec![]))
         }
+        ("agents", "preview-runtime") => {
+            crate::native_agent_settings::preview_runtime(ctx, request).map(|data| (data, vec![]))
+        }
         // 官方账号登录状态：用官方命令查一次，只读零写；一次要一两秒，只在界面上点它时才调
         ("agents", "auth-status") => crate::native_auth::status_command(ctx, request)
             .map(|data| (data, vec![]))
