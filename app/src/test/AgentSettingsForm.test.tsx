@@ -1172,12 +1172,15 @@ describe("助手运行参数", () => {
 
     expect(await screen.findByTestId("third-party-section-claude-code")).toBeInTheDocument();
     expect(screen.queryByTestId("check-all-connections-button")).toBeNull();
+    const testConnection = screen.getByTestId("check-connection-claude-code-relay");
+    expect(testConnection).toBeVisible();
+    await userEvent.click(testConnection);
+    expect(await screen.findByTestId("check-result-claude-code-relay")).toHaveTextContent("72ms");
+    expect(screen.queryByTestId("connection-check-summary")).toBeNull();
     await userEvent.click(screen.getByLabelText("管理 Relay"));
     expect(screen.queryByRole("button", { name: "上移 Relay" })).toBeNull();
     expect(screen.queryByRole("button", { name: "下移 Relay" })).toBeNull();
-    await userEvent.click(screen.getByTestId("check-connection-claude-code-relay"));
-    expect(await screen.findByTestId("check-result-claude-code-relay")).toHaveTextContent("72ms");
-    expect(screen.queryByTestId("connection-check-summary")).toBeNull();
+    expect(within(screen.getByLabelText("管理 Relay").closest("details")!).queryByTestId("check-connection-claude-code-relay")).toBeNull();
   });
 
   it("接入卡片可调整顺序，只保存定义且不触碰配置或认证", async () => {

@@ -773,7 +773,7 @@ function ConnectionCard({
         if (onEdit && !(event.target as HTMLElement).closest("button, details, summary")) onEdit();
       }}
       className={cn(
-        "flex min-h-24 items-center gap-4 rounded-2xl border bg-background px-5 py-4 shadow-sm transition-colors",
+        "flex min-h-24 flex-wrap items-center gap-4 rounded-2xl border bg-background px-5 py-4 shadow-sm transition-colors",
         onEdit && "cursor-pointer",
         active ? "border-success/40 bg-success/5" : "hover:border-primary/30",
       )}
@@ -836,7 +836,7 @@ function ConnectionCard({
           </p>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex min-w-0 flex-[1_1_240px] flex-wrap items-center justify-end gap-2">
         {check && !check.pending && (
           <span
             data-testid={`check-result-${agentId}-${id}`}
@@ -844,6 +844,18 @@ function ConnectionCard({
           >
             {check.ok && check.latencyMs > 0 ? `${check.latencyMs}ms` : check.detail}
           </span>
+        )}
+        {onCheck && (
+          <button
+            type="button"
+            data-testid={`check-connection-${agentId}-${id}`}
+            disabled={check?.pending}
+            title="发送一次最小真实请求检查接入；只在点击时联网，不改配置"
+            onClick={onCheck}
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg border px-3 py-2 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
+          >
+            {check?.pending ? "正在测试…" : "测试连接"}
+          </button>
         )}
         {onBalance && (
           <button
@@ -901,23 +913,12 @@ function ConnectionCard({
             {connection ? "编辑" : "添加 Provider"}
           </button>
         )}
-        {connection && (onCheck || onEdit || onDuplicate || onMakeProfile || onExport || onRemove || onMoveUp || onMoveDown) && (
+        {connection && (onDuplicate || onMakeProfile || onExport || onRemove || onMoveUp || onMoveDown) && (
           <details className="group relative">
             <summary aria-label={`管理 ${connection.label || connection.name}`} className="inline-flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-lg border text-muted-foreground hover:bg-accent">
               <MoreHorizontal className="h-4 w-4" aria-hidden />
             </summary>
             <div className="absolute right-0 top-full z-10 mt-1 flex w-44 flex-col rounded-lg border bg-popover p-1 shadow-lg">
-          {onCheck && (
-            <button
-              type="button"
-              data-testid={`check-connection-${agentId}-${id}`}
-              disabled={check?.pending}
-              onClick={(event) => runMenuAction(event, onCheck)}
-              className="rounded px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
-            >
-              {check?.pending ? "正在测试…" : "测试连接"}
-            </button>
-          )}
             {(onMoveUp || onMoveDown) && <div className="flex items-center" aria-label="调整接入顺序">
               <button
                 type="button"
