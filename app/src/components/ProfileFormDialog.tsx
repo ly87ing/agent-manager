@@ -15,9 +15,8 @@ import {
   configEnvOf,
   defaultConfigDir,
   isThirdPartyProfile,
-  profileMcpConfig,
   profileLaunchValue,
-  profileSkillsDir,
+  updateProfileDefinition,
   type ProfileDraftPreview,
   type ProfileFormInput,
   type ProfileKind,
@@ -38,6 +37,7 @@ function envTruthy(value: string): boolean {
 export function ProfileFormDialog({
   baseAgents,
   initial,
+  initialDefinition,
   isEdit: isEditProp,
   existingIds,
   baseBinOf,
@@ -52,6 +52,8 @@ export function ProfileFormDialog({
   /** 可作为归属的助手（目前支持 Claude Code 与 Codex）。 */
   baseAgents: { id: string; displayName: string; kind: ProfileKind }[];
   initial?: ProfileFormInput;
+  /** 编辑时打开表单所读取的完整定义，与保存时使用同一基准。 */
+  initialDefinition?: Record<string, unknown>;
   /** 复制实例时带着预填内容但仍是新建：名称与配置目录必须可改。 */
   isEdit?: boolean;
   existingIds: string[];
@@ -59,7 +61,7 @@ export function ProfileFormDialog({
   /** 新建时另带要从默认环境带上的设置（编辑时为空）。 */
   onSubmit: (input: ProfileFormInput, options: { seedItems: SeedItem[]; isEdit: boolean;
     preview?: { config: ProfileDraftPreview; alias: AliasFilePreview } }) => void;
-  onPreview: (input: ProfileFormInput, seedItems: SeedItem[]) => Promise<ProfileDraftPreview | string>;
+  onPreview: (input: ProfileFormInput, seedItems: SeedItem[], definition: Record<string, unknown>) => Promise<ProfileDraftPreview | string>;
   onAliasPreview: (name: string, value: string) => Promise<AliasFilePreview | string>;
   aliasPreviewBase: string;
   /** 用表单里的地址与凭据变量问接口能用哪些模型；失败时返回原因。只在点按钮时才联网。 */
@@ -132,7 +134,10 @@ export function ProfileFormDialog({
   const launch = id ? profileLaunchValue(input, baseBinOf(baseAgent)) : "";
   const aliasPreviewKey = JSON.stringify([aliasPreviewBase, id, launch]);
   const [aliasPreview, setAliasPreview] = useState<{ key: string; result: AliasFilePreview | string } | null>(null);
-  const previewKey = JSON.stringify([buildProfileDefinition(input, baseBinOf(baseAgent)), isEdit ? [] : seedItems]);
+  const candidateDefinition = isEdit && initialDefinition
+    ? updateProfileDefinition(input, baseBinOf(baseAgent), initialDefinition)
+    : buildProfileDefinition(input, baseBinOf(baseAgent));
+  const previewKey = JSON.stringify([candidateDefinition, isEdit ? [] : seedItems]);
   const previewReady = PROFILE_ID_RE.test(id)
     && (isEdit || !existingIds.includes(id))
     && /^(~\/|\/)/.test(effectiveConfigDir)
@@ -144,8 +149,8 @@ export function ProfileFormDialog({
     && (previewBusy || preview?.key !== previewKey || typeof preview.result === "string"
       || aliasPreview?.key !== aliasPreviewKey || typeof aliasPreview.result === "string");
   const managedConfigFile = `${effectiveConfigDir.replace(/\/$/, "")}/${kind === "codex" ? "config.toml" : "settings.json"}`;
-  const mcpConfigFile = profileMcpConfig(kind, effectiveConfigDir).path;
-  const skillsDir = profileSkillsDir(effectiveConfigDir);
+  const mcpConfigFile = (candidateDefinition.mcp_config as { path?: string } | undefined)?.path ?? "未设置";
+  const skillsDir = typeof candidateDefinition.skills_dir === "string" ? candidateDefinition.skills_dir : "未设置";
   /** 预设按该实例实际执行的命令给（实例的 bin 来自归属助手）。 */
   const presets = presetsForCommand(baseBinOf(baseAgent));
   const activeDangerPreset = presets.find((preset) => preset.danger && hasPresetArgs(extraArgs, preset));
@@ -154,7 +159,7 @@ export function ProfileFormDialog({
     const serial = ++previewSerial.current;
     setPreviewBusy(true);
     try {
-      const result = await onPreview(input, isEdit ? [] : seedItems);
+      const result = await onPreview(input, isEdit ? [] : seedItems, candidateDefinition);
       if (serial === previewSerial.current) setPreview({ key: previewKey, result });
     } finally {
       if (serial === previewSerial.current) setPreviewBusy(false);

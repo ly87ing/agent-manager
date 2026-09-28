@@ -1485,6 +1485,7 @@ export default function AgentsPage({
               : profileCapableAgents
           }
           initial={profileForm === "new" ? undefined : profileForm}
+          initialDefinition={profileEditBase?.definition}
           isEdit={profileForm !== "new" && !profileDuplicating}
           existingIds={elements.map((element) => element.id.replace(/^agents:/, ""))}
           baseBinOf={baseBinOf}
@@ -1493,11 +1494,11 @@ export default function AgentsPage({
           onSubmit={(input, options) => void saveProfile(input, options.seedItems, options.isEdit, options.preview)}
           onAliasPreview={aliasSource.previewSetAlias}
           aliasPreviewBase={JSON.stringify(aliasSource.source?.targets.map((target) => [target.id, target.base]) ?? [])}
-          onPreview={async (input, seedItems) => {
+          onPreview={async (input, seedItems, definition) => {
             try {
               const result = await runEngine<ProfileDraftPreview>("profiles:preview", [
                 "--only", `profiles:${input.id}`,
-                "--definition", JSON.stringify(buildProfileDefinition(input, baseBinOf(input.baseAgent))),
+                "--definition", JSON.stringify(definition),
                 "--on-save",
                 ...(seedItems.length ? ["--items", seedItems.join(",")] : []),
               ]);

@@ -885,6 +885,20 @@ describe("助手实例", () => {
     await userEvent.clear(within(dialog).getByTestId("profile-display-name"));
     await userEvent.type(within(dialog).getByTestId("profile-display-name"), "新名称");
     await userEvent.clear(within(dialog).getByTestId("profile-model"));
+    const preview = await waitFor(() => {
+      const found = calls.filter((call) => call.command === "profiles:preview").slice(-1)[0];
+      expect(found).toBeDefined();
+      const definition = JSON.parse(found!.args[found!.args.indexOf("--definition") + 1]);
+      expect(definition.display_name).toBe("新名称");
+      expect(definition.profile.model).toBeUndefined();
+      return definition;
+    });
+    expect(preview.bin).toBe(original.bin);
+    expect(preview.skills_dir).toBe(original.skills_dir);
+    expect(preview.mcp_config).toEqual(original.mcp_config);
+    expect(preview.future_root).toEqual(original.future_root);
+    expect(within(dialog).getByText(original.skills_dir)).toBeInTheDocument();
+    expect(within(dialog).getByText(original.mcp_config.path)).toBeInTheDocument();
     await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
     const write = await waitFor(() => {
       const found = calls.find((call) => call.command === "policy:set");
@@ -900,6 +914,7 @@ describe("助手实例", () => {
     expect(saved.profile.future_profile).toEqual(original.profile.future_profile);
     expect(saved.profile.env.OTHER).toBe("keep");
     expect(saved.profile.model).toBeUndefined();
+    expect(saved).toEqual({ ...preview, _delete: false, _replace: true });
   });
 
   it("共用设置写入被拒时保留差异，说明原因并可刷新", async () => {
