@@ -1092,6 +1092,12 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       candidate[set] = argOf(args, "--value") ?? "";
     } else if (removed) {
       delete candidate[removed];
+    } else if (args.includes("--recommended")) {
+      const item = aliasRecommended.find((entry) => entry.name === argOf(args, "--recommended"));
+      if (item) candidate[item.name] = item.value;
+    } else if (args.includes("--legacy")) {
+      const item = aliasLegacy.find((entry) => entry.id === argOf(args, "--legacy"));
+      if (item) candidate[item.name] = item.value;
     }
     const content = `# 演示数据；正式预览按实际文件计算\n${Object.entries(candidate).map(([name, value]) => `alias ${name}='${value}'`).join("\n")}\n`;
     return makeEnvelope({

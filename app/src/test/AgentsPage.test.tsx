@@ -168,6 +168,28 @@ describe("助手页产品边界", () => {
     expect(args).not.toContain("--rename-from");
   });
 
+  it("助手页删除启动命令前展示完整 rc 文件，预览与删除带相同基准", async () => {
+    const all = routes();
+    all["aliases:preview"] = makeEnvelope({
+      files: [{ target: "aliases:zshrc", path: "/isolated/.zshrc", exists: true, content: "# 保留区块外内容\n" }],
+      skipped: ["aliases:zprofile"],
+    }, { command: "aliases.preview" });
+    all["aliases:apply"] = makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+
+    await userEvent.click(await screen.findByTestId("workbench-tab-launch"));
+    await userEvent.click(screen.getByTestId("agent-launch-remove-claude-code-claude"));
+    const dialog = await screen.findByRole("dialog", { name: "删除启动命令 claude" });
+    expect(await within(dialog).findByTestId("alias-confirm-file-aliases:zshrc")).toHaveTextContent("# 保留区块外内容");
+    expect(dialog).toHaveTextContent("aliases:zprofile");
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认删除" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
+    const preview = calls.find((call) => call.command === "aliases:preview")?.args;
+    const apply = calls.find((call) => call.command === "aliases:apply")?.args;
+    expect(preview).toEqual(apply);
+    expect(apply).toContain("--remove");
+  });
+
   it("默认环境卡片可按需查看实际配置文件，运行设置按实际值预填", async () => {
     const withFile: Record<string, Envelope> = {
       ...routes(),

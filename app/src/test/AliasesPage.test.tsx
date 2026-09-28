@@ -14,14 +14,25 @@ function aliasRoutes(
   return {
     "aliases:status": makeEnvelope(makeAliasStatus({ claude: CLAUDE, ...aliases }, options), { command: "aliases.status" }),
     "aliases:preview": async (args) => {
-      const name = valueOf(args, "--set") ?? "";
-      const value = valueOf(args, "--value") ?? "";
+      const candidate: Record<string, string> = { claude: CLAUDE, ...aliases };
+      const name = valueOf(args, "--set");
+      if (name) {
+        const rename = valueOf(args, "--rename-from");
+        if (rename) delete candidate[rename];
+        candidate[name] = valueOf(args, "--value") ?? "";
+      }
+      const removed = valueOf(args, "--remove");
+      if (removed) delete candidate[removed];
+      const recommended = options.recommendations?.find((item) => item.name === valueOf(args, "--recommended"));
+      if (recommended) candidate[recommended.name] = recommended.value;
+      const legacy = options.legacy?.find((item) => item.id === valueOf(args, "--legacy"));
+      if (legacy) candidate[legacy.name] = legacy.value;
       return makeEnvelope({
-        files: ["aliases:zshrc", "aliases:zprofile"].map((target) => ({
+        files: ["aliases:zshrc", ...(options.blockedZprofile ? [] : ["aliases:zprofile"])].map((target) => ({
           target,
           path: `/isolated/${target.replace("aliases:", ".")}`,
           exists: target === "aliases:zshrc",
-          content: `# 保留用户注释\nalias ${name}='${value}'\n`,
+          content: `# 保留用户注释\n${Object.entries(candidate).map(([key, value]) => `alias ${key}='${value}'`).join("\n")}\n`,
         })),
         skipped: [],
       }, { command: "aliases.preview" });
@@ -355,11 +366,32 @@ describe("终端快捷命令页", () => {
     const { calls } = renderWithEngine(<AliasesPage />, aliasRoutes({ codex: "codex" }));
     await userEvent.click(await screen.findByTestId("remove-alias-codex"));
     expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
-    await userEvent.click(await screen.findByRole("button", { name: "确认移除" }));
+    const dialog = await screen.findByRole("dialog");
+    const file = await within(dialog).findByTestId("alias-confirm-file-aliases:zshrc");
+    expect(file).toHaveTextContent("# 保留用户注释");
+    expect(file).toHaveTextContent("alias claude=");
+    expect(file).not.toHaveTextContent("alias codex=");
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认移除" }));
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
     const args = applyArgs(calls);
     expect(valueOf(args, "--remove")).toBe("codex");
     expect(valueOf(args, "--zshrc-base")).toBe("base-aliases:zshrc");
+    expect(calls.find((call) => call.command === "aliases:preview")?.args).toEqual(args);
+  });
+
+  it("移除预览失败时不能确认；取消不写文件", async () => {
+    const routes = aliasRoutes({ codex: "codex" });
+    routes["aliases:preview"] = makeEnvelope({}, {
+      command: "aliases.preview", ok: false,
+      errors: [{ code: "ALIAS_ERROR", element: null, message: "~/.zshrc 已在外部修改" }],
+    });
+    const { calls } = renderWithEngine(<AliasesPage />, routes);
+    await userEvent.click(await screen.findByTestId("remove-alias-codex"));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("已在外部修改");
+    expect(within(dialog).getByRole("button", { name: "确认移除" })).toBeDisabled();
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
   });
 
   it("来源推荐不自动写入，逐条确认后才添加，并标出来自哪个来源", async () => {
@@ -374,11 +406,13 @@ describe("终端快捷命令页", () => {
     await userEvent.click(screen.getByTestId("add-recommended-grok"));
     const modal = await screen.findByRole("dialog");
     expect(modal).toHaveTextContent("alias grok='grok'");
+    expect(await within(modal).findByTestId("alias-confirm-file-aliases:zshrc")).toHaveTextContent("alias grok='grok'");
     await userEvent.click(within(modal).getByRole("button", { name: "添加" }));
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
     const args = applyArgs(calls);
     expect(valueOf(args, "--recommended")).toBe("grok");
     expect(args).not.toContain("--value");
+    expect(calls.find((call) => call.command === "aliases:preview")?.args).toEqual(args);
   });
 
   it("还没有来源别名：已登记的推荐来源给「取回」，没登记的引导去技能页添加", async () => {
@@ -419,9 +453,12 @@ describe("终端快捷命令页", () => {
     expect(item).toHaveTextContent("加入会替换它");
 
     await userEvent.click(screen.getByTestId("add-legacy-claude"));
-    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "加入终端配置" }));
+    const modal = await screen.findByRole("dialog");
+    expect(await within(modal).findByTestId("alias-confirm-file-aliases:zshrc")).toHaveTextContent(`alias claude='${legacy.value}'`);
+    await userEvent.click(within(modal).getByRole("button", { name: "加入终端配置" }));
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
     expect(valueOf(applyArgs(calls), "--legacy")).toBe(legacy.id);
+    expect(calls.find((call) => call.command === "aliases:preview")?.args).toEqual(applyArgs(calls));
 
     await userEvent.click(screen.getByTestId("discard-legacy-claude"));
     await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "丢弃" }));
@@ -445,7 +482,10 @@ describe("终端快捷命令页", () => {
     );
     expect(await screen.findByTestId("alias-target-aliases:zprofile")).toHaveTextContent("符号链接");
     await userEvent.click(screen.getByTestId("remove-alias-codex"));
-    await userEvent.click(await screen.findByRole("button", { name: "确认移除" }));
+    const modal = await screen.findByRole("dialog");
+    expect(await within(modal).findByTestId("alias-confirm-file-aliases:zshrc")).toHaveTextContent("# 保留用户注释");
+    expect(within(modal).queryByTestId("alias-confirm-file-aliases:zprofile")).toBeNull();
+    await userEvent.click(within(modal).getByRole("button", { name: "确认移除" }));
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
     const args = applyArgs(calls);
     expect(args).toContain("--zshrc-base");

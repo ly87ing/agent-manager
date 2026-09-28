@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { AliasCurrent, AliasLegacySuggestion, AliasRecommendation, EngineElement, StatusData, SuggestedSource } from "./contract";
 import type { AliasesObserved, AliasesSpec, AliasLine } from "./observed";
@@ -119,7 +119,7 @@ export function useAliasSource() {
     return run("aliases:apply", [...bases, ...op], label, options);
   };
 
-  const preview = async (op: string[]): Promise<AliasFilePreview | string> => {
+  const previewApply = useCallback(async (op: string[]): Promise<AliasFilePreview | string> => {
     const bases = (latest.current?.targets ?? []).flatMap((target) => (target.base ? [target.baseFlag, target.base] : []));
     if (bases.length === 0) return "~/.zshrc 与 ~/.zprofile 当前都不能写，原因见「终端快捷命令」页";
     try {
@@ -128,7 +128,7 @@ export function useAliasSource() {
     } catch (error) {
       return engineErrorMessage(error);
     }
-  };
+  }, []);
 
   const setOp = (name: string, value: string, renameFrom?: string) => [
     "--set", name, "--value", value,
@@ -149,7 +149,7 @@ export function useAliasSource() {
   };
 
   const previewSetAlias = (name: string, value: string, renameFrom?: string): Promise<AliasFilePreview | string> =>
-    preview(setOp(name, value, renameFrom));
+    previewApply(setOp(name, value, renameFrom));
 
   const removeAlias = (name: string, options?: { label?: string; silent?: boolean }): Promise<boolean> =>
     write(["--remove", name], options?.label ?? `移除快捷命令 ${name}`, options);
@@ -168,5 +168,5 @@ export function useAliasSource() {
   const fetchSource = (collection: string): Promise<boolean> =>
     run("skills:apply", ["--only", `skill:${collection}`, "--action", "update"], `更新来源 ${collection}`);
 
-  return { query, source, busy, setAlias, previewSetAlias, removeAlias, addRecommended, addLegacy, discardLegacy, fetchSource };
+  return { query, source, busy, setAlias, previewSetAlias, previewApply, removeAlias, addRecommended, addLegacy, discardLegacy, fetchSource };
 }

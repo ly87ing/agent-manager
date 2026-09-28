@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Copy, Plus, Terminal, Trash2 } from "lucide-react";
+import { AliasApplyConfirm } from "../components/AliasApplyConfirm";
 import { AliasEditorDialog } from "../components/AliasEditorDialog";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
@@ -34,7 +35,7 @@ type Dialog =
  * 旧版本保存、还没写进文件的命令作为建议，可加入或丢弃。
  */
 export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => void } = {}) {
-  const { query, source, busy, setAlias, previewSetAlias, removeAlias, addRecommended, addLegacy, discardLegacy, fetchSource } = useAliasSource();
+  const { query, source, busy, setAlias, previewSetAlias, previewApply, removeAlias, addRecommended, addLegacy, discardLegacy, fetchSource } = useAliasSource();
   const [dialog, setDialog] = useState<Dialog | null>(null);
 
   if (query.isPending) return <PageLoading text="正在读取终端快捷命令…" />;
@@ -49,6 +50,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
   }
 
   const names = source.current.map((item) => item.name);
+  const previewBase = JSON.stringify(source.targets.map((target) => [target.id, target.base]));
   const external = source.targets.flatMap((target) => target.external.map((line) => ({ target, line })));
   const close = () => setDialog(null);
   const closeOn = (ok: boolean) => {
@@ -318,52 +320,58 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
           presetName={dialog.presetName}
           defaults={{ timezone: DEFAULT_TIMEZONE, lang: DEFAULT_LANG }}
           existingNames={names}
-          previewBase={JSON.stringify(source.targets.map((target) => [target.id, target.base]))}
+          previewBase={previewBase}
           onPreview={previewSetAlias}
           onSubmit={(name, value) => void setAlias(name, value, { renameFrom: dialog.name }).then(closeOn)}
           onClose={close}
         />
       )}
       {dialog?.kind === "remove" && (
-        <ConfirmModal
+        <AliasApplyConfirm
           title={`移除 ${dialog.name}`}
           description="确认后直接从 ~/.zshrc 与 ~/.zprofile 里本工具维护的那一段中去掉这一条；这段空了会连同两行注释一起移除，段外的内容不动。"
-          risk="write-local"
           confirmLabel="确认移除"
+          previewBase={previewBase}
+          op={["--remove", dialog.name]}
+          onPreview={previewApply}
           executing={busy}
           onConfirm={() => void removeAlias(dialog.name).then(closeOn)}
           onClose={close}
         />
       )}
       {dialog?.kind === "recommend" && (
-        <ConfirmModal
+        <AliasApplyConfirm
           title={`添加推荐的 ${dialog.item.name}`}
           description="把这一行写进 ~/.zshrc 与 ~/.zprofile 里本工具维护的那一段；写入前重读文件，被别处改过就不写。"
-          risk="write-local"
           confirmLabel="添加"
+          previewBase={previewBase}
+          op={["--recommended", dialog.item.name]}
+          onPreview={previewApply}
           executing={busy}
           onConfirm={() => void addRecommended(dialog.item.name).then(closeOn)}
           onClose={close}
         >
           <AliasLineBox line={dialog.item.line} />
-        </ConfirmModal>
+        </AliasApplyConfirm>
       )}
       {dialog?.kind === "legacy-add" && (
-        <ConfirmModal
+        <AliasApplyConfirm
           title={`加入 ${dialog.item.name}`}
           description={
             dialog.item.actual
               ? "用旧版本保存的这一行替换终端配置里现在的同名命令；写入前重读文件，被别处改过就不写。"
               : "把旧版本保存的这一行写进终端配置；写入前重读文件，被别处改过就不写。"
           }
-          risk="write-local"
           confirmLabel="加入终端配置"
+          previewBase={previewBase}
+          op={["--legacy", dialog.item.id]}
+          onPreview={previewApply}
           executing={busy}
           onConfirm={() => void addLegacy(dialog.item).then(closeOn)}
           onClose={close}
         >
           <AliasLineBox line={dialog.item.line} />
-        </ConfirmModal>
+        </AliasApplyConfirm>
       )}
       {dialog?.kind === "legacy-discard" && (
         <ConfirmModal

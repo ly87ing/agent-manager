@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { AliasEditorDialog } from "../components/AliasEditorDialog";
 import { ProfileCard } from "../components/ProfileCards";
 import { ProfileFormDialog } from "../components/ProfileFormDialog";
+import { AliasApplyConfirm } from "../components/AliasApplyConfirm";
 import { ConfirmModal } from "../components/ConfirmModal";
 import {
   ConnectionFormDialog,
@@ -1446,11 +1447,13 @@ export default function AgentsPage({
         />
       )}
       {launchRemoving && (
-        <ConfirmModal
+        <AliasApplyConfirm
           title={`删除启动命令 ${launchRemoving}`}
           description="只删这条命令，实例的配置目录与登录状态不受影响。确认后直接从 ~/.zshrc 与 ~/.zprofile 里本工具维护的那一段中去掉。"
-          risk="write-local"
           confirmLabel="确认删除"
+          previewBase={JSON.stringify((aliasSource.source?.targets ?? []).map((target) => [target.id, target.base]))}
+          op={["--remove", launchRemoving]}
+          onPreview={aliasSource.previewApply}
           executing={aliasSource.busy}
           onConfirm={() => void removeLaunchAlias(launchRemoving)}
           onClose={() => setLaunchRemoving(null)}

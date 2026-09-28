@@ -332,6 +332,17 @@ fn adding_a_recommendation_writes_both_files_and_passes_zsh_syntax() {
     let (root, ctx) = temp_ctx("recommend");
     add_alias_source(&ctx, "mine", &[("aliases.json", ALIAS_SOURCE)]);
     let before = status(&ctx);
+    let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
+    let bases = both_bases(&before);
+    let mut preview_args: Vec<&str> = bases.iter().map(String::as_str).collect();
+    preview_args.extend_from_slice(&["--recommended", "claude"]);
+    let preview = run(&ctx, "aliases:preview", &preview_args);
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert!(!preview.lock.held);
+    assert_eq!(preview.data["files"].as_array().unwrap().len(), 2);
+    assert!(read(&ctx, ".zshrc").is_none());
+    assert!(read(&ctx, ".zprofile").is_none());
+    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), db_before);
     let env = apply(&ctx, &both_bases(&before), &["--recommended", "claude"]);
     assert!(env.ok, "{:?}", env.errors);
     assert!(env.lock.held, "真实写入必须持锁");
@@ -341,6 +352,12 @@ fn adding_a_recommendation_writes_both_files_and_passes_zsh_syntax() {
     ]);
     assert_eq!(read(&ctx, ".zshrc").unwrap(), expected);
     assert_eq!(read(&ctx, ".zprofile").unwrap(), expected);
+    for (index, rel) in [".zshrc", ".zprofile"].iter().enumerate() {
+        assert_eq!(
+            read(&ctx, rel).as_deref(),
+            preview.data["files"][index]["content"].as_str()
+        );
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -571,13 +588,26 @@ fn edit_keeps_foreign_lines_and_empty_block_is_removed() {
         &format!("pre\n{}post\n", block(&["alias ll='ls -l'"])),
     );
     let now = status(&ctx);
-    let env = apply(
+    let args = ["--zshrc-base".to_string(), base_of(&now, "aliases:zshrc")];
+    let preview = run(
         &ctx,
-        &["--zshrc-base".into(), base_of(&now, "aliases:zshrc")],
-        &["--remove", "ll"],
+        "aliases:preview",
+        &["--zshrc-base", &args[1], "--remove", "ll"],
     );
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert!(!preview.lock.held);
+    assert_eq!(preview.data["files"][0]["content"], "pre\npost\n");
+    assert_eq!(
+        read(&ctx, ".zshrc").unwrap(),
+        format!("pre\n{}post\n", block(&["alias ll='ls -l'"]))
+    );
+    let env = apply(&ctx, &args, &["--remove", "ll"]);
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(read(&ctx, ".zshrc").unwrap(), "pre\npost\n");
+    assert_eq!(
+        read(&ctx, ".zshrc").as_deref(),
+        preview.data["files"][0]["content"].as_str()
+    );
     let after = status(&ctx);
     assert_eq!(element(&after, "aliases:zshrc")["state"], "missing");
     assert_eq!(base_of(&after, "aliases:zshrc"), "missing");
@@ -885,12 +915,31 @@ fn legacy_saved_aliases_become_suggestions_that_can_be_added_or_discarded() {
     };
 
     // 加入 ll：写进两个文件；写路径把已在区块里的 gs 与刚加入的 ll 从库里删掉
-    let env = apply(&ctx, &both_bases(&now), &["--legacy", &id_of("ll")]);
+    let bases = both_bases(&now);
+    let legacy_id = id_of("ll");
+    let mut preview_args: Vec<&str> = bases.iter().map(String::as_str).collect();
+    preview_args.extend_from_slice(&["--legacy", &legacy_id]);
+    let preview = run(&ctx, "aliases:preview", &preview_args);
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert!(!preview.lock.held);
+    assert_eq!(
+        read(&ctx, ".zshrc").unwrap(),
+        block(&["alias gs='git status'", "alias claude='claude --old'"])
+    );
+    assert!(read(&ctx, ".zprofile").is_none());
+    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), db_before);
+    let env = apply(&ctx, &bases, &["--legacy", &legacy_id]);
     assert!(env.ok, "{:?}", env.errors);
     assert!(read(&ctx, ".zshrc").unwrap().contains("alias ll='ls -l'"));
     assert!(read(&ctx, ".zprofile")
         .unwrap()
         .contains("alias ll='ls -l'"));
+    for (index, rel) in [".zshrc", ".zprofile"].iter().enumerate() {
+        assert_eq!(
+            read(&ctx, rel).as_deref(),
+            preview.data["files"][index]["content"].as_str()
+        );
+    }
     let after = status(&ctx);
     assert_eq!(names(&after["alias_legacy"]), ["claude", "gp"]);
     let stored: String = store::open_readonly(&ctx)
