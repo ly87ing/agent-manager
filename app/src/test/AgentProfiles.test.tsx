@@ -145,10 +145,13 @@ describe("助手实例", () => {
     const all: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
     all["profiles:preview"] = async (args) => {
       const definition = JSON.parse(args[args.indexOf("--definition") + 1]);
+      const selected = args[args.indexOf("--items") + 1]?.split(",") ?? [];
       return makeEnvelope({
         path: `${definition.profile.config_dir}/settings.json`,
         exists: false,
         content: JSON.stringify({ env: definition.profile.env }),
+        files: selected.includes("rules") ? [{ path: `${definition.profile.config_dir}/CLAUDE.md`, exists: false, content: "# Shared rule\n" }] : [],
+        seed_results: selected.includes("rules") ? [{ item: "rules", state: "copied", detail: "已复制 CLAUDE.md" }] : [],
       }, { command: "profiles.preview" });
     };
     const { calls } = renderWithEngine(<AgentsPage />, all);
@@ -162,12 +165,27 @@ describe("助手实例", () => {
     const preview = await within(dialog).findByTestId("profile-draft-preview-content");
     expect(preview).toHaveTextContent("https://api.example.com");
     expect(preview).toHaveTextContent("${DEMO_KEY}");
+    expect(within(dialog).getByTestId("profile-draft-preview-file-0")).toHaveTextContent("# Shared rule");
+    expect(within(dialog).getByText("已复制 CLAUDE.md")).toBeInTheDocument();
     expect(calls.find((call) => call.command === "profiles:preview")?.args.slice(0, 2)).toEqual(["--only", "profiles:demo"]);
+    expect(calls.find((call) => call.command === "profiles:preview")?.args.slice(-2)).toEqual([
+      "--items", "permissions,statusline,hooks,rules,mcp",
+    ]);
     expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
     await userEvent.type(within(dialog).getByTestId("profile-base-url"), "/v1");
     expect(within(dialog).queryByTestId("profile-draft-preview-content")).toBeNull();
     expect(within(dialog).getByText("表单已更改，正在更新预览。")).toBeInTheDocument();
     expect(await within(dialog).findByTestId("profile-draft-preview-content")).toHaveTextContent("https://api.example.com/v1");
+    await userEvent.click(within(dialog).getByTestId("profile-seed-statusline"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "profiles:preview").slice(-1)[0]?.args.slice(-2)).toEqual([
+      "--items", "permissions,hooks,rules,mcp",
+    ]));
+    await userEvent.click(within(dialog).getByTestId("profile-seed-rules"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "profiles:preview").slice(-1)[0]?.args.slice(-2)).toEqual([
+      "--items", "permissions,hooks,mcp",
+    ]));
+    await within(dialog).findByTestId("profile-draft-preview-content");
+    expect(within(dialog).queryByTestId("profile-draft-preview-file-0")).toBeNull();
   });
 
   for (const saveTemplate of [false, true]) {
@@ -219,6 +237,7 @@ describe("助手实例", () => {
         path: `${definition.profile.config_dir}/settings.json`,
         exists: false,
         content: JSON.stringify({ env: definition.profile.env }),
+        files: [{ path: `${definition.profile.config_dir}/CLAUDE.md`, exists: false, content: "# Shared rule\n" }],
       }, { command: "profiles.preview" });
     };
     const { calls } = renderWithEngine(<AgentsPage />, all);
@@ -233,7 +252,11 @@ describe("助手实例", () => {
     const content = await within(dialog).findByTestId("connection-preview-content-deepseek");
     expect(content).toHaveTextContent("https://api.deepseek.com/anthropic");
     expect(content).toHaveTextContent("${DEEPSEEK_API_KEY}");
+    expect(within(dialog).getByTestId("connection-preview-file-deepseek-0")).toHaveTextContent("# Shared rule");
     expect(calls.find((call) => call.command === "profiles:preview")?.args.slice(0, 2)).toEqual(["--only", "profiles:deepseek"]);
+    expect(calls.find((call) => call.command === "profiles:preview")?.args.slice(-2)).toEqual([
+      "--items", "permissions,statusline,hooks,rules,mcp",
+    ]);
     expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
     await userEvent.click(within(dialog).getByTestId("connection-save-template"));
     expect(within(dialog).queryByTestId("connection-preview-content-deepseek")).toBeNull();
@@ -803,7 +826,10 @@ describe("助手实例", () => {
   });
 
   it("Codex 环境填了鉴权变量却没填接口地址时不保存，免得接入方式指向不存在的接入表", async () => {
-    const codexRoutes = routes();
+    const codexRoutes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    codexRoutes["profiles:preview"] = async () => makeEnvelope({
+      path: "~/.codex-cx-relay/config.toml", content: "", exists: false, will_write: false,
+    }, { command: "profiles.preview" });
     (codexRoutes["agents:status"] as { data: { elements: unknown[] } }).data.elements.push(
       makeElement({
         id: "agents:codex",
@@ -822,10 +848,14 @@ describe("助手实例", () => {
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.click(within(within(dialog).getByTestId("profile-base-agent")).getByRole("button", { name: /Codex/ }));
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cx-relay");
-    expect(within(dialog).getByTestId("profile-draft-preview-button")).toBeDisabled();
+    await within(dialog).findByTestId("profile-draft-preview-content");
+    expect(within(dialog).getByTestId("profile-draft-preview-button")).not.toBeDisabled();
+    expect(within(dialog).getByText(/config\.toml · 不创建文件/)).toBeInTheDocument();
+    const previewCalls = calls.filter((call) => call.command === "profiles:preview").length;
     await userEvent.type(within(dialog).getByTestId("profile-token-var"), "RELAY_KEY");
     expect(within(dialog).getByTestId("profile-draft-preview-button")).toBeDisabled();
-    expect(calls.some((call) => call.command === "profiles:preview")).toBe(false);
+    expect(within(dialog).queryByTestId("profile-draft-preview-content")).toBeNull();
+    expect(calls.filter((call) => call.command === "profiles:preview")).toHaveLength(previewCalls);
     expect(within(dialog).getByTestId("profile-launch-preview")).toHaveTextContent(
       `alias cx-relay='CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-cx-relay" codex'`,
     );

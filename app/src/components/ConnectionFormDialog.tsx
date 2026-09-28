@@ -186,6 +186,7 @@ export function ConnectionFormDialog({
     ...(newEnvironmentInput ? [{
       id: newEnvironmentInput.id,
       definition: buildProfileDefinition(newEnvironmentInput, agentBin),
+      seedItems,
     }] : []),
     ...selectedUpdates.flatMap((profile) => profile.update && profile.base && profile.definitionBase ? [{
       id: profile.id,
@@ -943,7 +944,7 @@ export function ConnectionFormDialog({
                 {previewRequests.length === 0 && <p className="text-muted-foreground">{intent === "environment"
                   ? "选定接入并填写有效的环境名后，可预览客户端配置文件和启动命令。"
                   : "只保存 Provider 模板时，客户端配置文件和启动命令不变。"}</p>}
-                {previewRequests.length > 0 && <p className="text-muted-foreground">按当前实际文件合并计算；凭据变量保留引用形式，保存时重新校验。现有文件可能含敏感值，请勿直接分享。</p>}
+                {previewRequests.length > 0 && <p className="text-muted-foreground">按当前实际文件及勾选的共用设置合并计算；凭据变量保留引用形式，保存时重新校验。Hooks、规则及 MCP 文件原文可能含敏感值，仅在本机查看，请勿直接分享。</p>}
                 {preview && preview.key !== previewKey && previewRequests.length > 0
                   && <p className="text-muted-foreground">表单或勾选目标已变化，正在更新预览。</p>}
                 {preview?.key === previewKey && preview.results.map(({ id, result }) => (
@@ -952,8 +953,13 @@ export function ConnectionFormDialog({
                     {typeof result === "string"
                       ? <p role="alert" className="text-destructive">{result}</p>
                       : <>
-                          <p className="break-all font-mono text-muted-foreground">{result.path}{result.exists ? " · 合并现有文件" : " · 新文件"}</p>
+                          <p className="break-all font-mono text-muted-foreground">{result.path}{result.will_write === false ? (result.exists ? " · 保持现有文件" : " · 不创建文件") : (result.exists ? " · 合并现有文件" : " · 新文件")}</p>
                           <pre data-testid={`connection-preview-content-${id}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">{result.content}</pre>
+                          {result.files?.map((file, index) => <div key={file.path} className="space-y-1">
+                            <p className="break-all font-mono text-muted-foreground">{file.path}{file.exists ? " · 合并现有文件" : " · 新文件"}</p>
+                            <pre data-testid={`connection-preview-file-${id}-${index}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">{file.content}</pre>
+                          </div>)}
+                          {result.seed_results?.map((item) => <p key={item.item} className="text-muted-foreground">{item.detail}</p>)}
                         </>}
                   </div>
                 ))}

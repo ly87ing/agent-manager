@@ -18,10 +18,13 @@ export interface ProfileDraftPreview {
   path: string;
   content: string;
   exists: boolean;
+  will_write?: boolean;
+  seed_results?: { item: string; state: string; detail: string }[];
+  files?: { path: string; content: string; exists: boolean }[];
 }
 
 export type ProfilePreviewRequest =
-  | { id: string; definition: Record<string, unknown> }
+  | { id: string; definition: Record<string, unknown>; seedItems?: string[] }
   | { id: string; base: string; definitionBase: string; candidate: Record<string, unknown> };
 
 export interface ProfileFormInput {

@@ -853,6 +853,8 @@ Codex 独立环境换 Key 验收（2026-09-27）：用当前源码编译的 Rust
 
 原生窗口补验（2026-09-28，当前源码调试构建）：以隔离 HOME、`AGENT_MANAGER_DATA_DIR` 和只回版本号的替身 `claude`/`codex` 启动 Tauri；在 Claude 运行设置选择「智能自动」，窗口自动显示包含原有 `theme`、`env` 与新增 `permissions.defaultMode` 的完整 `settings.json` 候选；在 Codex 选择同项，窗口自动显示保留原注释、模型和 `history` 的完整 `config.toml` 候选，并列出 `approval_policy`、`sandbox_mode` 与 `approvals_reviewer`。两份目标文件预览前后 SHA256 相同，隔离数据目录为空。在「启动命令」新增表单切换 Codex「智能自动」，alias 预览即时出现 `--approve-for-me`；取消后隔离 `.zshrc`、`.zprofile` 均未创建。仅验当前源码的调试构建与这些交互；安装包仍待单独验收，未操作真实 Claude/Codex 配置。
 
+新建独立环境的勾选设置即时预览（2026-09-28）：`profiles:preview --items` 在只读路径中依创建顺序计算权限、状态栏、Hooks、规则与 MCP 的目标文件，MCP 逐条复用现有复制计划；两种新环境的隔离 Rust 用例将预览原文与随后 `profiles:seed` 写成的主文件及附加文件逐字节比对，预览前实例目录和数据库均不存在。含明文凭据的 MCP 条目在预览中跳过且不泄露取值，已有同名条目保持原样。两个创建表单随勾选变化重新预览并展示文件路径、原文和逐项结果；前端 59 个文件、652 项测试及构建通过，引擎全量与 Tauri 22 项、两套格式检查通过。源码调试应用曾在隔离 HOME/数据目录与替身 CLI 下启动，数据目录未写入；macOS 辅助功能仍拒绝读取窗口（权限查询为已授权），本轮没有原生窗口操作证据。没有运行真实 Claude/Codex 或重建安装包。
+
 ## 交付回执（2026-09-23，实际配置为准 x86_64 DMG 真机验收）
 
 绑定提交：`c0065c090e2ed89e6adedac60bc025a159baefda`（产品代码；其后 `0ceb7e0` 只改验收脚本）。

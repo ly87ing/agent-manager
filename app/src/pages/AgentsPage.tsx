@@ -1268,7 +1268,8 @@ export default function AgentsPage({
           onSubmit={(submission) => void saveConnection(connectionForm.agent, submission)}
           onPreview={async (request: ProfilePreviewRequest) => {
             const args = "definition" in request
-              ? ["--only", `profiles:${request.id}`, "--definition", JSON.stringify(request.definition)]
+              ? ["--only", `profiles:${request.id}`, "--definition", JSON.stringify(request.definition),
+                  ...(request.seedItems?.length ? ["--items", request.seedItems.join(",")] : [])]
               : [
                   "--only", `profiles:${request.id}`,
                   "--base", request.base,
@@ -1367,11 +1368,12 @@ export default function AgentsPage({
           onFetchModels={fetchModelsForDraft}
           secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}
           onSubmit={(input, options) => void saveProfile(input, options.seedItems)}
-          onPreview={async (input) => {
+          onPreview={async (input, seedItems) => {
             try {
               const result = await runEngine<ProfileDraftPreview>("profiles:preview", [
                 "--only", `profiles:${input.id}`,
                 "--definition", JSON.stringify(buildProfileDefinition(input, baseBinOf(input.baseAgent))),
+                ...(seedItems.length ? ["--items", seedItems.join(",")] : []),
               ]);
               return result.ok ? result.data : result.errors[0]?.message ?? "预览失败";
             } catch (error) {

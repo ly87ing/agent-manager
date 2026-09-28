@@ -55,7 +55,7 @@ export function ProfileFormDialog({
   baseBinOf: (agentId: string) => string;
   /** 新建时另带要从默认环境带上的设置（编辑时为空）。 */
   onSubmit: (input: ProfileFormInput, options: { seedItems: SeedItem[] }) => void;
-  onPreview: (input: ProfileFormInput) => Promise<ProfileDraftPreview | string>;
+  onPreview: (input: ProfileFormInput, seedItems: SeedItem[]) => Promise<ProfileDraftPreview | string>;
   /** 用表单里的地址与凭据变量问接口能用哪些模型；失败时返回原因。只在点按钮时才联网。 */
   onFetchModels?: (draft: { kind: ProfileKind; baseUrl: string; tokenVar: string }) => Promise<string[] | string>;
   /** 密钥文件的状态：说明这个变量现在有没有值。 */
@@ -124,14 +124,14 @@ export function ProfileFormDialog({
     extraEnv,
   };
   const launch = id ? profileLaunchValue(input, baseBinOf(baseAgent)) : "";
-  const previewKey = JSON.stringify(buildProfileDefinition(input, baseBinOf(baseAgent)));
+  const previewKey = JSON.stringify([buildProfileDefinition(input, baseBinOf(baseAgent)), isEdit ? [] : seedItems]);
   const previewReady = PROFILE_ID_RE.test(id)
     && (isEdit || !existingIds.includes(id))
     && /^(~\/|\/)/.test(effectiveConfigDir)
     && (!baseUrl.trim() || (/^https?:\/\/[^/]/.test(baseUrl.trim()) && !urlHasUserinfo(baseUrl)))
     && (!tokenVar.trim() || /^[A-Za-z_][A-Za-z0-9_]*$/.test(tokenVar.trim()))
     && (kind !== "claude" || !baseUrl.trim() || Boolean(tokenVar.trim()))
-    && (kind !== "codex" || (thirdParty && Boolean(baseUrl.trim()) && Boolean(tokenVar.trim())));
+    && (kind !== "codex" || !tokenVar.trim() || Boolean(baseUrl.trim()));
   const managedConfigFile = `${effectiveConfigDir.replace(/\/$/, "")}/${kind === "codex" ? "config.toml" : "settings.json"}`;
   const mcpConfigFile = profileMcpConfig(kind, effectiveConfigDir).path;
   const skillsDir = profileSkillsDir(effectiveConfigDir);
@@ -143,7 +143,7 @@ export function ProfileFormDialog({
     const serial = ++previewSerial.current;
     setPreviewBusy(true);
     try {
-      const result = await onPreview(input);
+      const result = await onPreview(input, isEdit ? [] : seedItems);
       if (serial === previewSerial.current) setPreview({ key: previewKey, result });
     } finally {
       if (serial === previewSerial.current) setPreviewBusy(false);
@@ -634,14 +634,19 @@ export function ProfileFormDialog({
                     className="rounded border px-2.5 py-1 text-xs disabled:opacity-50"
                   >{previewBusy ? "正在预览…" : "重新读取"}</button>
                 </div>
-                <p className="mt-2 text-xs text-muted-foreground">有效输入会自动按当前目标文件合并计算，凭据变量保留引用形式；预览不检查凭据是否有值，保存时会重新读取并校验。文件原有内容可能含敏感值，请勿直接分享。</p>
-                {kind === "codex" && !thirdParty && <p className="mt-1 text-xs text-muted-foreground">Codex 官方环境创建时不写主配置文件。</p>}
+                <p className="mt-2 text-xs text-muted-foreground">有效输入会自动按当前目标文件及勾选的共用设置计算，凭据变量保留引用形式；预览不检查凭据是否有值，保存时会重新读取并校验。Hooks、规则及 MCP 文件原文可能含敏感值，仅在本机查看，请勿直接分享。</p>
+                {kind === "codex" && !thirdParty && <p className="mt-1 text-xs text-muted-foreground">Codex 官方接入本身不改 config.toml；勾选的共用设置仍可能写入。</p>}
                 {preview && preview.key !== previewKey && previewReady && <p className="mt-2 text-xs text-muted-foreground">表单已更改，正在更新预览。</p>}
                 {preview?.key === previewKey && (typeof preview.result === "string"
                   ? <p role="alert" className="mt-2 text-xs text-destructive">{preview.result}</p>
                   : <div className="mt-2 space-y-2">
-                      <p className="break-all font-mono text-xs text-muted-foreground">{preview.result.path}{preview.result.exists ? " · 合并现有文件" : " · 新文件"}</p>
+                      <p className="break-all font-mono text-xs text-muted-foreground">{preview.result.path}{preview.result.will_write === false ? (preview.result.exists ? " · 保持现有文件" : " · 不创建文件") : (preview.result.exists ? " · 合并现有文件" : " · 新文件")}</p>
                       <pre data-testid="profile-draft-preview-content" className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded border bg-muted p-3 font-mono text-xs">{preview.result.content}</pre>
+                      {preview.result.files?.map((file, index) => <div key={file.path} className="space-y-1">
+                        <p className="break-all font-mono text-xs text-muted-foreground">{file.path}{file.exists ? " · 合并现有文件" : " · 新文件"}</p>
+                        <pre data-testid={`profile-draft-preview-file-${index}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded border bg-muted p-3 font-mono text-xs">{file.content}</pre>
+                      </div>)}
+                      {preview.result.seed_results?.map((item) => <p key={item.item} className="text-xs text-muted-foreground">{item.detail}</p>)}
                     </div>)}
               </section>
 
