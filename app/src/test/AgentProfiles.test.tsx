@@ -636,6 +636,22 @@ describe("助手实例", () => {
     expect(calls.some((call) => call.command === "profiles:seed")).toBe(false);
   });
 
+  it("编辑已有环境只保存定义，不用空参数覆盖实际启动命令或写环境文件", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("profile-edit-cc-ly"));
+    const dialog = await screen.findByRole("dialog", { name: "编辑独立环境" });
+    expect(within(dialog).queryByTestId("profile-extra-args")).toBeNull();
+    expect(within(dialog).queryByTestId("profile-launch-preview")).toBeNull();
+    expect(dialog).toHaveTextContent("终端启动命令都不会改");
+    await userEvent.clear(within(dialog).getByTestId("profile-display-name"));
+    await userEvent.type(within(dialog).getByTestId("profile-display-name"), "工作环境");
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "编辑独立环境" })).toBeNull());
+    expect(calls.some((call) => call.command === "policy:set")).toBe(true);
+    expect(calls.some((call) => ["profiles:apply", "aliases:apply", "profiles:seed"].includes(call.command))).toBe(false);
+  });
+
   it("共用设置写入被拒时保留差异，说明原因并可刷新", async () => {
     const routeMap = {
       ...routes(),

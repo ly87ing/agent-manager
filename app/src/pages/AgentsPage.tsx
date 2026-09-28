@@ -859,11 +859,8 @@ export default function AgentsPage({
     });
   };
 
-  /**
-   * 保存实例：写定义、（第三方环境与 Claude 环境）写好配置，再把启动命令存成同名快捷命令；新建时
-   * 最后按勾选从默认环境带上设置。
-   */
-  const saveProfile = async (input: ProfileFormInput, seedItems: SeedItem[] = []): Promise<boolean> => {
+  /** 编辑只写定义；新建时还会写环境配置、启动命令及勾选的共用设置。 */
+  const saveProfile = async (input: ProfileFormInput, seedItems: SeedItem[] = [], isEdit = false): Promise<boolean> => {
     const definition = buildProfileDefinition(input, baseBinOf(input.baseAgent));
     let envelope;
     try {
@@ -882,6 +879,14 @@ export default function AgentsPage({
     if (!envelope.ok) {
       toast.error(`保存独立环境被拒绝:${envelope.errors[0]?.message ?? "未知错误"}`);
       return false;
+    }
+    if (isEdit) {
+      toast.success(`已保存独立环境 ${input.id} 的定义`);
+      setProfileForm(null);
+      await profilesQuery.refetch();
+      setSelectedAgentId(`agents:${input.baseAgent}`);
+      setSavedProfileTarget({ agentId: input.baseAgent, profileId: input.id });
+      return true;
     }
     if ((isThirdPartyProfile(input) || input.kind === "claude") && !(await writeNewProfileConfig(input.id))) {
       toast.error(`已保存独立环境 ${input.id}，但配置没有写入，启动命令也先不写`, {
@@ -1368,7 +1373,7 @@ export default function AgentsPage({
           baseBinOf={baseBinOf}
           onFetchModels={fetchModelsForDraft}
           secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}
-          onSubmit={(input, options) => void saveProfile(input, options.seedItems)}
+          onSubmit={(input, options) => void saveProfile(input, options.seedItems, options.isEdit)}
           onPreview={async (input, seedItems) => {
             try {
               const result = await runEngine<ProfileDraftPreview>("profiles:preview", [

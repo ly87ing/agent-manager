@@ -54,7 +54,7 @@ export function ProfileFormDialog({
   existingIds: string[];
   baseBinOf: (agentId: string) => string;
   /** 新建时另带要从默认环境带上的设置（编辑时为空）。 */
-  onSubmit: (input: ProfileFormInput, options: { seedItems: SeedItem[] }) => void;
+  onSubmit: (input: ProfileFormInput, options: { seedItems: SeedItem[]; isEdit: boolean }) => void;
   onPreview: (input: ProfileFormInput, seedItems: SeedItem[]) => Promise<ProfileDraftPreview | string>;
   /** 用表单里的地址与凭据变量问接口能用哪些模型；失败时返回原因。只在点按钮时才联网。 */
   onFetchModels?: (draft: { kind: ProfileKind; baseUrl: string; tokenVar: string }) => Promise<string[] | string>;
@@ -198,7 +198,7 @@ export function ProfileFormDialog({
       setError("填了鉴权变量名就要填接口地址：凭据只配合这个环境自己的接口使用");
       return;
     }
-    onSubmit(input, { seedItems: isEdit ? [] : seedItems });
+    onSubmit(input, { seedItems: isEdit ? [] : seedItems, isEdit });
   };
 
   return (
@@ -325,7 +325,7 @@ export function ProfileFormDialog({
                 <p className="mt-2 text-xs text-muted-foreground">登录、会话、技能与 MCP 都放在这里；不会覆盖助手的全局配置。</p>
                 {isEdit && initial?.configDir && configDir.trim() && configDir.trim().replace(/\/$/, "") !== initial.configDir.replace(/\/$/, "") && (
                   <p data-testid="profile-config-dir-moved" className="mt-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-                    换了配置目录：官方登录按目录保存（macOS 钥匙串条目也按目录路径区分），原目录里的登录、会话与技能不会跟过来，需要在新目录重新登录；不再使用原目录的登录时，先用原来的退出命令在终端退出。
+                    换了配置目录：官方登录按目录保存（macOS 钥匙串条目也按目录路径区分），原目录里的登录、会话与技能不会跟过来，需要在新目录重新登录；保存定义不会改已有启动命令，请回到环境卡片单独修改。之后不再使用原目录的登录时，先用原来的退出命令在终端退出。
                   </p>
                 )}
               </section>
@@ -490,7 +490,7 @@ export function ProfileFormDialog({
                 </p>
               </section>
 
-              <section className="rounded-xl border bg-card p-5 shadow-sm" aria-labelledby="profile-launch-heading">
+              {!isEdit && <section className="rounded-xl border bg-card p-5 shadow-sm" aria-labelledby="profile-launch-heading">
                 <div className="mb-4 flex items-start gap-3">
                   <span className="flex h-9 w-9 flex-none items-center justify-center rounded-lg bg-orange/10 text-orange">
                     <Play className="h-5 w-5" aria-hidden />
@@ -550,7 +550,7 @@ export function ProfileFormDialog({
                     {activeDangerPreset.hint}
                   </p>
                 )}
-              </section>
+              </section>}
 
               {!isEdit && (
                 <section className="rounded-xl border bg-card p-5 shadow-sm" aria-labelledby="profile-seed-heading" data-testid="profile-seed-section">
@@ -620,12 +620,12 @@ export function ProfileFormDialog({
                 </dl>
               </section>
 
-              <section className="rounded-xl border bg-card p-5 shadow-sm">
+              {!isEdit && <section className="rounded-xl border bg-card p-5 shadow-sm">
                 <h3 className="text-sm font-semibold text-foreground">终端启动命令</h3>
                 <pre data-testid="profile-launch-preview" className="mt-3 whitespace-pre-wrap break-all rounded-lg border bg-muted px-3 py-3 font-mono text-xs leading-5 text-foreground">
                   {launch ? `alias ${id}='${launch}'` : "填写环境名后显示完整命令"}
                 </pre>
-              </section>
+              </section>}
 
               <section className="rounded-xl border bg-card p-5 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -636,7 +636,9 @@ export function ProfileFormDialog({
                     className="rounded border px-2.5 py-1 text-xs disabled:opacity-50"
                   >{previewBusy ? "正在预览…" : "重新读取"}</button>
                 </div>
-                <p className="mt-2 text-xs text-muted-foreground">按保存流程预览目标文件及勾选的共用设置。新建文件的凭据仍以变量引用展示；已有主文件不会自动覆盖，保存后可在环境卡片逐项应用接入字段。预览可能含敏感值，请勿直接分享。</p>
+                <p className="mt-2 text-xs text-muted-foreground">{isEdit
+                  ? "只读预览这套定义对应的目标配置；保存编辑只更新定义，不会写入下列文件。需要生效时请回到环境卡片对比并写入。预览可能含敏感值，请勿直接分享。"
+                  : "按保存流程预览目标文件及勾选的共用设置。新建文件的凭据仍以变量引用展示；已有主文件不会自动覆盖，保存后可在环境卡片逐项应用接入字段。预览可能含敏感值，请勿直接分享。"}</p>
                 {kind === "codex" && !thirdParty && <p className="mt-1 text-xs text-muted-foreground">Codex 官方接入本身不改 config.toml；勾选的共用设置仍可能写入。</p>}
                 {preview && preview.key !== previewKey && previewReady && <p className="mt-2 text-xs text-muted-foreground">表单已更改，正在更新预览。</p>}
                 {preview?.key === previewKey && (typeof preview.result === "string"
@@ -654,7 +656,7 @@ export function ProfileFormDialog({
 
               <p className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-xs leading-5 text-muted-foreground">
                 {isEdit
-                  ? "保存只更新这套定义；实际配置已存在时不自动覆盖，回到卡片上对比后再写入。"
+                  ? "保存只更新这套定义；实际配置文件与终端启动命令都不会改。回到卡片上对比配置、单独编辑启动命令。"
                   : "创建后写好这个环境的配置（Codex 官方账号环境没有要写的）与启动命令，再按勾选从默认环境带上设置。"}
               </p>
             </aside>
