@@ -28,6 +28,7 @@ pub struct TrayConnection {
     profile_label: String,
     /// 与客户端实际配置一致的那一项（引擎按内容识别）。
     current: bool,
+    usage_summary: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -38,6 +39,7 @@ pub struct TrayEnvironment {
     environment_id: String,
     environment_name: String,
     launch_name: Option<String>,
+    usage_summary: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -86,10 +88,21 @@ fn connection_menu_label(connection: &TrayConnection) -> String {
 
 fn environment_menu_label(environment: &TrayEnvironment) -> String {
     let name = escape_menu_text(&environment.environment_name);
-    match &environment.launch_name {
+    let label = match &environment.launch_name {
         Some(launch) => format!("环境 · {name} · {}", escape_menu_text(launch)),
         None => format!("环境 · {name}（查看）"),
+    };
+    match &environment.usage_summary {
+        Some(usage) => format!("{label} · {}", escape_menu_text(usage)),
+        None => label,
     }
+}
+
+fn agent_menu_label(name: &str, current: &str, usage: Option<&str>) -> String {
+    escape_menu_text(&format!(
+        "{name} · {current}{}",
+        usage.map(|value| format!(" · {value}")).unwrap_or_default()
+    ))
 }
 
 /// 恢复并聚焦主窗口；托盘「显示主界面」、单实例二次启动回调与
@@ -224,7 +237,10 @@ fn build_menu(
                         .map(|(_, environment)| environment.agent_name.as_str())
                 })
                 .unwrap_or(agent_id);
-            let submenu_label = escape_menu_text(&format!("{agent_name} · {current_label}"));
+            let usage = agent_connections
+                .first()
+                .and_then(|(_, connection)| connection.usage_summary.as_deref());
+            let submenu_label = agent_menu_label(agent_name, current_label, usage);
             let mut submenu = SubmenuBuilder::new(app, submenu_label);
             for (index, connection) in agent_connections {
                 let label = connection_menu_label(connection);
@@ -339,6 +355,7 @@ mod tests {
             profile: "kimi".into(),
             profile_label: "Kimi Code".into(),
             current,
+            usage_summary: None,
         }
     }
 
@@ -359,6 +376,7 @@ mod tests {
             environment_id: "work".into(),
             environment_name: "工作&A".into(),
             launch_name: Some("cc-work".into()),
+            usage_summary: None,
         };
         assert_eq!(
             environment_menu_label(&environment),
@@ -370,6 +388,26 @@ mod tests {
                 ..environment
             }),
             "环境 · 工作&&A（查看）"
+        );
+    }
+
+    #[test]
+    fn tray_labels_show_cached_usage_without_touching_actions() {
+        assert_eq!(
+            agent_menu_label("Claude&Code", "官方账号", Some("5 小时已用 82%（缓存）")),
+            "Claude&&Code · 官方账号 · 5 小时已用 82%（缓存）"
+        );
+        let environment = TrayEnvironment {
+            agent_id: "claude-code".into(),
+            agent_name: "Claude Code".into(),
+            environment_id: "work".into(),
+            environment_name: "工作账号".into(),
+            launch_name: Some("cc-work".into()),
+            usage_summary: Some("7 天已用 90%（旧记录）".into()),
+        };
+        assert_eq!(
+            environment_menu_label(&environment),
+            "环境 · 工作账号 · cc-work · 7 天已用 90%（旧记录）"
         );
     }
 }

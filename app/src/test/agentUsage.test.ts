@@ -6,6 +6,7 @@ import {
   isWindowExpired,
   resetLabel,
   tightestWindow,
+  trayUsageSummary,
   usageTone,
   windowLabel,
 } from "../lib/agentUsage";
@@ -76,6 +77,21 @@ describe("额度展示口径", () => {
     expect(tightestWindow(usage)?.used_percent).toBe(71);
     expect(tightestWindow({ ...usage, windows: [] })).toBeNull();
     expect(tightestWindow(null)).toBeNull();
+  });
+
+  it("托盘只显示有效窗口的缓存额度，旧记录有标记", () => {
+    const usage: AgentUsage = {
+      source: "local-cache",
+      checked_at: "2026-09-18T03:00:00Z",
+      windows: [
+        { window_minutes: 300, used_percent: 82, resets_at: "2026-09-18T05:00:00Z" },
+        { window_minutes: 10080, used_percent: 25, resets_at: "2026-09-21T04:00:00Z" },
+      ],
+    };
+    expect(trayUsageSummary(usage, NOW)).toBe("5 小时已用 82%（缓存）");
+    expect(trayUsageSummary(usage, new Date("2026-09-19T04:00:00Z"))).toBe("7 天已用 25%（旧记录）");
+    expect(trayUsageSummary(usage, new Date("2026-09-22T04:00:00Z"))).toBeNull();
+    expect(trayUsageSummary(null, NOW)).toBeNull();
   });
 
   it("余额只显示两位；颜色档在 80/90 分界", () => {

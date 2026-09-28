@@ -14,6 +14,8 @@ export interface TrayConnection {
   profileLabel: string;
   /** 与客户端实际配置一致的那一项（引擎按内容识别）。 */
   current: boolean;
+  /** 来自该助手实际配置目录的本机额度缓存；没有有效窗口时为 null。 */
+  usageSummary: string | null;
 }
 
 export interface TrayEnvironment {
@@ -23,11 +25,13 @@ export interface TrayEnvironment {
   environmentName: string;
   /** 来自实际别名文件；没有可用命令时只打开环境卡片。 */
   launchName: string | null;
+  /** 来自这个独立环境配置目录的本机额度缓存。 */
+  usageSummary: string | null;
 }
 
 export type TrayAction = "search" | "takeover"
-  | ({ type: "switch-connection" } & Omit<TrayConnection, "current">)
-  | ({ type: "open-environment" } & TrayEnvironment);
+  | ({ type: "switch-connection" } & Omit<TrayConnection, "current" | "usageSummary">)
+  | ({ type: "open-environment" } & Omit<TrayEnvironment, "usageSummary">);
 
 const TRAY_ACTION_EVENT = "tray-action";
 

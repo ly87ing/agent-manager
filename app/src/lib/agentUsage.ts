@@ -80,6 +80,13 @@ export function tightestWindow(
   return live.reduce((worst, item) => (item.used_percent > worst.used_percent ? item : worst));
 }
 
+/** 托盘只放最吃紧的有效窗口；旧记录明确标出，避免把缓存当实时额度。 */
+export function trayUsageSummary(usage: AgentUsage | null | undefined, now: Date = new Date()): string | null {
+  const window = tightestWindow(usage, now);
+  if (!window) return null;
+  return `${windowLabel(window.window_minutes)}已用 ${Math.round(window.used_percent)}%${isStale(usage?.checked_at ?? null, now) ? "（旧记录）" : "（缓存）"}`;
+}
+
 /** 余额是长小数串（"2443.0204250000"），显示两位就够。 */
 export function creditsLabel(credits: string | undefined): string | null {
   if (!credits) return null;

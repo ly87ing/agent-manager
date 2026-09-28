@@ -12,6 +12,8 @@ import {
 } from "../lib/agentCurrent";
 import { isOfficial } from "../lib/defaultEnvironment";
 import { parseAliasValue } from "../lib/aliasCommand";
+import { trayUsageSummary } from "../lib/agentUsage";
+import type { AgentUsage, AgentsObserved } from "../lib/observed";
 import { launchCommandsForProfile, profileKindOf } from "../lib/profileDefinition";
 import { useExecutions } from "../lib/execution";
 import { useEngineQuery } from "../lib/queries";
@@ -106,6 +108,7 @@ export function CommandPalette({
   const [targetItemId, setTargetItemId] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const [switchingTarget, setSwitchingTarget] = useState<string | null>(null);
+  const [usageNow, setUsageNow] = useState(() => new Date());
   /** 切换前的回填被拒：由用户显式选择放弃，或先去选密钥文件。 */
   const [pendingSwitch, setPendingSwitch] = useState<{
     request: ConnectionSwitchRequest;
@@ -116,6 +119,12 @@ export function CommandPalette({
   const switchBusyRef = useRef(false);
   const refreshUpstream = useRefreshUpstream();
   const { execute } = useExecutions();
+
+  useEffect(() => {
+    // 不重扫会话文件；只让托盘里的缓存额度在窗口重置后消失、过旧后标明。
+    const timer = window.setInterval(() => setUsageNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // 托盘快切在窗口隐藏时也要有可信的脱敏状态，因此这两项保持热缓存；
   // React Query 会与助手页共享请求，不会为同一状态另建数据源。
@@ -216,10 +225,11 @@ export function CommandPalette({
         profile: "",
         profileLabel: "官方账号",
         current: Boolean(agents.data?.ok && isCurrentConnection(agents.data.data, agentId, "")),
+        usageSummary: trayUsageSummary((element.observed as AgentsObserved).usage, usageNow),
       });
     }
     return out;
-  }, [agents.data, profiles.data]);
+  }, [agents.data, profiles.data, usageNow]);
 
   const trayEnvironments = useMemo<TrayEnvironment[]>(() => {
     const out: TrayEnvironment[] = [];
@@ -233,18 +243,18 @@ export function CommandPalette({
         : undefined;
       const agentName = (agent?.spec as { display_name?: string } | undefined)?.display_name ?? agentId;
       const environmentName = spec.display_name ?? id;
-      const observed = element.observed as { config_dir?: string };
+      const observed = element.observed as { config_dir?: string; usage?: AgentUsage | null };
       const configDir = observed.config_dir ?? spec.config_dir ?? "";
       const ready = element.state === "managed-ok" || element.state === "drifted";
       const commands = ready && configDir
         ? launchCommandsForProfile(aliasValues, spec.kind === "codex" ? "codex" : profileKindOf(agentId), configDir, (value) => parseAliasValue(value).otherEnv)
         : [];
       for (const launchName of commands.length ? commands.map((command) => command.name) : [null]) {
-        out.push({ agentId, agentName, environmentId: id, environmentName, launchName });
+        out.push({ agentId, agentName, environmentId: id, environmentName, launchName, usageSummary: trayUsageSummary(observed.usage, usageNow) });
       }
     }
     return out;
-  }, [agents.data, profiles.data, aliasValues]);
+  }, [agents.data, profiles.data, aliasValues, usageNow]);
 
   useEffect(() => {
     // 三份状态都成功后才替换原生菜单，避免瞬时读取失败清空上一次可用菜单。
