@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { LayoutGrid, Plus, SearchX, Server } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -52,9 +52,34 @@ export default function McpPage() {
   const savedExtraArgs = useRef<Record<string, string[]>>({});
   const [copying, setCopying] = useState<{ element: EngineElement; agent: string; cell: McpAgentCell } | null>(null);
   const [pendingRemove, setPendingRemove] = useState<{ element: EngineElement; agent: string; cell: McpAgentCell } | null>(null);
+  const [removePreview, setRemovePreview] = useState<{
+    key: string;
+    files: { path: string; exists: boolean; content: string }[];
+    warnings: string[];
+    error?: string;
+  } | null>(null);
   const [pendingForget, setPendingForget] = useState<EngineElement | null>(null);
   const [editingSecret, setEditingSecret] = useState<string | null>(null);
   const tabRefs = useRef<Record<"services" | "agents", HTMLButtonElement | null>>({ services: null, agents: null });
+  const removeKey = pendingRemove ? JSON.stringify([pendingRemove.element.id, pendingRemove.agent, pendingRemove.cell.base]) : "";
+
+  useEffect(() => {
+    if (!pendingRemove) return;
+    let current = true;
+    const args = ["--only", pendingRemove.element.id, "--agent", pendingRemove.agent,
+      "--action", "remove", "--base", pendingRemove.cell.base];
+    void runEngine<{ files: { path: string; exists: boolean; content: string }[] }>("mcp:preview", args)
+      .then((envelope) => {
+        if (!current) return;
+        setRemovePreview(envelope.ok
+          ? { key: removeKey, files: envelope.data.files, warnings: envelope.warnings.map((warning) => warning.message) }
+          : { key: removeKey, files: [], warnings: [], error: envelope.errors[0]?.message ?? "预览失败" });
+      })
+      .catch((reason) => {
+        if (current) setRemovePreview({ key: removeKey, files: [], warnings: [], error: engineErrorMessage(reason) });
+      });
+    return () => { current = false; };
+  }, [removeKey]);
 
   const handleTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, tab: "services" | "agents") => {
     const tabs: ("services" | "agents")[] = ["services", "agents"];
@@ -105,6 +130,7 @@ export default function McpPage() {
       return;
     }
     if (action === "remove") {
+      setRemovePreview(null);
       setPendingRemove({ element, agent, cell });
       return;
     }
@@ -418,7 +444,9 @@ export default function McpPage() {
               : `从 ${pendingRemove.agent} 的配置文件里删掉这一条${pendingRemove.cell.has_saved ? "，连同本工具保存的停用内容" : ""}，其他条目与配置保持不变。确认后执行。`
           }
           risk="write-local"
+          riskLabel={pendingRemove.cell.source === "saved" ? "删除已保存内容" : undefined}
           confirmLabel="确认删除"
+          confirmDisabled={removePreview?.key !== removeKey || Boolean(removePreview.error)}
           executing={busy}
           onConfirm={() => {
             const { element, agent, cell } = pendingRemove;
@@ -435,7 +463,22 @@ export default function McpPage() {
             ]);
           }}
           onClose={() => setPendingRemove(null)}
-        />
+        >
+          <section className="mt-3 space-y-2 rounded border p-3 text-xs" data-testid="mcp-remove-preview">
+            <p className="font-medium">删除后的配置文件</p>
+            {removePreview?.key !== removeKey && <p className="text-muted-foreground">正在读取实际文件并计算…</p>}
+            {removePreview?.key === removeKey && removePreview.error && <p role="alert" className="text-destructive">{removePreview.error}</p>}
+            {removePreview?.key === removeKey && !removePreview.error && <>
+              {removePreview.files.length === 0 && <p className="text-muted-foreground">只删除已保存的停用内容，助手配置文件不变。</p>}
+              {removePreview.files.map((file) => <div key={file.path} className="space-y-1">
+                <p className="break-all font-mono">{file.path}{file.exists ? "（已有文件）" : "（将新建）"}</p>
+                <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono" data-testid="mcp-remove-preview-content">{file.content}</pre>
+              </div>)}
+              {removePreview.warnings.map((warning) => <p key={warning} className="text-warning">{warning}</p>)}
+            </>}
+            <p className="text-muted-foreground">只读预览；文件原文可能含敏感值，仅在本机查看。</p>
+          </section>
+        </ConfirmModal>
       )}
 
       {pendingForget && (

@@ -17,6 +17,7 @@ export function ConfirmModal({
   riskLabel,
   requireText,
   confirmLabel = "确认执行",
+  confirmDisabled = false,
   executing,
   resultErrors,
   children,
@@ -31,6 +32,7 @@ export function ConfirmModal({
   riskLabel?: string;
   requireText?: string;
   confirmLabel?: string;
+  confirmDisabled?: boolean;
   executing: boolean;
   resultErrors?: Diagnostic[] | null;
   children?: ReactNode;
@@ -41,7 +43,7 @@ export function ConfirmModal({
 }) {
   const [text, setText] = useState("");
   const needsText = requireText !== undefined;
-  const blocked = executing || (needsText && text !== requireText);
+  const blocked = executing || confirmDisabled || (needsText && text !== requireText);
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({
     onEscape: executing ? undefined : onClose,
     initialFocusSelector: needsText ? '[data-testid="confirm-modal-input"]' : '[data-testid="confirm-modal-cancel"]',

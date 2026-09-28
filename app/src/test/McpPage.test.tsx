@@ -14,10 +14,11 @@ function routes(
   return {
     "mcp:status": makeEnvelope(status, { command: "mcp.status" }),
     "mcp:preview": async (args: string[]) => makeEnvelope({
-      files: [{
+      files: args.includes("mcp:old-snap") && args.includes("remove") ? [] : [{
         path: `/isolated/${args.includes("--to") ? args[args.indexOf("--to") + 1] : args[args.indexOf("--agent") + 1]}/config`,
         exists: true,
-        content: args.includes("--spec") ? JSON.stringify(specOf(args)) : "复制后完整配置：fs-mcp",
+        content: args.includes("--spec") ? JSON.stringify(specOf(args))
+          : args.includes("remove") ? "删除后完整配置：保留其他服务" : "复制后完整配置：fs-mcp",
       }],
     }, { command: "mcp.preview" }),
     "mcp:apply": apply,
@@ -97,7 +98,7 @@ describe("McpPage：实际条目为主", () => {
     });
   });
 
-  it("停用/启用直接执行并带 base；删除需独立确认", async () => {
+  it("停用/启用直接执行并带 base；删除前预览完整文件且需独立确认", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
     await userEvent.click(await screen.findByTestId("action-disable-mcp:fs-claude-code"));
     await waitFor(() => expect(applyCalls(calls)).toHaveLength(1));
@@ -109,9 +110,63 @@ describe("McpPage：实际条目为主", () => {
 
     await userEvent.click(screen.getByTestId("action-remove-mcp:remote-api-codex"));
     expect(applyCalls(calls)).toHaveLength(2);
+    const dialog = await screen.findByRole("dialog", { name: /从 codex 删除 remote-api/ });
+    expect(await within(dialog).findByTestId("mcp-remove-preview-content")).toHaveTextContent("删除后完整配置");
+    expect(within(dialog).getByText("/isolated/codex/config（已有文件）")).toBeInTheDocument();
+    const removePreview = calls.find((call) => call.command === "mcp:preview" && call.args.includes("remove"));
     await userEvent.click(await screen.findByRole("button", { name: "确认删除" }));
     await waitFor(() => expect(applyCalls(calls)).toHaveLength(3));
     expect(applyCalls(calls)[2].args).toEqual(["--only", "mcp:remote-api", "--agent", "codex", "--action", "remove", "--base", BASE_CODEX_REMOTE]);
+    expect(removePreview?.args).toEqual(applyCalls(calls)[2].args);
+  });
+
+  it("删除已保存的停用内容时明确说明文件不变；预览失败时不能删除", async () => {
+    const { calls, unmount } = renderWithEngine(<McpPage />, routes());
+    await userEvent.click(await screen.findByTestId("action-remove-mcp:old-snap-claude-code"));
+    const dialog = await screen.findByRole("dialog", { name: /从 claude-code 删除 old-snap/ });
+    expect(within(dialog).getByText("删除已保存内容")).toBeInTheDocument();
+    expect(await within(dialog).findByText("只删除已保存的停用内容，助手配置文件不变。")).toBeInTheDocument();
+    expect(within(dialog).queryByTestId("mcp-remove-preview-content")).toBeNull();
+    expect(applyCalls(calls)).toHaveLength(0);
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(applyCalls(calls)).toHaveLength(0);
+    unmount();
+
+    const failing = routes();
+    failing["mcp:preview"] = makeEnvelope(null, {
+      command: "mcp.preview", ok: false,
+      errors: [{ code: "MCP_ERROR", element: null, message: "配置文件已变化" }],
+    });
+    const failed = renderWithEngine(<McpPage />, failing);
+    await userEvent.click(await screen.findByTestId("action-remove-mcp:remote-api-codex"));
+    const failedDialog = await screen.findByRole("dialog", { name: /从 codex 删除 remote-api/ });
+    expect(await within(failedDialog).findByRole("alert")).toHaveTextContent("配置文件已变化");
+    expect(within(failedDialog).getByRole("button", { name: "确认删除" })).toBeDisabled();
+    expect(applyCalls(failed.calls)).toHaveLength(0);
+  });
+
+  it("同一条目取消后重新打开时等待新预览，不沿用上次的文件结果", async () => {
+    let previews = 0;
+    let finishSecond: ((result: Envelope) => void) | undefined;
+    const handlers = routes();
+    handlers["mcp:preview"] = async () => {
+      previews += 1;
+      if (previews === 2) return new Promise<Envelope>((resolve) => { finishSecond = resolve; });
+      return makeEnvelope({ files: [{ path: "/isolated/codex/config", exists: true, content: "第一次的结果" }] });
+    };
+    renderWithEngine(<McpPage />, handlers);
+    const remove = await screen.findByTestId("action-remove-mcp:remote-api-codex");
+    await userEvent.click(remove);
+    const first = await screen.findByRole("dialog", { name: /从 codex 删除 remote-api/ });
+    expect(await within(first).findByTestId("mcp-remove-preview-content")).toHaveTextContent("第一次的结果");
+    await userEvent.click(within(first).getByRole("button", { name: "取消" }));
+    await userEvent.click(remove);
+    const second = await screen.findByRole("dialog", { name: /从 codex 删除 remote-api/ });
+    expect(within(second).queryByTestId("mcp-remove-preview-content")).toBeNull();
+    expect(within(second).getByRole("button", { name: "确认删除" })).toBeDisabled();
+    await waitFor(() => expect(finishSecond).toBeDefined());
+    finishSecond?.(makeEnvelope({ files: [{ path: "/isolated/codex/config", exists: true, content: "第二次的结果" }] }));
+    expect(await within(second).findByTestId("mcp-remove-preview-content")).toHaveTextContent("第二次的结果");
   });
 
   it("复制到另一个助手：目标有同名条目时必须勾选替换，并带目标条目的 base", async () => {

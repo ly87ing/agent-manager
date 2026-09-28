@@ -1482,12 +1482,35 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       if (command === "mcp:preview") {
         const agent = argOf(args, "--agent") ?? "";
         const to = argOf(args, "--to");
+        const action = argOf(args, "--action");
         const name = (argOf(args, "--only") ?? "").replace(/^mcp:/, "");
-        const target = (routes["mcp:status"].data as { targets: Array<{ agent: string; path: string; format: string; exists: boolean }> })
-          .targets.find((item) => item.agent === (to ?? agent));
+        const status = routes["mcp:status"].data as {
+          targets: Array<{ agent: string; path: string; format: string; exists: boolean }>;
+          elements: Array<{ id: string; observed: { agents: Record<string, { entry?: Record<string, unknown>; source: string }> } }>;
+        };
+        const target = status.targets.find((item) => item.agent === (to ?? agent));
         if (!target) throw new EngineBridgeError({ kind: "invalid_args", message: "找不到 MCP 目标" });
-        const source = (routes["mcp:status"].data as { elements: Array<{ id: string; observed: { agents: Record<string, { entry: Record<string, unknown> }> } }> })
-          .elements.find((item) => item.id === `mcp:${name}`);
+        const source = status.elements.find((item) => item.id === `mcp:${name}`);
+        if (action === "remove") {
+          if (source?.observed.agents[agent]?.source === "saved") {
+            return makeEnvelope({ files: [] }, { command: "mcp.preview" });
+          }
+          const remaining = status.elements.flatMap((item) => {
+            const cell = item.observed.agents[agent];
+            return item.id === `mcp:${name}` || !cell || cell.source === "saved" || !cell.entry
+              ? [] : [{ name: item.id.replace(/^mcp:/, ""), entry: cell.entry }];
+          });
+          const content = target.format === "codex-toml"
+            ? `# 演示数据；正式预览按实际文件计算\n${remaining.map((item) => {
+              const fields = ["command", "args", "url", "enabled"]
+                .filter((field) => item.entry[field] !== undefined)
+                .map((field) => `${field} = ${JSON.stringify(item.entry[field])}`);
+              return `[mcp_servers.${item.name}]\n${fields.join("\n")}`;
+            }).join("\n\n")}\n`
+            : JSON.stringify({ [target.format === "opencode-json" ? "mcp" : "mcpServers"]:
+              Object.fromEntries(remaining.map((item) => [item.name, item.entry])) }, null, 2);
+          return makeEnvelope({ files: [{ path: target.path, exists: target.exists, content }] }, { command: "mcp.preview" });
+        }
         const spec = to ? source?.observed.agents[agent]?.entry ?? {} : JSON.parse(argOf(args, "--spec") ?? "{}") as Record<string, unknown>;
         const content = target.format === "codex-toml"
           ? `[mcp_servers.${name}]\ncommand = ${JSON.stringify(spec.command ?? "npx")}\nargs = ${JSON.stringify(spec.args ?? [])}\n`

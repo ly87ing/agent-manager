@@ -101,7 +101,7 @@ fn preview_matches_add_and_edit_without_writing_and_rejects_stale_entry() {
         ],
     );
     assert!(!unsupported.ok);
-    assert!(errors(&unsupported).contains("仅支持 add/edit/copy"));
+    assert!(errors(&unsupported).contains("仅支持 add/edit/copy/remove"));
     assert!(!ctx.data_dir.exists());
     let spec = r#"{"command":"npx","args":["-y","example-mcp"]}"#;
     for (agent, path) in [
@@ -1094,6 +1094,28 @@ fn claude_disable_snapshots_entry_transfers_secrets_and_enable_restores_identica
     assert_eq!(c["actions"], json!(["enable", "copy", "remove"]));
     assert_eq!(element(&status(&ctx), "fs")["state"], "disabled");
 
+    let remove_args = [
+        "--only",
+        "mcp:fs",
+        "--agent",
+        "claude-code",
+        "--action",
+        "remove",
+        "--base",
+        &base(&ctx, "fs", "claude-code"),
+    ];
+    let before_file = read(&claude_path(&ctx));
+    let before_db = db_bytes(&ctx);
+    let preview = run(&ctx, "mcp:preview", &remove_args);
+    assert!(preview.ok, "{}", errors(&preview));
+    assert_eq!(
+        preview.data["files"],
+        json!([]),
+        "已保存的停用项不会改配置文件"
+    );
+    assert_eq!(read(&claude_path(&ctx)), before_file);
+    assert_eq!(db_bytes(&ctx), before_db, "删除预览不得写库");
+
     for name in ["fs", "remote"] {
         apply_ok(
             &ctx,
@@ -1622,18 +1644,27 @@ fn remove_keeps_other_tables_and_comments() {
     let (root, ctx) = temp_ctx("remove");
     let text = "# top\nmodel = \"o3\"\n\n# user note\n# [agent-manager:managed]\n[mcp_servers.target]\ncommand = \"x\"\n[mcp_servers.target.env]\nK = \"v\"\n\n# before keep\n[mcp_servers.keep]\ncommand = \"k\"\n";
     write_codex(&ctx, text);
-    apply_ok(
-        &ctx,
-        &[
-            "--only",
-            "mcp:target",
-            "--agent",
-            "codex",
-            "--action",
-            "remove",
-            "--base",
-            &base(&ctx, "target", "codex"),
-        ],
+    let args = [
+        "--only",
+        "mcp:target",
+        "--agent",
+        "codex",
+        "--action",
+        "remove",
+        "--base",
+        &base(&ctx, "target", "codex"),
+    ];
+    let before_db = db_bytes(&ctx);
+    let preview = run(&ctx, "mcp:preview", &args);
+    assert!(preview.ok, "{}", errors(&preview));
+    let expected = preview.data["files"][0]["content"].as_str().unwrap();
+    assert_eq!(read(&codex_path(&ctx)), text, "预览不得修改目标文件");
+    assert_eq!(db_bytes(&ctx), before_db, "预览不得写库");
+    apply_ok(&ctx, &args);
+    assert_eq!(
+        read(&codex_path(&ctx)),
+        expected,
+        "删除预览须与写入逐字节一致"
     );
     assert_eq!(
         read(&codex_path(&ctx)),
