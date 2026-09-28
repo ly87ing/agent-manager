@@ -1238,6 +1238,71 @@ describe("助手实例", () => {
     expect(within(card).getByTestId("profile-config-file-toggle-cc-ly")).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("Provider 更新一个环境失败后继续更新另一环境，并报告未确认项", async () => {
+    const definition = (id: string, candidate?: Record<string, unknown>) => ({
+      display_name: id, bin: "claude",
+      profile: {
+        base_agent: "claude-code", kind: "claude", config_dir: `~/.claude-${id}`,
+        source_connection: "relay",
+        env: { ANTHROPIC_BASE_URL: "https://old.example.com", ANTHROPIC_AUTH_TOKEN: "${MY_TOKEN}" },
+        ...candidate,
+      },
+    });
+    const profile = (id: string, updated = false) => profileElement({
+      id: `profiles:${id}`,
+      state: "managed-ok",
+      observed: {
+        ...(profileElement().observed as Record<string, unknown>),
+        config_dir: `~/.claude-${id}`, target: `~/.claude-${id}/settings.json`,
+        base: updated ? "c".repeat(64) : "a".repeat(64),
+        definition_base: updated ? "d".repeat(64) : "b".repeat(64),
+        target_exists: true,
+        fields: [
+          { field: "env.ANTHROPIC_BASE_URL", state: "same", definition: updated ? "https://new.example.com" : "https://old.example.com", live: updated ? "https://new.example.com" : "https://old.example.com" },
+          { field: "env.ANTHROPIC_AUTH_TOKEN", state: "same", definition: "${MY_TOKEN}", live: "<hidden>", purpose: "credential" },
+        ],
+      },
+    });
+    let secondCandidate: Record<string, unknown> | undefined;
+    const all = routes([profile("cc-one"), profile("cc-two")]) as Record<string, Envelope | ((args: string[]) => Promise<Envelope>)>;
+    const agent = (all["agents:status"] as Envelope<{ elements: { spec: Record<string, unknown>; observed: Record<string, unknown> }[] }>).data.elements[0];
+    agent.observed.current_config = { state: "missing", base: "missing", config: null, current: null };
+    agent.spec.settings = { profiles: { relay: { label: "Relay", base_url: "https://old.example.com", auth: "token", token_var: "MY_TOKEN", model: "" } } };
+    all["policy:get"] = async () => makeEnvelope(makePolicyData({ effective: {
+      agents: { definitions: { "cc-one": definition("cc-one"), "cc-two": definition("cc-two", secondCandidate) } },
+    } }), { command: "policy.get" });
+    all["profiles:status"] = async () => makeEnvelope({
+      domain: "profiles", elements: [profile("cc-one"), profile("cc-two", Boolean(secondCandidate))],
+    }, { command: "profiles.status" });
+    all["profiles:preview"] = async (args) => makeEnvelope({
+      path: `~/.claude-${args[1].replace("profiles:", "")}/settings.json`, exists: true,
+      content: JSON.stringify(JSON.parse(args[args.indexOf("--candidate") + 1])),
+    }, { command: "profiles.preview" });
+    all["profiles:apply-definition"] = async (args) => {
+      if (args[1] === "profiles:cc-one") {
+        return makeEnvelope(null, { ok: false, command: "profiles.apply-definition", errors: [{ code: "PROFILE_ERROR", message: "目标文件已被外部修改", element: null }] });
+      }
+      secondCandidate = JSON.parse(args[args.indexOf("--candidate") + 1]);
+      return makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply-definition" });
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
+    const dialog = await screen.findByRole("dialog", { name: "编辑 Relay" });
+    await userEvent.clear(within(dialog).getByTestId("new-connection-base-url"));
+    await userEvent.type(within(dialog).getByTestId("new-connection-base-url"), "https://new.example.com");
+    await userEvent.click(within(dialog).getByTestId("connection-update-cc-one"));
+    await userEvent.click(within(dialog).getByTestId("connection-update-cc-two"));
+    expect(await within(dialog).findByTestId("connection-preview-content-cc-one")).toHaveTextContent("https://new.example.com");
+    expect(await within(dialog).findByTestId("connection-preview-content-cc-two")).toHaveTextContent("https://new.example.com");
+    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    expect(await screen.findByText("Provider 已保存，1 个环境已更新，1 个未确认")).toBeInTheDocument();
+    expect(screen.getByText(/cc-one。请到对应环境卡片查看实际配置后再操作/)).toBeInTheDocument();
+    expect(calls.filter((call) => call.command === "profiles:apply-definition").map((call) => call.args[1])).toEqual([
+      "profiles:cc-one", "profiles:cc-two",
+    ]);
+    expect(secondCandidate).toMatchObject({ env: { ANTHROPIC_BASE_URL: "https://new.example.com" } });
+  });
+
   it("Provider 上次保存时未同步的环境，再打开编辑可逐字段补同步", async () => {
     const definition = {
       display_name: "Claude Code · ly",
@@ -1317,6 +1382,41 @@ describe("助手实例", () => {
     const impact = within(dialog).getByTestId("connection-affected-cc-ly");
     expect(impact).toHaveTextContent("实际配置与定义不同");
     expect(within(impact).getByRole("checkbox")).toBeDisabled();
+    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
+  });
+
+  it("旧环境同时匹配两个 Provider 时不猜来源，也不允许勾选更新", async () => {
+    const all = routes([profileElement({
+      state: "managed-ok",
+      observed: {
+        ...(profileElement().observed as Record<string, unknown>),
+        base: "a".repeat(64), definition_base: "b".repeat(64), target_exists: true,
+      },
+    })]);
+    const agent = (all["agents:status"].data as { elements: { spec: Record<string, unknown>; observed: Record<string, unknown> }[] }).elements[0];
+    agent.observed.current_config = { state: "missing", base: "missing", config: null, current: null };
+    const sameEndpoint = { base_url: "https://api.example.com", auth: "token", token_var: "MY_TOKEN" };
+    agent.spec.settings = { profiles: {
+      relay: { label: "Relay", ...sameEndpoint },
+      backup: { label: "Backup", ...sameEndpoint },
+    } };
+    (all["policy:get"].data as { effective: Record<string, unknown> }).effective = {
+      agents: { definitions: { "cc-ly": {
+        display_name: "Claude Code · ly",
+        profile: { base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-cc-ly",
+          env: { ANTHROPIC_BASE_URL: "https://api.example.com", ANTHROPIC_AUTH_TOKEN: "${MY_TOKEN}" } },
+      } } },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
+    const dialog = await screen.findByRole("dialog", { name: "编辑 Relay" });
+    await userEvent.clear(within(dialog).getByTestId("new-connection-base-url"));
+    await userEvent.type(within(dialog).getByTestId("new-connection-base-url"), "https://new.example.com");
+    const impact = within(dialog).getByTestId("connection-affected-cc-ly");
+    expect(impact).toHaveTextContent("旧环境同时匹配多个 Provider，不能自动判断来源");
+    expect(within(impact).getByTestId("connection-update-cc-ly")).toBeDisabled();
     await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
     await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
     expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
