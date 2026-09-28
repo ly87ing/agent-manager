@@ -68,7 +68,7 @@ import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource } from "../lib/useAliasS
 import { useDirectApply } from "../lib/useDirectApply";
 import { useExecutions } from "../lib/execution";
 import { seedArgs, summarizeSeed, type SeedItem, type SeedResult } from "../lib/profileSeed";
-import { sharedApplyArgs, type SharedItem, type SharedStatus } from "../lib/profileShared";
+import { sharedApplyArgs, sharedPreviewArgs, type SharedItem, type SharedPreview, type SharedStatus } from "../lib/profileShared";
 import { isOfficial, switchBackEffects } from "../lib/defaultEnvironment";
 import { DEFAULT_SECRETS_PATH, secretSourceOf } from "../lib/secretSource";
 
@@ -811,6 +811,15 @@ export default function AgentsPage({
     }
   };
 
+  const sharedPreview = async (id: string, items: SharedItem[]): Promise<SharedPreview | string> => {
+    try {
+      const envelope = await runEngine<SharedPreview>("profiles:shared-preview", sharedPreviewArgs(id, items));
+      return envelope.ok ? envelope.data : envelope.errors[0]?.message ?? "共用设置预览失败";
+    } catch (err) {
+      return String(err);
+    }
+  };
+
   const applyShared = async (id: string, item: SharedItem): Promise<string | null> => {
     try {
       const envelope = await execute({
@@ -1140,6 +1149,7 @@ export default function AgentsPage({
                   }}
                   onCheckBalance={() => fetchBalance(["--only", element.id])}
                   onSharedStatus={() => sharedStatus(id)}
+                  onSharedPreview={(items) => sharedPreview(id, items)}
                   onSharedApply={(item) => applyShared(id, item)}
                   onCheckEndpoint={async () => {
                     try {

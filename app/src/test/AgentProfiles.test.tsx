@@ -526,6 +526,10 @@ describe("助手实例", () => {
         field_diffs: [{ field: "正文", source: "3 行（内容隐藏）", target: "2 行（内容隐藏）" }],
         source_base: "a".repeat(64), target_base: "b".repeat(64), blocked_reason: null,
       }] }, { command: "profiles.shared-status" }),
+      "profiles:shared-preview": makeEnvelope({
+        files: [{ path: "/tmp/cc-ly/CLAUDE.md", exists: true, content: "# 来源规则\n" }],
+        results: [{ item: "rules", state: "ready", detail: "可更新" }],
+      }, { command: "profiles.shared-preview" }),
       "profiles:shared-apply": makeEnvelope(null, {
         command: "profiles.shared-apply", ok: false,
         errors: [{ code: "PROFILE_ERROR", element: null, message: "来源或环境配置已变化，请刷新差异后重试" }],
@@ -537,12 +541,37 @@ describe("助手实例", () => {
     await userEvent.click(within(card).getByTestId("profile-shared-cc-ly"));
     const panel = within(card).getByTestId("profile-shared-panel-cc-ly");
     await userEvent.click(within(await within(panel).findByTestId("profile-shared-row-cc-ly-rules")).getByRole("checkbox"));
+    expect(await within(panel).findByTestId("profile-shared-file-cc-ly-0")).toHaveTextContent("# 来源规则");
     await userEvent.click(within(panel).getByTestId("profile-shared-run-cc-ly"));
     expect(await within(panel).findByText(/来源或环境配置已变化/)).toBeInTheDocument();
     expect(within(panel).getByTestId("profile-shared-row-cc-ly-rules")).toHaveTextContent("两边不同");
     expect(calls.some((call) => call.command === "profiles:shared-apply")).toBe(true);
     await userEvent.click(within(panel).getByTestId("profile-shared-refresh-cc-ly"));
     expect(within(panel).getByTestId("profile-shared-run-cc-ly")).toBeDisabled();
+  });
+
+  it("共用设置预览失败时不允许按旧结果写入", async () => {
+    const routeMap = {
+      ...routes(),
+      "profiles:shared-status": makeEnvelope({ domain: "profiles", items: [{
+        item: "rules", state: "different", source: "已设置", target: "已设置",
+        changed_fields: ["正文"], field_diffs: [],
+        source_base: "a".repeat(64), target_base: "b".repeat(64), blocked_reason: null,
+      }] }, { command: "profiles.shared-status" }),
+      "profiles:shared-preview": makeEnvelope(null, {
+        command: "profiles.shared-preview", ok: false,
+        errors: [{ code: "PROFILE_ERROR", element: null, message: "来源或环境配置已变化，请刷新差异后重试" }],
+      }),
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
+    await openInstanceManager();
+    const panel = within(await screen.findByTestId("profile-card-cc-ly")).getByTestId("profile-shared-cc-ly");
+    await userEvent.click(panel);
+    const shared = await screen.findByTestId("profile-shared-panel-cc-ly");
+    await userEvent.click(within(within(shared).getByTestId("profile-shared-row-cc-ly-rules")).getByRole("checkbox"));
+    expect(await within(shared).findByRole("alert")).toHaveTextContent("来源或环境配置已变化");
+    expect(within(shared).getByTestId("profile-shared-run-cc-ly")).toBeDisabled();
+    expect(calls.some((call) => call.command === "profiles:shared-apply")).toBe(false);
   });
 
   it("已有环境先看共用设置差异，默认不更新；逐项确认后回读", async () => {
@@ -567,6 +596,10 @@ describe("助手实例", () => {
           source_base: "c".repeat(64), target_base: "missing", blocked_reason: "来源条目含明文凭据",
         }],
       }, { command: "profiles.shared-status" }),
+      "profiles:shared-preview": async () => makeEnvelope({
+        files: [{ path: "/tmp/cc-ly/settings.json", exists: true, content: "{\"permissions\":{\"allow\":[\"Bash(ls:*)\"]}}" }],
+        results: [{ item: "permissions", state: "ready", detail: "可更新" }],
+      }, { command: "profiles.shared-preview" }),
       "profiles:shared-apply": async () => {
         applied = true;
         return makeEnvelope({ domain: "profiles", action: "shared-apply", item: "permissions", state: "updated" }, { command: "profiles.shared-apply" });
@@ -584,8 +617,12 @@ describe("助手实例", () => {
     expect(within(panel).getByTestId("profile-shared-run-cc-ly")).toBeDisabled();
     expect(within(within(panel).getByTestId("profile-shared-row-cc-ly-mcp:private")).getByRole("checkbox")).toBeDisabled();
     expect(calls.some((call) => call.command === "profiles:shared-apply")).toBe(false);
+    expect(calls.some((call) => call.command === "profiles:shared-preview")).toBe(false);
 
     await userEvent.click(within(permission).getByRole("checkbox"));
+    expect(await within(panel).findByTestId("profile-shared-file-cc-ly-0")).toHaveTextContent("Bash(ls:*)");
+    const selection = JSON.parse(calls.find((call) => call.command === "profiles:shared-preview")!.args[3]);
+    expect(selection).toEqual([{ item: "permissions", source_base: "a".repeat(64), target_base: "b".repeat(64) }]);
     await userEvent.click(within(panel).getByTestId("profile-shared-run-cc-ly"));
     await waitFor(() => expect(within(panel).getByText("权限规则：已更新并回读一致")).toBeInTheDocument());
     const update = calls.find((call) => call.command === "profiles:shared-apply")!;
@@ -605,6 +642,10 @@ describe("助手实例", () => {
       "profiles:shared-status": async () => makeEnvelope({
         domain: "profiles", items: [row("permissions", "different"), row("statusline", statuslineUpdated ? "same" : "different")],
       }, { command: "profiles.shared-status" }),
+      "profiles:shared-preview": async (args: string[]) => makeEnvelope({
+        files: [{ path: "/tmp/cc-ly/settings.json", exists: true, content: JSON.stringify(JSON.parse(args[3]).map((item: { item: string }) => item.item)) }],
+        results: JSON.parse(args[3]).map((item: { item: string }) => ({ item: item.item, state: "ready", detail: "可更新" })),
+      }, { command: "profiles.shared-preview" }),
       "profiles:shared-apply": async (args: string[]) => {
         if (args[3] === "permissions") return makeEnvelope(null, {
           command: "profiles.shared-apply", ok: false,
@@ -622,6 +663,7 @@ describe("助手实例", () => {
     for (const item of ["permissions", "statusline"]) {
       await userEvent.click(within(await within(panel).findByTestId(`profile-shared-row-cc-ly-${item}`)).getByRole("checkbox"));
     }
+    await waitFor(() => expect(within(panel).getByTestId("profile-shared-file-cc-ly-0")).toHaveTextContent("statusline"));
     await userEvent.click(within(panel).getByTestId("profile-shared-run-cc-ly"));
     expect(await within(panel).findByText("权限规则：目标已被外部修改")).toBeInTheDocument();
     expect(within(panel).getByText("状态栏：已更新并回读一致")).toBeInTheDocument();

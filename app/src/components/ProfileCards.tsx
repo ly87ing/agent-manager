@@ -11,7 +11,7 @@ import { StateBadge } from "./StateBadge";
 import { cn } from "../lib/utils";
 import { overrideEffect } from "../lib/overrideEffects";
 import { balanceSupported } from "../lib/balance";
-import { sharedItemLabel, type SharedItem } from "../lib/profileShared";
+import { sharedItemLabel, type SharedItem, type SharedPreview } from "../lib/profileShared";
 import { runEngine } from "../lib/engine";
 
 interface ProfileConfigFile {
@@ -49,6 +49,7 @@ export function ProfileCard({
   onCheckEndpoint,
   onCheckBalance,
   onSharedStatus,
+  onSharedPreview,
   onSharedApply,
   onWriteCredential,
 }: {
@@ -78,6 +79,8 @@ export function ProfileCard({
   onCheckBalance?: () => Promise<string>;
   /** 只读比较默认环境与这个环境的实际共用设置。 */
   onSharedStatus?: () => Promise<SharedItem[] | string>;
+  /** 只读计算所选项写入后的完整目标文件。 */
+  onSharedPreview?: (items: SharedItem[]) => Promise<SharedPreview | string>;
   /** 按预览的来源与目标摘要更新单项；失败时返回原因。 */
   onSharedApply?: (item: SharedItem) => Promise<string | null>;
   /** 只有密钥换了：直接把新密钥写进这个环境（不用确认覆盖其他内容，因为没有别的不同）。 */
@@ -88,6 +91,29 @@ export function ProfileCard({
   const [sharedSelected, setSharedSelected] = useState<string[]>([]);
   const [sharedBusy, setSharedBusy] = useState(false);
   const [sharedOutcome, setSharedOutcome] = useState<string[]>([]);
+  const [sharedPreview, setSharedPreview] = useState<{ key: string; result: SharedPreview | string } | null>(null);
+  const [sharedPreviewBusy, setSharedPreviewBusy] = useState(false);
+  const sharedPreviewRequest = useRef(0);
+  const sharedPreviewKey = JSON.stringify(Array.isArray(sharedItems)
+    ? sharedItems.filter((item) => sharedSelected.includes(item.item)).map((item) => [item.item, item.source_base, item.target_base])
+    : []);
+  useEffect(() => {
+    const request = ++sharedPreviewRequest.current;
+    const selected = Array.isArray(sharedItems) ? sharedItems.filter((item) => sharedSelected.includes(item.item)) : [];
+    if (!sharedOpen || !onSharedPreview || selected.length === 0) {
+      setSharedPreview(null);
+      setSharedPreviewBusy(false);
+      return;
+    }
+    setSharedPreviewBusy(true);
+    void onSharedPreview(selected).then((result) => {
+      if (request === sharedPreviewRequest.current) setSharedPreview({ key: sharedPreviewKey, result });
+    }).catch((error) => {
+      if (request === sharedPreviewRequest.current) setSharedPreview({ key: sharedPreviewKey, result: String(error) });
+    }).finally(() => {
+      if (request === sharedPreviewRequest.current) setSharedPreviewBusy(false);
+    });
+  }, [sharedOpen, sharedPreviewKey, sharedItems, onSharedPreview]);
   const [fileOpen, setFileOpen] = useState(false);
   const [fileKey, setFileKey] = useState<"main" | "mcp" | "hooks" | "rules">("main");
   const [file, setFile] = useState<ProfileConfigFile | null>(null);
@@ -97,6 +123,8 @@ export function ProfileCard({
   const loadShared = async () => {
     if (!onSharedStatus) return;
     setSharedBusy(true);
+    sharedPreviewRequest.current++;
+    setSharedPreview(null);
     try {
       setSharedItems(await onSharedStatus());
       setSharedSelected([]);
@@ -544,10 +572,10 @@ export function ProfileCard({
         </p>
       )}
 
-      {sharedOpen && onSharedStatus && onSharedApply && (
+      {sharedOpen && onSharedStatus && onSharedPreview && onSharedApply && (
         <div data-testid={`profile-shared-panel-${id}`} className="mt-3 rounded-lg border bg-muted/30 p-3">
           <p className="text-xs font-medium text-foreground">更新共用设置</p>
-          <p className="mt-1 text-xs text-muted-foreground">比较默认环境与此环境的实际文件。已有自定义内容默认保留；只更新你勾选的项。自由文本取值会隐藏，接入凭据不复制，含明文凭据的 MCP 条目会被拦下。</p>
+          <p className="mt-1 text-xs text-muted-foreground">比较默认环境与此环境的实际文件。已有自定义内容默认保留；只更新你勾选的项。差异列表隐藏自由文本；勾选后在本机显示目标文件原文，可能含敏感值，请勿分享。接入凭据不复制，含明文凭据的 MCP 条目会被拦下。</p>
           {sharedBusy && <p className="mt-2 text-xs text-muted-foreground">正在读取或更新…</p>}
           {typeof sharedItems === "string" && <p className="mt-2 text-xs text-destructive">{sharedItems}</p>}
           {Array.isArray(sharedItems) && (
@@ -557,7 +585,11 @@ export function ProfileCard({
                 return (
                   <label key={item.item} className="flex items-start gap-2 rounded border p-2 text-xs" data-testid={`profile-shared-row-${id}-${item.item}`}>
                     <input type="checkbox" className="mt-0.5" checked={sharedSelected.includes(item.item)} disabled={!selectable || sharedBusy}
-                      onChange={(event) => setSharedSelected((current) => event.target.checked ? [...current, item.item] : current.filter((value) => value !== item.item))} />
+                      onChange={(event) => {
+                        sharedPreviewRequest.current++;
+                        setSharedPreview(null);
+                        setSharedSelected((current) => event.target.checked ? [...current, item.item] : current.filter((value) => value !== item.item));
+                      }} />
                     <span>
                       <strong>{sharedItemLabel(item.item)}</strong> · {item.state === "same" ? "两边一致" : item.state === "absent" ? "默认环境未设置" : item.state === "blocked" ? "暂不可更新" : item.state === "new" ? "环境尚未设置" : "两边不同"}
                       <span className="mt-1 block text-muted-foreground">默认环境：{item.source}；此环境：{item.target}</span>
@@ -571,9 +603,26 @@ export function ProfileCard({
               })}
             </div>
           )}
+          {sharedSelected.length > 0 && (
+            <div className="mt-3 space-y-2" data-testid={`profile-shared-preview-${id}`}>
+              <p className="text-xs font-medium">所选项写入后的文件</p>
+              {(sharedPreviewBusy || sharedPreview?.key !== sharedPreviewKey) && <p className="text-xs text-muted-foreground">正在按当前实际文件计算…</p>}
+              {sharedPreview?.key === sharedPreviewKey && (typeof sharedPreview.result === "string"
+                ? <p role="alert" className="text-xs text-destructive">{sharedPreview.result}</p>
+                : <>
+                    {sharedPreview.result.results.map((result) => <p key={result.item} role={result.state === "failed" ? "alert" : undefined} className={cn("text-xs", result.state === "failed" ? "text-destructive" : "text-muted-foreground")}>
+                      {sharedItemLabel(result.item)}：{result.detail}
+                    </p>)}
+                    {sharedPreview.result.files.map((file, index) => <div key={file.path} className="space-y-1">
+                      <p className="break-all font-mono text-xs text-muted-foreground">{file.path}{file.exists ? " · 更新现有文件" : " · 新文件"}</p>
+                      <pre data-testid={`profile-shared-file-${id}-${index}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded border bg-muted p-2 font-mono text-xs">{file.content}</pre>
+                    </div>)}
+                  </>)}
+            </div>
+          )}
           <div className="mt-3 flex gap-2">
             <button type="button" data-testid={`profile-shared-refresh-${id}`} disabled={sharedBusy} onClick={() => void loadShared()} className="rounded border px-2.5 py-1 text-xs">刷新差异</button>
-            <button type="button" data-testid={`profile-shared-run-${id}`} disabled={sharedBusy || sharedSelected.length === 0} onClick={() => void runShared()} className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary disabled:opacity-50">更新所选</button>
+            <button type="button" data-testid={`profile-shared-run-${id}`} disabled={sharedBusy || sharedPreviewBusy || sharedSelected.length === 0 || sharedPreview?.key !== sharedPreviewKey || typeof sharedPreview.result === "string"} onClick={() => void runShared()} className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary disabled:opacity-50">更新所选</button>
             <button type="button" onClick={() => setSharedOpen(false)} className="rounded border px-2.5 py-1 text-xs">收起</button>
           </div>
           {sharedOutcome.length > 0 && <ul className="mt-2 space-y-1 text-xs">{sharedOutcome.map((line, index) => <li key={`${index}-${line}`}>{line}</li>)}</ul>}
@@ -657,7 +706,7 @@ export function ProfileCard({
         >
           <Copy className="h-3 w-3" aria-hidden /> 复制
         </button>
-        {onSharedStatus && onSharedApply && (
+        {onSharedStatus && onSharedPreview && onSharedApply && (
           <button type="button" data-testid={`profile-shared-${id}`} aria-expanded={sharedOpen}
             onClick={() => {
               setSharedOpen((open) => !open);
