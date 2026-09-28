@@ -1229,7 +1229,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     }
     return makeEnvelope({
       domain: "agents", element, path: observed.current_config?.target ?? file.path,
-      exists: true, content,
+      exists: true, file_base: "f".repeat(64), content,
     }, { command: "agents.preview-runtime" });
   };
   const previewDefault = (args: string[]): Envelope => {

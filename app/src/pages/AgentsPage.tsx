@@ -239,6 +239,7 @@ export default function AgentsPage({
   const [pendingRuntimeSave, setPendingRuntimeSave] = useState<{
     agent: EngineElement;
     patch: Record<string, unknown>;
+    fileBase: string;
   } | null>(null);
   /**
    * 切换前的回填被拒：实际令牌还没保存，或实际配置无法完整保存。由用户显式选择出路，
@@ -804,7 +805,7 @@ export default function AgentsPage({
   };
 
   /** 运行参数只发改动过的字段；完全放开先确认，取消时文件与库都不动。 */
-  const saveRuntimeSettings = (element: EngineElement, patch: Record<string, unknown>) => {
+  const saveRuntimeSettings = (element: EngineElement, patch: Record<string, unknown>, fileBase: string) => {
     if (runtimeSaving) return;
     const management = agentManagementOf(element);
     if (!management) {
@@ -812,22 +813,23 @@ export default function AgentsPage({
       return;
     }
     if (runtimeRequiresYoloConfirmation(patch, management.runtime_fields)) {
-      setPendingRuntimeSave({ agent: element, patch });
+      setPendingRuntimeSave({ agent: element, patch, fileBase });
       return;
     }
-    void persistRuntimeSettings(element, patch);
+    void persistRuntimeSettings(element, patch, fileBase);
   };
 
   const persistRuntimeSettings = async (
     element: EngineElement,
     patch: Record<string, unknown>,
+    fileBase: string,
     allowYolo = false,
   ) => {
     const agentId = element.id.replace(/^agents:/, "");
     setRuntimeSaving(true);
     try {
       await runConfigure(
-        { agentId, runtime: patch, allowYolo },
+        { agentId, runtime: patch, previewFileBase: fileBase, allowYolo },
         { message: `已写入 ${agentId} 的运行参数` },
       );
     } finally {
@@ -1167,7 +1169,7 @@ export default function AgentsPage({
         onRemove={(element, connection) => setConnectionRemoving({ agent: element, connection })}
         onMove={(element, connection, direction) => void moveConnection(element, connection, direction)}
         runtimeSaving={runtimeSaving}
-        onSaveRuntime={(element, patch) => saveRuntimeSettings(element, patch)}
+        onSaveRuntime={(element, patch, fileBase) => saveRuntimeSettings(element, patch, fileBase)}
         onSaveCurrent={(element) =>
           void runConfigure(
             { agentId: element.id.replace(/^agents:/, ""), saveCurrent: true },
@@ -1567,7 +1569,7 @@ export default function AgentsPage({
           onConfirm={() => {
             const pending = pendingRuntimeSave;
             setPendingRuntimeSave(null);
-            void persistRuntimeSettings(pending.agent, pending.patch, true);
+            void persistRuntimeSettings(pending.agent, pending.patch, pending.fileBase, true);
           }}
           onClose={() => {
             setPendingRuntimeSave(null);

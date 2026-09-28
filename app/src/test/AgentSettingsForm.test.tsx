@@ -54,6 +54,10 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
       { domain: "agents", action: "configure", element: "agents:claude-code" },
       { command: "agents.configure" },
     ),
+    "agents:preview-runtime": makeEnvelope({
+      path: "/Users/demo/.claude/settings.json", exists: true,
+      file_base: PREVIEW_FILE_BASE, content: '{"env":{"MY_OWN":"keep"}}',
+    }, { command: "agents.preview-runtime" }),
     "agents:preview-default": makeEnvelope({
       path: "/Users/demo/.claude/settings.json", exists: true, will_write: true,
       file_base: PREVIEW_FILE_BASE,
@@ -73,6 +77,12 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
 async function openRuntimeSettings(): Promise<HTMLElement> {
   await userEvent.click(await screen.findByTestId("workbench-tab-automation"));
   return screen.findByTestId("automation-panel");
+}
+
+async function submitRuntime(): Promise<void> {
+  const submit = screen.getByTestId("agent-runtime-submit");
+  await waitFor(() => expect(submit).toBeEnabled());
+  await userEvent.click(submit);
 }
 
 function configureCalls<T extends { command: string }>(calls: T[]): T[] {
@@ -141,6 +151,11 @@ function setClaudeCurrentConfig(element: EngineElement, profile: string | null):
 describe("助手运行参数", () => {
   function agentRoutes(id: string, bin: string) {
     return routes({
+      "agents:preview-runtime": makeEnvelope({
+        path: bin === "codex" ? "/Users/demo/.codex/config.toml" : "/Users/demo/.claude/settings.json",
+        exists: true, file_base: PREVIEW_FILE_BASE,
+        content: bin === "codex" ? 'model_reasoning_effort = "high"\n' : '{"env":{"MY_OWN":"keep"}}',
+      }, { command: "agents.preview-runtime" }),
       "agents:status": makeEnvelope(
         {
           domain: "agents",
@@ -195,13 +210,13 @@ describe("助手运行参数", () => {
     expect(screen.queryByLabelText("升级命令")).toBeNull();
     expect(screen.queryByLabelText("卸载命令")).toBeNull();
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-statusline"), "builtin");
-    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
+    await submitRuntime();
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     // 文件与库由引擎在同一事务里写，界面不再先存一份定义（被拒时库也不会先变）
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
     expect(configureCalls(calls)[0].args).toEqual(
-      configureArgsOf("--runtime", JSON.stringify({ statusline: "builtin" })),
+      configureArgsOf("--preview-file-base", PREVIEW_FILE_BASE, "--runtime", JSON.stringify({ statusline: "builtin" })),
     );
   });
 
@@ -229,7 +244,7 @@ describe("助手运行参数", () => {
     expect(dialog).toHaveTextContent('"enableArtifact": false');
     expect(dialog).not.toHaveTextContent("CLAUDE_CODE_EFFORT_LEVEL");
     expect(dialog).not.toHaveTextContent("CLAUDE_CODE_DISABLE_ARTIFACT");
-    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
+    await submitRuntime();
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     expect(runtimeOf(configureCalls(calls)[0])).toEqual({
@@ -259,7 +274,7 @@ describe("助手运行参数", () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes({
       "agents:preview-runtime": makeEnvelope({
         domain: "agents", element: "agents:claude-code", path: "/Users/demo/.claude/settings.json",
-        exists: true, content,
+        exists: true, file_base: PREVIEW_FILE_BASE, content,
       }, { command: "agents.preview-runtime" }),
     }));
     await openRuntimeSettings();
@@ -282,17 +297,20 @@ describe("助手运行参数", () => {
     withPreview["agents:preview-runtime"] = () => new Promise((resolve) => {
       pending.push((content) => resolve(makeEnvelope({
         domain: "agents", element: "agents:claude-code", path: "/Users/demo/.claude/settings.json",
-        exists: true, content,
+        exists: true, file_base: PREVIEW_FILE_BASE, content,
       }, { command: "agents.preview-runtime" })));
     });
     renderWithEngine(<AgentsPage />, withPreview);
     await openRuntimeSettings();
     await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-auto"));
     await waitFor(() => expect(pending).toHaveLength(1));
+    expect(screen.getByTestId("agent-runtime-submit")).toBeDisabled();
     await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
     await waitFor(() => expect(pending).toHaveLength(2));
+    expect(screen.getByTestId("agent-runtime-submit")).toBeDisabled();
     await act(async () => pending[1]('{"permissions":{"defaultMode":"bypassPermissions"},"other":"new"}\n'));
     expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"other":"new"');
+    expect(screen.getByTestId("agent-runtime-submit")).toBeEnabled();
     await act(async () => pending[0]('{"permissions":{"defaultMode":"auto"},"other":"old"}\n'));
     expect(screen.getByTestId("agent-runtime-preview")).not.toHaveTextContent('"other":"old"');
   });
@@ -309,6 +327,20 @@ describe("助手运行参数", () => {
     await waitFor(() => expect(screen.getByText(/完整文件预览失败：配置文件已在外部修改/)).toBeInTheDocument());
     expect(screen.getByText(/完整文件尚未确认/)).toBeInTheDocument();
     expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"defaultMode": "auto"');
+    expect(screen.getByTestId("agent-runtime-submit")).toBeDisabled();
+    expect(configureCalls(calls)).toHaveLength(0);
+  });
+
+  it("完整预览缺少文件基准时不能写入", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes({
+      "agents:preview-runtime": makeEnvelope({
+        path: "/Users/demo/.claude/settings.json", exists: true, content: "{}",
+      }, { command: "agents.preview-runtime" }),
+    }));
+    await openRuntimeSettings();
+    await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-auto"));
+    await waitFor(() => expect(screen.getByText(/完整文件预览失败/)).toBeInTheDocument());
+    expect(screen.getByTestId("agent-runtime-submit")).toBeDisabled();
     expect(configureCalls(calls)).toHaveLength(0);
   });
 
@@ -337,7 +369,7 @@ describe("助手运行参数", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "claude-opus-5");
     expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"model": "claude-opus-5"');
-    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
+    await submitRuntime();
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     expect(runtimeOf(configureCalls(calls)[0])).toEqual({ default_model: "claude-opus-5" });
     expect(await screen.findByText("写入已经返回成功，但状态回读没有确认生效")).toBeInTheDocument();
@@ -355,7 +387,7 @@ describe("助手运行参数", () => {
     expect(dialog).toHaveTextContent("model_context_window");
     expect(dialog).toHaveTextContent("model_auto_compact_token_limit");
     expect(dialog).toHaveTextContent("web_search");
-    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
+    await submitRuntime();
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     expect(runtimeOf(configureCalls(calls)[0])).toEqual({
@@ -370,7 +402,7 @@ describe("助手运行参数", () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openRuntimeSettings();
     await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
-    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
+    await submitRuntime();
 
     await screen.findByRole("dialog", { name: "完全放开助手权限" });
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
@@ -385,14 +417,14 @@ describe("助手运行参数", () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openRuntimeSettings();
     await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
-    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
+    await submitRuntime();
     await screen.findByRole("dialog", { name: "完全放开助手权限" });
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
     expect(configureCalls(calls)[0].args).toEqual(
-      configureArgsOf("--runtime", JSON.stringify({ automation_mode: "full" }), "--allow-yolo"),
+      configureArgsOf("--preview-file-base", PREVIEW_FILE_BASE, "--runtime", JSON.stringify({ automation_mode: "full" }), "--allow-yolo"),
     );
   });
 
@@ -432,7 +464,7 @@ describe("助手运行参数", () => {
     expect(screen.getByTestId("agent-runtime-panel")).toHaveTextContent("acceptEdits");
     expect(screen.getByTestId("agent-runtime-claude-effort-level")).toHaveValue("low");
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-claude-effort-level"), "high");
-    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
+    await submitRuntime();
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
     expect(runtimeOf(configureCalls(calls)[0])).toEqual({ claude_effort_level: "high" });
@@ -521,7 +553,7 @@ describe("助手运行参数", () => {
     await openRuntimeSettings();
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-statusline"), "builtin");
     const statusCallsBefore = calls.filter((call) => call.command === "agents:status").length;
-    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
+    await submitRuntime();
 
     expect(await screen.findByText("配置文件已在外部修改，没有写入")).toBeInTheDocument();
     expect(configureCalls(calls)).toHaveLength(1);

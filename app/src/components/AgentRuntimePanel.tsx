@@ -211,11 +211,11 @@ export function AgentRuntimePanel({
   currentConfig?: AgentCurrentConfigStatus | null;
   busy: boolean;
   /** 只含改动过的字段；撤掉的项为 null。 */
-  onSubmit: (patch: Record<string, unknown>) => void;
+  onSubmit: (patch: Record<string, unknown>, fileBase: string) => void;
 }) {
   const [settings, setSettings] = useState<AgentRuntimeSettings>(initial);
   const [localError, setLocalError] = useState<string | null>(null);
-  const [filePreview, setFilePreview] = useState<{ key: string; path: string | null; content: string | null; error: string | null } | null>(null);
+  const [filePreview, setFilePreview] = useState<{ key: string; path: string | null; content: string | null; fileBase: string | null; error: string | null } | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const previewSerial = useRef(0);
   const rawText = automationRawText(currentConfig);
@@ -268,7 +268,7 @@ export function AgentRuntimePanel({
     setPreviewBusy(true);
     const timer = window.setTimeout(async () => {
       try {
-        const envelope = await runEngine<{ path: string; content: string }>("agents:preview-runtime", [
+        const envelope = await runEngine<{ path: string; content: string; file_base: string }>("agents:preview-runtime", [
           "--only", `agents:${agentId}`,
           "--base", base!,
           "--runtime", JSON.stringify(pendingPatch),
@@ -276,11 +276,12 @@ export function AgentRuntimePanel({
         if (serial === previewSerial.current) setFilePreview({
           key: previewKey,
           path: envelope.ok ? envelope.data.path : null,
-          content: envelope.ok ? envelope.data.content : null,
-          error: envelope.ok ? null : envelope.errors[0]?.message ?? "无法预览完整配置文件",
+          content: envelope.ok && envelope.data.file_base ? envelope.data.content : null,
+          fileBase: envelope.ok ? envelope.data.file_base ?? null : null,
+          error: envelope.ok && envelope.data.file_base ? null : envelope.errors[0]?.message ?? "无法预览完整配置文件",
         });
       } catch (err) {
-        if (serial === previewSerial.current) setFilePreview({ key: previewKey, path: null, content: null, error: engineErrorMessage(err) });
+        if (serial === previewSerial.current) setFilePreview({ key: previewKey, path: null, content: null, fileBase: null, error: engineErrorMessage(err) });
       } finally {
         if (serial === previewSerial.current) setPreviewBusy(false);
       }
@@ -295,8 +296,9 @@ export function AgentRuntimePanel({
     try {
       const patch = runtimePatch(fields, initial, settings);
       if (Object.keys(patch).length === 0) return;
+      if (filePreview?.key !== previewKey || !filePreview.fileBase || filePreview.error) return;
       setLocalError(null);
-      onSubmit(patch);
+      onSubmit(patch, filePreview.fileBase);
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : String(err));
     }
@@ -389,7 +391,7 @@ export function AgentRuntimePanel({
         <button
           type="button"
           data-testid="agent-runtime-submit"
-          disabled={busy || changedCount === 0}
+          disabled={busy || changedCount === 0 || filePreview?.key !== previewKey || !filePreview.fileBase || Boolean(filePreview.error)}
           onClick={submit}
           className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >

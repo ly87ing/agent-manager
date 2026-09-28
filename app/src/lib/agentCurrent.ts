@@ -29,7 +29,7 @@ export function hasUnsavedLive(current: AgentCurrentConnection | null): boolean 
 export interface ConfigureRequest {
   agentId: string;
   base: string;
-  /** 仅切回官方账号：确认框展示完整文件时的原文字节基准。 */
+  /** 完整文件预览时的原文字节基准，只用于运行参数和切回官方账号。 */
   previewFileBase?: string;
   /** 切回官方账号：撤掉主配置里的接入键（主配置不写第三方接入）。 */
   useDefault?: boolean;

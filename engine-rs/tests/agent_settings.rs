@@ -232,6 +232,7 @@ fn 写入只动自己那几条路径_别人的键原样保留() {
 
 #[test]
 fn 运行参数完整预览与实际写入同字节_且预览零写() {
+    use sha2::{Digest, Sha256};
     let (base, ctx) = temp_ctx("runtime-preview-claude");
     let path = ctx.home_dir.join(".claude/settings.json");
     write_settings_file(
@@ -245,8 +246,10 @@ fn 运行参数完整预览与实际写入同字节_且预览零写() {
     let preview = preview_runtime(&ctx, "claude-code", &status_base, patch);
     assert!(preview.ok, "{:?}", preview.errors);
     let content = preview.data["content"].as_str().unwrap();
+    let file_base = preview.data["file_base"].as_str().unwrap();
     assert_eq!(preview.data["path"], path.display().to_string());
     assert_eq!(preview.data["exists"], true);
+    assert_eq!(file_base, format!("{:x}", Sha256::digest(&old_file)));
     assert_eq!(
         serde_json::from_str::<Value>(content).unwrap()["env"]["MY_OWN"],
         "keep"
@@ -258,7 +261,30 @@ fn 运行参数完整预览与实际写入同字节_且预览零写() {
     assert_eq!(file_bytes(&path), old_file);
     assert_eq!(data_dir_bytes(&ctx), old_data);
 
-    let applied = configure_with_base(&ctx, "claude-code", &status_base, &["--runtime", patch]);
+    let old_settings = settings_in_db(&ctx, "claude-code");
+    let mut changed: Value = serde_json::from_slice(&old_file).unwrap();
+    changed["hooks"]["SessionStart"] = json!([{"hooks": []}]);
+    write_settings_file(&ctx, &changed);
+    assert_eq!(base_of(&ctx, "claude-code"), status_base);
+    let changed_file = file_bytes(&path);
+    let stale = configure_with_base(
+        &ctx,
+        "claude-code",
+        &status_base,
+        &["--runtime", patch, "--preview-file-base", file_base],
+    );
+    assert!(!stale.ok);
+    assert_eq!(stale.errors[0].code, "AGENT_CONFIG_CHANGED");
+    assert_eq!(file_bytes(&path), changed_file);
+    assert_eq!(settings_in_db(&ctx, "claude-code"), old_settings);
+    fs::write(&path, &old_file).unwrap();
+
+    let applied = configure_with_base(
+        &ctx,
+        "claude-code",
+        &status_base,
+        &["--runtime", patch, "--preview-file-base", file_base],
+    );
     assert!(applied.ok, "{:?}", applied.errors);
     assert_eq!(file_bytes(&path), content.as_bytes());
     let _ = fs::remove_dir_all(&base);
@@ -418,6 +444,7 @@ fn 已是官方账号时预览保留模型原文字节_非法参数零写() {
 
 #[test]
 fn codex_完整预览保留用户内容_外部改动后拒绝旧基准() {
+    use sha2::{Digest, Sha256};
     let (base, ctx) = temp_ctx("runtime-preview-codex");
     define_codex(&ctx, json!({}));
     let dir = ctx.home_dir.join(".codex");
@@ -431,13 +458,20 @@ fn codex_完整预览保留用户内容_外部改动后拒绝旧基准() {
     let preview = preview_runtime(&ctx, "codex", &status_base, patch);
     assert!(preview.ok, "{:?}", preview.errors);
     let content = preview.data["content"].as_str().unwrap();
+    let file_base = preview.data["file_base"].as_str().unwrap();
+    assert_eq!(file_base, format!("{:x}", Sha256::digest(&old_file)));
     assert!(content.contains("# 自己的注释"));
     assert!(content.contains("user_instructions = \"keep\""));
     assert!(content.contains("model_reasoning_effort = \"high\""));
     assert_eq!(file_bytes(&path), old_file);
     assert_eq!(data_dir_bytes(&ctx), old_data);
 
-    let applied = configure_with_base(&ctx, "codex", &status_base, &["--runtime", patch]);
+    let applied = configure_with_base(
+        &ctx,
+        "codex",
+        &status_base,
+        &["--runtime", patch, "--preview-file-base", file_base],
+    );
     assert!(applied.ok, "{:?}", applied.errors);
     assert_eq!(file_bytes(&path), content.as_bytes());
 
@@ -466,6 +500,7 @@ fn 不存在的配置文件预览不创建文件或数据库() {
     );
     assert!(preview.ok, "{:?}", preview.errors);
     assert_eq!(preview.data["exists"], false);
+    assert_eq!(preview.data["file_base"], "missing");
     assert!(!ctx.home_dir.join(".claude/settings.json").exists());
     assert!(!store::db_path(&ctx).exists());
     let _ = fs::remove_dir_all(&base);

@@ -2713,8 +2713,8 @@ fn configure_args(req: &Request) -> Result<ConfigureArgs, DispatchError> {
         None
     };
     if let Some(value) = preview_file_base.as_deref() {
-        if !matches!(action, Action::UseDefault) {
-            return Err(usage("--preview-file-base 只用于切回官方账号"));
+        if !matches!(action, Action::UseDefault | Action::Runtime(_)) {
+            return Err(usage("--preview-file-base 只用于完整文件预览后的写入"));
         }
         if value != "missing"
             && (value.len() != 64
@@ -2882,6 +2882,10 @@ pub(crate) fn preview_runtime(ctx: &Context, req: &Request) -> Result<Value, Dis
         "element": format!("agents:{}", args.id),
         "path": path.display().to_string(),
         "exists": existing.is_some(),
+        "file_base": existing.as_deref().map_or_else(
+            || "missing".to_string(),
+            crate::native_mcp::model::sha256_hex_bytes,
+        ),
         "content": String::from_utf8(content).map_err(|err| agent_error(err.into()))?,
     }))
 }

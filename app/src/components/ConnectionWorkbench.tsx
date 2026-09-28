@@ -137,7 +137,7 @@ export function ConnectionWorkbench({
   onMove: (element: EngineElement, connection: ConnectionEntry, direction: "up" | "down") => void;
   runtimeSaving: boolean;
   /** 运行设置只发改动过的字段；撤掉的项为 null。 */
-  onSaveRuntime: (element: EngineElement, patch: Record<string, unknown>) => void;
+  onSaveRuntime: (element: EngineElement, patch: Record<string, unknown>, fileBase: string) => void;
   /** 把「当前实际配置（未保存）」存成接入配置，不写助手文件。 */
   onSaveCurrent: (element: EngineElement) => void;
   /** 旧格式状态栏：按引用形式重写一次。 */
@@ -450,7 +450,7 @@ export function ConnectionWorkbench({
                 initial={actualRuntimeSettings(runtimeFields, currentConfig)}
                 currentConfig={currentConfig}
                 busy={runtimeSaving}
-                onSubmit={(patch) => onSaveRuntime(selected, patch)}
+                onSubmit={(patch, fileBase) => onSaveRuntime(selected, patch, fileBase)}
               />
             )}
             {kind && writeBlocked && (
