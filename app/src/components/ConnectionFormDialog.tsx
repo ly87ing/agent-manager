@@ -697,7 +697,10 @@ export function ConnectionFormDialog({
                           autoComplete="new-password"
                           data-testid="new-connection-secret"
                           value={secretValue}
-                          onChange={(event) => setSecretValue(event.target.value)}
+                          onChange={(event) => {
+                            setSecretValue(event.target.value);
+                            setModelsFor(null);
+                          }}
                           placeholder="粘贴厂商给你的 API Key"
                           className="mt-1 w-full rounded border border-input p-2 text-sm"
                         />

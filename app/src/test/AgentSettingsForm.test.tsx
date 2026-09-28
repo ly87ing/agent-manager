@@ -1180,6 +1180,11 @@ describe("助手运行参数", () => {
     expect(await within(dialog).findByTestId("connection-models-message")).toHaveTextContent("已获取 2 个模型");
     const options = [...within(dialog).getByTestId("connection-model-options").querySelectorAll("option")].map((o) => o.getAttribute("value"));
     expect(options).toEqual(["deepseek-v4-pro", "deepseek-v4-flash"]);
+    const secret = within(dialog).getByTestId("new-connection-secret");
+    fireEvent.change(secret, { target: { value: "YOUR_TEST_KEY" } });
+    expect(within(dialog).queryByTestId("connection-model-options")).toBeNull();
+    expect(within(dialog).queryByTestId("connection-models-message")).toBeNull();
+    fireEvent.change(secret, { target: { value: "" } });
     const fetch = rendered.calls.find((call) => call.command === "agents:models")!;
     expect(JSON.parse(fetch.args[fetch.args.indexOf("--draft") + 1])).toEqual({
       kind: "claude",
