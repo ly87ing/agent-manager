@@ -103,6 +103,8 @@ Hooks 以各助手的实际配置为准。目标是主 Claude（`~/.claude/setti
 
 编辑 Provider 并勾选更新已有独立环境时，候选预览显式读取当前密钥；表单新填的密钥仅用于只读渲染，直到提交才保存到外部密钥文件。每个勾选环境展示将写入的完整文件，并返回原文件与候选内容摘要。提交时重新解析密钥和渲染文件，摘要任一不符就拒绝该环境写入。未勾选的环境不写；只保存 Provider 模板不改环境文件。原有 CLI 候选预览不带真实取值选项时仍显示变量引用。
 
+配置备份导入只恢复库内定义与来源，不写助手实际文件，也不恢复外部密钥文件。导入成功后说明去对应页面逐项预览和应用；总览的「全部同步」只处理当前可批量同步的项目，不作为备份恢复入口。
+
 SQLite 核心、Tauri bridge、设置页面、主要资源页面布局、Agent 原生生命周期、Skills 原生域、MCP 原生域、Rules 原生域、Hooks 原生域、Aliases 原生域、Runs SQLite 操作记录及 Python 清理已完成。内置技能仓库只作推荐来源（`skills:status.recommendations`），添加后才成为用户集合且不自动分配给任何助手；技能页另展示各助手技能目录的实际条目（`skills:status.installed`）；集合与 Skill×Agent 均支持独立更新、启停和移除；启用通过内容寻址快照与安全软连接落地；status 只读零写，真实 apply 具备进程锁与操作审计。任务记录基于 `operation_logs` 审计实际操作，保留期由 `log_retention_days` 控制（0 为不自动清理），执行中心提供二次确认清空。Hooks 原生域以实际配置为准（见「Hooks 原生域状态」），hooks 专用 `sources:get/set` 已退役。验收基线提交 `5a110be3` 的候选包已完成主要真实 GUI E2E（旧版 plan→confirm 交互，现已失效，不证明本轮直接 apply 新交互）；2026-09-09 Darwin x86_64 DMG 的只读挂载、仓库外复制、无 Python、路径脱敏和 5 秒启动验收早于当前 Rules/MCP/Hooks/Secrets 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks/Secrets/system:audit GUI 业务闭环；签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
 
 旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（提交、SHA256 与验证结果见 [交付回执](goal-rust-gui.md)）。

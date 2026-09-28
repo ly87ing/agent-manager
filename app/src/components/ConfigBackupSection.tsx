@@ -11,9 +11,9 @@ import { useDialogFocus } from "../lib/dialogFocus";
  * 配置备份：把本机的定义与来源导出成一份 JSON，换机器或重装时导回来。
  *
  * 密钥取值与外部文件路径不进入备份。不含分配记录与写入指纹——那些是本机落地状态，
- * 导回来之后仍由用户到总览确认一次「全部同步」，才会写到助手配置里。
+ * 导回来之后仍由用户到对应页面逐项预览和应用，才会写到助手配置里。
  */
-export function ConfigBackupSection({ onGoSync }: { onGoSync?: () => void } = {}) {
+export function ConfigBackupSection() {
   const queryClient = useQueryClient();
   const [exported, setExported] = useState<string | null>(null);
   /** 导出内容里有什么：只报条数，正文不铺在页面上。 */
@@ -121,7 +121,7 @@ export function ConfigBackupSection({ onGoSync }: { onGoSync?: () => void } = {}
       setImported(true);
       void queryClient.invalidateQueries({ queryKey: engineKeys.all });
       toast.success("已恢复定义与来源", {
-        description: "还没写到助手配置：到总览点一次「全部同步」即可落地。",
+        description: "助手配置未改动；请到对应页面逐项预览和应用，密钥需另行配置。",
       });
     } catch (err) {
       toast.error(`导入失败:${engineErrorMessage(err)}`);
@@ -135,7 +135,7 @@ export function ConfigBackupSection({ onGoSync }: { onGoSync?: () => void } = {}
       <h3 className="text-sm font-semibold text-foreground">配置备份</h3>
       <p className="mt-1 text-xs text-muted-foreground">
         导出本机的助手、技能、MCP、实例定义与规则等来源，换机器或重装时导回来。不含本机的落地记录——
-        导回来之后到总览点一次「全部同步」才会写到助手配置。密钥取值与外部文件路径不在备份中。
+        导回来之后要到对应页面逐项预览和应用，才会写到助手配置。密钥取值与外部文件路径不在备份中。
       </p>
 
       <div className="mt-3 space-y-3">
@@ -195,19 +195,9 @@ export function ConfigBackupSection({ onGoSync }: { onGoSync?: () => void } = {}
           >
             <Upload className="h-3.5 w-3.5" aria-hidden /> 导入并覆盖
           </button>
-          {imported && onGoSync && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-xs text-success">
-              <span>定义与来源已恢复，还没有写入助手配置。</span>
-              <button
-                type="button"
-                data-testid="config-go-sync"
-                onClick={onGoSync}
-                className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 font-medium text-primary hover:bg-primary/15"
-              >
-                去总览一键同步
-              </button>
-            </div>
-          )}
+          {imported && <p data-testid="config-import-success" className="mt-2 rounded-md border border-success/30 bg-success/10 px-3 py-2 text-xs text-success">
+            定义与来源已恢复，助手配置未改动。请到助手、技能、MCP、规则等对应页面逐项预览和应用；密钥需另行配置。
+          </p>}
         </div>
       </div>
 
@@ -228,7 +218,7 @@ export function ConfigBackupSection({ onGoSync }: { onGoSync?: () => void } = {}
           >
             <h3 className="text-base font-semibold text-foreground">这份备份会改掉这些</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              导入是整体替换，不能撤销。助手配置文件本身不受影响——恢复后到总览点一次「全部同步」才会落地。
+              导入是整体替换，不能撤销。助手配置文件本身不受影响；恢复后到对应页面逐项预览和应用。
             </p>
 
             <div className="mt-3 space-y-2 text-sm">

@@ -301,7 +301,7 @@ export default function SettingsPage({
       <PageHeader title="设置" description="外观、配置备份与本机运行路径。" />
       <ConfigurationToolsSection onSelect={setActiveAdvanced} />
       <AppearanceSection />
-      <ConfigBackupSection onGoSync={onNavigate ? () => onNavigate("dashboard") : undefined} />
+      <ConfigBackupSection />
       <section className="rounded-lg border bg-card p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-foreground">应用与运行路径</h2>
         <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">

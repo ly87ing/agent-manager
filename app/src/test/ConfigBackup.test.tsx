@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { fireEvent, waitFor } from "@testing-library/react";
 import { ConfigBackupSection } from "../components/ConfigBackupSection";
 import { makeEnvelope } from "./fixtures";
@@ -53,8 +53,7 @@ describe("配置备份", () => {
   });
 
   it("导入前先给差异预览，确认后才整份提交", async () => {
-    const onGoSync = vi.fn();
-    const { calls } = renderWithEngine(<ConfigBackupSection onGoSync={onGoSync} />, routes());
+    const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
     // 这份旧格式备份多了 newcomer（服务库定义按 MCP 已保存项计入），还带着旧的规则来源
     //（导入时转为模板）；本机已有的 MCP 已保存项 demo 导入后保留，不算消失
     fireEvent.change(screen.getByTestId("config-import-input"), {
@@ -83,10 +82,10 @@ describe("配置备份", () => {
     const write = calls.find((call) => call.command === "config:import")!;
     expect(write.args[0]).toBe("--value");
     expect(JSON.parse(write.args[1]).format).toBe("agent-manager/config-backup/v1");
-    const goSync = await screen.findByTestId("config-go-sync");
-    expect(goSync).toHaveTextContent("去总览一键同步");
-    await userEvent.click(goSync);
-    expect(onGoSync).toHaveBeenCalledOnce();
+    expect(await screen.findByTestId("config-import-success")).toHaveTextContent("逐项预览和应用");
+    expect(screen.queryByTestId("config-go-sync")).toBeNull();
+    fireEvent.change(screen.getByTestId("config-import-input"), { target: { value: "{}" } });
+    expect(screen.queryByTestId("config-import-success")).toBeNull();
   });
 
   it("与当前完全一致时明说不会改变任何东西", async () => {
