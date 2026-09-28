@@ -29,6 +29,7 @@ const dummySettings: SettingsData = {
 type TestRoute = Envelope | ((args: string[]) => Promise<Envelope>);
 
 const BASE = "d".repeat(64);
+const PREVIEW_FILE_BASE = "e".repeat(64);
 
 /** active 是库里的上次写入记录；actual 是客户端实际配置——当前接入只看后者。 */
 function agentsStatus(active = "", actual = active) {
@@ -122,6 +123,10 @@ function routes(): Record<string, TestRoute> {
       { command: "secrets.status" },
     ),
     "agents:status": agentsStatus(),
+    "agents:preview-default": makeEnvelope({
+      path: "/isolated/.claude/settings.json", exists: true, will_write: true,
+      file_base: PREVIEW_FILE_BASE, content: '{"env":{"MY_OWN":"keep"}}',
+    }, { command: "agents.preview-default" }),
     "skills:status": makeEnvelope(
       {
         domain: "skills",
@@ -173,6 +178,14 @@ async function openPalette() {
 async function openAccountAndEnvironmentPalette() {
   await userEvent.keyboard("{Meta>}{Shift>}k{/Shift}{/Meta}");
   return screen.findByRole("dialog", { name: "账号与环境" });
+}
+
+async function confirmOfficialReset() {
+  const dialog = await screen.findByRole("dialog", { name: "把 Claude Code 的主配置切回官方账号" });
+  expect(await within(dialog).findByTestId("switch-back-file-preview")).toHaveTextContent('"MY_OWN":"keep"');
+  const confirm = within(dialog).getByTestId("confirm-modal-confirm");
+  await waitFor(() => expect(confirm).toBeEnabled());
+  await userEvent.click(confirm);
 }
 
 describe("命令面板", () => {
@@ -377,7 +390,7 @@ describe("命令面板", () => {
     expect(await screen.findByRole("heading", { name: "密钥" }, { timeout: 10_000 })).toBeInTheDocument();
   });
 
-  it("主配置里有第三方接入时一步切回官方账号，成功必须经过状态回读且带操作记录 id", async () => {
+  it("命令面板切回官方账号先确认完整文件，成功必须经过状态回读且带操作记录 id", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     let actual = "kimi";
     const testRoutes = routes();
@@ -394,10 +407,12 @@ describe("命令面板", () => {
     const official = await screen.findByTestId("command-item-connection:claude-code:default");
     expect(official).toHaveTextContent("切回官方账号");
     await userEvent.click(official);
+    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
+    await confirmOfficialReset();
 
     await screen.findByText("已切换 Claude Code 到 官方账号");
     const configure = calls.find((call) => call.command === "agents:configure");
-    expect(configure?.args).toEqual(["--only", "agents:claude-code", "--base", BASE, "--use-default"]);
+    expect(configure?.args).toEqual(["--only", "agents:claude-code", "--base", BASE, "--preview-file-base", PREVIEW_FILE_BASE, "--use-default"]);
     expect(configure?.options?.runId).toMatch(/^gui-/);
     expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThanOrEqual(2);
 
@@ -406,6 +421,52 @@ describe("命令面板", () => {
     const current = await screen.findByTestId("command-item-connection:claude-code:default");
     expect(current).toBeDisabled();
     expect(current).toHaveTextContent("当前使用");
+  });
+
+  it("命令面板预览未完成或取消时不写主配置", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    let finishPreview: (() => void) | undefined;
+    const testRoutes = routes();
+    testRoutes["agents:status"] = agentsStatus("kimi", "kimi");
+    testRoutes["agents:preview-default"] = () => new Promise<Envelope>((resolve) => {
+      finishPreview = () => resolve(makeEnvelope({
+        path: "/isolated/.claude/settings.json", exists: true, will_write: true,
+        file_base: PREVIEW_FILE_BASE, content: '{"env":{"MY_OWN":"keep"}}',
+      }, { command: "agents.preview-default" }));
+    });
+    const { calls } = renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
+    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
+    const dialog = await screen.findByRole("dialog", { name: "把 Claude Code 的主配置切回官方账号" });
+    expect(within(dialog).getByTestId("confirm-modal-confirm")).toBeDisabled();
+    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-cancel"));
+    finishPreview?.();
+    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
+  });
+
+  it("命令面板预览失败时只能关闭并重读实际配置", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    const testRoutes = routes();
+    testRoutes["agents:status"] = agentsStatus("kimi", "kimi");
+    testRoutes["agents:preview-default"] = makeEnvelope({}, {
+      command: "agents.preview-default", ok: false,
+      errors: [{ code: "AGENT_CONFIG_CHANGED", element: null, message: "配置文件已在外部修改" }],
+    });
+    const { calls } = renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
+    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
+    const dialog = await screen.findByRole("dialog", { name: "把 Claude Code 的主配置切回官方账号" });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("外部修改");
+    expect(within(dialog).getByTestId("confirm-modal-confirm")).toBeDisabled();
+    const readsBefore = calls.filter((call) => call.command === "agents:status").length;
+    await userEvent.click(within(dialog).getByRole("button", { name: "关闭并重新读取" }));
+    await waitFor(() => expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThan(readsBefore));
+    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
   });
 
   it("命令面板不再提供切到第三方接入：按接入名或备注都搜不到切换项", async () => {
@@ -450,6 +511,8 @@ describe("命令面板", () => {
     expect(await screen.findByTestId("command-item-connection:claude-code:default")).toBeInTheDocument();
     expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
     await userEvent.keyboard("{Enter}");
+    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
+    await confirmOfficialReset();
 
     await screen.findByText("已切换 Claude Code 到 官方账号");
     expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
@@ -457,6 +520,8 @@ describe("命令面板", () => {
       "agents:claude-code",
       "--base",
       BASE,
+      "--preview-file-base",
+      PREVIEW_FILE_BASE,
       "--use-default",
     ]);
     expect(calls.filter((call) => call.command === "agents:status").length).toBeGreaterThanOrEqual(2);
@@ -499,6 +564,7 @@ describe("命令面板", () => {
 
     expect(await screen.findByTestId("command-palette")).toBeInTheDocument();
     await userEvent.keyboard("{Enter}");
+    await confirmOfficialReset();
     const confirm = await screen.findByRole("dialog", { name: "当前实际令牌还没有保存" });
     expect(within(confirm).getByTestId("confirm-modal-secondary")).toHaveTextContent("去选择密钥文件");
     expect(confirm).toHaveTextContent("设置 → 密钥");
@@ -510,8 +576,39 @@ describe("命令面板", () => {
       "agents:claude-code",
       "--base",
       BASE,
+      "--preview-file-base",
+      PREVIEW_FILE_BASE,
       "--use-default",
       "--discard-live-token",
+    ]);
+  });
+
+  it("放弃旧令牌确认后文件已变时关闭旧确认，要求重新预览", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    const testRoutes = routes();
+    testRoutes["agents:status"] = agentsStatus("kimi", "kimi");
+    testRoutes["agents:configure"] = async (args) => makeEnvelope({}, args.includes("--discard-live-token")
+      ? {
+          command: "agents.configure", ok: false,
+          errors: [{ code: "AGENT_CONFIG_CHANGED", element: "agents:claude-code", message: "预览后配置文件又发生变化" }],
+        }
+      : {
+          command: "agents.configure", ok: false,
+          errors: [{ code: "AGENT_LIVE_TOKEN_UNSAVED", element: "agents:claude-code", message: "当前令牌没有保存" }],
+        });
+    const { calls } = renderWithEngine(<App />, testRoutes);
+    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await openPalette();
+    await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
+    await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
+    await confirmOfficialReset();
+    const confirm = await screen.findByRole("dialog", { name: "当前实际令牌还没有保存" });
+    await userEvent.click(within(confirm).getByTestId("confirm-modal-confirm"));
+    expect(await screen.findByText("配置文件已在外部修改，接入没有切换")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "当前实际令牌还没有保存" })).toBeNull());
+    expect(calls.filter((call) => call.command === "agents:configure")[1]?.args).toEqual([
+      "--only", "agents:claude-code", "--base", BASE,
+      "--preview-file-base", PREVIEW_FILE_BASE, "--use-default", "--discard-live-token",
     ]);
   });
 
@@ -530,6 +627,7 @@ describe("命令面板", () => {
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
     await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
+    await confirmOfficialReset();
 
     await screen.findByText("已切换 Claude Code 到 官方账号");
     expect(calls.find((call) => call.command === "agents:configure")?.args).toEqual([
@@ -537,6 +635,8 @@ describe("命令面板", () => {
       "agents:claude-code",
       "--base",
       BASE,
+      "--preview-file-base",
+      PREVIEW_FILE_BASE,
       "--use-default",
     ]);
   });
@@ -556,6 +656,7 @@ describe("命令面板", () => {
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
     await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
+    await confirmOfficialReset();
 
     expect(await screen.findByText("写入已经返回成功，但状态回读没有确认接入生效，请在助手页检查")).toBeInTheDocument();
     expect(screen.queryByText("已切换 Claude Code 到 官方账号")).not.toBeInTheDocument();
@@ -599,6 +700,7 @@ describe("命令面板", () => {
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
     const statusBefore = calls.filter((call) => call.command === "agents:status").length;
     await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
+    await confirmOfficialReset();
 
     expect(await screen.findByText("配置文件已在外部修改，接入没有切换")).toBeInTheDocument();
     expect(screen.queryByText("已切换 Claude Code 到 官方账号")).not.toBeInTheDocument();
@@ -626,6 +728,7 @@ describe("命令面板", () => {
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
     await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
+    await confirmOfficialReset();
 
     expect(await screen.findByText("接入没有切换：凭据变量 KIMI_API_KEY 未配置")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "当前实际令牌还没有保存" })).not.toBeInTheDocument();

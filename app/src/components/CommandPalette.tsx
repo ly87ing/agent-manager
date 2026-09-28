@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
-import type { StatusData } from "../lib/contract";
+import type { EngineElement, StatusData } from "../lib/contract";
 import {
   backfillNotice,
   configureArgs,
@@ -21,6 +21,7 @@ import { useRefreshUpstream } from "../lib/queries";
 import { matchesKeyword } from "./SearchInput";
 import { cn } from "../lib/utils";
 import { ConfirmModal } from "./ConfirmModal";
+import { ResetDefaultConfirm } from "./ResetDefaultConfirm";
 import {
   publishTrayConnections,
   type TrayConnection,
@@ -108,10 +109,13 @@ export function CommandPalette({
   const [targetItemId, setTargetItemId] = useState<string | null>(null);
   const [active, setActive] = useState(0);
   const [switchingTarget, setSwitchingTarget] = useState<string | null>(null);
+  const [pendingReset, setPendingReset] = useState<{ request: ConnectionSwitchRequest; element: EngineElement } | null>(null);
   const [usageNow, setUsageNow] = useState(() => new Date());
   /** 切换前的回填被拒：由用户显式选择放弃，或先去选密钥文件。 */
   const [pendingSwitch, setPendingSwitch] = useState<{
     request: ConnectionSwitchRequest;
+    base: string;
+    previewFileBase: string;
     kind: "live-token" | "unrepresentable";
     message: string;
   } | null>(null);
@@ -143,24 +147,18 @@ export function CommandPalette({
   const switchConnection = useCallback(
     async (
       request: ConnectionSwitchRequest,
+      base: string,
+      previewFileBase: string,
       discard: { discardLive?: boolean; discardLiveToken?: boolean } = {},
     ) => {
       if (switchBusyRef.current) return;
-      const element = agents.data?.ok
-        ? agents.data.data.elements.find((item) => item.id === `agents:${request.agentId}`)
-        : undefined;
-      const base = element ? configureBaseOf(element) : null;
-      if (!base) {
-        toast.error("客户端配置文件暂不可读，接入没有切换", { description: "到助手页默认环境卡片的“查看实际配置文件”查看原因。" });
-        return;
-      }
       switchBusyRef.current = true;
       const target = `${request.agentId}/${request.profile || "default"}`;
       setSwitchingTarget(target);
       try {
         const envelope = await execute({
           command: "agents:configure",
-          args: configureArgs({ agentId: request.agentId, base, useDefault: true, ...discard }),
+          args: configureArgs({ agentId: request.agentId, base, previewFileBase, useDefault: true, ...discard }),
           label: `切换 ${request.agentName} 到 ${request.profileLabel}`,
           silent: true,
         });
@@ -172,6 +170,7 @@ export function CommandPalette({
           const message = envelope.errors[0]?.message ?? "未知错误";
           const refusal = configureRefusalOf(envelope);
           if (refusal === "changed") {
+            setPendingSwitch(null);
             await refetchAgents();
             toast.error("配置文件已在外部修改，接入没有切换", {
               description: "已刷新为客户端当前的实际配置，请确认后重新选择。",
@@ -179,7 +178,7 @@ export function CommandPalette({
             return;
           }
           if (refusal === "live-token" || refusal === "unrepresentable") {
-            setPendingSwitch({ request, kind: refusal, message });
+            setPendingSwitch({ request, base, previewFileBase, kind: refusal, message });
             return;
           }
           toast.error(`接入没有切换：${message}`);
@@ -205,7 +204,7 @@ export function CommandPalette({
         setSwitchingTarget(null);
       }
     },
-    [agents.data, execute, refetchAgents],
+    [execute, refetchAgents],
   );
 
   const trayConnections = useMemo<TrayConnection[]>(() => {
@@ -326,12 +325,12 @@ export function CommandPalette({
           disabled: current || switchingTarget !== null,
           current,
           run: () =>
-            void switchConnection({
+            setPendingReset({ element, request: {
               agentId: id,
               agentName: displayName,
               profile: "",
               profileLabel: "官方账号",
-            }),
+            } }),
         });
       }
     }
@@ -414,7 +413,7 @@ export function CommandPalette({
       },
     );
     return out;
-  }, [agents.data, skills.data, mcp.data, profiles.data, aliasValues, switchingTarget, refreshUpstream, switchConnection, onNavigate, onNavigateProfile, onOpenAgentSkills]);
+  }, [agents.data, skills.data, mcp.data, profiles.data, aliasValues, switchingTarget, refreshUpstream, onNavigate, onNavigateProfile, onOpenAgentSkills]);
 
   const filtered = useMemo(() => {
     const scoped = scope === "quick"
@@ -429,7 +428,7 @@ export function CommandPalette({
     setActive((prev) => (prev >= filtered.length ? 0 : prev));
   }, [filtered.length]);
 
-  if (!open && !pendingSwitch) return null;
+  if (!open && !pendingReset && !pendingSwitch) return null;
 
   const runItem = (item: CommandItem) => {
     if (item.disabled) return;
@@ -535,6 +534,23 @@ export function CommandPalette({
       </div>
         </div>
       )}
+      {pendingReset && (
+        <ResetDefaultConfirm
+          element={pendingReset.element}
+          executing={switchingTarget !== null}
+          onConfirm={(fileBase) => {
+            const { request, element } = pendingReset;
+            const base = configureBaseOf(element);
+            setPendingReset(null);
+            if (base) void switchConnection(request, base, fileBase);
+          }}
+          onClose={() => setPendingReset(null)}
+          onRefresh={() => {
+            setPendingReset(null);
+            void refetchAgents();
+          }}
+        />
+      )}
       {pendingSwitch && (
         <ConfirmModal
           title={pendingSwitch.kind === "live-token" ? "当前实际令牌还没有保存" : "当前实际配置无法完整保存"}
@@ -552,6 +568,8 @@ export function CommandPalette({
           executing={switchingTarget !== null}
           onConfirm={() => void switchConnection(
             pendingSwitch.request,
+            pendingSwitch.base,
+            pendingSwitch.previewFileBase,
             pendingSwitch.kind === "live-token" ? { discardLiveToken: true } : { discardLive: true },
           )}
           onClose={() => setPendingSwitch(null)}
