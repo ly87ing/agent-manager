@@ -67,7 +67,7 @@ import {
 import { runtimePatchApplied } from "../lib/agentRuntime";
 import type { AgentsSpec, OfficialAuthStatus } from "../lib/observed";
 import { useEngineQuery } from "../lib/queries";
-import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource } from "../lib/useAliasSource";
+import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource, type AliasFilePreview } from "../lib/useAliasSource";
 import { useDirectApply } from "../lib/useDirectApply";
 import { useExecutions } from "../lib/execution";
 import { seedArgs, summarizeSeed, type SeedItem, type SeedResult } from "../lib/profileSeed";
@@ -423,6 +423,32 @@ export default function AgentsPage({
     }
   };
 
+  /** 保存前重读两类实际文件，避免外部改动后继续按旧候选创建环境。 */
+  const verifyNewProfilePreview = async (
+    input: ProfileFormInput,
+    seedItems: SeedItem[],
+    expected: { config: ProfileDraftPreview; alias: AliasFilePreview },
+  ): Promise<string | null> => {
+    try {
+      const [config, alias] = await Promise.all([
+        runEngine<ProfileDraftPreview>("profiles:preview", [
+          "--only", `profiles:${input.id}`,
+          "--definition", JSON.stringify(buildProfileDefinition(input, baseBinOf(input.baseAgent))),
+          "--on-save",
+          ...(seedItems.length ? ["--items", seedItems.join(",")] : []),
+        ]),
+        aliasSource.previewSetAlias(input.id, profileLaunchValue(input, baseBinOf(input.baseAgent))),
+      ]);
+      if (!config.ok || typeof alias === "string") {
+        return `无法重新确认候选文件：${!config.ok ? config.errors[0]?.message ?? "配置预览失败" : alias}`;
+      }
+      return sameJson(config.data, expected.config) && sameJson(alias, expected.alias)
+        ? null : "目标文件已变化，未保存；请重新读取预览后再创建";
+    } catch (error) {
+      return `无法重新确认候选文件：${String(error)}`;
+    }
+  };
+
   /** 创建/编辑 Provider 只保存定义与可选凭据；应用是卡片上的独立操作。 */
   const saveConnection = async (element: EngineElement, submission: ConnectionSubmission) => {
     if (connectionSaving) return;
@@ -465,6 +491,37 @@ export default function AgentsPage({
         if (agentsNow.data.elements.some((item) => item.id === `agents:${id}`)
           || profilesNow.data.elements.some((item) => item.id === `profiles:${id}`)) {
           setConnectionFormError(`环境名 ${id} 已被使用，未写入；请换一个名称`);
+          return;
+        }
+      }
+      let newProfile: ProfileFormInput | null = null;
+      let droppedProfileFields: string[] = [];
+      if (submission.environment) {
+        if (!kind) {
+          setConnectionFormError("此助手不支持创建第三方环境");
+          return;
+        }
+        const made = connectionToProfileInput({ id: agentId, kind }, submission.connection, []);
+        if (!made) {
+          setConnectionFormError("这套接入引用主配置里的接入方式，没法搬进独立目录");
+          return;
+        }
+        droppedProfileFields = made.dropped;
+        newProfile = {
+          ...made.input,
+          id: submission.environment.id,
+          configDir: submission.environment.configDir,
+          sourceConnection: submission.environment.saveTemplate ? submission.connection.name : undefined,
+          extraEnv: { ...made.input.extraEnv },
+        };
+        if (kind === "claude" && submission.environment.scrubSubprocess) {
+          newProfile.extraEnv[SUBPROCESS_SCRUB_ENV] = "1";
+        }
+        const previewError = await verifyNewProfilePreview(
+          newProfile, submission.environment.seedItems, submission.environment.preview,
+        );
+        if (previewError) {
+          setConnectionFormError(previewError);
           return;
         }
       }
@@ -613,26 +670,9 @@ export default function AgentsPage({
           }
         }
       }
-      if (submission.environment) {
-        if (!kind) {
-          setConnectionFormError("此助手不支持创建第三方环境");
-          return;
-        }
-        const made = connectionToProfileInput({ id: agentId, kind }, submission.connection, []);
-        if (!made) {
-          setConnectionFormError("这套接入引用主配置里的接入方式，没法搬进独立目录");
-          return;
-        }
-        if (made.dropped.length > 0) toast.warning(`独立环境不支持：${made.dropped.join("、")}，没有带过去`);
-        const input: ProfileFormInput = {
-          ...made.input,
-          id: submission.environment.id,
-          configDir: submission.environment.configDir,
-          sourceConnection: saveTemplate ? submission.connection.name : undefined,
-          extraEnv: { ...made.input.extraEnv },
-        };
-        if (kind === "claude" && submission.environment.scrubSubprocess) input.extraEnv[SUBPROCESS_SCRUB_ENV] = "1";
-        if (!(await saveProfile(input, submission.environment.seedItems))) {
+      if (submission.environment && newProfile) {
+        if (droppedProfileFields.length > 0) toast.warning(`独立环境不支持：${droppedProfileFields.join("、")}，没有带过去`);
+        if (!(await saveProfile(newProfile, submission.environment.seedItems, false, submission.environment.preview))) {
           setConnectionFormError(`${saveTemplate ? "Provider 模板已保存，但" : ""}独立环境没有创建，请根据任务记录修正后重试`);
           return;
         }
@@ -881,11 +921,25 @@ export default function AgentsPage({
   };
 
   /** 编辑只写定义；新建时还会写环境配置、启动命令及勾选的共用设置。 */
-  const saveProfile = async (input: ProfileFormInput, seedItems: SeedItem[] = [], isEdit = false): Promise<boolean> => {
+  const saveProfile = async (
+    input: ProfileFormInput,
+    seedItems: SeedItem[] = [],
+    isEdit = false,
+    expected?: { config: ProfileDraftPreview; alias: AliasFilePreview },
+  ): Promise<boolean> => {
     if (!isEdit) {
       const launchError = await newLaunchNameError(input.id);
       if (launchError) {
         toast.error(launchError);
+        return false;
+      }
+      if (!expected) {
+        toast.error("缺少有效文件预览，未保存");
+        return false;
+      }
+      const previewError = await verifyNewProfilePreview(input, seedItems, expected);
+      if (previewError) {
+        toast.error(previewError);
         return false;
       }
     }
@@ -1403,7 +1457,7 @@ export default function AgentsPage({
           baseBinOf={baseBinOf}
           onFetchModels={fetchModelsForDraft}
           secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}
-          onSubmit={(input, options) => void saveProfile(input, options.seedItems, options.isEdit)}
+          onSubmit={(input, options) => void saveProfile(input, options.seedItems, options.isEdit, options.preview)}
           onAliasPreview={aliasSource.previewSetAlias}
           aliasPreviewBase={JSON.stringify(aliasSource.source?.targets.map((target) => [target.id, target.base]) ?? [])}
           onPreview={async (input, seedItems) => {

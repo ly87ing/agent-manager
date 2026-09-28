@@ -245,6 +245,25 @@ describe("助手实例", () => {
     expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
   });
 
+  it("手动新建时目标配置在预览后被外部创建，不保存定义或启动命令", async () => {
+    let changed = false;
+    const routeMap: Record<string, Envelope | (() => Promise<Envelope>)> = routes();
+    routeMap["profiles:preview"] = async () => makeEnvelope({
+      path: "/isolated/settings.json", exists: changed,
+      content: changed ? '{"theme":"external"}' : '{"env":{}}', files: [],
+    }, { command: "profiles.preview" });
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
+    await openNewProfileForm();
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
+    await waitFor(() => expect(within(dialog).getByTestId("profile-form-submit")).toBeEnabled());
+    changed = true;
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    expect(await screen.findByText(/目标文件已变化，未保存/)).toBeInTheDocument();
+    expect(calls.filter((call) => call.command === "profiles:preview")).toHaveLength(2);
+    expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+  });
+
   it.each([
     ["受管别名", "cc-ly-yolo", "managed"],
     ["区块外别名", "outside", "external"],
@@ -461,6 +480,27 @@ describe("助手实例", () => {
     await userEvent.click(within(dialog).getByTestId("connection-save-template"));
     expect(await within(dialog).findByText("终端文件已变化，请重新读取")).toBeInTheDocument();
     expect(within(dialog).getByTestId("connection-form-submit")).toBeDisabled();
+    expect(calls.some((call) => ["policy:set", "secrets:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+  });
+
+  it("Provider 新建时终端文件在预览后变化，不先保存模板或密钥", async () => {
+    let changed = false;
+    const routeMap: Record<string, Envelope | (() => Promise<Envelope>)> = routes();
+    routeMap["aliases:preview"] = async () => makeEnvelope({
+      files: [{ target: "aliases:zshrc", path: "/isolated/.zshrc", exists: true,
+        content: changed ? "# 外部新内容\n" : "# 原有内容\n" }], skipped: [],
+    }, { command: "aliases.preview" });
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
+    await userEvent.click(await screen.findByTestId("new-environment-button"));
+    await userEvent.click(screen.getByTestId("new-environment-third-party"));
+    const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
+    await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
+    await userEvent.click(within(dialog).getByTestId("connection-save-template"));
+    await userEvent.type(within(dialog).getByTestId("new-connection-secret"), "fixture-secret");
+    await waitFor(() => expect(within(dialog).getByTestId("connection-form-submit")).toBeEnabled());
+    changed = true;
+    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("目标文件已变化，未保存");
     expect(calls.some((call) => ["policy:set", "secrets:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
   });
 

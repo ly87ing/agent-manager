@@ -42,6 +42,7 @@ export interface ConnectionSubmission {
     seedItems: SeedItem[];
     saveTemplate: boolean;
     scrubSubprocess: boolean;
+    preview: { config: ProfileDraftPreview; alias: AliasFilePreview };
   };
   /** 用户逐环境勾选的更新目标；未勾选的环境不写入。 */
   profileUpdates?: string[];
@@ -353,6 +354,18 @@ export function ConnectionFormDialog({
         return;
       }
     }
+    const environmentPreview = newEnvironmentInput
+      ? preview?.results.find((item) => item.id === newEnvironmentInput.id)?.result : null;
+    let environmentSnapshot: { config: ProfileDraftPreview; alias: AliasFilePreview } | undefined;
+    if (intent === "environment") {
+      if (!newEnvironmentInput || waitingForPreview
+        || !environmentPreview || typeof environmentPreview === "string"
+        || !currentAliasPreview || typeof currentAliasPreview === "string") {
+        setLocalError("文件预览已失效，请重新读取后保存");
+        return;
+      }
+      environmentSnapshot = { config: environmentPreview, alias: currentAliasPreview };
+    }
     const previewBases: Record<string, { fileBase: string; contentBase: string }> = {};
     for (const profile of selectedUpdates) {
       const result = preview?.results.find((item) => item.id === profile.id)?.result;
@@ -374,8 +387,9 @@ export function ConnectionFormDialog({
         model: connection.model.trim(),
       },
       secretValue,
-      environment: intent === "environment"
-        ? { id: environmentId.trim(), configDir, seedItems, saveTemplate, scrubSubprocess }
+      environment: intent === "environment" && environmentSnapshot
+        ? { id: environmentId.trim(), configDir, seedItems, saveTemplate, scrubSubprocess,
+            preview: environmentSnapshot }
         : undefined,
       profileUpdates: selectedUpdates.map((profile) => profile.id),
       profileOverrides: Object.fromEntries(selectedUpdates.map((profile) =>

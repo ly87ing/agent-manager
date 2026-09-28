@@ -57,7 +57,8 @@ export function ProfileFormDialog({
   existingIds: string[];
   baseBinOf: (agentId: string) => string;
   /** 新建时另带要从默认环境带上的设置（编辑时为空）。 */
-  onSubmit: (input: ProfileFormInput, options: { seedItems: SeedItem[]; isEdit: boolean }) => void;
+  onSubmit: (input: ProfileFormInput, options: { seedItems: SeedItem[]; isEdit: boolean;
+    preview?: { config: ProfileDraftPreview; alias: AliasFilePreview } }) => void;
   onPreview: (input: ProfileFormInput, seedItems: SeedItem[]) => Promise<ProfileDraftPreview | string>;
   onAliasPreview: (name: string, value: string) => Promise<AliasFilePreview | string>;
   aliasPreviewBase: string;
@@ -220,7 +221,17 @@ export function ProfileFormDialog({
       setError("填了鉴权变量名就要填接口地址：凭据只配合这个环境自己的接口使用");
       return;
     }
-    onSubmit(input, { seedItems: isEdit ? [] : seedItems, isEdit });
+    if (isEdit) {
+      onSubmit(input, { seedItems: [], isEdit: true });
+      return;
+    }
+    const configPreview = preview?.key === previewKey ? preview.result : null;
+    if (waitingForPreview || !configPreview || typeof configPreview === "string"
+      || !currentAliasPreview || typeof currentAliasPreview === "string") {
+      setError("文件预览已失效，请重新读取后保存");
+      return;
+    }
+    onSubmit(input, { seedItems, isEdit: false, preview: { config: configPreview, alias: currentAliasPreview } });
   };
 
   return (
