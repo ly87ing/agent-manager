@@ -335,10 +335,9 @@ export default function SettingsPage({
           {saveStatus && <p role={saveStatus.startsWith("设置保存失败") ? "alert" : "status"} className={saveStatus.startsWith("设置保存失败") ? "text-sm text-destructive" : "text-sm text-success"}>{saveStatus}</p>}
         </div>
       </section>
-      <section className="rounded-lg border bg-card p-5 shadow-sm">
-        <div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">应用更新</h2><p className="mt-1 text-xs text-muted-foreground">手动检查，确认后下载并安装。</p></div><button type="button" onClick={() => void checkForUpdate()} disabled={!data.updaterConfigured || updateState !== "idle"} className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"><RefreshCw className={cn("h-4 w-4", updateState === "checking" && "animate-spin")} aria-hidden />检查更新</button></div>
-        {!data.updaterConfigured && <p role="status" className="mt-3 text-sm text-muted-foreground">更新服务未配置。</p>}
-        {data.updaterConfigured && updateState === "idle" && !update && !updateError && <p role="status" className="mt-3 text-sm text-muted-foreground">{updateStatus ?? "尚未检查更新。"}</p>}
+      {data.updaterConfigured && <section className="rounded-lg border bg-card p-5 shadow-sm">
+        <div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">应用更新</h2><p className="mt-1 text-xs text-muted-foreground">手动检查，确认后下载并安装。</p></div><button type="button" onClick={() => void checkForUpdate()} disabled={updateState !== "idle"} className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"><RefreshCw className={cn("h-4 w-4", updateState === "checking" && "animate-spin")} aria-hidden />检查更新</button></div>
+        {updateState === "idle" && !update && !updateError && <p role="status" className="mt-3 text-sm text-muted-foreground">{updateStatus ?? "尚未检查更新。"}</p>}
         {updateError && (
           <div className="mt-3 flex items-center justify-between gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
             <p role="alert">{updateError}</p>
@@ -353,7 +352,7 @@ export default function SettingsPage({
           </div>
         )}
         {update && <div className="mt-3 rounded-md border border-primary/20 bg-primary/10 p-3 text-sm"><p className="font-medium text-primary">发现新版本 {update.version}</p>{update.date && <p className="mt-1 text-xs text-primary">发布时间：{update.date}</p>}{update.body && <p className="mt-2 whitespace-pre-wrap text-xs text-primary">{update.body}</p>}<button type="button" onClick={() => setConfirmUpdate(true)} disabled={updateState !== "idle"} className="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">下载并安装</button></div>}
-      </section>
+      </section>}
       {confirmUpdate && update && <ConfirmModal title="安装应用更新" description={`将下载并安装版本 ${update.version}，完成后请重启应用。`} risk="network" confirmLabel="确认下载并安装" executing={updateState === "installing"} onConfirm={() => void installUpdate()} onClose={() => setConfirmUpdate(false)} />}
     </div>
   );

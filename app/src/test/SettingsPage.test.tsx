@@ -51,11 +51,12 @@ describe("SettingsPage", () => {
     expect(retention).toHaveValue(60);
   });
 
-  it("更新未配置时显示状态且不发起 updater 请求", async () => {
+  it("更新未配置时不显示不可用入口", async () => {
     setSettingsClient({ get: async () => settings, save: async (preferences) => ({ ...settings, preferences }) });
     const { calls } = renderWithEngine(<SettingsPage />, {});
-    await screen.findByText("更新服务未配置。");
-    await userEvent.click(screen.getByRole("button", { name: "检查更新" }));
+    await screen.findByRole("heading", { name: "设置" });
+    expect(screen.queryByRole("heading", { name: "应用更新" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "检查更新" })).toBeNull();
     expect(calls).toEqual([]);
   });
 
