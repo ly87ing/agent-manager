@@ -1436,6 +1436,10 @@ export default function AgentsPage({
           existingNames={Object.keys(aliasSource.source.aliases)}
           previewBase={JSON.stringify(aliasSource.source.targets.map((target) => [target.id, target.base]))}
           onPreview={aliasSource.previewSetAlias}
+          onRefresh={() => {
+            setAliasEditing(null);
+            void aliasSource.query.refetch();
+          }}
           onSubmit={(name, value) => {
             // value===null 表示新建，此时 name 只是预填的可执行名，不算改名
             const renamedFrom = aliasEditing.value === null ? undefined : aliasEditing.name || undefined;
@@ -1454,6 +1458,10 @@ export default function AgentsPage({
           previewBase={JSON.stringify((aliasSource.source?.targets ?? []).map((target) => [target.id, target.base]))}
           op={["--remove", launchRemoving]}
           onPreview={aliasSource.previewApply}
+          onRefresh={() => {
+            setLaunchRemoving(null);
+            void aliasSource.query.refetch();
+          }}
           executing={aliasSource.busy}
           onConfirm={() => void removeLaunchAlias(launchRemoving)}
           onClose={() => setLaunchRemoving(null)}

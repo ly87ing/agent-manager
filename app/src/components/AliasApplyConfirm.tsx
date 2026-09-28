@@ -10,6 +10,7 @@ export function AliasApplyConfirm({
   previewBase,
   op,
   onPreview,
+  onRefresh,
   executing,
   onConfirm,
   onClose,
@@ -21,6 +22,7 @@ export function AliasApplyConfirm({
   previewBase: string;
   op: string[];
   onPreview: (op: string[]) => Promise<AliasFilePreview | string>;
+  onRefresh: () => void;
   executing: boolean;
   onConfirm: () => void;
   onClose: () => void;
@@ -53,7 +55,10 @@ export function AliasApplyConfirm({
       <section className="mt-3 max-h-80 space-y-2 overflow-y-auto rounded border p-3 text-xs" data-testid="alias-confirm-file-preview">
         <p className="font-medium">终端配置文件写入后</p>
         {result === null && <p className="text-muted-foreground">正在读取实际文件并计算…</p>}
-        {typeof result === "string" && <p role="alert" className="text-destructive">{result}</p>}
+        {typeof result === "string" && <>
+          <p role="alert" className="text-destructive">{result}</p>
+          <button type="button" onClick={onRefresh} className="rounded border px-2 py-1">关闭并重新读取</button>
+        </>}
         {result && typeof result !== "string" && <>
           {result.files.length === 0 && <p className="text-muted-foreground">配置文件不变。</p>}
           {result.files.map((file) => <div key={file.target} className="space-y-1">

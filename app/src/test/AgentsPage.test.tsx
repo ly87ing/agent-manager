@@ -190,6 +190,44 @@ describe("助手页产品边界", () => {
     expect(apply).toContain("--remove");
   });
 
+  it("助手页启动命令预览过期时关闭操作并重读状态", async () => {
+    const all = routes();
+    all["aliases:preview"] = makeEnvelope({}, {
+      command: "aliases.preview", ok: false,
+      errors: [{ code: "ALIAS_ERROR", element: null, message: "终端文件已在外部修改" }],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await userEvent.click(await screen.findByTestId("workbench-tab-launch"));
+    await userEvent.click(screen.getByTestId("agent-launch-remove-claude-code-claude"));
+    const dialog = await screen.findByRole("dialog", { name: "删除启动命令 claude" });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("外部修改");
+    expect(within(dialog).getByRole("button", { name: "确认删除" })).toBeDisabled();
+    const readsBefore = calls.filter((call) => call.command === "aliases:status").length;
+    await userEvent.click(within(dialog).getByRole("button", { name: "关闭并重新读取" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(calls.filter((call) => call.command === "aliases:status").length).toBeGreaterThan(readsBefore));
+    expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
+  });
+
+  it("助手页编辑启动命令遇到预览错误时不保留旧表单", async () => {
+    const all = routes();
+    all["aliases:preview"] = makeEnvelope({}, {
+      command: "aliases.preview", ok: false,
+      errors: [{ code: "ALIAS_ERROR", element: null, message: "终端文件已在外部修改" }],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await userEvent.click(await screen.findByTestId("workbench-tab-launch"));
+    await userEvent.click(screen.getByTestId("agent-launch-edit-claude-code-claude"));
+    const dialog = await screen.findByRole("dialog", { name: "编辑启动命令" });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("外部修改");
+    expect(within(dialog).getByTestId("alias-form-submit")).toBeDisabled();
+    const readsBefore = calls.filter((call) => call.command === "aliases:status").length;
+    await userEvent.click(within(dialog).getByRole("button", { name: "关闭并重新读取" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(calls.filter((call) => call.command === "aliases:status").length).toBeGreaterThan(readsBefore));
+    expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
+  });
+
   it("默认环境卡片可按需查看实际配置文件，运行设置按实际值预填", async () => {
     const withFile: Record<string, Envelope> = {
       ...routes(),

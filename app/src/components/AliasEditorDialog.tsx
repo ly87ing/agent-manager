@@ -33,6 +33,7 @@ export function AliasEditorDialog({
   existingNames,
   previewBase,
   onPreview,
+  onRefresh,
   onSubmit,
   onClose,
 }: {
@@ -49,6 +50,8 @@ export function AliasEditorDialog({
   existingNames: string[];
   previewBase: string;
   onPreview: (name: string, value: string, renameFrom?: string) => Promise<AliasFilePreview | string>;
+  /** 预览基准过期时放弃当前表单，重读实际配置后再从新状态打开。 */
+  onRefresh: () => void;
   /** 编辑时改了名字即为重命名：调用方据此删掉旧名那一条。 */
   onSubmit: (name: string, value: string) => void;
   onClose: () => void;
@@ -429,7 +432,10 @@ export function AliasEditorDialog({
             <p className="font-medium">终端配置文件写入后</p>
             {!canPreview && <p className="text-muted-foreground">填写有效名称和命令后显示完整文件。</p>}
             {canPreview && currentFilePreview === null && <p className="text-muted-foreground">正在读取实际文件并计算…</p>}
-            {typeof currentFilePreview === "string" && <p role="alert" className="text-destructive">{currentFilePreview}</p>}
+            {typeof currentFilePreview === "string" && <>
+              <p role="alert" className="text-destructive">{currentFilePreview}</p>
+              <button type="button" onClick={onRefresh} className="rounded border px-2 py-1">关闭并重新读取</button>
+            </>}
             {currentFilePreview && typeof currentFilePreview !== "string" && <>
               {currentFilePreview.files.length === 0 && <p className="text-muted-foreground">配置文件不变。</p>}
               {currentFilePreview.files.map((file) => <div key={file.target} className="space-y-1">

@@ -109,6 +109,11 @@ describe("终端快捷命令页", () => {
 
   it("预览失败时禁止保存，不会写终端配置", async () => {
     const routes = aliasRoutes();
+    let statusReads = 0;
+    routes["aliases:status"] = async () => makeEnvelope(
+      makeAliasStatus({ claude: statusReads++ === 0 ? CLAUDE : "claude --external" }),
+      { command: "aliases.status" },
+    );
     routes["aliases:preview"] = makeEnvelope({}, {
       command: "aliases.preview", ok: false,
       errors: [{ code: "ALIAS_ERROR", element: null, message: "~/.zshrc 已在外部修改" }],
@@ -118,6 +123,11 @@ describe("终端快捷命令页", () => {
     const dialog = await screen.findByRole("dialog");
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("已在外部修改");
     expect(within(dialog).getByTestId("alias-form-submit")).toBeDisabled();
+    expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "关闭并重新读取" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.getByTestId("alias-row-claude")).toHaveTextContent("claude --external"));
+    expect(statusReads).toBeGreaterThan(1);
     expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
   });
 
@@ -379,8 +389,13 @@ describe("终端快捷命令页", () => {
     expect(calls.find((call) => call.command === "aliases:preview")?.args).toEqual(args);
   });
 
-  it("移除预览失败时不能确认；取消不写文件", async () => {
+  it("移除预览失败时不能确认；关闭重读后不写文件", async () => {
     const routes = aliasRoutes({ codex: "codex" });
+    let statusReads = 0;
+    routes["aliases:status"] = async () => makeEnvelope(
+      makeAliasStatus({ claude: CLAUDE, codex: statusReads++ === 0 ? "codex" : "codex --external" }),
+      { command: "aliases.status" },
+    );
     routes["aliases:preview"] = makeEnvelope({}, {
       command: "aliases.preview", ok: false,
       errors: [{ code: "ALIAS_ERROR", element: null, message: "~/.zshrc 已在外部修改" }],
@@ -390,7 +405,10 @@ describe("终端快捷命令页", () => {
     const dialog = await screen.findByRole("dialog");
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("已在外部修改");
     expect(within(dialog).getByRole("button", { name: "确认移除" })).toBeDisabled();
-    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "关闭并重新读取" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.getByTestId("alias-row-codex")).toHaveTextContent("codex --external"));
+    expect(statusReads).toBeGreaterThan(1);
     expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
   });
 

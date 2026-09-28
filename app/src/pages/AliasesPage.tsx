@@ -53,6 +53,10 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
   const previewBase = JSON.stringify(source.targets.map((target) => [target.id, target.base]));
   const external = source.targets.flatMap((target) => target.external.map((line) => ({ target, line })));
   const close = () => setDialog(null);
+  const refreshCurrent = () => {
+    close();
+    void query.refetch();
+  };
   const closeOn = (ok: boolean) => {
     if (ok) setDialog(null);
   };
@@ -322,6 +326,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
           existingNames={names}
           previewBase={previewBase}
           onPreview={previewSetAlias}
+          onRefresh={refreshCurrent}
           onSubmit={(name, value) => void setAlias(name, value, { renameFrom: dialog.name }).then(closeOn)}
           onClose={close}
         />
@@ -334,6 +339,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
           previewBase={previewBase}
           op={["--remove", dialog.name]}
           onPreview={previewApply}
+          onRefresh={refreshCurrent}
           executing={busy}
           onConfirm={() => void removeAlias(dialog.name).then(closeOn)}
           onClose={close}
@@ -347,6 +353,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
           previewBase={previewBase}
           op={["--recommended", dialog.item.name]}
           onPreview={previewApply}
+          onRefresh={refreshCurrent}
           executing={busy}
           onConfirm={() => void addRecommended(dialog.item.name).then(closeOn)}
           onClose={close}
@@ -366,6 +373,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
           previewBase={previewBase}
           op={["--legacy", dialog.item.id]}
           onPreview={previewApply}
+          onRefresh={refreshCurrent}
           executing={busy}
           onConfirm={() => void addLegacy(dialog.item).then(closeOn)}
           onClose={close}
