@@ -150,6 +150,7 @@ export default function AgentsPage({
   const [checkingAllAgentId, setCheckingAllAgentId] = useState<string | null>(null);
   /** 「新建环境 → 手动创建环境」时预先选中的助手；null 按列表第一个。 */
   const [profileNewAgent, setProfileNewAgent] = useState<string | null>(null);
+  const [savedProfileTarget, setSavedProfileTarget] = useState<{ agentId: string; profileId: string } | null>(null);
 
   const [aliasEditing, setAliasEditing] = useState<
     { bin: string; name: string; value: string | null; presetName?: string } | null
@@ -185,6 +186,19 @@ export default function AgentsPage({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [profileTarget, selectedAgentId, profilesQuery.data]);
+  useEffect(() => {
+    if (!savedProfileTarget || selectedAgentId !== `agents:${savedProfileTarget.agentId}`
+      || !profilesQuery.data?.ok
+      || !profilesQuery.data.data.elements.some((item) => item.id === `profiles:${savedProfileTarget.profileId}`)) return;
+    const timer = window.setTimeout(() => {
+      const card = document.getElementById(`profile-card-${savedProfileTarget.profileId}`);
+      if (!card) return;
+      card.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      card.focus({ preventScroll: true });
+      setSavedProfileTarget(null);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [savedProfileTarget, selectedAgentId, profilesQuery.data]);
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="助手状态读取失败" error={query.error} />;
 
@@ -552,13 +566,17 @@ export default function AgentsPage({
             failed.push(`${entry.impact.id}（写入后回读失败）`);
           }
         }
-        void profilesQuery.refetch();
+        await profilesQuery.refetch();
         if (failed.length > 0) {
           toast.warning(`Provider 已保存，${applied} 个环境已更新，${failed.length} 个未确认`, {
             description: `${failed.join("、")}。请到对应环境卡片查看实际配置后再操作。`,
           });
         } else {
           toast.success(`Provider 已保存，${applied} 个独立环境已更新并回读`);
+          if (updates.length === 1 && updates[0]) {
+            setSelectedAgentId(`agents:${agentId}`);
+            setSavedProfileTarget({ agentId, profileId: updates[0].impact.id });
+          }
         }
       }
       if (submission.environment) {
@@ -848,7 +866,9 @@ export default function AgentsPage({
       });
       setProfileForm(null);
       setProfileDuplicating(false);
-      void profilesQuery.refetch();
+      await profilesQuery.refetch();
+      setSelectedAgentId(`agents:${input.baseAgent}`);
+      setSavedProfileTarget({ agentId: input.baseAgent, profileId: input.id });
       return true;
     }
     if (aliasSource.source) {
@@ -869,7 +889,9 @@ export default function AgentsPage({
     setProfileForm(null);
     setProfileDuplicating(false);
     if (seedItems.length > 0) toastSeed(input.id, await seedProfile(input.id, seedItems));
-    void profilesQuery.refetch();
+    await profilesQuery.refetch();
+    setSelectedAgentId(`agents:${input.baseAgent}`);
+    setSavedProfileTarget({ agentId: input.baseAgent, profileId: input.id });
     return true;
   };
 

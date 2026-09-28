@@ -176,6 +176,9 @@ describe("助手实例", () => {
       expect(definition.profile.env.ANTHROPIC_AUTH_TOKEN).toBe("${DEEPSEEK_API_KEY}");
       expect(calls.find((call) => call.command === "profiles:apply")!.args).toEqual(["--only", "profiles:deepseek", "--base", "missing"]);
       expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
+      const card = await screen.findByTestId("profile-card-deepseek");
+      await waitFor(() => expect(card).toHaveFocus());
+      expect(within(card).getByTestId("profile-config-file-toggle-deepseek")).toHaveAttribute("aria-expanded", "false");
     });
   }
 
@@ -1154,6 +1157,9 @@ describe("助手实例", () => {
     });
     expect(calls.find((call) => call.command === "policy:set")!.args).toContain("agents.definitions.claude-code");
     expect(await screen.findByText("Provider 已保存，1 个独立环境已更新并回读")).toBeInTheDocument();
+    const card = screen.getByTestId("profile-card-cc-ly");
+    await waitFor(() => expect(card).toHaveFocus());
+    expect(within(card).getByTestId("profile-config-file-toggle-cc-ly")).toHaveAttribute("aria-expanded", "false");
   });
 
   it("Provider 上次保存时未同步的环境，再打开编辑可逐字段补同步", async () => {
