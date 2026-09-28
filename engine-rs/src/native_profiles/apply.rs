@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 
 use super::model::{self, ProfileDef};
 use super::persistence::{load_bindings_from, write_binding, Binding};
+use super::status::definition_base;
 use crate::native::{Context, Request};
 use crate::store;
 
@@ -55,6 +56,25 @@ fn check_args(req: &Request, command: &str) -> Result<()> {
                 iter.next();
             }
             other => bail!("{command} 不支持参数 '{other}'"),
+        }
+    }
+    Ok(())
+}
+
+/// 更新定义并写入文件只接受候选受管字段和两个独立的写入基准。
+fn check_update_args(req: &Request) -> Result<()> {
+    if req.flag("--dry-run") {
+        bail!("profiles:apply-definition 不支持 --dry-run");
+    }
+    let mut iter = req.args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--only" | "--base" | "--definition-base" | "--candidate" => {
+                if iter.next().is_none() {
+                    bail!("profiles:apply-definition 的 {arg} 缺少取值");
+                }
+            }
+            other => bail!("profiles:apply-definition 不支持参数 '{other}'"),
         }
     }
     Ok(())
@@ -127,13 +147,10 @@ struct Plan {
     content: Vec<u8>,
 }
 
-fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
-    check_args(req, "profiles:apply")?;
-    let id = parse_only(req)?;
+fn plan_for_def(ctx: &Context, req: &Request, def: ProfileDef) -> Result<Plan> {
     let base = parse_base(req)?;
-    let def = find_def(ctx, &id)?;
     if !def.enabled {
-        bail!("[{}] 实例已停用，拒绝写入", id);
+        bail!("[{}] 实例已停用，拒绝写入", def.id);
     }
     let dir = model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
     let (file, real, previous) = read_target(&def, &dir)?;
@@ -152,7 +169,7 @@ fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
         .into_iter()
         .next()
         .map(|target| target.content)
-        .ok_or_else(|| anyhow!("[{}] 没有要写的文件", id))?;
+        .ok_or_else(|| anyhow!("[{}] 没有要写的文件", def.id))?;
     Ok(Plan {
         def,
         dir,
@@ -161,6 +178,97 @@ fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
         previous,
         content,
     })
+}
+
+fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
+    check_args(req, "profiles:apply")?;
+    let id = parse_only(req)?;
+    plan_for_def(ctx, req, find_def(ctx, &id)?)
+}
+
+/// 从现有完整定义生成候选；只替换实例负责的字段，未知元数据原样保留。
+fn plan_update(ctx: &Context, req: &Request) -> Result<(Plan, Value, String)> {
+    check_update_args(req)?;
+    let id = parse_only(req)?;
+    let expected = req
+        .value("--definition-base")
+        .ok_or_else(|| anyhow!("缺少 --definition-base"))?;
+    if !crate::native_mcp::model::is_sha256_hex(expected) {
+        bail!("--definition-base 必须是 64 位小写 sha256");
+    }
+    let policy = store::effective_policy(ctx)?;
+    let original = policy
+        .get("agents")
+        .and_then(|v| v.get("definitions"))
+        .and_then(|v| v.get(&id))
+        .ok_or_else(|| anyhow!("未知实例: {}", id))?;
+    if definition_base(original)? != expected {
+        bail!("[{}] 实例定义已在外部修改，没有写入；请刷新后重试", id);
+    }
+    let current = find_def(ctx, &id)?;
+    let raw_candidate = req
+        .value("--candidate")
+        .ok_or_else(|| anyhow!("缺少 --candidate"))?;
+    let candidate: Value =
+        serde_json::from_str(raw_candidate).map_err(|_| anyhow!("--candidate 不是合法 JSON"))?;
+    let fields = candidate
+        .as_object()
+        .ok_or_else(|| anyhow!("--candidate 必须是对象"))?;
+    let owned: &[&str] = match current.kind {
+        model::ProfileKind::Claude => &["env", "model"],
+        model::ProfileKind::Codex => &["base_url", "env_key", "wire_api", "model"],
+    };
+    if fields
+        .keys()
+        .any(|key| key != "source_connection" && !owned.contains(&key.as_str()))
+    {
+        bail!("--candidate 只能更新该助手实例的接入字段");
+    }
+    let source = fields
+        .get("source_connection")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("--candidate 缺少来源 Provider 名称"))?;
+    if source.is_empty()
+        || source.len() > 64
+        || !source
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        bail!("来源 Provider 名称格式不正确");
+    }
+    let old_source = original
+        .get("profile")
+        .and_then(|v| v.get("source_connection"))
+        .and_then(Value::as_str);
+    if old_source.is_some_and(|old| old != source) {
+        bail!("[{}] 来源 Provider 与现有定义不一致，没有写入", id);
+    }
+    let mut next = original.clone();
+    let profile = next
+        .get_mut("profile")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| anyhow!("[{}] 缺少 profile 段", id))?;
+    for key in owned {
+        profile.remove(*key);
+    }
+    profile.extend(fields.clone());
+    let def = model::parse_definition(&id, &next, current.enabled)?;
+    let has_third_party_credential = match def.kind {
+        model::ProfileKind::Claude => {
+            def.env.contains_key("ANTHROPIC_BASE_URL")
+                && (def.env.contains_key("ANTHROPIC_AUTH_TOKEN")
+                    || def.env.contains_key("ANTHROPIC_API_KEY"))
+        }
+        model::ProfileKind::Codex => def.base_url.is_some() && def.env_key.is_some(),
+    };
+    if !has_third_party_credential {
+        bail!(
+            "[{}] Provider 更新必须保留独立环境的第三方地址与凭据引用",
+            id
+        );
+    }
+    let plan = plan_for_def(ctx, req, def)?;
+    Ok((plan, next, expected.to_string()))
 }
 
 /// 第三方实例的配置目录里不能有官方账号登录：两种凭据在同一个目录里，助手取哪个就只能
@@ -195,6 +303,8 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     let cmd = req.command.replace('.', ":");
     if cmd == "profiles:adopt" {
         plan_adopt(ctx, req)?;
+    } else if cmd == "profiles:apply-definition" {
+        plan_update(ctx, req)?;
     } else {
         plan(ctx, req)?;
     }
@@ -255,7 +365,12 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         return adopt(ctx, req);
     }
     // 锁内重新读取并比对基准，不沿用锁前结果
-    let plan = plan(ctx, req)?;
+    let (plan, update) = if cmd == "profiles:apply-definition" {
+        let (plan, candidate, expected) = plan_update(ctx, req)?;
+        (plan, Some((candidate, expected)))
+    } else {
+        (plan(ctx, req)?, None)
+    };
     let def = &plan.def;
     ensure_no_official_login(ctx, def, &plan.dir)?;
 
@@ -279,6 +394,22 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     let result = (|| -> Result<()> {
         let mut conn = store::open_write(ctx)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if let Some((candidate, expected)) = &update {
+            let mut policy = store::policy_from_connection(&tx)?;
+            let definitions = policy
+                .get_mut("agents")
+                .and_then(|v| v.get_mut("definitions"))
+                .and_then(Value::as_object_mut)
+                .ok_or_else(|| anyhow!("[{}] 实例定义已移除，没有写入", def.id))?;
+            let current = definitions
+                .get(&def.id)
+                .ok_or_else(|| anyhow!("[{}] 实例定义已移除，没有写入", def.id))?;
+            if definition_base(current)? != *expected {
+                bail!("[{}] 实例定义已在外部修改，没有写入", def.id);
+            }
+            definitions.insert(def.id.clone(), candidate.clone());
+            store::write_policy(&tx, &policy)?;
+        }
         write_binding(
             &tx,
             &Binding {
@@ -299,10 +430,14 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         store::record_operation(
             &tx,
             Some(&req.run_id),
-            "profiles:apply",
+            if update.is_some() {
+                "profiles:apply-definition"
+            } else {
+                "profiles:apply"
+            },
             Some(&def.id),
             Some(&json!({
-                "action": "apply",
+                "action": if update.is_some() { "apply-definition" } else { "apply" },
                 "kind": def.kind.as_str(),
                 "created": !existed,
                 "files": [plan.file.clone()],
@@ -319,7 +454,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
 
     Ok(json!({
         "domain": "profiles",
-        "steps": [{"name": format!("profiles:apply {}", def.id), "ok": true, "exit_code": 0}],
+        "steps": [{"name": format!("{} {}", req.command.replace('.', ":"), def.id), "ok": true, "exit_code": 0}],
         "skipped": [],
         "base": model::live_base(def.kind, Some(&plan.content))?,
     }))

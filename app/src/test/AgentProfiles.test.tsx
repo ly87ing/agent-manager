@@ -891,4 +891,109 @@ describe("助手实例", () => {
     expect(JSON.parse(write.args[write.args.indexOf("--value") + 1])).toEqual({ _delete: true });
     expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
   });
+
+  it("编辑 Provider 先预览环境差异，只有勾选后才按两份基准更新并回读", async () => {
+    const oldDefinition = {
+      display_name: "Claude Code · ly", bin: "claude",
+      profile: {
+        base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-cc-ly",
+        source_connection: "relay",
+        env: { ANTHROPIC_BASE_URL: "https://api.example.com", ANTHROPIC_AUTH_TOKEN: "${MY_TOKEN}" },
+      },
+    };
+    const base = "a".repeat(64);
+    const definitionBase = "b".repeat(64);
+    let appliedCandidate: Record<string, unknown> | null = null;
+    const all = routes([profileElement({
+      state: "managed-ok",
+      observed: {
+        ...(profileElement().observed as Record<string, unknown>),
+        base, definition_base: definitionBase, target_exists: true,
+        fields: [{ field: "env.ANTHROPIC_BASE_URL", state: "same", definition: "https://api.example.com", live: "https://api.example.com" }],
+      },
+    })]) as Record<string, Envelope | ((args: string[]) => Promise<Envelope>)>;
+    const agents = all["agents:status"] as Envelope<{ elements: { spec: Record<string, unknown> }[] }>;
+    (agents.data.elements[0] as any).observed.current_config = { state: "missing", base: "missing", config: null, current: null };
+    agents.data.elements[0].spec.settings = {
+      profiles: { relay: { label: "Relay", base_url: "https://api.example.com", auth: "token", token_var: "MY_TOKEN", model: "" } },
+    };
+    all["policy:get"] = async () => makeEnvelope(makePolicyData({
+      effective: {
+        agents: { definitions: { "cc-ly": appliedCandidate
+          ? { ...oldDefinition, profile: { ...oldDefinition.profile, ...appliedCandidate } }
+          : oldDefinition } },
+      },
+    }), { command: "policy.get" });
+    all["profiles:status"] = async () => makeEnvelope({
+      domain: "profiles",
+      elements: [profileElement({
+        state: "managed-ok",
+        observed: {
+          ...(profileElement().observed as Record<string, unknown>),
+          base: appliedCandidate ? "c".repeat(64) : base,
+          definition_base: appliedCandidate ? "d".repeat(64) : definitionBase,
+          target_exists: true,
+          fields: [{
+            field: "env.ANTHROPIC_BASE_URL", state: "same",
+            definition: appliedCandidate ? "https://new.example.com" : "https://api.example.com",
+            live: appliedCandidate ? "https://new.example.com" : "https://api.example.com",
+          }, {
+            field: "env.ANTHROPIC_AUTH_TOKEN", state: "same", definition: "${MY_TOKEN}", live: "<hidden>", purpose: "credential",
+          }],
+        },
+      })],
+    }, { command: "profiles.status" });
+    all["profiles:apply-definition"] = async (args) => {
+      appliedCandidate = JSON.parse(args[args.indexOf("--candidate") + 1]);
+      return makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply-definition" });
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
+    const dialog = await screen.findByRole("dialog", { name: "编辑 Relay" });
+    await userEvent.clear(within(dialog).getByTestId("new-connection-base-url"));
+    await userEvent.type(within(dialog).getByTestId("new-connection-base-url"), "https://new.example.com");
+    const impact = within(dialog).getByTestId("connection-affected-cc-ly");
+    expect(impact).toHaveTextContent("API 地址：https://api.example.com → https://new.example.com");
+    expect(within(impact).getByRole("checkbox")).not.toBeChecked();
+    expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
+    await userEvent.click(within(impact).getByRole("checkbox"));
+    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(true));
+    const update = calls.find((call) => call.command === "profiles:apply-definition")!;
+    expect(update.args).toContain(base);
+    expect(update.args).toContain(definitionBase);
+    expect(appliedCandidate).toMatchObject({
+      source_connection: "relay",
+      env: { ANTHROPIC_BASE_URL: "https://new.example.com", ANTHROPIC_AUTH_TOKEN: "${MY_TOKEN}" },
+    });
+    expect(calls.find((call) => call.command === "policy:set")!.args).toContain("agents.definitions.claude-code");
+    expect(await screen.findByText("Provider 已保存，1 个独立环境已更新并回读")).toBeInTheDocument();
+  });
+
+  it("实际环境已偏离定义时不能从 Provider 编辑直接覆盖", async () => {
+    const all = routes([profileElement({
+      state: "drifted",
+      observed: { ...(profileElement().observed as Record<string, unknown>), base: "a".repeat(64), definition_base: "b".repeat(64) },
+    })]);
+    const agent = (all["agents:status"].data as { elements: { spec: Record<string, unknown> }[] }).elements[0];
+    (agent as any).observed.current_config = { state: "missing", base: "missing", config: null, current: null };
+    agent.spec.settings = { profiles: { relay: { label: "Relay", base_url: "https://api.example.com", auth: "token", token_var: "MY_TOKEN" } } };
+    (all["policy:get"].data as { effective: Record<string, unknown> }).effective = {
+      agents: { definitions: { "cc-ly": {
+        display_name: "Claude Code · ly",
+        profile: { base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-cc-ly", source_connection: "relay", env: { ANTHROPIC_BASE_URL: "https://api.example.com", ANTHROPIC_AUTH_TOKEN: "${MY_TOKEN}" } },
+      } } },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
+    const dialog = await screen.findByRole("dialog", { name: "编辑 Relay" });
+    await userEvent.clear(within(dialog).getByTestId("new-connection-base-url"));
+    await userEvent.type(within(dialog).getByTestId("new-connection-base-url"), "https://new.example.com");
+    const impact = within(dialog).getByTestId("connection-affected-cc-ly");
+    expect(impact).toHaveTextContent("实际配置与定义不同");
+    expect(within(impact).getByRole("checkbox")).toBeDisabled();
+    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
+  });
 });

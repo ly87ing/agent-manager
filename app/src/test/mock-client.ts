@@ -1439,7 +1439,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         aliasLegacy = aliasLegacy.filter((entry) => entry.id !== id);
         return makeEnvelope({ domain: "aliases", discarded: id, source_removed: aliasLegacy.length === 0 }, { command: "aliases.discard-legacy" });
       }
-      if (command.endsWith(":apply") || command === "profiles:adopt") {
+      if (command.endsWith(":apply") || command === "profiles:adopt" || command === "profiles:apply-definition") {
         return applyEnvelope(command.split(":")[0], args, runId);
       }
 

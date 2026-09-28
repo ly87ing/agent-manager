@@ -14,6 +14,8 @@ import {
 } from "../lib/connectionPresets";
 import { cn } from "../lib/utils";
 import { keyStatus, type SecretSourceState } from "../lib/secretSource";
+import { profileConnectionUpdate } from "../lib/profileDefinition";
+import type { ElementState } from "../lib/contract";
 
 export type ConnectionKind = "claude" | "codex";
 
@@ -22,6 +24,18 @@ export interface ConnectionSubmission {
   secretValue: string;
   /** 保存后接着打开「建成独立环境」表单：第三方接入只在独立环境里用，一步到位。 */
   thenMakeProfile?: boolean;
+  /** 用户逐环境勾选的更新目标；未勾选的环境不写入。 */
+  profileUpdates?: string[];
+}
+
+export interface ConnectionProfileImpact {
+  id: string;
+  label: string;
+  definition: Record<string, unknown>;
+  state: ElementState;
+  base: string | null;
+  definitionBase: string | null;
+  blockedReason?: string;
 }
 
 const FOCUSABLE_SELECTOR =
@@ -32,6 +46,7 @@ export function ConnectionFormDialog({
   kind,
   existingNames,
   initialConnection,
+  affectedProfiles = [],
   variant,
   intent,
   secretSource,
@@ -47,6 +62,7 @@ export function ConnectionFormDialog({
   existingNames: string[];
   /** 编辑或复制时的预填值；具体语义由 variant 决定。 */
   initialConnection?: ConnectionEntry;
+  affectedProfiles?: ConnectionProfileImpact[];
   /** 复制模式允许创建新名称；凭据取值始终为空。 */
   variant?: "edit" | "duplicate";
   /** environment：从「新建环境」进来，主按钮是建成独立环境，只保存接入退为次要。 */
@@ -78,6 +94,7 @@ export function ConnectionFormDialog({
     initialConnection ? { ...initialConnection } : null,
   );
   const [secretValue, setSecretValue] = useState("");
+  const [selectedProfiles, setSelectedProfiles] = useState<string[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(!duplicating && Boolean(
     initialConnection?.timeoutMs || initialConnection?.smallFastModel || initialConnection?.aliasOpus
@@ -100,6 +117,16 @@ export function ConnectionFormDialog({
     connection && existingNames.includes(connection.name.trim()) && !(editing && connection.name.trim() === initialConnection?.name),
   );
   const saveDisabled = busy || !connection || (duplicating && (Boolean(validationError) || duplicateName));
+  const impacts = editing && initialConnection && connection
+    ? affectedProfiles.map((profile) => ({
+        ...profile,
+        update: profileConnectionUpdate(profile.id, profile.definition, initialConnection, connection, kind),
+      }))
+    : [];
+  const selectedUpdates = impacts.filter((profile) => selectedProfiles.includes(profile.id)
+    && profile.update && profile.update.changes.length > 0
+    && (profile.state === "managed-ok" || profile.state === "not-materialized")
+    && profile.base && profile.definitionBase && !profile.blockedReason);
 
   useLayoutEffect(() => {
     return () => restoreFocusRef.current?.focus();
@@ -189,6 +216,7 @@ export function ConnectionFormDialog({
       },
       secretValue,
       thenMakeProfile,
+      profileUpdates: selectedUpdates.map((profile) => profile.id),
     });
   };
 
@@ -211,7 +239,7 @@ export function ConnectionFormDialog({
             <h2 className="text-lg font-semibold text-foreground">{dialogTitle}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {editing
-                ? `修改 ${agentName} 的这套接入；只保存定义，不写助手配置。留空凭据取值不会覆盖外部密钥文件中的值。`
+                ? `修改 ${agentName} 的这套接入；已建环境可在下方逐项选择是否更新，默认不改。留空凭据取值不会覆盖外部密钥文件中的值。`
                 : duplicating
                   ? "确认新名称即可创建；原 Provider、当前接入和客户端配置都不会改变。"
                 : "先选厂商，再确认地址、模型和凭据；安装命令不在这里。"}
@@ -671,10 +699,48 @@ export function ConnectionFormDialog({
               </details>
 
               <p className="rounded-lg border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                {intent === "environment"
+                {editing && selectedUpdates.length > 0
+                  ? "保存 Provider 后，只更新下方勾选的独立环境；每个环境按当前实际文件和原定义的基准写入并回读。默认环境不会改。"
+                  : intent === "environment"
                   ? "保存只更新接入定义，不写助手配置，主配置里的官方账号不会被改。「下一步」先保存这套接入，再打开建成独立环境的表单，确认启动命令名与要从默认环境带上的设置。"
                   : "保存只更新接入定义，不写助手配置。主配置只放官方账号；要使用这套接入，点「保存并建成独立环境」，或保存后在卡片上选「建成独立环境」。"}
               </p>
+              {impacts.length > 0 && (
+                <section data-testid="connection-affected-profiles" className="rounded-lg border px-3 py-3 text-xs">
+                  <h3 className="font-medium text-foreground">已建独立环境 · 逐项选择更新</h3>
+                  <p className="mt-1 text-muted-foreground">以下是环境定义相对本次 Provider 修改的差异。环境自己改过的字段会保留；实际配置已偏离定义的环境要先到卡片处理。</p>
+                  <div className="mt-2 space-y-2">
+                    {impacts.map((profile) => {
+                      const changes = profile.update?.changes ?? [];
+                      const selectable = changes.length > 0
+                        && (profile.state === "managed-ok" || profile.state === "not-materialized")
+                        && Boolean(profile.base && profile.definitionBase) && !profile.blockedReason;
+                      return (
+                        <label key={profile.id} data-testid={`connection-affected-${profile.id}`} className="block rounded border p-2">
+                          <span className="flex items-center gap-2 font-medium text-foreground">
+                            <input
+                              type="checkbox"
+                              data-testid={`connection-update-${profile.id}`}
+                              disabled={!selectable || busy}
+                              checked={selectable && selectedProfiles.includes(profile.id)}
+                              onChange={(event) => setSelectedProfiles((current) => event.target.checked
+                                ? [...current, profile.id]
+                                : current.filter((id) => id !== profile.id))}
+                            />
+                            {profile.label} <code className="font-normal text-muted-foreground">{profile.id}</code>
+                          </span>
+                          {!selectable && <p className="mt-1 text-warning">{profile.blockedReason ?? (!profile.update ? "Provider 缺少可写的地址或凭据变量，不能更新环境。" : profile.state === "drifted" ? "实际配置与定义不同，先在环境卡片处理差异。" : profile.state === "unsupported" || profile.state === "disabled" ? "环境当前不可写。" : changes.length === 0 ? "这次没有可带入的字段变化。" : "无法读取完整写入基准，请刷新后重试。")}</p>}
+                          {changes.length > 0 && (
+                            <ul className="mt-1 space-y-0.5 pl-5 text-muted-foreground">
+                              {changes.map((change) => <li key={change.field} className="list-disc break-all">{change.field}：{change.before} → {change.after}</li>)}
+                            </ul>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
                 </>
               )}
             </div>

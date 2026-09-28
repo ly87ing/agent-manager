@@ -6,6 +6,7 @@ import { ProfileFormDialog } from "../components/ProfileFormDialog";
 import { ConfirmModal } from "../components/ConfirmModal";
 import {
   ConnectionFormDialog,
+  type ConnectionProfileImpact,
   type ConnectionSubmission,
 } from "../components/ConnectionFormDialog";
 import { ConnectionWorkbench } from "../components/ConnectionWorkbench";
@@ -28,6 +29,8 @@ import {
   profileLaunchValue,
   connectionToProfileInput,
   instancesUsingConnection,
+  profileConnectionUpdate,
+  profileConnectionReadbackMatches,
   type ProfileFormInput,
 } from "../lib/profileDefinition";
 import { runEngine } from "../lib/engine";
@@ -37,6 +40,7 @@ import {
   connectionsOf,
   duplicateConnectionDraft,
   moveAgentConnection,
+  parseInitialToFormValues,
   serializeConnectionBundle,
   removeAgentConnection,
   runtimeRequiresYoloConfirmation,
@@ -74,6 +78,22 @@ function overwriteDescription(element: EngineElement): string {
   return blanked.length > 0
     ? `${base}注意：配置文件里自己设的 ${blanked.join("、")} 定义里没有，会被置空；要保留请先编辑定义把它们加进去。`
     : base;
+}
+
+/** 引擎回读的 JSON 对象键顺序可能与表单不同，按值比较完整字段。 */
+function sameJson(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length
+      && left.every((item, index) => sameJson(item, right[index]));
+  }
+  if (left && right && typeof left === "object" && typeof right === "object") {
+    const a = left as Record<string, unknown>;
+    const b = right as Record<string, unknown>;
+    return Object.keys(a).length === Object.keys(b).length
+      && Object.keys(a).every((key) => Object.prototype.hasOwnProperty.call(b, key) && sameJson(a[key], b[key]));
+  }
+  return false;
 }
 
 export default function AgentsPage({
@@ -340,6 +360,31 @@ export default function AgentsPage({
     }
   };
 
+  const affectedProfilesForConnection = (element: EngineElement, connection: ConnectionEntry): ConnectionProfileImpact[] => {
+    const agentId = element.id.replace(/^agents:/, "");
+    const definitions = ((policyQuery.data?.ok
+      ? (policyQuery.data.data.effective as Record<string, any> | undefined)?.agents?.definitions
+      : undefined) ?? {}) as Record<string, unknown>;
+    return instancesUsingConnection(definitions, agentId, connection).flatMap(({ id, label }) => {
+      const definition = definitions[id];
+      const status = profilesQuery.data?.ok
+        ? profilesQuery.data.data.elements.find((item) => item.id === `profiles:${id}`)
+        : undefined;
+      if (!definition || typeof definition !== "object") return [];
+      const observed = status?.observed as { base?: string | null; definition_base?: string | null } | undefined;
+      const source = ((definition as Record<string, any>).profile as Record<string, unknown> | undefined)?.source_connection;
+      const matches = source ? 1 : parseInitialToFormValues(agentId, element.spec as Record<string, unknown>).connections
+        .filter((candidate) => instancesUsingConnection({ [id]: definition }, agentId, candidate).length > 0).length;
+      return [{
+        id, label, definition: definition as Record<string, unknown>,
+        state: status?.state ?? "unsupported",
+        base: observed?.base ?? null,
+        definitionBase: observed?.definition_base ?? null,
+        blockedReason: matches > 1 ? "旧环境同时匹配多个 Provider，不能自动判断来源；请先在环境卡片核对。" : undefined,
+      }];
+    });
+  };
+
   /** 创建/编辑 Provider 只保存定义与可选凭据；应用是卡片上的独立操作。 */
   const saveConnection = async (element: EngineElement, submission: ConnectionSubmission) => {
     if (connectionSaving) return;
@@ -347,8 +392,51 @@ export default function AgentsPage({
     setConnectionSaving(true);
     setConnectionFormError(null);
     try {
+      const selectedIds = submission.profileUpdates ?? [];
+      const previous = connectionForm?.variant === "edit" ? connectionForm.initial : undefined;
+      const kind = connectionKindOf(element);
+      const impacts = previous ? affectedProfilesForConnection(element, previous) : [];
+      const updates = selectedIds.map((id) => {
+        const impact = impacts.find((item) => item.id === id);
+        const update = impact && previous && kind
+          ? profileConnectionUpdate(id, impact.definition, previous, submission.connection, kind)
+          : null;
+        return impact && update ? { impact, update } : null;
+      });
+      if (updates.some((item) => !item || item.impact.blockedReason || !item.impact.base || !item.impact.definitionBase
+        || (item.impact.state !== "managed-ok" && item.impact.state !== "not-materialized"))) {
+        setConnectionFormError("受影响环境的定义或写入基准已变化，请刷新后重新选择");
+        return;
+      }
+      let sourceElement = element;
+      if (updates.length > 0) {
+        const [agentsNow, profilesNow] = await Promise.all([
+          runEngine<StatusData>("agents:status", []),
+          runEngine<StatusData>("profiles:status", []),
+        ]);
+        const currentElement = agentsNow.ok
+          ? agentsNow.data.elements.find((item) => item.id === element.id)
+          : undefined;
+        sourceElement = currentElement ?? element;
+        const fresh = Boolean(currentElement) && agentsNow.ok && profilesNow.ok
+          && sameJson(sourceElement.spec, element.spec)
+          && updates.every((entry) => {
+            if (!entry) return false;
+            const now = profilesNow.data.elements.find((item) => item.id === `profiles:${entry.impact.id}`);
+            const observed = now?.observed as { base?: string | null; definition_base?: string | null } | undefined;
+            return now?.state === entry.impact.state
+              && observed?.base === entry.impact.base
+              && observed?.definition_base === entry.impact.definitionBase;
+          });
+        if (!fresh) {
+          void query.refetch();
+          void profilesQuery.refetch();
+          setConnectionFormError("Provider 或环境在表单打开后发生变化，未保存；请刷新后重新选择");
+          return;
+        }
+      }
       const definition = upsertAgentConnection(
-        element.spec as Record<string, unknown>,
+        sourceElement.spec as Record<string, unknown>,
         submission.connection,
         connectionForm?.preserveUnknownFrom,
       );
@@ -391,6 +479,65 @@ export default function AgentsPage({
         void secretsQuery.refetch();
       }
 
+      if (updates.length > 0) {
+        let applied = 0;
+        const failed: string[] = [];
+        for (const entry of updates) {
+          if (!entry) continue;
+          const result = await execute({
+            command: "profiles:apply-definition",
+            label: `更新独立环境 ${entry.impact.id}`,
+            args: [
+              "--only", `profiles:${entry.impact.id}`,
+              "--base", entry.impact.base!,
+              "--definition-base", entry.impact.definitionBase!,
+              "--candidate", JSON.stringify(entry.update.candidate),
+            ],
+            silent: true,
+          });
+          if (!result?.ok) {
+            failed.push(entry.impact.id);
+            continue;
+          }
+          try {
+            const [status, policy] = await Promise.all([
+              runEngine<StatusData>("profiles:status", []),
+              runEngine<PolicyData>("policy:get", []),
+            ]);
+            const now = status.ok
+              ? status.data.elements.find((item) => item.id === `profiles:${entry.impact.id}`)
+              : undefined;
+            const savedProfile = policy.ok
+              ? ((policy.data.effective as Record<string, any>)?.agents?.definitions?.[entry.impact.id]?.profile as Record<string, unknown> | undefined)
+              : undefined;
+            const keys = kind === "codex"
+              ? ["base_url", "env_key", "wire_api", "model", "source_connection"]
+              : ["env", "model", "source_connection"];
+            const saved = savedProfile && keys.every((key) =>
+              sameJson(savedProfile[key], entry.update.candidate[key]));
+            const observed = now?.observed as { fields?: { field: string; state: string; definition: string | null }[] } | undefined;
+            if (now?.state === "managed-ok"
+              && observed?.fields
+              && kind
+              && profileConnectionReadbackMatches(kind, entry.update.candidate, observed.fields)
+              && saved) {
+              applied += 1;
+            } else {
+              failed.push(`${entry.impact.id}（写入后回读未确认）`);
+            }
+          } catch {
+            failed.push(`${entry.impact.id}（写入后回读失败）`);
+          }
+        }
+        void profilesQuery.refetch();
+        if (failed.length > 0) {
+          toast.warning(`Provider 已保存，${applied} 个环境已更新，${failed.length} 个未确认`, {
+            description: `${failed.join("、")}。请到对应环境卡片查看实际配置后再操作。`,
+          });
+        } else {
+          toast.success(`Provider 已保存，${applied} 个独立环境已更新并回读`);
+        }
+      }
       setConnectionForm(null);
       await query.refetch();
       if (submission.thenMakeProfile) makeProfileFromConnection(element, submission.connection);
@@ -1018,6 +1165,9 @@ export default function AgentsPage({
           kind={connectionKindOf(connectionForm.agent)!}
           existingNames={connectionsOf(connectionForm.agent.spec as Record<string, unknown>).map((item) => item.name)}
           initialConnection={connectionForm.initial}
+          affectedProfiles={connectionForm.variant === "edit" && connectionForm.initial
+            ? affectedProfilesForConnection(connectionForm.agent, connectionForm.initial)
+            : []}
           variant={connectionForm.variant}
           intent={connectionForm.intent}
           secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}

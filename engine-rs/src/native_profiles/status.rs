@@ -11,6 +11,13 @@ use super::model::{self, ProfileDef};
 use crate::native::Context;
 use crate::store;
 
+/// 定义的写入基准：只输出摘要，候选更新在锁内重新比对原定义。
+pub(crate) fn definition_base(raw: &Value) -> Result<String> {
+    Ok(crate::native_mcp::model::sha256_hex_bytes(
+        &serde_json::to_vec(raw)?,
+    ))
+}
+
 /// 实例执行的命令：取基础助手定义里的 bin，取不到时退回实例类型的默认命令名。
 pub(crate) fn base_bin(ctx: &Context, def: &ProfileDef) -> String {
     let fallback = match def.kind {
@@ -53,7 +60,7 @@ fn invalid_element(id: &str, raw: &Value, err: &anyhow::Error) -> Value {
     })
 }
 
-fn element(ctx: &Context, def: &ProfileDef) -> Value {
+fn element(ctx: &Context, def: &ProfileDef, raw: &Value) -> Value {
     let dir_check = model::validate_config_dir(def, &ctx.home_dir, &ctx.data_dir);
     let (config_dir, blocked) = match dir_check {
         Ok(path) => (Some(path), None),
@@ -195,6 +202,7 @@ fn element(ctx: &Context, def: &ProfileDef) -> Value {
     );
     observed.insert("files".into(), Value::Array(files));
     observed.insert("base".into(), json!(base));
+    observed.insert("definition_base".into(), json!(definition_base(raw).ok()));
     observed.insert("fields".into(), Value::Array(fields));
     observed.insert("env_refs".into(), Value::Array(env_refs));
     observed.insert(
@@ -244,7 +252,7 @@ pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
     let mut elements = Vec::new();
     for (id, raw, parsed) in model::load_definition_entries(&policy) {
         match parsed {
-            Ok(def) => elements.push(element(ctx, &def)),
+            Ok(def) => elements.push(element(ctx, &def, &raw)),
             Err(err) => elements.push(invalid_element(&id, &raw, &err)),
         }
     }

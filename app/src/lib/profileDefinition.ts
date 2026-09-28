@@ -378,3 +378,92 @@ export function connectionToProfileInput(
     dropped,
   };
 }
+
+export interface ProfileConnectionChange {
+  field: string;
+  before: string;
+  after: string;
+}
+
+/**
+ * Provider 编辑预览：只更新环境中仍等于旧 Provider 的字段，实例自行改过的值保留。
+ * 返回引擎可原子写入的受管字段；凭据始终是变量引用，不包含取值。
+ */
+export function profileConnectionUpdate(
+  id: string,
+  definition: Record<string, unknown>,
+  previous: ConnectionEntry,
+  next: ConnectionEntry,
+  kind: ProfileKind,
+): { candidate: Record<string, unknown>; changes: ProfileConnectionChange[] } | null {
+  const current = parseProfileDefinition(id, definition);
+  if (!current.baseUrl.trim() || !current.tokenVar.trim() || !next.baseUrl.trim() || !next.tokenVar.trim()) return null;
+  const agent = { id: current.baseAgent, kind };
+  const oldInput = connectionToProfileInput(agent, previous, [])?.input;
+  const newInput = connectionToProfileInput(agent, next, [])?.input;
+  if (!oldInput || !newInput || current.kind !== kind) return null;
+  const proposed: ProfileFormInput = { ...current, sourceConnection: next.name, extraEnv: { ...current.extraEnv } };
+  const changes: ProfileConnectionChange[] = [];
+  const show = (value: string | undefined) => value || "（未设置）";
+  const set = (field: string, before: string, after: string, update: () => void) => {
+    if (before !== after) {
+      update();
+      changes.push({ field, before: show(before), after: show(after) });
+    }
+  };
+  if (current.baseUrl === oldInput.baseUrl) {
+    set("API 地址", current.baseUrl, newInput.baseUrl, () => { proposed.baseUrl = newInput.baseUrl; });
+  }
+  if (current.model === oldInput.model) {
+    set("默认模型", current.model, newInput.model, () => { proposed.model = newInput.model; });
+  }
+  if (current.tokenVar === oldInput.tokenVar && current.authHeader === oldInput.authHeader) {
+    set("凭据变量", current.tokenVar, newInput.tokenVar, () => { proposed.tokenVar = newInput.tokenVar; });
+    set("请求头", current.authHeader, newInput.authHeader, () => { proposed.authHeader = newInput.authHeader; });
+  }
+  for (const name of new Set([...Object.keys(oldInput.extraEnv), ...Object.keys(newInput.extraEnv)])) {
+    const before = current.extraEnv[name];
+    if (before !== oldInput.extraEnv[name]) continue;
+    const after = newInput.extraEnv[name];
+    set(name, before ?? "", after ?? "", () => {
+      if (after === undefined) delete proposed.extraEnv[name];
+      else proposed.extraEnv[name] = after;
+    });
+  }
+  if (!current.sourceConnection) {
+    changes.push({ field: "来源关联", before: "按地址推断", after: next.name });
+  }
+  const profile = buildProfileDefinition(proposed, "").profile as Record<string, unknown>;
+  const candidate: Record<string, unknown> = { source_connection: next.name };
+  const keys = kind === "claude" ? ["env", "model"] : ["base_url", "env_key", "wire_api", "model"];
+  for (const key of keys) {
+    if (profile[key] !== undefined) candidate[key] = profile[key];
+  }
+  return { candidate, changes };
+}
+
+/** 更新后从 profiles:status 核对每个候选字段都已在实际文件中生效。 */
+export function profileConnectionReadbackMatches(
+  kind: ProfileKind,
+  candidate: Record<string, unknown>,
+  fields: { field: string; state: string; definition: string | null }[],
+): boolean {
+  if (fields.some((field) => field.state !== "same")) return false;
+  const expected: [string, string][] = [];
+  if (typeof candidate.model === "string") expected.push(["model", candidate.model]);
+  if (kind === "claude") {
+    const env = candidate.env as Record<string, unknown> | undefined;
+    for (const [name, value] of Object.entries(env ?? {})) {
+      if (typeof value !== "string") return false;
+      expected.push([`env.${name}`, value]);
+    }
+  } else if (typeof candidate.base_url === "string") {
+    expected.push(["provider.base_url", candidate.base_url]);
+    expected.push(["provider.wire_api", String(candidate.wire_api ?? "responses")]);
+    if (typeof candidate.env_key === "string") {
+      expected.push(["provider.experimental_bearer_token", `\${${candidate.env_key}}`]);
+    }
+  }
+  return expected.every(([field, value]) =>
+    fields.some((actual) => actual.field === field && actual.definition === value && actual.state === "same"));
+}

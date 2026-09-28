@@ -275,6 +275,8 @@ export interface ProfileObserved {
   system_overrides?: { source: string; name: string }[];
   /** 写入基准：实例目标文件本工具负责部分的摘要，文件不存在为 missing；读不了时为 null。 */
   base?: string | null;
+  /** 当前完整实例定义的摘要，更新定义和实际文件时一起做写前比对。 */
+  definition_base?: string | null;
   /** 实例定义与实际文件逐字段对比；凭据只给是否一致，取值为 <hidden>。 */
   fields?: ProfileField[];
   blocked_reason: string | null;

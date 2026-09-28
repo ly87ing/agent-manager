@@ -33,7 +33,7 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             status::build_status(ctx)
         }
         // apply：用实例定义写实例文件（取锁）；adopt：用实际文件更新实例定义（只写库）
-        "profiles:apply" | "profiles:adopt" => apply::apply(ctx, req),
+        "profiles:apply" | "profiles:apply-definition" | "profiles:adopt" => apply::apply(ctx, req),
         // seed：把默认环境的权限、状态栏、hooks、规则与 MCP 一次性带进实例（取锁）
         "profiles:seed" => seed::seed(ctx, req),
         _ => bail!("profiles 域不支持命令 '{}'", req.command),

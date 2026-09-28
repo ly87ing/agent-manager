@@ -13,6 +13,8 @@ import {
   launchCommandsForProfile,
   normalizeConfigDir,
   parseProfileDefinition,
+  profileConnectionUpdate,
+  profileConnectionReadbackMatches,
   profileLaunchValue,
   profileMcpConfig,
   shellConfigDir,
@@ -311,6 +313,89 @@ describe("用着某套接入的独立环境", () => {
     expect(instancesUsingConnection(definitions, "claude-code", {
       name: "other", baseUrl: "https://old.example.com", tokenVar: "OLD_KEY",
     })).toEqual([]);
+  });
+});
+
+describe("Provider 编辑影响预览", () => {
+  it("只改仍跟随旧 Provider 的字段，保留环境自己改过的模型和 env", () => {
+    const old = {
+      ...emptyConnection("relay"), baseUrl: "https://old.example.com", tokenVar: "OLD_KEY",
+      model: "old-model", aliasOpus: "old-opus", aliasHaiku: "old-haiku",
+    };
+    const newer = {
+      ...old, baseUrl: "https://new.example.com", tokenVar: "NEW_KEY",
+      model: "new-model", aliasOpus: "new-opus", aliasHaiku: "",
+    };
+    const definition = buildProfileDefinition({
+      ...claudeInput,
+      baseUrl: old.baseUrl,
+      tokenVar: old.tokenVar,
+      model: "my-model",
+      extraEnv: { ANTHROPIC_DEFAULT_OPUS_MODEL: "old-opus", ANTHROPIC_DEFAULT_HAIKU_MODEL: "my-haiku", MINE: "keep" },
+    }, "claude");
+    const update = profileConnectionUpdate("cc-ly", definition, old, newer, "claude")!;
+    expect(update.changes.map((change) => change.field)).toEqual(["API 地址", "凭据变量", "ANTHROPIC_DEFAULT_OPUS_MODEL", "来源关联"]);
+    expect(update.candidate).toMatchObject({
+      source_connection: "relay",
+      model: "my-model",
+      env: {
+        ANTHROPIC_BASE_URL: "https://new.example.com",
+        ANTHROPIC_AUTH_TOKEN: "${NEW_KEY}",
+        ANTHROPIC_DEFAULT_OPUS_MODEL: "new-opus",
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: "my-haiku",
+        MINE: "keep",
+      },
+    });
+  });
+
+  it("Codex 更新地址与变量引用，候选不包含 Claude env 或凭据取值", () => {
+    const old = { ...emptyConnection("relay"), baseUrl: "https://old.example.com", tokenVar: "OLD_KEY", model: "old-model" };
+    const newer = { ...old, baseUrl: "https://new.example.com", tokenVar: "NEW_KEY", model: "new-model" };
+    const definition = buildProfileDefinition({
+      ...claudeInput, id: "cx-work", baseAgent: "codex", kind: "codex", configDir: "~/.codex-work",
+      baseUrl: old.baseUrl, tokenVar: old.tokenVar, model: old.model,
+    }, "codex");
+    const update = profileConnectionUpdate("cx-work", definition, old, newer, "codex")!;
+    expect(update.candidate).toEqual({
+      source_connection: "relay", base_url: "https://new.example.com", env_key: "NEW_KEY",
+      wire_api: "responses", model: "new-model",
+    });
+    expect(JSON.stringify(update.candidate)).not.toContain("OLD_KEY_VALUE");
+    expect(profileConnectionReadbackMatches("codex", update.candidate, [
+      { field: "model", state: "same", definition: "new-model" },
+      { field: "provider.base_url", state: "same", definition: "https://new.example.com" },
+      { field: "provider.wire_api", state: "same", definition: "responses" },
+      { field: "provider.experimental_bearer_token", state: "same", definition: "${NEW_KEY}" },
+    ])).toBe(true);
+    expect(profileConnectionReadbackMatches("codex", update.candidate, [
+      { field: "provider.base_url", state: "same", definition: "https://old.example.com" },
+    ])).toBe(false);
+  });
+
+  it("认证请求头切换会移除旧凭据键；回读必须逐字段确认新值", () => {
+    const old = {
+      ...emptyConnection("relay"), baseUrl: "https://old.example.com", tokenVar: "RELAY_KEY",
+      model: "old-model", aliasHaiku: "old-haiku",
+    };
+    const newer = { ...old, auth: "api_key" as const, aliasHaiku: "", model: "new-model" };
+    const definition = buildProfileDefinition({
+      ...claudeInput, sourceConnection: "relay", baseUrl: old.baseUrl, tokenVar: old.tokenVar,
+      model: old.model, extraEnv: { ANTHROPIC_DEFAULT_HAIKU_MODEL: "old-haiku", MINE: "keep" },
+    }, "claude");
+    const update = profileConnectionUpdate("cc-ly", definition, old, newer, "claude")!;
+    expect(update.candidate.env).toEqual({
+      ANTHROPIC_BASE_URL: "https://old.example.com", ANTHROPIC_API_KEY: "${RELAY_KEY}", MINE: "keep",
+    });
+    expect(update.changes.map((item) => item.field)).toEqual(["默认模型", "请求头", "ANTHROPIC_DEFAULT_HAIKU_MODEL"]);
+    expect(profileConnectionReadbackMatches("claude", update.candidate, [
+      { field: "model", state: "same", definition: "new-model" },
+      { field: "env.ANTHROPIC_BASE_URL", state: "same", definition: "https://old.example.com" },
+      { field: "env.ANTHROPIC_API_KEY", state: "same", definition: "${RELAY_KEY}" },
+      { field: "env.MINE", state: "same", definition: "keep" },
+    ])).toBe(true);
+    expect(profileConnectionReadbackMatches("claude", update.candidate, [
+      { field: "model", state: "same", definition: "old-model" },
+    ])).toBe(false);
   });
 });
 

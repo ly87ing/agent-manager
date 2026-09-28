@@ -165,7 +165,10 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let is_rule_apply = request.command.replace('.', ":") == "rules:apply";
     let is_hook_apply = request.command.replace('.', ":") == "hooks:apply";
     let is_alias_apply = request.command.replace('.', ":") == "aliases:apply";
-    let is_profile_apply = request.command.replace('.', ":") == "profiles:apply";
+    let is_profile_apply = matches!(
+        request.command.replace('.', ":").as_str(),
+        "profiles:apply" | "profiles:apply-definition"
+    );
     let is_profile_seed = request.command.replace('.', ":") == "profiles:seed";
     // 运行参数写助手配置文件，与别的写动作同样要排他；校验在 configure 内部做，
     // 这里只负责取锁。
@@ -544,7 +547,7 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
                 .map(|data| (data, vec![]))
                 .map_err(|err| DispatchError::new("HOOK_ERROR", format!("{err:#}")))
         }
-        ("profiles", "status" | "apply" | "adopt" | "seed") => {
+        ("profiles", "status" | "apply" | "apply-definition" | "adopt" | "seed") => {
             crate::native_profiles::handle(ctx, request)
                 .map(|data| (data, vec![]))
                 .map_err(|err| DispatchError::new("PROFILE_ERROR", format!("{err:#}")))

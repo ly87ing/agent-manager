@@ -108,6 +108,13 @@ fn base_of(ctx: &Context, id: &str) -> String {
         .to_string()
 }
 
+fn definition_base_of(ctx: &Context, id: &str) -> String {
+    element(&status(ctx), id)["observed"]["definition_base"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{id} 没有 definition_base"))
+        .to_string()
+}
+
 /// 按当前实际内容写入实例（先取 base 再 apply）。
 fn apply_now(ctx: &Context, id: &str) -> agent_manager_engine::Envelope {
     let base = base_of(ctx, id);
@@ -118,6 +125,211 @@ fn apply_now(ctx: &Context, id: &str) -> agent_manager_engine::Envelope {
             &["--only", &format!("profiles:{id}"), "--base", &base],
         ),
     )
+}
+
+#[test]
+fn provider_candidate_updates_one_profile_definition_and_live_file_together() {
+    let (root, ctx) = temp_ctx("provider-candidate");
+    std::env::set_var("AM_TEST_PROVIDER_CANDIDATE", "candidate-token-value");
+    let global = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+    std::fs::write(&global, b"{\"theme\":\"keep\"}\n").unwrap();
+    let global_before = std::fs::read(&global).unwrap();
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_PROVIDER_CANDIDATE")
+    ));
+    assert!(apply_now(&ctx, "cc-ly").ok);
+    let target = ctx.home_dir.join(".claude-ly/settings.json");
+    let old_file = std::fs::read(&target).unwrap();
+    let base = base_of(&ctx, "cc-ly");
+    let definition_base = definition_base_of(&ctx, "cc-ly");
+    let candidate = r#"{"env":{"ANTHROPIC_BASE_URL":"https://new.example.com","ANTHROPIC_API_KEY":"${AM_TEST_PROVIDER_CANDIDATE}"},"model":"new-model","source_connection":"provider-demo"}"#;
+    let request_update = || {
+        request(
+            "profiles:apply-definition",
+            &[
+                "--only",
+                "profiles:cc-ly",
+                "--base",
+                &base,
+                "--definition-base",
+                &definition_base,
+                "--candidate",
+                candidate,
+            ],
+        )
+    };
+    let done = execute(&ctx, &request_update());
+    assert!(done.ok, "{:?}", done.errors);
+    let file: serde_json::Value = serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
+    assert_eq!(file["env"]["ANTHROPIC_BASE_URL"], "https://new.example.com");
+    assert_eq!(file["env"]["ANTHROPIC_API_KEY"], "candidate-token-value");
+    assert_eq!(
+        file["env"]["ANTHROPIC_AUTH_TOKEN"], "",
+        "旧请求头凭据须置空以隔离 shell 继承"
+    );
+    assert_eq!(file["model"], "new-model");
+    let policy = execute(&ctx, &request("policy:get", &[]));
+    let profile = &policy.data["effective"]["agents"]["definitions"]["cc-ly"]["profile"];
+    assert_eq!(profile["source_connection"], "provider-demo");
+    assert_eq!(
+        profile["env"]["ANTHROPIC_API_KEY"],
+        "${AM_TEST_PROVIDER_CANDIDATE}"
+    );
+    assert_eq!(element(&status(&ctx), "cc-ly")["state"], "managed-ok");
+    assert_eq!(std::fs::read(&global).unwrap(), global_before);
+    assert_ne!(std::fs::read(&target).unwrap(), old_file);
+
+    // 两个旧基准都不能重用，文件与定义保持刚刚确认过的结果。
+    let finished_file = std::fs::read(&target).unwrap();
+    let finished_policy = policy.data["effective"]["agents"]["definitions"]["cc-ly"].clone();
+    let denied = execute(&ctx, &request_update());
+    assert!(!denied.ok);
+    assert_eq!(std::fs::read(&target).unwrap(), finished_file);
+    let after = execute(&ctx, &request("policy:get", &[]));
+    assert_eq!(
+        after.data["effective"]["agents"]["definitions"]["cc-ly"],
+        finished_policy
+    );
+
+    std::env::remove_var("AM_TEST_PROVIDER_CANDIDATE");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn provider_candidate_rejects_stale_file_definition_and_plaintext_before_writing() {
+    let (root, ctx) = temp_ctx("provider-candidate-reject");
+    std::env::set_var("AM_TEST_PROVIDER_REJECT", "candidate-token-value");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_PROVIDER_REJECT")
+    ));
+    assert!(apply_now(&ctx, "cc-ly").ok);
+    let target = ctx.home_dir.join(".claude-ly/settings.json");
+    let base = base_of(&ctx, "cc-ly");
+    let definition_base = definition_base_of(&ctx, "cc-ly");
+    let candidate = r#"{"env":{"ANTHROPIC_BASE_URL":"https://new.example.com","ANTHROPIC_AUTH_TOKEN":"${AM_TEST_PROVIDER_REJECT}"},"source_connection":"provider-demo"}"#;
+    let update = |file_base: &str, def_base: &str, value: &str| {
+        execute(
+            &ctx,
+            &request(
+                "profiles:apply-definition",
+                &[
+                    "--only",
+                    "profiles:cc-ly",
+                    "--base",
+                    file_base,
+                    "--definition-base",
+                    def_base,
+                    "--candidate",
+                    value,
+                ],
+            ),
+        )
+    };
+    let policy_before = execute(&ctx, &request("policy:get", &[])).data;
+    let file_before = std::fs::read(&target).unwrap();
+    let bad_secret =
+        r#"{"env":{"ANTHROPIC_AUTH_TOKEN":"plaintext-token"},"source_connection":"provider-demo"}"#;
+    assert!(!update(&base, &definition_base, bad_secret).ok);
+    assert_eq!(std::fs::read(&target).unwrap(), file_before);
+    assert_eq!(
+        execute(&ctx, &request("policy:get", &[])).data,
+        policy_before
+    );
+
+    std::fs::write(&target, b"{\"env\":{\"EXTERNAL\":\"keep\"}}\n").unwrap();
+    let external = std::fs::read(&target).unwrap();
+    assert!(!update(&base, &definition_base, candidate).ok);
+    assert_eq!(std::fs::read(&target).unwrap(), external);
+    assert_eq!(
+        execute(&ctx, &request("policy:get", &[])).data,
+        policy_before
+    );
+
+    let fresh_base = base_of(&ctx, "cc-ly");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_PROVIDER_REJECT").replace("Claude Code · ly", "Edited elsewhere")
+    ));
+    let updated_policy = execute(&ctx, &request("policy:get", &[])).data;
+    assert!(!update(&fresh_base, &definition_base, candidate).ok);
+    assert_eq!(std::fs::read(&target).unwrap(), external);
+    assert_eq!(
+        execute(&ctx, &request("policy:get", &[])).data,
+        updated_policy
+    );
+
+    std::env::remove_var("AM_TEST_PROVIDER_REJECT");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn provider_candidate_updates_only_codex_profile_and_preserves_mcp_and_main_config() {
+    let (root, ctx) = temp_ctx("provider-codex-candidate");
+    std::env::set_var("AM_TEST_CODEX_OLD", "old-candidate-token");
+    std::env::set_var("AM_TEST_CODEX_NEW", "new-candidate-token");
+    let global = ctx.home_dir.join(".codex/config.toml");
+    std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+    std::fs::write(&global, b"model = \"keep\"\n").unwrap();
+    let global_before = std::fs::read(&global).unwrap();
+    let target = ctx.home_dir.join(".codex-work/config.toml");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, b"[mcp_servers.fs]\ncommand = \"npx\"\n").unwrap();
+    assert!(save_definition(
+        &ctx,
+        "cx-work",
+        r#"{"display_name":"Codex work","bin":"codex","profile":{"base_agent":"codex","kind":"codex","config_dir":"~/.codex-work","base_url":"https://old.example.com/v1","env_key":"AM_TEST_CODEX_OLD","wire_api":"responses","model":"old-model"}}"#
+    ));
+    assert!(apply_now(&ctx, "cx-work").ok);
+    let base = base_of(&ctx, "cx-work");
+    let definition_base = definition_base_of(&ctx, "cx-work");
+    let candidate = r#"{"base_url":"https://new.example.com/v1","env_key":"AM_TEST_CODEX_NEW","wire_api":"responses","model":"new-model","source_connection":"provider-demo"}"#;
+    let done = execute(
+        &ctx,
+        &request(
+            "profiles:apply-definition",
+            &[
+                "--only",
+                "profiles:cx-work",
+                "--base",
+                &base,
+                "--definition-base",
+                &definition_base,
+                "--candidate",
+                candidate,
+            ],
+        ),
+    );
+    assert!(done.ok, "{:?}", done.errors);
+    let text = std::fs::read_to_string(&target).unwrap();
+    let doc: toml::Table = text.parse().unwrap();
+    assert_eq!(doc["model"].as_str(), Some("new-model"));
+    assert_eq!(
+        doc["model_providers"]["agent-manager"]["base_url"].as_str(),
+        Some("https://new.example.com/v1")
+    );
+    assert_eq!(
+        doc["model_providers"]["agent-manager"]["experimental_bearer_token"].as_str(),
+        Some("new-candidate-token")
+    );
+    assert_eq!(doc["mcp_servers"]["fs"]["command"].as_str(), Some("npx"));
+    assert_eq!(std::fs::read(&global).unwrap(), global_before);
+    assert_eq!(element(&status(&ctx), "cx-work")["state"], "managed-ok");
+    let policy = execute(&ctx, &request("policy:get", &[]));
+    assert_eq!(
+        policy.data["effective"]["agents"]["definitions"]["cx-work"]["profile"]["env_key"],
+        "AM_TEST_CODEX_NEW"
+    );
+    assert!(!policy.data.to_string().contains("new-candidate-token"));
+
+    std::env::remove_var("AM_TEST_CODEX_OLD");
+    std::env::remove_var("AM_TEST_CODEX_NEW");
+    let _ = std::fs::remove_dir_all(root);
 }
 
 /// 测试并行执行，环境变量是进程级共享的：每个用例用各自的变量名，互不清掉对方的。

@@ -583,7 +583,7 @@ export function ConnectionWorkbench({
             <div>
               <h3 className="text-base font-semibold text-foreground">第三方接入 · 用来建独立环境</h3>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                这里只是保存的接入参数（地址、模型、密钥变量名），不会写进默认环境；建成独立环境后才能用。改这里不会改已经建好的环境。
+                这里只保存接入参数（地址、模型、密钥变量名），不会写进默认环境；建成独立环境后才能用。编辑时可逐项选择更新已建独立环境，默认不改。
               </p>
             </div>
             <div className="flex items-center gap-2">

@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:adopt|seed / agents:configure|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:apply-definition|adopt|seed / agents:configure|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -62,6 +62,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("aliases", "discard-legacy") => true,
         // 以实例的实际配置更新实例定义：只写库，不动实例文件
         ("profiles", "adopt") => true,
+        // 用户逐环境确认后同时更新定义与实际配置文件
+        ("profiles", "apply-definition") => true,
         // 把默认环境的权限、状态栏、hooks、规则与 MCP 一次性带进实例：只补实例没有的
         ("profiles", "seed") => true,
         // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
@@ -191,6 +193,12 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("profiles", "adopt") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--base", ArgValueKind::RuleBase));
+        }
+        ("profiles", "apply-definition") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--base", ArgValueKind::RuleBase));
+            specs.push(("--definition-base", ArgValueKind::Digest));
+            specs.push(("--candidate", ArgValueKind::JsonValue));
         }
         // 只读发现：--only 取域名（agents/skills/mcp），引擎侧再做词汇表校验
         ("profiles", "seed") => {
@@ -692,6 +700,7 @@ mod tests {
             "aliases:discard-legacy",
             "profiles:status",
             "profiles:apply",
+            "profiles:apply-definition",
             "profiles:adopt",
             "profiles:seed",
             "secrets:status",
@@ -1356,6 +1365,35 @@ mod tests {
         assert!(validate_args(
             "profiles:apply",
             &args(&["--only", "profiles:cc-ly", "--allow-takeover"])
+        )
+        .is_err());
+        let candidate = r#"{"source_connection":"relay","model":"new-model"}"#;
+        assert!(validate_args(
+            "profiles:apply-definition",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--base",
+                "missing",
+                "--definition-base",
+                &base,
+                "--candidate",
+                candidate,
+            ])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "profiles:apply-definition",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--base",
+                "missing",
+                "--definition-base",
+                "XYZ",
+                "--candidate",
+                candidate,
+            ])
         )
         .is_err());
         // seed：只认那几项，逗号分隔；凭据相关的 env / apiKeyHelper 不在其中
