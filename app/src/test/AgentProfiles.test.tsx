@@ -239,6 +239,19 @@ describe("助手实例", () => {
     expect(within(card).getByTestId("profile-skills-cc-ly")).toBeInTheDocument();
   });
 
+  for (const state of ["managed-ok", "not-materialized"] as const) {
+    it(`没有启动命令时，${state} 状态不误称环境可用同名命令启动`, async () => {
+      const withNoLaunch = routes([profileElement({ state })]);
+      withNoLaunch["aliases:status"] = makeEnvelope(makeAliasStatus({}), { command: "aliases.status" });
+      renderWithEngine(<AgentsPage />, withNoLaunch);
+      const card = await screen.findByTestId("profile-card-cc-ly");
+      expect(within(card).getByTestId("profile-summary-cc-ly")).toHaveTextContent("还没有启动命令");
+      expect(card).not.toHaveTextContent("用它的名字即可启动");
+      if (state === "managed-ok") expect(card).not.toHaveTextContent("配置已写入，终端里");
+      else expect(card).toHaveTextContent("还没写入这套配置，点「写入配置」。");
+    });
+  }
+
   it("复制启动名只写剪贴板，不修改实际别名或环境", async () => {
     const writeText = vi.fn(async () => {});
     const originalClipboard = navigator.clipboard;

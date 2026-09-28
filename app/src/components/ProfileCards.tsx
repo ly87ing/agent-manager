@@ -15,8 +15,7 @@ import { sharedItemLabel, type SharedItem } from "../lib/profileShared";
 
 /** 实例状态 → 一句话说明用户现在处于什么位置。 */
 const STATE_NOTE: Record<string, string> = {
-  "not-materialized": "还没写入这套配置，点「写入配置」后就能用这个名字启动。",
-  "managed-ok": "配置已写入，终端里用它的名字即可启动这个独立环境。",
+  "not-materialized": "还没写入这套配置，点「写入配置」。",
   drifted: "实例定义与实际配置不同：可以用定义写入覆盖实际配置，也可以以实际配置更新定义。",
   disabled: "已停用，不再维护这套配置。",
   unsupported: "定义有问题，先修好再写入。",
@@ -153,6 +152,7 @@ export function ProfileCard({
   const thirdParty = observed.third_party === true;
   // 优先显示和环境同名的那条启动命令
   const launchName = (launchCommands.find((command) => command.name === id) ?? launchCommands[0])?.name ?? null;
+  const stateNote = blocked ?? (credentialOnlyDrift ? "密钥换过了，这个环境还在用旧的：点「写入新密钥」。" : STATE_NOTE[element.state] ?? "");
   const systemOverrides = observed.system_overrides ?? [];
   if (observed.invalid) {
     // 库里的定义按现在的规则解析不了（如旧版本存下的写法）：只给原因，以及编辑修正或移除
@@ -216,9 +216,7 @@ export function ProfileCard({
         <StateBadge state={element.state} />
       </div>
 
-      <p className="mt-2 text-xs text-muted-foreground">
-        {blocked ?? (credentialOnlyDrift ? "密钥换过了，这个环境还在用旧的：点「写入新密钥」。" : STATE_NOTE[element.state] ?? "")}
-      </p>
+      {stateNote && <p className="mt-2 text-xs text-muted-foreground">{stateNote}</p>}
 
       {credentials.map((field) => (
         <p
