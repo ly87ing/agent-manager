@@ -148,7 +148,7 @@ export default function AgentsPage({
     Record<string, { ok: boolean; detail: string; latencyMs: number; pending?: boolean }>
   >({});
   const [checkingAllAgentId, setCheckingAllAgentId] = useState<string | null>(null);
-  /** 「新建环境 → 另一个官方账号」时预先选中的助手；null 按列表第一个。 */
+  /** 「新建环境 → 手动创建环境」时预先选中的助手；null 按列表第一个。 */
   const [profileNewAgent, setProfileNewAgent] = useState<string | null>(null);
 
   const [aliasEditing, setAliasEditing] = useState<
@@ -1081,34 +1081,20 @@ export default function AgentsPage({
         }}
         renderInstances={() => (
           <section data-testid="independent-environments" className="space-y-4 rounded-xl border bg-card p-5 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold text-foreground">
-              独立环境{visibleProfileElements.length > 0 ? `（${visibleProfileElements.length}）` : ""}
-            </h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              各有自己的配置目录、登录与会话，和默认环境可以同时开着；第三方厂商只在这里用，也可以在这里登录另一个官方账号。
-            </p>
-          </div>
-          <button
-            type="button"
-            data-testid="add-profile-button"
-            disabled={profileCapableAgents.length === 0}
-            onClick={() => {
-              setProfileNewAgent(effectiveAgentName);
-              setProfileForm("new");
-            }}
-            className="shrink-0 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-50"
-          >
-            新建独立环境
-          </button>
-        </div>
+            <div>
+              <h3 className="text-base font-semibold text-foreground">
+                独立环境{visibleProfileElements.length > 0 ? `（${visibleProfileElements.length}）` : ""}
+              </h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                各有自己的配置目录、登录与会话，和默认环境可以同时开着；第三方厂商只在这里用，也可以在这里登录另一个官方账号。
+              </p>
+            </div>
         {visibleProfileElements.length === 0 ? (
           <EmptyState
             compact
             testId="profiles-empty"
             title="还没有独立环境"
-            description="用右上角「新建环境」：选第三方厂商会建成一个用它的独立环境；选另一个官方账号会建一个单独登录的目录。下方保存过的第三方接入也可以一键建成。"
+            description="用右上角「新建环境」：选第三方厂商直接创建，或手动填写环境与账号。下方保存过的第三方接入也可以建成环境。"
           />
         ) : (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">

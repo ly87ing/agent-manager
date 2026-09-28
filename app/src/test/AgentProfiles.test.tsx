@@ -136,6 +136,11 @@ describe("助手实例", () => {
     return screen.findByTestId("independent-environments");
   }
 
+  async function openNewProfileForm() {
+    await userEvent.click(await screen.findByTestId("new-environment-button"));
+    await userEvent.click(screen.getByTestId("new-environment-manual"));
+  }
+
   for (const saveTemplate of [false, true]) {
     it(`第三方预设直接创建环境${saveTemplate ? "并可选保存 Provider 模板" : "且默认不保存重复模板"}`, async () => {
       let definitionSaved = false;
@@ -265,7 +270,7 @@ describe("助手实例", () => {
       routes([profileElement(), profileElement({ id: "profiles:cc-work" })]),
     );
     await openInstanceManager();
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
     await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://api.example.com");
@@ -305,7 +310,7 @@ describe("助手实例", () => {
       routes([profileElement(), profileElement({ id: "profiles:cc-home" })]),
     );
     await openInstanceManager();
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-home");
     await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
@@ -326,7 +331,7 @@ describe("助手实例", () => {
       routes([profileElement(), profileElement({ id: "profiles:cc-work" })]),
     );
     await openInstanceManager();
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     const section = within(dialog).getByTestId("profile-seed-section");
     for (const item of ["permissions", "statusline", "hooks", "rules", "mcp"]) {
@@ -356,7 +361,7 @@ describe("助手实例", () => {
       routes([profileElement(), profileElement({ id: "profiles:cc-work" })]),
     );
     await openInstanceManager();
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     let dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     for (const item of ["permissions", "statusline", "hooks", "rules", "mcp"]) {
       await userEvent.click(within(dialog).getByTestId(`profile-seed-${item}`));
@@ -570,7 +575,7 @@ describe("助手实例", () => {
       routes([profileElement(), profileElement({ id: "profiles:cc-lan" }), profileElement({ id: "profiles:cc-plain" })]),
     );
     await openInstanceManager();
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     let dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-lan");
     expect(within(dialog).getByTestId("profile-scrub-subprocess-env")).not.toBeChecked();
@@ -590,7 +595,7 @@ describe("助手实例", () => {
     });
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "新建独立环境" })).toBeNull());
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-plain");
     await userEvent.click(within(dialog).getByTestId("profile-scrub-subprocess-env"));
@@ -626,7 +631,7 @@ describe("助手实例", () => {
     };
     const { calls } = renderWithEngine(<AgentsPage />, routeMap);
     await openInstanceManager();
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://relay.example.com");
     await userEvent.type(within(dialog).getByTestId("profile-token-var"), "RELAY");
@@ -659,7 +664,7 @@ describe("助手实例", () => {
     };
     const { calls } = renderWithEngine(<AgentsPage />, refused);
     await openInstanceManager();
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
     await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://api.example.com");
@@ -673,7 +678,7 @@ describe("助手实例", () => {
   it("Claude 环境填了接口地址却没填鉴权变量时不保存，免得官方登录被发往第三方地址", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-relay");
     await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://api.example.com");
@@ -698,7 +703,7 @@ describe("助手实例", () => {
     );
     const { calls } = renderWithEngine(<AgentsPage />, codexRoutes);
     await openInstanceManager();
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     await userEvent.click(within(within(dialog).getByTestId("profile-base-agent")).getByRole("button", { name: /Codex/ }));
     await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cx-relay");
@@ -714,7 +719,7 @@ describe("助手实例", () => {
   it("新建实例使用整页分组编辑器，并实时列出全部落地位置与启动值", async () => {
     renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
 
     expect(within(dialog).getByText("1. 选择归属助手")).toBeInTheDocument();
@@ -735,7 +740,7 @@ describe("助手实例", () => {
   it("实例表单同样给出该助手的常用参数", async () => {
     renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     // 归属助手是 Claude Code，因此给 Claude 的预设
     await userEvent.click(within(dialog).getByTestId("profile-preset-claude-yolo"));
@@ -965,7 +970,7 @@ describe("助手实例", () => {
     };
     const { calls } = renderWithEngine(<AgentsPage />, routeMap);
     await openInstanceManager();
-    await userEvent.click(await screen.findByTestId("add-profile-button"));
+    await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     expect(within(dialog).getByTestId("profile-fetch-models")).toBeDisabled();
     await userEvent.type(within(dialog).getByTestId("profile-base-url"), "https://relay.example.com");

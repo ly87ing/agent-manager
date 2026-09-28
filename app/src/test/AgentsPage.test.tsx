@@ -194,7 +194,7 @@ describe("助手页产品边界", () => {
     expect(editorText(await editorView("config-file-text"))).toBe('{\n  "effortLevel": "high"\n}\n');
   });
 
-  it("新建环境是主入口：第三方预设直接填写独立环境；另一个官方账号打开环境表单", async () => {
+  it("新建环境是唯一新增入口：第三方预设直接填写独立环境；手动创建打开空白环境表单", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await userEvent.click(await screen.findByTestId("new-environment-button"));
     await userEvent.click(screen.getByTestId("new-environment-third-party"));
@@ -208,10 +208,11 @@ describe("助手页产品边界", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "为 Claude Code 新建第三方环境" })).toBeNull());
 
     await userEvent.click(screen.getByTestId("new-environment-button"));
-    await userEvent.click(screen.getByTestId("new-environment-official"));
+    await userEvent.click(screen.getByTestId("new-environment-manual"));
     const profileDialog = await screen.findByRole("dialog", { name: "新建独立环境" });
     expect(within(profileDialog).getByTestId("profile-base-url")).toHaveValue("");
     expect(within(profileDialog).getByTestId("profile-token-var")).toHaveValue("");
+    expect(screen.queryByTestId("add-profile-button")).toBeNull();
     // 只打开表单，什么都没写
     expect(calls.some((call) => call.command === "policy:set" || call.command === "profiles:apply")).toBe(false);
   });

@@ -146,8 +146,8 @@ export function ConnectionWorkbench({
   onClearEnvOverrides: (element: EngineElement) => void;
   /** 这个助手的独立环境：与默认环境放在同一个列表里，不再分页签。 */
   renderInstances?: (element: EngineElement) => ReactNode;
-  /** 新建环境：第三方厂商（先选预设再建成独立环境）或另一个官方账号。 */
-  onNewEnvironment?: (element: EngineElement, kind: "third-party" | "official") => void;
+  /** 新建环境：选第三方预设，或打开空白环境表单手动填写。 */
+  onNewEnvironment?: (element: EngineElement, kind: "third-party" | "manual") => void;
 }) {
   const [tab, setTab] = useState<WorkbenchTab>("providers");
   const [fileOpen, setFileOpen] = useState(false);
@@ -289,12 +289,12 @@ export function ConnectionWorkbench({
                 </button>
                 <button
                   type="button"
-                  data-testid="new-environment-official"
-                  onClick={(event) => runMenuAction(event, () => onNewEnvironment(selected, "official"))}
+                  data-testid="new-environment-manual"
+                  onClick={(event) => runMenuAction(event, () => onNewEnvironment(selected, "manual"))}
                   className="rounded px-3 py-2 text-left hover:bg-accent"
                 >
-                  <span className="block text-sm text-foreground">另一个官方账号</span>
-                  <span className="block text-xs text-muted-foreground">单独的目录里再登录一个官方账号</span>
+                  <span className="block text-sm text-foreground">手动创建环境</span>
+                  <span className="block text-xs text-muted-foreground">另一个官方账号，或手动填写第三方接口</span>
                 </button>
               </div>
             </details>
