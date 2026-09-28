@@ -28,13 +28,15 @@ export function ConfigFileEditor({ agentId }: { agentId: string }) {
   const { execute } = useExecutions();
   const [file, setFile] = useState<AgentConfigFile | null>(null);
   const [text, setText] = useState("");
+  const [conflictDraft, setConflictDraft] = useState<string | null>(null);
   const [mode, setMode] = useState<"edit" | "diff">("edit");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = async (notice: string | null = null) => {
+  const load = async (notice: string | null = null, draft: string | null = null) => {
     setFile(null);
     setError(null);
+    setConflictDraft(draft);
     const envelope = await runEngine<AgentConfigFile>("agents:config-file", ["--only", `agents:${agentId}`]);
     if (!envelope.ok) {
       setError(envelope.errors[0]?.message ?? "读取配置文件失败");
@@ -94,7 +96,7 @@ export function ConfigFileEditor({ agentId }: { agentId: string }) {
       if (envelope?.ok) {
         await load();
       } else if (envelope?.errors[0]?.code === "AGENT_CONFIG_CHANGED") {
-        await load("配置文件已在外部修改，已刷新为最新内容；请在此基础上重新修改。");
+        await load("配置文件已在外部修改，已刷新为最新内容；原草稿保留在下方供对照，请在最新内容上重新修改。", text);
       } else if (envelope) {
         setError(envelope.errors[0]?.message ?? "写入失败");
       }
@@ -179,11 +181,18 @@ export function ConfigFileEditor({ agentId }: { agentId: string }) {
           {error}
         </p>
       )}
+      {conflictDraft !== null && (
+        <section data-testid="config-file-conflict-draft" className="space-y-2 rounded border border-warning/40 p-3">
+          <h4 className="text-sm font-medium">未写入的原草稿</h4>
+          <p className="text-xs text-muted-foreground">上方编辑器是刚读到的实际文件。请对照下面的草稿，在最新内容中重新做需要的改动；直接整份替换会丢掉外部修改。</p>
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">{conflictDraft}</pre>
+        </section>
+      )}
       <div className="flex justify-end gap-2">
         <button
           type="button"
           data-testid="config-file-refresh"
-          disabled={busy || changed}
+          disabled={busy || changed || conflictDraft !== null}
           onClick={() => void load()}
           className="rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
         >
@@ -192,9 +201,10 @@ export function ConfigFileEditor({ agentId }: { agentId: string }) {
         <button
           type="button"
           data-testid="config-file-reset"
-          disabled={busy || !changed}
+          disabled={busy || (!changed && conflictDraft === null)}
           onClick={() => {
             setText(original);
+            setConflictDraft(null);
             setError(null);
           }}
           className="rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"

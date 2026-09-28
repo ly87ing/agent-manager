@@ -94,26 +94,44 @@ describe("直接编辑配置文件", () => {
     expect(edits(calls)).toHaveLength(0);
   });
 
-  it("文件已在外部修改：写入被拒后重新读取最新内容并提示", async () => {
+  it("文件已在外部修改：保留草稿供对照，在最新内容上重做改动并用新基准写入", async () => {
     let reads = 0;
+    let writes = 0;
+    const latest = CONTENT.replace('"theme": "dark"', '"theme": "dark",\n  "plugin": true');
+    const draft = CONTENT.replace('"dark"', '"light"');
     const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
       "agents:config-file": async () => {
         reads += 1;
-        return reads === 1 ? file() : file({ content: CONTENT.replace('"dark"', '"solarized"'), base: "c".repeat(64) });
+        return reads === 1 ? file() : file({ content: latest, base: "c".repeat(64) });
       },
-      "agents:edit-config": async () =>
-        makeEnvelope({}, {
+      "agents:edit-config": async () => {
+        writes += 1;
+        return writes === 1 ? makeEnvelope({}, {
           command: "agents.edit-config",
           ok: false,
           errors: [{ code: "AGENT_CONFIG_CHANGED", element: null, message: "~/.claude/settings.json 已在外部修改" }],
-        }),
+        }) : makeEnvelope({ changed: ["theme"], base: "d".repeat(64) }, { command: "agents.edit-config" });
+      },
     };
-    renderWithEngine(<ConfigFileEditor agentId="claude-code" />, routes);
+    const { calls } = renderWithEngine(<ConfigFileEditor agentId="claude-code" />, routes);
     const view = await editorView("config-file-text");
-    setEditorText(view, CONTENT.replace('"dark"', '"light"'));
+    setEditorText(view, draft);
     await userEvent.click(screen.getByTestId("config-file-submit"));
     expect(await screen.findByTestId("config-file-error")).toHaveTextContent("已在外部修改");
-    await waitFor(async () => expect(editorText(await editorView("config-file-text"))).toBe(CONTENT.replace('"dark"', '"solarized"')));
+    await waitFor(async () => expect(editorText(await editorView("config-file-text"))).toBe(latest));
+    expect(screen.getByTestId("config-file-conflict-draft")).toHaveTextContent('"theme": "light"');
+    expect(screen.getByTestId("config-file-submit")).toBeDisabled();
+    expect(screen.getByTestId("config-file-refresh")).toBeDisabled();
+    expect(edits(calls)).toHaveLength(1);
+
+    const merged = latest.replace('"dark"', '"light"');
+    setEditorText(await editorView("config-file-text"), merged);
+    await userEvent.click(screen.getByTestId("config-file-submit"));
+    await waitFor(() => expect(edits(calls)).toHaveLength(2));
+    expect(edits(calls)[1].args).toEqual([
+      "--only", "agents:claude-code", "--file-base", "c".repeat(64), "--value", merged,
+    ]);
+    await waitFor(() => expect(screen.queryByTestId("config-file-conflict-draft")).toBeNull());
   });
 
   it("格式化只在点按钮时按两格缩进重排 JSON", async () => {
@@ -139,6 +157,30 @@ describe("直接编辑配置文件", () => {
     await userEvent.click(screen.getByTestId("config-file-submit"));
     await waitFor(() => expect(edits(calls)).toHaveLength(1));
     expect(edits(calls)[0].args[edits(calls)[0].args.length - 1]).toBe(toml.replace('"o3"', '"o4"'));
+  });
+
+  it("Codex 文件冲突时保留 TOML 草稿，放弃草稿也不写文件", async () => {
+    const original = 'model = "o3"\n';
+    const latest = '# 外部新增注释\nmodel = "o3"\n';
+    let reads = 0;
+    const { calls } = renderWithEngine(<ConfigFileEditor agentId="codex" />, {
+      "agents:config-file": async () => {
+        reads += 1;
+        return file({ element: "agents:codex", path: "~/.codex/config.toml", format: "toml", content: reads === 1 ? original : latest, base: reads === 1 ? BASE : "c".repeat(64) });
+      },
+      "agents:edit-config": makeEnvelope({}, {
+        command: "agents.edit-config", ok: false,
+        errors: [{ code: "AGENT_CONFIG_CHANGED", element: null, message: "config.toml 已在外部修改" }],
+      }),
+    });
+    setEditorText(await editorView("config-file-text"), 'model = "o4"\n');
+    await userEvent.click(screen.getByTestId("config-file-submit"));
+    await waitFor(async () => expect(editorText(await editorView("config-file-text"))).toBe(latest));
+    expect(screen.getByTestId("config-file-conflict-draft")).toHaveTextContent('model = "o4"');
+    await userEvent.click(screen.getByTestId("config-file-reset"));
+    expect(screen.queryByTestId("config-file-conflict-draft")).toBeNull();
+    expect(editorText(await editorView("config-file-text"))).toBe(latest);
+    expect(edits(calls)).toHaveLength(1);
   });
 
   it("不是文本的文件只说明原因，不给编辑框", async () => {
