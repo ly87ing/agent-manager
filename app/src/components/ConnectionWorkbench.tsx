@@ -190,7 +190,6 @@ export function ConnectionWorkbench({
   const official = isOfficial(current);
   const envState = kind ? defaultEnvState(kind, current, currentConfig?.config) : null;
   const thirdParty = envState?.account === "third-party";
-  const configFile = kind === "codex" ? "~/.codex/config.toml" : "~/.claude/settings.json";
   const summary = activeEntry
     ? activeEntry.label || activeEntry.name
     : official
@@ -300,10 +299,6 @@ export function ConnectionWorkbench({
             </details>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">
-          {name} 的每个环境各有自己的配置、登录与会话，可以同时开着；在终端里输入环境的命令启动它。
-        </p>
-
         <article data-testid="default-environment-card" className="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-sm sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
           <div>
@@ -340,9 +335,6 @@ export function ConnectionWorkbench({
             ) : (
               <p className="mt-1 text-xs text-muted-foreground">当前接入：{summary} · 自动化：{automationLabel}。</p>
             )}
-            <p className="mt-2 text-xs text-muted-foreground">
-              以 {configFile} 的实际内容为准；下面三个页签都属于默认环境。
-            </p>
             {writeBlocked && (
               <p data-testid="configure-blocked" className="mt-1 text-xs text-warning">{writeBlocked}</p>
             )}
