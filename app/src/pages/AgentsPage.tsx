@@ -28,6 +28,7 @@ import {
   profileKindOf,
   profileLaunchValue,
   connectionToProfileInput,
+  SUBPROCESS_SCRUB_ENV,
   instancesUsingConnection,
   profileConnectionUpdate,
   profileConnectionReadbackMatches,
@@ -410,6 +411,22 @@ export default function AgentsPage({
         setConnectionFormError("受影响环境的定义或写入基准已变化，请刷新后重新选择");
         return;
       }
+      if (submission.environment) {
+        const [agentsNow, profilesNow] = await Promise.all([
+          runEngine<StatusData>("agents:status", []),
+          runEngine<StatusData>("profiles:status", []),
+        ]);
+        if (!agentsNow.ok || !profilesNow.ok) {
+          setConnectionFormError("无法确认现有环境名称，未写入；请刷新后重试");
+          return;
+        }
+        const id = submission.environment.id;
+        if (agentsNow.data.elements.some((item) => item.id === `agents:${id}`)
+          || profilesNow.data.elements.some((item) => item.id === `profiles:${id}`)) {
+          setConnectionFormError(`环境名 ${id} 已被使用，未写入；请换一个名称`);
+          return;
+        }
+      }
       let sourceElement = element;
       if (updates.length > 0) {
         const [agentsNow, profilesNow] = await Promise.all([
@@ -437,16 +454,20 @@ export default function AgentsPage({
           return;
         }
       }
-      const definition = upsertAgentConnection(
-        sourceElement.spec as Record<string, unknown>,
-        submission.connection,
-        connectionForm?.preserveUnknownFrom,
-      );
-      // 主配置只放官方账号：编辑接入只保存定义，不写助手配置（包括主配置里旧版本留下的那套）
-      const saved = await definitionOps.saveDefinition({ name: agentId, definition, isNew: false });
-      if (!saved) {
-        setConnectionFormError("接入没有保存，请根据提示修正后重试");
-        return;
+      const saveTemplate = !submission.environment || submission.environment.saveTemplate;
+      const savedStage = !submission.environment ? "接入已保存" : saveTemplate ? "接入模板已保存" : "环境尚未创建";
+      if (saveTemplate) {
+        const definition = upsertAgentConnection(
+          sourceElement.spec as Record<string, unknown>,
+          submission.connection,
+          connectionForm?.preserveUnknownFrom,
+        );
+        // Provider 定义不写助手主配置；独立环境默认不需要额外存一份 Provider 模板。
+        const saved = await definitionOps.saveDefinition({ name: agentId, definition, isNew: false });
+        if (!saved) {
+          setConnectionFormError("接入没有保存，请根据提示修正后重试");
+          return;
+        }
       }
 
       if (submission.secretValue) {
@@ -457,7 +478,7 @@ export default function AgentsPage({
           if (!created.ok) {
             await query.refetch();
             setConnectionFormError(
-              `接入已保存，但没能新建密钥文件 ${DEFAULT_SECRETS_PATH}：${created.errors[0]?.message ?? "未知原因"}。可以到“设置 → 密钥”选一个已有的文件。`,
+              `${savedStage}，但没能新建密钥文件 ${DEFAULT_SECRETS_PATH}：${created.errors[0]?.message ?? "未知原因"}。可以到“设置 → 密钥”选一个已有的文件。`,
             );
             return;
           }
@@ -474,7 +495,7 @@ export default function AgentsPage({
         if (!secret.ok) {
           await query.refetch();
           setConnectionFormError(
-            `接入已保存，但凭据没有写入外部文件：${secret.errors[0]?.message ?? "请先在“设置 → 密钥”选择外部文件，或从进程环境提供这个变量"}`,
+            `${savedStage}，但凭据没有写入外部文件：${secret.errors[0]?.message ?? "请先在“设置 → 密钥”选择外部文件，或从进程环境提供这个变量"}`,
           );
           return;
         }
@@ -540,9 +561,32 @@ export default function AgentsPage({
           toast.success(`Provider 已保存，${applied} 个独立环境已更新并回读`);
         }
       }
+      if (submission.environment) {
+        if (!kind) {
+          setConnectionFormError("此助手不支持创建第三方环境");
+          return;
+        }
+        const made = connectionToProfileInput({ id: agentId, kind }, submission.connection, []);
+        if (!made) {
+          setConnectionFormError("这套接入引用主配置里的接入方式，没法搬进独立目录");
+          return;
+        }
+        if (made.dropped.length > 0) toast.warning(`独立环境不支持：${made.dropped.join("、")}，没有带过去`);
+        const input: ProfileFormInput = {
+          ...made.input,
+          id: submission.environment.id,
+          configDir: submission.environment.configDir,
+          sourceConnection: saveTemplate ? submission.connection.name : undefined,
+          extraEnv: { ...made.input.extraEnv },
+        };
+        if (kind === "claude" && submission.environment.scrubSubprocess) input.extraEnv[SUBPROCESS_SCRUB_ENV] = "1";
+        if (!(await saveProfile(input, submission.environment.seedItems))) {
+          setConnectionFormError(`${saveTemplate ? "Provider 模板已保存，但" : ""}独立环境没有创建，请根据任务记录修正后重试`);
+          return;
+        }
+      }
       setConnectionForm(null);
       await query.refetch();
-      if (submission.thenMakeProfile) makeProfileFromConnection(element, submission.connection);
     } catch (err) {
       setConnectionFormError(`保存接入失败:${String(err)}`);
     } finally {
@@ -712,7 +756,8 @@ export default function AgentsPage({
       // 查不到状态就不知道目标文件在不在：按没写成处理，由调用方提示并先不写启动命令
       return false;
     }
-    if (!element || profileBaseOf(element) !== "missing") return true;
+    if (!element) return false;
+    if (profileBaseOf(element) !== "missing") return true;
     const applied = await profileApply.apply({
       command: "profiles:apply",
       label: `写入独立环境 ${id} 的配置`,
@@ -777,7 +822,7 @@ export default function AgentsPage({
    * 保存实例：写定义、（第三方环境与 Claude 环境）写好配置，再把启动命令存成同名快捷命令；新建时
    * 最后按勾选从默认环境带上设置。
    */
-  const saveProfile = async (input: ProfileFormInput, seedItems: SeedItem[] = []) => {
+  const saveProfile = async (input: ProfileFormInput, seedItems: SeedItem[] = []): Promise<boolean> => {
     const definition = buildProfileDefinition(input, baseBinOf(input.baseAgent));
     let envelope;
     try {
@@ -791,11 +836,11 @@ export default function AgentsPage({
       ]);
     } catch (err) {
       toast.error(`保存独立环境失败:${String(err)}`);
-      return;
+      return false;
     }
     if (!envelope.ok) {
       toast.error(`保存独立环境被拒绝:${envelope.errors[0]?.message ?? "未知错误"}`);
-      return;
+      return false;
     }
     if ((isThirdPartyProfile(input) || input.kind === "claude") && !(await writeNewProfileConfig(input.id))) {
       toast.error(`已保存独立环境 ${input.id}，但配置没有写入，启动命令也先不写`, {
@@ -804,7 +849,7 @@ export default function AgentsPage({
       setProfileForm(null);
       setProfileDuplicating(false);
       void profilesQuery.refetch();
-      return;
+      return true;
     }
     if (aliasSource.source) {
       const ok = await aliasSource.setAlias(input.id, profileLaunchValue(input, baseBinOf(input.baseAgent)), {
@@ -825,6 +870,7 @@ export default function AgentsPage({
     setProfileDuplicating(false);
     if (seedItems.length > 0) toastSeed(input.id, await seedProfile(input.id, seedItems));
     void profilesQuery.refetch();
+    return true;
   };
 
   /** 移除实例定义：只停止管理这套配置，配置目录与里面的内容原样保留。 */
@@ -1187,9 +1233,14 @@ export default function AgentsPage({
 
       {connectionForm && connectionKindOf(connectionForm.agent) && (
         <ConnectionFormDialog
+          agentId={connectionForm.agent.id.replace(/^agents:/, "")}
           agentName={(connectionForm.agent.spec as AgentsSpec).display_name ?? connectionForm.agent.id.replace(/^agents:/, "")}
           kind={connectionKindOf(connectionForm.agent)!}
           existingNames={connectionsOf(connectionForm.agent.spec as Record<string, unknown>).map((item) => item.name)}
+          existingProfileIds={[...new Set([
+            ...elements.map((item) => item.id.replace(/^agents:/, "")),
+            ...profileIds,
+          ])]}
           initialConnection={connectionForm.initial}
           affectedProfiles={connectionForm.variant === "edit" && connectionForm.initial
             ? affectedProfilesForConnection(connectionForm.agent, connectionForm.initial)

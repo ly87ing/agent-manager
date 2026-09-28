@@ -136,6 +136,74 @@ describe("助手实例", () => {
     return screen.findByTestId("independent-environments");
   }
 
+  for (const saveTemplate of [false, true]) {
+    it(`第三方预设直接创建环境${saveTemplate ? "并可选保存 Provider 模板" : "且默认不保存重复模板"}`, async () => {
+      let definitionSaved = false;
+      const activeRoutes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+      activeRoutes["policy:set"] = async () => {
+        definitionSaved = true;
+        return makeEnvelope(makePolicyData(), { command: "policy.set" });
+      };
+      activeRoutes["profiles:status"] = async () => makeEnvelope({
+        domain: "profiles",
+        elements: definitionSaved
+          ? [profileElement(), profileElement({ id: "profiles:deepseek" })]
+          : [profileElement()],
+      }, { command: "profiles.status" });
+      const { calls } = renderWithEngine(<AgentsPage />, activeRoutes);
+      await userEvent.click(await screen.findByTestId("new-environment-button"));
+      await userEvent.click(screen.getByTestId("new-environment-third-party"));
+      const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
+      await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
+      expect(within(dialog).getByTestId("connection-environment-id")).toHaveValue("deepseek");
+      expect(within(dialog).getByTestId("connection-save-template")).not.toBeChecked();
+      if (saveTemplate) await userEvent.click(within(dialog).getByTestId("connection-save-template"));
+      await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+      await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply")).toBe(true));
+      const writes = calls.filter((call) => call.command === "policy:set");
+      expect(writes.map((call) => call.args[call.args.indexOf("--key") + 1])).toEqual(saveTemplate
+        ? ["agents.definitions.claude-code", "agents.definitions.deepseek"]
+        : ["agents.definitions.deepseek"]);
+      const lastWrite = writes[writes.length - 1];
+      const definition = JSON.parse(lastWrite.args[lastWrite.args.indexOf("--value") + 1]);
+      expect(definition.profile.source_connection).toBe(saveTemplate ? "deepseek" : undefined);
+      expect(definition.profile.env.ANTHROPIC_BASE_URL).toBe("https://api.deepseek.com/anthropic");
+      expect(definition.profile.env.ANTHROPIC_AUTH_TOKEN).toBe("${DEEPSEEK_API_KEY}");
+      expect(calls.find((call) => call.command === "profiles:apply")!.args).toEqual(["--only", "profiles:deepseek", "--base", "missing"]);
+      expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
+    });
+  }
+
+  it("第三方环境的凭据写入失败时保留表单，不保存环境或 Provider", async () => {
+    const activeRoutes = routes();
+    activeRoutes["secrets:set"] = makeEnvelope({}, {
+      command: "secrets.set",
+      ok: false,
+      errors: [{ code: "SECRET_ERROR", element: null, message: "测试凭据文件不可写" }],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, activeRoutes);
+    await userEvent.click(await screen.findByTestId("new-environment-button"));
+    await userEvent.click(screen.getByTestId("new-environment-third-party"));
+    const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
+    await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
+    await userEvent.type(within(dialog).getByTestId("new-connection-secret"), "fake-secret-value");
+    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("环境尚未创建");
+    expect(within(dialog).getByTestId("new-connection-secret")).toHaveValue("fake-secret-value");
+    expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+  });
+
+  it("创建后仍读不到新环境状态时不写配置或启动命令，并提示部分完成", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await userEvent.click(await screen.findByTestId("new-environment-button"));
+    await userEvent.click(screen.getByTestId("new-environment-third-party"));
+    const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
+    await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
+    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    expect(await screen.findByText("已保存独立环境 deepseek，但配置没有写入，启动命令也先不写")).toBeInTheDocument();
+    expect(calls.some((call) => call.command === "profiles:apply" || call.command === "aliases:apply")).toBe(false);
+  });
+
   it("实例单独成卡，展示配置目录与启动方式，不混进主助手列表", async () => {
     renderWithEngine(<AgentsPage />, routes());
     await openInstanceManager();

@@ -14,7 +14,10 @@ import {
 } from "../lib/connectionPresets";
 import { cn } from "../lib/utils";
 import { keyStatus, type SecretSourceState } from "../lib/secretSource";
-import { profileConnectionUpdate } from "../lib/profileDefinition";
+import { connectionToProfileInput, defaultConfigDir, PROFILE_ID_RE, profileConnectionUpdate } from "../lib/profileDefinition";
+import { detectSystemPlatform } from "../lib/agentDefinitionForm";
+import { ALL_SEED_ITEMS, type SeedItem } from "../lib/profileSeed";
+import { ProfileSeedPicker } from "./ProfileSeedPicker";
 import type { ElementState } from "../lib/contract";
 
 export type ConnectionKind = "claude" | "codex";
@@ -22,8 +25,13 @@ export type ConnectionKind = "claude" | "codex";
 export interface ConnectionSubmission {
   connection: ConnectionEntry;
   secretValue: string;
-  /** 保存后接着打开「建成独立环境」表单：第三方接入只在独立环境里用，一步到位。 */
-  thenMakeProfile?: boolean;
+  environment?: {
+    id: string;
+    configDir: string;
+    seedItems: SeedItem[];
+    saveTemplate: boolean;
+    scrubSubprocess: boolean;
+  };
   /** 用户逐环境勾选的更新目标；未勾选的环境不写入。 */
   profileUpdates?: string[];
   /** 对实例自己保留的字段，用户逐字段选择改为当前 Provider 值。 */
@@ -44,9 +52,11 @@ const FOCUSABLE_SELECTOR =
   'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
 
 export function ConnectionFormDialog({
+  agentId,
   agentName,
   kind,
   existingNames,
+  existingProfileIds = [],
   initialConnection,
   affectedProfiles = [],
   variant,
@@ -59,15 +69,17 @@ export function ConnectionFormDialog({
   onFetchModels,
   onClose,
 }: {
+  agentId: string;
   agentName: string;
   kind: ConnectionKind;
   existingNames: string[];
+  existingProfileIds?: string[];
   /** 编辑或复制时的预填值；具体语义由 variant 决定。 */
   initialConnection?: ConnectionEntry;
   affectedProfiles?: ConnectionProfileImpact[];
   /** 复制模式允许创建新名称；凭据取值始终为空。 */
   variant?: "edit" | "duplicate";
-  /** environment：从「新建环境」进来，主按钮是建成独立环境，只保存接入退为次要。 */
+  /** environment：从「新建环境」进来，直接建立隔离环境，Provider 模板可选。 */
   intent?: "environment";
   /** 密钥文件的状态：说明 API Key 会写到哪、这个变量现在有没有值。 */
   secretSource?: SecretSourceState | null;
@@ -96,6 +108,11 @@ export function ConnectionFormDialog({
     initialConnection ? { ...initialConnection } : null,
   );
   const [secretValue, setSecretValue] = useState("");
+  const [environmentId, setEnvironmentId] = useState("");
+  const [environmentDir, setEnvironmentDir] = useState("");
+  const [saveTemplate, setSaveTemplate] = useState(false);
+  const [seedItems, setSeedItems] = useState<SeedItem[]>(ALL_SEED_ITEMS);
+  const [scrubSubprocess, setScrubSubprocess] = useState(kind === "claude" && detectSystemPlatform() !== "linux");
   const [selectedProfiles, setSelectedProfiles] = useState<string[]>([]);
   const [selectedOverrides, setSelectedOverrides] = useState<Record<string, string[]>>({});
   const [localError, setLocalError] = useState<string | null>(null);
@@ -140,7 +157,12 @@ export function ConnectionFormDialog({
     const preset = presets.find((item) => item.id === presetId);
     if (!preset) return;
     setChoice(preset.id);
-    setConnection(connectionFromPreset(preset, presetConnectionName(preset, existingNames)));
+    const next = connectionFromPreset(preset, presetConnectionName(preset, existingNames));
+    setConnection(next);
+    if (intent === "environment") {
+      setEnvironmentId(connectionToProfileInput({ id: agentId, kind }, next, existingProfileIds)?.input.id ?? "");
+      setEnvironmentDir("");
+    }
     setLocalError(null);
   };
 
@@ -152,7 +174,12 @@ export function ConnectionFormDialog({
       index += 1;
     }
     setChoice("custom");
-    setConnection(emptyConnection(name));
+    const next = emptyConnection(name);
+    setConnection(next);
+    if (intent === "environment") {
+      setEnvironmentId(connectionToProfileInput({ id: agentId, kind }, next, existingProfileIds)?.input.id ?? "");
+      setEnvironmentDir("");
+    }
     setLocalError(null);
   };
 
@@ -189,7 +216,7 @@ export function ConnectionFormDialog({
     }
   };
 
-  const submit = (thenMakeProfile = false) => {
+  const submit = () => {
     if (!connection) {
       setLocalError("先选择一个厂商预设，或选择自定义接入");
       return;
@@ -199,7 +226,7 @@ export function ConnectionFormDialog({
       setLocalError("唯一名称只能用字母、数字、连字符与下划线，长度不超过 64");
       return;
     }
-    if (existingNames.includes(name) && !(editing && name === initialConnection?.name)) {
+    if ((intent !== "environment" || saveTemplate) && existingNames.includes(name) && !(editing && name === initialConnection?.name)) {
       setLocalError(`已经有名为 ${name} 的接入，请换一个名称`);
       return;
     }
@@ -207,6 +234,17 @@ export function ConnectionFormDialog({
     if (validationError) {
       setLocalError(validationError);
       return;
+    }
+    const configDir = environmentDir.trim() || defaultConfigDir(kind, environmentId.trim());
+    if (intent === "environment") {
+      if (!PROFILE_ID_RE.test(environmentId.trim()) || existingProfileIds.includes(environmentId.trim())) {
+        setLocalError("环境名只能用小写字母、数字与连字符，且不能与已有环境或助手重名");
+        return;
+      }
+      if (!/^(~\/|\/)/.test(configDir)) {
+        setLocalError("配置目录要填绝对路径或以 ~/ 开头");
+        return;
+      }
     }
     onSubmit({
       connection: {
@@ -219,7 +257,9 @@ export function ConnectionFormDialog({
         model: connection.model.trim(),
       },
       secretValue,
-      thenMakeProfile,
+      environment: intent === "environment"
+        ? { id: environmentId.trim(), configDir, seedItems, saveTemplate, scrubSubprocess }
+        : undefined,
       profileUpdates: selectedUpdates.map((profile) => profile.id),
       profileOverrides: Object.fromEntries(selectedUpdates.map((profile) =>
         [profile.id, selectedOverrides[profile.id] ?? []])),
@@ -704,12 +744,40 @@ export function ConnectionFormDialog({
                 </div>
               </details>
 
+              {intent === "environment" && !editing && !duplicating && (
+                <section className="space-y-3 rounded-lg border p-3" data-testid="connection-environment-options">
+                  <h3 className="font-medium">独立环境</h3>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="text-sm">环境名（也是启动命令名）
+                      <input data-testid="connection-environment-id" value={environmentId} onChange={(event) => setEnvironmentId(event.target.value)} className="mt-1 w-full rounded border border-input p-2 font-mono text-sm" />
+                    </label>
+                    <label className="text-sm">独立配置目录
+                      <input data-testid="connection-environment-dir" value={environmentDir} onChange={(event) => setEnvironmentDir(event.target.value)} placeholder={defaultConfigDir(kind, environmentId)} className="mt-1 w-full rounded border border-input p-2 font-mono text-sm" />
+                    </label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">启动命令使用此目录，不修改当前默认环境。密钥取值写入外部密钥文件。</p>
+                  {kind === "claude" && detectSystemPlatform() !== "linux" && (
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" data-testid="connection-environment-scrub" checked={scrubSubprocess} onChange={(event) => setScrubSubprocess(event.target.checked)} />
+                      子进程不读取此环境的凭据
+                    </label>
+                  )}
+                  <details>
+                    <summary className="cursor-pointer text-sm">从默认环境带上共用设置</summary>
+                    <div className="mt-2"><ProfileSeedPicker kind={kind} selected={seedItems} onChange={setSeedItems} testIdPrefix="connection-seed" /></div>
+                  </details>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" data-testid="connection-save-template" checked={saveTemplate} onChange={(event) => setSaveTemplate(event.target.checked)} />
+                    同时另存为 Provider 模板
+                  </label>
+                </section>
+              )}
               <p className="rounded-lg border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
                 {editing && selectedUpdates.length > 0
                   ? "保存 Provider 后，只更新下方勾选的独立环境；每个环境按当前实际文件和原定义的基准写入并回读。默认环境不会改。"
                   : intent === "environment"
-                  ? "保存只更新接入定义，不写助手配置，主配置里的官方账号不会被改。「下一步」先保存这套接入，再打开建成独立环境的表单，确认启动命令名与要从默认环境带上的设置。"
-                  : "保存只更新接入定义，不写助手配置。主配置只放官方账号；要使用这套接入，点「保存并建成独立环境」，或保存后在卡片上选「建成独立环境」。"}
+                  ? "创建时写入独立环境及其启动命令；只有勾选时才另存 Provider 模板。默认环境和当前登录不会修改。"
+                  : "保存只更新接入定义，不写助手配置。之后可在接入卡片上选「建成独立环境」。"}
               </p>
               {impacts.length > 0 && (
                 <section data-testid="connection-affected-profiles" className="rounded-lg border px-3 py-3 text-xs">
@@ -808,45 +876,22 @@ export function ConnectionFormDialog({
           >
             取消
           </button>
-          {!editing && !duplicating && !connection?.providerRef && (
-            <button
-              type="button"
-              data-testid="connection-form-submit-and-make-profile"
-              disabled={saveDisabled}
-              onClick={() => submit(true)}
-              title="保存这套接入，再打开建成独立环境的表单：它有自己的配置目录与启动命令，和官方账号互不影响"
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded px-4 py-2 text-sm disabled:opacity-50",
-                intent === "environment"
-                  ? "order-last bg-primary text-primary-foreground hover:bg-primary/90"
-                  : "border border-primary/40 text-primary hover:bg-primary/10",
-              )}
-            >
-              {busy && intent === "environment" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-              {intent === "environment" ? "下一步：建成独立环境" : "保存并建成独立环境"}
-            </button>
-          )}
           <button
             type="button"
             data-testid="connection-form-submit"
             disabled={saveDisabled}
             onClick={() => submit()}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded px-4 py-2 text-sm disabled:opacity-50",
-              intent === "environment" && !editing && !duplicating
-                ? "border text-muted-foreground hover:bg-accent"
-                : "bg-primary text-primary-foreground hover:bg-primary/90",
-            )}
+            className="inline-flex items-center gap-1.5 rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            {busy && intent !== "environment" && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-            {busy && intent !== "environment"
+            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+            {busy
               ? "正在保存…"
               : editing
                 ? "保存修改"
                 : duplicating
                   ? "创建副本"
                   : intent === "environment"
-                    ? "只保存接入，稍后再建"
+                    ? "创建独立环境"
                     : "保存接入"}
           </button>
         </div>

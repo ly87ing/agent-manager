@@ -962,16 +962,15 @@ describe("助手运行参数", () => {
     expect(within(dialog).getByTestId("profile-base-url")).toHaveValue("https://api.moonshot.cn/anthropic");
   });
 
-  it("添加接入可一步「保存并建成独立环境」：先保存接入，再打开预填的新建独立环境表单", async () => {
+  it("添加接入只保存 Provider 模板，之后可在卡片上建独立环境", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await userEvent.click(await screen.findByTestId("add-connection-button"));
-    let dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("dialog");
     await userEvent.click(within(dialog).getByRole("button", { name: /DeepSeek/ }));
-    await userEvent.click(within(dialog).getByTestId("connection-form-submit-and-make-profile"));
+    expect(within(dialog).queryByTestId("connection-environment-options")).toBeNull();
+    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
     await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
-    dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
-    expect(within(dialog).getByTestId("profile-base-url")).toHaveValue("https://api.deepseek.com/anthropic");
-    expect(within(dialog).getByTestId("profile-token-var")).toHaveValue("DEEPSEEK_API_KEY");
+    expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
   });
 
   it("添加接入时可获取模型列表挑模型；别名可一键都用默认模型；子代理模型随接入保存", async () => {

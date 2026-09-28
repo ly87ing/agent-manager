@@ -194,14 +194,16 @@ describe("助手页产品边界", () => {
     expect(editorText(await editorView("config-file-text"))).toBe('{\n  "effortLevel": "high"\n}\n');
   });
 
-  it("新建环境是主入口：第三方先选预设、下一步建成独立环境；另一个官方账号直接打开环境表单", async () => {
+  it("新建环境是主入口：第三方预设直接填写独立环境；另一个官方账号打开环境表单", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, routes());
     await userEvent.click(await screen.findByTestId("new-environment-button"));
     await userEvent.click(screen.getByTestId("new-environment-third-party"));
     const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
-    // 主按钮是建成独立环境；只保存接入退为次要
-    expect(within(dialog).getByTestId("connection-form-submit-and-make-profile")).toHaveTextContent("下一步：建成独立环境");
-    expect(within(dialog).getByTestId("connection-form-submit")).toHaveTextContent("只保存接入，稍后再建");
+    expect(within(dialog).getByTestId("connection-form-submit")).toHaveTextContent("创建独立环境");
+    await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
+    expect(within(dialog).getByTestId("connection-environment-id")).toHaveValue("deepseek");
+    expect(within(dialog).getByTestId("connection-environment-dir")).toHaveAttribute("placeholder", "~/.claude-deepseek");
+    expect(within(dialog).getByTestId("connection-save-template")).not.toBeChecked();
     await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "为 Claude Code 新建第三方环境" })).toBeNull());
 
