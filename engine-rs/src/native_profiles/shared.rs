@@ -563,28 +563,17 @@ pub(super) fn status(ctx: &Context, req: &Request) -> Result<Value> {
     )
 }
 
-fn write_setting(
-    ctx: &Context,
-    req: &Request,
-    def: &ProfileDef,
+fn render_setting(
+    kind: ProfileKind,
+    source: Option<&[u8]>,
+    previous: Option<&[u8]>,
     item: &str,
-    source_base: &str,
-    target_base: &str,
-) -> Result<()> {
-    let dir = seed::config_dir(ctx, def)?;
-    let source = read_source(&settings_file(ctx, def))?;
-    let (path, previous) = seed::read_target(&dir.join(def.kind.target_file()))?;
-    let from = setting_part(def.kind, source.as_deref(), item)?;
-    let before = setting_part(def.kind, previous.as_deref(), item)?;
-    if from.is_none()
-        || value_base(from.as_ref()) != source_base
-        || value_base(before.as_ref()) != target_base
-    {
-        bail!("来源或环境设置已变化，请刷新差异后重试");
-    }
-    let next = match def.kind {
+) -> Result<Vec<u8>> {
+    let from =
+        setting_part(kind, source, item)?.ok_or_else(|| anyhow!("来源没有这个共用设置项"))?;
+    match kind {
         ProfileKind::Claude => {
-            let mut doc = json_doc(previous.as_deref())?;
+            let mut doc = json_doc(previous)?;
             doc.insert(
                 if item == "permissions" {
                     "permissions"
@@ -592,15 +581,15 @@ fn write_setting(
                     "statusLine"
                 }
                 .into(),
-                from.unwrap(),
+                from,
             );
             let mut bytes = serde_json::to_vec_pretty(&Value::Object(doc))?;
             bytes.push(b'\n');
-            bytes
+            Ok(bytes)
         }
         ProfileKind::Codex => {
-            let source_doc = toml_doc(source.as_deref())?;
-            let mut doc = toml_doc(previous.as_deref())?;
+            let source_doc = toml_doc(source)?;
+            let mut doc = toml_doc(previous)?;
             if item == "permissions" {
                 for key in seed::CODEX_PERMISSION_KEYS {
                     doc.remove(key);
@@ -631,9 +620,31 @@ fn write_setting(
             if !fatal.is_empty() {
                 bail!("写入后 Codex 无法加载：{}", fatal.join("；"));
             }
-            text.into_bytes()
+            Ok(text.into_bytes())
         }
-    };
+    }
+}
+
+fn write_setting(
+    ctx: &Context,
+    req: &Request,
+    def: &ProfileDef,
+    item: &str,
+    source_base: &str,
+    target_base: &str,
+) -> Result<()> {
+    let dir = seed::config_dir(ctx, def)?;
+    let source = read_source(&settings_file(ctx, def))?;
+    let (path, previous) = seed::read_target(&dir.join(def.kind.target_file()))?;
+    let from = setting_part(def.kind, source.as_deref(), item)?;
+    let before = setting_part(def.kind, previous.as_deref(), item)?;
+    if from.is_none()
+        || value_base(from.as_ref()) != source_base
+        || value_base(before.as_ref()) != target_base
+    {
+        bail!("来源或环境设置已变化，请刷新差异后重试");
+    }
+    let next = render_setting(def.kind, source.as_deref(), previous.as_deref(), item)?;
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     crate::native_mcp::rollback::atomic_write_bytes_checked(&path, &next, previous.as_deref())?;
