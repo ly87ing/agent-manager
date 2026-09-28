@@ -372,6 +372,29 @@ fn config_file_reads_only_the_selected_profile_and_refreshes_external_edits() {
     std::fs::write(&target, "{\"model\":\"two\"}\n").unwrap();
     let second = execute(&ctx, &request("profiles:config-file", &args));
     assert_eq!(second.data["content"], "{\"model\":\"two\"}\n");
+    let mcp = target.parent().unwrap().join(".claude.json");
+    std::fs::write(&mcp, "{\"mcpServers\":{\"demo\":{}}}\n").unwrap();
+    let rules = target.parent().unwrap().join("CLAUDE.md");
+    std::fs::write(&rules, "# 环境规则\n").unwrap();
+    for (file, path, content) in [
+        (
+            "mcp",
+            "~/.claude-ly/.claude.json",
+            "{\"mcpServers\":{\"demo\":{}}}\n",
+        ),
+        ("rules", "~/.claude-ly/CLAUDE.md", "# 环境规则\n"),
+    ] {
+        let read = execute(
+            &ctx,
+            &request(
+                "profiles:config-file",
+                &["--only", "profiles:cc-ly", "--file", file],
+            ),
+        );
+        assert!(read.ok, "{file}: {:?}", read.errors);
+        assert_eq!(read.data["path"], path);
+        assert_eq!(read.data["content"], content);
+    }
     assert_eq!(
         std::fs::read_to_string(&default).unwrap(),
         "{\"default\":true}\n"
@@ -393,6 +416,53 @@ fn config_file_reads_only_the_selected_profile_and_refreshes_external_edits() {
     assert_eq!(codex.data["path"], "~/.codex-show/config.toml");
     assert_eq!(codex.data["format"], "toml");
     assert_eq!(codex.data["content"], "model = \"gpt-demo\"\n");
+    let hooks = codex_target.parent().unwrap().join("hooks.json");
+    std::fs::write(&hooks, "{\"hooks\":{}}\n").unwrap();
+    std::fs::write(
+        codex_target.parent().unwrap().join("AGENTS.md"),
+        "# Codex 规则\n",
+    )
+    .unwrap();
+    for (file, path, content) in [
+        ("hooks", "~/.codex-show/hooks.json", "{\"hooks\":{}}\n"),
+        ("rules", "~/.codex-show/AGENTS.md", "# Codex 规则\n"),
+    ] {
+        let read = execute(
+            &ctx,
+            &request(
+                "profiles:config-file",
+                &["--only", "profiles:cx-show", "--file", file],
+            ),
+        );
+        assert!(read.ok, "{file}: {:?}", read.errors);
+        assert_eq!(read.data["path"], path);
+        assert_eq!(read.data["content"], content);
+    }
+    assert!(
+        !execute(
+            &ctx,
+            &request(
+                "profiles:config-file",
+                &["--only", "profiles:cx-show", "--file", "mcp"]
+            )
+        )
+        .ok
+    );
+    assert!(
+        !execute(
+            &ctx,
+            &request(
+                "profiles:config-file",
+                &[
+                    "--only",
+                    "profiles:cc-ly",
+                    "--file",
+                    "../.claude/.credentials.json"
+                ]
+            )
+        )
+        .ok
+    );
 
     let auth = ctx.home_dir.join(".claude/.credentials.json");
     std::fs::write(&auth, "dummy-auth-must-not-leak").unwrap();
@@ -401,6 +471,17 @@ fn config_file_reads_only_the_selected_profile_and_refreshes_external_edits() {
     let blocked = execute(&ctx, &request("profiles:config-file", &args));
     assert!(!blocked.ok, "认证文件不能作为实例配置原文读出");
     assert!(!format!("{:?}", blocked).contains("dummy-auth-must-not-leak"));
+    std::fs::remove_file(&mcp).unwrap();
+    std::os::unix::fs::symlink(&auth, &mcp).unwrap();
+    let blocked_mcp = execute(
+        &ctx,
+        &request(
+            "profiles:config-file",
+            &["--only", "profiles:cc-ly", "--file", "mcp"],
+        ),
+    );
+    assert!(!blocked_mcp.ok, "认证文件不能通过 MCP 文件入口读出");
+    assert!(!format!("{:?}", blocked_mcp).contains("dummy-auth-must-not-leak"));
 
     for bad in [
         vec!["--only", "profiles:../.claude"],

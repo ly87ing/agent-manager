@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Activity, Copy, CopyPlus, FolderTree, Loader2, PlayCircle, Plus, Sparkles, Terminal, Trash2, Wrench } from "lucide-react";
 import type { EngineElement } from "../lib/contract";
@@ -89,9 +89,11 @@ export function ProfileCard({
   const [sharedBusy, setSharedBusy] = useState(false);
   const [sharedOutcome, setSharedOutcome] = useState<string[]>([]);
   const [fileOpen, setFileOpen] = useState(false);
+  const [fileKey, setFileKey] = useState<"main" | "mcp" | "hooks" | "rules">("main");
   const [file, setFile] = useState<ProfileConfigFile | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [fileBusy, setFileBusy] = useState(false);
+  const fileRequest = useRef(0);
   const loadShared = async () => {
     if (!onSharedStatus) return;
     setSharedBusy(true);
@@ -147,10 +149,14 @@ export function ProfileCard({
   const observed = element.observed as unknown as ProfileObserved;
   const id = element.id.replace(/^profiles:/, "");
   const loadFile = async () => {
+    const request = ++fileRequest.current;
     setFileBusy(true);
     setFile(null);
     try {
-      const result = await runEngine<ProfileConfigFile>("profiles:config-file", ["--only", element.id]);
+      const args = ["--only", element.id];
+      if (fileKey !== "main") args.push("--file", fileKey);
+      const result = await runEngine<ProfileConfigFile>("profiles:config-file", args);
+      if (request !== fileRequest.current) return;
       if (result.ok) {
         setFile(result.data);
         setFileError(null);
@@ -159,17 +165,18 @@ export function ProfileCard({
         setFileError(result.errors[0]?.message ?? "读取配置文件失败");
       }
     } catch (error) {
+      if (request !== fileRequest.current) return;
       setFile(null);
       setFileError(String(error));
     } finally {
-      setFileBusy(false);
+      if (request === fileRequest.current) setFileBusy(false);
     }
   };
   useEffect(() => {
     if (fileOpen) void loadFile();
     // 打开时、实际受管内容摘要变化后回读；其余外部改动可点刷新。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileOpen, observed.base, observed.target, element.id]);
+  }, [fileOpen, fileKey, observed.base, observed.target, element.id]);
   const blocked = observed.blocked_reason;
   const missingVars = (observed.env_refs ?? []).filter((ref) => ref.resolved === false);
   const allDiffers = (observed.fields ?? []).filter((field) => field.state !== "same");
@@ -190,6 +197,17 @@ export function ProfileCard({
   const launchName = (launchCommands.find((command) => command.name === id) ?? launchCommands[0])?.name ?? null;
   const stateNote = blocked ?? (credentialOnlyDrift ? "密钥换过了，这个环境还在用旧的：点「写入新密钥」。" : STATE_NOTE[element.state] ?? "");
   const systemOverrides = observed.system_overrides ?? [];
+  const fileOptions = observed.kind === "codex"
+    ? ([
+        ["main", "主配置", observed.target],
+        ["hooks", "Hooks", `${observed.config_dir}/hooks.json`],
+        ["rules", "规则", `${observed.config_dir}/AGENTS.md`],
+      ] as const)
+    : ([
+        ["main", "主配置", observed.target],
+        ["mcp", "MCP", `${observed.config_dir}/.claude.json`],
+        ["rules", "规则", `${observed.config_dir}/CLAUDE.md`],
+      ] as const);
   if (observed.invalid) {
     // 库里的定义按现在的规则解析不了（如旧版本存下的写法）：只给原因，以及编辑修正或移除
     return (
@@ -336,8 +354,16 @@ export function ProfileCard({
         </button>
         {fileOpen && (
           <div className="space-y-2 border-t px-3 py-2 text-xs">
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label="配置文件">
+              {fileOptions.map(([key, label]) => (
+                <button key={key} type="button" aria-pressed={fileKey === key} onClick={() => setFileKey(key)}
+                  className={cn("rounded border px-2 py-1 text-left", fileKey === key ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-accent")}>
+                  {label}
+                </button>
+              ))}
+            </div>
             <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground">从目标文件重新读取；原文可能含凭据，请勿直接分享。</span>
+              <span className="text-muted-foreground">{file?.path ?? fileOptions.find(([key]) => key === fileKey)?.[2]} · 从目标文件重新读取；原文可能含凭据，请勿直接分享。</span>
               <button type="button" disabled={fileBusy} onClick={() => void loadFile()} className="shrink-0 rounded border px-2 py-1 disabled:opacity-50">刷新</button>
             </div>
             {fileBusy && <p>正在读取…</p>}

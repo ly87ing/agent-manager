@@ -135,6 +135,8 @@ enum ArgValueKind {
     Revision,
     /// profiles:seed 要带的项：逗号分隔，只能是引擎认得的几项（引擎再校验一次）。
     SeedItems,
+    /// 独立环境只读文件选择；实际是否属于该助手仍由引擎校验。
+    ProfileFile,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -207,7 +209,10 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--items", ArgValueKind::SeedItems));
         }
         ("profiles", "shared-status") => specs.push(("--only", ArgValueKind::ElementId)),
-        ("profiles", "config-file") => specs.push(("--only", ArgValueKind::ElementId)),
+        ("profiles", "config-file") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--file", ArgValueKind::ProfileFile));
+        }
         ("profiles", "shared-apply") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--item", ArgValueKind::ElementId));
@@ -351,6 +356,13 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
                 ))
             }
         }
+        ArgValueKind::ProfileFile => match value {
+            "main" | "mcp" | "hooks" | "rules" => Ok(()),
+            _ => Err(EngineError::new(
+                "invalid_args",
+                "独立环境文件只能选主配置、MCP、Hooks 或规则",
+            )),
+        },
         ArgValueKind::RunId => validate_run_id(value),
         ArgValueKind::PolicyLayer => {
             if value == "local" {
@@ -1357,6 +1369,16 @@ mod tests {
         assert!(
             validate_args("profiles:config-file", &args(&["--only", "profiles:cc-ly"])).is_ok()
         );
+        assert!(validate_args(
+            "profiles:config-file",
+            &args(&["--only", "profiles:cc-ly", "--file", "mcp"])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "profiles:config-file",
+            &args(&["--only", "profiles:cc-ly", "--file", "../auth.json"])
+        )
+        .is_err());
         assert!(validate_args(
             "profiles:config-file",
             &args(&["--only", "profiles:cc-ly", "--value", "secret"])

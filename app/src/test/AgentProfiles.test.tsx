@@ -242,10 +242,20 @@ describe("助手实例", () => {
   it("实例文件按需读实际原文，刷新后展示外部修改", async () => {
     const all: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
     let content = '{"model":"one"}\n';
-    all["profiles:config-file"] = async () => makeEnvelope(
-      { element: "profiles:cc-ly", path: "~/.claude-cc-ly/settings.json", format: "json", exists: true, content, blocked_reason: null },
-      { command: "profiles.config-file" },
-    );
+    all["profiles:config-file"] = async (args) => {
+      const selected = args[3] ?? "main";
+      return makeEnvelope(
+        {
+          element: "profiles:cc-ly",
+          path: `~/.claude-cc-ly/${selected === "mcp" ? ".claude.json" : selected === "rules" ? "CLAUDE.md" : "settings.json"}`,
+          format: selected === "rules" ? "text" : "json",
+          exists: true,
+          content: selected === "mcp" ? '{"mcpServers":{"demo":{}}}\n' : selected === "rules" ? "# 环境规则\n" : content,
+          blocked_reason: null,
+        },
+        { command: "profiles.config-file" },
+      );
+    };
     const { calls } = renderWithEngine(<AgentsPage />, all);
     await openInstanceManager();
     const card = await screen.findByTestId("profile-card-cc-ly");
@@ -258,6 +268,13 @@ describe("助手实例", () => {
     content = '{"model":"two"}\n';
     await userEvent.click(within(card).getByRole("button", { name: "刷新" }));
     await waitFor(() => expect(within(card).getByTestId("profile-config-file-content-cc-ly")).toHaveTextContent("two"));
+    expect(calls.filter((call) => call.command === "profiles:config-file")).toHaveLength(2);
+    await userEvent.click(within(card).getByRole("button", { name: "MCP" }));
+    await waitFor(() => expect(within(card).getByTestId("profile-config-file-content-cc-ly")).toHaveTextContent("mcpServers"));
+    const fileCalls = calls.filter((call) => call.command === "profiles:config-file");
+    expect(fileCalls[fileCalls.length - 1]?.args).toEqual(["--only", "profiles:cc-ly", "--file", "mcp"]);
+    await userEvent.click(within(card).getByRole("button", { name: "规则" }));
+    await waitFor(() => expect(within(card).getByTestId("profile-config-file-content-cc-ly")).toHaveTextContent("环境规则"));
   });
 
   for (const state of ["managed-ok", "not-materialized"] as const) {
