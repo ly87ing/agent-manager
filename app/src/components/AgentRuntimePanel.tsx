@@ -162,7 +162,7 @@ function RuntimeField({
     );
   }
 
-  if (field.type === "positive_integer") {
+  if (field.type === "positive_integer" || field.type === "model") {
     const text = value === undefined || value === null ? "" : String(value);
     return (
       <label className="rounded-lg border bg-background p-3 text-foreground">
@@ -170,7 +170,7 @@ function RuntimeField({
         <span className="mt-1 block text-xs leading-5 text-muted-foreground">{field.description}</span>
         <input
           data-testid={testIdOf(field)}
-          inputMode="numeric"
+          inputMode={field.type === "positive_integer" ? "numeric" : "text"}
           value={text}
           disabled={disabled}
           placeholder={field.placeholder}

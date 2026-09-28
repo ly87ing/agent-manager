@@ -260,6 +260,26 @@ describe("助手运行参数", () => {
     expect(preview).toHaveTextContent('model_reasoning_effort = "high"');
   });
 
+  it("默认模型从实际配置预填，预览只列 model 并只提交该字段", async () => {
+    const withModel = routes();
+    const status = withModel["agents:status"] as { data: { elements: EngineElement[] } };
+    const element = status.data.elements[0];
+    setClaudeCurrentConfig(element, null);
+    (element.observed as any).current_config.config.runtime = { automation_mode: "manual", default_model: "claude-sonnet-5" };
+    const { calls } = renderWithEngine(<AgentsPage />, withModel);
+    await openRuntimeSettings();
+    const input = screen.getByTestId("agent-runtime-default-model");
+    expect(input).toHaveValue("claude-sonnet-5");
+    await userEvent.clear(input);
+    await userEvent.type(input, "claude-opus-5");
+    await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
+    expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"model": "claude-opus-5"');
+    await userEvent.click(screen.getByTestId("agent-runtime-submit"));
+    await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
+    expect(runtimeOf(configureCalls(calls)[0])).toEqual({ default_model: "claude-opus-5" });
+    expect(await screen.findByText("写入已经返回成功，但状态回读没有确认生效")).toBeInTheDocument();
+  });
+
   it("Codex 运行参数允许研发填写推理、上下文、压缩与搜索的具体值", async () => {
     const { calls } = renderWithEngine(<AgentsPage />, agentRoutes("codex", "codex"));
     const dialog = await openRuntimeSettings();

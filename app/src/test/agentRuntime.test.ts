@@ -18,6 +18,7 @@ describe("运行设置以客户端实际值为准", () => {
       config: {
         runtime: {
           automation_mode: "auto",
+          default_model: "gpt-6-sol",
           codex_reasoning_effort: "medium",
           codex_web_search: "live",
           codex_context_window: 1000000,
@@ -29,6 +30,7 @@ describe("运行设置以客户端实际值为准", () => {
 
     expect(actualRuntimeSettings(fields, status)).toEqual({
       automation_mode: "auto",
+      default_model: "gpt-6-sol",
       codex_reasoning_effort: "medium",
       codex_web_search: "live",
       codex_context_window: 1000000,
@@ -73,6 +75,19 @@ describe("运行设置以客户端实际值为准", () => {
     const codex = agentManagementFixture("codex").runtime_fields;
     expect(runtimePatch(codex, {}, { codex_context_window: "1000000" })).toEqual({ codex_context_window: 1000000 });
     expect(() => runtimePatch(codex, {}, { codex_context_window: "-1" })).toThrow("正整数");
+  });
+
+  it("默认模型只提交改动，清空后撤掉原生顶层键，并按实际文件回读", () => {
+    const fields = agentManagementFixture("claude").runtime_fields;
+    const initial = { default_model: "claude-sonnet-5" };
+    expect(runtimePatch(fields, initial, { default_model: " claude-opus-5 " }))
+      .toEqual({ default_model: "claude-opus-5" });
+    expect(runtimePatch(fields, initial, {})).toEqual({ default_model: null });
+    expect(() => runtimePatch(fields, initial, { default_model: "bad model" })).toThrow("模型 ID");
+    const status = { state: "ready", file: "settings.json", config: { runtime: { default_model: "claude-opus-5" } } };
+    expect(runtimePatchApplied(fields, { default_model: "claude-opus-5" }, status)).toBe(true);
+    expect(runtimePatchApplied(fields, { default_model: "claude-sonnet-5" }, status)).toBe(false);
+    expect(runtimePatchApplied(fields, { default_model: null }, status)).toBe(false);
   });
 
   it("自定义档位显示原始键值；写入后按补丁逐项回读确认", () => {

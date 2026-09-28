@@ -56,6 +56,7 @@ const CLAUDE_OWNED_PATHS: &[&[&str]] = &[
     &["env", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"],
     // 官方禁用自动更新的写法：settings.json 的 env 里 DISABLE_AUTOUPDATER=1
     &["env", "DISABLE_AUTOUPDATER"],
+    &["model"],
     // 官方持久键：默认推理强度与 Artifact 开关（/effort、/config 写的就是它们）
     &["effortLevel"],
     &["enableArtifact"],
@@ -221,6 +222,7 @@ fn claude_observed_config(
         "runtime": {
             "automation_mode": automation_mode,
             "automation_raw": automation_raw,
+            "default_model": string_at(&value, &["model"]),
             "statusline": statusline,
             // 顶层 effortLevel：没有单独保存推理强度的模型用它（/effort 现在按模型存进 modelSettings）
             "claude_effort_level": string_at(&value, &["effortLevel"]),
@@ -410,6 +412,7 @@ fn codex_observed_config(bytes: &[u8]) -> Option<Value> {
         "runtime": {
             "automation_mode": automation_mode,
             "automation_raw": automation_raw,
+            "default_model": root.get("model").and_then(toml::Value::as_str),
             "codex_reasoning_effort": root.get("model_reasoning_effort").and_then(toml::Value::as_str),
             "codex_web_search": root.get("web_search").and_then(toml::Value::as_str),
             "codex_context_window": root.get("model_context_window").and_then(toml::Value::as_integer),
@@ -1057,6 +1060,9 @@ fn write_claude_runtime(
             ("claude_effort_level", RuntimeValue::Text(level)) => {
                 set_or_remove(root, &["effortLevel"], level.clone());
             }
+            ("default_model", RuntimeValue::Text(model)) => {
+                set_or_remove(root, &["model"], model.clone());
+            }
             ("claude_tool_search", RuntimeValue::Flag(on)) => {
                 set_or_remove(
                     root,
@@ -1136,12 +1142,14 @@ enum FieldKind {
     Mode,
     Statusline,
     Flag,
+    Model,
     Choice(&'static [&'static str]),
     Number,
 }
 
 const CLAUDE_RUNTIME_FIELDS: &[(&str, FieldKind)] = &[
     ("automation_mode", FieldKind::Mode),
+    ("default_model", FieldKind::Model),
     ("statusline", FieldKind::Statusline),
     (
         "claude_effort_level",
@@ -1158,6 +1166,7 @@ const CLAUDE_RUNTIME_FIELDS: &[(&str, FieldKind)] = &[
 
 const CODEX_RUNTIME_FIELDS: &[(&str, FieldKind)] = &[
     ("automation_mode", FieldKind::Mode),
+    ("default_model", FieldKind::Model),
     (
         "codex_reasoning_effort",
         FieldKind::Choice(CODEX_REASONING_EFFORTS),
@@ -1200,6 +1209,20 @@ fn parse_runtime_patch(kind: Kind, raw: &Value) -> Result<RuntimePatch> {
                 Value::Bool(on) => *on,
                 Value::Null => false,
                 _ => bail!("{key} 必须是 true 或 false"),
+            }),
+            FieldKind::Model => RuntimeValue::Text(match value {
+                Value::Null => None,
+                Value::String(raw) => {
+                    let model = raw.trim();
+                    if model.is_empty() {
+                        None
+                    } else if model.len() > 256 || model.chars().any(char::is_whitespace) {
+                        bail!("{key} 必须是不超过 256 字节且不含空白字符的模型 ID");
+                    } else {
+                        Some(model.to_string())
+                    }
+                }
+                _ => bail!("{key} 必须是字符串"),
             }),
             FieldKind::Choice(allowed) => {
                 if !value.is_null() && !value.is_string() {
@@ -1638,6 +1661,10 @@ fn write_codex_runtime(existing: &str, patch: &RuntimePatch) -> String {
             ("codex_reasoning_effort", RuntimeValue::Text(value)) => {
                 let literal = string_literal(value);
                 text = toml_set_root_key(&text, "model_reasoning_effort", literal.as_deref());
+            }
+            ("default_model", RuntimeValue::Text(value)) => {
+                let literal = string_literal(value);
+                text = toml_set_root_key(&text, "model", literal.as_deref());
             }
             ("codex_web_search", RuntimeValue::Text(value)) => {
                 let literal = string_literal(value);
@@ -2729,6 +2756,10 @@ fn apply_settings_changes(settings: &mut Map<String, Value>, changes: &SettingsC
     }
     if let Some(patch) = changes.patch {
         for (key, value) in &patch.0 {
+            if *key == "default_model" {
+                // 模型以助手文件为准；库只记本次写入摘要，不留另一份可编辑值。
+                continue;
+            }
             let stored = match value {
                 RuntimeValue::Mode(mode) => {
                     // 旧版本的 yolo 开关与新值并存会让定义解析失败，写新值时一并撤掉
@@ -3874,6 +3905,11 @@ stream_idle_timeout_ms = 450000
         );
         assert!(parse_runtime_patch(Kind::Claude, &json!({"claude_tool_search": "yes"})).is_err());
         assert!(parse_runtime_patch(Kind::Codex, &json!({"codex_context_window": 0})).is_err());
+        assert!(parse_runtime_patch(Kind::Claude, &json!({"default_model": "bad model"})).is_err());
+        assert!(
+            parse_runtime_patch(Kind::Codex, &json!({"default_model": "x".repeat(257)})).is_err()
+        );
+        assert!(parse_runtime_patch(Kind::Claude, &json!({"default_model": 7})).is_err());
         assert!(parse_runtime_patch(Kind::Claude, &json!([])).is_err());
 
         let patch = parse_runtime_patch(

@@ -80,6 +80,11 @@ export function runtimePatch(
         }
         patch[field.key] = number;
       }
+    } else if (field.type === "model") {
+      if (after && (new TextEncoder().encode(after).length > 256 || /\s/u.test(after))) {
+        throw new Error(`${field.label}必须是不超过 256 字节且不含空白字符的模型 ID`);
+      }
+      patch[field.key] = after || null;
     } else {
       throw new Error(`当前版本不认识运行设置类型 ${field.type}（${field.key}）`);
     }

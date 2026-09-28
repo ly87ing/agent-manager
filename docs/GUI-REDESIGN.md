@@ -179,6 +179,8 @@ Codex 侧读 `<CODEX_HOME>/sessions/**/rollout-*.jsonl` 里最后一条 `rate_li
 「有没有任何接入键」判定，官方账号设了模型就被当成一套未保存的接入，「切回官方账号」会删掉模型并生成导入项
 （2026-09-24 用真实 codex 0.156.1 复现：`auth.json` 与登录状态不受影响，但模型被删）。Claude 的状态另报顶层
 `model`（`settings_model`，`/model` 保存的就是它；env 的 `ANTHROPIC_MODEL` 优先于它）。
+「运行设置」可直接编辑 Claude 与 Codex 主配置的顶层 `model`：表单从实际文件预填，留空即撤掉该键；
+只修改目标助手的配置，写前检查基准，写后按字段回读。Claude 的 `env.ANTHROPIC_MODEL` 若存在仍优先。
 
 默认环境的状态逐行写明：账号（官方账号，或「第三方接入 · 地址」并注明与官方账号混在主配置里）、登录（由助手
 自己保存在哪里，本工具不读取也不改动；第三方时说明现在用的是配置里的令牌）、模型与它取自哪个键、自动化档位。
@@ -221,7 +223,7 @@ Codex：地址 + 令牌变量且仍是本工具写的那张表，或引用同一
 `env.ANTHROPIC_SMALL_FAST_MODEL`、`env.ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU,FABLE}_MODEL`、
 `env.API_TIMEOUT_MS`、`env.ENABLE_TOOL_SEARCH`、`env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`、
 `env.DISABLE_AUTOUPDATER`（禁止自动更新，官方写法）、
-`effortLevel`、`enableArtifact`（连同已废弃的 `disableArtifact`）、`permissions.defaultMode`
+顶层 `model`、`effortLevel`、`enableArtifact`（连同已废弃的 `disableArtifact`）、`permissions.defaultMode`
 与 `attribution.{commit,pr}`。同一文件里 hooks 域的内容、
 用户自己的 `permissions.allow/deny` 与别的 `env` 变量原样保留；写入基准也只算
 这几条的摘要。从没写过而这几项已有内容时，表单已按实际值预填，带基准写入即可。

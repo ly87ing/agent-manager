@@ -123,6 +123,13 @@ fn claude_fields() -> Vec<Value> {
     vec![
         automation_mode(AdapterKind::Claude),
         json!({
+            "key": "default_model", "type": "model", "section": "界面与模型行为",
+            "label": "默认模型", "description": "写入 settings.json 顶层 model，作为新会话的默认模型；env.ANTHROPIC_MODEL 已设置时会优先于它。留空撤掉此处的覆盖。",
+            "placeholder": "例如 claude-sonnet-5",
+            "targets": [{"key": "model"}],
+            "summary": {"label": "默认模型", "default": "客户端默认"}
+        }),
+        json!({
             "key": "statusline", "type": "enum", "section": "界面与模型行为",
             "label": "状态栏", "description": "选择是否使用 Agent Manager 提供的本地用量状态栏。",
             "options": [
@@ -179,8 +186,15 @@ fn codex_fields() -> Vec<Value> {
     vec![
         automation_mode(AdapterKind::Codex),
         json!({
-            "key": "codex_reasoning_effort", "type": "enum", "section": "模型与上下文",
+            "key": "default_model", "type": "model", "section": "模型与上下文",
             "section_description": "留空即删除本工具的覆盖，恢复 Codex 自己的默认值。",
+            "label": "默认模型", "description": "写入 config.toml 顶层 model；新会话使用该模型，已有会话由 Codex 自己决定何时切换。留空撤掉此处的覆盖。",
+            "placeholder": "例如 gpt-6-sol",
+            "targets": [{"key": "model"}],
+            "summary": {"label": "默认模型", "default": "客户端默认"}
+        }),
+        json!({
+            "key": "codex_reasoning_effort", "type": "enum", "section": "模型与上下文",
             "label": "推理强度", "description": "选择 Codex 的模型推理强度；可用档位取决于所用模型。",
             "options": CODEX_REASONING_EFFORTS.iter().map(|value| json!({"value": value, "label": value})).collect::<Vec<_>>(),
             "targets": [{"key": "model_reasoning_effort"}],
@@ -257,6 +271,21 @@ mod tests {
             .collect();
         // 界面可选值 = 运行参数补丁校验的词汇表 = 官方允许持久保存的级别
         assert_eq!(values, CLAUDE_EFFORT_PERSISTED);
+    }
+
+    #[test]
+    fn 两种助手的默认模型都指向原生顶层键() {
+        for bin in ["claude", "codex"] {
+            let management = management_for_bin(bin);
+            let model = management["runtime_fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|field| field["key"] == "default_model")
+                .unwrap();
+            assert_eq!(model["type"], "model");
+            assert_eq!(model["targets"][0]["key"], "model");
+        }
     }
 
     #[test]

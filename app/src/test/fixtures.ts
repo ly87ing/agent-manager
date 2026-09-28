@@ -52,6 +52,11 @@ export function agentManagementFixture(kind: "claude" | "codex"): AgentManagemen
     ? [
         automationMode,
         {
+          key: "default_model", type: "model", section: "界面与模型行为", label: "默认模型",
+          description: "写入 settings.json 顶层 model；env.ANTHROPIC_MODEL 优先。留空撤掉此处的覆盖。",
+          placeholder: "例如 claude-sonnet-5", targets: [{ key: "model" }], summary: summary("默认模型"),
+        },
+        {
           key: "statusline", type: "enum", section: "界面与模型行为", label: "状态栏",
           description: "选择是否使用本地用量状态栏。",
           options: [{ value: "", label: "保持现有状态栏" }, { value: "builtin", label: "使用 Agent Manager 用量状态栏" }],
@@ -86,6 +91,11 @@ export function agentManagementFixture(kind: "claude" | "codex"): AgentManagemen
       ]
     : [
         automationMode,
+        {
+          key: "default_model", type: "model", section: "模型与上下文", label: "默认模型",
+          description: "写入 config.toml 顶层 model；留空撤掉此处的覆盖。",
+          placeholder: "例如 gpt-6-sol", targets: [{ key: "model" }], summary: summary("默认模型"),
+        },
         {
           key: "codex_reasoning_effort", type: "enum", section: "模型与上下文", label: "推理强度",
           description: "选择 Codex 的模型推理强度。",

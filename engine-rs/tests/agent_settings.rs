@@ -1383,7 +1383,114 @@ fn 写助手配置失败时回滚密钥文件与库() {
     let _ = fs::remove_dir_all(&base);
 }
 
+#[test]
+fn 默认模型只改助手文件且外部修改会拒绝() {
+    let (base, ctx) = temp_ctx("default-model");
+    write_settings_file(
+        &ctx,
+        &json!({
+            "model": "claude-sonnet-5",
+            "env": {"ANTHROPIC_MODEL": "env-model"},
+            "hooks": {"Stop": []}
+        }),
+    );
+    let initial = current_config(&ctx, "claude-code");
+    assert_eq!(
+        initial["config"]["runtime"]["default_model"],
+        "claude-sonnet-5"
+    );
+    assert_eq!(initial["config"]["model"], "env-model");
+    let stale = initial["base"].as_str().unwrap().to_string();
+
+    let mut external = settings_file(&ctx);
+    external["model"] = json!("claude-opus-5");
+    write_settings_file(&ctx, &external);
+    let file_before = file_bytes(&ctx.home_dir.join(".claude/settings.json"));
+    let db_before = db_bytes(&ctx);
+    let refused = configure_with_base(
+        &ctx,
+        "claude-code",
+        &stale,
+        &["--runtime", r#"{"default_model":"claude-haiku-5"}"#],
+    );
+    assert!(!refused.ok);
+    assert_eq!(refused.errors[0].code, "AGENT_CONFIG_CHANGED");
+    assert_eq!(
+        file_bytes(&ctx.home_dir.join(".claude/settings.json")),
+        file_before
+    );
+    assert_eq!(db_bytes(&ctx), db_before);
+
+    let applied = configure(
+        &ctx,
+        "claude-code",
+        &["--runtime", r#"{"default_model":"claude-haiku-5"}"#],
+    );
+    assert!(applied.ok, "{:?}", applied.errors);
+    let after = settings_file(&ctx);
+    assert_eq!(after["model"], "claude-haiku-5");
+    assert_eq!(after["env"]["ANTHROPIC_MODEL"], "env-model");
+    assert_eq!(after["hooks"], json!({"Stop": []}));
+    assert_eq!(
+        current_config(&ctx, "claude-code")["config"]["runtime"]["default_model"],
+        "claude-haiku-5"
+    );
+    assert!(settings_in_db(&ctx, "claude-code")
+        .get("default_model")
+        .is_none());
+
+    let cleared = configure(
+        &ctx,
+        "claude-code",
+        &["--runtime", r#"{"default_model":null}"#],
+    );
+    assert!(cleared.ok, "{:?}", cleared.errors);
+    assert!(settings_file(&ctx).get("model").is_none());
+    assert_eq!(settings_file(&ctx)["env"]["ANTHROPIC_MODEL"], "env-model");
+    let _ = fs::remove_dir_all(&base);
+}
+
 // ---------- Codex ----------
+
+#[test]
+fn codex_默认模型不改登录与其他配置() {
+    let (base, ctx) = temp_ctx("codex-default-model");
+    fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    fs::write(
+        ctx.home_dir.join(".codex/config.toml"),
+        "model = \"gpt-5.6-sol\"\nuser_instructions = \"keep\"\n",
+    )
+    .unwrap();
+    let auth = ctx.home_dir.join(".codex/auth.json");
+    fs::write(&auth, br#"{"test_only":"unchanged"}"#).unwrap();
+    let auth_before = file_bytes(&auth);
+    assert_eq!(
+        current_config(&ctx, "codex")["config"]["runtime"]["default_model"],
+        "gpt-5.6-sol"
+    );
+
+    let applied = configure(
+        &ctx,
+        "codex",
+        &["--runtime", r#"{"default_model":"gpt-6-sol"}"#],
+    );
+    assert!(applied.ok, "{:?}", applied.errors);
+    assert!(codex_config(&ctx).contains("model = \"gpt-6-sol\""));
+    assert!(codex_config(&ctx).contains("user_instructions = \"keep\""));
+    assert_eq!(file_bytes(&auth), auth_before);
+    assert_eq!(
+        current_config(&ctx, "codex")["config"]["runtime"]["default_model"],
+        "gpt-6-sol"
+    );
+    assert!(settings_in_db(&ctx, "codex").get("default_model").is_none());
+
+    let cleared = configure(&ctx, "codex", &["--runtime", r#"{"default_model":null}"#]);
+    assert!(cleared.ok, "{:?}", cleared.errors);
+    assert!(!codex_config(&ctx).contains("model = "));
+    assert!(codex_config(&ctx).contains("user_instructions = \"keep\""));
+    assert_eq!(file_bytes(&auth), auth_before);
+    let _ = fs::remove_dir_all(&base);
+}
 
 /// 写一条 Codex 助手定义（配置文件与 MCP 同一个 config.toml）。
 fn define_codex(ctx: &Context, settings: Value) {
