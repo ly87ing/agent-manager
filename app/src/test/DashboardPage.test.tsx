@@ -192,6 +192,7 @@ describe("DashboardPage", () => {
     expect(within(aliases).getByTestId("overview-item-alias:yolo")).toHaveTextContent("已同步");
     expect(within(aliases).queryByTestId("overview-item-alias:grok")).toBeNull();
     expect(screen.queryByTestId("sync-all-button")).toBeNull();
+    expect(screen.queryByText("全部已同步")).toBeNull();
 
     // 空的域不占位置
     expect(screen.queryByTestId("overview-profiles")).not.toBeInTheDocument();
@@ -252,6 +253,9 @@ describe("DashboardPage", () => {
     const pages: string[] = [];
     renderDashboard(routes, (page) => pages.push(page));
 
+    await screen.findByTestId("overview-skills");
+    expect(screen.queryByText("全部已同步")).toBeNull();
+    expect(screen.getByText(/另有 1 项要你决定/)).toBeInTheDocument();
     await userEvent.click(await screen.findByTestId("overview-goto-skill:agent-skills/gone"));
     expect(pages).toEqual(["skills:gone"]);
   });

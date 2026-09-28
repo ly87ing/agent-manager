@@ -1,6 +1,6 @@
 import { useQueries } from "@tanstack/react-query";
 import { useState } from "react";
-import { CheckCircle2, PlayCircle, RefreshCw } from "lucide-react";
+import { PlayCircle, RefreshCw } from "lucide-react";
 import type { StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import {
@@ -108,7 +108,7 @@ export function OverviewList({ onNavigate }: { onNavigate?: (page: string) => vo
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        {syncable.length > 0 ? (
+        {syncable.length > 0 && (
           <button
             type="button"
             data-testid="sync-all-button"
@@ -123,10 +123,6 @@ export function OverviewList({ onNavigate }: { onNavigate?: (page: string) => vo
                 : "正在同步…"
               : `全部同步（${syncable.length}）`}
           </button>
-        ) : (
-          <span data-testid="sync-all-clear" className="inline-flex items-center gap-1.5 text-sm text-success">
-            <CheckCircle2 className="h-4 w-4" aria-hidden /> 全部已同步
-          </span>
         )}
         <button
           type="button"
@@ -166,9 +162,7 @@ export function OverviewList({ onNavigate }: { onNavigate?: (page: string) => vo
               {group.label}
               <span className="ml-2 text-xs font-normal text-muted-foreground">{group.items.length} 项</span>
             </h3>
-            <span className={cn("text-xs", group.pending > 0 ? "text-warning" : "text-success")}>
-              {group.pending > 0 ? `${group.pending} 项待处理` : "全部已同步"}
-            </span>
+            {group.pending > 0 && <span className="text-xs text-warning">{group.pending} 项待处理</span>}
           </div>
           <ul>
             {group.items.map((item) => (
