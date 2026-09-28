@@ -525,26 +525,27 @@ export default function AgentsPage({
           return;
         }
       }
+      const saveTemplate = !submission.environment || submission.environment.saveTemplate;
       let sourceElement = element;
-      if (updates.length > 0) {
+      if (saveTemplate || updates.length > 0) {
         const [agentsNow, profilesNow] = await Promise.all([
           runEngine<StatusData>("agents:status", []),
-          runEngine<StatusData>("profiles:status", []),
+          updates.length > 0 ? runEngine<StatusData>("profiles:status", []) : Promise.resolve(null),
         ]);
         const currentElement = agentsNow.ok
           ? agentsNow.data.elements.find((item) => item.id === element.id)
           : undefined;
         sourceElement = currentElement ?? element;
-        const fresh = Boolean(currentElement) && agentsNow.ok && profilesNow.ok
+        const fresh = Boolean(currentElement) && agentsNow.ok
           && sameJson(sourceElement.spec, element.spec)
-          && updates.every((entry) => {
+          && (updates.length === 0 || (profilesNow?.ok && updates.every((entry) => {
             if (!entry) return false;
             const now = profilesNow.data.elements.find((item) => item.id === `profiles:${entry.impact.id}`);
             const observed = now?.observed as { base?: string | null; definition_base?: string | null } | undefined;
             return now?.state === entry.impact.state
               && observed?.base === entry.impact.base
               && observed?.definition_base === entry.impact.definitionBase;
-          });
+          })));
         if (!fresh) {
           void query.refetch();
           void profilesQuery.refetch();
@@ -552,7 +553,6 @@ export default function AgentsPage({
           return;
         }
       }
-      const saveTemplate = !submission.environment || submission.environment.saveTemplate;
       const savedStage = !submission.environment ? "接入已保存" : saveTemplate ? "接入模板已保存" : "环境尚未创建";
       if (saveTemplate) {
         const definition = upsertAgentConnection(

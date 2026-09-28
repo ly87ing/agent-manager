@@ -824,6 +824,32 @@ describe("助手运行参数", () => {
     });
   });
 
+  it("只编辑 Provider 模板时发现其他 Provider 被外部修改，先拒绝且不保存密钥", async () => {
+    const handlers: Record<string, Envelope | (() => Promise<Envelope>)> = routes();
+    const status = handlers["agents:status"] as Envelope & { data: { elements: EngineElement[] } };
+    (status.data.elements[0].spec as Record<string, unknown>).settings = {
+      active: "official",
+      profiles: { relay: { label: "我的中转", base_url: "https://old.example.com", token_var: "RELAY_KEY", model: "old-model" } },
+    };
+    let changed = false;
+    handlers["agents:status"] = async () => {
+      const current = structuredClone(status);
+      if (changed) {
+        const settings = (current.data.elements[0].spec as Record<string, any>).settings;
+        settings.profiles.other = { label: "外部新增", base_url: "https://external.example.com" };
+      }
+      return current;
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, handlers);
+    await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
+    const dialog = await screen.findByRole("dialog", { name: "编辑 我的中转" });
+    await userEvent.type(within(dialog).getByTestId("new-connection-secret"), "fixture-key");
+    changed = true;
+    await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Provider 或环境在表单打开后发生变化");
+    expect(calls.some((call) => ["policy:set", "secrets:set", "agents:configure"].includes(call.command))).toBe(false);
+  });
+
   it("小任务模型已被官方弃用：新增接入不再提供，旧接入里的取值可一键挪到 Haiku 别名", async () => {
     const withProfiles = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
