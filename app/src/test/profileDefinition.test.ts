@@ -186,6 +186,7 @@ describe("启动命令里的配置目录", () => {
       id: "glm-4-5-2",
       displayName: "GLM 4.5",
       baseAgent: "claude-code",
+      sourceConnection: "GLM_4.5",
       configDir: "~/.claude-glm-4-5-2",
       baseUrl: "https://open.bigmodel.cn/api/anthropic",
       tokenVar: "GLM_API_KEY",
@@ -194,6 +195,8 @@ describe("启动命令里的配置目录", () => {
     });
     expect(PROFILE_ID_RE.test(made.input.id)).toBe(true);
     const def = buildProfileDefinition(made.input, "claude") as Record<string, any>;
+    expect(def.profile.source_connection).toBe("GLM_4.5");
+    expect(parseProfileDefinition(made.input.id, def).sourceConnection).toBe("GLM_4.5");
     // 官方已弃用 ANTHROPIC_SMALL_FAST_MODEL：只填了小任务模型时按官方替代写成 Haiku 别名
     expect(def.profile.env).toEqual({
       ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic",
@@ -286,9 +289,28 @@ describe("用着某套接入的独立环境", () => {
       "cx-glm": { profile: { base_agent: "codex", base_url: "https://open.bigmodel.cn/api/anthropic", env_key: "GLM_API_KEY" } },
     };
     expect(
-      instancesUsingConnection(definitions, "claude-code", { baseUrl: "https://open.bigmodel.cn/api/anthropic", tokenVar: "GLM_API_KEY" }),
+      instancesUsingConnection(definitions, "claude-code", { name: "glm", baseUrl: "https://open.bigmodel.cn/api/anthropic", tokenVar: "GLM_API_KEY" }),
     ).toEqual([{ id: "cc-glm", label: "Claude · GLM" }]);
-    expect(instancesUsingConnection(definitions, "claude-code", { baseUrl: "", tokenVar: "GLM_API_KEY" })).toEqual([]);
+    expect(instancesUsingConnection(definitions, "claude-code", { name: "glm", baseUrl: "", tokenVar: "GLM_API_KEY" })).toEqual([]);
+  });
+
+  it("新环境按 Provider 名称关联，地址和凭据变量变更后仍可找到；不串到同参数的另一个 Provider", () => {
+    const definitions = {
+      "cc-glm": {
+        display_name: "GLM 环境",
+        profile: {
+          base_agent: "claude-code",
+          source_connection: "glm",
+          env: { ANTHROPIC_BASE_URL: "https://old.example.com", ANTHROPIC_AUTH_TOKEN: "${OLD_KEY}" },
+        },
+      },
+    };
+    expect(instancesUsingConnection(definitions, "claude-code", {
+      name: "glm", baseUrl: "https://new.example.com", tokenVar: "NEW_KEY",
+    })).toEqual([{ id: "cc-glm", label: "GLM 环境" }]);
+    expect(instancesUsingConnection(definitions, "claude-code", {
+      name: "other", baseUrl: "https://old.example.com", tokenVar: "OLD_KEY",
+    })).toEqual([]);
   });
 });
 

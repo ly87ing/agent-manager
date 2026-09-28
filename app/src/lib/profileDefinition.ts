@@ -19,6 +19,8 @@ export interface ProfileFormInput {
   id: string;
   displayName: string;
   baseAgent: string;
+  /** 建立该环境的 Provider 唯一名称；只用于关联，不写助手配置。 */
+  sourceConnection?: string;
   kind: ProfileKind;
   configDir: string;
   /** 接口地址，留空表示用该助手的默认地址。 */
@@ -78,6 +80,7 @@ export function buildProfileDefinition(input: ProfileFormInput, baseBin: string)
     kind: input.kind,
     config_dir: configDir,
   };
+  if (input.sourceConnection) profile.source_connection = input.sourceConnection;
   if (input.kind === "claude") {
     const env: Record<string, string> = {};
     for (const [name, value] of Object.entries(input.extraEnv)) {
@@ -267,6 +270,7 @@ export function parseProfileDefinition(id: string, definition: Record<string, un
     id,
     displayName: typeof definition.display_name === "string" ? definition.display_name : id,
     baseAgent,
+    sourceConnection: typeof profile.source_connection === "string" ? profile.source_connection : undefined,
     kind,
     configDir: typeof profile.config_dir === "string" ? profile.config_dir : defaultConfigDir(kind, id),
     baseUrl: kind === "claude" ? (env.ANTHROPIC_BASE_URL ?? "") : ((profile.base_url as string | undefined) ?? ""),
@@ -279,24 +283,27 @@ export function parseProfileDefinition(id: string, definition: Record<string, un
 }
 
 /**
- * 用着这套接入的独立环境：同一助手、同一地址（忽略结尾的 /）、同一凭据变量。接入卡片据此说明
- * 「已建成哪个环境」，没有时直接给「建成独立环境」。
+ * 用着这套接入的独立环境：新环境按保存时的 Provider 名称关联；旧定义没有来源标识时，
+ * 仍按同一助手、地址和凭据变量推断。来源标识在 Provider 地址变更后仍可定位原环境。
  */
 export function instancesUsingConnection(
   definitions: Record<string, unknown>,
   agentId: string,
-  connection: { baseUrl: string; tokenVar: string },
+  connection: { name: string; baseUrl: string; tokenVar: string },
 ): { id: string; label: string }[] {
   const normalize = (url: string) => url.trim().replace(/\/+$/, "");
   const baseUrl = normalize(connection.baseUrl);
-  if (!baseUrl) return [];
   const out: { id: string; label: string }[] = [];
   for (const [id, raw] of Object.entries(definitions)) {
     const definition = raw as Record<string, unknown> | null;
     if (!definition || typeof definition !== "object" || !definition.profile || definition._delete === true) continue;
     const input = parseProfileDefinition(id, definition);
     if (input.baseAgent !== agentId) continue;
-    if (normalize(input.baseUrl) !== baseUrl || input.tokenVar !== connection.tokenVar.trim()) continue;
+    if (input.sourceConnection !== undefined) {
+      if (input.sourceConnection !== connection.name) continue;
+    } else if (!baseUrl || normalize(input.baseUrl) !== baseUrl || input.tokenVar !== connection.tokenVar.trim()) {
+      continue;
+    }
     out.push({ id, label: input.displayName });
   }
   return out.sort((a, b) => a.id.localeCompare(b.id));
@@ -358,6 +365,7 @@ export function connectionToProfileInput(
       id,
       displayName: connection.label.trim() || connection.name,
       baseAgent: agent.id,
+      sourceConnection: connection.name,
       kind: agent.kind,
       configDir: defaultConfigDir(agent.kind, id),
       baseUrl: connection.baseUrl.trim(),

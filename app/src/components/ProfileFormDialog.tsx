@@ -106,6 +106,7 @@ export function ProfileFormDialog({
     id,
     displayName,
     baseAgent,
+    sourceConnection: baseAgent === initial?.baseAgent ? initial?.sourceConnection : undefined,
     kind,
     configDir: effectiveConfigDir,
     baseUrl,

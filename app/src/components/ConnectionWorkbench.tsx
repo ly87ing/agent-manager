@@ -110,7 +110,7 @@ export function ConnectionWorkbench({
   busyTarget: string | null;
   checkingAllAgentId: string | null;
   checkResults: Record<string, ConnectionCheckResult>;
-  /** 用着这套接入的独立环境（同一地址与凭据变量）。 */
+  /** 由这套接入建立的独立环境；旧定义按地址与凭据变量推断。 */
   instancesOf?: (agentId: string, connection: ConnectionEntry) => { id: string; label: string }[];
   /** 切到「独立环境」页签。 */
   onShowInstances?: () => void;
