@@ -407,6 +407,22 @@ export default function AgentsPage({
     });
   };
 
+  const newLaunchNameError = async (id: string): Promise<string | null> => {
+    try {
+      const result = await runEngine<StatusData>("aliases:status", []);
+      if (!result.ok || result.data.elements.length === 0) return "无法读取现有终端命令，未写入；请刷新后重试";
+      const targets = result.data.elements.map((element) => element.observed as { blocked_reason?: string | null; external?: { name: string }[] });
+      if (targets.some((target) => target.blocked_reason)) return "有终端配置文件无法读取，无法确认命令名是否占用；请到终端快捷命令页查看原因";
+      const occupied = id === "claude" || id === "codex"
+        || profileCapableAgents.some((agent) => baseBinOf(agent.id).split("/").pop() === id)
+        || result.data.aliases?.some((alias) => alias.name === id)
+        || targets.some((target) => target.external?.some((alias) => alias.name === id));
+      return occupied ? `终端命令 ${id} 已存在，请换一个环境名` : null;
+    } catch {
+      return "无法读取现有终端命令，未写入；请刷新后重试";
+    }
+  };
+
   /** 创建/编辑 Provider 只保存定义与可选凭据；应用是卡片上的独立操作。 */
   const saveConnection = async (element: EngineElement, submission: ConnectionSubmission) => {
     if (connectionSaving) return;
@@ -432,6 +448,11 @@ export default function AgentsPage({
         return;
       }
       if (submission.environment) {
+        const launchError = await newLaunchNameError(submission.environment.id);
+        if (launchError) {
+          setConnectionFormError(launchError);
+          return;
+        }
         const [agentsNow, profilesNow] = await Promise.all([
           runEngine<StatusData>("agents:status", []),
           runEngine<StatusData>("profiles:status", []),
@@ -861,6 +882,13 @@ export default function AgentsPage({
 
   /** 编辑只写定义；新建时还会写环境配置、启动命令及勾选的共用设置。 */
   const saveProfile = async (input: ProfileFormInput, seedItems: SeedItem[] = [], isEdit = false): Promise<boolean> => {
+    if (!isEdit) {
+      const launchError = await newLaunchNameError(input.id);
+      if (launchError) {
+        toast.error(launchError);
+        return false;
+      }
+    }
     const definition = buildProfileDefinition(input, baseBinOf(input.baseAgent));
     let envelope;
     try {

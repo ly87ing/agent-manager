@@ -228,6 +228,45 @@ describe("助手实例", () => {
     expect(calls.some((call) => call.command === "aliases:preview")).toBe(true);
   });
 
+  it.each([
+    ["受管别名", "cc-ly-yolo", "managed"],
+    ["区块外别名", "outside", "external"],
+    ["助手启动名", "claude", "binary"],
+    ["未出现在助手状态中的 Codex 启动名", "codex", "binary"],
+    ["无法读取的终端文件", "safe-name", "blocked"],
+  ])("手动新建遇到%s时在保存定义前拒绝", async (_label, id, source) => {
+    const routeMap = routes();
+    if (source !== "managed") {
+      const options = source === "external" ? { external: { outside: "other-command" } }
+        : source === "blocked" ? { blockedZprofile: "不能读取" } : {};
+      routeMap["aliases:status"] = makeEnvelope(makeAliasStatus(
+        { "cc-ly": 'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-ly" claude' }, options,
+      ), { command: "aliases.status" });
+    }
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
+    await openInstanceManager();
+    await openNewProfileForm();
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), id);
+    await submitAfterPreview(dialog, "profile-form-submit");
+    expect(await screen.findByText(source === "blocked" ? /终端配置文件无法读取/ : /终端命令 .* 已存在/)).toBeInTheDocument();
+    expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+  });
+
+  it("从 Provider 新建环境遇到现有终端命令时不先保存模板或凭据", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await userEvent.click(await screen.findByTestId("new-environment-button"));
+    await userEvent.click(screen.getByTestId("new-environment-third-party"));
+    const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
+    await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
+    await userEvent.clear(within(dialog).getByTestId("connection-environment-id"));
+    await userEvent.type(within(dialog).getByTestId("connection-environment-id"), "claude");
+    await userEvent.click(within(dialog).getByTestId("connection-save-template"));
+    await submitAfterPreview(dialog, "connection-form-submit");
+    expect(await within(dialog).findByText(/终端命令 claude 已存在/)).toBeInTheDocument();
+    expect(calls.some((call) => ["policy:set", "secrets:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+  });
+
   it("新建环境指向已有文件时展示保存后保留的原文", async () => {
     const all = routes();
     all["profiles:preview"] = makeEnvelope({
