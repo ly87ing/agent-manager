@@ -127,7 +127,7 @@ export default function AgentsPage({
   const [profileEditBase, setProfileEditBase] = useState<{ id: string; definition: Record<string, unknown> } | null>(null);
   /** 复制实例：表单带着预填内容，但名称与配置目录仍要能改（否则两个实例指同一套配置）。 */
   const [profileDuplicating, setProfileDuplicating] = useState(false);
-  const [profileRemoving, setProfileRemoving] = useState<string | null>(null);
+  const [profileRemoving, setProfileRemoving] = useState<{ id: string; definition: Record<string, unknown> } | null>(null);
   const [profileWriting, setProfileWriting] = useState<{ element: EngineElement; credentialOnly: boolean } | null>(null);
   /** 日常接入工作台当前查看的主助手；null 时跟随列表里的第一个。 */
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
@@ -1024,10 +1024,8 @@ export default function AgentsPage({
   };
 
   /** 移除实例定义：只停止管理这套配置，配置目录与里面的内容原样保留。 */
-  const removeProfile = async (id: string) => {
-    const snapshot = (policyQuery.data?.ok
-      ? ((policyQuery.data.data.layers?.sqlite as Record<string, any> | null)?.agents?.definitions?.[id] ?? null)
-      : null) as Record<string, unknown> | null;
+  const removeProfile = async ({ id, definition }: { id: string; definition: Record<string, unknown> }) => {
+    const snapshot = definition;
     const removedAlias = aliasSource.source?.aliases[id];
     let envelope;
     try {
@@ -1038,6 +1036,8 @@ export default function AgentsPage({
         `agents.definitions.${id}`,
         "--value",
         JSON.stringify({ _delete: true }),
+        "--expect-definition",
+        JSON.stringify(snapshot),
       ]);
     } catch (err) {
       toast.error(`移除实例失败:${String(err)}`);
@@ -1063,6 +1063,8 @@ export default function AgentsPage({
             `agents.definitions.${id}`,
             "--value",
             JSON.stringify({ ...snapshot, _delete: false, _replace: true }),
+            "--expect-definition",
+            "null",
           ]);
           if (!restored.ok) {
             toast.error(`恢复实例被拒绝:${restored.errors[0]?.message ?? "未知错误"}`);
@@ -1307,7 +1309,14 @@ export default function AgentsPage({
                     setProfileEditBase({ id, definition: definition as Record<string, unknown> });
                     setProfileForm(parseProfileDefinition(id, definition));
                   }}
-                  onRemove={() => setProfileRemoving(id)}
+                  onRemove={() => {
+                    const definition = elements.find((item) => item.id === `agents:${id}`)?.spec;
+                    if (!definition || typeof definition !== "object" || Array.isArray(definition)) {
+                      toast.error("读取独立环境定义失败，请刷新后重试");
+                      return;
+                    }
+                    setProfileRemoving({ id, definition: definition as Record<string, unknown> });
+                  }}
                   onDuplicate={() => {
                     const definition = (policyQuery.data?.ok
                       ? ((policyQuery.data.data.layers?.sqlite as Record<string, any> | null)?.agents?.definitions?.[id] ?? null)
@@ -1525,7 +1534,7 @@ export default function AgentsPage({
 
       {profileRemoving && (
         <ConfirmModal
-          title={`移除独立环境 ${profileRemoving}`}
+          title={`移除独立环境 ${profileRemoving.id}`}
           description="只停止管理这个独立环境并删掉它的启动命令；配置目录、登录状态与里面的内容都原样保留。官方登录按目录保存（macOS 在钥匙串里按目录路径区分），不再使用时请先用实例卡片上的退出命令在终端退出，再自行删除目录。"
           risk="write-local"
           confirmLabel="确认移除"

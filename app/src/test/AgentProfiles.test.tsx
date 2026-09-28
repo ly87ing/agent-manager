@@ -1582,7 +1582,10 @@ describe("助手实例", () => {
   });
 
   it("移除实例需确认，且只停止管理、不动配置目录", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    const all = routes();
+    const expected = (all["agents:status"].data as { elements: { id: string; spec: Record<string, unknown> }[] })
+      .elements.find((item) => item.id === "agents:cc-ly")!.spec;
+    const { calls } = renderWithEngine(<AgentsPage />, all);
     await openInstanceManager();
     await userEvent.click(await screen.findByTestId("profile-remove-cc-ly"));
     expect(await screen.findByText(/配置目录、登录状态与里面的内容都原样保留/)).toBeInTheDocument();
@@ -1591,7 +1594,28 @@ describe("助手实例", () => {
     const write = calls.find((call) => call.command === "policy:set")!;
     expect(write.args[write.args.indexOf("--key") + 1]).toBe("agents.definitions.cc-ly");
     expect(JSON.parse(write.args[write.args.indexOf("--value") + 1])).toEqual({ _delete: true });
+    expect(write.args.slice(-2)).toEqual(["--expect-definition", JSON.stringify(expected)]);
     expect(calls.some((call) => call.command === "profiles:apply")).toBe(false);
+    await userEvent.click(await screen.findByRole("button", { name: "撤销" }));
+    await waitFor(() => expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(2));
+    const undo = calls.filter((call) => call.command === "policy:set")[1];
+    expect(undo.args.slice(-2)).toEqual(["--expect-definition", "null"]);
+    expect(JSON.parse(undo.args[undo.args.indexOf("--value") + 1])).toMatchObject(expected);
+  });
+
+  it("移除环境时定义已被外部修改，不删除启动命令也不关闭确认框", async () => {
+    const all = routes();
+    all["policy:set"] = makeEnvelope(null, {
+      command: "policy.set", ok: false,
+      errors: [{ code: "POLICY_CONFLICT", element: null, message: "Agent 定义在表单打开后发生变化" }],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("profile-remove-cc-ly"));
+    await userEvent.click(screen.getByRole("button", { name: "确认移除" }));
+    expect(await screen.findByText(/移除实例被拒绝/)).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "移除独立环境 cc-ly" })).toBeInTheDocument();
+    expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
   });
 
   it("编辑 Provider 先预览环境差异，只有勾选后才按两份基准更新并回读", async () => {
