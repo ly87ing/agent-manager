@@ -9,11 +9,13 @@ function Harness({
   isNew = true,
   complete,
   definition,
+  expectedDefinition,
 }: {
   domain: "agents" | "skills";
   isNew?: boolean;
   complete?: boolean;
   definition?: Record<string, unknown>;
+  expectedDefinition?: Record<string, unknown> | null;
 }) {
   const ops = useDefinitionOps({ section: domain, domain });
   return (
@@ -26,6 +28,7 @@ function Harness({
             definition: definition ?? { bin: "demo", install: "install.sh", upgrade: "upgrade.sh" },
             isNew,
             complete,
+            expectedDefinition,
           })
         }
       >
@@ -39,6 +42,18 @@ function Harness({
 const policySetRoute = makeEnvelope({ applied: true }, { command: "policy.set" });
 
 describe("useDefinitionOps 保存语义", () => {
+  it("Agent 定义保存把打开表单时的定义交给写入命令核对", async () => {
+    const expectedDefinition = { bin: "demo", settings: { profiles: { other: { label: "旧接入" } } } };
+    const { calls } = renderWithEngine(<Harness domain="agents" expectedDefinition={expectedDefinition} />, {
+      "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode({ offline: false }) }),
+      "policy:set": policySetRoute,
+    });
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const write = calls.find((call) => call.command === "policy:set");
+    expect(write?.args.slice(-2)).toEqual(["--expect-definition", JSON.stringify(expectedDefinition)]);
+  });
+
   it("agents 域：保存定义只写定义本身，不写 enabled、不 apply/preflight", async () => {
     const { calls } = renderWithEngine(<Harness domain="agents" />, {
       "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode({ offline: false }) }),

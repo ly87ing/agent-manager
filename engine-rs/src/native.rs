@@ -1059,8 +1059,32 @@ fn validate_mcp_policy_candidate(
     Ok(())
 }
 
+fn check_expected_agent_definition(
+    policy: &Value,
+    segments: &[&str],
+    expected: &Value,
+) -> Result<(), DispatchError> {
+    let current = segments
+        .iter()
+        .try_fold(policy, |value, segment| value.get(*segment));
+    let visible = current
+        .map(crate::native_agents::strip_internal_markers)
+        .unwrap_or(Value::Null);
+    if &visible != expected {
+        return Err(DispatchError::new(
+            "POLICY_CONFLICT",
+            "Agent 定义在表单打开后发生变化，未保存；请刷新后重试",
+        ));
+    }
+    Ok(())
+}
+
 fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
-    reject_unrecognized_args(request, &["--layer", "--key", "--value"], "policy:set")?;
+    reject_unrecognized_args(
+        request,
+        &["--layer", "--key", "--value", "--expect-definition"],
+        "policy:set",
+    )?;
     if request.value("--layer") != Some("local") {
         return Err(DispatchError::new(
             "USAGE_ERROR",
@@ -1084,8 +1108,34 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
     })?;
     let segments = validate_key(key)?;
     reject_secrets(key, &value)?;
+    let expected_definition = request
+        .value("--expect-definition")
+        .map(|raw| {
+            serde_json::from_str::<Value>(raw).map_err(|err| {
+                DispatchError::new(
+                    "USAGE_ERROR",
+                    format!("--expect-definition 不是合法 JSON: {err}"),
+                )
+            })
+        })
+        .transpose()?;
+    if let Some(expected) = &expected_definition {
+        if segments.len() != 3
+            || segments[0] != "agents"
+            || segments[1] != "definitions"
+            || (!expected.is_object() && !expected.is_null())
+        {
+            return Err(DispatchError::new(
+                "USAGE_ERROR",
+                "--expect-definition 只支持 agents.definitions.<id> 的对象或 null 基准",
+            ));
+        }
+    }
 
     let mut candidate_policy = store::effective_policy(ctx).map_err(DispatchError::from)?;
+    if let Some(expected) = &expected_definition {
+        check_expected_agent_definition(&candidate_policy, &segments, expected)?;
+    }
     set_dot_path(&mut candidate_policy, &segments, value.clone())?;
     validate_mcp_policy_candidate(key, &value, &candidate_policy)?;
 
@@ -1095,6 +1145,9 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(DispatchError::from)?;
     let mut policy = store::policy_from_connection(&tx).map_err(DispatchError::from)?;
+    if let Some(expected) = &expected_definition {
+        check_expected_agent_definition(&policy, &segments, expected)?;
+    }
     set_dot_path(&mut policy, &segments, value.clone())?;
     validate_mcp_policy_candidate(key, &value, &policy)?;
     store::write_policy(&tx, &policy).map_err(DispatchError::from)?;

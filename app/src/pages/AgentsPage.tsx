@@ -561,7 +561,10 @@ export default function AgentsPage({
           connectionForm?.preserveUnknownFrom,
         );
         // Provider 定义不写助手主配置；独立环境默认不需要额外存一份 Provider 模板。
-        const saved = await definitionOps.saveDefinition({ name: agentId, definition, isNew: false });
+        const saved = await definitionOps.saveDefinition({
+          name: agentId, definition, isNew: false,
+          expectedDefinition: sourceElement.spec as Record<string, unknown>,
+        });
         if (!saved) {
           setConnectionFormError("接入没有保存，请根据提示修正后重试");
           return;
@@ -727,6 +730,7 @@ export default function AgentsPage({
         name: agentId,
         definition: removeAgentConnection(definition, connection.name),
         isNew: false,
+        expectedDefinition: definition,
       });
       if (!saved) return;
       setConnectionRemoving(null);
@@ -754,7 +758,10 @@ export default function AgentsPage({
         connection.name,
         direction,
       );
-      const saved = await definitionOps.saveDefinition({ name: agentId, definition, isNew: false });
+      const saved = await definitionOps.saveDefinition({
+        name: agentId, definition, isNew: false,
+        expectedDefinition: element.spec as Record<string, unknown>,
+      });
       if (!saved) return;
       await query.refetch();
     } finally {

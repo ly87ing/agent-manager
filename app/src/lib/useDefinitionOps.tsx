@@ -90,6 +90,8 @@ export function useDefinitionOps({
     /** definition 是否为完整整条定义（skills 用）。新增恒为完整；编辑时调用方有
      * sqlite 有效定义则传完整定义（complete 可缺省），拿不到完整原定义必须显式传 false。 */
     complete?: boolean;
+    /** Agent 定义表单打开时看到的内容；写入事务内据此拒绝过期保存。 */
+    expectedDefinition?: Record<string, unknown> | null;
     /** 成功保存返回 true；被校验或引擎拒绝返回 false，调用方据此决定要不要接着落地。 */
   }): Promise<boolean> => {
     const defKey = `${definitionKeyPrefix(section)}.${input.name}`;
@@ -99,7 +101,11 @@ export function useDefinitionOps({
       if (!full) return false;
       definition = { ...full, ...definition };
     }
-    if (!(await writePolicy("policy:set", ["--layer", "local", "--key", defKey, "--value", JSON.stringify({ ...definition, _delete: false, _replace: true })]))) {
+    const args = ["--layer", "local", "--key", defKey, "--value", JSON.stringify({ ...definition, _delete: false, _replace: true })];
+    if (input.expectedDefinition !== undefined) {
+      args.push("--expect-definition", JSON.stringify(input.expectedDefinition));
+    }
+    if (!(await writePolicy("policy:set", args))) {
       return false;
     }
     // 表单提交语义为「保存定义」：只保存定义，不写启用键、不 apply/preflight、不触发安装或

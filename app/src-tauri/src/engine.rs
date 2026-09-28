@@ -246,6 +246,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--layer", ArgValueKind::PolicyLayer));
             specs.push(("--key", ArgValueKind::DotKey));
             specs.push(("--value", ArgValueKind::JsonValue));
+            specs.push(("--expect-definition", ArgValueKind::JsonValue));
         }
         ("policy", "delete") => {
             specs.push(("--layer", ArgValueKind::PolicyLayer));
@@ -911,6 +912,19 @@ mod tests {
                     "mcp.enabled".into(),
                     "--value".into(),
                     "{\"a\":true}".into(),
+                ],
+            ),
+            (
+                "policy:set",
+                vec![
+                    "--layer".into(),
+                    "local".into(),
+                    "--key".into(),
+                    "agents.definitions.fixture".into(),
+                    "--value".into(),
+                    "{}".into(),
+                    "--expect-definition".into(),
+                    "{}".into(),
                 ],
             ),
             (

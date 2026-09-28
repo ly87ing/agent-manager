@@ -850,6 +850,27 @@ describe("助手运行参数", () => {
     expect(calls.some((call) => ["policy:set", "secrets:set", "agents:configure"].includes(call.command))).toBe(false);
   });
 
+  it("写入事务内发现 Provider 定义冲突时停止保存凭据", async () => {
+    const handlers = routes({
+      "policy:set": makeEnvelope({}, {
+        command: "policy.set",
+        ok: false,
+        errors: [{ code: "POLICY_CONFLICT", element: null, message: "Agent 定义在表单打开后发生变化" }],
+      }),
+    });
+    const expected = (handlers["agents:status"].data as { elements: EngineElement[] }).elements[0].spec;
+    const { calls } = renderWithEngine(<AgentsPage />, handlers);
+    await userEvent.click(await screen.findByTestId("add-connection-button"));
+    await userEvent.click(screen.getByTestId("connection-preset-kimi-cn-claude"));
+    await userEvent.type(screen.getByTestId("new-connection-secret"), "fixture-key");
+    await userEvent.click(screen.getByTestId("connection-form-submit"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("接入没有保存");
+    const write = calls.find((call) => call.command === "policy:set");
+    expect(write?.args.slice(-2)).toEqual(["--expect-definition", JSON.stringify(expected)]);
+    expect(calls.some((call) => ["secrets:source", "secrets:set", "agents:configure"].includes(call.command))).toBe(false);
+  });
+
   it("小任务模型已被官方弃用：新增接入不再提供，旧接入里的取值可一键挪到 Haiku 别名", async () => {
     const withProfiles = routes();
     const status = withProfiles["agents:status"] as { data: { elements: { spec: Record<string, unknown> }[] } };
@@ -939,6 +960,7 @@ describe("助手运行参数", () => {
     expect(configureCalls(calls)).toHaveLength(0);
     const saved = calls.find((call) => call.command === "policy:set")!;
     const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(JSON.parse(saved.args![saved.args!.indexOf("--expect-definition") + 1])).toEqual(status.data.elements[0].spec);
     expect(definition.settings.active).toBe("official");
     expect(definition.settings.profiles.relay.label).toBe("备用中转");
   });
@@ -1281,6 +1303,7 @@ describe("助手运行参数", () => {
     await waitFor(() => expect(confirm).not.toBeInTheDocument());
     const saved = calls.find((call) => call.command === "policy:set")!;
     const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(JSON.parse(saved.args![saved.args!.indexOf("--expect-definition") + 1])).toEqual(status.data.elements[0].spec);
     expect(definition.settings.active).toBe("official");
     expect(definition.settings.profiles).toEqual({ official: { label: "官方" } });
     expect(configureCalls(calls)).toHaveLength(0);
@@ -1351,6 +1374,7 @@ describe("助手运行参数", () => {
     await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
     const saved = calls.find((call) => call.command === "policy:set")!;
     const definition = JSON.parse(saved.args![saved.args!.indexOf("--value") + 1]);
+    expect(JSON.parse(saved.args![saved.args!.indexOf("--expect-definition") + 1])).toEqual(status.data.elements[0].spec);
     expect(Object.keys(definition.settings.profiles)).toEqual(["beta", "alpha", "gamma"]);
     expect(definition.settings.active).toBe("beta");
     expect(definition.settings.profiles.beta.future).toBe(2);

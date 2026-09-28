@@ -107,7 +107,7 @@ fn provider_command(
     }
 }
 
-fn strip_internal_markers(value: &Value) -> Value {
+pub(crate) fn strip_internal_markers(value: &Value) -> Value {
     match value {
         Value::Object(map) => Value::Object(
             map.iter()

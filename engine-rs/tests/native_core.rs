@@ -52,6 +52,131 @@ fn set_agent_definition(ctx: &Context, id: &str, value: serde_json::Value) {
 }
 
 #[test]
+fn policy_set_expected_agent_definition_rejects_stale_write_and_preserves_external_value() {
+    let (base, ctx) = temp_ctx("agent-definition-cas");
+    let original = json!({
+        "display_name": "fixture",
+        "bin": "fixture",
+        "preferred_provider": "native",
+        "providers": {"native": {}}
+    });
+    set_agent_definition(&ctx, "fixture", original.clone());
+    let changed = json!({
+        "display_name": "fixture",
+        "bin": "fixture",
+        "preferred_provider": "native",
+        "providers": {"native": {}},
+        "settings": {"profiles": {"other": {"label": "外部新增"}}},
+        "_replace": true
+    });
+    let first = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.fixture",
+                "--value",
+                &changed.to_string(),
+                "--expect-definition",
+                &original.to_string(),
+            ],
+        ),
+    );
+    assert!(first.ok, "{:?}", first.errors);
+
+    let before = store::effective_policy(&ctx).unwrap();
+    let stale = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.fixture",
+                "--value",
+                &original.to_string(),
+                "--expect-definition",
+                &original.to_string(),
+            ],
+        ),
+    );
+    assert!(!stale.ok);
+    assert_eq!(stale.errors[0].code, "POLICY_CONFLICT");
+    assert_eq!(store::effective_policy(&ctx).unwrap(), before);
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
+fn policy_set_expected_agent_definition_can_require_missing_key_without_creating_db_on_conflict() {
+    let (base, ctx) = temp_ctx("agent-definition-missing");
+    let definition = json!({
+        "display_name": "fixture",
+        "bin": "fixture",
+        "preferred_provider": "native",
+        "providers": {"native": {}}
+    });
+    let rejected = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.claude-code",
+                "--value",
+                &definition.to_string(),
+                "--expect-definition",
+                "null",
+            ],
+        ),
+    );
+    assert!(!rejected.ok);
+    assert_eq!(rejected.errors[0].code, "POLICY_CONFLICT");
+    assert!(!store::db_path(&ctx).exists());
+
+    let created = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.fixture",
+                "--value",
+                &definition.to_string(),
+                "--expect-definition",
+                "null",
+            ],
+        ),
+    );
+    assert!(created.ok, "{:?}", created.errors);
+    let duplicate = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.fixture",
+                "--value",
+                &definition.to_string(),
+                "--expect-definition",
+                "null",
+            ],
+        ),
+    );
+    assert_eq!(duplicate.errors[0].code, "POLICY_CONFLICT");
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
 fn request_helpers_parse_flags_and_values() {
     let req = request(
         "rules:plan",
