@@ -67,6 +67,7 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
       { command: "secrets.set" },
     ),
     "aliases:status": makeEnvelope(makeAliasStatus({}), { command: "aliases.status" }),
+    "aliases:preview": makeEnvelope({ files: [], skipped: [] }, { command: "aliases.preview" }),
     "profiles:preview": makeEnvelope({
       path: "/isolated/settings.json", exists: false, content: "{\"env\":{}}", files: [],
     }, { command: "profiles.preview" }),

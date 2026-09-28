@@ -207,9 +207,11 @@ export function ConnectionFormDialog({
     }] : []),
   ];
   const previewKey = JSON.stringify(previewRequests);
-  const waitingForPreview = previewRequests.length > 0
+  const waitingForPreview = (previewRequests.length > 0
     && (previewBusy || preview?.key !== previewKey || preview.results.length !== previewRequests.length
-      || preview.results.some(({ result }) => typeof result === "string"));
+      || preview.results.some(({ result }) => typeof result === "string")))
+    || (Boolean(newEnvironmentInput)
+      && (aliasPreview?.key !== aliasPreviewKey || typeof aliasPreview.result === "string"));
 
   const refreshPreview = async () => {
     const serial = ++previewSerial.current;

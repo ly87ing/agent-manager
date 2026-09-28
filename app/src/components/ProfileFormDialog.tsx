@@ -140,7 +140,8 @@ export function ProfileFormDialog({
     && (kind !== "claude" || !baseUrl.trim() || Boolean(tokenVar.trim()))
     && (kind !== "codex" || !tokenVar.trim() || Boolean(baseUrl.trim()));
   const waitingForPreview = !isEdit && previewReady
-    && (previewBusy || preview?.key !== previewKey || typeof preview.result === "string");
+    && (previewBusy || preview?.key !== previewKey || typeof preview.result === "string"
+      || aliasPreview?.key !== aliasPreviewKey || typeof aliasPreview.result === "string");
   const managedConfigFile = `${effectiveConfigDir.replace(/\/$/, "")}/${kind === "codex" ? "config.toml" : "settings.json"}`;
   const mcpConfigFile = profileMcpConfig(kind, effectiveConfigDir).path;
   const skillsDir = profileSkillsDir(effectiveConfigDir);

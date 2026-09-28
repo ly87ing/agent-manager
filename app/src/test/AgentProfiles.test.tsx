@@ -222,10 +222,27 @@ describe("助手实例", () => {
     expect(file).toHaveTextContent('alias cc-work=\'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-work" claude\'');
     await userEvent.type(within(dialog).getByTestId("profile-extra-args"), "--dangerously-skip-permissions");
     expect(within(dialog).queryByTestId("profile-alias-file-aliases:zshrc")).toBeNull();
+    expect(within(dialog).getByTestId("profile-form-submit")).toBeDisabled();
     await waitFor(() => expect(within(dialog).getByTestId("profile-alias-file-aliases:zshrc"))
       .toHaveTextContent("--dangerously-skip-permissions"));
+    await waitFor(() => expect(within(dialog).getByTestId("profile-form-submit")).toBeEnabled());
     expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
     expect(calls.some((call) => call.command === "aliases:preview")).toBe(true);
+  });
+
+  it("手动新建时终端文件预览失败不能提交", async () => {
+    const routeMap = routes();
+    routeMap["aliases:preview"] = makeEnvelope(null, {
+      command: "aliases.preview", ok: false,
+      errors: [{ code: "ALIAS_ERROR", element: null, message: "终端文件已变化，请重新读取" }],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
+    await openNewProfileForm();
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
+    expect(await within(dialog).findByText("终端文件已变化，请重新读取")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("profile-form-submit")).toBeDisabled();
+    expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
   });
 
   it.each([
@@ -423,9 +440,28 @@ describe("助手实例", () => {
     await userEvent.clear(within(dialog).getByTestId("connection-environment-id"));
     await userEvent.type(within(dialog).getByTestId("connection-environment-id"), "deepseek-work");
     expect(within(dialog).queryByTestId("connection-alias-file-aliases:zshrc")).toBeNull();
+    expect(within(dialog).getByTestId("connection-form-submit")).toBeDisabled();
     await waitFor(() => expect(within(dialog).getByTestId("connection-alias-file-aliases:zshrc"))
       .toHaveTextContent("alias deepseek-work="));
+    await waitFor(() => expect(within(dialog).getByTestId("connection-form-submit")).toBeEnabled());
     expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+  });
+
+  it("从 Provider 新建时终端文件预览失败不能保存模板或环境", async () => {
+    const routeMap = routes();
+    routeMap["aliases:preview"] = makeEnvelope(null, {
+      command: "aliases.preview", ok: false,
+      errors: [{ code: "ALIAS_ERROR", element: null, message: "终端文件已变化，请重新读取" }],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
+    await userEvent.click(await screen.findByTestId("new-environment-button"));
+    await userEvent.click(screen.getByTestId("new-environment-third-party"));
+    const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
+    await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
+    await userEvent.click(within(dialog).getByTestId("connection-save-template"));
+    expect(await within(dialog).findByText("终端文件已变化，请重新读取")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("connection-form-submit")).toBeDisabled();
+    expect(calls.some((call) => ["policy:set", "secrets:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
   });
 
   it("Provider 新建环境预览失败时不保存定义或写入配置", async () => {
