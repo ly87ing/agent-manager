@@ -586,7 +586,7 @@ state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是
 - 更新中心：`system:refresh-upstream` 已实施（参与域 agents/mcp/skills，探测缓存落 SQLite `upstream_probes` 表，三域 status 只读回填 freshness，`--offline` 拒绝，不取 apply 锁）；`system:converge` 已于 `9080c1d` 退役清理；Updates 页直接触发真实 apply（apply 内部保留 preflight/写前校验），前端调用已补显式 `--action`（agents→upgrade，mcp/skills→update）。
 - 快照：退役。新体系既定方向为 fail-closed 拒绝覆盖 + 操作内事务回滚，不恢复"写前持久备份"模型；"自动备份"承诺文案已于 `9080c1d` 清理。
 - 探测缓存：落 SQLite 新表（易失状态入库与 operation_logs 先例一致），不引入第二份可写状态文件。
-- 实施者：全部使用 Kimi YOLO 模式（AGENTS.md 已同步）。
+- 实施者：当时决定全部使用 Kimi YOLO 模式；2026-09-28 因 Kimi 无实施权限，当前协作规则已在 [AGENTS.md](../AGENTS.md) 更新。
 
 ## 2026-09-15 公共 plan/dry-run 退役裁决
 
