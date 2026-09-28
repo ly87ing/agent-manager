@@ -1034,9 +1034,11 @@ export default function AgentsPage({
             connection,
           )
         }
-        onShowInstances={() =>
-          document.querySelector('[data-testid="independent-environments"]')?.scrollIntoView?.({ behavior: "smooth", block: "start" })
-        }
+        onShowInstances={(id) => {
+          const card = document.getElementById(`profile-card-${id}`);
+          card?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+          card?.focus({ preventScroll: true });
+        }}
         onNewEnvironment={(element, kind) => {
           if (kind === "third-party") {
             setConnectionFormError(null);

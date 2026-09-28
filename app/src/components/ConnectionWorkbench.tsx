@@ -112,8 +112,8 @@ export function ConnectionWorkbench({
   checkResults: Record<string, ConnectionCheckResult>;
   /** 由这套接入建立的独立环境；旧定义按地址与凭据变量推断。 */
   instancesOf?: (agentId: string, connection: ConnectionEntry) => { id: string; label: string }[];
-  /** 切到「独立环境」页签。 */
-  onShowInstances?: () => void;
+  /** 定位这套接入建立的独立环境卡片。 */
+  onShowInstances?: (id: string) => void;
   /** 查这套接入凭据的余额（只对有官方余额接口的厂商）；返回一行结果或失败原因。 */
   onBalance?: (element: EngineElement, connection: ConnectionEntry) => Promise<string>;
   onSelectAgent: (agentId: string) => void;
@@ -760,7 +760,7 @@ function ConnectionCard({
   onMoveUp?: () => void;
   onMoveDown?: () => void;
   instances?: { id: string; label: string }[];
-  onShowInstances?: () => void;
+  onShowInstances?: (id: string) => void;
   onBalance?: () => Promise<string>;
 }) {
   const id = connection?.name ?? "default";
@@ -819,15 +819,14 @@ function ConnectionCard({
                 {index > 0 && "、"}
                 <button
                   type="button"
-                  onClick={onShowInstances}
+                  onClick={() => onShowInstances?.(instance.id)}
                   className="font-mono text-primary hover:underline"
-                  title={`在终端里输入 ${instance.id} 启动`}
+                  title={`查看独立环境 ${instance.label}`}
                 >
                   {instance.id}
                 </button>
               </span>
             ))}
-            （终端里输入同名命令启动）
           </p>
         )}
         {balance && (

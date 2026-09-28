@@ -971,8 +971,26 @@ describe("助手运行参数", () => {
       }),
       { command: "policy.get" },
     );
-    renderWithEngine(<AgentsPage />, withProfiles);
+    withProfiles["profiles:status"] = makeEnvelope(
+      { domain: "profiles", elements: [makeElement({
+        id: "profiles:cc-glm",
+        domain: "profiles",
+        spec: { display_name: "Claude · GLM", base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-cc-glm", base_url: "https://open.bigmodel.cn/api/anthropic" },
+        observed: { kind: "claude", config_dir: "~/.claude-cc-glm", target: "~/.claude-cc-glm/settings.json", fields: [] },
+        state: "not-materialized",
+      })] },
+      { command: "profiles.status" },
+    );
+    const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
     expect(await screen.findByTestId("connection-instances-claude-code-glm")).toHaveTextContent("已建成独立环境：cc-glm");
+    expect(screen.getByTestId("connection-instances-claude-code-glm")).not.toHaveTextContent("终端里输入同名命令");
+    const profileCard = await screen.findByTestId("profile-card-cc-glm");
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(profileCard, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    await userEvent.click(within(screen.getByTestId("connection-instances-claude-code-glm")).getByRole("button", { name: "cc-glm" }));
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" });
+    expect(profileCard).toHaveFocus();
+    expect(calls.some((call) => call.command === "agents:configure" || call.command === "profiles:apply" || call.command === "aliases:apply")).toBe(false);
     expect(screen.queryByTestId("make-profile-quick-claude-code-glm")).toBeNull();
     await userEvent.click(screen.getByLabelText("管理 智谱"));
     expect(screen.getByTestId("make-profile-claude-code-glm")).toBeInTheDocument();
