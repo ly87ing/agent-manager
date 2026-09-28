@@ -835,11 +835,6 @@ function ConnectionCard({
             {balance}
           </p>
         )}
-        {connection && instances.length === 0 && onMakeProfile && !connection.providerRef && (
-          <p data-testid={`connection-unused-${agentId}-${id}`} className="mt-1 text-xs text-muted-foreground">
-            还没建成独立环境。
-          </p>
-        )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {check && !check.pending && (

@@ -976,7 +976,8 @@ describe("助手运行参数", () => {
     expect(screen.queryByTestId("make-profile-quick-claude-code-glm")).toBeNull();
     await userEvent.click(screen.getByLabelText("管理 智谱"));
     expect(screen.getByTestId("make-profile-claude-code-glm")).toBeInTheDocument();
-    expect(screen.getByTestId("connection-unused-claude-code-kimi")).toHaveTextContent("还没建成独立环境");
+    expect(screen.queryByText("还没建成独立环境。")).toBeNull();
+    expect(screen.getByTestId("make-profile-quick-claude-code-kimi")).toHaveTextContent("建成独立环境");
     expect(screen.queryByTestId("make-profile-claude-code-kimi")).toBeNull();
     await userEvent.click(screen.getByTestId("make-profile-quick-claude-code-kimi"));
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
