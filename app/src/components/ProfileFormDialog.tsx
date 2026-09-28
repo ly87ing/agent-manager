@@ -7,6 +7,7 @@ import { detectSystemPlatform, urlHasUserinfo } from "../lib/agentDefinitionForm
 import { ALL_SEED_ITEMS, type SeedItem } from "../lib/profileSeed";
 import { keyStatus, type SecretSourceState } from "../lib/secretSource";
 import { ProfileSeedPicker } from "./ProfileSeedPicker";
+import type { AliasFilePreview } from "../lib/useAliasSource";
 import {
   PROFILE_ID_RE,
   SUBPROCESS_SCRUB_ENV,
@@ -42,6 +43,8 @@ export function ProfileFormDialog({
   baseBinOf,
   onSubmit,
   onPreview,
+  onAliasPreview,
+  aliasPreviewBase,
   onFetchModels,
   secretSource,
   onClose,
@@ -56,6 +59,8 @@ export function ProfileFormDialog({
   /** 新建时另带要从默认环境带上的设置（编辑时为空）。 */
   onSubmit: (input: ProfileFormInput, options: { seedItems: SeedItem[]; isEdit: boolean }) => void;
   onPreview: (input: ProfileFormInput, seedItems: SeedItem[]) => Promise<ProfileDraftPreview | string>;
+  onAliasPreview: (name: string, value: string) => Promise<AliasFilePreview | string>;
+  aliasPreviewBase: string;
   /** 用表单里的地址与凭据变量问接口能用哪些模型；失败时返回原因。只在点按钮时才联网。 */
   onFetchModels?: (draft: { kind: ProfileKind; baseUrl: string; tokenVar: string }) => Promise<string[] | string>;
   /** 密钥文件的状态：说明这个变量现在有没有值。 */
@@ -124,6 +129,8 @@ export function ProfileFormDialog({
     extraEnv,
   };
   const launch = id ? profileLaunchValue(input, baseBinOf(baseAgent)) : "";
+  const aliasPreviewKey = JSON.stringify([aliasPreviewBase, id, launch]);
+  const [aliasPreview, setAliasPreview] = useState<{ key: string; result: AliasFilePreview | string } | null>(null);
   const previewKey = JSON.stringify([buildProfileDefinition(input, baseBinOf(baseAgent)), isEdit ? [] : seedItems]);
   const previewReady = PROFILE_ID_RE.test(id)
     && (isEdit || !existingIds.includes(id))
@@ -164,6 +171,20 @@ export function ProfileFormDialog({
       previewSerial.current += 1;
     };
   }, [previewKey, previewReady]);
+
+  useEffect(() => {
+    if (isEdit || !previewReady || !launch) return;
+    let current = true;
+    const timer = window.setTimeout(() => {
+      void onAliasPreview(id, launch)
+        .then((result) => { if (current) setAliasPreview({ key: aliasPreviewKey, result }); })
+        .catch((error) => { if (current) setAliasPreview({ key: aliasPreviewKey, result: String(error) }); });
+    }, 300);
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [aliasPreviewKey, isEdit, previewReady]);
+
+  const currentAliasPreview = !isEdit && previewReady && aliasPreview?.key === aliasPreviewKey
+    ? aliasPreview.result : null;
 
   const submit = () => {
     if (!PROFILE_ID_RE.test(id)) {
@@ -625,6 +646,20 @@ export function ProfileFormDialog({
                 <pre data-testid="profile-launch-preview" className="mt-3 whitespace-pre-wrap break-all rounded-lg border bg-muted px-3 py-3 font-mono text-xs leading-5 text-foreground">
                   {launch ? `alias ${id}='${launch}'` : "填写环境名后显示完整命令"}
                 </pre>
+                <div className="mt-3 space-y-2 text-xs" data-testid="profile-alias-file-preview">
+                  <p className="font-medium">终端配置文件写入后</p>
+                  {!previewReady && <p className="text-muted-foreground">填写有效环境名和配置后显示完整文件。</p>}
+                  {previewReady && currentAliasPreview === null && <p className="text-muted-foreground">正在读取实际文件并计算…</p>}
+                  {typeof currentAliasPreview === "string" && <p role="alert" className="text-destructive">{currentAliasPreview}</p>}
+                  {currentAliasPreview && typeof currentAliasPreview !== "string" && <>
+                    {currentAliasPreview.files.map((file) => <div key={file.target} className="space-y-1">
+                      <p className="break-all font-mono">{file.path}{file.exists ? "（已有文件）" : "（将新建）"}</p>
+                      <pre data-testid={`profile-alias-file-${file.target}`} className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono">{file.content}</pre>
+                    </div>)}
+                    {currentAliasPreview.skipped.map((reason) => <p key={reason} className="text-muted-foreground">{reason}</p>)}
+                  </>}
+                  <p className="text-muted-foreground">只读预览；原文可能含敏感值，仅在本机查看。</p>
+                </div>
               </section>}
 
               <section className="rounded-xl border bg-card p-5 shadow-sm">

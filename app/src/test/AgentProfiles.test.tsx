@@ -118,6 +118,17 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
       },
       { command: "profiles.seed" },
     ),
+    "aliases:preview": async (args) => {
+      const name = args[args.indexOf("--set") + 1];
+      const value = args[args.indexOf("--value") + 1];
+      return makeEnvelope({
+        files: [{
+          target: "aliases:zshrc", path: "/isolated/.zshrc", exists: true,
+          content: `# 保留现有配置\nalias ${name}='${value}'\n`,
+        }],
+        skipped: [],
+      }, { command: "aliases.preview" });
+    },
     "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
     "policy:set": makeEnvelope(makePolicyData(), { command: "policy.set" }),
     "aliases:status": makeEnvelope(
@@ -199,6 +210,23 @@ describe("助手实例", () => {
     ]));
     await within(dialog).findByTestId("profile-draft-preview-content");
     expect(within(dialog).queryByTestId("profile-draft-preview-file-0")).toBeNull();
+  });
+
+  it("新建环境实时展示终端配置完整候选原文，改参数后旧预览失效且预览不写文件", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    await openInstanceManager();
+    await openNewProfileForm();
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
+    const file = await within(dialog).findByTestId("profile-alias-file-aliases:zshrc");
+    expect(file).toHaveTextContent("# 保留现有配置");
+    expect(file).toHaveTextContent('alias cc-work=\'CLAUDE_CONFIG_DIR="$HOME/.claude-cc-work" claude\'');
+    await userEvent.type(within(dialog).getByTestId("profile-extra-args"), "--dangerously-skip-permissions");
+    expect(within(dialog).queryByTestId("profile-alias-file-aliases:zshrc")).toBeNull();
+    await waitFor(() => expect(within(dialog).getByTestId("profile-alias-file-aliases:zshrc"))
+      .toHaveTextContent("--dangerously-skip-permissions"));
+    expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+    expect(calls.some((call) => call.command === "aliases:preview")).toBe(true);
   });
 
   it("新建环境指向已有文件时展示保存后保留的原文", async () => {

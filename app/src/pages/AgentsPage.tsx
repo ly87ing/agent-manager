@@ -1374,6 +1374,8 @@ export default function AgentsPage({
           onFetchModels={fetchModelsForDraft}
           secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}
           onSubmit={(input, options) => void saveProfile(input, options.seedItems, options.isEdit)}
+          onAliasPreview={aliasSource.previewSetAlias}
+          aliasPreviewBase={JSON.stringify(aliasSource.source?.targets.map((target) => [target.id, target.base]) ?? [])}
           onPreview={async (input, seedItems) => {
             try {
               const result = await runEngine<ProfileDraftPreview>("profiles:preview", [
