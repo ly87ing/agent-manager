@@ -178,13 +178,12 @@ fn parse_json_object(bytes: Option<&[u8]>, what: &str) -> Result<Map<String, Val
 // ---------- 权限与状态栏：没有别的域管，在这里写 ----------
 
 /// Claude settings.json 里的两段（主配置有、实例没有才补）。
-fn seed_claude_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec<Value>> {
-    let source = parse_json_object(
-        read_source(&ctx.home_dir.join(".claude/settings.json")).as_deref(),
-        "默认环境的 settings.json",
-    )?;
-    let (real, previous) = read_target(&dir.join("settings.json"))?;
-    let mut target = parse_json_object(previous.as_deref(), "独立环境的 settings.json")?;
+fn render_claude_settings(
+    source: &Map<String, Value>,
+    previous: Option<&[u8]>,
+    items: &[&str],
+) -> Result<(Vec<Value>, Option<Vec<u8>>)> {
+    let mut target = parse_json_object(previous, "独立环境的 settings.json")?;
     let mut out = Vec::new();
     let mut changed = false;
     for item in items {
@@ -206,9 +205,24 @@ fn seed_claude_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec
             }
         }
     }
-    if changed {
+    let content = if changed {
         let mut bytes = serde_json::to_vec_pretty(&Value::Object(target))?;
         bytes.push(b'\n');
+        Some(bytes)
+    } else {
+        None
+    };
+    Ok((out, content))
+}
+
+fn seed_claude_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec<Value>> {
+    let source = parse_json_object(
+        read_source(&ctx.home_dir.join(".claude/settings.json")).as_deref(),
+        "默认环境的 settings.json",
+    )?;
+    let (real, previous) = read_target(&dir.join("settings.json"))?;
+    let (out, content) = render_claude_settings(&source, previous.as_deref(), items)?;
+    if let Some(bytes) = content {
         crate::native_mcp::rollback::atomic_write_bytes_checked(&real, &bytes, previous.as_deref())
             .map_err(|err| anyhow!("写 settings.json 没有成功（可能已在外部修改）：{err:#}"))?;
     }
@@ -228,16 +242,12 @@ pub(super) const CODEX_PERMISSION_KEYS: &[&str] = &[
 /// Codex 的状态栏在 `[tui]` 下。
 pub(super) const CODEX_STATUSLINE_KEYS: &[&str] = &["status_line", "status_line_use_colors"];
 
-fn seed_codex_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec<Value>> {
-    let source = match read_source(&ctx.home_dir.join(".codex/config.toml")) {
-        Some(bytes) => String::from_utf8_lossy(&bytes)
-            .parse::<toml_edit::Document>()
-            .map_err(|_| anyhow!("默认环境的 config.toml 不是合法 TOML，没有带"))?,
-        None => toml_edit::Document::new(),
-    };
-    let (real, previous) = read_target(&dir.join("config.toml"))?;
+fn render_codex_settings(
+    source: &toml_edit::Document,
+    previous: Option<&[u8]>,
+    items: &[&str],
+) -> Result<(Vec<Value>, Option<Vec<u8>>)> {
     let mut target = previous
-        .as_deref()
         .map(|bytes| String::from_utf8_lossy(bytes).into_owned())
         .unwrap_or_default()
         .parse::<toml_edit::Document>()
@@ -307,7 +317,7 @@ fn seed_codex_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec<
             out.push(result(item, "copied", "已带上状态栏"));
         }
     }
-    if changed {
+    let content = if changed {
         let content = target.to_string();
         let parsed: toml::Value = content
             .parse()
@@ -319,12 +329,25 @@ fn seed_codex_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec<
                 fatal.join("；")
             );
         }
-        crate::native_mcp::rollback::atomic_write_bytes_checked(
-            &real,
-            content.as_bytes(),
-            previous.as_deref(),
-        )
-        .map_err(|err| anyhow!("写 config.toml 没有成功（可能已在外部修改）：{err:#}"))?;
+        Some(content.into_bytes())
+    } else {
+        None
+    };
+    Ok((out, content))
+}
+
+fn seed_codex_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec<Value>> {
+    let source = match read_source(&ctx.home_dir.join(".codex/config.toml")) {
+        Some(bytes) => String::from_utf8_lossy(&bytes)
+            .parse::<toml_edit::Document>()
+            .map_err(|_| anyhow!("默认环境的 config.toml 不是合法 TOML，没有带"))?,
+        None => toml_edit::Document::new(),
+    };
+    let (real, previous) = read_target(&dir.join("config.toml"))?;
+    let (out, content) = render_codex_settings(&source, previous.as_deref(), items)?;
+    if let Some(bytes) = content {
+        crate::native_mcp::rollback::atomic_write_bytes_checked(&real, &bytes, previous.as_deref())
+            .map_err(|err| anyhow!("写 config.toml 没有成功（可能已在外部修改）：{err:#}"))?;
     }
     Ok(out)
 }
