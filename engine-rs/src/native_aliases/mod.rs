@@ -5,6 +5,7 @@
 //!   （未生效）；只读零写。
 //! - `aliases:apply`：按名编辑区块里的一条（新增/改写/删除/添加推荐/加入旧版别名），
 //!   每个文件独立 base CAS，取 apply 锁。
+//! - `aliases:preview`：同参数只读计算将变化的完整文件，不取锁。
 //! - `aliases:discard-legacy`：丢弃一条旧版本保存的别名，只写库。
 
 pub(crate) mod apply;
@@ -39,6 +40,7 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             status::build_status(ctx)
         }
         "aliases:apply" => apply::apply(ctx, req),
+        "aliases:preview" => apply::preview(ctx, req),
         "aliases:discard-legacy" => legacy::discard(ctx, req),
         _ => bail!("aliases 域不支持命令 '{}'", req.command),
     }

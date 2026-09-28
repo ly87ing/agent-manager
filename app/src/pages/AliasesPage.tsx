@@ -34,7 +34,7 @@ type Dialog =
  * 旧版本保存、还没写进文件的命令作为建议，可加入或丢弃。
  */
 export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => void } = {}) {
-  const { query, source, busy, setAlias, removeAlias, addRecommended, addLegacy, discardLegacy, fetchSource } = useAliasSource();
+  const { query, source, busy, setAlias, previewSetAlias, removeAlias, addRecommended, addLegacy, discardLegacy, fetchSource } = useAliasSource();
   const [dialog, setDialog] = useState<Dialog | null>(null);
 
   if (query.isPending) return <PageLoading text="正在读取终端快捷命令…" />;
@@ -318,6 +318,8 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
           presetName={dialog.presetName}
           defaults={{ timezone: DEFAULT_TIMEZONE, lang: DEFAULT_LANG }}
           existingNames={names}
+          previewBase={JSON.stringify(source.targets.map((target) => [target.id, target.base]))}
+          onPreview={previewSetAlias}
           onSubmit={(name, value) => void setAlias(name, value, { renameFrom: dialog.name }).then(closeOn)}
           onClose={close}
         />

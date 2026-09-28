@@ -198,6 +198,29 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     Ok(())
 }
 
+/// 与 apply 使用同一写入计划，只返回将变化的目标文件完整原文，不取锁、不写文件或库。
+pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
+    let parsed = args::parse_apply_args(req)?;
+    let row = legacy::read_row_readonly(ctx)?;
+    let prep = prepare(ctx, row.as_ref(), &parsed)?;
+    let files = prep
+        .writes
+        .iter()
+        .map(|write| -> Result<Value> {
+            Ok(json!({
+                "target": write.target_id,
+                "path": write.abs,
+                "exists": write.old_bytes.is_some(),
+                "content": std::str::from_utf8(&write.new_bytes)?,
+            }))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(json!({
+        "files": files,
+        "skipped": prep.skipped,
+    }))
+}
+
 fn op_meta(op: &Op, edit: &Edit, origin: Option<&str>) -> Value {
     let name = match edit {
         Edit::Set { name, .. } | Edit::Remove { name } => name,

@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import type { AliasCurrent, AliasLegacySuggestion, AliasRecommendation, EngineElement, StatusData, SuggestedSource } from "./contract";
 import type { AliasesObserved, AliasesSpec, AliasLine } from "./observed";
 import { useExecutions } from "./execution";
+import { engineErrorMessage, runEngine } from "./engine";
 import { useEngineQuery } from "./queries";
 
 /**
@@ -42,6 +43,11 @@ export interface AliasSource {
   legacy: AliasLegacySuggestion[];
   /** 至少有一个文件能写。 */
   writable: boolean;
+}
+
+export interface AliasFilePreview {
+  files: { target: string; path: string; exists: boolean; content: string }[];
+  skipped: string[];
 }
 
 function targetOf(element: EngineElement): AliasTarget {
@@ -113,6 +119,22 @@ export function useAliasSource() {
     return run("aliases:apply", [...bases, ...op], label, options);
   };
 
+  const preview = async (op: string[]): Promise<AliasFilePreview | string> => {
+    const bases = (latest.current?.targets ?? []).flatMap((target) => (target.base ? [target.baseFlag, target.base] : []));
+    if (bases.length === 0) return "~/.zshrc 与 ~/.zprofile 当前都不能写，原因见「终端快捷命令」页";
+    try {
+      const envelope = await runEngine<AliasFilePreview>("aliases:preview", [...bases, ...op]);
+      return envelope.ok ? envelope.data : envelope.errors[0]?.message ?? "无法预览终端配置文件";
+    } catch (error) {
+      return engineErrorMessage(error);
+    }
+  };
+
+  const setOp = (name: string, value: string, renameFrom?: string) => [
+    "--set", name, "--value", value,
+    ...(renameFrom && renameFrom !== name ? ["--rename-from", renameFrom] : []),
+  ];
+
   const setAlias = (
     name: string,
     value: string,
@@ -120,11 +142,14 @@ export function useAliasSource() {
   ): Promise<boolean> => {
     const renamed = options?.renameFrom && options.renameFrom !== name ? options.renameFrom : undefined;
     return write(
-      ["--set", name, "--value", value, ...(renamed ? ["--rename-from", renamed] : [])],
+      setOp(name, value, renamed),
       options?.label ?? (renamed ? `把 ${renamed} 改名为 ${name}` : `保存快捷命令 ${name}`),
       options,
     );
   };
+
+  const previewSetAlias = (name: string, value: string, renameFrom?: string): Promise<AliasFilePreview | string> =>
+    preview(setOp(name, value, renameFrom));
 
   const removeAlias = (name: string, options?: { label?: string; silent?: boolean }): Promise<boolean> =>
     write(["--remove", name], options?.label ?? `移除快捷命令 ${name}`, options);
@@ -143,5 +168,5 @@ export function useAliasSource() {
   const fetchSource = (collection: string): Promise<boolean> =>
     run("skills:apply", ["--only", `skill:${collection}`, "--action", "update"], `更新来源 ${collection}`);
 
-  return { query, source, busy, setAlias, removeAlias, addRecommended, addLegacy, discardLegacy, fetchSource };
+  return { query, source, busy, setAlias, previewSetAlias, removeAlias, addRecommended, addLegacy, discardLegacy, fetchSource };
 }

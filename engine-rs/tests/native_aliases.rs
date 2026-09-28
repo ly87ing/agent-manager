@@ -237,6 +237,60 @@ fn fresh_status_is_zero_write_and_only_suggests_a_source() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
+#[test]
+fn preview_matches_both_rc_files_and_does_not_write() {
+    let (root, ctx) = temp_ctx("preview");
+    let original = format!(
+        "# my comment\nalias own='echo own'\n{}",
+        block(&["alias old='old'"])
+    );
+    write(&ctx, ".zshrc", &original);
+    let bases = both_bases(&status(&ctx));
+    let mut args: Vec<&str> = bases.iter().map(String::as_str).collect();
+    args.extend_from_slice(&[
+        "--set",
+        "new",
+        "--value",
+        "echo new",
+        "--rename-from",
+        "old",
+    ]);
+    let preview = run(&ctx, "aliases:preview", &args);
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert!(!preview.lock.held);
+    let files = preview.data["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0]["target"], "aliases:zshrc");
+    assert_eq!(files[0]["exists"], true);
+    assert_eq!(
+        files[0]["path"],
+        std::fs::canonicalize(ctx.home_dir.join(".zshrc"))
+            .unwrap()
+            .to_string_lossy()
+            .as_ref()
+    );
+    assert_eq!(files[1]["target"], "aliases:zprofile");
+    assert_eq!(files[1]["exists"], false);
+    assert!(files[0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("# my comment\nalias own='echo own'"));
+    assert!(!files[0]["content"].as_str().unwrap().contains("alias old="));
+    assert_eq!(read(&ctx, ".zshrc").as_deref(), Some(original.as_str()));
+    assert_eq!(read(&ctx, ".zprofile"), None);
+    assert!(!ctx.data_dir.exists(), "预览不得建库");
+
+    let applied = run(&ctx, "aliases:apply", &args);
+    assert!(applied.ok, "{:?}", applied.errors);
+    for (index, rel) in [".zshrc", ".zprofile"].iter().enumerate() {
+        assert_eq!(read(&ctx, rel).as_deref(), files[index]["content"].as_str());
+    }
+    let stale = run(&ctx, "aliases:preview", &args);
+    assert!(!stale.ok);
+    assert!(stale.errors[0].message.contains("已在外部修改"));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 /// 来源别名：按来源里 aliases/*.json 推荐，带上来源名；同名取先读到的文件，结构不合法的
 /// 文件整份跳过，README 不算；有来源别名时不再给推荐来源。
 #[test]

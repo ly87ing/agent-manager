@@ -90,6 +90,9 @@ function routes(bin = "claude", id = "claude-code"): Record<string, Envelope> {
     "aliases:status": makeEnvelope(makeAliasStatus({ [bin]: `${bin} --dangerously-skip-permissions` }), {
       command: "aliases.status",
     }),
+    "aliases:preview": makeEnvelope({ files: [
+      { target: "aliases:zshrc", path: "/isolated/.zshrc", exists: true, content: "# 其余原文\nalias claude='claude'\n" },
+    ], skipped: [] }, { command: "aliases.preview" }),
   };
 }
 
@@ -154,6 +157,7 @@ describe("助手页产品边界", () => {
     expect(within(dialog).getByTestId("alias-command-input")).toHaveValue("claude");
     expect(within(dialog).getByTestId("alias-extra-args-input")).toHaveValue("--dangerously-skip-permissions");
     await userEvent.clear(within(dialog).getByTestId("alias-extra-args-input"));
+    await waitFor(() => expect(within(dialog).getByTestId("alias-form-submit")).not.toBeDisabled());
     await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));

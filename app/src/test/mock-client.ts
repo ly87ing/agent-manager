@@ -1082,6 +1082,26 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
     }
     return applyEnvelope("aliases", args, runId);
   };
+  const previewAliases = (args: string[]): Envelope => {
+    const candidate = { ...aliasState };
+    const set = argOf(args, "--set");
+    const removed = argOf(args, "--remove");
+    if (set) {
+      const rename = argOf(args, "--rename-from");
+      if (rename && rename !== set) delete candidate[rename];
+      candidate[set] = argOf(args, "--value") ?? "";
+    } else if (removed) {
+      delete candidate[removed];
+    }
+    const content = `# 演示数据；正式预览按实际文件计算\n${Object.entries(candidate).map(([name, value]) => `alias ${name}='${value}'`).join("\n")}\n`;
+    return makeEnvelope({
+      files: [
+        { target: "aliases:zshrc", path: "/Users/demo/.zshrc", exists: true, content },
+        { target: "aliases:zprofile", path: "/Users/demo/.zprofile", exists: true, content },
+      ],
+      skipped: [],
+    }, { command: "aliases.preview" });
+  };
 
   const setSecret = (args: string[], runId: string): Envelope => {
     const variable = args[args.indexOf("--var") + 1] ?? "";
@@ -1544,6 +1564,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       if (command === "hooks:preview") return previewHooks(args);
       if (command === "hooks:discard-legacy") return discardLegacyHook(args);
       if (command === "aliases:status") return aliasStatus();
+      if (command === "aliases:preview") return previewAliases(args);
       if (command === "aliases:apply") return applyAliases(args, runId);
       if (command === "aliases:discard-legacy") {
         const id = argOf(args, "--legacy");

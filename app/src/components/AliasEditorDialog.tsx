@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { cn } from "../lib/utils";
 import { useDialogFocus } from "../lib/dialogFocus";
@@ -12,6 +12,7 @@ import {
   parseAliasValue,
   renderAliasPreview,
 } from "../lib/aliasCommand";
+import type { AliasFilePreview } from "../lib/useAliasSource";
 
 /** 下拉里的「自定义…」哨兵值：选中后切到可输入状态。 */
 const CUSTOM_OPTION = "__custom__";
@@ -30,6 +31,8 @@ export function AliasEditorDialog({
   presetName,
   defaults,
   existingNames,
+  previewBase,
+  onPreview,
   onSubmit,
   onClose,
 }: {
@@ -44,6 +47,8 @@ export function AliasEditorDialog({
   defaults: { timezone: string; lang: string };
   /** 已存在的别名名称，用于新增时的重名校验。 */
   existingNames: string[];
+  previewBase: string;
+  onPreview: (name: string, value: string, renameFrom?: string) => Promise<AliasFilePreview | string>;
   /** 编辑时改了名字即为重命名：调用方据此删掉旧名那一条。 */
   onSubmit: (name: string, value: string) => void;
   onClose: () => void;
@@ -83,6 +88,27 @@ export function AliasEditorDialog({
         ),
       });
   const preview = name && value ? renderAliasPreview(name, value) : "";
+  const filePreviewKey = JSON.stringify([previewBase, initialName, name, value]);
+  const canPreview = ALIAS_NAME_RE.test(name)
+    && (name === initialName || !existingNames.includes(name))
+    && (rawMode || Boolean(command.trim()))
+    && Boolean(value.trim())
+    && !aliasTextError(value)
+    && (rawMode || envRows.every((row) => !row.key.trim() || (/^[A-Za-z_][A-Za-z0-9_]*$/.test(row.key.trim()) && !row.value.includes('"'))));
+  const [filePreview, setFilePreview] = useState<{ key: string; result: AliasFilePreview | string } | null>(null);
+
+  useEffect(() => {
+    if (!canPreview) return;
+    let current = true;
+    const timer = window.setTimeout(() => {
+      void onPreview(name, value, initialName)
+        .then((result) => { if (current) setFilePreview({ key: filePreviewKey, result }); })
+        .catch((error) => { if (current) setFilePreview({ key: filePreviewKey, result: String(error) }); });
+    }, 250);
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [filePreviewKey, canPreview, onPreview]);
+
+  const currentFilePreview = canPreview && filePreview?.key === filePreviewKey ? filePreview.result : null;
 
   const submit = () => {
     if (!ALIAS_NAME_RE.test(name)) {
@@ -117,6 +143,10 @@ export function AliasEditorDialog({
     const textError = aliasTextError(value);
     if (textError) {
       setError(`命令内容${textError}`);
+      return;
+    }
+    if (!currentFilePreview || typeof currentFilePreview === "string") {
+      setError("请先确认完整文件预览");
       return;
     }
     onSubmit(name, value);
@@ -395,6 +425,21 @@ export function AliasEditorDialog({
             </pre>
           </div>
 
+          <section className="space-y-2 rounded border p-3 text-xs" data-testid="alias-file-preview">
+            <p className="font-medium">终端配置文件写入后</p>
+            {!canPreview && <p className="text-muted-foreground">填写有效名称和命令后显示完整文件。</p>}
+            {canPreview && currentFilePreview === null && <p className="text-muted-foreground">正在读取实际文件并计算…</p>}
+            {typeof currentFilePreview === "string" && <p role="alert" className="text-destructive">{currentFilePreview}</p>}
+            {currentFilePreview && typeof currentFilePreview !== "string" && <>
+              {currentFilePreview.files.length === 0 && <p className="text-muted-foreground">配置文件不变。</p>}
+              {currentFilePreview.files.map((file) => <div key={file.target} className="space-y-1">
+                <p className="break-all font-mono">{file.path}{file.exists ? "（已有文件）" : "（将新建）"}</p>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono" data-testid={`alias-file-preview-${file.target}`}>{file.content}</pre>
+              </div>)}
+            </>}
+            <p className="text-muted-foreground">只读预览；原文可能含敏感值，仅在本机查看。</p>
+          </section>
+
           <button
             type="button"
             onClick={() => setRawMode((prev) => !prev)}
@@ -419,8 +464,9 @@ export function AliasEditorDialog({
           <button
             type="button"
             onClick={submit}
+            disabled={canPreview && (!currentFilePreview || typeof currentFilePreview === "string")}
             data-testid="alias-form-submit"
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
             保存
           </button>

@@ -1433,6 +1433,8 @@ export default function AgentsPage({
           presetName={aliasEditing.presetName}
           defaults={{ timezone: DEFAULT_TIMEZONE, lang: DEFAULT_LANG }}
           existingNames={Object.keys(aliasSource.source.aliases)}
+          previewBase={JSON.stringify(aliasSource.source.targets.map((target) => [target.id, target.base]))}
+          onPreview={aliasSource.previewSetAlias}
           onSubmit={(name, value) => {
             // value===null 表示新建，此时 name 只是预填的可执行名，不算改名
             const renamedFrom = aliasEditing.value === null ? undefined : aliasEditing.name || undefined;

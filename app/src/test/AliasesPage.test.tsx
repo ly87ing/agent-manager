@@ -10,9 +10,22 @@ const CLAUDE = 'TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8"
 function aliasRoutes(
   aliases: Record<string, string> = {},
   options: Parameters<typeof makeAliasStatus>[1] = {},
-): Record<string, Envelope> {
+): Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> {
   return {
     "aliases:status": makeEnvelope(makeAliasStatus({ claude: CLAUDE, ...aliases }, options), { command: "aliases.status" }),
+    "aliases:preview": async (args) => {
+      const name = valueOf(args, "--set") ?? "";
+      const value = valueOf(args, "--value") ?? "";
+      return makeEnvelope({
+        files: ["aliases:zshrc", "aliases:zprofile"].map((target) => ({
+          target,
+          path: `/isolated/${target.replace("aliases:", ".")}`,
+          exists: target === "aliases:zshrc",
+          content: `# 保留用户注释\nalias ${name}='${value}'\n`,
+        })),
+        skipped: [],
+      }, { command: "aliases.preview" });
+    },
     "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
     "aliases:discard-legacy": makeEnvelope(
       { domain: "aliases", discarded: "legacy-0123456789abcdef", source_removed: true },
@@ -57,6 +70,8 @@ describe("终端快捷命令页", () => {
     expect(within(dialog).getByTestId("alias-preview")).toHaveTextContent(
       `alias codex='TZ="Asia/Shanghai" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" codex --full-auto'`,
     );
+    expect(await within(dialog).findByTestId("alias-file-preview-aliases:zshrc")).toHaveTextContent("# 保留用户注释");
+    await waitFor(() => expect(within(dialog).getByTestId("alias-form-submit")).not.toBeDisabled());
     await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
@@ -67,6 +82,7 @@ describe("终端快捷命令页", () => {
     // 写进文件的是字面量，不再有 {timezone}/{lang} 占位
     expect(valueOf(args, "--value")).toBe('TZ="Asia/Shanghai" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" codex --full-auto');
     expect(args).not.toContain("--rename-from");
+    expect(calls.find((call) => call.command === "aliases:preview")?.args).toEqual(args);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
@@ -78,6 +94,41 @@ describe("终端快捷命令页", () => {
     expect(within(dialog).getByTestId("alias-lang-select")).toHaveValue("en_US.UTF-8");
     expect(dialog).not.toHaveTextContent("跟随全局");
     expect(dialog).toHaveTextContent("保存即写入");
+  });
+
+  it("预览失败时禁止保存，不会写终端配置", async () => {
+    const routes = aliasRoutes();
+    routes["aliases:preview"] = makeEnvelope({}, {
+      command: "aliases.preview", ok: false,
+      errors: [{ code: "ALIAS_ERROR", element: null, message: "~/.zshrc 已在外部修改" }],
+    });
+    const { calls } = renderWithEngine(<AliasesPage />, routes);
+    await userEvent.click(await screen.findByTestId("edit-alias-claude"));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("已在外部修改");
+    expect(within(dialog).getByTestId("alias-form-submit")).toBeDisabled();
+    expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
+  });
+
+  it("输入变化后旧文件预览立即失效", async () => {
+    const routes = aliasRoutes();
+    let finish: ((envelope: Envelope) => void) | undefined;
+    routes["aliases:preview"] = async (args) => {
+      const changed = (valueOf(args, "--value") ?? "").includes("--verbose");
+      if (changed) return new Promise<Envelope>((resolve) => { finish = resolve; });
+      return makeEnvelope({ files: [{ target: "aliases:zshrc", path: "/isolated/.zshrc", exists: true, content: "第一次的文件" }], skipped: [] });
+    };
+    renderWithEngine(<AliasesPage />, routes);
+    await userEvent.click(await screen.findByTestId("edit-alias-claude"));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByTestId("alias-file-preview-aliases:zshrc")).toHaveTextContent("第一次的文件");
+    await userEvent.type(within(dialog).getByTestId("alias-extra-args-input"), " --verbose");
+    expect(within(dialog).queryByText("第一次的文件")).toBeNull();
+    expect(within(dialog).getByTestId("alias-form-submit")).toBeDisabled();
+    await waitFor(() => expect(finish).toBeDefined());
+    finish?.(makeEnvelope({ files: [{ target: "aliases:zshrc", path: "/isolated/.zshrc", exists: true, content: "第二次的文件" }], skipped: [] }));
+    expect(await within(dialog).findByTestId("alias-file-preview-aliases:zshrc")).toHaveTextContent("第二次的文件");
+    expect(within(dialog).getByTestId("alias-form-submit")).not.toBeDisabled();
   });
 
   it("编辑既有命令时回填时区、语言与扩展参数", async () => {
@@ -99,6 +150,7 @@ describe("终端快捷命令页", () => {
     const nameInput = within(dialog).getByTestId("alias-name-input");
     await userEvent.clear(nameInput);
     await userEvent.type(nameInput, "cc");
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "保存" })).not.toBeDisabled());
     await userEvent.click(within(dialog).getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
@@ -122,6 +174,7 @@ describe("终端快捷命令页", () => {
     await userEvent.click(await screen.findByTestId("edit-alias-claude"));
     const dialog = await screen.findByRole("dialog");
     await userEvent.type(within(dialog).getByTestId("alias-extra-args-input"), " --verbose");
+    await waitFor(() => expect(within(dialog).getByTestId("alias-form-submit")).not.toBeDisabled());
     await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
     expect(await screen.findByText(/已在外部修改/)).toBeInTheDocument();
@@ -180,6 +233,7 @@ describe("终端快捷命令页", () => {
     await userEvent.type(within(dialog).getByTestId("alias-command-input"), "mytool");
     await userEvent.selectOptions(within(dialog).getByTestId("alias-timezone-select"), "__custom__");
     await userEvent.type(within(dialog).getByTestId("alias-timezone-input"), "Pacific/Chatham");
+    await waitFor(() => expect(within(dialog).getByTestId("alias-form-submit")).not.toBeDisabled());
     await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
@@ -195,6 +249,7 @@ describe("终端快捷命令页", () => {
     await userEvent.click(within(dialog).getByTestId("alias-env-add"));
     await userEvent.type(within(dialog).getByTestId("alias-env-key-0"), "HTTPS_PROXY");
     await userEvent.type(within(dialog).getByTestId("alias-env-value-0"), "http://127.0.0.1:7890");
+    await waitFor(() => expect(within(dialog).getByTestId("alias-form-submit")).not.toBeDisabled());
     await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
@@ -241,6 +296,7 @@ describe("终端快捷命令页", () => {
     expect(within(dialog).getByTestId("alias-extra-args-input")).toHaveValue("--dangerously-skip-permissions");
     expect(within(dialog).getByTestId("alias-preset-warning")).toHaveTextContent("不再逐次征求确认");
 
+    await waitFor(() => expect(within(dialog).getByTestId("alias-form-submit")).not.toBeDisabled());
     await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
     expect(valueOf(applyArgs(calls), "--value")).toContain("--dangerously-skip-permissions");
