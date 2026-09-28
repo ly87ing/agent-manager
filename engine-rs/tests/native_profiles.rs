@@ -358,7 +358,8 @@ fn draft_preview_uses_profile_renderer_without_writing_files_or_resolving_creden
     std::fs::create_dir_all(default.parent().unwrap()).unwrap();
     let target_before = b"{\"theme\":\"keep\",\"env\":{\"CUSTOM\":\"untouched\"}}\n";
     std::fs::write(&target, target_before).unwrap();
-    std::fs::write(&default, b"{\"default\":true}\n").unwrap();
+    let default_before = b"{\"permissions\":{\"allow\":[\"Bash(ls:*)\"]},\"statusLine\":{\"type\":\"command\",\"command\":\"echo ready\"}}\n";
+    std::fs::write(&default, default_before).unwrap();
     let draft = claude_profile("AM_PREVIEW_UNSET_TOKEN");
     let preview = execute(
         &ctx,
@@ -384,8 +385,30 @@ fn draft_preview_uses_profile_renderer_without_writing_files_or_resolving_creden
     assert_eq!(std::fs::read(&target).unwrap(), target_before);
     assert_eq!(
         std::fs::read_to_string(&default).unwrap(),
-        "{\"default\":true}\n"
+        String::from_utf8_lossy(default_before)
     );
+    let seeded = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &[
+                "--only",
+                "profiles:cc-ly",
+                "--definition",
+                &draft,
+                "--items",
+                "permissions,statusline",
+            ],
+        ),
+    );
+    assert!(seeded.ok, "{:?}", seeded.errors);
+    let seeded_content: serde_json::Value =
+        serde_json::from_str(seeded.data["content"].as_str().unwrap()).unwrap();
+    assert_eq!(seeded_content["permissions"]["allow"][0], "Bash(ls:*)");
+    assert_eq!(seeded_content["statusLine"]["command"], "echo ready");
+    assert_eq!(seeded.data["seed_results"][0]["state"], "copied");
+    assert_eq!(seeded.data["seed_results"][1]["state"], "copied");
+    assert_eq!(std::fs::read(&target).unwrap(), target_before);
     assert!(!ctx.data_dir.exists());
     assert!(probe_log(&ctx).is_empty());
 
@@ -409,7 +432,7 @@ fn draft_preview_uses_profile_renderer_without_writing_files_or_resolving_creden
     assert!(!blocked.ok);
     assert_eq!(
         std::fs::read_to_string(&default).unwrap(),
-        "{\"default\":true}\n"
+        String::from_utf8_lossy(default_before)
     );
     let new_dir = draft.replace("~/.claude-ly", "~/.claude-new");
     let missing = execute(
@@ -434,7 +457,8 @@ fn codex_draft_preview_preserves_existing_mcp_without_touching_default_config() 
     std::fs::create_dir_all(default.parent().unwrap()).unwrap();
     let target_before = b"[mcp_servers.fs]\ncommand = \"npx\"\n";
     std::fs::write(&target, target_before).unwrap();
-    std::fs::write(&default, b"model = \"keep\"\n").unwrap();
+    let default_before = b"model = \"keep\"\napproval_policy = \"on-request\"\n[tui]\nstatus_line = [\"model\", \"cwd\"]\n";
+    std::fs::write(&default, default_before).unwrap();
     let draft = r#"{"display_name":"Codex work","bin":"codex","profile":{"base_agent":"codex","kind":"codex","config_dir":"~/.codex-work","base_url":"https://api.example.com/v1","env_key":"AM_PREVIEW_UNSET_CODEX_KEY","wire_api":"responses","model":"new-model"}}"#;
     let preview = execute(
         &ctx,
@@ -459,10 +483,226 @@ fn codex_draft_preview_preserves_existing_mcp_without_touching_default_config() 
     assert_eq!(std::fs::read(&target).unwrap(), target_before);
     assert_eq!(
         std::fs::read_to_string(&default).unwrap(),
-        "model = \"keep\"\n"
+        String::from_utf8_lossy(default_before)
     );
+    let seeded = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &[
+                "--only",
+                "profiles:cx-work",
+                "--definition",
+                draft,
+                "--items",
+                "permissions,statusline",
+            ],
+        ),
+    );
+    assert!(seeded.ok, "{:?}", seeded.errors);
+    let seeded_doc: toml::Value = toml::from_str(seeded.data["content"].as_str().unwrap()).unwrap();
+    assert_eq!(seeded_doc["approval_policy"].as_str(), Some("on-request"));
+    assert_eq!(seeded_doc["tui"]["status_line"][0].as_str(), Some("model"));
+    assert_eq!(
+        seeded_doc["mcp_servers"]["fs"]["command"].as_str(),
+        Some("npx")
+    );
+    assert_eq!(seeded.data["seed_results"][0]["state"], "copied");
+    assert_eq!(seeded.data["seed_results"][1]["state"], "copied");
+    assert_eq!(std::fs::read(&target).unwrap(), target_before);
+    assert_eq!(std::fs::read(&default).unwrap(), default_before);
     assert!(!ctx.data_dir.exists());
     assert!(probe_log(&ctx).is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn claude_seed_preview_matches_files_written_after_creation_without_writing_early() {
+    let (root, ctx) = temp_ctx("claude-seed-preview");
+    let source = ctx.home_dir.join(".claude");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("settings.json"), r#"{"permissions":{"allow":["Bash(ls:*)"]},"statusLine":{"type":"command","command":"echo ready"},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo done"}]}]}}"#).unwrap();
+    std::fs::write(source.join("CLAUDE.md"), "# Shared rule\n").unwrap();
+    std::fs::write(
+        ctx.home_dir.join(".claude.json"),
+        r#"{"mcpServers":{"fs":{"type":"stdio","command":"npx","args":["fs-mcp"]},"gh":{"type":"stdio","command":"gh-mcp","env":{"GITHUB_TOKEN":"literal-token-value"}}}}"#,
+    )
+    .unwrap();
+    let definition = r#"{"display_name":"Claude work","bin":"claude","mcp_config":{"path":"~/.claude-work/.claude.json","format":"json"},"profile":{"base_agent":"claude-code","config_dir":"~/.claude-work"}}"#;
+    let preview = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &[
+                "--only",
+                "profiles:claude-work",
+                "--definition",
+                definition,
+                "--items",
+                "permissions,statusline,hooks,rules,mcp",
+            ],
+        ),
+    );
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert!(!ctx.home_dir.join(".claude-work").exists());
+    assert!(!ctx.data_dir.exists());
+    assert_eq!(preview.data["seed_results"].as_array().unwrap().len(), 5);
+    assert!(preview.data["seed_results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["state"] == "copied"));
+    assert_eq!(
+        preview.data["seed_results"][4]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("gh"),
+        true
+    );
+    assert!(!preview.data.to_string().contains("literal-token-value"));
+    assert!(save_definition(&ctx, "claude-work", definition));
+    assert!(apply_now(&ctx, "claude-work").ok);
+    let seeded = seed(
+        &ctx,
+        "claude-work",
+        "permissions,statusline,hooks,rules,mcp",
+    );
+    assert!(seeded.ok, "{:?}", seeded.errors);
+    let dir = ctx.home_dir.join(".claude-work");
+    assert_eq!(
+        preview.data["content"].as_str().unwrap().as_bytes(),
+        std::fs::read(dir.join("settings.json")).unwrap()
+    );
+    let files = preview.data["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(
+        files[0]["content"].as_str().unwrap().as_bytes(),
+        std::fs::read(dir.join("CLAUDE.md")).unwrap()
+    );
+    assert_eq!(
+        files[1]["content"].as_str().unwrap().as_bytes(),
+        std::fs::read(dir.join(".claude.json")).unwrap()
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn codex_seed_preview_matches_files_written_after_creation_without_writing_early() {
+    let (root, ctx) = temp_ctx("codex-seed-preview");
+    let source = ctx.home_dir.join(".codex");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("config.toml"), "approval_policy = \"on-request\"\n[tui]\nstatus_line = [\"model\"]\n[mcp_servers.fs]\ncommand = \"npx\"\nargs = [\"fs-mcp\"]\n").unwrap();
+    std::fs::write(
+        source.join("hooks.json"),
+        r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo done"}]}]}}"#,
+    )
+    .unwrap();
+    std::fs::write(source.join("AGENTS.md"), "# Shared rule\n").unwrap();
+    let definition = r#"{"display_name":"Codex work","bin":"codex","mcp_config":{"path":"~/.codex-work/config.toml","format":"toml"},"profile":{"base_agent":"codex","config_dir":"~/.codex-work","model":"never-written"}}"#;
+    let unseeded = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &["--only", "profiles:codex-work", "--definition", definition],
+        ),
+    );
+    assert!(unseeded.ok, "{:?}", unseeded.errors);
+    assert_eq!(unseeded.data["will_write"], false);
+    assert_eq!(unseeded.data["content"], "");
+    let preview = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &[
+                "--only",
+                "profiles:codex-work",
+                "--definition",
+                definition,
+                "--items",
+                "permissions,statusline,hooks,rules,mcp",
+            ],
+        ),
+    );
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(preview.data["will_write"], true);
+    assert!(!preview.data["content"]
+        .as_str()
+        .unwrap()
+        .contains("never-written"));
+    assert!(!ctx.home_dir.join(".codex-work").exists());
+    assert!(!ctx.data_dir.exists());
+    assert_eq!(preview.data["seed_results"].as_array().unwrap().len(), 5);
+    assert!(preview.data["seed_results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|item| item["state"] == "copied"));
+    assert!(save_definition(&ctx, "codex-work", definition));
+    let seeded = seed(&ctx, "codex-work", "permissions,statusline,hooks,rules,mcp");
+    assert!(seeded.ok, "{:?}", seeded.errors);
+    let dir = ctx.home_dir.join(".codex-work");
+    assert_eq!(
+        preview.data["content"].as_str().unwrap().as_bytes(),
+        std::fs::read(dir.join("config.toml")).unwrap()
+    );
+    let files = preview.data["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(
+        files[0]["content"].as_str().unwrap().as_bytes(),
+        std::fs::read(dir.join("hooks.json")).unwrap()
+    );
+    assert_eq!(
+        files[1]["content"].as_str().unwrap().as_bytes(),
+        std::fs::read(dir.join("AGENTS.md")).unwrap()
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn seed_preview_reports_broken_mcp_target_without_hiding_other_files_or_writing() {
+    let (root, ctx) = temp_ctx("seed-preview-broken-mcp");
+    let source = ctx.home_dir.join(".claude");
+    let target = ctx.home_dir.join(".claude-work");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(
+        source.join("settings.json"),
+        r#"{"permissions":{"allow":["Bash(ls:*)"]}}"#,
+    )
+    .unwrap();
+    std::fs::write(source.join("CLAUDE.md"), "# Shared rule\n").unwrap();
+    std::fs::write(
+        ctx.home_dir.join(".claude.json"),
+        r#"{"mcpServers":{"fs":{"type":"stdio","command":"npx"}}}"#,
+    )
+    .unwrap();
+    let broken = target.join(".claude.json");
+    std::fs::write(&broken, b"{invalid").unwrap();
+    let definition = r#"{"display_name":"Claude work","bin":"claude","mcp_config":{"path":"~/.claude-work/.claude.json","format":"json"},"profile":{"base_agent":"claude-code","config_dir":"~/.claude-work"}}"#;
+    let preview = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &[
+                "--only",
+                "profiles:claude-work",
+                "--definition",
+                definition,
+                "--items",
+                "permissions,rules,mcp",
+            ],
+        ),
+    );
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(preview.data["seed_results"][0]["state"], "copied");
+    assert_eq!(preview.data["seed_results"][1]["state"], "copied");
+    assert_eq!(preview.data["seed_results"][2]["state"], "failed");
+    assert_eq!(preview.data["files"].as_array().unwrap().len(), 1);
+    assert_eq!(preview.data["files"][0]["content"], "# Shared rule\n");
+    assert_eq!(std::fs::read(&broken).unwrap(), b"{invalid");
+    assert!(!target.join("settings.json").exists());
+    assert!(!target.join("CLAUDE.md").exists());
+    assert!(!ctx.data_dir.exists());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -2197,6 +2437,23 @@ fn 默认环境的设置可一次性带进_claude_独立环境_只补没有的_�
     let apply = apply_now(&ctx, "cc-ly");
     assert!(apply.ok, "{:?}", apply.errors);
     let state_before = element(&status(&ctx), "cc-ly")["state"].clone();
+    let before_preview = snapshot_dir(&dir);
+    let preview = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &[
+                "--only",
+                "profiles:cc-ly",
+                "--definition",
+                &claude_profile("AM_TEST_SEED_CLAUDE_TOKEN"),
+                "--items",
+                "permissions,statusline,hooks,rules,mcp",
+            ],
+        ),
+    );
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(snapshot_dir(&dir), before_preview, "预览不能写实例目录");
 
     let env = seed(&ctx, "cc-ly", "permissions,statusline,hooks,rules,mcp");
     assert!(env.ok, "{:?}", env.errors);
@@ -2234,6 +2491,13 @@ fn 默认环境的设置可一次性带进_claude_独立环境_只补没有的_�
     );
     let instance_json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.join(".claude.json")).unwrap()).unwrap();
+    assert_eq!(
+        preview.data["files"][1]["content"]
+            .as_str()
+            .unwrap()
+            .as_bytes(),
+        std::fs::read(dir.join(".claude.json")).unwrap()
+    );
     let servers = instance_json["mcpServers"].as_object().unwrap();
     assert_eq!(servers["fs"]["command"], "npx");
     assert_eq!(servers["dup"]["command"], "instance-own", "同名条目不动");

@@ -61,6 +61,13 @@ fn parse_args(req: &Request) -> Result<SeedArgs> {
     }
     let raw =
         items.ok_or_else(|| anyhow!("缺少 --items（从 {} 里选，逗号分隔）", ITEMS.join("、")))?;
+    Ok(SeedArgs {
+        id,
+        items: parse_items(&raw)?,
+    })
+}
+
+pub(super) fn parse_items(raw: &str) -> Result<Vec<&'static str>> {
     let mut picked = Vec::new();
     for item in raw
         .split(',')
@@ -80,7 +87,7 @@ fn parse_args(req: &Request) -> Result<SeedArgs> {
         bail!("--items 至少选一项");
     }
     picked.sort_by_key(|item| ITEMS.iter().position(|known| known == item));
-    Ok(SeedArgs { id, items: picked })
+    Ok(picked)
 }
 
 pub(super) fn find_def(ctx: &Context, id: &str) -> Result<ProfileDef> {
@@ -350,6 +357,42 @@ fn seed_codex_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec<
             .map_err(|err| anyhow!("写 config.toml 没有成功（可能已在外部修改）：{err:#}"))?;
     }
     Ok(out)
+}
+
+/// 在实例主文件写入之后，按相同合并规则计算已勾选的权限与状态栏；只读、不解析凭据。
+pub(super) fn preview_settings(
+    ctx: &Context,
+    kind: ProfileKind,
+    after_profile: Vec<u8>,
+    items: &[&str],
+) -> Result<(Vec<u8>, Vec<Value>)> {
+    let selected: Vec<&str> = items
+        .iter()
+        .copied()
+        .filter(|item| matches!(*item, "permissions" | "statusline"))
+        .collect();
+    if selected.is_empty() {
+        return Ok((after_profile, Vec::new()));
+    }
+    let (results, rendered) = match kind {
+        ProfileKind::Claude => {
+            let source = parse_json_object(
+                read_source(&ctx.home_dir.join(".claude/settings.json")).as_deref(),
+                "默认环境的 settings.json",
+            )?;
+            render_claude_settings(&source, Some(&after_profile), &selected)?
+        }
+        ProfileKind::Codex => {
+            let source = match read_source(&ctx.home_dir.join(".codex/config.toml")) {
+                Some(bytes) => String::from_utf8_lossy(&bytes)
+                    .parse::<toml_edit::Document>()
+                    .map_err(|_| anyhow!("默认环境的 config.toml 不是合法 TOML，没有带"))?,
+                None => toml_edit::Document::new(),
+            };
+            render_codex_settings(&source, Some(&after_profile), &selected)?
+        }
+    };
+    Ok((rendered.unwrap_or(after_profile), results))
 }
 
 // ---------- hooks / 规则：交给各自的域写 ----------

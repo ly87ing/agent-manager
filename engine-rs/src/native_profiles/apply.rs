@@ -209,8 +209,12 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
             "content": String::from_utf8(plan.content).map_err(|_| anyhow!("预览结果不是 UTF-8 文本"))?,
         }));
     }
-    if req.args.len() != 4 || req.args[0] != "--only" || req.args[2] != "--definition" {
-        bail!("profiles:preview 只接受 --only profiles:<实例名> --definition <JSON>");
+    if !matches!(req.args.len(), 4 | 6)
+        || req.args[0] != "--only"
+        || req.args[2] != "--definition"
+        || (req.args.len() == 6 && req.args[4] != "--items")
+    {
+        bail!("profiles:preview 只接受 --only profiles:<实例名> --definition <JSON> [--items <逗号分隔的共用设置>]");
     }
     let id = parse_only(req)?;
     let raw: Value =
@@ -224,18 +228,38 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
     {
         bail!("配置文件超过安全读取上限");
     }
-    let recorded = recorded_paths(ctx, &def, &file)?;
-    let rendered = model::render_all(
-        &def,
-        &|_| previous.clone(),
-        &|name| Some(format!("${{{name}}}")),
-        &recorded,
-    )?;
-    let content = rendered
+    // 官方 Codex 新环境只建立定义和启动命令；主文件要等勾选的共用设置来写。
+    let content = if def.kind == model::ProfileKind::Codex && !model::is_third_party(&def) {
+        previous.clone().unwrap_or_default()
+    } else {
+        let recorded = recorded_paths(ctx, &def, &file)?;
+        model::render_all(
+            &def,
+            &|_| previous.clone(),
+            &|name| Some(format!("${{{name}}}")),
+            &recorded,
+        )?
         .into_iter()
         .next()
         .ok_or_else(|| anyhow!("[{}] 没有可预览的文件", def.id))?
-        .content;
+        .content
+    };
+    let items = if req.args.len() == 6 {
+        super::seed::parse_items(&req.args[5])?
+    } else {
+        Vec::new()
+    };
+    let seed_preview = super::preview_seed::preview(ctx, req, &def, &dir, content, &items);
+    let will_write = def.kind == model::ProfileKind::Claude
+        || model::is_third_party(&def)
+        || seed_preview.results.iter().any(|item| {
+            item["state"] == "copied"
+                && matches!(
+                    item["item"].as_str(),
+                    Some("permissions" | "statusline" | "mcp")
+                )
+        });
+    let content = seed_preview.main;
     if content.len() > MAX_PREVIEW_BYTES {
         bail!("配置文件超过安全读取上限");
     }
@@ -244,7 +268,10 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         "path": format!("{}/{}", def.config_dir_raw, file),
         "format": if def.kind.as_str() == "codex" { "toml" } else { "json" },
         "exists": previous.is_some(),
+        "will_write": will_write,
         "content": String::from_utf8(content).map_err(|_| anyhow!("预览结果不是 UTF-8 文本"))?,
+        "seed_results": seed_preview.results,
+        "files": seed_preview.files,
     }))
 }
 

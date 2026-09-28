@@ -11,6 +11,7 @@ pub(crate) mod apply;
 pub(crate) mod config_file;
 pub(crate) mod model;
 pub(crate) mod persistence;
+pub(crate) mod preview_seed;
 pub(crate) mod seed;
 pub(crate) mod shared;
 pub(crate) mod status;
