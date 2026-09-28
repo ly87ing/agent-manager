@@ -87,7 +87,13 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
           makeElement({
             id: "agents:cc-ly",
             domain: "agents",
-            spec: { display_name: "Claude Code · ly", bin: "claude" },
+            spec: {
+              display_name: "Claude Code · ly", bin: "claude",
+              profile: {
+                base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-cc-ly",
+                env: { ANTHROPIC_BASE_URL: "https://api.example.com", ANTHROPIC_AUTH_TOKEN: "${MY_TOKEN}" },
+              },
+            },
             policy: { enabled: true },
             observed: { install_source: null, installed: true },
             state: "unmanaged-detected",
@@ -835,6 +841,28 @@ describe("助手实例", () => {
     expect(calls.some((call) => ["profiles:apply", "aliases:apply", "profiles:seed"].includes(call.command))).toBe(false);
   });
 
+  it("编辑环境时定义被外部修改，拒绝旧表单且不写环境文件或启动命令", async () => {
+    const all = routes();
+    const expected = (all["agents:status"].data as { elements: { id: string; spec: Record<string, unknown> }[] })
+      .elements.find((item) => item.id === "agents:cc-ly")!.spec;
+    all["policy:set"] = makeEnvelope(null, {
+      command: "policy.set", ok: false,
+      errors: [{ code: "POLICY_CONFLICT", element: null, message: "Agent 定义在表单打开后发生变化" }],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await openInstanceManager();
+    await userEvent.click(await screen.findByTestId("profile-edit-cc-ly"));
+    const dialog = await screen.findByRole("dialog", { name: "编辑独立环境" });
+    await userEvent.clear(within(dialog).getByTestId("profile-display-name"));
+    await userEvent.type(within(dialog).getByTestId("profile-display-name"), "新名称");
+    await userEvent.click(within(dialog).getByTestId("profile-form-submit"));
+    expect(await screen.findByText(/保存独立环境被拒绝/)).toBeInTheDocument();
+    const write = calls.find((call) => call.command === "policy:set");
+    expect(write?.args.slice(-2)).toEqual(["--expect-definition", JSON.stringify(expected)]);
+    expect(screen.getByRole("dialog", { name: "编辑独立环境" })).toBeInTheDocument();
+    expect(calls.some((call) => ["profiles:apply", "aliases:apply", "profiles:seed"].includes(call.command))).toBe(false);
+  });
+
   it("共用设置写入被拒时保留差异，说明原因并可刷新", async () => {
     const routeMap = {
       ...routes(),
@@ -1127,6 +1155,12 @@ describe("助手实例", () => {
         env: { ANTHROPIC_BASE_URL: "https://relay.example.com", ANTHROPIC_AUTH_TOKEN: "${RELAY}", CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "true" },
       },
     };
+    const agents = routeMap["agents:status"] as { data: { elements: { id: string; spec: Record<string, unknown> }[] } };
+    agents.data.elements.push({
+      ...structuredClone(agents.data.elements[1]),
+      id: "agents:cc-true",
+      spec: policy.data.layers.sqlite.agents.definitions["cc-true"],
+    });
     const { calls } = renderWithEngine(<AgentsPage />, routeMap);
     await openInstanceManager();
     await openNewProfileForm();

@@ -124,6 +124,7 @@ export default function AgentsPage({
   const profileApply = useDirectApply();
   const { execute } = useExecutions();
   const [profileForm, setProfileForm] = useState<ProfileFormInput | "new" | null>(null);
+  const [profileEditBase, setProfileEditBase] = useState<{ id: string; definition: Record<string, unknown> } | null>(null);
   /** 复制实例：表单带着预填内容，但名称与配置目录仍要能改（否则两个实例指同一套配置）。 */
   const [profileDuplicating, setProfileDuplicating] = useState(false);
   const [profileRemoving, setProfileRemoving] = useState<string | null>(null);
@@ -934,6 +935,13 @@ export default function AgentsPage({
     isEdit = false,
     expected?: { config: ProfileDraftPreview; alias: AliasFilePreview },
   ): Promise<boolean> => {
+    const expectedDefinition = isEdit
+      ? (profileEditBase?.id === input.id ? profileEditBase.definition : undefined)
+      : null;
+    if (expectedDefinition === undefined) {
+      toast.error("缺少编辑前的独立环境定义，请刷新后重试");
+      return false;
+    }
     if (!isEdit) {
       const launchError = await newLaunchNameError(input.id);
       if (launchError) {
@@ -960,7 +968,8 @@ export default function AgentsPage({
         `agents.definitions.${input.id}`,
         "--value",
         JSON.stringify({ ...definition, _delete: false, _replace: true }),
-        ...(!isEdit ? ["--expect-definition", "null"] : []),
+        "--expect-definition",
+        JSON.stringify(expectedDefinition),
       ]);
     } catch (err) {
       toast.error(`保存独立环境失败:${String(err)}`);
@@ -973,6 +982,7 @@ export default function AgentsPage({
     if (isEdit) {
       toast.success(`已保存独立环境 ${input.id} 的定义`);
       setProfileForm(null);
+      setProfileEditBase(null);
       await profilesQuery.refetch();
       setSelectedAgentId(`agents:${input.baseAgent}`);
       setSavedProfileTarget({ agentId: input.baseAgent, profileId: input.id });
@@ -1289,10 +1299,13 @@ export default function AgentsPage({
                     })
                   }
                   onEdit={() => {
-                    const definition = (policyQuery.data?.ok
-                      ? ((policyQuery.data.data.layers?.sqlite as Record<string, any> | null)?.agents?.definitions?.[id] ?? null)
-                      : null) as Record<string, unknown> | null;
-                    setProfileForm(parseProfileDefinition(id, definition ?? {}));
+                    const definition = elements.find((item) => item.id === `agents:${id}`)?.spec;
+                    if (!definition || typeof definition !== "object" || Array.isArray(definition)) {
+                      toast.error("读取独立环境定义失败，请刷新后重试");
+                      return;
+                    }
+                    setProfileEditBase({ id, definition: definition as Record<string, unknown> });
+                    setProfileForm(parseProfileDefinition(id, definition));
                   }}
                   onRemove={() => setProfileRemoving(id)}
                   onDuplicate={() => {
@@ -1483,6 +1496,7 @@ export default function AgentsPage({
           }}
           onClose={() => {
             setProfileForm(null);
+            setProfileEditBase(null);
             setProfileDuplicating(false);
           }}
         />
