@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { McpServerFormDialog, isValidRemoteUrl, type McpFormMode } from "../components/McpServerFormDialog";
 import { mcpCell, mcpTargets } from "./mcp-fixtures";
@@ -11,11 +11,42 @@ import { mcpCell, mcpTargets } from "./mcp-fixtures";
  */
 function renderForm(mode: McpFormMode) {
   const onSubmit = vi.fn();
-  render(<McpServerFormDialog mode={mode} onSubmit={onSubmit} onClose={vi.fn()} />);
+  render(<McpServerFormDialog mode={mode} onSubmit={onSubmit} onPreview={async () => []} onClose={vi.fn()} />);
   return { onSubmit, dialog: screen.getByRole("dialog") };
 }
 
 describe("McpServerFormDialog", () => {
+  it("输入有效后逐助手展示实际文件预览，修改输入时旧结果立即失效", async () => {
+    const onPreview = vi.fn(async (payload: { agents: string[]; spec: Record<string, unknown> }) =>
+      payload.agents.map((agent) => ({
+        agent,
+        files: [{ path: `/isolated/${agent}/config`, exists: false, content: JSON.stringify(payload.spec) }],
+      })));
+    render(<McpServerFormDialog mode={{ kind: "add", targets: mcpTargets() }} onSubmit={vi.fn()} onPreview={onPreview} onClose={vi.fn()} />);
+    const dialog = screen.getByRole("dialog");
+    await userEvent.type(within(dialog).getByTestId("server-name-input"), "example");
+    await userEvent.click(within(dialog).getByTestId("server-agent-claude-code"));
+    await userEvent.click(within(dialog).getByTestId("server-agent-codex"));
+    await userEvent.type(within(dialog).getByTestId("server-command-input"), "npx");
+    await waitFor(() => expect(within(dialog).getByTestId("mcp-preview-content-codex")).toHaveTextContent('"command":"npx"'));
+    expect(within(dialog).getByTestId("mcp-preview-content-claude-code")).toHaveTextContent('"command":"npx"');
+    expect(onPreview).toHaveBeenCalledWith(expect.objectContaining({ agents: ["claude-code", "codex"] }));
+    await userEvent.type(within(dialog).getByTestId("server-command-input"), "2");
+    expect(within(dialog).queryByTestId("mcp-preview-content-codex")).toBeNull();
+    await waitFor(() => expect(within(dialog).getByTestId("mcp-preview-content-codex")).toHaveTextContent('"command":"npx2"'));
+  });
+
+  it("预览失败显示目标原因，不把失败结果当作配置文件", async () => {
+    render(<McpServerFormDialog mode={{ kind: "add", targets: mcpTargets() }} onSubmit={vi.fn()}
+      onPreview={async () => [{ agent: "claude-code", files: [], error: "目标配置已被外部修改" }]} onClose={vi.fn()} />);
+    const dialog = screen.getByRole("dialog");
+    await userEvent.type(within(dialog).getByTestId("server-name-input"), "example");
+    await userEvent.click(within(dialog).getByTestId("server-agent-claude-code"));
+    await userEvent.type(within(dialog).getByTestId("server-command-input"), "npx");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("目标配置已被外部修改");
+    expect(within(dialog).queryByTestId("mcp-preview-content-claude-code")).toBeNull();
+  });
+
   it("新增：名称与助手必填；超时输入只在选中 Codex 时出现", async () => {
     const { onSubmit, dialog } = renderForm({ kind: "add", targets: mcpTargets() });
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));

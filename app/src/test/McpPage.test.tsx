@@ -13,6 +13,13 @@ function routes(
 ): Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> {
   return {
     "mcp:status": makeEnvelope(status, { command: "mcp.status" }),
+    "mcp:preview": async (args: string[]) => makeEnvelope({
+      files: [{
+        path: `/isolated/${args[args.indexOf("--agent") + 1]}/config`,
+        exists: true,
+        content: JSON.stringify(specOf(args)),
+      }],
+    }, { command: "mcp.preview" }),
     "mcp:apply": apply,
     "secrets:set": makeEnvelope({ domain: "secrets", variable: "FS_API_KEY", stored: true }, { command: "secrets.set" }),
   };
@@ -73,6 +80,10 @@ describe("McpPage：实际条目为主", () => {
     const env = within(dialog).getByTestId("server-env-input");
     await userEvent.clear(env);
     await userEvent.type(env, "TOKEN=<literal>{enter}MODE=fast");
+    expect(await within(dialog).findByTestId("mcp-preview-content-codex")).toHaveTextContent("fs-mcp@3");
+    const previewCalls = calls.filter((call) => call.command === "mcp:preview");
+    const previewCall = previewCalls[previewCalls.length - 1];
+    expect(previewCall?.args.slice(0, 8)).toEqual(["--only", "mcp:fs", "--agent", "codex", "--action", "edit", "--base", BASE_CODEX_FS]);
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
 
     await waitFor(() => expect(applyCalls(calls)).toHaveLength(1));

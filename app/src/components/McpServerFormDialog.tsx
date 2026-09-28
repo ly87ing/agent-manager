@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import type { McpTarget } from "../lib/contract";
 import type { McpAgentCell, McpSavedDefinition } from "../lib/observed";
@@ -39,6 +39,12 @@ export interface McpFormPayload {
   startupTimeoutSec: number | null;
 }
 
+export interface McpFilePreview {
+  agent: string;
+  files: { path: string; exists: boolean; content: string }[];
+  error?: string;
+}
+
 export type McpFormMode =
   | {
       kind: "add";
@@ -58,10 +64,12 @@ export type McpFormMode =
 export function McpServerFormDialog({
   mode,
   onSubmit,
+  onPreview,
   onClose,
 }: {
   mode: McpFormMode;
   onSubmit: (payload: McpFormPayload) => void;
+  onPreview: (payload: McpFormPayload) => Promise<McpFilePreview[] | string>;
   onClose: () => void;
 }) {
   const isNew = mode.kind === "add";
@@ -92,6 +100,9 @@ export function McpServerFormDialog({
     String(editEntry?.startup_timeout_sec ?? initial?.startup_timeout_sec ?? (mode.kind === "add" ? 120 : "")),
   );
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ key: string; result: McpFilePreview[] | string } | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const previewSerial = useRef(0);
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
 
   const formatOf = (agent: string) =>
@@ -99,26 +110,22 @@ export function McpServerFormDialog({
   const involvesCodex = selectedAgents.some((agent) => formatOf(agent) === "codex-toml");
   const preserved = mode.kind === "edit" ? Object.keys(mode.cell.extra ?? {}).filter((key) => key !== "type") : [];
 
-  const submit = () => {
+  const buildPayload = (): McpFormPayload | string => {
     if (isNew && !/^[A-Za-z0-9_-]+$/.test(name)) {
-      setError("名称只能用字母、数字、- 与 _（如 my-server）");
-      return;
+      return "名称只能用字母、数字、- 与 _（如 my-server）";
     }
     if (selectedAgents.length === 0) {
-      setError("至少选一个助手");
-      return;
+      return "至少选一个助手";
     }
     let spec: Record<string, unknown>;
     if (transport === "remote") {
       const trimmedUrl = url.trim();
       if (!trimmedUrl) {
-        setError("远程服务地址（url）不能为空");
-        return;
+        return "远程服务地址（url）不能为空";
       }
       const urlChanged = mode.kind === "add" || trimmedUrl !== (editEntry?.url ?? "");
       if (urlChanged && !isValidRemoteUrl(trimmedUrl)) {
-        setError("服务地址仅支持 https://，或本机 http://localhost / http://127.0.0.1（可带端口与路径）");
-        return;
+        return "服务地址仅支持 https://，或本机 http://localhost / http://127.0.0.1（可带端口与路径）";
       }
       const headers: Record<string, string> = {};
       for (const line of headersText.split("\n").map((item) => item.trim()).filter(Boolean)) {
@@ -126,8 +133,7 @@ export function McpServerFormDialog({
         const headerName = (eq >= 0 ? line.slice(0, eq) : line).trim();
         const value = eq >= 0 ? line.slice(eq + 1).trim() : "";
         if (!HEADER_NAME_RE.test(headerName)) {
-          setError(`非法 header 名:${line}`);
-          return;
+          return `非法 header 名:${line}`;
         }
         if (value === KEEP && !isNew) {
           headers[headerName] = KEEP;
@@ -136,32 +142,27 @@ export function McpServerFormDialog({
         } else if (VAR_NAME_RE.test(value)) {
           headers[headerName] = `\${${value}}`;
         } else {
-          setError(`header 值只能写 \${VAR} 变量引用${isNew ? "" : "或保留原值 <literal>"}:${headerName}`);
-          return;
+          return `header 值只能写 \${VAR} 变量引用${isNew ? "" : "或保留原值 <literal>"}:${headerName}`;
         }
       }
       spec = { url: trimmedUrl, headers };
     } else {
       if (!command.trim()) {
-        setError("启动命令不能为空");
-        return;
+        return "启动命令不能为空";
       }
       const env: Record<string, string> = {};
       for (const line of envText.split("\n").map((item) => item.trim()).filter(Boolean)) {
         const eq = line.indexOf("=");
         if (eq <= 0) {
-          setError(`环境变量要写成 KEY=取值:${line}`);
-          return;
+          return `环境变量要写成 KEY=取值:${line}`;
         }
         const key = line.slice(0, eq).trim();
         const value = line.slice(eq + 1).trim();
         if (/\s/.test(key)) {
-          setError(`非法变量名:${key}`);
-          return;
+          return `非法变量名:${key}`;
         }
         if (value === KEEP && isNew) {
-          setError(`新增时没有可保留的原值，请写 ${key}=\${VAR} 或直接写取值`);
-          return;
+          return `新增时没有可保留的原值，请写 ${key}=\${VAR} 或直接写取值`;
         }
         env[key] = value;
       }
@@ -175,12 +176,51 @@ export function McpServerFormDialog({
     if (transport === "stdio" && involvesCodex && timeoutText.trim()) {
       const timeout = Number(timeoutText);
       if (!Number.isInteger(timeout) || timeout <= 0) {
-        setError("超时秒数要是正整数");
-        return;
+        return "超时秒数要是正整数";
       }
       startupTimeoutSec = timeout;
     }
-    onSubmit({ name, agents: selectedAgents, spec, startupTimeoutSec });
+    return { name, agents: selectedAgents, spec, startupTimeoutSec };
+  };
+  const draft = buildPayload();
+  const previewKey = typeof draft === "string" ? "" : JSON.stringify({
+    draft,
+    mode: mode.kind,
+    base: mode.kind === "edit" ? mode.cell.base : null,
+  });
+
+  useEffect(() => {
+    const serial = ++previewSerial.current;
+    if (!previewKey || typeof draft === "string") {
+      setPreviewBusy(false);
+      return;
+    }
+    setPreviewBusy(true);
+    const timer = window.setTimeout(() => {
+      void onPreview(draft)
+        .then((result) => {
+          if (serial === previewSerial.current) setPreview({ key: previewKey, result });
+        })
+        .catch((reason) => {
+          if (serial === previewSerial.current) setPreview({ key: previewKey, result: String(reason) });
+        })
+        .finally(() => {
+          if (serial === previewSerial.current) setPreviewBusy(false);
+        });
+    }, 300);
+    return () => {
+      window.clearTimeout(timer);
+      previewSerial.current += 1;
+    };
+  }, [previewKey]);
+
+  const submit = () => {
+    const payload = buildPayload();
+    if (typeof payload === "string") {
+      setError(payload);
+      return;
+    }
+    onSubmit(payload);
   };
 
   return (
@@ -329,6 +369,26 @@ export function McpServerFormDialog({
               条目里的这些字段本表单不改动，保存时原样保留：{preserved.join("、")}
             </p>
           )}
+          <section className="space-y-2 rounded-lg border p-3 text-xs lg:col-span-2" data-testid="mcp-file-preview">
+            <h4 className="font-medium text-foreground">目标配置文件预览</h4>
+            <p className="text-muted-foreground">填写有效内容后按当前实际文件计算；仅在本机显示完整原文，可能含凭据。保存时会重新读取并校验。</p>
+            {typeof draft === "string" && <p className="text-muted-foreground">{draft}</p>}
+            {typeof draft !== "string" && (previewBusy || preview?.key !== previewKey) && <p className="text-muted-foreground">正在计算…</p>}
+            {preview?.key === previewKey && typeof preview.result === "string" && <p role="alert" className="text-destructive">{preview.result}</p>}
+            {preview?.key === previewKey && Array.isArray(preview.result) && preview.result.map((item) => (
+              <div key={item.agent} className="space-y-1 border-t pt-2">
+                <p className="font-medium text-foreground">{item.agent}</p>
+                {item.error && <p role="alert" className="text-destructive">{item.error}</p>}
+                {!item.error && item.files.length === 0 && <p className="text-muted-foreground">文件内容不变。</p>}
+                {item.files.map((file) => (
+                  <div key={file.path} className="space-y-1">
+                    <p className="break-all font-mono text-muted-foreground">{file.path} · {file.exists ? "更新现有文件" : "新建文件"}</p>
+                    <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs" data-testid={`mcp-preview-content-${item.agent}`}>{file.content}</pre>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </section>
           {error && <p role="alert" className="text-xs text-destructive lg:col-span-2">{error}</p>}
         </div>
 

@@ -8,13 +8,14 @@ import { McpEntryRow, mcpCellKey, mcpEntrySummary } from "../components/McpAssig
 import { McpCopyDialog } from "../components/McpCopyDialog";
 import { ResourceAgentMatrix, type MatrixRow, type MatrixRowCell } from "../components/ResourceAgentMatrix";
 import { McpServerCard } from "../components/McpServerCard";
-import { McpServerFormDialog, type McpFormMode, type McpFormPayload } from "../components/McpServerFormDialog";
+import { McpServerFormDialog, type McpFilePreview, type McpFormMode, type McpFormPayload } from "../components/McpServerFormDialog";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { SecretValueDialog } from "../components/SecretValueDialog";
 import type { EngineElement, Envelope, McpTarget, StatusData } from "../lib/contract";
 import type { McpAgentCell, McpObserved, McpSavedDefinition, McpSpec } from "../lib/observed";
 import { OVERLAY_COPY } from "../lib/ui-copy";
+import { engineErrorMessage, runEngine } from "../lib/engine";
 import { useEngineQuery } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
@@ -119,6 +120,25 @@ export default function McpPage() {
       spec.startup_timeout_sec = payload.startupTimeoutSec;
     }
     return spec;
+  };
+
+  const previewForm = async (payload: McpFormPayload): Promise<McpFilePreview[]> => {
+    return Promise.all(payload.agents.map(async (agent): Promise<McpFilePreview> => {
+      const args = [
+        "--only", `mcp:${payload.name}`, "--agent", agent,
+        "--action", form?.kind === "edit" ? "edit" : "add",
+        ...(form?.kind === "edit" ? ["--base", form.cell.base] : []),
+        "--spec", JSON.stringify(specFor(payload, agent)),
+      ];
+      try {
+        const envelope = await runEngine<{ files: McpFilePreview["files"] }>("mcp:preview", args);
+        return envelope.ok
+          ? { agent, files: envelope.data.files }
+          : { agent, files: [], error: envelope.errors[0]?.message ?? "预览失败" };
+      } catch (reason) {
+        return { agent, files: [], error: engineErrorMessage(reason) };
+      }
+    }));
   };
 
   const submitForm = async (payload: McpFormPayload) => {
@@ -355,7 +375,7 @@ export default function McpPage() {
         </div>
       )}
 
-      {form && <McpServerFormDialog mode={form} onClose={() => setForm(null)} onSubmit={(payload) => void submitForm(payload)} />}
+      {form && <McpServerFormDialog mode={form} onClose={() => setForm(null)} onSubmit={(payload) => void submitForm(payload)} onPreview={previewForm} />}
 
       {copying && (
         <McpCopyDialog

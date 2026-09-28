@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:config-file|preview|apply-definition|adopt|seed|shared-status|shared-preview|shared-apply / agents:configure|preview-runtime|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / mcp:preview / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:config-file|preview|apply-definition|adopt|seed|shared-status|shared-preview|shared-apply / agents:configure|preview-runtime|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -62,6 +62,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("aliases", "discard-legacy") => true,
         // 以实例的实际配置更新实例定义：只写库，不动实例文件
         ("profiles", "adopt") => true,
+        ("mcp", "preview") => true,
         // 用户逐环境确认后同时更新定义与实际配置文件
         ("profiles", "apply-definition") => true,
         // 把默认环境的权限、状态栏、hooks、规则与 MCP 一次性带进实例：只补实例没有的
@@ -286,7 +287,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--base", ArgValueKind::Digest));
             specs.push(("--runtime", ArgValueKind::JsonValue));
         }
-        (_, "apply") => {
+        (_, "apply") | ("mcp", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
             if domain == "agents" {
                 specs.push(("--allow-uninstall", ArgValueKind::Flag));
@@ -727,6 +728,7 @@ mod tests {
             "usage:status",
             "usage:scan",
             "mcp:status",
+            "mcp:preview",
             "mcp:apply",
             "skills:status",
             "skills:apply",
@@ -1051,6 +1053,22 @@ mod tests {
                 "--replace".into(),
                 "--to-base".into(),
                 digest.clone(),
+            ]
+        )
+        .is_ok());
+        assert!(validate_args(
+            "mcp:preview",
+            &[
+                "--only".into(),
+                "mcp:s1".into(),
+                "--agent".into(),
+                "codex".into(),
+                "--action".into(),
+                "edit".into(),
+                "--base".into(),
+                digest.clone(),
+                "--spec".into(),
+                r#"{"command":"npx","args":[]}"#.into(),
             ]
         )
         .is_ok());

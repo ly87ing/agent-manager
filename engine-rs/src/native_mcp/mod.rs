@@ -28,7 +28,7 @@ pub mod targets;
 pub mod write;
 
 use anyhow::{bail, Result};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 pub use preflight::preflight_apply;
 pub use targets::{AgentTarget, Entry, Format};
@@ -49,6 +49,32 @@ pub fn dispatch(ctx: &Context, req: &Request) -> Result<(Value, Vec<String>)> {
                 }
             }
             Ok((status::status(ctx)?, Vec::new()))
+        }
+        "mcp:preview" => {
+            let parsed = preflight::parse_action_args(req)?;
+            if !matches!(
+                parsed.action,
+                preflight::Action::Add | preflight::Action::Edit
+            ) {
+                bail!("mcp:preview 仅支持 add/edit");
+            }
+            let inv = inventory::load(ctx)?;
+            let plan = preflight::plan(&parsed, &inv)?;
+            let files = plan
+                .file_writes
+                .iter()
+                .map(|write| {
+                    if write.new_bytes.len() > 4 * 1024 * 1024 {
+                        bail!("目标文件超过 4 MiB，不能在界面预览");
+                    }
+                    Ok(json!({
+                        "path": write.path,
+                        "exists": write.old_bytes.is_some(),
+                        "content": std::str::from_utf8(&write.new_bytes)?,
+                    }))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok((json!({ "files": files }), plan.warnings))
         }
         "mcp:apply" => apply::apply(ctx, req),
         _ => bail!("mcp 域不支持命令 '{}'", req.command),

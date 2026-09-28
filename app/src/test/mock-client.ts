@@ -1471,6 +1471,18 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
           { command: "agents.models" },
         );
       }
+      if (command === "mcp:preview") {
+        const agent = argOf(args, "--agent") ?? "";
+        const name = (argOf(args, "--only") ?? "").replace(/^mcp:/, "");
+        const target = (routes["mcp:status"].data as { targets: Array<{ agent: string; path: string; format: string; exists: boolean }> })
+          .targets.find((item) => item.agent === agent);
+        if (!target) throw new EngineBridgeError({ kind: "invalid_args", message: "找不到 MCP 目标" });
+        const spec = JSON.parse(argOf(args, "--spec") ?? "{}") as Record<string, unknown>;
+        const content = target.format === "codex-toml"
+          ? `[mcp_servers.${name}]\ncommand = ${JSON.stringify(spec.command ?? "npx")}\nargs = ${JSON.stringify(spec.args ?? [])}\n`
+          : JSON.stringify({ [target.format === "opencode-json" ? "mcp" : "mcpServers"]: { [name]: spec } }, null, 2);
+        return makeEnvelope({ files: [{ path: target.path, exists: target.exists, content }] }, { command: "mcp.preview" });
+      }
       if (command === "profiles:seed") {
         const id = (argOf(args, "--only") ?? "").replace(/^profiles:/, "");
         const items = (argOf(args, "--items") ?? "").split(",").filter(Boolean);

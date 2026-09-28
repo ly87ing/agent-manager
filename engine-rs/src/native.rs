@@ -535,7 +535,7 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("skills", "status" | "apply") => crate::native_skills::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("SKILL_ERROR", format!("{err:#}"))),
-        ("mcp", "status" | "apply") => crate::native_mcp::dispatch(ctx, request)
+        ("mcp", "status" | "preview" | "apply") => crate::native_mcp::dispatch(ctx, request)
             .map(|(data, notes)| {
                 let warnings = notes
                     .into_iter()

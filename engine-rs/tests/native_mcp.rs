@@ -83,6 +83,99 @@ fn status(ctx: &Context) -> Value {
     env.data
 }
 
+#[test]
+fn preview_matches_add_and_edit_without_writing_and_rejects_stale_entry() {
+    let (root, ctx) = temp_ctx("preview");
+    let unsupported = run(
+        &ctx,
+        "mcp:preview",
+        &[
+            "--only",
+            "mcp:example",
+            "--agent",
+            "codex",
+            "--action",
+            "disable",
+            "--base",
+            &"a".repeat(64),
+        ],
+    );
+    assert!(!unsupported.ok);
+    assert!(errors(&unsupported).contains("仅支持 add/edit"));
+    assert!(!ctx.data_dir.exists());
+    let spec = r#"{"command":"npx","args":["-y","example-mcp"]}"#;
+    for (agent, path) in [
+        ("claude-code", claude_path(&ctx)),
+        ("codex", codex_path(&ctx)),
+    ] {
+        let args = [
+            "--only",
+            "mcp:example",
+            "--agent",
+            agent,
+            "--action",
+            "add",
+            "--spec",
+            spec,
+        ];
+        let before_db = db_bytes(&ctx);
+        let preview = run(&ctx, "mcp:preview", &args);
+        assert!(preview.ok, "{}", errors(&preview));
+        let files = preview.data["files"].as_array().unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0]["path"], path.to_string_lossy().as_ref());
+        assert_eq!(files[0]["exists"], false);
+        let expected = files[0]["content"].as_str().unwrap();
+        assert!(!path.exists(), "预览不得创建目标文件");
+        assert_eq!(db_bytes(&ctx), before_db, "预览不得写库");
+        apply_ok(&ctx, &args);
+        assert_eq!(read(&path), expected, "预览必须与实际写入逐字节一致");
+    }
+
+    let original = read(&codex_path(&ctx));
+    let b = base(&ctx, "example", "codex");
+    let edit_spec = r#"{"command":"npx","args":["-y","example-mcp@2"]}"#;
+    let args = [
+        "--only",
+        "mcp:example",
+        "--agent",
+        "codex",
+        "--action",
+        "edit",
+        "--base",
+        &b,
+        "--spec",
+        edit_spec,
+    ];
+    let preview = run(&ctx, "mcp:preview", &args);
+    assert!(preview.ok, "{}", errors(&preview));
+    let expected = preview.data["files"][0]["content"].as_str().unwrap();
+    assert_eq!(read(&codex_path(&ctx)), original);
+    apply_ok(&ctx, &args);
+    assert_eq!(read(&codex_path(&ctx)), expected);
+
+    let latest_base = base(&ctx, "example", "codex");
+    let current_args = [
+        "--only",
+        "mcp:example",
+        "--agent",
+        "codex",
+        "--action",
+        "edit",
+        "--base",
+        &latest_base,
+        "--spec",
+        edit_spec,
+    ];
+    let external = read(&codex_path(&ctx)).replace("example-mcp@2", "example-mcp@3");
+    write_codex(&ctx, &external);
+    let stale = run(&ctx, "mcp:preview", &current_args);
+    assert!(!stale.ok);
+    assert!(errors(&stale).contains("已在外部修改"));
+    assert_eq!(read(&codex_path(&ctx)), external);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn element<'a>(data: &'a Value, server: &str) -> &'a Value {
     data["elements"]
         .as_array()
