@@ -1049,7 +1049,10 @@ describe("助手运行参数", () => {
     const withProfiles = routes();
     const { calls } = renderWithEngine(<AgentsPage />, withProfiles);
 
-    await userEvent.click(await screen.findByTestId("import-connection-button"));
+    const importButton = await screen.findByTestId("import-connection-button");
+    expect(importButton).toBeVisible();
+    expect(screen.queryByLabelText("更多设置")).toBeNull();
+    await userEvent.click(importButton);
     const dialog = await screen.findByRole("dialog", { name: "导入接入" });
     expect(dialog).toHaveTextContent("不导入凭据取值、不启用接入");
     fireEvent.change(screen.getByTestId("connection-import-text"), { target: { value: JSON.stringify({

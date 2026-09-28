@@ -1,5 +1,5 @@
 import { useState, type MouseEvent, type ReactNode } from "react";
-import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Download, Loader2, MoreHorizontal, Pencil, Plus, Save, Settings2, Terminal, Trash2, Upload } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Download, Loader2, MoreHorizontal, Pencil, Plus, Save, Terminal, Trash2, Upload } from "lucide-react";
 import { AgentRuntimePanel } from "./AgentRuntimePanel";
 import { ConfigFileEditor } from "./ConfigFileEditor";
 import { OfficialAuthPanel } from "./OfficialAuthPanel";
@@ -601,22 +601,15 @@ export function ConnectionWorkbench({
                   {checkingAll ? "检查中…" : "检查全部"}
                 </button>
               )}
-              <details className="group relative">
-                <summary aria-label="更多设置" className="inline-flex h-9 w-9 cursor-pointer list-none items-center justify-center rounded-lg border text-muted-foreground hover:bg-accent">
-                  <Settings2 className="h-4 w-4" aria-hidden />
-                </summary>
-                <div className="absolute right-0 z-10 mt-2 flex w-40 flex-col rounded-lg border bg-popover p-1 shadow-lg">
-                  <button
-                    type="button"
-                    data-testid="import-connection-button"
-                    disabled={!kind}
-                    onClick={(event) => runMenuAction(event, () => onImport(selected))}
-                    className="inline-flex items-center gap-2 rounded px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
-                  >
-                    <Upload className="h-4 w-4" aria-hidden /> 导入接入
-                  </button>
-                </div>
-              </details>
+              <button
+                type="button"
+                data-testid="import-connection-button"
+                disabled={!kind}
+                onClick={() => onImport(selected)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm text-muted-foreground hover:bg-accent disabled:opacity-50"
+              >
+                <Upload className="h-4 w-4" aria-hidden /> 导入接入
+              </button>
               <button
                 type="button"
                 data-testid="add-connection-button"
