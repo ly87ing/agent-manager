@@ -17,15 +17,10 @@ import {
   profileMcpConfig,
   profileLaunchValue,
   profileSkillsDir,
+  type ProfileDraftPreview,
   type ProfileFormInput,
   type ProfileKind,
 } from "../lib/profileDefinition";
-
-export interface ProfileDraftPreview {
-  path: string;
-  content: string;
-  exists: boolean;
-}
 
 /**
  * 助手实例表单：为同一个助手再配一套独立配置。

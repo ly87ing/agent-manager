@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AliasEditorDialog } from "../components/AliasEditorDialog";
 import { ProfileCard } from "../components/ProfileCards";
-import { ProfileFormDialog, type ProfileDraftPreview } from "../components/ProfileFormDialog";
+import { ProfileFormDialog } from "../components/ProfileFormDialog";
 import { ConfirmModal } from "../components/ConfirmModal";
 import {
   ConnectionFormDialog,
@@ -33,6 +33,7 @@ import {
   profileConnectionUpdate,
   profileConnectionReadbackMatches,
   type ProfileFormInput,
+  type ProfileDraftPreview,
 } from "../lib/profileDefinition";
 import { runEngine } from "../lib/engine";
 import { formatBalance, type BalanceItem } from "../lib/balance";

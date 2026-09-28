@@ -14,6 +14,11 @@ import type { ConnectionEntry } from "./agentDefinitionForm";
 
 export type ProfileKind = "claude" | "codex";
 
+export interface ProfileDraftPreview {
+  path: string;
+  content: string;
+  exists: boolean;
+}
 
 export interface ProfileFormInput {
   id: string;
