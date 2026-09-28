@@ -15,9 +15,9 @@ function routes(
     "mcp:status": makeEnvelope(status, { command: "mcp.status" }),
     "mcp:preview": async (args: string[]) => makeEnvelope({
       files: [{
-        path: `/isolated/${args[args.indexOf("--agent") + 1]}/config`,
+        path: `/isolated/${args.includes("--to") ? args[args.indexOf("--to") + 1] : args[args.indexOf("--agent") + 1]}/config`,
         exists: true,
-        content: JSON.stringify(specOf(args)),
+        content: args.includes("--spec") ? JSON.stringify(specOf(args)) : "复制后完整配置：fs-mcp",
       }],
     }, { command: "mcp.preview" }),
     "mcp:apply": apply,
@@ -120,13 +120,22 @@ describe("McpPage：实际条目为主", () => {
     const dialog = await screen.findByRole("dialog", { name: "复制 fs" });
     expect(within(dialog).getByTestId("mcp-copy-target")).toHaveValue("codex");
     expect(within(dialog).getByTestId("mcp-copy-submit")).toBeDisabled();
+    expect(calls.some((call) => call.command === "mcp:preview")).toBe(false);
     await userEvent.click(within(dialog).getByTestId("mcp-copy-replace"));
+    expect(await within(dialog).findByTestId("mcp-copy-preview-content")).toHaveTextContent("复制后完整配置");
+    expect(within(dialog).getByText("/isolated/codex/config（已有文件）")).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByTestId("mcp-copy-replace"));
+    expect(within(dialog).queryByTestId("mcp-copy-preview-content")).toBeNull();
+    await userEvent.click(within(dialog).getByTestId("mcp-copy-replace"));
+    expect(await within(dialog).findByTestId("mcp-copy-preview-content")).toHaveTextContent("复制后完整配置");
+    const preview = calls.find((call) => call.command === "mcp:preview")!;
     await userEvent.click(within(dialog).getByTestId("mcp-copy-submit"));
     await waitFor(() => expect(applyCalls(calls)).toHaveLength(1));
     expect(applyCalls(calls)[0].args).toEqual([
       "--only", "mcp:fs", "--agent", "claude-code", "--to", "codex", "--action", "copy",
       "--base", BASE_CLAUDE_FS, "--replace", "--to-base", BASE_CODEX_FS,
     ]);
+    expect(preview.args).toEqual(applyCalls(calls)[0].args);
   });
 
   it("新增直接写入所选助手：逐个助手各写一次，超时只给 Codex；新增时不接受 <literal>", async () => {

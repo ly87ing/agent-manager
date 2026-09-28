@@ -54,9 +54,9 @@ pub fn dispatch(ctx: &Context, req: &Request) -> Result<(Value, Vec<String>)> {
             let parsed = preflight::parse_action_args(req)?;
             if !matches!(
                 parsed.action,
-                preflight::Action::Add | preflight::Action::Edit
+                preflight::Action::Add | preflight::Action::Edit | preflight::Action::Copy
             ) {
-                bail!("mcp:preview 仅支持 add/edit");
+                bail!("mcp:preview 仅支持 add/edit/copy");
             }
             let inv = inventory::load(ctx)?;
             let plan = preflight::plan(&parsed, &inv)?;

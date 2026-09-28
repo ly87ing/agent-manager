@@ -101,7 +101,7 @@ fn preview_matches_add_and_edit_without_writing_and_rejects_stale_entry() {
         ],
     );
     assert!(!unsupported.ok);
-    assert!(errors(&unsupported).contains("仅支持 add/edit"));
+    assert!(errors(&unsupported).contains("仅支持 add/edit/copy"));
     assert!(!ctx.data_dir.exists());
     let spec = r#"{"command":"npx","args":["-y","example-mcp"]}"#;
     for (agent, path) in [
@@ -1454,21 +1454,29 @@ fn copy_claude_to_codex_converts_fields_and_guards_existing_target() {
         }}),
     );
     write_codex(&ctx, "# 用户的\n[mcp_servers.keep]\ncommand = \"k\"\n");
-    let env = apply_ok(
-        &ctx,
-        &[
-            "--only",
-            "mcp:fs",
-            "--agent",
-            "claude-code",
-            "--to",
-            "codex",
-            "--action",
-            "copy",
-            "--base",
-            &base(&ctx, "fs", "claude-code"),
-        ],
-    );
+    let source_base = base(&ctx, "fs", "claude-code");
+    let copy_args = [
+        "--only",
+        "mcp:fs",
+        "--agent",
+        "claude-code",
+        "--to",
+        "codex",
+        "--action",
+        "copy",
+        "--base",
+        source_base.as_str(),
+    ];
+    let before = read(&codex_path(&ctx));
+    let before_db = db_bytes(&ctx);
+    let preview = run(&ctx, "mcp:preview", &copy_args);
+    assert!(preview.ok, "{}", errors(&preview));
+    let candidate = preview.data["files"][0]["content"].as_str().unwrap();
+    assert!(candidate.contains("[mcp_servers.fs]"));
+    assert_eq!(read(&codex_path(&ctx)), before);
+    assert_eq!(db_bytes(&ctx), before_db);
+    let env = apply_ok(&ctx, &copy_args);
+    assert_eq!(read(&codex_path(&ctx)), candidate);
     assert!(
         warnings(&env).contains("alwaysLoad"),
         "未复制的字段要说明: {}",
@@ -1530,6 +1538,24 @@ fn copy_claude_to_codex_converts_fields_and_guards_existing_target() {
 
     // 目标同名：默认拒绝；--replace 必须带对的 --to-base
     let src = base(&ctx, "fs", "claude-code");
+    let conflict = run(
+        &ctx,
+        "mcp:preview",
+        &[
+            "--only",
+            "mcp:fs",
+            "--agent",
+            "claude-code",
+            "--to",
+            "codex",
+            "--action",
+            "copy",
+            "--base",
+            &src,
+        ],
+    );
+    assert!(!conflict.ok);
+    assert!(errors(&conflict).contains("已有同名条目"));
     let err = apply_err(
         &ctx,
         &[

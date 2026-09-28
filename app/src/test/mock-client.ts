@@ -1481,11 +1481,14 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       }
       if (command === "mcp:preview") {
         const agent = argOf(args, "--agent") ?? "";
+        const to = argOf(args, "--to");
         const name = (argOf(args, "--only") ?? "").replace(/^mcp:/, "");
         const target = (routes["mcp:status"].data as { targets: Array<{ agent: string; path: string; format: string; exists: boolean }> })
-          .targets.find((item) => item.agent === agent);
+          .targets.find((item) => item.agent === (to ?? agent));
         if (!target) throw new EngineBridgeError({ kind: "invalid_args", message: "找不到 MCP 目标" });
-        const spec = JSON.parse(argOf(args, "--spec") ?? "{}") as Record<string, unknown>;
+        const source = (routes["mcp:status"].data as { elements: Array<{ id: string; observed: { agents: Record<string, { entry: Record<string, unknown> }> } }> })
+          .elements.find((item) => item.id === `mcp:${name}`);
+        const spec = to ? source?.observed.agents[agent]?.entry ?? {} : JSON.parse(argOf(args, "--spec") ?? "{}") as Record<string, unknown>;
         const content = target.format === "codex-toml"
           ? `[mcp_servers.${name}]\ncommand = ${JSON.stringify(spec.command ?? "npx")}\nargs = ${JSON.stringify(spec.args ?? [])}\n`
           : JSON.stringify({ [target.format === "opencode-json" ? "mcp" : "mcpServers"]: { [name]: spec } }, null, 2);

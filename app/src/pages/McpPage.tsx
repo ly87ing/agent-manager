@@ -141,6 +141,11 @@ export default function McpPage() {
     }));
   };
 
+  const copyArgs = (element: EngineElement, from: string, base: string, to: string, replaceBase: string | null) => [
+    "--only", element.id, "--agent", from, "--to", to, "--action", "copy", "--base", base,
+    ...(replaceBase ? ["--replace", "--to-base", replaceBase] : []),
+  ];
+
   const submitForm = async (payload: McpFormPayload) => {
     const mode = form;
     setForm(null);
@@ -384,23 +389,22 @@ export default function McpPage() {
           targets={targets}
           cells={cellsOf(copying.element)}
           busy={busy}
+          onPreview={async ({ to, replaceBase }) => {
+            const args = copyArgs(copying.element, copying.agent, copying.cell.base, to, replaceBase);
+            try {
+              const envelope = await runEngine<{ files: { path: string; exists: boolean; content: string }[] }>("mcp:preview", args);
+              return envelope.ok
+                ? { files: envelope.data.files, warnings: envelope.warnings.map((warning) => warning.message) }
+                : envelope.errors[0]?.message ?? "预览失败";
+            } catch (reason) {
+              return engineErrorMessage(reason);
+            }
+          }}
           onClose={() => setCopying(null)}
           onSubmit={({ to, replaceBase }) => {
             const { element, agent, cell } = copying;
             setCopying(null);
-            void apply(`复制 ${nameOf(element)}：${agent} → ${to}`, [
-              "--only",
-              element.id,
-              "--agent",
-              agent,
-              "--to",
-              to,
-              "--action",
-              "copy",
-              "--base",
-              cell.base,
-              ...(replaceBase ? ["--replace", "--to-base", replaceBase] : []),
-            ]);
+            void apply(`复制 ${nameOf(element)}：${agent} → ${to}`, copyArgs(element, agent, cell.base, to, replaceBase));
           }}
         />
       )}
