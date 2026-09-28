@@ -14,7 +14,17 @@ import {
 } from "../lib/connectionPresets";
 import { cn } from "../lib/utils";
 import { keyStatus, type SecretSourceState } from "../lib/secretSource";
-import { connectionToProfileInput, defaultConfigDir, PROFILE_ID_RE, profileConnectionUpdate } from "../lib/profileDefinition";
+import {
+  SUBPROCESS_SCRUB_ENV,
+  buildProfileDefinition,
+  connectionToProfileInput,
+  defaultConfigDir,
+  PROFILE_ID_RE,
+  profileConnectionUpdate,
+  profileLaunchValue,
+  type ProfileDraftPreview,
+  type ProfilePreviewRequest,
+} from "../lib/profileDefinition";
 import { detectSystemPlatform } from "../lib/agentDefinitionForm";
 import { ALL_SEED_ITEMS, type SeedItem } from "../lib/profileSeed";
 import { ProfileSeedPicker } from "./ProfileSeedPicker";
@@ -54,6 +64,7 @@ const FOCUSABLE_SELECTOR =
 export function ConnectionFormDialog({
   agentId,
   agentName,
+  agentBin,
   kind,
   existingNames,
   existingProfileIds = [],
@@ -65,12 +76,14 @@ export function ConnectionFormDialog({
   busy,
   error,
   onSubmit,
+  onPreview,
   onOpenSecrets,
   onFetchModels,
   onClose,
 }: {
   agentId: string;
   agentName: string;
+  agentBin: string;
   kind: ConnectionKind;
   existingNames: string[];
   existingProfileIds?: string[];
@@ -86,6 +99,7 @@ export function ConnectionFormDialog({
   busy: boolean;
   error?: string | null;
   onSubmit: (submission: ConnectionSubmission) => void;
+  onPreview: (request: ProfilePreviewRequest) => Promise<ProfileDraftPreview | string>;
   onOpenSecrets?: () => void;
   /** 用表单里的地址与凭据变量问接口能用哪些模型；失败时返回原因。只在点按钮时才联网。 */
   onFetchModels?: (draft: { kind: ConnectionKind; baseUrl: string; tokenVar: string }) => Promise<string[] | string>;
@@ -94,6 +108,11 @@ export function ConnectionFormDialog({
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [modelsMessage, setModelsMessage] = useState<string | null>(null);
   const [fetchingModels, setFetchingModels] = useState(false);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [preview, setPreview] = useState<{
+    key: string;
+    results: { id: string; result: ProfileDraftPreview | string }[];
+  } | null>(null);
   const rootRef = useRef<HTMLElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(
     typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null),
@@ -148,6 +167,32 @@ export function ConnectionFormDialog({
     && profile.update && profile.update.changes.length > 0
     && (profile.state === "managed-ok" || profile.state === "not-materialized")
     && profile.base && profile.definitionBase && !profile.blockedReason);
+  const newEnvironment = intent === "environment" && connection && PROFILE_ID_RE.test(environmentId.trim())
+    ? connectionToProfileInput({ id: agentId, kind }, connection, existingProfileIds)
+    : null;
+  const newEnvironmentInput = newEnvironment ? {
+    ...newEnvironment.input,
+    id: environmentId.trim(),
+    configDir: environmentDir.trim() || defaultConfigDir(kind, environmentId.trim()),
+    sourceConnection: saveTemplate ? connection?.name : undefined,
+    extraEnv: {
+      ...newEnvironment.input.extraEnv,
+      ...(kind === "claude" && scrubSubprocess ? { [SUBPROCESS_SCRUB_ENV]: "1" } : {}),
+    },
+  } : null;
+  const previewRequests: ProfilePreviewRequest[] = [
+    ...(newEnvironmentInput ? [{
+      id: newEnvironmentInput.id,
+      definition: buildProfileDefinition(newEnvironmentInput, agentBin),
+    }] : []),
+    ...selectedUpdates.flatMap((profile) => profile.update && profile.base && profile.definitionBase ? [{
+      id: profile.id,
+      base: profile.base,
+      definitionBase: profile.definitionBase,
+      candidate: profile.update.candidate,
+    }] : []),
+  ];
+  const previewKey = JSON.stringify(previewRequests);
 
   useLayoutEffect(() => {
     return () => restoreFocusRef.current?.focus();
@@ -756,6 +801,11 @@ export function ConnectionFormDialog({
                     </label>
                   </div>
                   <p className="text-xs text-muted-foreground">启动命令使用此目录，不修改当前默认环境。密钥取值写入外部密钥文件。</p>
+                  {newEnvironmentInput && (
+                    <pre data-testid="connection-environment-launch-preview" className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">
+                      {`alias ${newEnvironmentInput.id}='${profileLaunchValue(newEnvironmentInput, agentBin)}'`}
+                    </pre>
+                  )}
                   {kind === "claude" && detectSystemPlatform() !== "linux" && (
                     <label className="flex items-center gap-2 text-sm">
                       <input type="checkbox" data-testid="connection-environment-scrub" checked={scrubSubprocess} onChange={(event) => setScrubSubprocess(event.target.checked)} />
@@ -850,6 +900,45 @@ export function ConnectionFormDialog({
                   </div>
                 </section>
               )}
+              <section className="space-y-2 rounded-lg border px-3 py-3 text-xs" data-testid="connection-file-preview">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="font-medium text-foreground">将改动的客户端文件</h3>
+                  {previewRequests.length > 0 && (
+                    <button type="button" data-testid="connection-preview-button"
+                      disabled={busy || previewBusy}
+                      onClick={async () => {
+                        setPreviewBusy(true);
+                        try {
+                          const results: { id: string; result: ProfileDraftPreview | string }[] = [];
+                          for (const request of previewRequests) {
+                            results.push({ id: request.id, result: await onPreview(request) });
+                          }
+                          setPreview({ key: previewKey, results });
+                        } finally {
+                          setPreviewBusy(false);
+                        }
+                      }}
+                      className="rounded border px-2.5 py-1 disabled:opacity-50"
+                    >{previewBusy ? "正在预览…" : "预览目标文件"}</button>
+                  )}
+                </div>
+                {previewRequests.length === 0 && <p className="text-muted-foreground">{intent === "environment"
+                  ? "选定接入并填写有效的环境名后，可预览客户端配置文件和启动命令。"
+                  : "只保存 Provider 模板时，客户端配置文件和启动命令不变。"}</p>}
+                {previewRequests.length > 0 && <p className="text-muted-foreground">按当前实际文件合并计算；凭据变量保留引用形式，保存时重新校验。现有文件可能含敏感值，请勿直接分享。</p>}
+                {preview && preview.key !== previewKey && <p className="text-muted-foreground">表单或勾选目标已变化，请重新预览。</p>}
+                {preview?.key === previewKey && preview.results.map(({ id, result }) => (
+                  <div key={id} className="space-y-1 border-t pt-2">
+                    <p className="font-medium text-foreground">{id}</p>
+                    {typeof result === "string"
+                      ? <p role="alert" className="text-destructive">{result}</p>
+                      : <>
+                          <p className="break-all font-mono text-muted-foreground">{result.path}{result.exists ? " · 合并现有文件" : " · 新文件"}</p>
+                          <pre data-testid={`connection-preview-content-${id}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">{result.content}</pre>
+                        </>}
+                  </div>
+                ))}
+              </section>
                 </>
               )}
             </div>

@@ -20,6 +20,10 @@ export interface ProfileDraftPreview {
   exists: boolean;
 }
 
+export type ProfilePreviewRequest =
+  | { id: string; definition: Record<string, unknown> }
+  | { id: string; base: string; definitionBase: string; candidate: Record<string, unknown> };
+
 export interface ProfileFormInput {
   id: string;
   displayName: string;

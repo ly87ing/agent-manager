@@ -211,6 +211,36 @@ describe("助手实例", () => {
     });
   }
 
+  it("Provider 表单按当前新环境草稿预览文件和启动命令，输入变化后隐藏旧结果", async () => {
+    const all: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    all["profiles:preview"] = async (args) => {
+      const definition = JSON.parse(args[args.indexOf("--definition") + 1]);
+      return makeEnvelope({
+        path: `${definition.profile.config_dir}/settings.json`,
+        exists: false,
+        content: JSON.stringify({ env: definition.profile.env }),
+      }, { command: "profiles.preview" });
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await userEvent.click(await screen.findByTestId("new-environment-button"));
+    await userEvent.click(screen.getByTestId("new-environment-third-party"));
+    const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
+    await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
+    await userEvent.clear(within(dialog).getByTestId("connection-environment-id"));
+    expect(within(dialog).getByText("选定接入并填写有效的环境名后，可预览客户端配置文件和启动命令。")).toBeInTheDocument();
+    await userEvent.type(within(dialog).getByTestId("connection-environment-id"), "deepseek");
+    expect(within(dialog).getByTestId("connection-environment-launch-preview")).toHaveTextContent("alias deepseek=");
+    await userEvent.click(within(dialog).getByTestId("connection-preview-button"));
+    const content = await within(dialog).findByTestId("connection-preview-content-deepseek");
+    expect(content).toHaveTextContent("https://api.deepseek.com/anthropic");
+    expect(content).toHaveTextContent("${DEEPSEEK_API_KEY}");
+    expect(calls.find((call) => call.command === "profiles:preview")?.args.slice(0, 2)).toEqual(["--only", "profiles:deepseek"]);
+    expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+    await userEvent.click(within(dialog).getByTestId("connection-save-template"));
+    expect(within(dialog).queryByTestId("connection-preview-content-deepseek")).toBeNull();
+    expect(within(dialog).getByText("表单或勾选目标已变化，请重新预览。")).toBeInTheDocument();
+  });
+
   it("第三方环境的凭据写入失败时保留表单，不保存环境或 Provider", async () => {
     const activeRoutes = routes();
     activeRoutes["secrets:set"] = makeEnvelope({}, {
@@ -1165,6 +1195,11 @@ describe("助手实例", () => {
       appliedCandidate = JSON.parse(args[args.indexOf("--candidate") + 1]);
       return makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply-definition" });
     };
+    all["profiles:preview"] = async (args) => makeEnvelope({
+      path: "~/.claude-cc-ly/settings.json",
+      exists: true,
+      content: JSON.stringify({ env: JSON.parse(args[args.indexOf("--candidate") + 1]).env }),
+    }, { command: "profiles.preview" });
     const { calls } = renderWithEngine(<AgentsPage />, all);
     await userEvent.click(await screen.findByTestId("edit-connection-claude-code-relay"));
     const dialog = await screen.findByRole("dialog", { name: "编辑 Relay" });
@@ -1173,11 +1208,19 @@ describe("助手实例", () => {
     const impact = within(dialog).getByTestId("connection-affected-cc-ly");
     expect(impact).toHaveTextContent("API 地址：https://api.example.com → https://new.example.com");
     expect(within(impact).getByRole("checkbox")).not.toBeChecked();
+    expect(within(dialog).getByText("只保存 Provider 模板时，客户端配置文件和启动命令不变。")).toBeInTheDocument();
     expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
     await userEvent.click(within(impact).getByRole("checkbox"));
+    await userEvent.click(within(dialog).getByTestId("connection-preview-button"));
+    expect(await within(dialog).findByTestId("connection-preview-content-cc-ly")).toHaveTextContent("https://new.example.com");
+    const previewArgs = calls.find((call) => call.command === "profiles:preview")!.args;
+    expect(previewArgs).toContain(base);
+    expect(previewArgs).toContain(definitionBase);
+    expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
     await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
     await waitFor(() => expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(true));
     const update = calls.find((call) => call.command === "profiles:apply-definition")!;
+    expect(previewArgs).toEqual(update.args);
     expect(update.args).toContain(base);
     expect(update.args).toContain(definitionBase);
     expect(appliedCandidate).toMatchObject({

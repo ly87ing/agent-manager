@@ -34,6 +34,7 @@ import {
   profileConnectionReadbackMatches,
   type ProfileFormInput,
   type ProfileDraftPreview,
+  type ProfilePreviewRequest,
 } from "../lib/profileDefinition";
 import { runEngine } from "../lib/engine";
 import { formatBalance, type BalanceItem } from "../lib/balance";
@@ -1246,6 +1247,7 @@ export default function AgentsPage({
         <ConnectionFormDialog
           agentId={connectionForm.agent.id.replace(/^agents:/, "")}
           agentName={(connectionForm.agent.spec as AgentsSpec).display_name ?? connectionForm.agent.id.replace(/^agents:/, "")}
+          agentBin={(connectionForm.agent.spec as AgentsSpec).bin ?? (connectionKindOf(connectionForm.agent) === "codex" ? "codex" : "claude")}
           kind={connectionKindOf(connectionForm.agent)!}
           existingNames={connectionsOf(connectionForm.agent.spec as Record<string, unknown>).map((item) => item.name)}
           existingProfileIds={[...new Set([
@@ -1264,6 +1266,22 @@ export default function AgentsPage({
           onOpenSecrets={onOpenSecrets}
           onFetchModels={fetchModelsForDraft}
           onSubmit={(submission) => void saveConnection(connectionForm.agent, submission)}
+          onPreview={async (request: ProfilePreviewRequest) => {
+            const args = "definition" in request
+              ? ["--only", `profiles:${request.id}`, "--definition", JSON.stringify(request.definition)]
+              : [
+                  "--only", `profiles:${request.id}`,
+                  "--base", request.base,
+                  "--definition-base", request.definitionBase,
+                  "--candidate", JSON.stringify(request.candidate),
+                ];
+            try {
+              const result = await runEngine<ProfileDraftPreview>("profiles:preview", args);
+              return result.ok ? result.data : result.errors[0]?.message ?? "预览失败";
+            } catch (error) {
+              return `预览失败：${String(error)}`;
+            }
+          }}
           onClose={() => {
             setConnectionForm(null);
             setConnectionFormError(null);
