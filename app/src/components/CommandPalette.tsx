@@ -210,16 +210,13 @@ export function CommandPalette({
       const spec = element.spec as { display_name?: string };
       const agentName = spec.display_name ?? agentId;
       // 主配置只放官方账号：托盘只给「官方账号」一项，主配置里有第三方凭据时用它切回
-      const options = [{ profile: "", label: "官方账号" }];
-      for (const option of options) {
-        out.push({
-          agentId,
-          agentName,
-          profile: option.profile,
-          profileLabel: option.label,
-          current: Boolean(agents.data?.ok && isCurrentConnection(agents.data.data, agentId, option.profile)),
-        });
-      }
+      out.push({
+        agentId,
+        agentName,
+        profile: "",
+        profileLabel: "官方账号",
+        current: Boolean(agents.data?.ok && isCurrentConnection(agents.data.data, agentId, "")),
+      });
     }
     return out;
   }, [agents.data, profiles.data]);
@@ -302,33 +299,30 @@ export function CommandPalette({
 
       if (!profileIds.has(id) && supportsConnectionSwitch(element.spec)) {
         // 主配置只放官方账号，第三方接入在独立环境里用；这里只剩「切回官方账号」
-        const options = [{ profile: "", label: "官方账号", baseUrl: "", model: "", note: "" }];
-        for (const option of options) {
-          const current = Boolean(
-            agents.data?.ok && isCurrentConnection(agents.data.data, id, option.profile),
-          );
-          const target = `${id}/${option.profile || "default"}`;
-          out.push({
-            id: `connection:${id}:${option.profile || "default"}`,
-            label: `${displayName} · ${option.label}`,
-            hint: current
-              ? "当前使用"
-              : switchingTarget === target
-                ? "正在切换…"
-                : "切回官方账号",
-            keywords: `${id} ${spec.bin ?? ""} ${option.label} 官方 账号 登录 provider 接入 切换`,
-            group: "官方账号",
-            disabled: current || switchingTarget !== null,
-            current,
-            run: () =>
-              void switchConnection({
-                agentId: id,
-                agentName: displayName,
-                profile: option.profile,
-                profileLabel: option.label,
-              }),
-          });
-        }
+        const current = Boolean(
+          agents.data?.ok && isCurrentConnection(agents.data.data, id, ""),
+        );
+        const target = `${id}/default`;
+        out.push({
+          id: `connection:${id}:default`,
+          label: `${displayName} · 官方账号`,
+          hint: current
+            ? "当前使用"
+            : switchingTarget === target
+              ? "正在切换…"
+              : "切回官方账号",
+          keywords: `${id} ${spec.bin ?? ""} 官方账号 官方 账号 登录 provider 接入 切换`,
+          group: "官方账号",
+          disabled: current || switchingTarget !== null,
+          current,
+          run: () =>
+            void switchConnection({
+              agentId: id,
+              agentName: displayName,
+              profile: "",
+              profileLabel: "官方账号",
+            }),
+        });
       }
     }
     for (const element of profiles.data?.ok ? profiles.data.data.elements : []) {
