@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Braces, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import type { AgentRuntimeSettings } from "../lib/agentDefinitionForm";
 import { automationRawText, CUSTOM_AUTOMATION, runtimePatch } from "../lib/agentRuntime";
 import type { AgentCurrentConfigStatus, AgentRuntimeField, AgentRuntimeTarget } from "../lib/observed";
@@ -211,7 +211,6 @@ export function AgentRuntimePanel({
   onSubmit: (patch: Record<string, unknown>) => void;
 }) {
   const [settings, setSettings] = useState<AgentRuntimeSettings>(initial);
-  const [showPreview, setShowPreview] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const rawText = automationRawText(currentConfig);
   // 实际档位不在三档预设里：多给一张「保持当前」卡片，不改就原样保留
@@ -298,7 +297,7 @@ export function AgentRuntimePanel({
         );
       })}
 
-      {showPreview && (
+      {changedCount > 0 && (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
             写入{" "}
@@ -322,15 +321,6 @@ export function AgentRuntimePanel({
         <span data-testid="agent-runtime-pending" className="mr-auto text-xs text-muted-foreground">
           {changedCount > 0 ? `${changedCount} 项改动还没写入` : "按客户端当前的实际配置显示"}
         </span>
-        <button
-          type="button"
-          aria-pressed={showPreview}
-          data-testid="agent-runtime-preview-mode"
-          onClick={() => setShowPreview((shown) => !shown)}
-          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent"
-        >
-          <Braces className="h-4 w-4" aria-hidden /> {showPreview ? "收起写入预览" : "写入预览"}
-        </button>
         <button
           type="button"
           data-testid="agent-runtime-reset"

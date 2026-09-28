@@ -210,7 +210,6 @@ describe("助手运行参数", () => {
     await userEvent.click(screen.getByTestId("agent-runtime-claude-disable-autoupdate"));
     await userEvent.click(screen.getByTestId("agent-runtime-claude-disable-artifact"));
     await userEvent.click(screen.getByTestId("agent-runtime-claude-hide-attribution"));
-    await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
     expect(dialog).toHaveTextContent('"ENABLE_TOOL_SEARCH": "true"');
     expect(dialog).toHaveTextContent('"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"');
     // 官方禁用自动更新的写法
@@ -238,12 +237,13 @@ describe("助手运行参数", () => {
   it("写入预览显示 Claude 最终配置值和真实目标文件", async () => {
     renderWithEngine(<AgentsPage />, routes());
     const dialog = await openRuntimeSettings();
+    expect(screen.queryByTestId("agent-runtime-preview")).toBeNull();
     await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
-
-    await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
     expect(screen.getByTestId("agent-runtime-target")).toHaveTextContent("/Users/demo/.claude/settings.json");
     expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"defaultMode": "bypassPermissions"');
     expect(dialog).toHaveTextContent("文件里的其他配置保持不变");
+    await userEvent.click(screen.getByTestId("agent-runtime-reset"));
+    expect(screen.queryByTestId("agent-runtime-preview")).toBeNull();
   });
 
   it("写入预览显示 Codex TOML 最终配置值和真实目标文件", async () => {
@@ -251,8 +251,6 @@ describe("助手运行参数", () => {
     await openRuntimeSettings();
     await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-codex-reasoning-effort"), "high");
-    await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
-
     expect(screen.getByTestId("agent-runtime-target")).toHaveTextContent("/Users/demo/.codex/config.toml");
     const preview = screen.getByTestId("agent-runtime-preview");
     expect(preview).toHaveTextContent('approval_policy = "never"');
@@ -272,7 +270,6 @@ describe("助手运行参数", () => {
     expect(input).toHaveValue("claude-sonnet-5");
     await userEvent.clear(input);
     await userEvent.type(input, "claude-opus-5");
-    await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
     expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"model": "claude-opus-5"');
     await userEvent.click(screen.getByTestId("agent-runtime-submit"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
@@ -288,7 +285,6 @@ describe("助手运行参数", () => {
     await userEvent.type(screen.getByTestId("agent-runtime-codex-context-window"), "1000000");
     await userEvent.type(screen.getByTestId("agent-runtime-codex-auto-compact-token-limit"), "900000");
     await userEvent.selectOptions(screen.getByTestId("agent-runtime-codex-web-search"), "live");
-    await userEvent.click(screen.getByTestId("agent-runtime-preview-mode"));
     expect(dialog).toHaveTextContent("model_reasoning_effort");
     expect(dialog).toHaveTextContent("model_context_window");
     expect(dialog).toHaveTextContent("model_auto_compact_token_limit");
