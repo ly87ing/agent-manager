@@ -965,7 +965,7 @@ export function ConnectionFormDialog({
                   : "只保存 Provider 模板时，客户端配置文件和启动命令不变。"}</p>}
                 {previewRequests.length > 0 && <p className="text-muted-foreground">{selectedUpdates.length > 0
                   ? "已选环境按真实密钥取值计算最终文件；新建环境草稿仍以变量引用展示。保存时会重新校验原文件和候选内容。预览原文可能含敏感值，仅在本机查看，请勿分享。"
-                  : "按当前实际文件及勾选的共用设置合并计算；凭据变量保留引用形式，保存时重新校验。Hooks、规则及 MCP 文件原文可能含敏感值，仅在本机查看，请勿直接分享。"}</p>}
+                  : "按保存流程预览文件及勾选的共用设置。新建文件的凭据以变量引用展示；已有主文件不会自动覆盖，接入字段可在环境卡片逐项应用。预览可能含敏感值，请勿直接分享。"}</p>}
                 {preview && preview.key !== previewKey && previewRequests.length > 0
                   && <p className="text-muted-foreground">表单或勾选目标已变化，正在更新预览。</p>}
                 {preview?.key === previewKey && preview.results.map(({ id, result }) => (
@@ -974,7 +974,7 @@ export function ConnectionFormDialog({
                     {typeof result === "string"
                       ? <p role="alert" className="text-destructive">{result}</p>
                       : <>
-                          <p className="break-all font-mono text-muted-foreground">{result.path}{result.will_write === false ? (result.exists ? " · 保持现有文件" : " · 不创建文件") : (result.exists ? " · 合并现有文件" : " · 新文件")}</p>
+                          <p className="break-all font-mono text-muted-foreground">{result.path}{result.will_write === false ? (result.exists ? " · 保持现有文件" : " · 不创建文件") : (result.existing_profile_skipped ? " · 仅补勾选的共用设置" : (result.exists ? " · 合并现有文件" : " · 新文件"))}</p>
                           <pre data-testid={`connection-preview-content-${id}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">{result.content}</pre>
                           {result.files?.map((file, index) => <div key={file.path} className="space-y-1">
                             <p className="break-all font-mono text-muted-foreground">{file.path}{file.exists ? " · 合并现有文件" : " · 新文件"}</p>

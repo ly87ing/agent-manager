@@ -636,13 +636,13 @@ export function ProfileFormDialog({
                     className="rounded border px-2.5 py-1 text-xs disabled:opacity-50"
                   >{previewBusy ? "正在预览…" : "重新读取"}</button>
                 </div>
-                <p className="mt-2 text-xs text-muted-foreground">有效输入会自动按当前目标文件及勾选的共用设置计算，凭据变量保留引用形式；预览不检查凭据是否有值，保存时会重新读取并校验。Hooks、规则及 MCP 文件原文可能含敏感值，仅在本机查看，请勿直接分享。</p>
+                <p className="mt-2 text-xs text-muted-foreground">按保存流程预览目标文件及勾选的共用设置。新建文件的凭据仍以变量引用展示；已有主文件不会自动覆盖，保存后可在环境卡片逐项应用接入字段。预览可能含敏感值，请勿直接分享。</p>
                 {kind === "codex" && !thirdParty && <p className="mt-1 text-xs text-muted-foreground">Codex 官方接入本身不改 config.toml；勾选的共用设置仍可能写入。</p>}
                 {preview && preview.key !== previewKey && previewReady && <p className="mt-2 text-xs text-muted-foreground">表单已更改，正在更新预览。</p>}
                 {preview?.key === previewKey && (typeof preview.result === "string"
                   ? <p role="alert" className="mt-2 text-xs text-destructive">{preview.result}</p>
                   : <div className="mt-2 space-y-2">
-                      <p className="break-all font-mono text-xs text-muted-foreground">{preview.result.path}{preview.result.will_write === false ? (preview.result.exists ? " · 保持现有文件" : " · 不创建文件") : (preview.result.exists ? " · 合并现有文件" : " · 新文件")}</p>
+                      <p className="break-all font-mono text-xs text-muted-foreground">{preview.result.path}{preview.result.will_write === false ? (preview.result.exists ? " · 保持现有文件" : " · 不创建文件") : (preview.result.existing_profile_skipped ? " · 仅补勾选的共用设置" : (preview.result.exists ? " · 合并现有文件" : " · 新文件"))}</p>
                       <pre data-testid="profile-draft-preview-content" className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded border bg-muted p-3 font-mono text-xs">{preview.result.content}</pre>
                       {preview.result.files?.map((file, index) => <div key={file.path} className="space-y-1">
                         <p className="break-all font-mono text-xs text-muted-foreground">{file.path}{file.exists ? " · 合并现有文件" : " · 新文件"}</p>

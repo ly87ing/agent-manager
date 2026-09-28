@@ -223,6 +223,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("profiles", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--definition", ArgValueKind::JsonValue));
+            specs.push(("--on-save", ArgValueKind::Flag));
             specs.push(("--items", ArgValueKind::SeedItems));
             specs.push(("--base", ArgValueKind::RuleBase));
             specs.push(("--definition-base", ArgValueKind::Digest));
@@ -1481,6 +1482,19 @@ mod tests {
                 "profiles:cc-ly",
                 "--definition",
                 "{\"profile\":{}}"
+            ])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "profiles:preview",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--definition",
+                "{\"profile\":{}}",
+                "--on-save",
+                "--items",
+                "permissions,statusline,hooks,rules,mcp"
             ])
         )
         .is_ok());

@@ -315,12 +315,15 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         }
         return Ok(result);
     }
-    if !matches!(req.args.len(), 4 | 6)
+    let on_save = req.args.get(4).is_some_and(|arg| arg == "--on-save");
+    let items_index = if on_save { 5 } else { 4 };
+    if !matches!(req.args.len(), 4 | 5 | 6 | 7)
         || req.args[0] != "--only"
         || req.args[2] != "--definition"
-        || (req.args.len() == 6 && req.args[4] != "--items")
+        || (req.args.len() != items_index && req.args.len() != items_index + 2)
+        || (req.args.len() == items_index + 2 && req.args[items_index] != "--items")
     {
-        bail!("profiles:preview 只接受 --only profiles:<实例名> --definition <JSON> [--items <逗号分隔的共用设置>]");
+        bail!("profiles:preview 只接受 --only profiles:<实例名> --definition <JSON> [--on-save] [--items <逗号分隔的共用设置>]");
     }
     let id = parse_only(req)?;
     let raw: Value =
@@ -335,7 +338,9 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         bail!("配置文件超过安全读取上限");
     }
     // 官方 Codex 新环境只建立定义和启动命令；主文件要等勾选的共用设置来写。
-    let content = if def.kind == model::ProfileKind::Codex && !model::is_third_party(&def) {
+    let content = if (on_save && previous.is_some())
+        || (def.kind == model::ProfileKind::Codex && !model::is_third_party(&def))
+    {
         previous.clone().unwrap_or_default()
     } else {
         let recorded = recorded_paths(ctx, &def, &file)?;
@@ -350,21 +355,30 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         .ok_or_else(|| anyhow!("[{}] 没有可预览的文件", def.id))?
         .content
     };
-    let items = if req.args.len() == 6 {
-        super::seed::parse_items(&req.args[5])?
+    let items = if req.args.len() == items_index + 2 {
+        super::seed::parse_items(&req.args[items_index + 1])?
     } else {
         Vec::new()
     };
     let seed_preview = super::preview_seed::preview(ctx, req, &def, &dir, content, &items);
-    let will_write = def.kind == model::ProfileKind::Claude
-        || model::is_third_party(&def)
-        || seed_preview.results.iter().any(|item| {
-            item["state"] == "copied"
-                && matches!(
-                    item["item"].as_str(),
-                    Some("permissions" | "statusline" | "mcp")
-                )
-        });
+    let will_write = if on_save {
+        previous
+            .as_ref()
+            .is_some_and(|old| *old != seed_preview.main)
+            || (previous.is_none()
+                && ((def.kind == model::ProfileKind::Claude || model::is_third_party(&def))
+                    || !seed_preview.main.is_empty()))
+    } else {
+        def.kind == model::ProfileKind::Claude
+            || model::is_third_party(&def)
+            || seed_preview.results.iter().any(|item| {
+                item["state"] == "copied"
+                    && matches!(
+                        item["item"].as_str(),
+                        Some("permissions" | "statusline" | "mcp")
+                    )
+            })
+    };
     let content = seed_preview.main;
     if content.len() > MAX_PREVIEW_BYTES {
         bail!("配置文件超过安全读取上限");
@@ -375,6 +389,7 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         "format": if def.kind.as_str() == "codex" { "toml" } else { "json" },
         "exists": previous.is_some(),
         "will_write": will_write,
+        "existing_profile_skipped": on_save && previous.is_some(),
         "content": String::from_utf8(content).map_err(|_| anyhow!("预览结果不是 UTF-8 文本"))?,
         "seed_results": seed_preview.results,
         "files": seed_preview.files,

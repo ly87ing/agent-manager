@@ -1289,6 +1289,7 @@ export default function AgentsPage({
           onPreview={async (request: ProfilePreviewRequest) => {
             const args = "definition" in request
               ? ["--only", `profiles:${request.id}`, "--definition", JSON.stringify(request.definition),
+                  "--on-save",
                   ...(request.seedItems?.length ? ["--items", request.seedItems.join(",")] : [])]
               : [
                   "--only", `profiles:${request.id}`,
@@ -1373,6 +1374,7 @@ export default function AgentsPage({
               const result = await runEngine<ProfileDraftPreview>("profiles:preview", [
                 "--only", `profiles:${input.id}`,
                 "--definition", JSON.stringify(buildProfileDefinition(input, baseBinOf(input.baseAgent))),
+                "--on-save",
                 ...(seedItems.length ? ["--items", seedItems.join(",")] : []),
               ]);
               return result.ok ? result.data : result.errors[0]?.message ?? "预览失败";

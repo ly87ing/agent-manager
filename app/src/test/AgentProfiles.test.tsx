@@ -179,6 +179,7 @@ describe("助手实例", () => {
     expect(within(dialog).getByTestId("profile-draft-preview-file-0")).toHaveTextContent("# Shared rule");
     expect(within(dialog).getByText("已复制 CLAUDE.md")).toBeInTheDocument();
     expect(calls.find((call) => call.command === "profiles:preview")?.args.slice(0, 2)).toEqual(["--only", "profiles:demo"]);
+    expect(calls.find((call) => call.command === "profiles:preview")?.args).toContain("--on-save");
     expect(calls.find((call) => call.command === "profiles:preview")?.args.slice(-2)).toEqual([
       "--items", "permissions,statusline,hooks,rules,mcp",
     ]);
@@ -198,6 +199,25 @@ describe("助手实例", () => {
     ]));
     await within(dialog).findByTestId("profile-draft-preview-content");
     expect(within(dialog).queryByTestId("profile-draft-preview-file-0")).toBeNull();
+  });
+
+  it("新建环境指向已有文件时展示保存后保留的原文", async () => {
+    const all = routes();
+    all["profiles:preview"] = makeEnvelope({
+      path: "~/.claude-demo/settings.json",
+      exists: true,
+      will_write: false,
+      existing_profile_skipped: true,
+      content: "{\"theme\":\"keep\"}\n",
+      files: [],
+    }, { command: "profiles.preview" });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await openNewProfileForm();
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "demo");
+    expect(await within(dialog).findByTestId("profile-draft-preview-content")).toHaveTextContent("\"theme\":\"keep\"");
+    expect(within(dialog).getByText(/settings\.json · 保持现有文件/)).toBeInTheDocument();
+    expect(calls.find((call) => call.command === "profiles:preview")?.args).toContain("--on-save");
   });
 
   it("新建环境预览失败时不保存定义或写入配置", async () => {
@@ -304,6 +324,7 @@ describe("助手实例", () => {
     expect(content).toHaveTextContent("${DEEPSEEK_API_KEY}");
     expect(within(dialog).getByTestId("connection-preview-file-deepseek-0")).toHaveTextContent("# Shared rule");
     expect(calls.find((call) => call.command === "profiles:preview")?.args.slice(0, 2)).toEqual(["--only", "profiles:deepseek"]);
+    expect(calls.find((call) => call.command === "profiles:preview")?.args).toContain("--on-save");
     expect(calls.find((call) => call.command === "profiles:preview")?.args.slice(-2)).toEqual([
       "--items", "permissions,statusline,hooks,rules,mcp",
     ]);

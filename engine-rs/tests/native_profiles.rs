@@ -567,6 +567,72 @@ fn draft_preview_uses_profile_renderer_without_writing_files_or_resolving_creden
 }
 
 #[test]
+fn draft_on_save_preview_preserves_existing_main_file_and_only_seeds_selected_settings() {
+    let (root, ctx) = temp_ctx("draft-on-save-existing");
+    let target = ctx.home_dir.join(".claude-ly/settings.json");
+    let source = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+    let before = b"{\"theme\":\"keep\",\"env\":{\"CUSTOM\":\"untouched\"}}\n";
+    std::fs::write(&target, before).unwrap();
+    std::fs::write(&source, r#"{"permissions":{"allow":["Bash(ls:*)"]}}"#).unwrap();
+    let draft = claude_profile("AM_PREVIEW_UNSET_TOKEN");
+
+    let unchanged = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &[
+                "--only",
+                "profiles:cc-ly",
+                "--definition",
+                &draft,
+                "--on-save",
+            ],
+        ),
+    );
+    assert!(unchanged.ok, "{:?}", unchanged.errors);
+    assert_eq!(unchanged.data["will_write"], false);
+    assert_eq!(unchanged.data["existing_profile_skipped"], true);
+    assert_eq!(
+        unchanged.data["content"],
+        std::str::from_utf8(before).unwrap()
+    );
+
+    let preview = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &[
+                "--only",
+                "profiles:cc-ly",
+                "--definition",
+                &draft,
+                "--on-save",
+                "--items",
+                "permissions",
+            ],
+        ),
+    );
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(preview.data["will_write"], true);
+    assert_eq!(preview.data["existing_profile_skipped"], true);
+    let content = preview.data["content"].as_str().unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(content).unwrap();
+    assert_eq!(parsed["env"]["CUSTOM"], "untouched");
+    assert!(parsed["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
+    assert_eq!(parsed["permissions"]["allow"][0], "Bash(ls:*)");
+    assert_eq!(std::fs::read(&target).unwrap(), before, "预览不能写入");
+    assert!(!ctx.data_dir.exists(), "预览不能建库");
+
+    assert!(save_definition(&ctx, "cc-ly", &draft));
+    let seeded = seed(&ctx, "cc-ly", "permissions");
+    assert!(seeded.ok, "{:?}", seeded.errors);
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), content);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn codex_draft_preview_preserves_existing_mcp_without_touching_default_config() {
     let (root, ctx) = temp_ctx("codex-draft-preview");
     let target = ctx.home_dir.join(".codex-work/config.toml");
@@ -602,6 +668,26 @@ fn codex_draft_preview_preserves_existing_mcp_without_touching_default_config() 
     assert_eq!(
         std::fs::read_to_string(&default).unwrap(),
         String::from_utf8_lossy(default_before)
+    );
+    let on_save = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &[
+                "--only",
+                "profiles:cx-work",
+                "--definition",
+                draft,
+                "--on-save",
+            ],
+        ),
+    );
+    assert!(on_save.ok, "{:?}", on_save.errors);
+    assert_eq!(on_save.data["will_write"], false);
+    assert_eq!(on_save.data["existing_profile_skipped"], true);
+    assert_eq!(
+        on_save.data["content"],
+        std::str::from_utf8(target_before).unwrap()
     );
     let seeded = execute(
         &ctx,

@@ -21,6 +21,7 @@ export interface ProfileDraftPreview {
   file_base?: string;
   content_base?: string;
   will_write?: boolean;
+  existing_profile_skipped?: boolean;
   seed_results?: { item: string; state: string; detail: string }[];
   files?: { path: string; content: string; exists: boolean }[];
 }
