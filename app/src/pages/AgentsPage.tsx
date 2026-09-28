@@ -1319,6 +1319,8 @@ export default function AgentsPage({
           onOpenSecrets={onOpenSecrets}
           onFetchModels={fetchModelsForDraft}
           onSubmit={(submission) => void saveConnection(connectionForm.agent, submission)}
+          onAliasPreview={aliasSource.previewSetAlias}
+          aliasPreviewBase={JSON.stringify(aliasSource.source?.targets.map((target) => [target.id, target.base]) ?? [])}
           onPreview={async (request: ProfilePreviewRequest) => {
             const args = "definition" in request
               ? ["--only", `profiles:${request.id}`, "--definition", JSON.stringify(request.definition),

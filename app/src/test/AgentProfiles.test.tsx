@@ -404,6 +404,30 @@ describe("助手实例", () => {
     expect(JSON.parse(updated.args[updated.args.indexOf("--definition") + 1]).profile.source_connection).toBe("deepseek");
   });
 
+  it("从 Provider 新建环境也展示终端文件完整候选内容，改环境名后旧预览失效", async () => {
+    const routeMap: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    routeMap["aliases:preview"] = async (args) => makeEnvelope({
+      files: [{
+        target: "aliases:zshrc", path: "/isolated/.zshrc", exists: true,
+        content: `# 保留现有配置\nalias ${args[args.indexOf("--set") + 1]}='${args[args.indexOf("--value") + 1]}'\n`,
+      }], skipped: [],
+    }, { command: "aliases.preview" });
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
+    await userEvent.click(await screen.findByTestId("new-environment-button"));
+    await userEvent.click(screen.getByTestId("new-environment-third-party"));
+    const dialog = await screen.findByRole("dialog", { name: "为 Claude Code 新建第三方环境" });
+    await userEvent.click(within(dialog).getByTestId("connection-preset-deepseek-claude"));
+    const file = await within(dialog).findByTestId("connection-alias-file-aliases:zshrc");
+    expect(file).toHaveTextContent("# 保留现有配置");
+    expect(file).toHaveTextContent("alias deepseek=");
+    await userEvent.clear(within(dialog).getByTestId("connection-environment-id"));
+    await userEvent.type(within(dialog).getByTestId("connection-environment-id"), "deepseek-work");
+    expect(within(dialog).queryByTestId("connection-alias-file-aliases:zshrc")).toBeNull();
+    await waitFor(() => expect(within(dialog).getByTestId("connection-alias-file-aliases:zshrc"))
+      .toHaveTextContent("alias deepseek-work="));
+    expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+  });
+
   it("Provider 新建环境预览失败时不保存定义或写入配置", async () => {
     const all = routes();
     all["profiles:preview"] = makeEnvelope(null, {

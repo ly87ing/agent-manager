@@ -28,6 +28,7 @@ import {
 import { detectSystemPlatform } from "../lib/agentDefinitionForm";
 import { ALL_SEED_ITEMS, type SeedItem } from "../lib/profileSeed";
 import { ProfileSeedPicker } from "./ProfileSeedPicker";
+import type { AliasFilePreview } from "../lib/useAliasSource";
 import type { ElementState } from "../lib/contract";
 
 export type ConnectionKind = "claude" | "codex";
@@ -79,6 +80,8 @@ export function ConnectionFormDialog({
   error,
   onSubmit,
   onPreview,
+  onAliasPreview,
+  aliasPreviewBase,
   onOpenSecrets,
   onFetchModels,
   onClose,
@@ -102,6 +105,8 @@ export function ConnectionFormDialog({
   error?: string | null;
   onSubmit: (submission: ConnectionSubmission) => void;
   onPreview: (request: ProfilePreviewRequest) => Promise<ProfileDraftPreview | string>;
+  onAliasPreview: (name: string, value: string) => Promise<AliasFilePreview | string>;
+  aliasPreviewBase: string;
   onOpenSecrets?: () => void;
   /** 用表单里的地址与凭据变量问接口能用哪些模型；失败时返回原因。只在点按钮时才联网。 */
   onFetchModels?: (draft: { kind: ConnectionKind; baseUrl: string; tokenVar: string }) => Promise<string[] | string>;
@@ -184,6 +189,9 @@ export function ConnectionFormDialog({
       ...(kind === "claude" && scrubSubprocess ? { [SUBPROCESS_SCRUB_ENV]: "1" } : {}),
     },
   } : null;
+  const environmentLaunch = newEnvironmentInput ? profileLaunchValue(newEnvironmentInput, agentBin) : "";
+  const aliasPreviewKey = JSON.stringify([aliasPreviewBase, newEnvironmentInput?.id, environmentLaunch]);
+  const [aliasPreview, setAliasPreview] = useState<{ key: string; result: AliasFilePreview | string } | null>(null);
   const previewRequests: ProfilePreviewRequest[] = [
     ...(newEnvironmentInput ? [{
       id: newEnvironmentInput.id,
@@ -231,6 +239,20 @@ export function ConnectionFormDialog({
       previewSerial.current += 1;
     };
   }, [previewKey]);
+
+  useEffect(() => {
+    if (!newEnvironmentInput || !environmentLaunch) return;
+    let current = true;
+    const timer = window.setTimeout(() => {
+      void onAliasPreview(newEnvironmentInput.id, environmentLaunch)
+        .then((result) => { if (current) setAliasPreview({ key: aliasPreviewKey, result }); })
+        .catch((error) => { if (current) setAliasPreview({ key: aliasPreviewKey, result: String(error) }); });
+    }, 300);
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [aliasPreviewKey]);
+
+  const currentAliasPreview = newEnvironmentInput && aliasPreview?.key === aliasPreviewKey
+    ? aliasPreview.result : null;
 
   useLayoutEffect(() => {
     return () => restoreFocusRef.current?.focus();
@@ -852,9 +874,22 @@ export function ConnectionFormDialog({
                   <p className="text-xs text-muted-foreground">启动命令使用此目录，不修改当前默认环境。密钥取值写入外部密钥文件。</p>
                   {newEnvironmentInput && (
                     <pre data-testid="connection-environment-launch-preview" className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">
-                      {`alias ${newEnvironmentInput.id}='${profileLaunchValue(newEnvironmentInput, agentBin)}'`}
+                      {`alias ${newEnvironmentInput.id}='${environmentLaunch}'`}
                     </pre>
                   )}
+                  {newEnvironmentInput && <div className="space-y-2 text-xs" data-testid="connection-alias-file-preview">
+                    <p className="font-medium">终端配置文件写入后</p>
+                    {currentAliasPreview === null && <p className="text-muted-foreground">正在读取实际文件并计算…</p>}
+                    {typeof currentAliasPreview === "string" && <p role="alert" className="text-destructive">{currentAliasPreview}</p>}
+                    {currentAliasPreview && typeof currentAliasPreview !== "string" && <>
+                      {currentAliasPreview.files.map((file) => <div key={file.target} className="space-y-1">
+                        <p className="break-all font-mono">{file.path}{file.exists ? "（已有文件）" : "（将新建）"}</p>
+                        <pre data-testid={`connection-alias-file-${file.target}`} className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono">{file.content}</pre>
+                      </div>)}
+                      {currentAliasPreview.skipped.map((reason) => <p key={reason} className="text-muted-foreground">{reason}</p>)}
+                    </>}
+                    <p className="text-muted-foreground">只读预览；原文可能含敏感值，仅在本机查看。</p>
+                  </div>}
                   {kind === "claude" && detectSystemPlatform() !== "linux" && (
                     <label className="flex items-center gap-2 text-sm">
                       <input type="checkbox" data-testid="connection-environment-scrub" checked={scrubSubprocess} onChange={(event) => setScrubSubprocess(event.target.checked)} />
