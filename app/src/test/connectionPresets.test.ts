@@ -86,6 +86,17 @@ describe("接入配置预设", () => {
     expect(CONNECTION_PRESETS.find((p) => p.id === "minimax-global-claude")!.tokenVar).toBe("MINIMAX_API_KEY");
   });
 
+  it("MiniMax 国内预设使用当前官方端点和文档，国际预设保持独立", () => {
+    const cnClaude = CONNECTION_PRESETS.find((p) => p.id === "minimax-cn-claude")!;
+    const cnCodex = CONNECTION_PRESETS.find((p) => p.id === "minimax-cn-codex")!;
+    expect(cnClaude.baseUrl).toBe("https://api.minimax.cn/anthropic");
+    expect(cnCodex.baseUrl).toBe("https://api.minimax.cn/v1");
+    expect(cnClaude.docsUrl).toBe("https://platform.minimax.cn/docs/token-plan/claude-code");
+    expect(cnCodex.docsUrl).toBe("https://platform.minimax.cn/docs/token-plan/codex");
+    expect(CONNECTION_PRESETS.find((p) => p.id === "minimax-global-claude")!.baseUrl).toBe("https://api.minimax.io/anthropic");
+    expect(CONNECTION_PRESETS.find((p) => p.id === "minimax-global-codex")!.baseUrl).toBe("https://api.minimax.io/v1");
+  });
+
   it("密钥与文档链接只用 https；Kimi Code 的 Claude 接入按官方写法走 x-api-key 并带上 fable 与子代理模型", () => {
     for (const preset of CONNECTION_PRESETS) {
       for (const url of [preset.apiKeyUrl, preset.docsUrl]) {

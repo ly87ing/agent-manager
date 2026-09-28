@@ -12,8 +12,8 @@ import { emptyConnection, type ConnectionEntry } from "./agentDefinitionForm";
  * 模型名比地址更容易过期（各家发新模型就改）。选完预设后字段都可以改；
  * 报「模型不存在」时以各家官方文档为准。
  *
- * 核对日期：2026-09-24。能从厂商自己发布的代码里读到的以代码为准：智谱官方配置助手
- * `@z_ai/coding-helper`（npm，2026-08-27）、MiniMax 官方命令行 `MiniMax-AI/cli`、Kimi Code 仓库
+ * 核对日期：2026-09-27。能从厂商自己发布的代码里读到的以代码为准：智谱官方配置助手
+ * `@z_ai/coding-helper`（npm，2026-08-27）、Kimi Code 仓库
  * `MoonshotAI/kimi-code` 与帮助中心 `MoonshotAI/kimi-help-center`、火山方舟命令行 `volcengine/ark-cli`、
  * 小米 MiMo 官方仓库 `XiaomiMiMo/awesome-mimo-agent`（均为 GitHub）；其余取自厂商文档站。
  * Codex 只认 Responses 协议：厂商文档只写了 Chat Completions 的（阶跃、腾讯、百度等）不收 Codex 预设。
@@ -130,16 +130,16 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     id: "minimax-cn-claude",
     label: "MiniMax（国内）",
     kind: "claude",
-    baseUrl: "https://api.minimaxi.com/anthropic",
+    baseUrl: "https://api.minimax.cn/anthropic",
     model: "MiniMax-M3[1m]",
     aliasOpus: "MiniMax-M3[1m]",
     aliasSonnet: "MiniMax-M2.7",
     aliasHaiku: "MiniMax-M2.7-highspeed",
     timeoutMs: "3000000",
     tokenVar: "MINIMAX_CN_API_KEY",
-    source: "MiniMax 官方命令行 MiniMax-AI/cli 与文档 platform.minimaxi.com",
-    apiKeyUrl: "https://platform.minimaxi.com/subscribe/token-plan",
-    docsUrl: "https://platform.minimaxi.com/docs/token-plan/claude-code",
+    source: "MiniMax 官方接入文档 platform.minimax.cn",
+    apiKeyUrl: "https://platform.minimax.cn/subscribe/token-plan",
+    docsUrl: "https://platform.minimax.cn/docs/token-plan/claude-code",
   },
   {
     id: "minimax-global-claude",
@@ -349,12 +349,12 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     id: "minimax-cn-codex",
     label: "MiniMax（国内）",
     kind: "codex",
-    baseUrl: "https://api.minimaxi.com/v1",
+    baseUrl: "https://api.minimax.cn/v1",
     model: "MiniMax-M3",
     tokenVar: "MINIMAX_CN_API_KEY",
-    source: "MiniMax 官方命令行 MiniMax-AI/cli 与文档 platform.minimaxi.com",
-    apiKeyUrl: "https://platform.minimaxi.com/subscribe/token-plan",
-    docsUrl: "https://platform.minimaxi.com/docs/token-plan/codex",
+    source: "MiniMax 官方接入文档 platform.minimax.cn",
+    apiKeyUrl: "https://platform.minimax.cn/subscribe/token-plan",
+    docsUrl: "https://platform.minimax.cn/docs/token-plan/codex",
   },
   {
     id: "minimax-global-codex",
