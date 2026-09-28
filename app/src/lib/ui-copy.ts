@@ -93,33 +93,9 @@ export const POLICY_LAYER_COPY: Record<PolicyLayerName, { label: string; classNa
   sqlite: { label: "本地数据库", className: "border-violet/30 bg-violet/10 text-violet" },
 };
 
-// ---------- 通用动作/状态短语 ----------
-
-export const COPY = {
-  /** system:refresh-upstream 的唯一主动作。 */
-  checkUpdates: "检查更新",
-  checkAllUpdates: "检查全部更新",
-  recheck: "重新检查",
-  checking: "检查中…",
-  neverChecked: "从未检查",
-  /** 域级 apply。 */
-  syncNow: "立即同步",
-  syncState: "同步状态",
-  updateThis: "更新此项",
-  updateAll: "全部更新",
-  executing: "正在执行…",
-  /** 模式横幅。 */
-  /** 漂移解释面板。 */
-  expandDetail: "展开同步详情",
-  collapseDetail: "收起同步详情",
-  driftExplanation: "不一致说明",
-} as const;
-
-// ---------- 元素启停开关 ----------
+// ---------- 定义保存失败提示 ----------
 
 export const TOGGLE_COPY = {
-  enabled: "已启用",
-  disabled: "已停用",
   saveFailed: "保存配置失败",
   saveRejected: "保存被拒绝",
 } as const;
