@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:apply-definition|adopt|seed / agents:configure|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:apply-definition|adopt|seed|shared-status|shared-apply / agents:configure|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -66,6 +66,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("profiles", "apply-definition") => true,
         // 把默认环境的权限、状态栏、hooks、规则与 MCP 一次性带进实例：只补实例没有的
         ("profiles", "seed") => true,
+        ("profiles", "shared-status" | "shared-apply") => true,
         // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
         ("agents", "configure") => true,
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
@@ -204,6 +205,13 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("profiles", "seed") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--items", ArgValueKind::SeedItems));
+        }
+        ("profiles", "shared-status") => specs.push(("--only", ArgValueKind::ElementId)),
+        ("profiles", "shared-apply") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--item", ArgValueKind::ElementId));
+            specs.push(("--source-base", ArgValueKind::RuleBase));
+            specs.push(("--target-base", ArgValueKind::RuleBase));
         }
         ("system", "discover") => specs.push(("--only", ArgValueKind::ElementId)),
         ("runs", "get") => {
@@ -703,6 +711,8 @@ mod tests {
             "profiles:apply-definition",
             "profiles:adopt",
             "profiles:seed",
+            "profiles:shared-status",
+            "profiles:shared-apply",
             "secrets:status",
             "secrets:set",
             "secrets:source",
@@ -1426,6 +1436,39 @@ mod tests {
                 "mcp",
                 "--base",
                 &base
+            ])
+        )
+        .is_err());
+        assert!(validate_args(
+            "profiles:shared-status",
+            &args(&["--only", "profiles:cc-ly"])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "profiles:shared-apply",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--item",
+                "mcp:fs",
+                "--source-base",
+                &base,
+                "--target-base",
+                "missing"
+            ])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "profiles:shared-apply",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--item",
+                "permissions",
+                "--source-base",
+                "stale",
+                "--target-base",
+                "missing"
             ])
         )
         .is_err());

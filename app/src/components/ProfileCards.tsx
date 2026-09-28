@@ -11,8 +11,7 @@ import { StateBadge } from "./StateBadge";
 import { cn } from "../lib/utils";
 import { overrideEffect } from "../lib/overrideEffects";
 import { balanceSupported } from "../lib/balance";
-import { ALL_SEED_ITEMS, seedLabel, seedStateText, type SeedItem, type SeedResult } from "../lib/profileSeed";
-import { ProfileSeedPicker } from "./ProfileSeedPicker";
+import { sharedItemLabel, type SharedItem } from "../lib/profileShared";
 
 /** 实例状态 → 一句话说明用户现在处于什么位置。 */
 const STATE_NOTE: Record<string, string> = {
@@ -42,7 +41,8 @@ export function ProfileCard({
   onCheckAuth,
   onCheckEndpoint,
   onCheckBalance,
-  onSeed,
+  onSharedStatus,
+  onSharedApply,
   onWriteCredential,
 }: {
   element: EngineElement;
@@ -69,22 +69,54 @@ export function ProfileCard({
   onCheckEndpoint?: () => Promise<{ ok: boolean; detail: string; latencyMs: number }>;
   /** 查这个环境凭据的余额（只对有官方余额接口的厂商）；返回一行结果或失败原因。 */
   onCheckBalance?: () => Promise<string>;
-  /** 从默认环境把勾选的设置带进这个环境；返回逐项结果或失败原因。 */
-  onSeed?: (items: SeedItem[]) => Promise<SeedResult[] | string>;
+  /** 只读比较默认环境与这个环境的实际共用设置。 */
+  onSharedStatus?: () => Promise<SharedItem[] | string>;
+  /** 按预览的来源与目标摘要更新单项；失败时返回原因。 */
+  onSharedApply?: (item: SharedItem) => Promise<string | null>;
   /** 只有密钥换了：直接把新密钥写进这个环境（不用确认覆盖其他内容，因为没有别的不同）。 */
   onWriteCredential?: () => void;
 }) {
-  const [seedOpen, setSeedOpen] = useState(false);
-  const [seedItems, setSeedItems] = useState<SeedItem[]>(ALL_SEED_ITEMS);
-  const [seeding, setSeeding] = useState(false);
-  const [seedOutcome, setSeedOutcome] = useState<SeedResult[] | string | null>(null);
-  const runSeed = async () => {
-    if (!onSeed || seedItems.length === 0) return;
-    setSeeding(true);
+  const [sharedOpen, setSharedOpen] = useState(false);
+  const [sharedItems, setSharedItems] = useState<SharedItem[] | string | null>(null);
+  const [sharedSelected, setSharedSelected] = useState<string[]>([]);
+  const [sharedBusy, setSharedBusy] = useState(false);
+  const [sharedOutcome, setSharedOutcome] = useState<string[]>([]);
+  const loadShared = async () => {
+    if (!onSharedStatus) return;
+    setSharedBusy(true);
     try {
-      setSeedOutcome(await onSeed(seedItems));
+      setSharedItems(await onSharedStatus());
+      setSharedSelected([]);
     } finally {
-      setSeeding(false);
+      setSharedBusy(false);
+    }
+  };
+  const runShared = async () => {
+    if (!onSharedStatus || !onSharedApply || !Array.isArray(sharedItems) || sharedSelected.length === 0) return;
+    const selected = sharedItems.filter((item) => sharedSelected.includes(item.item));
+    const succeeded = new Set<string>();
+    const outcome: string[] = [];
+    setSharedBusy(true);
+    try {
+      for (const item of selected) {
+        const error = await onSharedApply(item);
+        if (error) outcome.push(`${sharedItemLabel(item.item)}：${error}`);
+        else succeeded.add(item.item);
+      }
+      const fresh = await onSharedStatus();
+      setSharedItems(fresh);
+      setSharedSelected([]);
+      if (Array.isArray(fresh)) {
+        for (const item of selected) {
+          if (!succeeded.has(item.item)) continue;
+          outcome.push(`${sharedItemLabel(item.item)}：${fresh.find((row) => row.item === item.item)?.state === "same" ? "已更新并回读一致" : "写后仍有差异，请检查实际配置"}`);
+        }
+      } else {
+        outcome.push(`写后回读失败：${fresh}`);
+      }
+      setSharedOutcome(outcome);
+    } finally {
+      setSharedBusy(false);
     }
   };
   const [balance, setBalance] = useState<string | null>(null);
@@ -423,61 +455,37 @@ export function ProfileCard({
         </p>
       )}
 
-      {seedOpen && onSeed && (
-        <div data-testid={`profile-seed-panel-${id}`} className="mt-3 rounded-lg border bg-muted/30 p-3">
-          <p className="mb-2 text-xs font-medium text-foreground">从默认环境带上</p>
-          <ProfileSeedPicker
-            kind={spec.kind === "codex" ? "codex" : "claude"}
-            selected={seedItems}
-            onChange={setSeedItems}
-            testIdPrefix={`profile-seed-${id}`}
-          />
-          <div className="mt-3 flex items-center gap-2">
-            <button
-              type="button"
-              data-testid={`profile-seed-run-${id}`}
-              disabled={seeding || seedItems.length === 0}
-              onClick={() => void runSeed()}
-              className="inline-flex items-center gap-1 rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/15 disabled:opacity-50"
-            >
-              {seeding && <Loader2 className="h-3 w-3 animate-spin" aria-hidden />}
-              {seeding ? "正在带…" : "带上"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setSeedOpen(false);
-                setSeedOutcome(null);
-              }}
-              className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
-            >
-              收起
-            </button>
+      {sharedOpen && onSharedStatus && onSharedApply && (
+        <div data-testid={`profile-shared-panel-${id}`} className="mt-3 rounded-lg border bg-muted/30 p-3">
+          <p className="text-xs font-medium text-foreground">更新共用设置</p>
+          <p className="mt-1 text-xs text-muted-foreground">比较默认环境与此环境的实际文件。已有自定义内容默认保留；只更新你勾选的项。接入凭据不复制，含明文凭据的 MCP 条目会被拦下。</p>
+          {sharedBusy && <p className="mt-2 text-xs text-muted-foreground">正在读取或更新…</p>}
+          {typeof sharedItems === "string" && <p className="mt-2 text-xs text-destructive">{sharedItems}</p>}
+          {Array.isArray(sharedItems) && (
+            <div className="mt-2 max-h-64 space-y-2 overflow-y-auto">
+              {sharedItems.map((item) => {
+                const selectable = item.state === "new" || item.state === "different";
+                return (
+                  <label key={item.item} className="flex items-start gap-2 rounded border p-2 text-xs" data-testid={`profile-shared-row-${id}-${item.item}`}>
+                    <input type="checkbox" className="mt-0.5" checked={sharedSelected.includes(item.item)} disabled={!selectable || sharedBusy}
+                      onChange={(event) => setSharedSelected((current) => event.target.checked ? [...current, item.item] : current.filter((value) => value !== item.item))} />
+                    <span>
+                      <strong>{sharedItemLabel(item.item)}</strong> · {item.state === "same" ? "两边一致" : item.state === "absent" ? "默认环境未设置" : item.state === "blocked" ? "暂不可更新" : item.state === "new" ? "环境尚未设置" : "两边不同"}
+                      <span className="mt-1 block text-muted-foreground">默认环境：{item.source}；此环境：{item.target}</span>
+                      {item.changed_fields.length > 0 && <span className="mt-1 block text-muted-foreground">差异字段：{item.changed_fields.join("、")}</span>}
+                      {item.blocked_reason && <span className="mt-1 block text-warning">{item.blocked_reason}</span>}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          <div className="mt-3 flex gap-2">
+            <button type="button" data-testid={`profile-shared-refresh-${id}`} disabled={sharedBusy} onClick={() => void loadShared()} className="rounded border px-2.5 py-1 text-xs">刷新差异</button>
+            <button type="button" data-testid={`profile-shared-run-${id}`} disabled={sharedBusy || sharedSelected.length === 0} onClick={() => void runShared()} className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary disabled:opacity-50">更新所选</button>
+            <button type="button" onClick={() => setSharedOpen(false)} className="rounded border px-2.5 py-1 text-xs">收起</button>
           </div>
-          {typeof seedOutcome === "string" && (
-            <p data-testid={`profile-seed-error-${id}`} className="mt-2 text-xs text-destructive">
-              {seedOutcome}
-            </p>
-          )}
-          {Array.isArray(seedOutcome) && (
-            <ul data-testid={`profile-seed-results-${id}`} className="mt-2 space-y-1 text-xs">
-              {seedOutcome.map((result) => (
-                <li
-                  key={result.item}
-                  data-testid={`profile-seed-result-${id}-${result.item}`}
-                  className={cn(
-                    result.state === "copied"
-                      ? "text-success"
-                      : result.state === "failed"
-                        ? "text-destructive"
-                        : "text-muted-foreground",
-                  )}
-                >
-                  {seedLabel(result.item)}：{result.detail || seedStateText(result.state)}
-                </li>
-              ))}
-            </ul>
-          )}
+          {sharedOutcome.length > 0 && <ul className="mt-2 space-y-1 text-xs">{sharedOutcome.map((line, index) => <li key={`${index}-${line}`}>{line}</li>)}</ul>}
         </div>
       )}
 
@@ -558,16 +566,15 @@ export function ProfileCard({
         >
           <Copy className="h-3 w-3" aria-hidden /> 复制
         </button>
-        {onSeed && (
-          <button
-            type="button"
-            data-testid={`profile-seed-${id}`}
-            aria-expanded={seedOpen}
-            onClick={() => setSeedOpen((open) => !open)}
-            title="把默认环境的权限、状态栏、Hooks、规则与 MCP 复制一份进这个环境；只补这里没有的，凭据不带"
-            className="inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent"
-          >
-            <CopyPlus className="h-3 w-3" aria-hidden /> 从默认环境带上
+        {onSharedStatus && onSharedApply && (
+          <button type="button" data-testid={`profile-shared-${id}`} aria-expanded={sharedOpen}
+            onClick={() => {
+              setSharedOpen((open) => !open);
+              if (!sharedOpen) { setSharedOutcome([]); void loadShared(); }
+            }}
+            title="比较默认环境与这个环境的权限、状态栏、Hooks、规则和 MCP，逐项选择更新"
+            className="inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent">
+            <CopyPlus className="h-3 w-3" aria-hidden /> 更新共用设置
           </button>
         )}
         <button

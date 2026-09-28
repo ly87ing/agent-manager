@@ -1499,6 +1499,252 @@ fn seed(ctx: &Context, id: &str, items: &str) -> agent_manager_engine::Envelope 
     )
 }
 
+fn shared_status(ctx: &Context, id: &str) -> agent_manager_engine::Envelope {
+    execute(
+        ctx,
+        &request(
+            "profiles:shared-status",
+            &["--only", &format!("profiles:{id}")],
+        ),
+    )
+}
+
+fn shared_item(status: &agent_manager_engine::Envelope, name: &str) -> serde_json::Value {
+    status.data["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["item"] == name)
+        .unwrap()
+        .clone()
+}
+
+fn apply_shared(
+    ctx: &Context,
+    id: &str,
+    item: &serde_json::Value,
+) -> agent_manager_engine::Envelope {
+    execute(
+        ctx,
+        &request(
+            "profiles:shared-apply",
+            &[
+                "--only",
+                &format!("profiles:{id}"),
+                "--item",
+                item["item"].as_str().unwrap(),
+                "--source-base",
+                item["source_base"].as_str().unwrap(),
+                "--target-base",
+                item["target_base"].as_str().unwrap(),
+            ],
+        ),
+    )
+}
+
+#[test]
+fn 已建_claude_环境逐项更新共用设置_来源目标变化拒绝覆盖() {
+    let (root, ctx) = temp_ctx("shared-claude");
+    std::env::set_var("AM_TEST_SHARED_CLAUDE", "YOUR_TEST_TOKEN");
+    let main_dir = ctx.home_dir.join(".claude");
+    std::fs::create_dir_all(&main_dir).unwrap();
+    let main_settings = main_dir.join("settings.json");
+    std::fs::write(
+        &main_settings,
+        serde_json::to_vec(&serde_json::json!({
+            "permissions": {"allow": ["Bash(ls:*)"]},
+            "statusLine": {"type": "command", "command": "echo source"},
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo source"}]}]},
+            "env": {"ANTHROPIC_AUTH_TOKEN": "YOUR_MAIN_TEST_TOKEN"}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let main_rules = main_dir.join("CLAUDE.md");
+    std::fs::write(&main_rules, "# 来源规则\n").unwrap();
+    let main_mcp = ctx.home_dir.join(".claude.json");
+    std::fs::write(&main_mcp, serde_json::to_vec(&serde_json::json!({"mcpServers": {
+        "fs": {"type": "stdio", "command": "source-fs"},
+        "private": {"type": "stdio", "command": "private-tool", "env": {"API_KEY": "YOUR_LITERAL_TEST_KEY"}}
+    }})).unwrap()).unwrap();
+    let auth = main_dir.join("auth.json");
+    std::fs::write(&auth, "YOUR_OFFICIAL_LOGIN_MARKER").unwrap();
+    let main_before = [
+        main_settings.clone(),
+        main_rules.clone(),
+        main_mcp.clone(),
+        auth.clone(),
+    ]
+    .map(|path| std::fs::read(path).unwrap());
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_SHARED_CLAUDE")
+    ));
+    assert!(apply_now(&ctx, "cc-ly").ok);
+    let dir = ctx.home_dir.join(".claude-ly");
+    let target = dir.join("settings.json");
+    let mut doc: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
+    doc["permissions"] = serde_json::json!({"allow": ["Bash(pwd:*)"]});
+    doc["statusLine"] = serde_json::json!({"type": "command", "command": "echo own"});
+    doc["hooks"] =
+        serde_json::json!({"Stop": [{"hooks": [{"type": "command", "command": "echo own"}]}]});
+    std::fs::write(&target, serde_json::to_vec(&doc).unwrap()).unwrap();
+    std::fs::write(dir.join("CLAUDE.md"), "# 环境自己的规则\n").unwrap();
+    std::fs::write(
+        dir.join(".claude.json"),
+        r#"{"mcpServers":{"fs":{"type":"stdio","command":"own-fs"}}}"#,
+    )
+    .unwrap();
+    let target_before = std::fs::read(&target).unwrap();
+    let preview = shared_status(&ctx, "cc-ly");
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(std::fs::read(&target).unwrap(), target_before, "预览零写");
+    for item in ["permissions", "statusline", "hooks", "rules", "mcp:fs"] {
+        assert_eq!(shared_item(&preview, item)["state"], "different", "{item}");
+    }
+    assert_eq!(shared_item(&preview, "mcp:private")["state"], "blocked");
+    assert!(!preview.data.to_string().contains("YOUR_LITERAL_TEST_KEY"));
+    assert!(!preview.data.to_string().contains("YOUR_MAIN_TEST_TOKEN"));
+
+    let permissions = shared_item(&preview, "permissions");
+    assert!(apply_shared(&ctx, "cc-ly", &permissions).ok);
+    let after_permissions: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
+    assert_eq!(after_permissions["permissions"]["allow"][0], "Bash(ls:*)");
+    assert_eq!(
+        after_permissions["statusLine"]["command"], "echo own",
+        "未选项保持原样"
+    );
+    assert_eq!(after_permissions["env"], doc["env"], "实例接入凭据保持原样");
+    let conn = store::open_write(&ctx).unwrap();
+    let audit: String = conn
+        .query_row(
+            "SELECT detail_json FROM operation_logs WHERE operation_type = 'profiles:shared-apply' AND target = 'profiles:cc-ly'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(audit.contains("permissions"));
+    assert!(!audit.contains("YOUR_MAIN_TEST_TOKEN"));
+    conn.execute_batch(
+        "CREATE TRIGGER fail_shared_audit BEFORE INSERT ON operation_logs
+         WHEN NEW.operation_type = 'profiles:shared-apply'
+         BEGIN SELECT RAISE(ABORT, 'injected-audit-failure'); END;",
+    )
+    .unwrap();
+    let statusline = shared_item(&preview, "statusline");
+    let before_failed_apply = std::fs::read(&target).unwrap();
+    let failed = apply_shared(&ctx, "cc-ly", &statusline);
+    assert!(!failed.ok);
+    assert_eq!(
+        std::fs::read(&target).unwrap(),
+        before_failed_apply,
+        "审计失败必须恢复目标"
+    );
+    conn.execute_batch("DROP TRIGGER fail_shared_audit;")
+        .unwrap();
+    drop(conn);
+    assert!(
+        !apply_shared(&ctx, "cc-ly", &permissions).ok,
+        "旧目标基准不可重用"
+    );
+
+    let mut source: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&main_settings).unwrap()).unwrap();
+    source["statusLine"]["command"] = serde_json::json!("echo later");
+    std::fs::write(&main_settings, serde_json::to_vec(&source).unwrap()).unwrap();
+    assert!(
+        !apply_shared(&ctx, "cc-ly", &statusline).ok,
+        "来源变化必须拒绝"
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&std::fs::read(&target).unwrap()).unwrap()
+            ["statusLine"]["command"],
+        "echo own"
+    );
+    let fresh = shared_status(&ctx, "cc-ly");
+    for item in ["statusline", "hooks", "rules", "mcp:fs"] {
+        let result = apply_shared(&ctx, "cc-ly", &shared_item(&fresh, item));
+        assert!(result.ok, "{item}: {:?}", result.errors);
+    }
+    let done = shared_status(&ctx, "cc-ly");
+    for item in ["permissions", "statusline", "hooks", "rules", "mcp:fs"] {
+        assert_eq!(shared_item(&done, item)["state"], "same", "{item}");
+    }
+    assert_eq!(shared_item(&done, "mcp:private")["state"], "blocked");
+    for (path, original) in [main_settings, main_rules, main_mcp, auth]
+        .into_iter()
+        .zip(main_before)
+    {
+        if path.ends_with("settings.json") {
+            assert_eq!(
+                std::fs::read(path).unwrap(),
+                serde_json::to_vec(&source).unwrap()
+            );
+        } else {
+            assert_eq!(
+                std::fs::read(path).unwrap(),
+                original,
+                "主配置和登录文件不被写入"
+            );
+        }
+    }
+    std::env::remove_var("AM_TEST_SHARED_CLAUDE");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn 已建_codex_环境更新审批状态栏_保留接入和官方登录() {
+    let (root, ctx) = temp_ctx("shared-codex");
+    std::env::set_var("AM_TEST_SHARED_CODEX", "profile-codex-token");
+    let main_dir = ctx.home_dir.join(".codex");
+    std::fs::create_dir_all(&main_dir).unwrap();
+    let main_config = main_dir.join("config.toml");
+    std::fs::write(&main_config, "approval_policy = \"on-request\"\nsandbox_mode = \"workspace-write\"\n\n[tui]\nstatus_line = [\"model\", \"cwd\"]\n").unwrap();
+    let auth = main_dir.join("auth.json");
+    std::fs::write(&auth, "official-login-marker").unwrap();
+    let source_before = std::fs::read(&main_config).unwrap();
+    let auth_before = std::fs::read(&auth).unwrap();
+    assert!(save_definition(
+        &ctx,
+        "cx-work",
+        r#"{"display_name":"Codex · work","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-work","base_url":"https://api.example.com/v1","env_key":"AM_TEST_SHARED_CODEX","model":"gpt-5.5"},"_delete":false,"_replace":true}"#
+    ));
+    assert!(apply_now(&ctx, "cx-work").ok);
+    let target = ctx.home_dir.join(".codex-work/config.toml");
+    // 当前实例文件已有自己的接入表；只改变受测的两组字段。
+    let mut parsed: toml_edit::Document =
+        std::fs::read_to_string(&target).unwrap().parse().unwrap();
+    parsed["approval_policy"] = toml_edit::value("never");
+    parsed["tui"] = toml_edit::Item::Table(toml_edit::Table::new());
+    let mut own_line = toml_edit::Array::new();
+    own_line.push("cwd");
+    parsed["tui"]["status_line"] = toml_edit::value(own_line);
+    std::fs::write(&target, parsed.to_string()).unwrap();
+    let before: toml::Value = std::fs::read_to_string(&target).unwrap().parse().unwrap();
+    let preview = shared_status(&ctx, "cx-work");
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(shared_item(&preview, "permissions")["state"], "different");
+    assert_eq!(shared_item(&preview, "statusline")["state"], "different");
+    assert!(apply_shared(&ctx, "cx-work", &shared_item(&preview, "permissions")).ok);
+    assert!(apply_shared(&ctx, "cx-work", &shared_item(&preview, "statusline")).ok);
+    let after: toml::Value = std::fs::read_to_string(&target).unwrap().parse().unwrap();
+    assert_eq!(after["approval_policy"].as_str(), Some("on-request"));
+    assert_eq!(after["sandbox_mode"].as_str(), Some("workspace-write"));
+    assert_eq!(
+        after["tui"]["status_line"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert_eq!(after["model_provider"], before["model_provider"]);
+    assert_eq!(after["model_providers"], before["model_providers"]);
+    assert_eq!(std::fs::read(&main_config).unwrap(), source_before);
+    assert_eq!(std::fs::read(&auth).unwrap(), auth_before);
+    std::env::remove_var("AM_TEST_SHARED_CODEX");
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn seed_states(env: &agent_manager_engine::Envelope) -> Vec<(String, String)> {
     env.data["results"]
         .as_array()

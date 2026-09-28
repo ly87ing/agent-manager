@@ -65,6 +65,7 @@ import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource } from "../lib/useAliasS
 import { useDirectApply } from "../lib/useDirectApply";
 import { useExecutions } from "../lib/execution";
 import { seedArgs, summarizeSeed, type SeedItem, type SeedResult } from "../lib/profileSeed";
+import { sharedApplyArgs, type SharedItem, type SharedStatus } from "../lib/profileShared";
 import { isOfficial, switchBackEffects } from "../lib/defaultEnvironment";
 import { DEFAULT_SECRETS_PATH, secretSourceOf } from "../lib/secretSource";
 
@@ -736,10 +737,33 @@ export default function AgentsPage({
     return (envelope.data as { results?: SeedResult[] } | null)?.results ?? [];
   };
 
+  const sharedStatus = async (id: string): Promise<SharedItem[] | string> => {
+    try {
+      const envelope = await runEngine<SharedStatus>("profiles:shared-status", ["--only", `profiles:${id}`]);
+      return envelope.ok ? envelope.data.items : envelope.errors[0]?.message ?? "共用设置读取失败";
+    } catch (err) {
+      return String(err);
+    }
+  };
+
+  const applyShared = async (id: string, item: SharedItem): Promise<string | null> => {
+    try {
+      const envelope = await execute({
+        command: "profiles:shared-apply",
+        args: sharedApplyArgs(id, item),
+        label: `更新 ${id} 的 ${item.item}`,
+        silent: true,
+      });
+      return envelope?.ok ? null : envelope?.errors[0]?.message ?? "更新失败，详见任务记录";
+    } catch (err) {
+      return String(err);
+    }
+  };
+
   const toastSeed = (id: string, outcome: SeedResult[] | string) => {
     if (typeof outcome === "string") {
       toast.error(`没有从默认环境带上设置到 ${id}：${outcome}`, {
-        description: "可以稍后在环境卡片上点「从默认环境带上」再试。",
+        description: "可以在环境卡片上点「更新共用设置」，查看差异后选择尚未带入的项。",
       });
       return;
     }
@@ -1057,7 +1081,8 @@ export default function AgentsPage({
                     }
                   }}
                   onCheckBalance={() => fetchBalance(["--only", element.id])}
-                  onSeed={(items) => seedProfile(id, items)}
+                  onSharedStatus={() => sharedStatus(id)}
+                  onSharedApply={(item) => applyShared(id, item)}
                   onCheckEndpoint={async () => {
                     try {
                       const envelope = await runEngine<{ ok?: boolean; detail?: string; latency_ms?: number }>(

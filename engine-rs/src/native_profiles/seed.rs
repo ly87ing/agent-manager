@@ -83,7 +83,7 @@ fn parse_args(req: &Request) -> Result<SeedArgs> {
     Ok(SeedArgs { id, items: picked })
 }
 
-fn find_def(ctx: &Context, id: &str) -> Result<ProfileDef> {
+pub(super) fn find_def(ctx: &Context, id: &str) -> Result<ProfileDef> {
     let policy = store::effective_policy(ctx)?;
     model::load_definition_entries(&policy)
         .into_iter()
@@ -92,7 +92,7 @@ fn find_def(ctx: &Context, id: &str) -> Result<ProfileDef> {
         .2
 }
 
-fn config_dir(ctx: &Context, def: &ProfileDef) -> Result<PathBuf> {
+pub(super) fn config_dir(ctx: &Context, def: &ProfileDef) -> Result<PathBuf> {
     if !def.enabled {
         bail!("[{}] 实例已停用，不带设置", def.id);
     }
@@ -151,7 +151,7 @@ fn read_source(path: &Path) -> Option<Vec<u8>> {
 }
 
 /// 实例里的目标文件：链接解析到最终文件；不是普通文件就拒绝。
-fn read_target(path: &Path) -> Result<(PathBuf, Option<Vec<u8>>)> {
+pub(super) fn read_target(path: &Path) -> Result<(PathBuf, Option<Vec<u8>>)> {
     let real = crate::native_agent_settings::resolve_write_target(path)?;
     match std::fs::symlink_metadata(&real) {
         Ok(meta) if meta.is_file() => {
@@ -217,7 +217,7 @@ fn seed_claude_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec
 
 /// Codex 的权限（审批、沙箱与权限档案）按一组整体带：实例里一个都没有才带，免得两边的
 /// 写法拼在一起互相矛盾。键名取自 Codex `rust-v0.156.1` 的 `ConfigToml`。
-const CODEX_PERMISSION_KEYS: &[&str] = &[
+pub(super) const CODEX_PERMISSION_KEYS: &[&str] = &[
     "approval_policy",
     "approvals_reviewer",
     "sandbox_mode",
@@ -226,7 +226,7 @@ const CODEX_PERMISSION_KEYS: &[&str] = &[
     "permissions",
 ];
 /// Codex 的状态栏在 `[tui]` 下。
-const CODEX_STATUSLINE_KEYS: &[&str] = &["status_line", "status_line_use_colors"];
+pub(super) const CODEX_STATUSLINE_KEYS: &[&str] = &["status_line", "status_line_use_colors"];
 
 fn seed_codex_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec<Value>> {
     let source = match read_source(&ctx.home_dir.join(".codex/config.toml")) {
@@ -331,7 +331,7 @@ fn seed_codex_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec<
 
 // ---------- hooks / 规则：交给各自的域写 ----------
 
-fn element<'a>(status: &'a Value, id: &str) -> Option<&'a Value> {
+pub(super) fn element<'a>(status: &'a Value, id: &str) -> Option<&'a Value> {
     status
         .get("elements")?
         .as_array()?
@@ -455,7 +455,7 @@ fn seed_rules(ctx: &Context, req: &Request, def: &ProfileDef) -> Result<Value> {
 
 /// 条目里有没有明文凭据：像凭据的 env 字面量、字面量请求头、地址里内嵌的账号密码，
 /// 或 Codex 的 `bearer_token`。
-fn has_literal_credentials(format: &crate::native_mcp::Format, view: &View) -> bool {
+pub(super) fn has_literal_credentials(format: &crate::native_mcp::Format, view: &View) -> bool {
     let literal_env = view.env.iter().any(|(key, value)| {
         crate::native_mcp::entry::env_ref(format, value).is_none()
             && (crate::native::credential_like_name(key)

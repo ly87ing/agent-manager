@@ -170,6 +170,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         "profiles:apply" | "profiles:apply-definition"
     );
     let is_profile_seed = request.command.replace('.', ":") == "profiles:seed";
+    let is_profile_shared_apply = request.command.replace('.', ":") == "profiles:shared-apply";
     // 运行参数写助手配置文件，与别的写动作同样要排他；校验在 configure 内部做，
     // 这里只负责取锁。
     let is_agent_configure = matches!(
@@ -341,8 +342,13 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                 return env;
             }
         }
-    } else if is_profile_seed {
-        match crate::native_profiles::preflight_seed(ctx, request) {
+    } else if is_profile_seed || is_profile_shared_apply {
+        let preflight = if is_profile_seed {
+            crate::native_profiles::preflight_seed(ctx, request)
+        } else {
+            crate::native_profiles::preflight_shared(ctx, request)
+        };
+        match preflight {
             Ok(()) => (true, "Profiles", "PROFILE_ERROR"),
             Err(err) => {
                 let env = Envelope::new(
@@ -547,11 +553,13 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
                 .map(|data| (data, vec![]))
                 .map_err(|err| DispatchError::new("HOOK_ERROR", format!("{err:#}")))
         }
-        ("profiles", "status" | "apply" | "apply-definition" | "adopt" | "seed") => {
-            crate::native_profiles::handle(ctx, request)
-                .map(|data| (data, vec![]))
-                .map_err(|err| DispatchError::new("PROFILE_ERROR", format!("{err:#}")))
-        }
+        (
+            "profiles",
+            "status" | "apply" | "apply-definition" | "adopt" | "seed" | "shared-status"
+            | "shared-apply",
+        ) => crate::native_profiles::handle(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("PROFILE_ERROR", format!("{err:#}"))),
         // 别名以 rc 文件受管区块的实际行为准：apply 写文件（取锁），丢弃旧版保存的别名只写库
         ("aliases", "status" | "apply" | "discard-legacy") => {
             crate::native_aliases::handle(ctx, request)
