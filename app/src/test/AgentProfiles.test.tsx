@@ -118,17 +118,7 @@ function routes(profiles: ReturnType<typeof profileElement>[] = [profileElement(
       },
       { command: "profiles.seed" },
     ),
-    "aliases:preview": async (args) => {
-      const name = args[args.indexOf("--set") + 1];
-      const value = args[args.indexOf("--value") + 1];
-      return makeEnvelope({
-        files: [{
-          target: "aliases:zshrc", path: "/isolated/.zshrc", exists: true,
-          content: `# 保留现有配置\nalias ${name}='${value}'\n`,
-        }],
-        skipped: [],
-      }, { command: "aliases.preview" });
-    },
+    "aliases:preview": makeEnvelope({ files: [], skipped: [] }, { command: "aliases.preview" }),
     "aliases:apply": makeEnvelope(makeApplyResult({ domain: "aliases" }), { command: "aliases.apply" }),
     "policy:set": makeEnvelope(makePolicyData(), { command: "policy.set" }),
     "aliases:status": makeEnvelope(
@@ -213,7 +203,16 @@ describe("助手实例", () => {
   });
 
   it("新建环境实时展示终端配置完整候选原文，改参数后旧预览失效且预览不写文件", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, routes());
+    const routeMap: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    routeMap["aliases:preview"] = async (args) => {
+      const name = args[args.indexOf("--set") + 1];
+      const value = args[args.indexOf("--value") + 1];
+      return makeEnvelope({ files: [{
+        target: "aliases:zshrc", path: "/isolated/.zshrc", exists: true,
+        content: `# 保留现有配置\nalias ${name}='${value}'\n`,
+      }], skipped: [] }, { command: "aliases.preview" });
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
     await openInstanceManager();
     await openNewProfileForm();
     const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
