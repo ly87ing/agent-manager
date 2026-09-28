@@ -29,6 +29,8 @@ export function hasUnsavedLive(current: AgentCurrentConnection | null): boolean 
 export interface ConfigureRequest {
   agentId: string;
   base: string;
+  /** 仅切回官方账号：确认框展示完整文件时的原文字节基准。 */
+  previewFileBase?: string;
   /** 切回官方账号：撤掉主配置里的接入键（主配置不写第三方接入）。 */
   useDefault?: boolean;
   /** 运行参数补丁：只含改动的字段。 */
@@ -44,6 +46,7 @@ export interface ConfigureRequest {
 
 export function configureArgs(request: ConfigureRequest): string[] {
   const args = ["--only", `agents:${request.agentId}`, "--base", request.base];
+  if (request.previewFileBase) args.push("--preview-file-base", request.previewFileBase);
   if (request.runtime) args.push("--runtime", JSON.stringify(request.runtime));
   if (request.useDefault) args.push("--use-default");
   if (request.saveCurrent) args.push("--save-current");

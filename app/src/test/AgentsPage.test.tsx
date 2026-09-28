@@ -7,6 +7,7 @@ import { editorText, editorView } from "./code-editor";
 import type { EngineElement, Envelope } from "../lib/contract";
 
 const BASE = "c".repeat(64);
+const PREVIEW_FILE_BASE = "e".repeat(64);
 /** 实际配置对不上任何已保存接入：引擎报「未保存」。 */
 const UNSAVED = { profile: null, default: false, last_written: null, unverified: [], drifted_from: null };
 
@@ -20,6 +21,7 @@ function routes(bin = "claude", id = "claude-code"): Record<string, Envelope> {
     ),
     "agents:preview-default": makeEnvelope({
       path: `/isolated/.${bin}/settings.json`, exists: true, will_write: true,
+      file_base: PREVIEW_FILE_BASE,
       content: '{"env":{"MY_OWN":"keep"}}',
     }, { command: "agents.preview-default" }),
     "agents:status": makeEnvelope(
@@ -391,6 +393,8 @@ describe("助手页产品边界", () => {
       "agents:claude-code",
       "--base",
       BASE,
+      "--preview-file-base",
+      PREVIEW_FILE_BASE,
       "--use-default",
     ]);
     await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方账号"));
@@ -420,6 +424,7 @@ describe("助手页产品边界", () => {
     all["agents:preview-default"] = () => new Promise<Envelope>((resolve) => {
       finishPreview = () => resolve(makeEnvelope({
         path: "/isolated/.claude/settings.json", exists: true, will_write: true,
+        file_base: PREVIEW_FILE_BASE,
         content: '{"env":{"MY_OWN":"keep"}}',
       }, { command: "agents.preview-default" }));
     });

@@ -73,7 +73,7 @@ import { sharedApplyArgs, sharedPreviewArgs, type SharedItem, type SharedPreview
 import { isOfficial, switchBackEffects } from "../lib/defaultEnvironment";
 import { DEFAULT_SECRETS_PATH, secretSourceOf } from "../lib/secretSource";
 
-type DefaultFilePreview = { path: string; content: string; exists: boolean; will_write: boolean };
+type DefaultFilePreview = { path: string; content: string; exists: boolean; will_write: boolean; file_base: string };
 
 function ResetDefaultConfirm({
   element,
@@ -84,7 +84,7 @@ function ResetDefaultConfirm({
 }: {
   element: EngineElement;
   executing: boolean;
-  onConfirm: () => void;
+  onConfirm: (fileBase: string) => void;
   onClose: () => void;
   onRefresh: () => void;
 }) {
@@ -101,7 +101,8 @@ function ResetDefaultConfirm({
     }
     void runEngine<DefaultFilePreview>("agents:preview-default", ["--only", element.id, "--base", base])
       .then((result) => {
-        if (current) setPreview(result.ok ? result.data : result.errors[0]?.message ?? "预览失败");
+        if (current) setPreview(result.ok && result.data?.file_base
+          ? result.data : result.errors[0]?.message ?? "预览失败");
       })
       .catch((error) => {
         if (current) setPreview(`预览失败：${String(error)}`);
@@ -119,7 +120,9 @@ function ResetDefaultConfirm({
       confirmLabel="确认切回"
       confirmDisabled={preview === null || typeof preview === "string"}
       executing={executing}
-      onConfirm={onConfirm}
+      onConfirm={() => {
+        if (preview && typeof preview !== "string") onConfirm(preview.file_base);
+      }}
       onClose={onClose}
     >
       <dl data-testid="switch-back-effects" className="space-y-2 text-sm">
@@ -1405,10 +1408,10 @@ export default function AgentsPage({
           key={`${resetElement.id}:${configureBaseOf(resetElement) ?? "unreadable"}`}
           element={resetElement}
           executing={configuringTarget === `${connectionResetting.id.replace(/^agents:/, "")}/default`}
-          onConfirm={() => {
+          onConfirm={(fileBase) => {
             const agentId = connectionResetting.id.replace(/^agents:/, "");
             setConnectionResetting(null);
-            void runConfigure({ agentId, useDefault: true }, { message: `已把 ${agentId} 的主配置切回官方账号` });
+            void runConfigure({ agentId, useDefault: true, previewFileBase: fileBase }, { message: `已把 ${agentId} 的主配置切回官方账号` });
           }}
           onClose={() => setConnectionResetting(null)}
           onRefresh={() => {

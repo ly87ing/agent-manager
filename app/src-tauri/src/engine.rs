@@ -274,6 +274,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("agents", "configure") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--base", ArgValueKind::Digest));
+            specs.push(("--preview-file-base", ArgValueKind::RuleBase));
             // 主配置只放官方账号：只能切回官方（--use-default），不能写入第三方接入
             specs.push(("--use-default", ArgValueKind::Flag));
             specs.push(("--save-current", ArgValueKind::Flag));
@@ -1371,6 +1372,32 @@ mod tests {
             &args(&["--only", "agents:claude-code", "--base", &base])
         )
         .is_ok());
+        assert!(validate_args(
+            "agents:configure",
+            &args(&[
+                "--only",
+                "agents:claude-code",
+                "--base",
+                &base,
+                "--use-default",
+                "--preview-file-base",
+                &base
+            ])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "agents:configure",
+            &args(&[
+                "--only",
+                "agents:claude-code",
+                "--base",
+                &base,
+                "--use-default",
+                "--preview-file-base",
+                "bad"
+            ])
+        )
+        .is_err());
         assert!(validate_args(
             "agents:preview-default",
             &args(&[

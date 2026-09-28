@@ -266,6 +266,7 @@ fn 运行参数完整预览与实际写入同字节_且预览零写() {
 
 #[test]
 fn 切回官方账号预览与_claude_实际写入同字节_且预览零写() {
+    use sha2::{Digest, Sha256};
     let (base, ctx) = temp_ctx("default-preview-claude");
     let path = ctx.home_dir.join(".claude/settings.json");
     write_settings_file(
@@ -282,8 +283,10 @@ fn 切回官方账号预览与_claude_实际写入同字节_且预览零写() {
     let preview = preview_default(&ctx, "claude-code", &status_base);
     assert!(preview.ok, "{:?}", preview.errors);
     let content = preview.data["content"].as_str().unwrap();
+    let file_base = preview.data["file_base"].as_str().unwrap();
     assert_eq!(preview.data["path"], path.display().to_string());
     assert_eq!(preview.data["will_write"], true);
+    assert_eq!(file_base, format!("{:x}", Sha256::digest(&old_file)));
     let parsed: Value = serde_json::from_str(content).unwrap();
     assert_eq!(parsed["env"]["MY_OWN"], "keep");
     assert!(parsed["env"].get("ANTHROPIC_BASE_URL").is_none());
@@ -291,7 +294,12 @@ fn 切回官方账号预览与_claude_实际写入同字节_且预览零写() {
     assert_eq!(file_bytes(&path), old_file);
     assert_eq!(data_dir_bytes(&ctx), old_data);
 
-    let applied = configure_with_base(&ctx, "claude-code", &status_base, &["--use-default"]);
+    let applied = configure_with_base(
+        &ctx,
+        "claude-code",
+        &status_base,
+        &["--use-default", "--preview-file-base", file_base],
+    );
     assert!(applied.ok, "{:?}", applied.errors);
     assert_eq!(file_bytes(&path), content.as_bytes());
     let _ = fs::remove_dir_all(&base);
@@ -315,13 +323,39 @@ fn 切回官方账号预览保留_codex_用户表_外部改动拒绝旧基准() 
     let preview = preview_default(&ctx, "codex", &status_base);
     assert!(preview.ok, "{:?}", preview.errors);
     let content = preview.data["content"].as_str().unwrap();
+    let file_base = preview.data["file_base"].as_str().unwrap();
     assert!(content.contains("# 用户注释"));
     assert!(content.contains("[model_providers.mine]"));
     assert!(!content.contains("model_provider ="));
     assert_eq!(file_bytes(&path), old_file);
     assert_eq!(data_dir_bytes(&ctx), old_data);
 
-    let applied = configure_with_base(&ctx, "codex", &status_base, &["--use-default"]);
+    let old_settings = settings_in_db(&ctx, "codex");
+    fs::write(
+        &path,
+        [b"# external comment\n".as_slice(), old_file.as_slice()].concat(),
+    )
+    .unwrap();
+    assert_eq!(base_of(&ctx, "codex"), status_base);
+    let changed = file_bytes(&path);
+    let stale_file = configure_with_base(
+        &ctx,
+        "codex",
+        &status_base,
+        &["--use-default", "--preview-file-base", file_base],
+    );
+    assert!(!stale_file.ok);
+    assert_eq!(stale_file.errors[0].code, "AGENT_CONFIG_CHANGED");
+    assert_eq!(file_bytes(&path), changed);
+    assert_eq!(settings_in_db(&ctx, "codex"), old_settings);
+    fs::write(&path, &old_file).unwrap();
+
+    let applied = configure_with_base(
+        &ctx,
+        "codex",
+        &status_base,
+        &["--use-default", "--preview-file-base", file_base],
+    );
     assert!(applied.ok, "{:?}", applied.errors);
     assert_eq!(file_bytes(&path), content.as_bytes());
 
@@ -370,6 +404,15 @@ fn 已是官方账号时预览保留模型原文字节_非法参数零写() {
     assert_eq!(bad.errors[0].code, "USAGE_ERROR");
     assert_eq!(file_bytes(&path), old_file);
     assert_eq!(data_dir_bytes(&ctx), old_data);
+    let missing_hash = configure_with_base(
+        &ctx,
+        "claude-code",
+        &status_base,
+        &["--use-default", "--preview-file-base"],
+    );
+    assert!(!missing_hash.ok);
+    assert_eq!(missing_hash.errors[0].code, "USAGE_ERROR");
+    assert_eq!(file_bytes(&path), old_file);
     let _ = fs::remove_dir_all(&base);
 }
 

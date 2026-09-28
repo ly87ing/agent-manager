@@ -1258,7 +1258,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       content = `${file.content.split("\n").filter((line) => !/^(model_provider|model)\s*=/.test(line)).join("\n").trimEnd()}\n`;
     }
     return makeEnvelope({ domain: "agents", element, path: observed.target ?? file.path,
-      exists: true, will_write: content !== file.content, content }, { command: "agents.preview-default" });
+      exists: true, file_base: "f".repeat(64), will_write: content !== file.content, content }, { command: "agents.preview-default" });
   };
   const editConfigFile = (args: string[], runId: string): Envelope => {
     const element = argOf(args, "--only") ?? "";

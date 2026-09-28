@@ -13,6 +13,7 @@ import type { EngineElement, Envelope } from "../lib/contract";
  */
 
 const BASE = "b".repeat(64);
+const PREVIEW_FILE_BASE = "d".repeat(64);
 const DEFAULT_CURRENT = { profile: null, default: true, last_written: null, unverified: [], drifted_from: null };
 
 function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelope> {
@@ -55,6 +56,7 @@ function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelo
     ),
     "agents:preview-default": makeEnvelope({
       path: "/Users/demo/.claude/settings.json", exists: true, will_write: true,
+      file_base: PREVIEW_FILE_BASE,
       content: '{"env":{"MY_OWN":"keep"}}',
     }, { command: "agents.preview-default" }),
     "secrets:set": makeEnvelope(
@@ -602,7 +604,7 @@ describe("助手运行参数", () => {
     await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
 
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
-    expect(configureCalls(calls)[1].args).toEqual(configureArgsOf("--use-default", "--discard-live-token"));
+    expect(configureCalls(calls)[1].args).toEqual(configureArgsOf("--preview-file-base", PREVIEW_FILE_BASE, "--use-default", "--discard-live-token"));
     await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方账号"));
     expect(onOpenSecrets).not.toHaveBeenCalled();
   });
@@ -662,7 +664,7 @@ describe("助手运行参数", () => {
     expect(within(dialog).queryByTestId("confirm-modal-secondary")).toBeNull();
     await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(2));
-    expect(configureCalls(calls)[1].args).toEqual(configureArgsOf("--use-default", "--discard-live"));
+    expect(configureCalls(calls)[1].args).toEqual(configureArgsOf("--preview-file-base", PREVIEW_FILE_BASE, "--use-default", "--discard-live"));
   });
 
   it("主配置里有第三方接入时提示混用、卡片不提供应用；切回官方账号先确认再带 --use-default", async () => {
@@ -707,7 +709,7 @@ describe("助手运行参数", () => {
     expect(within(resetConfirm).getByTestId("switch-back-file-preview")).toHaveTextContent('"MY_OWN":"keep"');
     await userEvent.click(within(resetConfirm).getByTestId("confirm-modal-confirm"));
     await waitFor(() => expect(configureCalls(calls)).toHaveLength(1));
-    expect(configureCalls(calls)[0].args).toEqual(configureArgsOf("--use-default"));
+    expect(configureCalls(calls)[0].args).toEqual(configureArgsOf("--preview-file-base", PREVIEW_FILE_BASE, "--use-default"));
     await waitFor(() => expect(screen.getByTestId("active-connection-summary")).toHaveTextContent("官方账号"));
     expect(screen.queryByTestId("main-mixed-warning")).toBeNull();
   });

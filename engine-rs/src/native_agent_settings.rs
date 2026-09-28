@@ -2651,6 +2651,7 @@ enum Action {
 struct ConfigureArgs {
     id: String,
     base: String,
+    preview_file_base: Option<String>,
     action: Action,
     discard_live: bool,
     discard_live_token: bool,
@@ -2702,6 +2703,30 @@ fn configure_args(req: &Request) -> Result<ConfigureArgs, DispatchError> {
     } else {
         Action::SaveCurrent
     };
+    let preview_file_base = if req.flag("--preview-file-base") {
+        Some(
+            req.value("--preview-file-base")
+                .ok_or_else(|| usage("--preview-file-base 缺少取值"))?
+                .to_string(),
+        )
+    } else {
+        None
+    };
+    if let Some(value) = preview_file_base.as_deref() {
+        if !matches!(action, Action::UseDefault) {
+            return Err(usage("--preview-file-base 只用于切回官方账号"));
+        }
+        if value != "missing"
+            && (value.len() != 64
+                || !value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+        {
+            return Err(usage(
+                "--preview-file-base 必须是 64 位小写 sha256 或 missing",
+            ));
+        }
+    }
     let discard_live = req.flag("--discard-live");
     let discard_live_token = req.flag("--discard-live-token");
     if (discard_live || discard_live_token) && matches!(action, Action::Runtime(_)) {
@@ -2715,6 +2740,7 @@ fn configure_args(req: &Request) -> Result<ConfigureArgs, DispatchError> {
     Ok(ConfigureArgs {
         id,
         base,
+        preview_file_base,
         action,
         discard_live,
         discard_live_token,
@@ -2913,6 +2939,10 @@ pub(crate) fn preview_default(ctx: &Context, req: &Request) -> Result<Value, Dis
         "element": format!("agents:{id}"),
         "path": path.display().to_string(),
         "exists": existing.is_some(),
+        "file_base": existing.as_deref().map_or_else(
+            || "missing".to_string(),
+            crate::native_mcp::model::sha256_hex_bytes,
+        ),
         "will_write": will_write,
         "content": String::from_utf8(content).map_err(|err| agent_error(err.into()))?,
     }))
@@ -2972,6 +3002,18 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
                 "{file_label} 已在外部修改（与读取时不一致），文件与库都没有改动；请刷新后重试"
             ),
         ));
+    }
+    if let Some(expected) = args.preview_file_base.as_deref() {
+        let current = existing.as_deref().map_or_else(
+            || "missing".to_string(),
+            crate::native_mcp::model::sha256_hex_bytes,
+        );
+        if current != expected {
+            return Err(DispatchError::new(
+                "AGENT_CONFIG_CHANGED",
+                "预览后配置文件又发生变化，没有写入；请刷新后重新预览".to_string(),
+            ));
+        }
     }
 
     let settings = parse(def.spec_ref()).map_err(agent_error)?;
