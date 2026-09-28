@@ -186,6 +186,44 @@ fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
     plan_for_def(ctx, req, find_def(ctx, &id)?)
 }
 
+/// 按表单草稿只读渲染目标文件。变量取值保留引用形式，不读取密钥来源；保存时仍按实际文件重新计算。
+pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
+    if req.args.len() != 4 || req.args[0] != "--only" || req.args[2] != "--definition" {
+        bail!("profiles:preview 只接受 --only profiles:<实例名> --definition <JSON>");
+    }
+    let id = parse_only(req)?;
+    let raw: Value =
+        serde_json::from_str(&req.args[3]).map_err(|_| anyhow!("--definition 不是合法 JSON"))?;
+    let def = model::parse_definition(&id, &raw, true)?;
+    let dir = model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
+    let (file, _, previous) = read_target(&def, &dir)?;
+    if previous
+        .as_ref()
+        .is_some_and(|bytes| bytes.len() > 4 * 1024 * 1024)
+    {
+        bail!("配置文件超过安全读取上限");
+    }
+    let recorded = recorded_paths(ctx, &def, &file)?;
+    let rendered = model::render_all(
+        &def,
+        &|_| previous.clone(),
+        &|name| Some(format!("${{{name}}}")),
+        &recorded,
+    )?;
+    let content = rendered
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("[{}] 没有可预览的文件", def.id))?
+        .content;
+    Ok(json!({
+        "element": format!("profiles:{id}"),
+        "path": format!("{}/{}", def.config_dir_raw, file),
+        "format": if def.kind.as_str() == "codex" { "toml" } else { "json" },
+        "exists": previous.is_some(),
+        "content": String::from_utf8(content).map_err(|_| anyhow!("预览结果不是 UTF-8 文本"))?,
+    }))
+}
+
 /// 从现有完整定义生成候选；只替换实例负责的字段，未知元数据原样保留。
 fn plan_update(ctx: &Context, req: &Request) -> Result<(Plan, Value, String)> {
     check_update_args(req)?;

@@ -555,7 +555,7 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         }
         (
             "profiles",
-            "status" | "config-file" | "apply" | "apply-definition" | "adopt" | "seed"
+            "status" | "config-file" | "preview" | "apply" | "apply-definition" | "adopt" | "seed"
             | "shared-status" | "shared-apply",
         ) => crate::native_profiles::handle(ctx, request)
             .map(|data| (data, vec![]))

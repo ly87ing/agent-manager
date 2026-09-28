@@ -37,7 +37,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:config-file|apply-definition|adopt|seed|shared-status|shared-apply / agents:configure|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 <domain>:status|apply / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:config-file|preview|apply-definition|adopt|seed|shared-status|shared-apply / agents:configure|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -66,7 +66,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("profiles", "apply-definition") => true,
         // 把默认环境的权限、状态栏、hooks、规则与 MCP 一次性带进实例：只补实例没有的
         ("profiles", "seed") => true,
-        ("profiles", "shared-status" | "shared-apply" | "config-file") => true,
+        ("profiles", "shared-status" | "shared-apply" | "config-file" | "preview") => true,
         // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
         ("agents", "configure") => true,
         // 接入配置可用性检查：会联网，但只在界面上点它时才发
@@ -212,6 +212,10 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("profiles", "config-file") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--file", ArgValueKind::ProfileFile));
+        }
+        ("profiles", "preview") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--definition", ArgValueKind::JsonValue));
         }
         ("profiles", "shared-apply") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -721,6 +725,7 @@ mod tests {
             "aliases:discard-legacy",
             "profiles:status",
             "profiles:config-file",
+            "profiles:preview",
             "profiles:apply",
             "profiles:apply-definition",
             "profiles:adopt",
@@ -1382,6 +1387,22 @@ mod tests {
         assert!(validate_args(
             "profiles:config-file",
             &args(&["--only", "profiles:cc-ly", "--value", "secret"])
+        )
+        .is_err());
+        assert!(validate_command("profiles:preview").is_ok());
+        assert!(validate_args(
+            "profiles:preview",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--definition",
+                "{\"profile\":{}}"
+            ])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "profiles:preview",
+            &args(&["--only", "profiles:cc-ly", "--definition", "not json"])
         )
         .is_err());
         for command in ["profiles:apply", "profiles:adopt"] {

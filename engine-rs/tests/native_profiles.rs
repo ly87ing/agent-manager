@@ -340,6 +340,123 @@ fn claude_profile(token_var: &str) -> String {
 }
 
 #[test]
+fn draft_preview_uses_profile_renderer_without_writing_files_or_resolving_credentials() {
+    let (root, ctx) = temp_ctx("draft-preview");
+    let target = ctx.home_dir.join(".claude-ly/settings.json");
+    let default = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(default.parent().unwrap()).unwrap();
+    let target_before = b"{\"theme\":\"keep\",\"env\":{\"CUSTOM\":\"untouched\"}}\n";
+    std::fs::write(&target, target_before).unwrap();
+    std::fs::write(&default, b"{\"default\":true}\n").unwrap();
+    let draft = claude_profile("AM_PREVIEW_UNSET_TOKEN");
+    let preview = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &["--only", "profiles:cc-ly", "--definition", &draft],
+        ),
+    );
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(preview.data["path"], "~/.claude-ly/settings.json");
+    let content: serde_json::Value =
+        serde_json::from_str(preview.data["content"].as_str().unwrap()).unwrap();
+    assert_eq!(content["theme"], "keep");
+    assert_eq!(content["env"]["CUSTOM"], "untouched");
+    assert_eq!(
+        content["env"]["ANTHROPIC_BASE_URL"],
+        "https://api.example.com"
+    );
+    assert_eq!(
+        content["env"]["ANTHROPIC_AUTH_TOKEN"],
+        "${AM_PREVIEW_UNSET_TOKEN}"
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), target_before);
+    assert_eq!(
+        std::fs::read_to_string(&default).unwrap(),
+        "{\"default\":true}\n"
+    );
+    assert!(!ctx.data_dir.exists());
+    assert!(probe_log(&ctx).is_empty());
+
+    let invalid = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &["--only", "profiles:cc-ly", "--definition", "{}"],
+        ),
+    );
+    assert!(!invalid.ok);
+    assert_eq!(std::fs::read(&target).unwrap(), target_before);
+    let primary = draft.replace("~/.claude-ly", "~/.claude");
+    let blocked = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &["--only", "profiles:cc-ly", "--definition", &primary],
+        ),
+    );
+    assert!(!blocked.ok);
+    assert_eq!(
+        std::fs::read_to_string(&default).unwrap(),
+        "{\"default\":true}\n"
+    );
+    let new_dir = draft.replace("~/.claude-ly", "~/.claude-new");
+    let missing = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &["--only", "profiles:cc-new", "--definition", &new_dir],
+        ),
+    );
+    assert!(missing.ok, "{:?}", missing.errors);
+    assert_eq!(missing.data["exists"], false);
+    assert!(!ctx.home_dir.join(".claude-new").exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn codex_draft_preview_preserves_existing_mcp_without_touching_default_config() {
+    let (root, ctx) = temp_ctx("codex-draft-preview");
+    let target = ctx.home_dir.join(".codex-work/config.toml");
+    let default = ctx.home_dir.join(".codex/config.toml");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(default.parent().unwrap()).unwrap();
+    let target_before = b"[mcp_servers.fs]\ncommand = \"npx\"\n";
+    std::fs::write(&target, target_before).unwrap();
+    std::fs::write(&default, b"model = \"keep\"\n").unwrap();
+    let draft = r#"{"display_name":"Codex work","bin":"codex","profile":{"base_agent":"codex","kind":"codex","config_dir":"~/.codex-work","base_url":"https://api.example.com/v1","env_key":"AM_PREVIEW_UNSET_CODEX_KEY","wire_api":"responses","model":"new-model"}}"#;
+    let preview = execute(
+        &ctx,
+        &request(
+            "profiles:preview",
+            &["--only", "profiles:cx-work", "--definition", draft],
+        ),
+    );
+    assert!(preview.ok, "{:?}", preview.errors);
+    let content = preview.data["content"].as_str().unwrap();
+    let doc: toml::Value = toml::from_str(content).unwrap();
+    assert_eq!(doc["model"].as_str(), Some("new-model"));
+    assert_eq!(doc["mcp_servers"]["fs"]["command"].as_str(), Some("npx"));
+    assert_eq!(
+        doc["model_providers"]["agent-manager"]["base_url"].as_str(),
+        Some("https://api.example.com/v1")
+    );
+    assert_eq!(
+        doc["model_providers"]["agent-manager"]["experimental_bearer_token"].as_str(),
+        Some("${AM_PREVIEW_UNSET_CODEX_KEY}")
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), target_before);
+    assert_eq!(
+        std::fs::read_to_string(&default).unwrap(),
+        "model = \"keep\"\n"
+    );
+    assert!(!ctx.data_dir.exists());
+    assert!(probe_log(&ctx).is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn config_file_reads_only_the_selected_profile_and_refreshes_external_edits() {
     let (root, ctx) = temp_ctx("config-file-readback");
     assert!(save_definition(
