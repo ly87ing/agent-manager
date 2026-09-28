@@ -343,6 +343,8 @@ describe("命令面板", () => {
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "接管");
+    expect(screen.getAllByTestId("command-item-page:takeover")).toHaveLength(1);
+    expect(screen.queryByTestId("command-item-action:takeover")).toBeNull();
     await userEvent.keyboard("{Enter}");
     expect(await screen.findByRole("heading", { name: "导入现有配置" }, { timeout: 10_000 })).toBeInTheDocument();
 

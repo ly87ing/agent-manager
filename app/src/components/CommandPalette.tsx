@@ -408,14 +408,6 @@ export function CommandPalette({
         group: "动作",
         run: () => refreshUpstream.mutate(undefined),
       },
-      {
-        id: "action:takeover",
-        label: "扫描本机资源",
-        hint: "扫描并导入本机已有配置",
-        keywords: "discover 接管 扫描 导入 现有配置",
-        group: "动作",
-        run: () => onNavigate("takeover"),
-      },
     );
     return out;
   }, [agents.data, skills.data, mcp.data, profiles.data, aliasValues, switchingTarget, refreshUpstream, switchConnection, onNavigate, onNavigateProfile, onOpenAgentSkills]);
