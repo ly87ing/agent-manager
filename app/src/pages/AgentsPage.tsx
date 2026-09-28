@@ -960,6 +960,7 @@ export default function AgentsPage({
         `agents.definitions.${input.id}`,
         "--value",
         JSON.stringify({ ...definition, _delete: false, _replace: true }),
+        ...(!isEdit ? ["--expect-definition", "null"] : []),
       ]);
     } catch (err) {
       toast.error(`保存独立环境失败:${String(err)}`);

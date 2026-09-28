@@ -177,6 +177,41 @@ fn policy_set_expected_agent_definition_can_require_missing_key_without_creating
 }
 
 #[test]
+fn policy_set_expected_missing_accepts_deleted_agent_definition() {
+    let (base, ctx) = temp_ctx("agent-definition-tombstone");
+    set_agent_definition(&ctx, "fixture", json!({"_delete": true}));
+    let definition = json!({
+        "display_name": "fixture",
+        "bin": "fixture",
+        "preferred_provider": "native",
+        "providers": {"native": {}},
+        "_replace": true
+    });
+    let restored = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.fixture",
+                "--value",
+                &definition.to_string(),
+                "--expect-definition",
+                "null",
+            ],
+        ),
+    );
+    assert!(restored.ok, "{:?}", restored.errors);
+    assert_eq!(
+        store::effective_policy(&ctx).unwrap()["agents"]["definitions"]["fixture"]["bin"],
+        "fixture"
+    );
+    let _ = std::fs::remove_dir_all(base);
+}
+
+#[test]
 fn request_helpers_parse_flags_and_values() {
     let req = request(
         "rules:plan",

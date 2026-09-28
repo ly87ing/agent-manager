@@ -1067,9 +1067,11 @@ fn check_expected_agent_definition(
     let current = segments
         .iter()
         .try_fold(policy, |value, segment| value.get(*segment));
-    let visible = current
-        .map(crate::native_agents::strip_internal_markers)
-        .unwrap_or(Value::Null);
+    let visible = match current {
+        Some(value) if value.get("_delete") == Some(&Value::Bool(true)) => Value::Null,
+        Some(value) => crate::native_agents::strip_internal_markers(value),
+        None => Value::Null,
+    };
     if &visible != expected {
         return Err(DispatchError::new(
             "POLICY_CONFLICT",

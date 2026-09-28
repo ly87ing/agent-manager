@@ -264,6 +264,23 @@ describe("助手实例", () => {
     expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
   });
 
+  it("新建环境写定义时发现同名项已被外部创建，停止写文件和启动命令", async () => {
+    const all = routes();
+    all["policy:set"] = makeEnvelope(null, {
+      command: "policy.set", ok: false,
+      errors: [{ code: "POLICY_CONFLICT", element: null, message: "Agent 定义在表单打开后发生变化" }],
+    });
+    const { calls } = renderWithEngine(<AgentsPage />, all);
+    await openNewProfileForm();
+    const dialog = await screen.findByRole("dialog", { name: "新建独立环境" });
+    await userEvent.type(within(dialog).getByTestId("profile-id-input"), "cc-work");
+    await submitAfterPreview(dialog, "profile-form-submit");
+    expect(await screen.findByText(/保存独立环境被拒绝/)).toBeInTheDocument();
+    const write = calls.find((call) => call.command === "policy:set");
+    expect(write?.args.slice(-2)).toEqual(["--expect-definition", "null"]);
+    expect(calls.some((call) => ["profiles:apply", "aliases:apply"].includes(call.command))).toBe(false);
+  });
+
   it.each([
     ["受管别名", "cc-ly-yolo", "managed"],
     ["区块外别名", "outside", "external"],
