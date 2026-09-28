@@ -444,6 +444,7 @@ export function ConnectionWorkbench({
             {kind && management && !writeBlocked && (
               <AgentRuntimePanel
                 key={`${agentId}:${configureBaseOf(selected)}`}
+                agentId={agentId}
                 adapter={management.adapter}
                 fields={runtimeFields}
                 initial={actualRuntimeSettings(runtimeFields, currentConfig)}

@@ -1135,6 +1135,69 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       { command: "agents.config-file" },
     );
   };
+  const previewRuntime = (args: string[]): Envelope => {
+    const element = argOf(args, "--only") ?? "";
+    const file = configFiles[element];
+    const agents = (routes["agents:status"].data as {
+      elements: Array<{ id: string; observed: { current_config?: { base?: string; target?: string }; management?: ReturnType<typeof agentManagementFixture> } }>;
+    }).elements;
+    const observed = agents.find((item) => item.id === element)?.observed;
+    const refuse = (code: string, message: string) => makeEnvelope({}, {
+      command: "agents.preview-runtime", ok: false,
+      errors: [{ code, element: element || null, message }],
+    });
+    if (!file || !observed?.management) return refuse("AGENT_ERROR", "没有这个助手的配置文件");
+    if (argOf(args, "--base") !== observed.current_config?.base) {
+      return refuse("AGENT_CONFIG_CHANGED", "配置文件已在外部修改，请刷新后重新预览");
+    }
+    let patch: Record<string, unknown>;
+    try {
+      patch = JSON.parse(argOf(args, "--runtime") ?? "") as Record<string, unknown>;
+    } catch {
+      return refuse("USAGE_ERROR", "--runtime 必须是 JSON 对象");
+    }
+    const changes = Object.entries(patch).flatMap(([key, value]) => {
+      const field = observed.management!.runtime_fields.find((candidate) => candidate.key === key);
+      const targets = field?.options?.find((option) => option.value === value)?.targets ?? field?.targets ?? [];
+      return targets.map((target) => {
+        let rendered = value;
+        if (target.enabled_value && value !== null && value !== false && value !== "") {
+          try { rendered = JSON.parse(target.enabled_value) as unknown; }
+          catch { rendered = target.enabled_value; }
+        }
+        return { key: target.key, value: value === null || value === false || value === "" ? undefined : rendered };
+      });
+    });
+    let content: string;
+    if (file.format === "json") {
+      const root = JSON.parse(file.content) as Record<string, unknown>;
+      for (const change of changes) {
+        const parts = change.key.split(".");
+        let node = root;
+        for (const part of parts.slice(0, -1)) {
+          if (!node[part] || typeof node[part] !== "object") node[part] = {};
+          node = node[part] as Record<string, unknown>;
+        }
+        if (change.value === undefined) delete node[parts[parts.length - 1]];
+        else node[parts[parts.length - 1]] = change.value;
+      }
+      content = `${JSON.stringify(root, null, 2)}\n`;
+    } else {
+      const lines = file.content.trimEnd().split("\n");
+      for (const change of changes) {
+        const index = lines.findIndex((line) => line.startsWith(`${change.key} = `));
+        if (change.value === undefined) {
+          if (index >= 0) lines.splice(index, 1);
+        } else if (index >= 0) lines[index] = `${change.key} = ${JSON.stringify(change.value)}`;
+        else lines.push(`${change.key} = ${JSON.stringify(change.value)}`);
+      }
+      content = `${lines.join("\n")}\n`;
+    }
+    return makeEnvelope({
+      domain: "agents", element, path: observed.current_config?.target ?? file.path,
+      exists: true, content,
+    }, { command: "agents.preview-runtime" });
+  };
   const editConfigFile = (args: string[], runId: string): Envelope => {
     const element = argOf(args, "--only") ?? "";
     const file = configFiles[element];
@@ -1386,6 +1449,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         return makeEnvelope({ deleted }, { command: "runs.clear" });
       }
       if (command === "agents:configure") return configureAgent(args, runId);
+      if (command === "agents:preview-runtime") return previewRuntime(args);
       if (command === "agents:config-file") return readConfigFile(args);
       if (command === "agents:edit-config") return editConfigFile(args, runId);
       if (command === "agents:auth-status") {

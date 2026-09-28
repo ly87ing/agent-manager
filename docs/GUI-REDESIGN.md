@@ -353,8 +353,8 @@ AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、�
 失败不把新 Provider 冒充为当前项。
 
 接入工作台中的「运行设置」直接在页签里展示表单，不再弹窗，按客户端实际值预填，只拥有
-`automation_mode`、适配器声明的运行字段与 Claude 的 `statusline`；有改动才能写入，可撤销改动或
-展开「写入预览」查看这次会写的键。提交只把改动过的字段作为 `--runtime` 补丁交给
+`automation_mode`、适配器声明的运行字段与 Claude 的 `statusline`；有改动才能写入，可撤销改动。
+改动后立即列出本次涉及的键，再由只读的 `agents:preview-runtime` 按当前实际文件和同一套写入逻辑展示完整目标文件；旧请求结果不能覆盖新输入，现有文件可能含敏感值，界面明确提示勿直接分享。提交只把改动过的字段作为 `--runtime` 补丁交给
 `agents:configure`，由引擎在同一事务里写文件并更新库里的上次写入记录；未改动的项（包括本工具
 不提供的取值，如 `acceptEdits`，表单显示为「保持当前」）原样保留。开启完全放开仍由引擎要求
 `--allow-yolo` 并经独立二次确认。
@@ -443,7 +443,7 @@ Codex 的探测去掉 `CODEX_API_KEY`、`CODEX_ACCESS_TOKEN`（`codex login stat
 `drifted_from`）。Claude 的 `credential.saved_var` 说明实际令牌与哪个已保存变量一致；自动化档位
 不在预设里时报 `custom`，原值放在 `automation_raw`。status 零写，不返回 token/API key 正文，
 不生成数据库 profile；符号链接按最终目标读，断链、非普通文件、超限或畸形内容按固定状态
-fail-closed。界面的当前接入、运行参数与表单预填全部读实际值；写入预览只列这次改动的键。
+fail-closed。界面的当前接入、运行参数与表单预填全部读实际值；写入前的即时摘要只列这次改动的键，随后按实际文件显示完整预览。
 `agents:configure` 返回成功后，必须回读到 `current` 是目标、或补丁里每一项都已是实际值，才向
 用户提示成功。
 

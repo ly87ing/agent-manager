@@ -1,5 +1,5 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { fireEvent, waitFor } from "@testing-library/react";
+import { act, fireEvent, waitFor } from "@testing-library/react";
 import AgentsPage from "../pages/AgentsPage";
 import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
@@ -241,9 +241,67 @@ describe("助手运行参数", () => {
     await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
     expect(screen.getByTestId("agent-runtime-target")).toHaveTextContent("/Users/demo/.claude/settings.json");
     expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"defaultMode": "bypassPermissions"');
-    expect(dialog).toHaveTextContent("文件里的其他配置保持不变");
+    expect(dialog).toHaveTextContent("正在计算完整文件");
     await userEvent.click(screen.getByTestId("agent-runtime-reset"));
     expect(screen.queryByTestId("agent-runtime-preview")).toBeNull();
+  });
+
+  it("运行设置自动回读 Rust 合并的完整文件，不执行写入", async () => {
+    const content = '{\n  "permissions": {"defaultMode": "bypassPermissions"},\n  "hooks": {"keep": true}\n}\n';
+    const { calls } = renderWithEngine(<AgentsPage />, routes({
+      "agents:preview-runtime": makeEnvelope({
+        domain: "agents", element: "agents:claude-code", path: "/Users/demo/.claude/settings.json",
+        exists: true, content,
+      }, { command: "agents.preview-runtime" }),
+    }));
+    await openRuntimeSettings();
+    await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
+    await waitFor(() => expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"keep": true'));
+    expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"defaultMode": "bypassPermissions"');
+    expect(screen.getByText(/按当前文件合并后的完整内容/)).toBeInTheDocument();
+    expect(calls.filter((call) => call.command === "agents:preview-runtime")[0].args).toEqual([
+      "--only", "agents:claude-code", "--base", BASE,
+      "--runtime", JSON.stringify({ automation_mode: "full" }),
+    ]);
+    expect(configureCalls(calls)).toHaveLength(0);
+    await userEvent.click(screen.getByTestId("agent-runtime-reset"));
+    expect(screen.queryByTestId("agent-runtime-preview")).toBeNull();
+  });
+
+  it("较慢的旧文件预览不会盖掉新选择", async () => {
+    const pending: Array<(content: string) => void> = [];
+    const withPreview: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    withPreview["agents:preview-runtime"] = () => new Promise((resolve) => {
+      pending.push((content) => resolve(makeEnvelope({
+        domain: "agents", element: "agents:claude-code", path: "/Users/demo/.claude/settings.json",
+        exists: true, content,
+      }, { command: "agents.preview-runtime" })));
+    });
+    renderWithEngine(<AgentsPage />, withPreview);
+    await openRuntimeSettings();
+    await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-auto"));
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-full"));
+    await waitFor(() => expect(pending).toHaveLength(2));
+    await act(async () => pending[1]('{"permissions":{"defaultMode":"bypassPermissions"},"other":"new"}\n'));
+    expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"other":"new"');
+    await act(async () => pending[0]('{"permissions":{"defaultMode":"auto"},"other":"old"}\n'));
+    expect(screen.getByTestId("agent-runtime-preview")).not.toHaveTextContent('"other":"old"');
+  });
+
+  it("文件在外部修改后不把局部摘要冒充完整预览", async () => {
+    const { calls } = renderWithEngine(<AgentsPage />, routes({
+      "agents:preview-runtime": makeEnvelope({}, {
+        command: "agents.preview-runtime", ok: false,
+        errors: [{ code: "AGENT_CONFIG_CHANGED", element: "agents:claude-code", message: "配置文件已在外部修改" }],
+      }),
+    }));
+    await openRuntimeSettings();
+    await userEvent.click(screen.getByTestId("agent-runtime-automation-mode-auto"));
+    await waitFor(() => expect(screen.getByText(/完整文件预览失败：配置文件已在外部修改/)).toBeInTheDocument());
+    expect(screen.getByText(/完整文件尚未确认/)).toBeInTheDocument();
+    expect(screen.getByTestId("agent-runtime-preview")).toHaveTextContent('"defaultMode": "auto"');
+    expect(configureCalls(calls)).toHaveLength(0);
   });
 
   it("写入预览显示 Codex TOML 最终配置值和真实目标文件", async () => {

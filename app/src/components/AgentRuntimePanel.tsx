@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { AgentRuntimeSettings } from "../lib/agentDefinitionForm";
 import { automationRawText, CUSTOM_AUTOMATION, runtimePatch } from "../lib/agentRuntime";
+import { engineErrorMessage, runEngine } from "../lib/engine";
 import type { AgentCurrentConfigStatus, AgentRuntimeField, AgentRuntimeTarget } from "../lib/observed";
 import { cn } from "../lib/utils";
 
@@ -194,6 +195,7 @@ function RuntimeField({
  * 写入后状态回读换了基准，调用方用新的 key 重建它，表单即回到新的实际值。
  */
 export function AgentRuntimePanel({
+  agentId,
   adapter,
   fields,
   initial,
@@ -201,6 +203,7 @@ export function AgentRuntimePanel({
   busy,
   onSubmit,
 }: {
+  agentId: string;
   adapter: string;
   fields: AgentRuntimeField[];
   /** 客户端实际值（actualRuntimeSettings）。 */
@@ -212,6 +215,9 @@ export function AgentRuntimePanel({
 }) {
   const [settings, setSettings] = useState<AgentRuntimeSettings>(initial);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [filePreview, setFilePreview] = useState<{ key: string; path: string | null; content: string | null; error: string | null } | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const previewSerial = useRef(0);
   const rawText = automationRawText(currentConfig);
   // 实际档位不在三档预设里：多给一张「保持当前」卡片，不改就原样保留
   const shownFields = useMemo(() => fields.map((field) => {
@@ -248,6 +254,42 @@ export function AgentRuntimePanel({
     }
   })();
   const changedCount = Object.keys(pendingPatch).length;
+  const base = currentConfig?.base;
+  const previewKey = JSON.stringify({ base, patch: pendingPatch });
+  const previewReady = changedCount > 0 && Boolean(base);
+
+  useEffect(() => {
+    if (!previewReady) {
+      setPreviewBusy(false);
+      setFilePreview(null);
+      return;
+    }
+    const serial = ++previewSerial.current;
+    setPreviewBusy(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const envelope = await runEngine<{ path: string; content: string }>("agents:preview-runtime", [
+          "--only", `agents:${agentId}`,
+          "--base", base!,
+          "--runtime", JSON.stringify(pendingPatch),
+        ]);
+        if (serial === previewSerial.current) setFilePreview({
+          key: previewKey,
+          path: envelope.ok ? envelope.data.path : null,
+          content: envelope.ok ? envelope.data.content : null,
+          error: envelope.ok ? null : envelope.errors[0]?.message ?? "无法预览完整配置文件",
+        });
+      } catch (err) {
+        if (serial === previewSerial.current) setFilePreview({ key: previewKey, path: null, content: null, error: engineErrorMessage(err) });
+      } finally {
+        if (serial === previewSerial.current) setPreviewBusy(false);
+      }
+    }, 300);
+    return () => {
+      window.clearTimeout(timer);
+      previewSerial.current += 1;
+    };
+  }, [previewKey, previewReady, agentId]);
 
   const submit = () => {
     try {
@@ -262,6 +304,7 @@ export function AgentRuntimePanel({
 
   const reset = () => {
     setSettings(initial);
+    setFilePreview(null);
     setLocalError(null);
   };
 
@@ -300,19 +343,32 @@ export function AgentRuntimePanel({
       {changedCount > 0 && (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">
-            写入{" "}
+            目标文件{" "}
             <code data-testid="agent-runtime-target" className="break-all font-semibold text-foreground">
-              {currentConfig?.target ?? currentConfig?.file ?? "目标文件暂不可用"}
+              {filePreview?.key === previewKey && filePreview.path
+                ? filePreview.path : currentConfig?.target ?? currentConfig?.file ?? "目标文件暂不可用"}
             </code>
-            ：只列出这次改动的配置键，未改动的项与文件里的其他配置保持不变。
+            ：{filePreview?.key === previewKey && filePreview.content !== null
+              ? "按当前文件合并后的完整内容；保存时会重新读取。现有文件可能含敏感值，请勿直接分享。"
+              : filePreview?.key === previewKey && filePreview.error
+                ? "完整文件尚未确认；下方只列本次改动的配置键，未改动的项保持不变。"
+                : previewReady
+                  ? "正在计算完整文件；下方暂列本次改动的配置键，未改动的项保持不变。"
+                  : "下方只列本次改动的配置键，目标文件暂不可预览。"}
           </p>
           <pre
-            aria-label="最终写入配置预览"
+            aria-label="写入配置预览"
             data-testid="agent-runtime-preview"
             className="max-h-72 w-full overflow-auto rounded-lg border border-input bg-slate-950 p-4 font-mono text-xs leading-5 text-slate-100"
           >
-            {runtimePreview(adapter, fields, pendingPatch)}
+            {filePreview?.key === previewKey && filePreview.content !== null
+              ? filePreview.content
+              : runtimePreview(adapter, fields, pendingPatch)}
           </pre>
+          {previewBusy && <p className="text-xs text-muted-foreground">正在读取完整配置文件…</p>}
+          {filePreview?.key === previewKey && filePreview.error && (
+            <p role="alert" className="text-xs text-destructive">完整文件预览失败：{filePreview.error}</p>
+          )}
         </div>
       )}
       {localError && <p role="alert" className="text-sm text-destructive">{localError}</p>}
