@@ -216,6 +216,9 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("profiles", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--definition", ArgValueKind::JsonValue));
+            specs.push(("--base", ArgValueKind::RuleBase));
+            specs.push(("--definition-base", ArgValueKind::Digest));
+            specs.push(("--candidate", ArgValueKind::JsonValue));
         }
         ("profiles", "shared-apply") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -1405,6 +1408,20 @@ mod tests {
             &args(&["--only", "profiles:cc-ly", "--definition", "not json"])
         )
         .is_err());
+        assert!(validate_args(
+            "profiles:preview",
+            &args(&[
+                "--only",
+                "profiles:cc-ly",
+                "--base",
+                &base,
+                "--definition-base",
+                &base,
+                "--candidate",
+                "{\"source_connection\":\"relay\"}"
+            ])
+        )
+        .is_ok());
         for command in ["profiles:apply", "profiles:adopt"] {
             assert!(
                 validate_args(

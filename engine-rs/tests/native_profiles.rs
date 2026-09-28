@@ -272,7 +272,6 @@ fn provider_candidate_rejects_stale_file_definition_and_plaintext_before_writing
 fn provider_candidate_updates_only_codex_profile_and_preserves_mcp_and_main_config() {
     let (root, ctx) = temp_ctx("provider-codex-candidate");
     std::env::set_var("AM_TEST_CODEX_OLD", "old-candidate-token");
-    std::env::set_var("AM_TEST_CODEX_NEW", "new-candidate-token");
     let global = ctx.home_dir.join(".codex/config.toml");
     std::fs::create_dir_all(global.parent().unwrap()).unwrap();
     std::fs::write(&global, b"model = \"keep\"\n").unwrap();
@@ -289,22 +288,33 @@ fn provider_candidate_updates_only_codex_profile_and_preserves_mcp_and_main_conf
     let base = base_of(&ctx, "cx-work");
     let definition_base = definition_base_of(&ctx, "cx-work");
     let candidate = r#"{"base_url":"https://new.example.com/v1","env_key":"AM_TEST_CODEX_NEW","wire_api":"responses","model":"new-model","source_connection":"provider-demo"}"#;
-    let done = execute(
-        &ctx,
-        &request(
-            "profiles:apply-definition",
-            &[
-                "--only",
-                "profiles:cx-work",
-                "--base",
-                &base,
-                "--definition-base",
-                &definition_base,
-                "--candidate",
-                candidate,
-            ],
-        ),
+    let before = std::fs::read(&target).unwrap();
+    let args = [
+        "--only",
+        "profiles:cx-work",
+        "--base",
+        &base,
+        "--definition-base",
+        &definition_base,
+        "--candidate",
+        candidate,
+    ];
+    let preview = execute(&ctx, &request("profiles:preview", &args));
+    assert!(preview.ok, "{:?}", preview.errors);
+    let preview_doc: toml::Table = preview.data["content"].as_str().unwrap().parse().unwrap();
+    assert_eq!(preview_doc["model"].as_str(), Some("new-model"));
+    assert_eq!(
+        preview_doc["mcp_servers"]["fs"]["command"].as_str(),
+        Some("npx")
     );
+    assert_eq!(
+        preview_doc["model_providers"]["agent-manager"]["experimental_bearer_token"].as_str(),
+        Some("${AM_TEST_CODEX_NEW}")
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), before);
+    assert_eq!(std::fs::read(&global).unwrap(), global_before);
+    std::env::set_var("AM_TEST_CODEX_NEW", "new-candidate-token");
+    let done = execute(&ctx, &request("profiles:apply-definition", &args));
     assert!(done.ok, "{:?}", done.errors);
     let text = std::fs::read_to_string(&target).unwrap();
     let doc: toml::Table = text.parse().unwrap();
@@ -453,6 +463,66 @@ fn codex_draft_preview_preserves_existing_mcp_without_touching_default_config() 
     );
     assert!(!ctx.data_dir.exists());
     assert!(probe_log(&ctx).is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn provider_candidate_preview_matches_apply_without_resolving_key_or_writing() {
+    let (root, ctx) = temp_ctx("provider-candidate-preview");
+    std::env::set_var("AM_PREVIEW_OLD", "old-test-token");
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_PREVIEW_OLD")
+    ));
+    assert!(apply_now(&ctx, "cc-ly").ok);
+    std::env::remove_var("AM_PREVIEW_OLD");
+    let target = ctx.home_dir.join(".claude-ly/settings.json");
+    let before = std::fs::read(&target).unwrap();
+    let policy_before = execute(&ctx, &request("policy:get", &[])).data;
+    let base = base_of(&ctx, "cc-ly");
+    let definition_base = definition_base_of(&ctx, "cc-ly");
+    let candidate = r#"{"source_connection":"relay","env":{"ANTHROPIC_BASE_URL":"https://next.example.com","ANTHROPIC_AUTH_TOKEN":"${AM_PREVIEW_NEW}"}}"#;
+    let args = [
+        "--only",
+        "profiles:cc-ly",
+        "--base",
+        &base,
+        "--definition-base",
+        &definition_base,
+        "--candidate",
+        candidate,
+    ];
+    let preview = execute(&ctx, &request("profiles:preview", &args));
+    assert!(preview.ok, "{:?}", preview.errors);
+    let preview_content: serde_json::Value =
+        serde_json::from_str(preview.data["content"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        preview_content["env"]["ANTHROPIC_BASE_URL"],
+        "https://next.example.com"
+    );
+    assert_eq!(
+        preview_content["env"]["ANTHROPIC_AUTH_TOKEN"],
+        "${AM_PREVIEW_NEW}"
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), before);
+    assert_eq!(
+        execute(&ctx, &request("policy:get", &[])).data,
+        policy_before
+    );
+    assert!(probe_log(&ctx).is_empty());
+
+    std::env::set_var("AM_PREVIEW_NEW", "new-test-token");
+    let applied = execute(&ctx, &request("profiles:apply-definition", &args));
+    assert!(applied.ok, "{:?}", applied.errors);
+    let mut live: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
+    assert_eq!(live["env"]["ANTHROPIC_AUTH_TOKEN"], "new-test-token");
+    live["env"]["ANTHROPIC_AUTH_TOKEN"] = serde_json::json!("${AM_PREVIEW_NEW}");
+    assert_eq!(live, preview_content);
+    let stale = execute(&ctx, &request("profiles:preview", &args));
+    assert!(!stale.ok);
+    std::env::remove_var("AM_PREVIEW_NEW");
     let _ = std::fs::remove_dir_all(root);
 }
 

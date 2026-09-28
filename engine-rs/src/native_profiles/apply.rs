@@ -23,6 +23,8 @@ use super::status::definition_base;
 use crate::native::{Context, Request};
 use crate::store;
 
+const MAX_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
+
 fn parse_only(req: &Request) -> Result<String> {
     let only = req
         .value("--only")
@@ -147,7 +149,12 @@ struct Plan {
     content: Vec<u8>,
 }
 
-fn plan_for_def(ctx: &Context, req: &Request, def: ProfileDef) -> Result<Plan> {
+fn plan_for_def(
+    ctx: &Context,
+    req: &Request,
+    def: ProfileDef,
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> Result<Plan> {
     let base = parse_base(req)?;
     if !def.enabled {
         bail!("[{}] 实例已停用，拒绝写入", def.id);
@@ -159,12 +166,7 @@ fn plan_for_def(ctx: &Context, req: &Request, def: ProfileDef) -> Result<Plan> {
     }
     let recorded = recorded_paths(ctx, &def, &file)?;
     // 渲染：变量缺失、现有文件损坏在取锁前就暴露
-    let rendered = model::render_all(
-        &def,
-        &|_| previous.clone(),
-        &crate::secret_values::lookup,
-        &recorded,
-    )?;
+    let rendered = model::render_all(&def, &|_| previous.clone(), resolve, &recorded)?;
     let content = rendered
         .into_iter()
         .next()
@@ -183,11 +185,30 @@ fn plan_for_def(ctx: &Context, req: &Request, def: ProfileDef) -> Result<Plan> {
 fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
     check_args(req, "profiles:apply")?;
     let id = parse_only(req)?;
-    plan_for_def(ctx, req, find_def(ctx, &id)?)
+    plan_for_def(ctx, req, find_def(ctx, &id)?, &crate::secret_values::lookup)
 }
 
 /// 按表单草稿只读渲染目标文件。变量取值保留引用形式，不读取密钥来源；保存时仍按实际文件重新计算。
 pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
+    if req.args.iter().any(|arg| arg == "--candidate") {
+        let (plan, _, _) =
+            plan_update_with_resolver(ctx, req, &|name| Some(format!("${{{name}}}")))?;
+        if plan
+            .previous
+            .as_ref()
+            .is_some_and(|bytes| bytes.len() > MAX_PREVIEW_BYTES)
+            || plan.content.len() > MAX_PREVIEW_BYTES
+        {
+            bail!("配置文件超过安全读取上限");
+        }
+        return Ok(json!({
+            "element": format!("profiles:{}", plan.def.id),
+            "path": format!("{}/{}", plan.def.config_dir_raw, plan.file),
+            "format": if plan.def.kind.as_str() == "codex" { "toml" } else { "json" },
+            "exists": plan.previous.is_some(),
+            "content": String::from_utf8(plan.content).map_err(|_| anyhow!("预览结果不是 UTF-8 文本"))?,
+        }));
+    }
     if req.args.len() != 4 || req.args[0] != "--only" || req.args[2] != "--definition" {
         bail!("profiles:preview 只接受 --only profiles:<实例名> --definition <JSON>");
     }
@@ -199,7 +220,7 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
     let (file, _, previous) = read_target(&def, &dir)?;
     if previous
         .as_ref()
-        .is_some_and(|bytes| bytes.len() > 4 * 1024 * 1024)
+        .is_some_and(|bytes| bytes.len() > MAX_PREVIEW_BYTES)
     {
         bail!("配置文件超过安全读取上限");
     }
@@ -215,6 +236,9 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         .next()
         .ok_or_else(|| anyhow!("[{}] 没有可预览的文件", def.id))?
         .content;
+    if content.len() > MAX_PREVIEW_BYTES {
+        bail!("配置文件超过安全读取上限");
+    }
     Ok(json!({
         "element": format!("profiles:{id}"),
         "path": format!("{}/{}", def.config_dir_raw, file),
@@ -226,6 +250,14 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
 
 /// 从现有完整定义生成候选；只替换实例负责的字段，未知元数据原样保留。
 fn plan_update(ctx: &Context, req: &Request) -> Result<(Plan, Value, String)> {
+    plan_update_with_resolver(ctx, req, &crate::secret_values::lookup)
+}
+
+fn plan_update_with_resolver(
+    ctx: &Context,
+    req: &Request,
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> Result<(Plan, Value, String)> {
     check_update_args(req)?;
     let id = parse_only(req)?;
     let expected = req
@@ -305,7 +337,7 @@ fn plan_update(ctx: &Context, req: &Request) -> Result<(Plan, Value, String)> {
             id
         );
     }
-    let plan = plan_for_def(ctx, req, def)?;
+    let plan = plan_for_def(ctx, req, def, resolve)?;
     Ok((plan, next, expected.to_string()))
 }
 
