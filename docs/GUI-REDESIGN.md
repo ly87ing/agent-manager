@@ -380,10 +380,11 @@ AI CLI 软件生命周期不再由产品界面维护。客户端是否可用、�
 配置目录，助手不再读主配置里的用户级设置；CC Switch 在同一目录里切换接入，这些自然都在。这里改为复制一次：
 新建表单的「从默认环境带上」默认勾选全部五项，创建后（写好配置与启动命令之后）执行。已建环境卡片的
 「更新共用设置」另走 `profiles:shared-status` / `profiles:shared-apply`：先只读比较默认环境和该环境的实际文件，
-按权限、状态栏、Hooks、规则文件及每条 MCP 显示状态和差异字段；默认不勾选，确认后一次只更新一项。
+按权限、状态栏、Hooks、规则文件及每条 MCP 显示状态和差异字段；安全的固定选项显示两边取值，
+命令、规则正文和 MCP 参数等自由文本只显示数量或隐藏提示；默认不勾选，确认后一次只更新一项。
 更新时同时核对来源和目标的预览摘要，写后回读；来源或目标已改变就拒绝，主配置只读，不做后台同步。
-权限与状态栏只改所选原生字段；Hooks、规则和 MCP 仍调用各自资源域写入。预览只显示结构摘要与字段名，
-不显示完整取值；需核对 Hooks、规则或 MCP 原文时到对应页面查看。新建时可带的项
+权限与状态栏只改所选原生字段；Hooks、规则和 MCP 仍调用各自资源域写入。预览不显示自由文本原文；
+需核对 Hooks、规则或 MCP 原文时到对应页面查看。新建时可带的项
 与来源——权限（Claude `settings.json` 的 `permissions`；Codex 的 `approval_policy`、`approvals_reviewer`、
 `sandbox_mode`、`sandbox_workspace_write`、`default_permissions`、`permissions`，作为一组整体带，实例里有其中
 任一个就不带，免得两套写法拼在一起）、状态栏（Claude `statusLine`；Codex `[tui]` 的 `status_line` 与

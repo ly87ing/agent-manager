@@ -5,6 +5,7 @@ export interface SharedItem {
   source: string;
   target: string;
   changed_fields: string[];
+  field_diffs: Array<{ field: string; source: string; target: string }>;
   source_base: string;
   target_base: string;
   blocked_reason: string | null;

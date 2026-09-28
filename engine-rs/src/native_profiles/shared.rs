@@ -212,6 +212,113 @@ fn changed_fields(source: Option<&Value>, target: Option<&Value>) -> Vec<String>
     }
 }
 
+/// 预览只放行固定词汇表；命令、规则和 MCP 等自由文本可能含凭据，不返回原文。
+fn safe_field_value(item: &str, field: &str, value: Option<&Value>) -> String {
+    let Some(value) = value else {
+        return "未设置".into();
+    };
+    let allowed = match (item, field) {
+        ("permissions", "approval_policy") => {
+            &["untrusted", "on-failure", "on-request", "never"][..]
+        }
+        ("permissions", "sandbox_mode") => {
+            &["read-only", "workspace-write", "danger-full-access"][..]
+        }
+        ("permissions", "approvals_reviewer") => &["user", "auto_review"][..],
+        ("statusline", "type") => &["command"][..],
+        (key, "type") if key.starts_with("mcp:") => &["stdio", "http", "sse"][..],
+        _ => &[][..],
+    };
+    if let Some(raw) = value.as_str() {
+        // Codex 的 TOML 标量保留引号在内部比较，只有精确命中安全枚举才展示。
+        let raw = raw.trim();
+        let word = raw
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .unwrap_or(raw);
+        if allowed.contains(&word) {
+            return word.into();
+        }
+        if item == "statusline"
+            && field == "status_line_use_colors"
+            && matches!(raw, "true" | "false")
+        {
+            return raw.into();
+        }
+        if item == "statusline" && field == "status_line" {
+            if let Ok(doc) = format!("value = {raw}").parse::<toml::Value>() {
+                if let Some(values) = doc.get("value").and_then(toml::Value::as_array) {
+                    return format!("{} 项（内容隐藏）", values.len());
+                }
+            }
+        }
+    }
+    match value {
+        Value::Array(values) => format!("{} 项（内容隐藏）", values.len()),
+        Value::Object(values) => format!("{} 个字段（内容隐藏）", values.len()),
+        Value::String(_) => "已设置（内容隐藏）".into(),
+        _ => "已设置（内容隐藏）".into(),
+    }
+}
+
+fn field_diffs(item: &str, source: Option<&Value>, target: Option<&Value>) -> Vec<Value> {
+    fn part<'a>(value: Option<&'a Value>, field: &str) -> Option<&'a Value> {
+        match value {
+            Some(Value::Object(fields)) => fields.get(field),
+            Some(value) if field == "正文" => Some(value),
+            _ => None,
+        }
+    }
+    changed_fields(source, target)
+        .into_iter()
+        .map(|field| {
+            json!({
+                "field": field,
+                "source": safe_field_value(item, &field, part(source, &field)),
+                "target": safe_field_value(item, &field, part(target, &field)),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::*;
+
+    #[test]
+    fn 只展示固定选项_任意字符串和嵌套内容保持隐藏() {
+        let secret = json!("YOUR_TEST_TOKEN");
+        assert_eq!(
+            safe_field_value("permissions", "approval_policy", Some(&secret)),
+            "已设置（内容隐藏）"
+        );
+        assert_eq!(
+            safe_field_value("statusline", "command", Some(&secret)),
+            "已设置（内容隐藏）"
+        );
+        assert_eq!(
+            safe_field_value("mcp:fs", "type", Some(&secret)),
+            "已设置（内容隐藏）"
+        );
+        assert_eq!(
+            safe_field_value(
+                "permissions",
+                "approval_policy",
+                Some(&json!("\"on-request\""))
+            ),
+            "on-request"
+        );
+        let rows = field_diffs(
+            "mcp:fs",
+            Some(&json!({"env": {"API_KEY": "YOUR_TEST_TOKEN"}})),
+            None,
+        );
+        assert!(!serde_json::to_string(&rows)
+            .unwrap()
+            .contains("YOUR_TEST_TOKEN"));
+    }
+}
+
 fn state(source: bool, same: bool, target: bool, blocked: bool) -> &'static str {
     if blocked {
         "blocked"
@@ -240,6 +347,7 @@ fn row(
         "source": summary(source),
         "target": summary(target),
         "changed_fields": changed_fields(source, target),
+        "field_diffs": field_diffs(item, source, target),
         "source_base": source_base.unwrap_or_else(|| value_base(source)),
         "target_base": target_base.unwrap_or_else(|| value_base(target)),
         "blocked_reason": blocked,

@@ -458,7 +458,7 @@ export function ProfileCard({
       {sharedOpen && onSharedStatus && onSharedApply && (
         <div data-testid={`profile-shared-panel-${id}`} className="mt-3 rounded-lg border bg-muted/30 p-3">
           <p className="text-xs font-medium text-foreground">更新共用设置</p>
-          <p className="mt-1 text-xs text-muted-foreground">比较默认环境与此环境的实际文件。已有自定义内容默认保留；只更新你勾选的项。接入凭据不复制，含明文凭据的 MCP 条目会被拦下。</p>
+          <p className="mt-1 text-xs text-muted-foreground">比较默认环境与此环境的实际文件。已有自定义内容默认保留；只更新你勾选的项。自由文本取值会隐藏，接入凭据不复制，含明文凭据的 MCP 条目会被拦下。</p>
           {sharedBusy && <p className="mt-2 text-xs text-muted-foreground">正在读取或更新…</p>}
           {typeof sharedItems === "string" && <p className="mt-2 text-xs text-destructive">{sharedItems}</p>}
           {Array.isArray(sharedItems) && (
@@ -472,7 +472,9 @@ export function ProfileCard({
                     <span>
                       <strong>{sharedItemLabel(item.item)}</strong> · {item.state === "same" ? "两边一致" : item.state === "absent" ? "默认环境未设置" : item.state === "blocked" ? "暂不可更新" : item.state === "new" ? "环境尚未设置" : "两边不同"}
                       <span className="mt-1 block text-muted-foreground">默认环境：{item.source}；此环境：{item.target}</span>
-                      {item.changed_fields.length > 0 && <span className="mt-1 block text-muted-foreground">差异字段：{item.changed_fields.join("、")}</span>}
+                      {item.field_diffs?.length > 0 && <span className="mt-1 block space-y-0.5 text-muted-foreground">
+                        {item.field_diffs.map((field) => <span key={field.field} className="block">{field.field}：默认环境 {field.source}；此环境 {field.target}</span>)}
+                      </span>}
                       {item.blocked_reason && <span className="mt-1 block text-warning">{item.blocked_reason}</span>}
                     </span>
                   </label>

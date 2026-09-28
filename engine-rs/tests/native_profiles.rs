@@ -1607,6 +1607,10 @@ fn 已建_claude_环境逐项更新共用设置_来源目标变化拒绝覆盖()
     assert_eq!(shared_item(&preview, "mcp:private")["state"], "blocked");
     assert!(!preview.data.to_string().contains("YOUR_LITERAL_TEST_KEY"));
     assert!(!preview.data.to_string().contains("YOUR_MAIN_TEST_TOKEN"));
+    let status_fields = &shared_item(&preview, "statusline")["field_diffs"];
+    assert!(status_fields.to_string().contains("内容隐藏"));
+    assert!(!status_fields.to_string().contains("echo source"));
+    assert!(!status_fields.to_string().contains("echo own"));
 
     let permissions = shared_item(&preview, "permissions");
     assert!(apply_shared(&ctx, "cc-ly", &permissions).ok);
@@ -1728,6 +1732,24 @@ fn 已建_codex_环境更新审批状态栏_保留接入和官方登录() {
     assert!(preview.ok, "{:?}", preview.errors);
     assert_eq!(shared_item(&preview, "permissions")["state"], "different");
     assert_eq!(shared_item(&preview, "statusline")["state"], "different");
+    let permission_item = shared_item(&preview, "permissions");
+    let approval = permission_item["field_diffs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["field"] == "approval_policy")
+        .unwrap();
+    assert_eq!(approval["source"], "on-request");
+    assert_eq!(approval["target"], "never");
+    let statusline_item = shared_item(&preview, "statusline");
+    let status_line = statusline_item["field_diffs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["field"] == "status_line")
+        .unwrap();
+    assert_eq!(status_line["source"], "2 项（内容隐藏）");
+    assert_eq!(status_line["target"], "1 项（内容隐藏）");
     assert!(apply_shared(&ctx, "cx-work", &shared_item(&preview, "permissions")).ok);
     assert!(apply_shared(&ctx, "cx-work", &shared_item(&preview, "statusline")).ok);
     let after: toml::Value = std::fs::read_to_string(&target).unwrap().parse().unwrap();

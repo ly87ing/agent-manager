@@ -312,6 +312,7 @@ describe("助手实例", () => {
       "profiles:shared-status": makeEnvelope({ domain: "profiles", items: [{
         item: "rules", state: "different", source: "已设置", target: "已设置",
         changed_fields: ["正文"],
+        field_diffs: [{ field: "正文", source: "3 行（内容隐藏）", target: "2 行（内容隐藏）" }],
         source_base: "a".repeat(64), target_base: "b".repeat(64), blocked_reason: null,
       }] }, { command: "profiles.shared-status" }),
       "profiles:shared-apply": makeEnvelope(null, {
@@ -338,6 +339,10 @@ describe("助手实例", () => {
     const previewItem = (state: "different" | "same") => ({
       item: "permissions", state, source: "包含 allow", target: state === "same" ? "包含 allow" : "包含 deny",
       changed_fields: state === "same" ? [] : ["allow", "deny"],
+      field_diffs: state === "same" ? [] : [
+        { field: "allow", source: "1 项（内容隐藏）", target: "未设置" },
+        { field: "deny", source: "未设置", target: "1 项（内容隐藏）" },
+      ],
       source_base: "a".repeat(64), target_base: "b".repeat(64), blocked_reason: null,
     });
     const routeMap = {
@@ -347,6 +352,7 @@ describe("助手实例", () => {
         items: [previewItem(applied ? "same" : "different"), {
           item: "mcp:private", state: "blocked", source: "包含 command、env", target: "未设置",
           changed_fields: ["command", "env"],
+          field_diffs: [{ field: "env", source: "1 个字段（内容隐藏）", target: "未设置" }],
           source_base: "c".repeat(64), target_base: "missing", blocked_reason: "来源条目含明文凭据",
         }],
       }, { command: "profiles.shared-status" }),
@@ -362,6 +368,7 @@ describe("助手实例", () => {
     const panel = within(card).getByTestId("profile-shared-panel-cc-ly");
     const permission = await within(panel).findByTestId("profile-shared-row-cc-ly-permissions");
     expect(permission).toHaveTextContent("默认环境：包含 allow；此环境：包含 deny");
+    expect(permission).toHaveTextContent("allow：默认环境 1 项（内容隐藏）；此环境 未设置");
     expect(within(permission).getByRole("checkbox")).not.toBeChecked();
     expect(within(panel).getByTestId("profile-shared-run-cc-ly")).toBeDisabled();
     expect(within(within(panel).getByTestId("profile-shared-row-cc-ly-mcp:private")).getByRole("checkbox")).toBeDisabled();
@@ -373,6 +380,43 @@ describe("助手实例", () => {
     const update = calls.find((call) => call.command === "profiles:shared-apply")!;
     expect(update.args).toEqual(["--only", "profiles:cc-ly", "--item", "permissions", "--source-base", "a".repeat(64), "--target-base", "b".repeat(64)]);
     expect(within(panel).getByTestId("profile-shared-run-cc-ly")).toBeDisabled();
+  });
+
+  it("多项共用设置按顺序更新，一项失败仍回读后续成功项", async () => {
+    let statuslineUpdated = false;
+    const row = (item: string, state: "different" | "same") => ({
+      item, state, source: "已设置", target: "已设置", changed_fields: state === "same" ? [] : ["value"],
+      field_diffs: state === "same" ? [] : [{ field: "value", source: "已设置（内容隐藏）", target: "已设置（内容隐藏）" }],
+      source_base: "a".repeat(64), target_base: "b".repeat(64), blocked_reason: null,
+    });
+    const routeMap = {
+      ...routes(),
+      "profiles:shared-status": async () => makeEnvelope({
+        domain: "profiles", items: [row("permissions", "different"), row("statusline", statuslineUpdated ? "same" : "different")],
+      }, { command: "profiles.shared-status" }),
+      "profiles:shared-apply": async (args: string[]) => {
+        if (args[3] === "permissions") return makeEnvelope(null, {
+          command: "profiles.shared-apply", ok: false,
+          errors: [{ code: "PROFILE_ERROR", element: null, message: "目标已被外部修改" }],
+        });
+        statuslineUpdated = true;
+        return makeEnvelope({ domain: "profiles", action: "shared-apply", item: "statusline", state: "updated" }, { command: "profiles.shared-apply" });
+      },
+    };
+    const { calls } = renderWithEngine(<AgentsPage />, routeMap);
+    await openInstanceManager();
+    const card = await screen.findByTestId("profile-card-cc-ly");
+    await userEvent.click(within(card).getByTestId("profile-shared-cc-ly"));
+    const panel = within(card).getByTestId("profile-shared-panel-cc-ly");
+    for (const item of ["permissions", "statusline"]) {
+      await userEvent.click(within(await within(panel).findByTestId(`profile-shared-row-cc-ly-${item}`)).getByRole("checkbox"));
+    }
+    await userEvent.click(within(panel).getByTestId("profile-shared-run-cc-ly"));
+    expect(await within(panel).findByText("权限规则：目标已被外部修改")).toBeInTheDocument();
+    expect(within(panel).getByText("状态栏：已更新并回读一致")).toBeInTheDocument();
+    expect(calls.filter((call) => call.command === "profiles:shared-apply").map((call) => call.args[3])).toEqual(["permissions", "statusline"]);
+    expect(within(panel).getByTestId("profile-shared-row-cc-ly-permissions")).toHaveTextContent("两边不同");
+    expect(within(panel).getByTestId("profile-shared-row-cc-ly-statusline")).toHaveTextContent("两边一致");
   });
 
   it("实例卡片把还没置空的外部凭据变量合并成一句说明，不逐条铺开", async () => {
