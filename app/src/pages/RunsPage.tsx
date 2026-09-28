@@ -149,7 +149,10 @@ export default function RunsPage() {
   if (listQuery.isError) return <PageError title="任务记录读取失败" error={listQuery.error} />;
 
   const runs: RunEntry[] = listQuery.data.data.runs;
-  const filteredRuns = runs.filter((run) => matchesKeyword(search, [run.run_id]));
+  const currentRunIds = new Set(executions.map((record) => record.runId));
+  const filteredRuns = runs.filter((run) =>
+    !currentRunIds.has(run.run_id) && matchesKeyword(search, [run.run_id]),
+  );
   const filteredExecutions = executions.filter((record) =>
     matchesKeyword(search, [record.label, record.command, record.runId]),
   );
@@ -216,7 +219,7 @@ export default function RunsPage() {
       )}
 
       <section className="rounded-lg border bg-card p-5 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-foreground">历史任务</h3>
+        <h3 className="mb-3 text-sm font-semibold text-foreground">其他历史任务</h3>
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b text-xs text-muted-foreground">
@@ -263,8 +266,10 @@ export default function RunsPage() {
             <EmptyState
               compact
               icon={History}
-              title="还没有任务记录"
-              description="通过本工具执行的安装、更新与分配操作会记录在这里。"
+              title={executions.length > 0 ? "没有其他历史任务" : "还没有任务记录"}
+              description={executions.length > 0
+                ? "本次会话的任务已显示在上方。"
+                : "通过本工具执行的安装、更新与分配操作会记录在这里。"}
             />
           ))}
       </section>

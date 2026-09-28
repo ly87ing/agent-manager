@@ -71,7 +71,15 @@ describe("执行中心", () => {
 
   it("执行状态机完成后可查看该 run 的结构化操作，并失效重拉 runs:list", async () => {
     let releaseApply: (() => void) | null = null;
+    let currentRunId: string | null = null;
     const gated = routes();
+    gated["runs:list"] = async () => makeEnvelope(
+      { runs: [
+        makeRunEntry({ run_id: "20260905T235900Z-legacy1", operations: currentRunId ? 9 : 2 }),
+        ...(currentRunId ? [makeRunEntry({ run_id: currentRunId })] : []),
+      ] },
+      { command: "runs.list" },
+    );
     gated["mcp:apply"] = () =>
       new Promise<Envelope>((resolve) => {
         releaseApply = () =>
@@ -108,6 +116,7 @@ describe("执行中心", () => {
     const statusChip = document.querySelector(`[data-testid^="execution-status-"]`)!;
     const runId = statusChip.getAttribute("data-testid")!.replace("execution-status-", "");
     expect(runId).toMatch(/^gui-/);
+    currentRunId = runId;
 
     const applyCall = calls.find((call) => call.command === "mcp:apply");
     expect(applyCall!.options?.runId).toBe(runId);
@@ -123,6 +132,9 @@ describe("执行中心", () => {
 
     const listCallsAfter = calls.filter((call) => call.command === "runs:list").length;
     expect(listCallsAfter).toBeGreaterThan(listCallsBefore);
+    await within(screen.getByTestId("run-row-20260905T235900Z-legacy1")).findByText("9");
+    expect(screen.queryByTestId(`run-row-${runId}`)).toBeNull();
+    expect(screen.getByTestId("run-row-20260905T235900Z-legacy1")).toBeInTheDocument();
 
     const card = screen.getByTestId(`execution-${runId}`);
     await userEvent.click(within(card).getByText("详情"));
