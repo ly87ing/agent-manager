@@ -178,7 +178,11 @@ fn rules(
     ))
 }
 
-fn mcp_scan(def: &ProfileDef, path: &Path, bytes: Option<Vec<u8>>) -> Result<TargetScan> {
+pub(super) fn mcp_scan(
+    def: &ProfileDef,
+    path: &Path,
+    bytes: Option<Vec<u8>>,
+) -> Result<TargetScan> {
     let format = match def.kind {
         ProfileKind::Claude => mcp::Format::ClaudeJson,
         ProfileKind::Codex => mcp::Format::CodexToml,

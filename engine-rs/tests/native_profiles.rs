@@ -2096,7 +2096,7 @@ fn shared_item(status: &agent_manager_engine::Envelope, name: &str) -> serde_jso
         .unwrap()
         .iter()
         .find(|item| item["item"] == name)
-        .unwrap()
+        .unwrap_or_else(|| panic!("缺少共用设置项 {name}"))
         .clone()
 }
 
@@ -2121,6 +2121,130 @@ fn apply_shared(
             ],
         ),
     )
+}
+
+fn preview_shared(ctx: &Context, id: &str, items: &[&str]) -> agent_manager_engine::Envelope {
+    let status = shared_status(ctx, id);
+    assert!(status.ok, "{:?}", status.errors);
+    let selection: Vec<_> = items
+        .iter()
+        .map(|name| {
+            let item = shared_item(&status, name);
+            serde_json::json!({
+                "item": name,
+                "source_base": item["source_base"],
+                "target_base": item["target_base"],
+            })
+        })
+        .collect();
+    let value = serde_json::to_string(&selection).unwrap();
+    execute(
+        ctx,
+        &request(
+            "profiles:shared-preview",
+            &["--only", &format!("profiles:{id}"), "--selection", &value],
+        ),
+    )
+}
+
+#[test]
+fn 已建环境多项预览与逐项写入完全一致且预览零写() {
+    let (root, ctx) = temp_ctx("shared-preview-all");
+    std::env::set_var("AM_TEST_SHARED_PREVIEW", "YOUR_TEST_TOKEN");
+    let main_dir = ctx.home_dir.join(".claude");
+    std::fs::create_dir_all(&main_dir).unwrap();
+    std::fs::write(
+        main_dir.join("settings.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "permissions": {"allow": ["Bash(ls:*)"]},
+            "statusLine": {"type": "command", "command": "echo source"},
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "echo source"}]}]},
+            "env": {"ANTHROPIC_AUTH_TOKEN": "YOUR_MAIN_TEST_TOKEN"}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    std::fs::write(main_dir.join("CLAUDE.md"), "# 来源规则\n").unwrap();
+    std::fs::write(ctx.home_dir.join(".claude.json"), r#"{"mcpServers":{"fs":{"type":"stdio","command":"source-fs"},"private":{"type":"stdio","command":"private-tool","env":{"API_KEY":"YOUR_LITERAL_TEST_KEY"}}}}"#).unwrap();
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_SHARED_PREVIEW")
+    ));
+    assert!(apply_now(&ctx, "cc-ly").ok);
+    let dir = ctx.home_dir.join(".claude-ly");
+    let main = dir.join("settings.json");
+    let mut doc: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&main).unwrap()).unwrap();
+    doc["permissions"] = serde_json::json!({"allow": ["Bash(pwd:*)"]});
+    doc["statusLine"] = serde_json::json!({"type": "command", "command": "echo own"});
+    doc["hooks"] =
+        serde_json::json!({"Stop": [{"hooks": [{"type": "command", "command": "echo own"}]}]});
+    std::fs::write(&main, serde_json::to_vec(&doc).unwrap()).unwrap();
+    std::fs::write(dir.join("CLAUDE.md"), "# 环境自己的规则\n").unwrap();
+    std::fs::write(
+        dir.join(".claude.json"),
+        r#"{"mcpServers":{"fs":{"type":"stdio","command":"own-fs"}}}"#,
+    )
+    .unwrap();
+    let items = ["permissions", "statusline", "hooks", "rules", "mcp:fs"];
+    let before = snapshot_dir(&dir);
+    let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
+    let preview = preview_shared(&ctx, "cc-ly", &items);
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert!(
+        preview.data["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["state"] == "ready"),
+        "{}",
+        preview.data
+    );
+    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), db_before);
+    assert_eq!(snapshot_dir(&dir), before);
+    let files = preview.data["files"].as_array().unwrap();
+    assert_eq!(files.len(), 3, "{}", preview.data);
+    let status = shared_status(&ctx, "cc-ly");
+    let old_line = shared_item(&status, "statusline");
+    let selection = serde_json::json!([{
+        "item": "statusline",
+        "source_base": old_line["source_base"],
+        "target_base": old_line["target_base"],
+    }])
+    .to_string();
+    let source_path = main_dir.join("settings.json");
+    let original_source = std::fs::read(&source_path).unwrap();
+    let mut changed_source: serde_json::Value = serde_json::from_slice(&original_source).unwrap();
+    changed_source["statusLine"]["command"] = serde_json::json!("echo changed outside");
+    std::fs::write(&source_path, serde_json::to_vec(&changed_source).unwrap()).unwrap();
+    let stale = execute(
+        &ctx,
+        &request(
+            "profiles:shared-preview",
+            &["--only", "profiles:cc-ly", "--selection", &selection],
+        ),
+    );
+    assert!(!stale.ok);
+    assert!(stale.errors[0].message.contains("已变化"));
+    assert_eq!(snapshot_dir(&dir), before);
+    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), db_before);
+    std::fs::write(&source_path, original_source).unwrap();
+    for name in items {
+        let result = apply_shared(&ctx, "cc-ly", &shared_item(&status, name));
+        assert!(result.ok, "{name}: {:?}", result.errors);
+    }
+    for file in files {
+        assert_eq!(
+            std::fs::read(file["path"].as_str().unwrap()).unwrap(),
+            file["content"].as_str().unwrap().as_bytes()
+        );
+    }
+    let blocked = preview_shared(&ctx, "cc-ly", &["mcp:private"]);
+    assert!(!blocked.ok);
+    assert!(!blocked.data.to_string().contains("YOUR_LITERAL_TEST_KEY"));
+    std::env::remove_var("AM_TEST_SHARED_PREVIEW");
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -2287,7 +2411,13 @@ fn 已建_codex_环境更新审批状态栏_保留接入和官方登录() {
     let main_dir = ctx.home_dir.join(".codex");
     std::fs::create_dir_all(&main_dir).unwrap();
     let main_config = main_dir.join("config.toml");
-    std::fs::write(&main_config, "approval_policy = \"on-request\"\nsandbox_mode = \"workspace-write\"\n\n[tui]\nstatus_line = [\"model\", \"cwd\"]\n").unwrap();
+    std::fs::write(&main_config, "approval_policy = \"on-request\"\nsandbox_mode = \"workspace-write\"\n\n[tui]\nstatus_line = [\"model\", \"cwd\"]\n\n[mcp_servers.fs]\ncommand = \"source-fs\"\n").unwrap();
+    std::fs::write(
+        main_dir.join("hooks.json"),
+        r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo source"}]}]}}"#,
+    )
+    .unwrap();
+    std::fs::write(main_dir.join("AGENTS.md"), "# 来源规则\n").unwrap();
     let auth = main_dir.join("auth.json");
     std::fs::write(&auth, "official-login-marker").unwrap();
     let source_before = std::fs::read(&main_config).unwrap();
@@ -2295,11 +2425,11 @@ fn 已建_codex_环境更新审批状态栏_保留接入和官方登录() {
     assert!(save_definition(
         &ctx,
         "cx-work",
-        r#"{"display_name":"Codex · work","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-work","base_url":"https://api.example.com/v1","env_key":"AM_TEST_SHARED_CODEX","model":"gpt-5.5"},"_delete":false,"_replace":true}"#
+        r#"{"display_name":"Codex · work","bin":"codex","mcp_config":{"path":"~/.codex-work/config.toml","format":"toml"},"profile":{"base_agent":"codex","config_dir":"~/.codex-work","base_url":"https://api.example.com/v1","env_key":"AM_TEST_SHARED_CODEX","model":"gpt-5.5"},"_delete":false,"_replace":true}"#
     ));
     assert!(apply_now(&ctx, "cx-work").ok);
     let target = ctx.home_dir.join(".codex-work/config.toml");
-    // 当前实例文件已有自己的接入表；只改变受测的两组字段。
+    // 当前实例文件已有自己的接入表；另外给五类共用设置各留一份环境自己的取值。
     let mut parsed: toml_edit::Document =
         std::fs::read_to_string(&target).unwrap().parse().unwrap();
     parsed["approval_policy"] = toml_edit::value("never");
@@ -2307,12 +2437,26 @@ fn 已建_codex_环境更新审批状态栏_保留接入和官方登录() {
     let mut own_line = toml_edit::Array::new();
     own_line.push("cwd");
     parsed["tui"]["status_line"] = toml_edit::value(own_line);
-    std::fs::write(&target, parsed.to_string()).unwrap();
+    std::fs::write(
+        &target,
+        format!("{}\n[mcp_servers.fs]\ncommand = \"own-fs\"\n", parsed),
+    )
+    .unwrap();
+    let dir = ctx.home_dir.join(".codex-work");
+    std::fs::write(
+        dir.join("hooks.json"),
+        r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo own"}]}]}}"#,
+    )
+    .unwrap();
+    std::fs::write(dir.join("AGENTS.md"), "# 环境自己的规则\n").unwrap();
     let before: toml::Value = std::fs::read_to_string(&target).unwrap().parse().unwrap();
     let preview = shared_status(&ctx, "cx-work");
     assert!(preview.ok, "{:?}", preview.errors);
     assert_eq!(shared_item(&preview, "permissions")["state"], "different");
     assert_eq!(shared_item(&preview, "statusline")["state"], "different");
+    for item in ["hooks", "rules", "mcp:fs"] {
+        assert_eq!(shared_item(&preview, item)["state"], "different", "{item}");
+    }
     let permission_item = shared_item(&preview, "permissions");
     let approval = permission_item["field_diffs"]
         .as_array()
@@ -2331,8 +2475,40 @@ fn 已建_codex_环境更新审批状态栏_保留接入和官方登录() {
         .unwrap();
     assert_eq!(status_line["source"], "2 项（内容隐藏）");
     assert_eq!(status_line["target"], "1 项（内容隐藏）");
+    let original_bytes = std::fs::read(&target).unwrap();
+    let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
+    let selected = preview_shared(
+        &ctx,
+        "cx-work",
+        &["statusline", "permissions", "hooks", "rules", "mcp:fs"],
+    );
+    assert!(selected.ok, "{:?}", selected.errors);
+    assert!(
+        selected.data["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|row| row["state"] == "ready"),
+        "{}",
+        selected.data
+    );
+    assert_eq!(selected.data["files"].as_array().unwrap().len(), 3);
+    assert_eq!(std::fs::read(&target).unwrap(), original_bytes);
+    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), db_before);
     assert!(apply_shared(&ctx, "cx-work", &shared_item(&preview, "permissions")).ok);
     assert!(apply_shared(&ctx, "cx-work", &shared_item(&preview, "statusline")).ok);
+    for item in ["hooks", "rules", "mcp:fs"] {
+        let result = apply_shared(&ctx, "cx-work", &shared_item(&preview, item));
+        assert!(result.ok, "{item}: {:?}", result.errors);
+    }
+    for file in selected.data["files"].as_array().unwrap() {
+        assert_eq!(
+            std::fs::read(file["path"].as_str().unwrap()).unwrap(),
+            file["content"].as_str().unwrap().as_bytes(),
+            "{}",
+            file["path"]
+        );
+    }
     let after: toml::Value = std::fs::read_to_string(&target).unwrap().parse().unwrap();
     assert_eq!(after["approval_policy"].as_str(), Some("on-request"));
     assert_eq!(after["sandbox_mode"].as_str(), Some("workspace-write"));

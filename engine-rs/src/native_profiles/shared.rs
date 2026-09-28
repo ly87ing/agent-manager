@@ -93,7 +93,7 @@ fn sub(req: &Request, command: &str, args: Vec<String>) -> Request {
     }
 }
 
-fn read_source(path: &Path) -> Result<Option<Vec<u8>>> {
+pub(super) fn read_source(path: &Path) -> Result<Option<Vec<u8>>> {
     match std::fs::metadata(path) {
         Ok(meta) if meta.is_file() && meta.len() <= 8 * 1024 * 1024 => {
             Ok(Some(std::fs::read(path)?))
@@ -104,7 +104,7 @@ fn read_source(path: &Path) -> Result<Option<Vec<u8>>> {
     }
 }
 
-fn settings_file(ctx: &Context, def: &ProfileDef) -> PathBuf {
+pub(super) fn settings_file(ctx: &Context, def: &ProfileDef) -> PathBuf {
     match def.kind {
         ProfileKind::Claude => ctx.home_dir.join(".claude/settings.json"),
         ProfileKind::Codex => ctx.home_dir.join(".codex/config.toml"),
@@ -155,7 +155,11 @@ fn codex_part(doc: &toml_edit::Document, item: &str) -> Result<Option<Value>> {
     Ok((!values.is_empty()).then_some(Value::Object(values)))
 }
 
-fn setting_part(kind: ProfileKind, bytes: Option<&[u8]>, item: &str) -> Result<Option<Value>> {
+pub(super) fn setting_part(
+    kind: ProfileKind,
+    bytes: Option<&[u8]>,
+    item: &str,
+) -> Result<Option<Value>> {
     match kind {
         ProfileKind::Claude => {
             let doc = json_doc(bytes)?;
@@ -175,7 +179,7 @@ fn setting_part(kind: ProfileKind, bytes: Option<&[u8]>, item: &str) -> Result<O
     }
 }
 
-fn value_base(value: Option<&Value>) -> String {
+pub(super) fn value_base(value: Option<&Value>) -> String {
     value.map_or_else(
         || "missing".into(),
         |value| sha256_hex_bytes(&serde_json::to_vec(value).unwrap_or_default()),
@@ -563,7 +567,7 @@ pub(super) fn status(ctx: &Context, req: &Request) -> Result<Value> {
     )
 }
 
-fn render_setting(
+pub(super) fn render_setting(
     kind: ProfileKind,
     source: Option<&[u8]>,
     previous: Option<&[u8]>,
