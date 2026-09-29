@@ -380,6 +380,26 @@ pub(crate) fn converge_content(old: &[u8], expected_inner: &str) -> Result<Optio
     Ok(Some(out.into_bytes()))
 }
 
+/// 旧版本保存的别名建议的 id 前缀。
+pub(crate) const LEGACY_PREFIX: &str = "legacy";
+
+/// 建议 id：前缀加内容摘要的前 16 位，同样的内容得到同样的 id。
+pub(crate) fn suggestion_id(prefix: &str, parts: &[&str]) -> String {
+    let digest = sha256_hex(&serde_json::to_string(parts).expect("JSON"));
+    format!("{prefix}-{}", &digest[..16])
+}
+
+pub(crate) fn valid_suggestion_id(id: &str, prefix: &str) -> bool {
+    id.strip_prefix(prefix)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .is_some_and(|hex| {
+            hex.len() == 16
+                && hex
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

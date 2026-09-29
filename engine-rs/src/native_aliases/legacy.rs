@@ -16,7 +16,6 @@ use serde_json::{json, Map, Value};
 
 use super::{args, model};
 use crate::native::{Context, Request};
-use crate::native_hooks::model::{suggestion_id, LEGACY_PREFIX};
 use crate::native_mcp::model::{canonical_compact, now_iso, sha256_hex};
 use crate::store;
 
@@ -72,7 +71,7 @@ pub(crate) fn candidates(row: Option<&Map<String, Value>>) -> Vec<LegacyAlias> {
         .into_iter()
         .filter(|(name, value)| !builtin.iter().any(|(n, v)| n == name && v == value))
         .map(|(name, value)| LegacyAlias {
-            id: suggestion_id(LEGACY_PREFIX, &[LEGACY_KEY, &name, &value]),
+            id: model::suggestion_id(model::LEGACY_PREFIX, &[LEGACY_KEY, &name, &value]),
             name,
             value,
         })
@@ -209,7 +208,7 @@ mod tests {
     }
 
     fn model_valid_id(id: &str) -> bool {
-        crate::native_hooks::model::valid_suggestion_id(id, LEGACY_PREFIX)
+        model::valid_suggestion_id(id, model::LEGACY_PREFIX)
     }
 
     #[test]

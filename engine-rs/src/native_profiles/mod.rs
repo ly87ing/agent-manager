@@ -38,7 +38,7 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         "profiles:preview" => apply::preview(ctx, req),
         // apply：用实例定义写实例文件（取锁）；adopt：用实际文件更新实例定义（只写库）
         "profiles:apply" | "profiles:apply-definition" | "profiles:adopt" => apply::apply(ctx, req),
-        // seed：把默认环境的权限、状态栏、hooks、规则与 MCP 一次性带进实例（取锁）
+        // seed：把默认环境的权限、状态栏、规则与 MCP 一次性带进实例（取锁）
         "profiles:seed" => seed::seed(ctx, req),
         "profiles:shared-status" => shared::status(ctx, req),
         "profiles:shared-apply" => shared::apply(ctx, req),

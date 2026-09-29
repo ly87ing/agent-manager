@@ -1,14 +1,14 @@
 //! `profiles:seed`：把默认环境（主配置）里的共享设置一次性带进独立环境。
 //!
 //! 独立环境有自己的配置目录，Claude Code / Codex 不再读主配置里的用户级设置，新建的环境因此
-//! 没有权限规则、状态栏、hooks、规则文件与 MCP 服务。CC Switch 在同一个目录里切换接入，这些
+//! 没有权限规则、状态栏、规则文件与 MCP 服务。CC Switch 在同一个目录里切换接入，这些
 //! 自然都在；这里按「实际文件为准」换一种做法：用户勾选后，把主配置里对应的部分**复制一次**
 //! 进实例自己的文件，之后两边各自独立。
 //!
 //! 规矩：
 //! - 只补实例里还没有的：实例已有这一项就不动，逐项报告；
-//! - 各项走各自的负责人：权限与状态栏没有别的域管，在这里写；hooks、规则与 MCP 分别交给
-//!   hooks / rules / mcp 域的写入（同一套写前比对、链接解析与审计），这里只挑要写什么；
+//! - 各项走各自的负责人：权限与状态栏没有别的域管，在这里写；规则与 MCP 分别交给
+//!   rules / mcp 域的写入（同一套写前比对、链接解析与审计），这里只挑要写什么；
 //! - 凭据一律不带：`env` 与 `apiKeyHelper` 不在可选项里；MCP 条目里有明文凭据（像凭据的 env
 //!   字面量、字面量请求头、地址里内嵌的账号密码、Codex 的 `bearer_token`）的整条跳过并点名，
 //!   要带就去 MCP 页逐条复制；
@@ -25,7 +25,7 @@ use crate::native_mcp::entry::{HeaderVal, View};
 use crate::store;
 
 /// 可带的项，结果按这个顺序给出。
-const ITEMS: &[&str] = &["permissions", "statusline", "hooks", "rules", "mcp"];
+const ITEMS: &[&str] = &["permissions", "statusline", "rules", "mcp"];
 
 struct SeedArgs {
     id: String,
@@ -395,7 +395,7 @@ pub(super) fn preview_settings(
     Ok((rendered.unwrap_or(after_profile), results))
 }
 
-// ---------- hooks / 规则：交给各自的域写 ----------
+// ---------- 规则：交给规则域写 ----------
 
 pub(super) fn element<'a>(status: &'a Value, id: &str) -> Option<&'a Value> {
     status
@@ -408,64 +408,6 @@ pub(super) fn element<'a>(status: &'a Value, id: &str) -> Option<&'a Value> {
 fn blocked(el: &Value) -> Option<&str> {
     el.pointer("/observed/blocked_reason")
         .and_then(Value::as_str)
-}
-
-fn seed_hooks(ctx: &Context, req: &Request, def: &ProfileDef) -> Result<Value> {
-    let status = crate::native_hooks::handle(ctx, &sub_request(req, "hooks:status", vec![]))?;
-    let main_id = match def.kind {
-        ProfileKind::Claude => "hooks:claude",
-        ProfileKind::Codex => "hooks:codex",
-    };
-    let target_id = format!("hooks:profile:{}", def.id);
-    let main = element(&status, main_id).ok_or_else(|| anyhow!("默认环境没有 Hooks 目标"))?;
-    let Some(hooks) = main.pointer("/observed/hooks").filter(|v| !v.is_null()) else {
-        let why = blocked(main).unwrap_or("默认环境的助手已停用");
-        return Ok(result(
-            "hooks",
-            "absent",
-            format!("读不到默认环境的 hooks：{why}"),
-        ));
-    };
-    if hooks.as_object().is_none_or(Map::is_empty) {
-        return Ok(result("hooks", "absent", "默认环境没有 hooks"));
-    }
-    let target =
-        element(&status, &target_id).ok_or_else(|| anyhow!("找不到这个环境的 Hooks 目标"))?;
-    if let Some(reason) = blocked(target) {
-        bail!("{reason}");
-    }
-    let existing = target.pointer("/observed/hooks");
-    if existing
-        .and_then(Value::as_object)
-        .is_some_and(|map| !map.is_empty())
-    {
-        return Ok(result("hooks", "exists", "独立环境已有 hooks，没有改"));
-    }
-    let base = target
-        .pointer("/observed/base")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("这个环境的 hooks 当前不能读写"))?;
-    crate::native_hooks::handle(
-        ctx,
-        &sub_request(
-            req,
-            "hooks:apply",
-            vec![
-                "--only".into(),
-                target_id,
-                "--base".into(),
-                base.to_string(),
-                "--value".into(),
-                serde_json::to_string(hooks)?,
-            ],
-        ),
-    )?;
-    let count = crate::native_hooks::model::hook_count(hooks);
-    Ok(result(
-        "hooks",
-        "copied",
-        format!("已带上 {count} 条 hooks"),
-    ))
 }
 
 fn seed_rules(ctx: &Context, req: &Request, def: &ProfileDef) -> Result<Value> {
@@ -640,7 +582,7 @@ fn seed_mcp(ctx: &Context, req: &Request, def: &ProfileDef) -> Result<Value> {
     }))
 }
 
-/// `profiles:seed --only profiles:<实例> --items permissions,statusline,hooks,rules,mcp`（取锁）。
+/// `profiles:seed --only profiles:<实例> --items permissions,statusline,rules,mcp`（取锁）。
 pub(crate) fn seed(ctx: &Context, req: &Request) -> Result<Value> {
     let args = parse_args(req)?;
     let def = find_def(ctx, &args.id)?;
@@ -666,7 +608,6 @@ pub(crate) fn seed(ctx: &Context, req: &Request) -> Result<Value> {
     }
     for item in &args.items {
         let outcome = match *item {
-            "hooks" => seed_hooks(ctx, req, &def),
             "rules" => seed_rules(ctx, req, &def),
             "mcp" => seed_mcp(ctx, req, &def),
             _ => continue,

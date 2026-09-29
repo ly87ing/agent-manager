@@ -143,10 +143,6 @@ fn import_rejects_bad_payloads_without_partial_writes() {
             "来源键不认识",
             r#"{"format":"agent-manager/config-backup/v1","policy":{},"sources":{"evil.key":"x"}}"#.to_string(),
         ),
-        (
-            "hooks 来源结构非法",
-            r#"{"format":"agent-manager/config-backup/v1","policy":{},"sources":{"hooks.claude":"{\"hooks\":{\"Stop\":\"not-an-array\"}}"}}"#.to_string(),
-        ),
     ];
     for (label, payload) in cases {
         let env = execute(&ctx, &request("config:import", &["--value", &payload]));
@@ -352,12 +348,11 @@ fn legacy_rule_sources_in_backup_become_templates() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// hooks 以实际配置为准，不进备份；只有旧版本保存、还没生效的 hooks 以 hooks.* 来源导出，
-/// 导入（含旧备份）后在 hooks 页作为未生效建议出现，不改任何助手文件。
+/// Hooks 已不再由本工具管理：实际配置里的 hooks 不进备份，也不再导出旧版保存的 hooks；
+/// 旧备份里的 hooks.* 来源不挡整份导入，这一段跳过不写，在 skipped 里列出，助手文件不动。
 #[test]
-fn only_unapplied_legacy_hooks_travel_in_backups() {
+fn retired_hooks_sources_are_skipped_on_import() {
     let (root, ctx) = temp_ctx("hooks-backup");
-    // 实际配置里的 hooks 不进备份
     let settings = ctx.home_dir.join(".claude/settings.json");
     std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
     std::fs::write(
@@ -373,62 +368,35 @@ fn only_unapplied_legacy_hooks_travel_in_backups() {
         .unwrap()
         .contains("echo live"));
 
-    // 旧备份：hooks.claude 来源（一条已在实际里，一条没有）
-    let legacy = r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo live"},{"type":"command","command":"echo old"}]}]},"removed_signatures":[]}"#;
+    // 旧备份带 hooks.claude（连结构不合法的也一样只是跳过）
     let mut backup = exported.data.clone();
-    backup["sources"]["hooks.claude"] = serde_json::json!(legacy);
-    let payload = backup.to_string();
+    backup["sources"]["hooks.claude"] = serde_json::json!(
+        r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo old"}]}]},"removed_signatures":[]}"#
+    );
+    backup["sources"]["hooks.codex"] = serde_json::json!("not json");
     let before = std::fs::read(&settings).unwrap();
-    let env = execute(&ctx, &request("config:import", &["--value", &payload]));
+    let env = execute(
+        &ctx,
+        &request("config:import", &["--value", &backup.to_string()]),
+    );
     assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(
+        env.data["skipped"],
+        serde_json::json!(["hooks.claude", "hooks.codex"])
+    );
     assert_eq!(
         std::fs::read(&settings).unwrap(),
         before,
         "导入不改助手文件"
     );
+    let again = execute(&ctx, &request("config:export", &[]));
+    assert!(!serde_json::to_string(&again.data["sources"])
+        .unwrap()
+        .contains("echo old"));
+    // hooks 域已移除
     let status = execute(&ctx, &request("hooks:status", &[]));
-    let claude = status.data["elements"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|e| e["id"] == "hooks:claude")
-        .unwrap()
-        .clone();
-    let legacy_commands: Vec<&str> = claude["observed"]["legacy"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|item| item["command"].as_str().unwrap())
-        .collect();
-    assert_eq!(legacy_commands, ["echo old"]);
-
-    // 仍有未生效的旧 hooks：导出带上这一行，换机器导入后照样是建议
-    let exported = execute(&ctx, &request("config:export", &[]));
-    let text = exported.data["sources"]["hooks.claude"].as_str().unwrap();
-    assert!(text.contains("echo old"));
-    let (root2, ctx2) = temp_ctx("hooks-backup-2");
-    let env = execute(
-        &ctx2,
-        &request(
-            "config:import",
-            &["--value", &serde_json::to_string(&exported.data).unwrap()],
-        ),
-    );
-    assert!(env.ok, "{:?}", env.errors);
-    assert!(
-        std::fs::read_dir(&ctx2.home_dir).unwrap().next().is_none(),
-        "导入不写助手目录"
-    );
-    let status = execute(&ctx2, &request("hooks:status", &[]));
-    assert_eq!(
-        status.data["elements"][0]["observed"]["legacy"]
-            .as_array()
-            .unwrap()
-            .len(),
-        2
-    );
+    assert!(!status.ok);
     let _ = std::fs::remove_dir_all(root);
-    let _ = std::fs::remove_dir_all(root2);
 }
 
 /// 终端快捷命令以 rc 文件受管区块为准，不进备份；只有旧版本保存、与内置推荐不同的别名以

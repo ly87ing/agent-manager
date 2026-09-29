@@ -1,12 +1,11 @@
-//! Aliases 命令的严格参数解析：与 hooks 域同一契约。解析失败固定为可 downcast 的
+//! Aliases 命令的严格参数解析：与 rules 域同一契约。解析失败固定为可 downcast 的
 //! UsageError（dispatch 映射 USAGE_ERROR），消息只描述参数种类，不回显未知 token/值。
 //! --dry-run、--only 与 --allow-takeover 已退役，一律作为不支持的选项拒绝。
 
 use anyhow::Result;
 
-use super::model::{self, TargetSpec};
+use super::model::{self, valid_suggestion_id, TargetSpec, LEGACY_PREFIX};
 use crate::native::Request;
-use crate::native_hooks::model::{valid_suggestion_id, LEGACY_PREFIX};
 
 /// 参数解析错误：dispatch/preflight 据此映射 USAGE_ERROR 而非域错误码。
 #[derive(Debug)]

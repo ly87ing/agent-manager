@@ -9,7 +9,7 @@
 //!   （detect-only 语义不变：可探测但不因此获得收敛动作）+ 各助手实际 MCP 条目与
 //!   已保存项中的 npx 包与 uvx `git+repo@branch` 源（每个服务名一份）+ enabled 且有
 //!   url 的 skills 集合仓库。
-//!   rules/hooks/aliases/secrets 恒 not-applicable，不参与。
+//!   rules/aliases/secrets 恒 not-applicable，不参与。
 //! - 探测器带超时（网络 ≤30s）：npm 包 `npm view <pkg> version`；agents 本地版本
 //!   沿用 bin --version；MCP npx 本地版本读 npx 缓存
 //!   （~/.npm/_npx/*/node_modules/<pkg>/package.json）；skills 集合本地 HEAD

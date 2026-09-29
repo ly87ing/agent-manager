@@ -51,7 +51,7 @@ fn only(req: &Request, apply: bool) -> Result<(String, Option<(String, String, S
         let target = values
             .remove("--target-base")
             .ok_or_else(|| anyhow!("缺少 --target-base"))?;
-        if !matches!(item, "permissions" | "statusline" | "hooks" | "rules")
+        if !matches!(item, "permissions" | "statusline" | "rules")
             && !item
                 .strip_prefix("mcp:")
                 .is_some_and(crate::native_mcp::model::is_valid_server_name)
@@ -389,18 +389,6 @@ fn settings_rows(ctx: &Context, def: &ProfileDef, dir: &Path) -> Result<Vec<Valu
 
 fn domain_row(ctx: &Context, req: &Request, def: &ProfileDef, item: &str) -> Result<Value> {
     let (command, main_id, target_id, pointer) = match (item, def.kind) {
-        ("hooks", ProfileKind::Claude) => (
-            "hooks:status",
-            "hooks:claude".to_string(),
-            format!("hooks:profile:{}", def.id),
-            "/observed/hooks",
-        ),
-        ("hooks", ProfileKind::Codex) => (
-            "hooks:status",
-            "hooks:codex".to_string(),
-            format!("hooks:profile:{}", def.id),
-            "/observed/hooks",
-        ),
         ("rules", ProfileKind::Claude) => (
             "rules:status",
             "rules:claude_global".to_string(),
@@ -414,24 +402,14 @@ fn domain_row(ctx: &Context, req: &Request, def: &ProfileDef, item: &str) -> Res
             "/observed/content",
         ),
     };
-    let status = if item == "hooks" {
-        crate::native_hooks::handle(ctx, &sub(req, command, vec![]))?
-    } else {
-        crate::native_rules::handle(ctx, &sub(req, command, vec![]))?
-    };
+    let status = crate::native_rules::handle(ctx, &sub(req, command, vec![]))?;
     let main =
         seed::element(&status, &main_id).ok_or_else(|| anyhow!("找不到默认环境的{item}目标"))?;
     let target =
         seed::element(&status, &target_id).ok_or_else(|| anyhow!("找不到独立环境的{item}目标"))?;
     let raw_source = main.pointer(pointer).filter(|v| !v.is_null());
     let raw_target = target.pointer(pointer).filter(|v| !v.is_null());
-    let meaningful = |value: &Value| {
-        if item == "hooks" {
-            value.as_object().is_some_and(|map| !map.is_empty())
-        } else {
-            value.as_str().is_some_and(|text| !text.trim().is_empty())
-        }
-    };
+    let meaningful = |value: &Value| value.as_str().is_some_and(|text| !text.trim().is_empty());
     let source = raw_source.filter(|value| meaningful(value));
     let dest = raw_target.filter(|value| meaningful(value));
     let blocked = main
@@ -536,7 +514,7 @@ fn preview(ctx: &Context, req: &Request, def: &ProfileDef) -> Vec<Value> {
     let dir = match seed::config_dir(ctx, def) {
         Ok(dir) => dir,
         Err(err) => {
-            return ["permissions", "statusline", "hooks", "rules", "mcp"]
+            return ["permissions", "statusline", "rules", "mcp"]
                 .iter()
                 .map(|item| blocked_row(item, &err))
                 .collect()
@@ -549,9 +527,7 @@ fn preview(ctx: &Context, req: &Request, def: &ProfileDef) -> Vec<Value> {
             .map(|item| blocked_row(item, &err))
             .collect(),
     };
-    for item in ["hooks", "rules"] {
-        rows.push(domain_row(ctx, req, def, item).unwrap_or_else(|err| blocked_row(item, &err)));
-    }
+    rows.push(domain_row(ctx, req, def, "rules").unwrap_or_else(|err| blocked_row("rules", &err)));
     match mcp_rows(ctx, def) {
         Ok(items) => rows.extend(items),
         Err(err) => rows.push(blocked_row("mcp", &err)),
@@ -708,38 +684,20 @@ pub(super) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         "permissions" | "statusline" => {
             write_setting(ctx, req, &def, &item, &source_base, &target_base)?
         }
-        "hooks" | "rules" => {
-            let (domain, main_id, target_id, pointer) = match (item.as_str(), def.kind) {
-                ("hooks", ProfileKind::Claude) => (
-                    "hooks",
-                    "hooks:claude",
-                    format!("hooks:profile:{id}"),
-                    "/observed/hooks",
-                ),
-                ("hooks", ProfileKind::Codex) => (
-                    "hooks",
-                    "hooks:codex",
-                    format!("hooks:profile:{id}"),
-                    "/observed/hooks",
-                ),
-                ("rules", ProfileKind::Claude) => (
-                    "rules",
+        "rules" => {
+            let (main_id, target_id, pointer) = match def.kind {
+                ProfileKind::Claude => (
                     "rules:claude_global",
                     format!("rules:profile:{id}"),
                     "/observed/content",
                 ),
-                _ => (
-                    "rules",
+                ProfileKind::Codex => (
                     "rules:codex_global",
                     format!("rules:profile:{id}"),
                     "/observed/content",
                 ),
             };
-            let status = if domain == "hooks" {
-                crate::native_hooks::handle(ctx, &sub(req, "hooks:status", vec![]))?
-            } else {
-                crate::native_rules::handle(ctx, &sub(req, "rules:status", vec![]))?
-            };
+            let status = crate::native_rules::handle(ctx, &sub(req, "rules:status", vec![]))?;
             let main = seed::element(&status, main_id).ok_or_else(|| anyhow!("找不到来源"))?;
             let value = main
                 .pointer(pointer)
@@ -757,20 +715,12 @@ pub(super) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
                 "--base".into(),
                 target_base,
                 "--value".into(),
-                if domain == "hooks" {
-                    serde_json::to_string(value)?
-                } else {
-                    value
-                        .as_str()
-                        .ok_or_else(|| anyhow!("规则不是文本"))?
-                        .into()
-                },
+                value
+                    .as_str()
+                    .ok_or_else(|| anyhow!("规则不是文本"))?
+                    .into(),
             ];
-            if domain == "hooks" {
-                crate::native_hooks::handle(ctx, &sub(req, "hooks:apply", args))?;
-            } else {
-                crate::native_rules::handle(ctx, &sub(req, "rules:apply", args))?;
-            }
+            crate::native_rules::handle(ctx, &sub(req, "rules:apply", args))?;
         }
         _ => {
             let name = item

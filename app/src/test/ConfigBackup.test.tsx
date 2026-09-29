@@ -8,7 +8,7 @@ const BACKUP = {
   format: "agent-manager/config-backup/v1",
   exported_at: "2026-09-17T00:00:00Z",
   policy: { mcp: { definitions: {} } },
-  // 规则与 hooks 不再是来源：导出里是规则模板（名称 + 正文），来源只剩 aliases 与旧版未生效的 hooks
+  // 规则与 hooks 不再是来源：导出里是规则模板（名称 + 正文），来源只剩 aliases
   sources: { "aliases.shell": "{}" },
   rule_templates: [{ name: "团队规则", body: "我的规则\n", origin: "user" }],
   // MCP 定义随「已保存项」导出（原先计在策略的服务库定义里）

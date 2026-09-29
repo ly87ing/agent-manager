@@ -46,13 +46,13 @@ Policy UI 只显示 `builtin` 和 `sqlite`。编辑请求固定使用 `--layer l
 
 确认弹窗只用于定义移除、清空日志等破坏性动作；普通同步、启停、更新没有二次确认步骤。
 
-Agent、Skills、MCP、Rules、Hooks、Aliases 与实例原生域已接线，生效配置都以各助手的实际文件为准：status 只读零写，输出实际内容与写入基准 `base`；写入带 `--base`，文件在打开后被外部改过时拒绝并提示「已在外部修改」，刷新后重新操作即可，不再有「接管 = 用库覆盖」。实际安装来源不可管理、Agent 已禁用、offline 阻断或动作不适用时，引擎不会提供或执行对应 action。Skills 集合与技能分配通过内容快照与安全软连接落地，遇外部非受管内容或冲突时 fail-closed 拒绝覆盖。MCP 支持本地 stdio 与远程 HTTP，`mcp:status` 直接列出各助手配置文件里的条目，`mcp:apply` 逐条编辑、启停、复制、删除；Claude 停用的条目以快照存库（疑似凭据转存到外部密钥文件、库里只留 `${VAR}`），Codex/OpenCode 用官方 `enabled = false`。Runs 操作记录基于 SQLite `operation_logs` 提供历史审计与二次确认清空，保留期由 `log_retention_days` 控制。
+Agent、Skills、MCP、Rules、Aliases 与实例原生域已接线（Hooks 已于 2026-09-29 移除），生效配置都以各助手的实际文件为准：status 只读零写，输出实际内容与写入基准 `base`；写入带 `--base`，文件在打开后被外部改过时拒绝并提示「已在外部修改」，刷新后重新操作即可，不再有「接管 = 用库覆盖」。实际安装来源不可管理、Agent 已禁用、offline 阻断或动作不适用时，引擎不会提供或执行对应 action。Skills 集合与技能分配通过内容快照与安全软连接落地，遇外部非受管内容或冲突时 fail-closed 拒绝覆盖。MCP 支持本地 stdio 与远程 HTTP，`mcp:status` 直接列出各助手配置文件里的条目，`mcp:apply` 逐条编辑、启停、复制、删除；Claude 停用的条目以快照存库（疑似凭据转存到外部密钥文件、库里只留 `${VAR}`），Codex/OpenCode 用官方 `enabled = false`。Runs 操作记录基于 SQLite `operation_logs` 提供历史审计与二次确认清空，保留期由 `log_retention_days` 控制。
 
 公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝；执行前请用 `<domain>:status` 确认状态。
 
 验收基线提交 `5a110be3` 的候选包只证明旧版 plan→confirm 交互，不证明本轮直接 apply 新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（SHA256 与验证结果见 [交付回执](goal-rust-gui.md)）。2026-09-09 Darwin x86_64 DMG 已通过只读挂载、仓库外复制、无 Python、路径脱敏和从 `/` 隔离环境 5 秒启动验收；该包早于当前 Rules/MCP/Hooks/Secrets 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks/Secrets/system:audit GUI 业务闭环。签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
 
-`system:audit` 已接入 Rust dispatcher：只读聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态。密钥取值优先读取「密钥」页选择的外部 `.env` 文件，再回退进程环境；数据库只保存路径。若页面显示“文件不可用”，检查它是否存在、是否是普通文件、是否为 UTF-8 `KEY=VALUE`，以及 Unix 权限是否为 `600`。应用不会自动创建文件或修改权限，也不会回显取值。历史数据库明文需在页面输入确认词后显式迁移，失败时旧表保留。
+`system:audit` 已接入 Rust dispatcher：只读聚合 agents/skills/mcp/rules/aliases/secrets 与 runtime/storage 状态。密钥取值优先读取「密钥」页选择的外部 `.env` 文件，再回退进程环境；数据库只保存路径。若页面显示“文件不可用”，检查它是否存在、是否是普通文件、是否为 UTF-8 `KEY=VALUE`，以及 Unix 权限是否为 `600`。应用不会自动创建文件或修改权限，也不会回显取值。历史数据库明文需在页面输入确认词后显式迁移，失败时旧表保留。
 
 ## Claude Code 的额度停在很多天前
 

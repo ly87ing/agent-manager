@@ -20,7 +20,6 @@ pub(crate) mod native_aliases;
 pub(crate) mod native_auth;
 pub(crate) mod native_config;
 pub(crate) mod native_discover;
-pub(crate) mod native_hooks;
 pub mod native_mcp;
 pub(crate) mod native_profiles;
 pub(crate) mod native_rules;

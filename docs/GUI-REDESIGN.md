@@ -86,7 +86,7 @@ Claude Code 和 Codex 的内置默认渠道均为官方 `native` 命令；brew �
 
 推荐快捷命令不编进程序：由技能来源根下的 `aliases/*.json` 提供（格式为 `timezone`、`lang` 与 `aliases` 映射，取值里的 `{timezone}`/`{lang}` 按该文件的两个字段解析），与技能共用集合定义、镜像目录与「更新资源库」；按集合名、文件名顺序读，同名取先读到的，结构不合法的文件整份跳过。作者维护的一份在 agent-skills 仓库 `aliases/`（2026-09-23 从本仓 `config/shell-aliases.json` 迁出）。推荐只作「推荐 · 添加」：展示解析后的那一行和来源，逐条确认才写入（`aliases:apply --recommended <名称>`，审计记来源）；任一文件里（区块内外）已有同名别名就不再推荐。旧库 `alias_sources` 里用户存过、与旧版内置默认（冻结在 `engine-rs/assets/legacy-aliases/`，只供判定）不同、而实际区块里没有同名同值的别名，以「已保存未生效」出现，可加入（`aliases:apply --legacy`）或丢弃（`aliases:discard-legacy --legacy <id>`，只写库，删掉这一条，没有剩余时整行删除）；区块里已有同名不同值时附上现在那一行，加入即替换。读路径即时推导，写路径清理：写入时把写入前后已在区块里的旧版别名从库里删掉；旧表损坏时只是不出建议。旧 `alias_target_bindings` 不再作为写入门槛，原样留在库里。配置备份不带实际别名，只以 `aliases.shell` 来源带上仍有未生效别名的旧行，导入后同样作为建议出现。
 
-## Hooks 原生域状态
+## Hooks 原生域状态（已移除，2026-09-29；以下仅作历史记录）
 
 Hooks 以各助手的实际配置为准。目标是主 Claude（`~/.claude/settings.json` 的 `hooks` 键）、主 Codex（`~/.codex/hooks.json`）与每个实例配置目录下对应的 `settings.json` / `hooks.json`。`hooks:status` 只读零写，逐目标输出路径、是否存在、实际 hooks 结构、`base` 与两类建议；`base` 在 Claude 只对 `hooks` 子树取摘要（没有该键为 `missing`），用户改 settings.json 的其他键不影响它，Codex 取 hooks.json 字节摘要（文件不存在为 `missing`）。停用的助手或实例不探测。目标是符号链接时与 `agents:configure` 同一裁决：解析到最终目标读写，原子写落在目标所在目录，CAS 比对目标字节，链接本身不变；断链、指向目录、非普通文件、非 JSON 对象或 hooks 骨架非法的目标只报原因，不提供写入。hook 的 `type` 除 `command` 外还有官方的 `http`、`mcp_tool`、`prompt`、`agent` 与将来的类型：结构校验只看「事件名 → 数组 → matcher/hooks」骨架，`command` 类型另要求非空 `command`；其他类型不阻塞目标，如实展示，按行编辑时只读、写回时整条原样保留，原文编辑可直接改。
 

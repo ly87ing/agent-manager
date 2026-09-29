@@ -130,7 +130,7 @@ pub(crate) fn observe(ctx: &Context) -> Vec<View> {
         .into_iter()
         .map(|spec| {
             let abs = ctx.home_dir.join(spec.target);
-            // 与 hooks、接入配置一致：链接解析到最终普通文件后读写；断链、指向目录等拒绝
+            // 与接入配置一致：链接解析到最终普通文件后读写；断链、指向目录等拒绝
             let (real, probe) = match crate::native_agent_settings::resolve_write_target(&abs) {
                 Ok(real) => {
                     let probe = probe(&real);

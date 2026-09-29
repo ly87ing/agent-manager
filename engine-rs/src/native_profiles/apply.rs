@@ -129,7 +129,7 @@ fn find_def(ctx: &Context, id: &str) -> Result<ProfileDef> {
     bail!("未知实例: {}", id)
 }
 
-/// 实例目标文件：解析符号链接到最终普通文件（与 hooks、接入配置一致），返回
+/// 实例目标文件：解析符号链接到最终普通文件（与接入配置一致），返回
 /// （展示用文件名, 实际读写路径, 现有字节）。
 fn read_target(def: &ProfileDef, dir: &Path) -> Result<(String, PathBuf, Option<Vec<u8>>)> {
     let file = def.kind.target_file().to_string();

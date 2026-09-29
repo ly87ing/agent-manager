@@ -42,7 +42,7 @@ fn section<'a>(env: &'a agent_manager_engine::Envelope, name: &str) -> &'a [Valu
         .unwrap_or_else(|| panic!("section '{name}' 必须存在且为数组: {}", env.data))
 }
 
-// A. fresh 隔离 Context：结构完整、零写；规则、hooks 与别名以实际文件为准，没有文件
+// A. fresh 隔离 Context：结构完整、零写；规则与别名以实际文件为准，没有文件
 // （区块）是正常空状态（notice）。整体是否 warning 只取决于 agents 在本机 PATH 下的探测结果。
 #[test]
 fn fresh_context_audit_is_complete_warning_and_zero_write() {
@@ -54,7 +54,7 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     assert!(!env.mode.offline);
     assert_eq!(env.data["version"], Value::Null);
     for name in [
-        "agents", "skills", "mcp", "rules", "hooks", "aliases", "secrets", "runtime", "storage",
+        "agents", "skills", "mcp", "rules", "aliases", "secrets", "runtime", "storage",
     ] {
         section(&env, name);
     }
@@ -81,7 +81,7 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     let summary = &env.data["summary"];
     assert_eq!(summary["errors"], 0);
     let total_warnings: u64 = [
-        "agents", "skills", "mcp", "rules", "hooks", "aliases", "secrets", "runtime", "storage",
+        "agents", "skills", "mcp", "rules", "aliases", "secrets", "runtime", "storage",
     ]
     .iter()
     .map(|name| {
@@ -91,8 +91,8 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
             .count() as u64
     })
     .sum();
-    // 规则与 hooks 以实际文件为准：没有文件是正常空状态（notice），不再算「未生成」warning
-    for name in ["rules", "hooks"] {
+    // 规则以实际文件为准：没有文件是正常空状态（notice），不再算「未生成」warning
+    for name in ["rules"] {
         let entries = section(&env, name);
         assert_eq!(entries.len(), 2, "{name}");
         for entry in entries {
@@ -116,7 +116,7 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     assert_eq!(summary["warning_categories"]["optional_tools"], 0);
     assert_eq!(summary["warning_categories"]["official_gaps"], 0);
     let categorized: u64 = [
-        "agents", "skills", "mcp", "rules", "hooks", "aliases", "secrets", "runtime", "storage",
+        "agents", "skills", "mcp", "rules", "aliases", "secrets", "runtime", "storage",
     ]
     .iter()
     .map(|name| {
@@ -161,8 +161,8 @@ fn existing_db_is_byte_identical_after_audit() {
 
 // C. 子域状态查询失败只降级该子域：rule_templates 损坏（含 marker）→ rules section 固定
 // error，其余 section 仍在；data.status=error；envelope 恰好一条 AUDIT_ERRORS；
-// marker/临时路径/原始 DB 错误不外泄；DB 字节不变。旧 hook_sources 损坏不再让 hooks
-// 失败（旧来源宽松读取，只是不产生建议），同样不外泄。
+// marker/临时路径/原始 DB 错误不外泄；DB 字节不变。库里留着的旧 hook_sources（Hooks 已移除）
+// 即便损坏也不影响检查，同样不外泄。
 #[test]
 fn failing_domain_degrades_only_its_section_without_leaks() {
     let (base, ctx) = temp_ctx("domain-corrupt");
@@ -202,7 +202,7 @@ fn failing_domain_degrades_only_its_section_without_leaks() {
     let rules = section(&env, "rules");
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0]["status"], "error");
-    for name in ["agents", "skills", "mcp", "hooks", "runtime", "storage"] {
+    for name in ["agents", "skills", "mcp", "runtime", "storage"] {
         assert!(
             section(&env, name)
                 .iter()
@@ -210,11 +210,7 @@ fn failing_domain_degrades_only_its_section_without_leaks() {
             "section '{name}' 不应被 rules 损坏波及"
         );
     }
-    assert_eq!(
-        section(&env, "hooks").len(),
-        2,
-        "旧 hook_sources 损坏不挡 hooks"
-    );
+    assert!(env.data["sections"].get("hooks").is_none(), "Hooks 已移除");
     let summary = &env.data["summary"];
     assert_eq!(summary["errors"], 1);
     assert_eq!(env.errors.len(), 1);
@@ -313,7 +309,7 @@ fn wired_domain_elements_map_into_sections() {
     assert_eq!(section(&env, "secrets")[0]["category"], "unmaterialized");
     assert!(unmaterialized > agent_warnings);
     let expected: u64 = [
-        "agents", "skills", "mcp", "rules", "hooks", "aliases", "secrets", "runtime", "storage",
+        "agents", "skills", "mcp", "rules", "aliases", "secrets", "runtime", "storage",
     ]
     .iter()
     .map(|name| {

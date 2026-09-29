@@ -795,21 +795,21 @@ fn claude_seed_preview_matches_files_written_after_creation_without_writing_earl
                 "--definition",
                 definition,
                 "--items",
-                "permissions,statusline,hooks,rules,mcp",
+                "permissions,statusline,rules,mcp",
             ],
         ),
     );
     assert!(preview.ok, "{:?}", preview.errors);
     assert!(!ctx.home_dir.join(".claude-work").exists());
     assert!(!ctx.data_dir.exists());
-    assert_eq!(preview.data["seed_results"].as_array().unwrap().len(), 5);
+    assert_eq!(preview.data["seed_results"].as_array().unwrap().len(), 4);
     assert!(preview.data["seed_results"]
         .as_array()
         .unwrap()
         .iter()
         .all(|item| item["state"] == "copied"));
     assert_eq!(
-        preview.data["seed_results"][4]["detail"]
+        preview.data["seed_results"][3]["detail"]
             .as_str()
             .unwrap()
             .contains("gh"),
@@ -818,16 +818,18 @@ fn claude_seed_preview_matches_files_written_after_creation_without_writing_earl
     assert!(!preview.data.to_string().contains("literal-token-value"));
     assert!(save_definition(&ctx, "claude-work", definition));
     assert!(apply_now(&ctx, "claude-work").ok);
-    let seeded = seed(
-        &ctx,
-        "claude-work",
-        "permissions,statusline,hooks,rules,mcp",
-    );
+    let seeded = seed(&ctx, "claude-work", "permissions,statusline,rules,mcp");
     assert!(seeded.ok, "{:?}", seeded.errors);
     let dir = ctx.home_dir.join(".claude-work");
     assert_eq!(
         preview.data["content"].as_str().unwrap().as_bytes(),
         std::fs::read(dir.join("settings.json")).unwrap()
+    );
+    // hooks 不再由本工具带：主账号里的 hooks 不进新账号
+    assert!(
+        !String::from_utf8(std::fs::read(dir.join("settings.json")).unwrap())
+            .unwrap()
+            .contains("echo done")
     );
     let files = preview.data["files"].as_array().unwrap();
     assert_eq!(files.len(), 2);
@@ -875,7 +877,7 @@ fn codex_seed_preview_matches_files_written_after_creation_without_writing_early
                 "--definition",
                 definition,
                 "--items",
-                "permissions,statusline,hooks,rules,mcp",
+                "permissions,statusline,rules,mcp",
             ],
         ),
     );
@@ -887,14 +889,14 @@ fn codex_seed_preview_matches_files_written_after_creation_without_writing_early
         .contains("never-written"));
     assert!(!ctx.home_dir.join(".codex-work").exists());
     assert!(!ctx.data_dir.exists());
-    assert_eq!(preview.data["seed_results"].as_array().unwrap().len(), 5);
+    assert_eq!(preview.data["seed_results"].as_array().unwrap().len(), 4);
     assert!(preview.data["seed_results"]
         .as_array()
         .unwrap()
         .iter()
         .all(|item| item["state"] == "copied"));
     assert!(save_definition(&ctx, "codex-work", definition));
-    let seeded = seed(&ctx, "codex-work", "permissions,statusline,hooks,rules,mcp");
+    let seeded = seed(&ctx, "codex-work", "permissions,statusline,rules,mcp");
     assert!(seeded.ok, "{:?}", seeded.errors);
     let dir = ctx.home_dir.join(".codex-work");
     assert_eq!(
@@ -902,13 +904,11 @@ fn codex_seed_preview_matches_files_written_after_creation_without_writing_early
         std::fs::read(dir.join("config.toml")).unwrap()
     );
     let files = preview.data["files"].as_array().unwrap();
-    assert_eq!(files.len(), 2);
+    assert_eq!(files.len(), 1);
+    // hooks 不再由本工具带：不生成 hooks.json
+    assert!(!dir.join("hooks.json").exists());
     assert_eq!(
         files[0]["content"].as_str().unwrap().as_bytes(),
-        std::fs::read(dir.join("hooks.json")).unwrap()
-    );
-    assert_eq!(
-        files[1]["content"].as_str().unwrap().as_bytes(),
         std::fs::read(dir.join("AGENTS.md")).unwrap()
     );
     let _ = std::fs::remove_dir_all(root);
@@ -2299,7 +2299,7 @@ fn 已建环境逐项写入共用设置_来源被外部改过就拒绝_含明文
         r#"{"mcpServers":{"fs":{"type":"stdio","command":"own-fs"}}}"#,
     )
     .unwrap();
-    let items = ["permissions", "statusline", "hooks", "rules", "mcp:fs"];
+    let items = ["permissions", "statusline", "rules", "mcp:fs"];
     let before = snapshot_dir(&dir);
     let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
     let status = shared_status(&ctx, "cc-ly");
@@ -2328,6 +2328,13 @@ fn 已建环境逐项写入共用设置_来源被外部改过就拒绝_含明文
         std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap(),
         "# 来源规则\n"
     );
+    // hooks 不再是共用设置：状态里没有这一项，环境自己的 hooks 原样保留
+    assert!(!status.data["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["item"] == "hooks"));
+    assert_eq!(after["hooks"]["Stop"][0]["hooks"][0]["command"], "echo own");
     // 含明文密钥的 MCP 条目不能同步，状态里也不出现取值
     let status_after = shared_status(&ctx, "cc-ly");
     assert_eq!(
@@ -2401,7 +2408,7 @@ fn 已建_claude_环境逐项更新共用设置_来源目标变化拒绝覆盖()
     let preview = shared_status(&ctx, "cc-ly");
     assert!(preview.ok, "{:?}", preview.errors);
     assert_eq!(std::fs::read(&target).unwrap(), target_before, "预览零写");
-    for item in ["permissions", "statusline", "hooks", "rules", "mcp:fs"] {
+    for item in ["permissions", "statusline", "rules", "mcp:fs"] {
         assert_eq!(shared_item(&preview, item)["state"], "different", "{item}");
     }
     assert_eq!(shared_item(&preview, "mcp:private")["state"], "blocked");
@@ -2469,12 +2476,12 @@ fn 已建_claude_环境逐项更新共用设置_来源目标变化拒绝覆盖()
         "echo own"
     );
     let fresh = shared_status(&ctx, "cc-ly");
-    for item in ["statusline", "hooks", "rules", "mcp:fs"] {
+    for item in ["statusline", "rules", "mcp:fs"] {
         let result = apply_shared(&ctx, "cc-ly", &shared_item(&fresh, item));
         assert!(result.ok, "{item}: {:?}", result.errors);
     }
     let done = shared_status(&ctx, "cc-ly");
-    for item in ["permissions", "statusline", "hooks", "rules", "mcp:fs"] {
+    for item in ["permissions", "statusline", "rules", "mcp:fs"] {
         assert_eq!(shared_item(&done, item)["state"], "same", "{item}");
     }
     assert_eq!(shared_item(&done, "mcp:private")["state"], "blocked");
@@ -2549,7 +2556,7 @@ fn 已建_codex_环境更新审批状态栏_保留接入和官方登录() {
     assert!(preview.ok, "{:?}", preview.errors);
     assert_eq!(shared_item(&preview, "permissions")["state"], "different");
     assert_eq!(shared_item(&preview, "statusline")["state"], "different");
-    for item in ["hooks", "rules", "mcp:fs"] {
+    for item in ["rules", "mcp:fs"] {
         assert_eq!(shared_item(&preview, item)["state"], "different", "{item}");
     }
     let permission_item = shared_item(&preview, "permissions");
@@ -2572,7 +2579,7 @@ fn 已建_codex_环境更新审批状态栏_保留接入和官方登录() {
     assert_eq!(status_line["target"], "1 项（内容隐藏）");
     assert!(apply_shared(&ctx, "cx-work", &shared_item(&preview, "permissions")).ok);
     assert!(apply_shared(&ctx, "cx-work", &shared_item(&preview, "statusline")).ok);
-    for item in ["hooks", "rules", "mcp:fs"] {
+    for item in ["rules", "mcp:fs"] {
         let result = apply_shared(&ctx, "cx-work", &shared_item(&preview, item));
         assert!(result.ok, "{item}: {:?}", result.errors);
     }
@@ -2691,26 +2698,28 @@ fn 默认环境的设置可一次性带进_claude_独立环境_只补没有的_�
                 "--definition",
                 &claude_profile("AM_TEST_SEED_CLAUDE_TOKEN"),
                 "--items",
-                "permissions,statusline,hooks,rules,mcp",
+                "permissions,statusline,rules,mcp",
             ],
         ),
     );
     assert!(preview.ok, "{:?}", preview.errors);
     assert_eq!(snapshot_dir(&dir), before_preview, "预览不能写实例目录");
 
-    let env = seed(&ctx, "cc-ly", "permissions,statusline,hooks,rules,mcp");
+    // hooks 已不是可带的项
+    assert!(!seed(&ctx, "cc-ly", "permissions,hooks").ok);
+    assert_eq!(snapshot_dir(&dir), before_preview, "拒绝时零写");
+    let env = seed(&ctx, "cc-ly", "permissions,statusline,rules,mcp");
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(
         seed_states(&env),
         states(&[
             ("permissions", "copied"),
             ("statusline", "copied"),
-            ("hooks", "copied"),
             ("rules", "copied"),
             ("mcp", "copied"),
         ])
     );
-    let mcp = &env.data["results"][4];
+    let mcp = &env.data["results"][3];
     assert_eq!(mcp["skipped"], serde_json::json!(["gh"]), "{mcp}");
     let detail = mcp["detail"].as_str().unwrap();
     assert!(
@@ -2722,7 +2731,7 @@ fn 默认环境的设置可一次性带进_claude_独立环境_只补没有的_�
     let settings = claude_settings(&ctx, ".claude-ly");
     assert_eq!(settings["permissions"], main_settings["permissions"]);
     assert_eq!(settings["statusLine"], main_settings["statusLine"]);
-    assert_eq!(settings["hooks"], main_settings["hooks"]);
+    assert!(settings.get("hooks").is_none(), "hooks 不再由本工具带");
     assert!(settings.get("apiKeyHelper").is_none(), "凭据命令不带");
     assert_eq!(
         settings["env"]["ANTHROPIC_AUTH_TOKEN"], "seed-token-value",
@@ -2761,14 +2770,13 @@ fn 默认环境的设置可一次性带进_claude_独立环境_只补没有的_�
 
     // 再带一次：都已有，什么都不写
     let instance_before = snapshot_dir(&dir);
-    let again = seed(&ctx, "cc-ly", "permissions,statusline,hooks,rules,mcp");
+    let again = seed(&ctx, "cc-ly", "permissions,statusline,rules,mcp");
     assert!(again.ok, "{:?}", again.errors);
     assert_eq!(
         seed_states(&again),
         states(&[
             ("permissions", "exists"),
             ("statusline", "exists"),
-            ("hooks", "exists"),
             ("rules", "exists"),
             ("mcp", "skipped"),
         ])
@@ -2837,14 +2845,13 @@ env = { GITHUB_TOKEN = "literal-token-value" }
     assert!(apply.ok, "{:?}", apply.errors);
     let dir = ctx.home_dir.join(".codex-work");
 
-    let env = seed(&ctx, "cx-work", "permissions,statusline,hooks,rules,mcp");
+    let env = seed(&ctx, "cx-work", "permissions,statusline,rules,mcp");
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(
         seed_states(&env),
         states(&[
             ("permissions", "copied"),
             ("statusline", "copied"),
-            ("hooks", "copied"),
             ("rules", "copied"),
             ("mcp", "copied"),
         ]),
@@ -2872,12 +2879,7 @@ env = { GITHUB_TOKEN = "literal-token-value" }
         Some("agent-manager"),
         "实例自己的接入原样保留"
     );
-    let hooks: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(dir.join("hooks.json")).unwrap()).unwrap();
-    assert_eq!(
-        hooks["hooks"]["Stop"][0]["hooks"][0]["command"],
-        "echo codex"
-    );
+    assert!(!dir.join("hooks.json").exists(), "hooks 不再由本工具带");
     assert_eq!(
         std::fs::read_to_string(dir.join("AGENTS.md")).unwrap(),
         "codex rules\n"

@@ -7,7 +7,6 @@ use std::path::Path;
 use super::model::{ProfileDef, ProfileKind};
 use super::seed;
 use crate::native::{Context, Request};
-use crate::native_hooks::model::{self as hooks_model, HookKind};
 use crate::native_mcp::{
     self as mcp,
     inventory::{FileEntry, TargetScan},
@@ -44,88 +43,6 @@ fn file(path: String, before: bool, bytes: Vec<u8>) -> Result<Value> {
         "exists": before,
         "content": String::from_utf8(bytes).map_err(|_| anyhow!("预览结果不是 UTF-8 文本"))?,
     }))
-}
-
-fn hooks(
-    ctx: &Context,
-    req: &Request,
-    def: &ProfileDef,
-    dir: &Path,
-    main: &mut Vec<u8>,
-) -> Result<(Value, Option<Value>)> {
-    let status = crate::native_hooks::handle(ctx, &sub_request(req, "hooks:status"))?;
-    let source_id = match def.kind {
-        ProfileKind::Claude => "hooks:claude",
-        ProfileKind::Codex => "hooks:codex",
-    };
-    let source =
-        seed::element(&status, source_id).ok_or_else(|| anyhow!("默认环境没有 Hooks 目标"))?;
-    let Some(raw) = source.pointer("/observed/hooks").filter(|v| !v.is_null()) else {
-        let why = source
-            .pointer("/observed/blocked_reason")
-            .and_then(Value::as_str)
-            .unwrap_or("默认环境的助手已停用");
-        return Ok((
-            result("hooks", "absent", format!("读不到默认环境的 hooks：{why}")),
-            None,
-        ));
-    };
-    let source_hooks = hooks_model::validate_hooks_map(Some(raw))?;
-    if source_hooks.is_empty() {
-        return Ok((result("hooks", "absent", "默认环境没有 hooks"), None));
-    }
-
-    let kind = match def.kind {
-        ProfileKind::Claude => HookKind::Claude,
-        ProfileKind::Codex => HookKind::Codex,
-    };
-    let previous = match def.kind {
-        ProfileKind::Claude => Some(main.clone()),
-        ProfileKind::Codex => {
-            let path = dir.join("hooks.json");
-            read_optional(&path)?
-        }
-    };
-    let root = previous
-        .as_deref()
-        .map(serde_json::from_slice::<Value>)
-        .transpose()
-        .map_err(|_| anyhow!("这个环境的 hooks 目标不是合法 JSON"))?;
-    if let Some(root) = &root {
-        if !root.is_object() {
-            bail!("这个环境的 hooks 目标不是 JSON 对象");
-        }
-        hooks_model::validate_target_hooks(root)?;
-    }
-    let existing = root
-        .as_ref()
-        .map(hooks_model::hooks_of)
-        .unwrap_or_else(|| json!({}));
-    let copied = existing.as_object().is_none_or(|map| map.is_empty());
-    let bytes = if copied {
-        hooks_model::render_target(kind, root.as_ref(), &source_hooks)
-            .ok_or_else(|| anyhow!("无法渲染 hooks 目标"))?
-    } else {
-        previous
-            .clone()
-            .ok_or_else(|| anyhow!("找不到 hooks 目标内容"))?
-    };
-    let state = if copied { "copied" } else { "exists" };
-    let detail = if copied {
-        format!("已带上 {} 条 hooks", hooks_model::hook_count(raw))
-    } else {
-        "独立环境已有 hooks，没有改".to_string()
-    };
-    if def.kind == ProfileKind::Claude {
-        *main = bytes;
-        Ok((result("hooks", state, detail), None))
-    } else {
-        let display = format!("{}/hooks.json", def.config_dir_raw.trim_end_matches('/'));
-        Ok((
-            result("hooks", state, detail),
-            Some(file(display, previous.is_some(), bytes)?),
-        ))
-    }
 }
 
 fn rules(
@@ -377,7 +294,6 @@ pub(super) fn preview(
     let mut files = Vec::new();
     for item in items {
         let outcome = match *item {
-            "hooks" => hooks(ctx, req, def, dir, &mut main),
             "rules" => rules(ctx, req, def, dir),
             "mcp" => mcp(ctx, def, dir, &mut main),
             _ => continue,

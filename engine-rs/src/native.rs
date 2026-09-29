@@ -62,8 +62,8 @@ impl Request {
 }
 
 const KNOWN_DOMAINS: &[&str] = &[
-    "usage", "agents", "mcp", "skills", "rules", "hooks", "aliases", "profiles", "secrets",
-    "profile", "policy", "system", "runs", "db", "logs", "config",
+    "usage", "agents", "mcp", "skills", "rules", "aliases", "profiles", "secrets", "profile",
+    "policy", "system", "runs", "db", "logs", "config",
 ];
 
 fn mode_of(request: &Request) -> Mode {
@@ -163,7 +163,6 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let is_skill_apply = request.command.replace('.', ":") == "skills:apply";
     let is_mcp_apply = request.command.replace('.', ":") == "mcp:apply";
     let is_rule_apply = request.command.replace('.', ":") == "rules:apply";
-    let is_hook_apply = request.command.replace('.', ":") == "hooks:apply";
     let is_alias_apply = request.command.replace('.', ":") == "aliases:apply";
     let is_profile_apply = matches!(
         request.command.replace('.', ":").as_str(),
@@ -266,29 +265,6 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                     vec![],
                     vec![diagnostic(
                         "RULE_ERROR",
-                        None,
-                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
-                    )],
-                );
-                return env;
-            }
-        }
-    } else if is_hook_apply {
-        match crate::native_hooks::preflight_apply(ctx, request) {
-            Ok(()) => (true, "Hooks", "HOOK_ERROR"),
-            Err(err) => {
-                let env = Envelope::new(
-                    request.command.replacen(':', ".", 1),
-                    mode_of(request),
-                    Lock {
-                        held: false,
-                        pid: None,
-                    },
-                    request.run_id.clone(),
-                    Value::Object(Map::new()),
-                    vec![],
-                    vec![diagnostic(
-                        "HOOK_ERROR",
                         None,
                         crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
                     )],
@@ -532,12 +508,6 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
             crate::native_rules::handle(ctx, request)
                 .map(|data| (data, vec![]))
                 .map_err(|err| DispatchError::new("RULE_ERROR", format!("{err:#}")))
-        }
-        // hooks 以实际配置为准：apply 写文件（取锁），丢弃旧版保存的 hooks 只写库
-        ("hooks", "status" | "preview" | "apply" | "discard-legacy") => {
-            crate::native_hooks::handle(ctx, request)
-                .map(|data| (data, vec![]))
-                .map_err(|err| DispatchError::new("HOOK_ERROR", format!("{err:#}")))
         }
         (
             "profiles",
@@ -1396,7 +1366,6 @@ mod tests {
             "skills:plan",
             "mcp:plan",
             "rules:plan",
-            "hooks:plan",
             "aliases:plan",
             "skills.plan", // 点号形式同样归一化为 UNKNOWN_VERB
         ] {

@@ -24,10 +24,6 @@ const FILE_CODEX_CONFIG: &str = "config.toml";
 /// 实例配置目录里由本工具维护的文件。
 pub(crate) const FILE_CLAUDE_SETTINGS: &str = "settings.json";
 
-/// 实例目录下的 hooks：以实际文件为准，归 hooks 域作为 hooks 目标直接编辑。
-/// profiles 域不渲染 hooks.json，也不碰 settings.json 的 `hooks` 键。
-pub(crate) const FILE_CODEX_HOOKS: &str = "hooks.json";
-
 /// 实例目录下的规则文件：以实际文件为准，归 rules 域作为规则目标直接编辑，
 /// profiles 域不渲染、不写、不检测它。
 pub(crate) const FILE_CLAUDE_RULES: &str = "CLAUDE.md";
@@ -465,7 +461,7 @@ pub(crate) fn load_definition_entries(policy: &Value) -> Vec<(String, Value, Res
     out
 }
 
-/// 实例 settings.json 里与本工具有关的键只有 env / model：`hooks` 归 hooks 域，其余根级
+/// 实例 settings.json 里与本工具有关的键只有 env / model：`hooks` 与其余根级
 /// 字段是用户自己的（合并写入时原样保留）。env 只写实例定义里声明的那几个变量，外加取消
 /// shell 继承的那组（见 `claude_cancelled_env`，定义没声明的写为空串）；用户自己加的其他 env
 /// 变量原样保留。Codex 实例 config.toml 同理，只动下面这几项。
@@ -869,8 +865,8 @@ pub(crate) fn adopt_profile(
     Ok((profile, notes))
 }
 
-/// 渲染该实例配置目录下的全部受管文件（不含规则与 hooks，见 FILE_CLAUDE_RULES /
-/// FILE_CODEX_HOOKS）。
+/// 渲染该实例配置目录下的全部受管文件（不含规则，见 FILE_CLAUDE_RULES；hooks.json 与
+/// settings.json 的 `hooks` 键是用户自己的，不渲染、不碰）。
 ///
 /// `existing` 给出目标文件的现有字节：Claude 的 `settings.json` 采用合并写入，只改实例
 /// 定义声明的 env 变量与 model；用户自己加的 env 变量、根级字段与 hooks 原样保留。

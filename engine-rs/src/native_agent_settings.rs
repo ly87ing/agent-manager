@@ -16,8 +16,8 @@
 //! 引用写进去不生效；落地文件里是明文，与 MCP 写助手配置同级，由文件权限保护。
 //! 回填遇到没保存过的明文令牌时，只写进用户选择的外部密钥文件，库里只留变量名。
 //!
-//! 受管粒度按「键路径」而不是整个顶层键：`~/.claude/settings.json` 里还住着 hooks 域
-//! 和用户自己的 permissions.allow/deny、别的 env 变量，整键归属会互相覆盖。
+//! 受管粒度按「键路径」而不是整个顶层键：`~/.claude/settings.json` 里还住着用户自己的 hooks、
+//! permissions.allow/deny、别的 env 变量，整键归属会互相覆盖。
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -2048,7 +2048,7 @@ fn target_path(ctx: &Context, kind: Kind, config_path: Option<&str>) -> Result<P
 }
 
 /// 写入落点：符号链接解析到最终目标（链接本身保持不变），目标必须是普通文件；
-/// 文件还不存在时只解析它的父目录。hooks 域写同一类助手配置文件，沿用这一裁决。
+/// 文件还不存在时只解析它的父目录。
 pub(crate) fn resolve_write_target(path: &Path) -> Result<PathBuf> {
     match std::fs::symlink_metadata(path) {
         Ok(_) => {
