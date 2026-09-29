@@ -438,7 +438,10 @@ list` 在实例目录里只列出不含明文凭据的那一条，Codex 能加�
 助手配置；分享内容只含连接参数与凭据变量名，不含凭据取值、认证文件或当前启用状态。导入先做
 格式、助手形态、名称、URL、模型与变量名校验，再明确以“保存但不启用”提交。
 
-官方账号登录状态不进 status（不读认证文件内容，也不在每次刷新时调用官方命令）。主配置的「官方账号」
+官方账号登录状态不进 status（不读认证文件内容，也不在每次刷新时调用官方命令）。账号页为每个官方账号调用一次
+`agents:auth-status`（结果缓存 5 分钟），返回里的 `account` 给出 Claude 登录记录 `oauthAccount` 的邮箱、组织名与订阅档位
+（`organizationType` + `organizationRateLimitTier`，如 `Max 5x`；走官方命令时取 `email`、`orgName`、`subscriptionType`），
+只用于界面认出是哪个账号，不入库、不进审计与日志；Codex 的官方命令不给账号，只显示登录方式（本工具不读 `auth.json`）。主配置的「官方账号」
 卡片与实例卡片都提供「检查登录」与只复制不执行的登录、退出命令，点「检查登录」时调用只读的 `agents:auth-status --only <agents:助手 | profiles:实例>`：用官方命令查一次，只看这个配置目录
 自己存的登录——实例带各自的 `CLAUDE_CONFIG_DIR` / `CODEX_HOME`，主配置不带。Claude 的探测：
 去掉进程环境里排在 `/login` 之前的全部来源（两种第三方凭据、长期令牌、五个云厂商开关、`ANTHROPIC_PROFILE`

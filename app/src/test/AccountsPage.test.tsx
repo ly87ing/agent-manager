@@ -73,7 +73,11 @@ function routes(options: { previewVersion?: () => number; statusline?: string } 
     }, { command: "secrets.status" }),
     "secrets:set": makeEnvelope({}, { command: "secrets.set" }),
     "agents:auth-status": async (args) => makeEnvelope(
-      { element: valueOf(args, "--only"), state: "logged-in", logged_in: true, method: "claude.ai", third_party: false, mixed: false, reason: null },
+      {
+        element: valueOf(args, "--only"), state: "logged-in", logged_in: true, method: "claude.ai",
+        account: valueOf(args, "--only") === "agents:claude-code" ? { email: "YOUR_EMAIL@example.com", org: "YOUR_ORG", plan: "Max 5x" } : null,
+        third_party: false, mixed: false, reason: null,
+      },
       { command: "agents.auth-status" },
     ),
     "profiles:preview": async (args) => makeEnvelope({
@@ -137,7 +141,9 @@ describe("账号页", () => {
     renderWithEngine(<AccountsPage />, routes());
     const main = await screen.findByTestId("account-row-agents:claude-code");
     expect(within(main).getByText("主账号")).toBeInTheDocument();
-    expect(await within(main).findByText("官方 · 已登录")).toBeInTheDocument();
+    // 认得出是哪个账号：邮箱与档位，组织名在悬停提示里
+    const identity = await within(main).findByText("官方 · YOUR_EMAIL@example.com · Max 5x");
+    expect(identity).toHaveAttribute("title", "组织：YOUR_ORG");
     const ds = screen.getByTestId("account-row-profiles:ds");
     expect(within(ds).getByText("ds")).toBeInTheDocument();
     expect(within(ds).getByText("API · api.deepseek.com")).toBeInTheDocument();

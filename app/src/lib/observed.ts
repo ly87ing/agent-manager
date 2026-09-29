@@ -148,6 +148,8 @@ export interface OfficialAuthStatus {
   logged_in: boolean | null;
   /** claude.ai / console / oauth_token / chatgpt / api_key / other；有登录记录但方式未知时为 null。 */
   method: string | null;
+  /** 账号标识（Claude 登录记录里的邮箱、组织名与订阅档位）；认不出或未登录时为 null。只显示、不存。 */
+  account?: { email: string | null; org: string | null; plan: string | null } | null;
   /** 这个环境用第三方接口或凭据。 */
   third_party: boolean;
   /** 第三方环境里有官方账号登录：两种凭据混在同一个配置目录。 */

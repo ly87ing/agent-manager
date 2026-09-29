@@ -1,7 +1,8 @@
 //! 助手官方账号登录的只读判断。
 //!
 //! 只经官方 CLI 的状态命令（`claude auth status` / `codex login status`）和官方文档说明的
-//! 登录记录判断，不读取任何凭据内容、不返回账号或令牌、不写文件。认证修改只由用户在终端
+//! 登录记录判断，不读取任何凭据内容、不返回令牌、不写文件。为让用户分得清是哪个账号，Claude
+//! 会带出登录记录里的邮箱、组织名与订阅档位（只返回给界面显示，不入库、不进审计与日志）。认证修改只由用户在终端
 //! 亲自执行官方命令完成，本工具从不代为登录或退出。
 
 use serde_json::{json, Value};
@@ -88,12 +89,83 @@ fn resolve_cli(home_dir: &Path, bin: &str) -> Option<std::path::PathBuf> {
         .find(|path| path.is_file())
 }
 
-/// `.claude.json` 顶层两个登录记录键是否存在且非 null。解析时取值一律跳过（`IgnoredAny`），
-/// 不进任何内存结构——`primaryApiKey` 的取值就是 Console 的 API key。
+/// `.claude.json` 顶层两个登录记录键是否存在且非 null。`primaryApiKey` 的取值就是 Console 的
+/// API key，解析时一律跳过（`IgnoredAny`），不进任何内存结构；`oauthAccount` 只有账号标识，
+/// 从中取邮箱、组织名与订阅档位给界面显示。
 #[derive(Default)]
 struct ClaudeJsonLogin {
     primary_api_key: bool,
     oauth_account: bool,
+    account: Option<AccountLabel>,
+}
+
+/// 账号标识：只用于界面上认出是哪个账号，不含任何凭据。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct AccountLabel {
+    pub email: Option<String>,
+    pub org: Option<String>,
+    pub plan: Option<String>,
+}
+
+impl AccountLabel {
+    fn from_oauth_account(value: &Value) -> Option<Self> {
+        let text = |key: &str| {
+            value
+                .get(key)
+                .and_then(Value::as_str)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string)
+        };
+        let label = AccountLabel {
+            email: text("emailAddress"),
+            org: text("organizationName"),
+            plan: plan_label(
+                text("organizationType").as_deref(),
+                text("organizationRateLimitTier").as_deref(),
+            ),
+        };
+        (label != AccountLabel::default()).then_some(label)
+    }
+
+    fn from_auth_status(value: &Value) -> Option<Self> {
+        let text = |key: &str| {
+            value
+                .get(key)
+                .and_then(Value::as_str)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string)
+        };
+        let label = AccountLabel {
+            email: text("email"),
+            org: text("orgName"),
+            plan: text("subscriptionType").map(|plan| capitalize(&plan)),
+        };
+        (label != AccountLabel::default()).then_some(label)
+    }
+}
+
+fn capitalize(word: &str) -> String {
+    let mut chars = word.chars();
+    chars
+        .next()
+        .map(|first| first.to_uppercase().chain(chars).collect())
+        .unwrap_or_default()
+}
+
+/// 订阅档位：`claude_max` + `default_claude_max_5x` → `Max 5x`；只有类型时取类型（`claude_pro` → `Pro`）。
+fn plan_label(org_type: Option<&str>, tier: Option<&str>) -> Option<String> {
+    let base = org_type.map(|kind| capitalize(kind.trim_start_matches("claude_")))?;
+    let multiple = tier
+        .and_then(|tier| tier.rsplit('_').next())
+        .filter(|last| {
+            last.ends_with('x')
+                && last[..last.len() - 1].chars().all(|c| c.is_ascii_digit())
+                && last.len() > 1
+        });
+    Some(match multiple {
+        Some(multiple) => format!("{base} {multiple}"),
+        None => base,
+    })
 }
 
 impl<'de> serde::Deserialize<'de> for ClaudeJsonLogin {
@@ -120,7 +192,13 @@ impl<'de> serde::Deserialize<'de> for ClaudeJsonLogin {
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
                         "primaryApiKey" => out.primary_api_key |= map.next_value::<Present>()?.0,
-                        "oauthAccount" => out.oauth_account |= map.next_value::<Present>()?.0,
+                        "oauthAccount" => {
+                            let value = map.next_value::<Value>()?;
+                            if !value.is_null() {
+                                out.oauth_account = true;
+                                out.account = AccountLabel::from_oauth_account(&value);
+                            }
+                        }
                         _ => {
                             map.next_value::<serde::de::IgnoredAny>()?;
                         }
@@ -138,7 +216,9 @@ impl<'de> serde::Deserialize<'de> for ClaudeJsonLogin {
 /// 只看键是否存在，取值在解析时就跳过。文件存在但解析不了时无法确认，报错。
 ///
 /// 返回 `None` 表示没有登录记录，`Some(方式)` 是能从记录看出的登录方式（看不出时为 `None`）。
-fn claude_json_login(path: &Path) -> Result<Option<Option<&'static str>>, String> {
+fn claude_json_login(
+    path: &Path,
+) -> Result<Option<(Option<&'static str>, Option<AccountLabel>)>, String> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -147,9 +227,9 @@ fn claude_json_login(path: &Path) -> Result<Option<Option<&'static str>>, String
     let found = serde_json::from_slice::<ClaudeJsonLogin>(&bytes)
         .map_err(|_| ".claude.json 不是合法 JSON".to_string())?;
     Ok(if found.primary_api_key {
-        Some(Some("console"))
+        Some((Some("console"), found.account))
     } else if found.oauth_account {
-        Some(None)
+        Some((None, found.account))
     } else {
         None
     })
@@ -159,12 +239,14 @@ fn claude_json_login(path: &Path) -> Result<Option<Option<&'static str>>, String
 pub(crate) struct LoginStatus {
     pub logged_in: bool,
     pub method: Option<&'static str>,
+    pub account: Option<AccountLabel>,
 }
 
 fn logged_out() -> LoginStatus {
     LoginStatus {
         logged_in: false,
         method: None,
+        account: None,
     }
 }
 
@@ -187,10 +269,11 @@ pub(crate) fn official_status(
     // `.credentials.json` 还存 MCP 服务的 OAuth 登录（官方认证文档），存在不等于登录了账号，
     // 以官方命令为准；`.claude.json` 的登录记录不受目录里声明的凭据影响，先看它。
     if matches!(kind, AuthKind::Claude) {
-        if let Some(method) = claude_json_login(&claude_json)? {
+        if let Some((method, account)) = claude_json_login(&claude_json)? {
             return Ok(LoginStatus {
                 logged_in: true,
                 method,
+                account,
             });
         }
     }
@@ -233,6 +316,7 @@ pub(crate) fn official_status(
             Ok(LoginStatus {
                 logged_in: true,
                 method: Some(method),
+                account: AccountLabel::from_auth_status(&status),
             })
         }
         AuthKind::Codex => {
@@ -261,6 +345,7 @@ pub(crate) fn official_status(
                     Ok(LoginStatus {
                         logged_in: true,
                         method: Some(method),
+                        account: None,
                     })
                 }
                 Some((1, stdout, stderr))
@@ -347,6 +432,11 @@ pub(crate) fn status_command(
             "state": if status.logged_in { "logged-in" } else { "logged-out" },
             "logged_in": status.logged_in,
             "method": status.method,
+            "account": status.account.map(|account| json!({
+                "email": account.email,
+                "org": account.org,
+                "plan": account.plan,
+            })),
             "third_party": third_party,
             "mixed": third_party && status.logged_in,
             "reason": null,
@@ -356,6 +446,7 @@ pub(crate) fn status_command(
             "state": "unknown",
             "logged_in": null,
             "method": null,
+            "account": null,
             "third_party": third_party,
             "mixed": false,
             "reason": reason,
@@ -960,6 +1051,55 @@ mod tests {
         let _ = std::fs::remove_dir_all(&home);
     }
 
+    /// 账号标识取自 oauthAccount：邮箱、组织名、订阅档位；Console 的 API key 取值不进结果。
+    #[test]
+    fn claude_json_login_labels_the_account_without_the_console_key() {
+        let dir = std::env::temp_dir().join(format!("am-auth-label-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".claude.json");
+        std::fs::write(
+            &path,
+            r#"{"primaryApiKey":"sk-ant-api03-secret","oauthAccount":{"emailAddress":"YOUR_EMAIL@example.com","organizationName":"YOUR_ORG","organizationType":"claude_max","organizationRateLimitTier":"default_claude_max_20x","accountUuid":"u"}}"#,
+        )
+        .unwrap();
+        let (method, account) = claude_json_login(&path).unwrap().unwrap();
+        assert_eq!(method, Some("console"));
+        let account = account.unwrap();
+        assert_eq!(account.email.as_deref(), Some("YOUR_EMAIL@example.com"));
+        assert_eq!(account.org.as_deref(), Some("YOUR_ORG"));
+        assert_eq!(account.plan.as_deref(), Some("Max 20x"));
+        assert!(!format!("{account:?}").contains("sk-ant"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn plan_labels_follow_type_and_rate_tier() {
+        assert_eq!(
+            plan_label(Some("claude_max"), Some("default_claude_max_5x")).as_deref(),
+            Some("Max 5x")
+        );
+        assert_eq!(
+            plan_label(Some("claude_pro"), Some("default_claude_ai")).as_deref(),
+            Some("Pro")
+        );
+        assert_eq!(
+            plan_label(Some("claude_team"), None).as_deref(),
+            Some("Team")
+        );
+        assert_eq!(plan_label(None, Some("default_claude_max_5x")), None);
+        assert_eq!(
+            AccountLabel::from_auth_status(
+                &json!({"email": "YOUR_EMAIL@example.com", "orgName": "YOUR_ORG", "subscriptionType": "max"})
+            ),
+            Some(AccountLabel {
+                email: Some("YOUR_EMAIL@example.com".into()),
+                org: Some("YOUR_ORG".into()),
+                plan: Some("Max".into())
+            })
+        );
+    }
+
     /// 登录记录只看顶层键在不在（非 null）；嵌套里同名的键不算。
     #[test]
     fn claude_json_login_looks_only_at_top_level_keys() {
@@ -969,7 +1109,7 @@ mod tests {
         let path = dir.join(".claude.json");
         let check = |text: &str| {
             std::fs::write(&path, text).unwrap();
-            claude_json_login(&path)
+            claude_json_login(&path).map(|found| found.map(|(method, _)| method))
         };
         assert_eq!(
             check(r#"{"primaryApiKey":"sk-ant-api03-secret","oauthAccount":{"a":1}}"#),

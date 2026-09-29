@@ -121,16 +121,22 @@ function AccountRow({
   const id = account.elementId;
   const loginCommand = authTerminalCommand(group.kind, group.bin, "login", account.isMain ? undefined : account.configDir);
   const loggedOut = account.type === "official" && auth !== "pending" && auth?.state === "logged-out";
+  // 登录了哪个账号：Claude 给出邮箱与档位；Codex 官方命令只说登录方式
+  const identity = auth && auth !== "pending" && auth.state === "logged-in"
+    ? [auth.account?.email, auth.account?.plan].filter(Boolean).join(" · ")
+      || (auth.method === "chatgpt" ? "ChatGPT 登录" : auth.method === "api_key" ? "API Key 登录" : "已登录")
+    : null;
   const typeText =
     account.type === "api"
       ? `API · ${account.apiHost ?? "未填地址"}`
       : auth === "pending"
         ? "官方 · 检查中"
-        : auth?.state === "logged-in"
-          ? "官方 · 已登录"
+        : identity
+          ? `官方 · ${identity}`
           : auth?.state === "logged-out"
             ? "官方 · 未登录"
             : "官方";
+  const typeTitle = auth && auth !== "pending" && auth.account?.org ? `组织：${auth.account.org}` : undefined;
   const badges: { text: string; tone: "warn" | "muted" }[] = [];
   if (!account.isMain && !account.command) badges.push({ text: "没有启动命令", tone: "warn" });
   if (account.drifted) badges.push({ text: "目录被外部改过", tone: "warn" });
@@ -159,7 +165,7 @@ function AccountRow({
         </div>
         <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
           {account.command && <code className="font-mono text-foreground">{account.command}</code>}
-          <span data-testid={`account-type-${id}`} className={cn(loggedOut && "text-warning")}>
+          <span data-testid={`account-type-${id}`} title={typeTitle} className={cn("truncate", loggedOut && "text-warning")}>
             {typeText}
           </span>
           {account.model && <span className="truncate">· {account.model}</span>}
