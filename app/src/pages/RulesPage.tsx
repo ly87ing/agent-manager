@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, Info, Plus } from "lucide-react";
+import { ArrowUpDown, Copy, Eye, Info, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { AgentIcon } from "../components/AgentIcon";
 import { ConfirmModal } from "../components/ConfirmModal";
-import { RuleSourcesManager } from "../components/RuleSourcesManager";
+import { AddSourceDialog, RemoveSourceDialog, type UserSource, useRuleSources } from "../components/RuleSources";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import type { EngineElement, RuleSourceRule, SuggestedSource, RuleTemplate, StatusData } from "../lib/contract";
@@ -31,10 +31,6 @@ const ORIGIN_LABEL: Record<string, string> = {
   legacy: "旧来源",
 };
 
-/** 次要动作：鼠标移到行上（或键盘聚焦）才显示，与技能、MCP 页一致。 */
-const HOVER_ACTIONS = "flex flex-wrap gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100";
-const GHOST = "rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground";
-
 function specOf(element: EngineElement): RulesSpec {
   return element.spec as unknown as RulesSpec;
 }
@@ -49,19 +45,6 @@ function nameOf(element: EngineElement): string {
 
 function isWritable(element: EngineElement): boolean {
   return element.actions.some((action) => action.id === "write") && typeof observedOf(element).base === "string";
-}
-
-function stateLabel(element: EngineElement): string {
-  switch (element.state) {
-    case "managed-ok":
-      return "已有文件";
-    case "missing":
-      return "还没有文件";
-    case "disabled":
-      return "已停用";
-    default:
-      return "不可用";
-  }
 }
 
 function lineCount(text: string): number {
@@ -113,7 +96,12 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
     );
   }
 
-  const elements = query.data.data.elements;
+  // 与账号页同序：Claude 在前、Codex 在后；每个助手主号在前
+  const elements = [...query.data.data.elements].sort(
+    (a, b) =>
+      Number(specOf(a).kind === "codex") - Number(specOf(b).kind === "codex") ||
+      Number(Boolean(specOf(a).profile_id)) - Number(Boolean(specOf(b).profile_id)),
+  );
   const templates = query.data.data.templates ?? [];
   const sourceRules = query.data.data.source_rules ?? [];
   const suggested = query.data.data.suggested_sources ?? [];
@@ -168,131 +156,88 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
     });
   };
 
+  const followerCount = (match: (observed: RulesObserved) => boolean) => elements.filter((element) => match(observedOf(element))).length;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <h2 className="sr-only">规则</h2>
       {query.data.errors.length > 0 && <ErrorPanel title="规则状态读取失败" errors={query.data.errors} />}
 
-      <div className="flex items-center gap-2">
-        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title={PAGE_NOTE}>
-          <Info className="h-3.5 w-3.5" aria-hidden /> 各账号的规则文件
-        </span>
-      </div>
-
-      <section className="divide-y rounded-lg border bg-card" aria-label="规则文件">
+      <section className="overflow-clip rounded-lg border bg-card" aria-label="规则文件">
+        <TableHeader title={`规则文件 · ${elements.length}`} middle="使用的规则" lines="行数">
+          <span className="text-muted-foreground" title={PAGE_NOTE}>
+            <Info className="inline h-3.5 w-3.5 align-[-2px]" aria-hidden /> 说明
+          </span>
+        </TableHeader>
         {elements.length === 0 && <p className="px-4 py-3 text-xs text-muted-foreground">没有可显示的规则文件。</p>}
-        {elements.map((element) => {
-          const others = writable.filter((item) => item.id !== element.id);
-          const content = observedOf(element).content;
-          return (
-            <TargetCard
-              key={element.id}
-              element={element}
-              label={labelOf(element)}
-              fill={pendingFill.find((row) => row.elementId === element.id)}
-              onFill={fillOne}
-              sourceRules={sourceRules}
-              busy={directApply.executing}
-              onEdit={() => setDialog({ kind: "edit", element })}
-              onApplyTemplate={
-                templates.length > 0 || sourceRules.length > 0
-                  ? () =>
-                      setDialog({
-                        kind: "apply",
-                        title: `应用模板到 ${nameOf(element)}`,
-                        targets: [element],
-                        sources: [...sourceRules.map(ruleSource), ...templates.map(templateSource)],
-                      })
-                  : undefined
-              }
-              onApplyRule={(rule) =>
-                setDialog({ kind: "apply", title: `用${sourceRuleLabel(rule)}更新 ${nameOf(element)}`, targets: [element], sources: [ruleSource(rule)] })
-              }
-              onFollow={(rule) => follow(element, rule)}
-              onCopy={
-                typeof content === "string" && others.length > 0
-                  ? () =>
-                      setDialog({
-                        kind: "apply",
-                        title: `复制 ${nameOf(element)} 的内容`,
-                        targets: others,
-                        sources: [{ key: `from:${element.id}`, label: nameOf(element), body: content, args: ["--from", element.id] }],
-                      })
-                  : undefined
-              }
-            />
-          );
-        })}
-      </section>
-
-      <section className="space-y-2 rounded-lg border bg-card px-4 py-3" aria-label="规则模板">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold">规则模板</h3>
-            <p className="mt-1 text-xs text-muted-foreground">只保存在本机库里，保存或删除都不改任何规则文件。</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setDialog({ kind: "template", template: null })}
-            className="inline-flex items-center gap-1 rounded-md border border-primary/30 px-3 py-1.5 text-xs text-primary hover:bg-primary/10"
-          >
-            <Plus className="h-3.5 w-3.5" aria-hidden /> 新建模板
-          </button>
-        </div>
-        {templates.length === 0 && <p className="text-xs text-muted-foreground">还没有模板。</p>}
         <ul className="divide-y">
-          {templates.map((template) => (
-            <li key={template.id} data-testid={`rule-template-${template.id}`} className="group flex flex-wrap items-center justify-between gap-2 py-2">
-              <div className="min-w-0">
-                <span className="text-sm font-medium">{template.name}</span>
-                <span className="ml-2 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">
-                  {ORIGIN_LABEL[template.origin] ?? template.origin}
-                </span>
-                <span className="ml-2 text-[11px] text-muted-foreground">{lineCount(template.body)} 行</span>
-              </div>
-              <div className={HOVER_ACTIONS}>
-                {writable.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setDialog({ kind: "apply", title: `应用模板「${template.name}」`, targets: writable, sources: [templateSource(template)] })
-                    }
-                    className={GHOST}
-                  >
-                    应用到…
-                  </button>
-                )}
-                <button
-                  type="button"
-                  aria-label={`编辑模板 ${template.name}`}
-                  onClick={() => setDialog({ kind: "template", template })}
-                  className={GHOST}
-                >
-                  编辑
-                </button>
-                <button
-                  type="button"
-                  aria-label={`删除模板 ${template.name}`}
-                  onClick={() => setDialog({ kind: "delete-template", template })}
-                  className={cn(GHOST, "hover:bg-destructive/10 hover:text-destructive")}
-                >
-                  删除
-                </button>
-              </div>
-            </li>
-          ))}
+          {elements.map((element) => {
+            const others = writable.filter((item) => item.id !== element.id);
+            const content = observedOf(element).content;
+            return (
+              <TargetRow
+                key={element.id}
+                element={element}
+                label={labelOf(element)}
+                fill={pendingFill.find((row) => row.elementId === element.id)}
+                onFill={fillOne}
+                sourceRules={sourceRules}
+                busy={directApply.executing}
+                onEdit={() => setDialog({ kind: "edit", element })}
+                onSwitch={
+                  templates.length > 0 || sourceRules.length > 0
+                    ? () =>
+                        setDialog({
+                          kind: "apply",
+                          title: `更换 ${nameOf(element)} 的规则`,
+                          targets: [element],
+                          sources: [...sourceRules.map(ruleSource), ...templates.map(templateSource)],
+                        })
+                    : undefined
+                }
+                onApplyRule={(rule) =>
+                  setDialog({ kind: "apply", title: `用${sourceRuleLabel(rule)}更新 ${nameOf(element)}`, targets: [element], sources: [ruleSource(rule)] })
+                }
+                onFollow={(rule) => follow(element, rule)}
+                onCopy={
+                  typeof content === "string" && others.length > 0
+                    ? () =>
+                        setDialog({
+                          kind: "apply",
+                          title: `复制 ${nameOf(element)} 的内容`,
+                          targets: others,
+                          sources: [{ key: `from:${element.id}`, label: nameOf(element), body: content, args: ["--from", element.id] }],
+                        })
+                    : undefined
+                }
+              />
+            );
+          })}
         </ul>
       </section>
 
-      <SourceRulesSection
-        rules={sourceRules}
+      <RuleLibrary
+        sourceRules={sourceRules}
+        templates={templates}
         suggested={suggested}
         busy={directApply.executing}
-        onApply={
+        usage={{
+          rule: (rule) => followerCount((observed) => (observed.source_follow?.rule ?? observed.matched_source_rule?.id) === rule.id),
+          template: (template) => followerCount((observed) => !observed.source_follow && observed.matched_template?.id === template.id),
+        }}
+        onApplyRule={
           writable.length > 0
             ? (rule) => setDialog({ kind: "apply", title: `应用${sourceRuleLabel(rule)}`, targets: writable, sources: [ruleSource(rule)] })
             : undefined
         }
+        onApplyTemplate={
+          writable.length > 0
+            ? (template) => setDialog({ kind: "apply", title: `应用模板「${template.name}」`, targets: writable, sources: [templateSource(template)] })
+            : undefined
+        }
+        onNewTemplate={() => setDialog({ kind: "template", template: null })}
+        onEditTemplate={(template) => setDialog({ kind: "template", template })}
+        onDeleteTemplate={(template) => setDialog({ kind: "delete-template", template })}
         onFetch={fetchSource}
         onOpenSkills={onOpenSkills}
       />
@@ -307,13 +252,81 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
   );
 }
 
-function TargetCard({
+/*
+ * 两张表共用一套列：名字（占满剩余）| 中间说明（w-72）| 行数（w-16）| 需要处理的按钮（w-28）| 图标（w-28）。
+ * 表头与每一行都用同样的列宽，所有内容上下对齐。
+ */
+const COL_MIDDLE = "w-72 shrink-0";
+const COL_LINES = "w-16 shrink-0 text-right tabular-nums";
+const COL_ACTION = "flex w-28 shrink-0 justify-start";
+const COL_ICONS = "flex w-28 shrink-0 items-center justify-end gap-0.5";
+const ROW = "group flex items-center gap-4 px-4 py-2 hover:bg-accent/40";
+const PILL = "whitespace-nowrap rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-40";
+
+function TableHeader({ title, middle, lines, children }: { title: string; middle: string; lines: string; children?: ReactNode }) {
+  return (
+    <div className="flex items-center gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
+      <span className="min-w-0 flex-1 font-medium text-foreground">{title}</span>
+      <span className={COL_MIDDLE}>{middle}</span>
+      <span className={COL_LINES}>{lines}</span>
+      <span className="flex w-60 shrink-0 items-center justify-end gap-3">{children}</span>
+    </div>
+  );
+}
+
+function Icon({ label, testId, danger, onClick, children, disabled }: { label: string; testId?: string; danger?: boolean; onClick: () => void; children: ReactNode; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      data-testid={testId}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-40",
+        danger && "hover:bg-destructive/10 hover:text-destructive",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** 这个账号的规则文件用的是哪条、状态如何。 */
+function ruleStatus(element: EngineElement, sourceRules: RuleSourceRule[]) {
+  const observed = observedOf(element);
+  const follow = observed.source_follow;
+  if (element.state === "disabled") return { tone: "muted" as const, note: "已停用" };
+  if (!isWritable(element)) return { tone: "muted" as const, note: "不可用", detail: observed.blocked_reason ?? undefined };
+  if (observed.content === null || observed.base === "missing") return { tone: "muted" as const, note: "还没有规则文件" };
+  if (follow) {
+    const rule = sourceRules.find((item) => item.id === follow.rule);
+    const name = rule?.name ?? follow.rule.split("/").pop();
+    const source = rule?.collection ?? follow.rule.split("/")[0];
+    const changedSinceFollow = !follow.file_unchanged && Boolean(follow.current_revision) && follow.current_revision !== follow.applied_revision;
+    if (follow.update_available) return { name, source, tone: "warn" as const, note: "有新版本", testId: "rules-update-available" };
+    if (changedSinceFollow) return { name, source, tone: "warn" as const, note: "被改过，来源有新版", testId: "rules-changed-since-follow" };
+    if (follow.current_revision === null) return { name, source, tone: "muted" as const, note: "来源已不在" };
+    if (!follow.file_unchanged) return { name, source, tone: "muted" as const, note: "改过" };
+    return { name, source, tone: "ok" as const, note: "最新" };
+  }
+  if (observed.matched_source_rule) {
+    return { name: observed.matched_source_rule.name, source: observed.matched_source_rule.collection, tone: "ok" as const, note: "一致" };
+  }
+  if (observed.matched_template) return { name: observed.matched_template.name, source: "本机模板", tone: "ok" as const, note: "一致" };
+  return { tone: "muted" as const, note: "自定义内容" };
+}
+
+const DOT = { ok: "bg-success", warn: "bg-warning", muted: "bg-muted-foreground/50" } as const;
+
+function TargetRow({
   element,
   label,
   sourceRules,
   busy,
   onEdit,
-  onApplyTemplate,
+  onSwitch,
   onApplyRule,
   onFollow,
   onCopy,
@@ -321,18 +334,15 @@ function TargetCard({
   onFill,
 }: {
   element: EngineElement;
-  /** 显示用：账号名 · 文件名。 */
   label: string;
-  /** 还没有规则文件、可以从主账号复制时给出。 */
   fill?: RulesFillRow;
   onFill: (row: RulesFillRow) => void;
   sourceRules: RuleSourceRule[];
   busy: boolean;
   onEdit: () => void;
-  onApplyTemplate?: () => void;
-  /** 用某条来源规则的当前版本覆盖（先看差异）。 */
+  /** 先看差异，再换成规则库里的另一条。 */
+  onSwitch?: () => void;
   onApplyRule: (rule: RuleSourceRule) => void;
-  /** 文件已与来源规则一致：记下跟随。 */
   onFollow: (rule: RuleSourceRule) => void;
   onCopy?: () => void;
 }) {
@@ -340,266 +350,292 @@ function TargetCard({
   const spec = specOf(element);
   const observed = observedOf(element);
   const writable = isWritable(element);
-  const hasContent = typeof observed.content === "string";
+  const status = ruleStatus(element, sourceRules);
   const follow = observed.source_follow;
   const followedRule = follow ? sourceRules.find((rule) => rule.id === follow.rule) : undefined;
-  const matchedRule = observed.matched_source_rule
-    ? sourceRules.find((rule) => rule.id === observed.matched_source_rule?.id)
-    : undefined;
-  // 来源出了新版，但这份文件在上次写入后被改过：只提示，要不要覆盖由用户看差异后决定
-  const changedSinceFollow = Boolean(
-    follow && !follow.file_unchanged && follow.current_revision && follow.current_revision !== follow.applied_revision,
-  );
+  const matchedRule = observed.matched_source_rule ? sourceRules.find((rule) => rule.id === observed.matched_source_rule?.id) : undefined;
+  const content = observed.content;
+  // 需要处理时的那一个按钮：补齐 > 更新 > 跟随
+  const action = !writable
+    ? null
+    : fill
+      ? { testId: `rules-fill-${element.id}`, label: "从主号补齐", title: "从同一助手的主号复制规则文件过来", run: () => onFill(fill) }
+      : followedRule && status.testId
+        ? {
+            testId: `rules-update-from-source-${element.id}`,
+            label: follow?.update_available ? "更新" : "查看新版本",
+            title: "先看差异，确认后写入；覆盖前先备份现有内容",
+            run: () => onApplyRule(followedRule),
+          }
+        : matchedRule && !follow
+          ? { testId: `rules-follow-${element.id}`, label: "跟随更新", title: "文件不动，只记下它来自这条规则；来源出新版本时这里会提示", run: () => onFollow(matchedRule) }
+          : null;
   return (
-    <div data-testid={`rules-target-${element.id}`} className="group px-4 py-2.5 hover:bg-accent/40">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
+    <li data-testid={`rules-target-${element.id}`}>
+      <div className={ROW}>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 text-sm font-medium" title={nameOf(element)}>
             <AgentIcon kind={spec.kind === "codex" ? "codex" : "claude"} />
-            <span className="text-sm font-medium" title={nameOf(element)}>{label}</span>
+            <span className="truncate">{label}</span>
+          </div>
+          <div className="truncate font-mono text-xs text-muted-foreground">{spec.target ?? observed.target}</div>
+        </div>
+        <div className={cn(COL_MIDDLE, "min-w-0 text-sm")}>
+          <div className="flex items-center gap-1.5">
+            <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", DOT[status.tone])} aria-hidden />
+            {status.name && <span className="font-medium">{status.name}</span>}
+            {status.source && <span className="truncate text-muted-foreground">· {status.source}</span>}
             <span
-              className={cn(
-                "rounded-full border px-2 py-0.5 text-[11px]",
-                element.state === "managed-ok" ? "border-success/30 bg-success/10 text-success" : "bg-muted text-muted-foreground",
-              )}
+              data-testid={status.testId ? `${status.testId}-${element.id}` : undefined}
+              className={cn("shrink-0", status.tone === "warn" ? "text-warning" : "text-muted-foreground")}
             >
-              {stateLabel(element)}
+              {status.name ? `· ${status.note}` : status.note}
             </span>
-            {observed.matched_template && (
-              <span className="text-[11px] text-muted-foreground">与模板「{observed.matched_template.name}」一致</span>
-            )}
-            {!observed.matched_template && observed.matched_source_rule && (
-              <span className="text-[11px] text-muted-foreground">
-                与来源规则「{observed.matched_source_rule.name}」（{observed.matched_source_rule.collection}）一致
-              </span>
-            )}
-            {follow?.update_available && (
-              <span data-testid={`rules-update-available-${element.id}`} className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] text-primary">
-                来源有新版本
-              </span>
-            )}
           </div>
-          <p className="font-mono text-[11px] break-all text-muted-foreground">{spec.target ?? observed.target}</p>
-          {observed.blocked_reason && <p className="text-xs text-warning">{observed.blocked_reason}</p>}
-          {changedSinceFollow && (
-            <p data-testid={`rules-changed-since-follow-${element.id}`} className="text-xs text-muted-foreground">
-              这份文件在上次从来源「{follow?.rule}」写入后被改过；来源也有了新版本。要不要用新版覆盖，看过差异再决定（覆盖前会先备份现有内容）。
-            </p>
-          )}
-          {follow && follow.current_revision === null && (
-            <p className="text-xs text-muted-foreground">跟随的来源规则「{follow.rule}」已不在（来源已停用、删除或还没取回）。</p>
-          )}
+          {status.detail && <p className="truncate text-xs text-warning" title={status.detail}>{status.detail}</p>}
         </div>
-        {writable && (
-          <div className="flex flex-wrap items-center gap-2">
-            {fill && (
-              <button
-                type="button"
-                data-testid={`rules-fill-${element.id}`}
-                disabled={busy}
-                title="从同一助手的主号复制规则文件过来；已有内容的账号不会走到这里"
-                onClick={() => onFill(fill)}
-                className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/15 disabled:opacity-40"
-              >
-                从主号补齐
-              </button>
-            )}
-            {followedRule && (follow?.update_available || changedSinceFollow) && (
-              <button
-                type="button"
-                data-testid={`rules-update-from-source-${element.id}`}
-                onClick={() => onApplyRule(followedRule)}
-                className="rounded bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:bg-primary/90"
-              >
-                {follow?.update_available ? "更新到新版本" : "查看新版本"}
-              </button>
-            )}
-            {matchedRule && !follow && (
-              <button
-                type="button"
-                data-testid={`rules-follow-${element.id}`}
-                disabled={busy}
-                title="文件不动，只记下它来自这条来源规则；来源出新版本时这里会提示更新"
-                onClick={() => onFollow(matchedRule)}
-                className="rounded border border-primary/30 px-2.5 py-1 text-xs text-primary hover:bg-primary/10 disabled:opacity-50"
-              >
-                跟随来源更新
-              </button>
-            )}
-            <div className={HOVER_ACTIONS}>
-            <button type="button" aria-label={`编辑 ${nameOf(element)}`} onClick={onEdit} className={GHOST}>
-              编辑
+        <span className={cn(COL_LINES, "text-xs text-muted-foreground")}>{typeof content === "string" ? `${lineCount(content)} 行` : ""}</span>
+        <div className={COL_ACTION}>
+          {action && (
+            <button type="button" data-testid={action.testId} disabled={busy} title={action.title} onClick={action.run} className={PILL}>
+              {action.label}
             </button>
-            {onApplyTemplate && (
-              <button
-                type="button"
-                aria-label={`应用模板到 ${nameOf(element)}`}
-                onClick={onApplyTemplate}
-                className={GHOST}
-              >
-                应用模板
-              </button>
-            )}
-            {onCopy && (
-              <button
-                type="button"
-                aria-label={`复制 ${nameOf(element)} 到…`}
-                onClick={onCopy}
-                className={GHOST}
-              >
-                复制到…
-              </button>
-            )}
-            </div>
-          </div>
-        )}
-      </div>
-      {hasContent && (
-        <div className="mt-2">
-          <button
-            type="button"
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
-            className="inline-flex items-center gap-1 text-xs text-primary"
-          >
-            {open ? <ChevronDown className="h-3 w-3" aria-hidden /> : <ChevronRight className="h-3 w-3" aria-hidden />}
-            {open ? "收起全文" : `查看全文（${lineCount(observed.content ?? "")} 行）`}
-          </button>
-          {open && (
-            <pre
-              data-testid={`rules-content-${element.id}`}
-              className="mt-2 max-h-80 overflow-auto rounded border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap"
-            >
-              {observed.content}
-            </pre>
           )}
         </div>
+        <div className={COL_ICONS}>
+          {writable && (
+            <>
+              {onSwitch && (
+                <Icon label={`更换 ${nameOf(element)} 的规则`} onClick={onSwitch}>
+                  <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
+                </Icon>
+              )}
+              {typeof content === "string" && (
+                <Icon label={open ? `收起 ${nameOf(element)} 全文` : `查看 ${nameOf(element)} 全文`} onClick={() => setOpen(!open)}>
+                  <Eye className="h-3.5 w-3.5" aria-hidden />
+                </Icon>
+              )}
+              <Icon label={`编辑 ${nameOf(element)}`} onClick={onEdit}>
+                <Pencil className="h-3.5 w-3.5" aria-hidden />
+              </Icon>
+              {onCopy && (
+                <Icon label={`复制 ${nameOf(element)} 到…`} onClick={onCopy}>
+                  <Copy className="h-3.5 w-3.5" aria-hidden />
+                </Icon>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      {open && typeof content === "string" && (
+        <pre data-testid={`rules-content-${element.id}`} className="mx-4 mb-2 max-h-80 overflow-auto whitespace-pre-wrap rounded border bg-muted/40 p-2 font-mono text-xs">
+          {content}
+        </pre>
       )}
-    </div>
+    </li>
   );
 }
 
-function SourceRulesSection({
-  rules,
+/** 规则库：来源规则（技能集合、我的规则来源）与本机模板，一行一条。 */
+function RuleLibrary({
+  sourceRules,
+  templates,
   suggested,
   busy,
-  onApply,
+  usage,
+  onApplyRule,
+  onApplyTemplate,
+  onNewTemplate,
+  onEditTemplate,
+  onDeleteTemplate,
   onFetch,
   onOpenSkills,
 }: {
-  rules: RuleSourceRule[];
+  sourceRules: RuleSourceRule[];
+  templates: RuleTemplate[];
   suggested: SuggestedSource[];
   busy: boolean;
-  onApply?: (rule: RuleSourceRule) => void;
+  usage: { rule: (rule: RuleSourceRule) => number; template: (template: RuleTemplate) => number };
+  onApplyRule?: (rule: RuleSourceRule) => void;
+  onApplyTemplate?: (template: RuleTemplate) => void;
+  onNewTemplate: () => void;
+  onEditTemplate: (template: RuleTemplate) => void;
+  onDeleteTemplate: (template: RuleTemplate) => void;
   onFetch: (collection: string) => void;
   onOpenSkills?: () => void;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
-  // 每个 git 来源一个「更新来源」：本地目录来源改了即时生效，不需要
-  const gitCollections = Array.from(new Set(rules.filter((rule) => !rule.local).map((rule) => rule.collection)));
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<UserSource | null>(null);
+  const userSources = useRuleSources();
+  const userSourceOf = (collection: string) => userSources.sources.find((source) => source.name === collection);
+  const emptySources = userSources.sources.filter((source) => !sourceRules.some((rule) => rule.collection === source.name));
+  const count = sourceRules.length + templates.length;
+  const used = (n: number) => (n > 0 ? `${n} 个账号在用` : "未使用");
+  const body = (id: string, text: string, testId: string) =>
+    openId === id && (
+      <pre data-testid={testId} className="mx-4 mb-2 max-h-80 overflow-auto whitespace-pre-wrap rounded border bg-muted/40 p-2 font-mono text-xs">
+        {text}
+      </pre>
+    );
+
   return (
-    <section className="space-y-3 rounded-lg border bg-card p-5 shadow-sm" aria-label="来源规则">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold">来源规则</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            来自你指定的规则文件或目录，以及技能集合里的规则位置（默认 rules/）；只读，应用前先看差异，来源更新后会提示。
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {gitCollections.map((collection) => (
-            <button
-              key={collection}
-              type="button"
-              data-testid={`rules-fetch-source-${collection}`}
-              disabled={busy}
-              onClick={() => onFetch(collection)}
-              className="rounded border px-2.5 py-1 text-xs hover:bg-accent disabled:opacity-50"
-            >
-              更新来源 {collection}
-            </button>
-          ))}
-        </div>
-      </div>
-      <RuleSourcesManager
-        ruleCounts={rules.reduce<Record<string, number>>((acc, rule) => ({ ...acc, [rule.collection]: (acc[rule.collection] ?? 0) + 1 }), {})}
-      />
-      {rules.length === 0 && (
-        <div data-testid="rules-no-source" className="space-y-2">
-          <p className="text-xs text-muted-foreground">还没有来源提供规则：添加上面的规则来源，或从技能集合取回。</p>
-          {suggested.map((item) => (
-            <div key={item.name} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{item.name}</p>
-                <p className="text-xs text-muted-foreground">{item.description}</p>
-              </div>
-              {item.collection ? (
-                <button
-                  type="button"
-                  data-testid={`rules-fetch-source-${item.collection}`}
-                  disabled={busy}
-                  onClick={() => onFetch(item.collection as string)}
-                  className="rounded border border-primary/30 px-2.5 py-1 text-xs text-primary hover:bg-primary/10 disabled:opacity-50"
-                >
-                  取回 {item.collection}
-                </button>
-              ) : (
-                <span className="text-xs text-muted-foreground">
-                  还没添加：到
-                  {onOpenSkills ? (
-                    <button type="button" onClick={onOpenSkills} className="mx-1 text-primary underline-offset-2 hover:underline">
-                      技能页
-                    </button>
-                  ) : (
-                    "技能页"
-                  )}
-                  添加推荐来源 {item.name}，再回来取回。
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+    <section className="overflow-clip rounded-lg border bg-card" aria-label="规则库">
+      <TableHeader title={`规则库 · ${count}`} middle="来源" lines="行数">
+        <button type="button" data-testid="rule-source-add" onClick={() => setAdding(true)} className="inline-flex items-center gap-1 text-primary hover:underline">
+          <Plus className="h-3.5 w-3.5" aria-hidden /> 添加规则来源
+        </button>
+        <button type="button" onClick={onNewTemplate} className="inline-flex items-center gap-1 text-primary hover:underline">
+          <Plus className="h-3.5 w-3.5" aria-hidden /> 新建模板
+        </button>
+      </TableHeader>
       <ul className="divide-y">
-        {rules.map((rule) => (
-          <li key={rule.id} data-testid={`rules-source-rule-${rule.id}`} className="group py-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0">
-                <span className="text-sm font-medium">{rule.name}</span>
-                <span className="ml-2 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">
-                  {rule.collection} · {rule.local ? "本地目录" : "git 镜像"}
-                </span>
-                <span className="ml-2 text-[11px] text-muted-foreground">{lineCount(rule.body)} 行</span>
+        {sourceRules.map((rule) => {
+          const mine = userSourceOf(rule.collection);
+          return (
+            <li key={rule.id} data-testid={`rules-source-rule-${rule.id}`}>
+              <div className={ROW}>
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{rule.name}</div>
+                  <div className="text-xs text-muted-foreground">{used(usage.rule(rule))}</div>
+                </div>
+                <div className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")} title={mine?.path}>
+                  {mine ? `我的规则来源 · ${mine.path}` : `${rule.collection} · ${rule.local ? "本地目录" : "git"}`}
+                </div>
+                <span className={cn(COL_LINES, "text-xs text-muted-foreground")}>{lineCount(rule.body)} 行</span>
+                <div className={COL_ACTION}>
+                  {onApplyRule && (
+                    <button
+                      type="button"
+                      aria-label={`应用${sourceRuleLabel(rule)}到…`}
+                      onClick={() => onApplyRule(rule)}
+                      className={cn(PILL, "opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100")}
+                    >
+                      应用到…
+                    </button>
+                  )}
+                </div>
+                <div className={COL_ICONS}>
+                  {!rule.local && (
+                    <Icon label={`更新来源 ${rule.collection}`} testId={`rules-fetch-source-${rule.collection}`} disabled={busy} onClick={() => onFetch(rule.collection)}>
+                      <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                    </Icon>
+                  )}
+                  <Icon label={openId === rule.id ? `收起 ${rule.name}` : `查看 ${rule.name}`} onClick={() => setOpenId(openId === rule.id ? null : rule.id)}>
+                    <Eye className="h-3.5 w-3.5" aria-hidden />
+                  </Icon>
+                  {mine && (
+                    <Icon danger label={`移除规则来源 ${mine.name}`} onClick={() => setRemoving(mine)}>
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                    </Icon>
+                  )}
+                </div>
               </div>
-              <div className={cn(HOVER_ACTIONS, openId === rule.id && "opacity-100")}>
-                <button
-                  type="button"
-                  aria-expanded={openId === rule.id}
-                  onClick={() => setOpenId(openId === rule.id ? null : rule.id)}
-                  className={GHOST}
-                >
-                  {openId === rule.id ? "收起" : "预览"}
-                </button>
-                {onApply && (
+              {body(rule.id, rule.body, `rules-source-body-${rule.id}`)}
+            </li>
+          );
+        })}
+        {emptySources.map((source) => (
+          <li key={`source:${source.name}`} data-testid={`rule-source-${source.name}`} className={ROW}>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-medium">{source.name}</div>
+              <div className="text-xs text-warning">没读到规则</div>
+            </div>
+            <div className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")} title={source.path}>我的规则来源 · {source.path}</div>
+            <span className={COL_LINES} />
+            <div className={COL_ACTION} />
+            <div className={COL_ICONS}>
+              <Icon danger label={`移除规则来源 ${source.name}`} onClick={() => setRemoving(source)}>
+                <Trash2 className="h-3.5 w-3.5" aria-hidden />
+              </Icon>
+            </div>
+          </li>
+        ))}
+        {templates.map((template) => (
+          <li key={template.id} data-testid={`rule-template-${template.id}`}>
+            <div className={ROW}>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium">{template.name}</div>
+                <div className="text-xs text-muted-foreground">{used(usage.template(template))}</div>
+              </div>
+              <div className={cn(COL_MIDDLE, "text-sm text-muted-foreground")}>本机模板 · {ORIGIN_LABEL[template.origin] ?? template.origin}</div>
+              <span className={cn(COL_LINES, "text-xs text-muted-foreground")}>{lineCount(template.body)} 行</span>
+              <div className={COL_ACTION}>
+                {onApplyTemplate && (
                   <button
                     type="button"
-                    aria-label={`应用${sourceRuleLabel(rule)}到…`}
-                    onClick={() => onApply(rule)}
-                    className={GHOST}
+                    onClick={() => onApplyTemplate(template)}
+                    className={cn(PILL, "opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100")}
                   >
                     应用到…
                   </button>
                 )}
               </div>
+              <div className={COL_ICONS}>
+                <Icon label={openId === template.id ? `收起 ${template.name}` : `查看 ${template.name}`} onClick={() => setOpenId(openId === template.id ? null : template.id)}>
+                  <Eye className="h-3.5 w-3.5" aria-hidden />
+                </Icon>
+                <Icon label={`编辑模板 ${template.name}`} onClick={() => onEditTemplate(template)}>
+                  <Pencil className="h-3.5 w-3.5" aria-hidden />
+                </Icon>
+                <Icon danger label={`删除模板 ${template.name}`} onClick={() => onDeleteTemplate(template)}>
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                </Icon>
+              </div>
             </div>
-            {openId === rule.id && (
-              <pre data-testid={`rules-source-body-${rule.id}`} className="mt-2 max-h-80 overflow-auto rounded border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap">
-                {rule.body}
-              </pre>
-            )}
+            {body(template.id, template.body, `rules-template-body-${template.id}`)}
           </li>
         ))}
+        {sourceRules.length === 0 && (
+          <li data-testid="rules-no-source" className="space-y-2 px-4 py-3 text-xs text-muted-foreground">
+            <p>还没有来源提供规则：添加规则来源，或从技能集合取回。</p>
+            {suggested.map((item) => (
+              <div key={item.name} className="flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="font-medium text-foreground">{item.name}</span> · {item.description}
+                </span>
+                {item.collection ? (
+                  <button type="button" data-testid={`rules-fetch-source-${item.collection}`} disabled={busy} onClick={() => onFetch(item.collection as string)} className={PILL}>
+                    取回 {item.collection}
+                  </button>
+                ) : (
+                  <span className="shrink-0">
+                    到
+                    {onOpenSkills ? (
+                      <button type="button" onClick={onOpenSkills} className="mx-1 text-primary underline-offset-2 hover:underline">
+                        技能页
+                      </button>
+                    ) : (
+                      "技能页"
+                    )}
+                    添加推荐来源 {item.name}，再回来取回
+                  </span>
+                )}
+              </div>
+            ))}
+          </li>
+        )}
       </ul>
+      {adding && (
+        <AddSourceDialog
+          taken={userSources.taken}
+          busy={userSources.busy}
+          onClose={() => setAdding(false)}
+          onSubmit={async (name, path) => {
+            if (await userSources.add(name, path)) setAdding(false);
+          }}
+        />
+      )}
+      {removing && (
+        <RemoveSourceDialog
+          source={removing}
+          busy={userSources.busy}
+          onConfirm={async () => {
+            if (await userSources.remove(removing)) setRemoving(null);
+          }}
+          onClose={() => setRemoving(null)}
+        />
+      )}
     </section>
   );
 }

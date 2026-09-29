@@ -191,11 +191,31 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
   });
 
+  it("我的规则来源在规则库里：没读到规则的也列出来；移除先确认，只删登记，不改任何规则文件", async () => {
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
+      ...rulesRoutes(),
+      "policy:get": makeEnvelope({ layers: null, effective: { rules: { sources: { "my-rules": { path: "~/notes/rules" } } } }, attribution: null, layer: null, key: null, value: null, path: null }, { command: "policy.get" }),
+      "policy:set": makeEnvelope({}, { command: "policy.set" }),
+    };
+    const { calls } = renderWithEngine(<RulesPage />, routes);
+    const row = await screen.findByTestId("rule-source-my-rules");
+    expect(row).toHaveTextContent("没读到规则");
+    expect(row).toHaveTextContent("我的规则来源 · ~/notes/rules");
+    await userEvent.click(within(row).getByRole("button", { name: "移除规则来源 my-rules" }));
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    await userEvent.click(await screen.findByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const set = calls.find((call) => call.command === "policy:set")!;
+    expect(set.args.slice(0, 4)).toEqual(["--layer", "local", "--key", "rules.sources.my-rules"]);
+    expect(JSON.parse(set.args[set.args.indexOf("--value") + 1])).toEqual({ _delete: true });
+    expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
+  });
+
   it("规则文件可展开查看实际全文，只读展示、不发起任何写入或 plan", async () => {
     const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
 
     const card = await screen.findByTestId("rules-target-rules:claude_global");
-    await userEvent.click(within(card).getByRole("button", { name: /查看全文/ }));
+    await userEvent.click(within(card).getByRole("button", { name: /^查看 .*全文$/ }));
     expect(screen.getByTestId("rules-content-rules:claude_global").textContent).toBe(CLAUDE_BODY);
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
@@ -256,15 +276,15 @@ describe("RulesPage：实际文件为准", () => {
 
     const claude = await screen.findByTestId("rules-target-rules:claude_global");
     expect(within(claude).getByText("~/.claude/CLAUDE.md")).toBeInTheDocument();
-    expect(within(claude).getByText("已有文件")).toBeInTheDocument();
-    expect(within(claude).getByText("与模板「团队规则」一致")).toBeInTheDocument();
+    // 使用的规则一栏：规则名 · 来源 · 状态
+    expect(claude).toHaveTextContent("团队规则· 本机模板· 一致");
     expect(within(claude).getByRole("button", { name: "编辑 Claude Code 全局规则" })).toBeInTheDocument();
 
     const codex = screen.getByTestId("rules-target-rules:codex_global");
-    expect(within(codex).getByText("与来源规则「core」（agent-skills）一致")).toBeInTheDocument();
+    expect(codex).toHaveTextContent("core· agent-skills· 一致");
 
     const missing = screen.getByTestId("rules-target-rules:profile:cc-work");
-    expect(within(missing).getByText("还没有文件")).toBeInTheDocument();
+    expect(within(missing).getByText("还没有规则文件")).toBeInTheDocument();
     // 文件不存在也可以新建，但没有可复制出去的内容
     expect(within(missing).getByRole("button", { name: "编辑 Claude · work 实例规则" })).toBeInTheDocument();
     expect(within(missing).queryByRole("button", { name: /复制/ })).toBeNull();
@@ -338,8 +358,8 @@ describe("RulesPage：实际文件为准", () => {
     );
     const { calls } = renderWithEngine(<RulesPage />, routes);
 
-    await userEvent.click(await screen.findByRole("button", { name: "应用模板到 Codex 全局规则" }));
-    const dialog = screen.getByRole("dialog", { name: "应用模板到 Codex 全局规则" });
+    await userEvent.click(await screen.findByRole("button", { name: "更换 Codex 全局规则 的规则" }));
+    const dialog = screen.getByRole("dialog", { name: "更换 Codex 全局规则 的规则" });
     const sourceSelect = within(dialog).getByRole("combobox", { name: "内容来源" });
     // 来源先列来源规则，再列全部已保存模板
     expect(within(sourceSelect).getAllByRole("option").map((option) => option.getAttribute("value"))).toEqual([
@@ -367,15 +387,15 @@ describe("RulesPage：实际文件为准", () => {
     const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
 
     // Codex 现在就是来源规则：选它时没有差异，写入按钮不可用
-    await userEvent.click(await screen.findByRole("button", { name: "应用模板到 Codex 全局规则" }));
-    let dialog = screen.getByRole("dialog", { name: "应用模板到 Codex 全局规则" });
+    await userEvent.click(await screen.findByRole("button", { name: "更换 Codex 全局规则 的规则" }));
+    let dialog = screen.getByRole("dialog", { name: "更换 Codex 全局规则 的规则" });
     await userEvent.selectOptions(within(dialog).getByRole("combobox", { name: "内容来源" }), "rule:agent-skills/core");
     expect(within(dialog).getByTestId("rules-diff-same")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "写入" })).toBeDisabled();
     await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
 
-    await userEvent.click(screen.getByRole("button", { name: "应用模板到 Claude Code 全局规则" }));
-    dialog = screen.getByRole("dialog", { name: "应用模板到 Claude Code 全局规则" });
+    await userEvent.click(screen.getByRole("button", { name: "更换 Claude Code 全局规则 的规则" }));
+    dialog = screen.getByRole("dialog", { name: "更换 Claude Code 全局规则 的规则" });
     await userEvent.selectOptions(within(dialog).getByRole("combobox", { name: "内容来源" }), "rule:agent-skills/core");
     expect(within(dialog).getByTestId("rules-diff")).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: "写入" }));
@@ -389,18 +409,20 @@ describe("RulesPage：实际文件为准", () => {
   it("来源规则区：可预览正文，「应用到…」选目标后发出 --source-rule", async () => {
     const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
 
-    const section = await screen.findByRole("region", { name: "来源规则" });
-    expect(section).toHaveTextContent("agent-skills · git 镜像");
-    await userEvent.click(within(section).getByRole("button", { name: "预览" }));
+    const section = await screen.findByRole("region", { name: "规则库" });
+    expect(section).toHaveTextContent("agent-skills · git");
+    expect(section).toHaveTextContent("1 个账号在用");
+    await userEvent.click(within(section).getByRole("button", { name: "查看 core" }));
     expect(screen.getByTestId("rules-source-body-agent-skills/core").textContent).toBe(SOURCE_BODY);
     await userEvent.click(screen.getByRole("button", { name: "应用来源规则「core」（agent-skills）到…" }));
     const dialog = screen.getByRole("dialog", { name: "应用来源规则「core」（agent-skills）" });
     // 只列可写目标：阻塞与停用的实例不在其中
     const targetSelect = within(dialog).getByRole("combobox", { name: "写入目标" });
+    // 与账号页同序：Claude 主号、Claude 其他账号、Codex
     expect(within(targetSelect).getAllByRole("option").map((option) => option.getAttribute("value"))).toEqual([
-      "rules:codex_global",
       "rules:claude_global",
       "rules:profile:cc-work",
+      "rules:codex_global",
     ]);
     await userEvent.selectOptions(targetSelect, "rules:profile:cc-work");
     await userEvent.click(within(dialog).getByRole("button", { name: "写入" }));
@@ -416,7 +438,7 @@ describe("RulesPage：实际文件为准", () => {
     const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
 
     const card = await screen.findByTestId("rules-target-rules:codex_global");
-    expect(card).toHaveTextContent("与来源规则「core」（agent-skills）一致");
+    expect(card).toHaveTextContent("core· agent-skills· 一致");
     await userEvent.click(within(card).getByTestId("rules-follow-rules:codex_global"));
     await waitFor(() => expect(calls.some((call) => call.command === "rules:apply")).toBe(true));
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -435,7 +457,7 @@ describe("RulesPage：实际文件为准", () => {
     codex.observed.source_follow = { rule: "agent-skills/core", applied_revision: "rev-old", current_revision: "rev-core", file_unchanged: true, update_available: true };
     const { calls } = renderWithEngine(<RulesPage />, routes);
 
-    expect(await screen.findByTestId("rules-update-available-rules:codex_global")).toHaveTextContent("来源有新版本");
+    expect(await screen.findByTestId("rules-update-available-rules:codex_global")).toHaveTextContent("有新版本");
     expect(screen.queryByTestId("rules-follow-rules:codex_global")).toBeNull();
     await userEvent.click(screen.getByTestId("rules-update-from-source-rules:codex_global"));
     const dialog = screen.getByRole("dialog", { name: "用来源规则「core」（agent-skills）更新 Codex 全局规则" });
@@ -483,7 +505,7 @@ describe("RulesPage：实际文件为准", () => {
     const onOpenSkills = vi.fn();
     const first = renderWithEngine(<RulesPage onOpenSkills={onOpenSkills} />, routes);
     const empty = await screen.findByTestId("rules-no-source");
-    expect(empty).toHaveTextContent("添加上面的规则来源");
+    expect(empty).toHaveTextContent("添加规则来源，或从技能集合取回");
     await userEvent.click(within(empty).getByRole("button", { name: "技能页" }));
     expect(onOpenSkills).toHaveBeenCalled();
     first.unmount();
@@ -523,8 +545,8 @@ describe("RulesPage：实际文件为准", () => {
     status.templates[2].body = CLAUDE_BODY.slice(0, -1);
     const { calls } = renderWithEngine(<RulesPage />, routes);
 
-    await userEvent.click(await screen.findByRole("button", { name: "应用模板到 Claude Code 全局规则" }));
-    const dialog = screen.getByRole("dialog", { name: "应用模板到 Claude Code 全局规则" });
+    await userEvent.click(await screen.findByRole("button", { name: "更换 Claude Code 全局规则 的规则" }));
+    const dialog = screen.getByRole("dialog", { name: "更换 Claude Code 全局规则 的规则" });
     await userEvent.selectOptions(within(dialog).getByRole("combobox", { name: "内容来源" }), "template:tpl-backup");
     expect(within(dialog).getByTestId("rules-diff-eol")).toBeInTheDocument();
     const write = within(dialog).getByRole("button", { name: "写入" });
@@ -583,7 +605,7 @@ describe("RulesPage：规则模板只写库", () => {
     const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
 
     const row = await screen.findByTestId("rule-template-tpl-team");
-    expect(within(row).getByText("自建")).toBeInTheDocument();
+    expect(row).toHaveTextContent("本机模板 · 自建");
     expect(screen.getByTestId("rule-template-tpl-backup")).toHaveTextContent("备份");
     expect(screen.getByTestId("rule-template-legacy-claude")).toHaveTextContent("旧来源");
     await userEvent.click(within(row).getByRole("button", { name: "删除模板 团队规则" }));

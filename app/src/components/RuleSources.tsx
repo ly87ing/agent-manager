@@ -1,4 +1,4 @@
-import { Plus, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -12,7 +12,7 @@ import { ConfirmModal } from "./ConfirmModal";
  * 用户自己指定的规则来源（`rules.sources.<名>.path`）：一个 .md 文件或一个目录（目录里的每个 .md
  * 是一条规则）。原地读取、改了即时生效；这里只登记路径，不复制内容，也不改任何规则文件。
  */
-interface UserSource {
+export interface UserSource {
   name: string;
   path: string;
 }
@@ -33,11 +33,10 @@ function sourcesOf(policy: PolicyData | undefined): { sources: UserSource[]; col
   return { sources, collections };
 }
 
-export function RuleSourcesManager({ ruleCounts }: { ruleCounts: Record<string, number> }) {
+/** 「我的规则来源」：读取登记、添加与移除（policy:set rules.sources.<名>）。 */
+export function useRuleSources() {
   const policy = useEngineQuery<PolicyData>("policy:get");
   const queryClient = useQueryClient();
-  const [adding, setAdding] = useState(false);
-  const [removing, setRemoving] = useState<UserSource | null>(null);
   const [busy, setBusy] = useState(false);
   const { sources, collections } = sourcesOf(policy.data?.ok ? policy.data.data : undefined);
 
@@ -57,70 +56,42 @@ export function RuleSourcesManager({ ruleCounts }: { ruleCounts: Record<string, 
     }
   };
 
+  return {
+    sources,
+    /** 名字不能与已有来源或技能集合重名。 */
+    taken: [...sources.map((source) => source.name), ...collections],
+    busy,
+    add: (name: string, path: string) => write(name, { path, _delete: false, _replace: true }, `已添加规则来源 ${name}`),
+    remove: (source: UserSource) => write(source.name, { _delete: true }, `已移除规则来源 ${source.name}`),
+  };
+}
+
+/** 移除一条登记：只删登记，目录里的文件和已写进各账号的规则文件都不动。 */
+export function RemoveSourceDialog({
+  source,
+  busy,
+  onConfirm,
+  onClose,
+}: {
+  source: UserSource;
+  busy: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
   return (
-    <div data-testid="rule-sources-manager" className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">我的规则来源</span>
-        <button
-          type="button"
-          data-testid="rule-source-add"
-          onClick={() => setAdding(true)}
-          className="inline-flex items-center gap-1 rounded border border-primary/30 px-2.5 py-1 text-xs text-primary hover:bg-primary/10"
-        >
-          <Plus className="h-3.5 w-3.5" aria-hidden /> 添加规则来源
-        </button>
-      </div>
-      {sources.length === 0 ? (
-        <p className="text-xs text-muted-foreground">可以直接指定本机的一个规则文件或一个装着规则的目录。</p>
-      ) : (
-        <ul className="divide-y rounded-md border">
-          {sources.map((source) => (
-            <li key={source.name} data-testid={`rule-source-${source.name}`} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-              <span className="font-medium">{source.name}</span>
-              <code className="min-w-0 truncate font-mono text-muted-foreground" title={source.path}>{source.path}</code>
-              <span className={ruleCounts[source.name] ? "text-muted-foreground" : "text-warning"}>
-                {ruleCounts[source.name] ? `${ruleCounts[source.name]} 条规则` : "没读到规则"}
-              </span>
-              <button
-                type="button"
-                aria-label={`移除规则来源 ${source.name}`}
-                onClick={() => setRemoving(source)}
-                className="ml-auto rounded px-2 py-0.5 text-destructive hover:bg-destructive/10"
-              >
-                移除
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {adding && (
-        <AddSourceDialog
-          taken={[...sources.map((source) => source.name), ...collections]}
-          busy={busy}
-          onClose={() => setAdding(false)}
-          onSubmit={async (name, path) => {
-            if (await write(name, { path, _delete: false, _replace: true }, `已添加规则来源 ${name}`)) setAdding(false);
-          }}
-        />
-      )}
-      {removing && (
-        <ConfirmModal
-          title={`移除规则来源 ${removing.name}`}
-          description={`只移除这条登记，${removing.path} 里的文件原样保留；已经写进各账号的规则文件也不动（不再提示来源更新）。`}
-          risk="write-local"
-          confirmLabel="移除"
-          executing={busy}
-          onConfirm={async () => {
-            if (await write(removing.name, { _delete: true }, `已移除规则来源 ${removing.name}`)) setRemoving(null);
-          }}
-          onClose={() => setRemoving(null)}
-        />
-      )}
-    </div>
+    <ConfirmModal
+      title={`移除规则来源 ${source.name}`}
+      description={`只移除这条登记，${source.path} 里的文件原样保留；已经写进各账号的规则文件也不动（不再提示来源更新）。`}
+      risk="write-local"
+      confirmLabel="移除"
+      executing={busy}
+      onConfirm={onConfirm}
+      onClose={onClose}
+    />
   );
 }
 
-function AddSourceDialog({
+export function AddSourceDialog({
   taken,
   busy,
   onClose,
