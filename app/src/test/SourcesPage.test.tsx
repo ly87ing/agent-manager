@@ -67,4 +67,24 @@ describe("来源页", () => {
     await userEvent.click(screen.getByTestId("source-add-rule"));
     expect(await screen.findByRole("dialog", { name: "添加规则来源" })).toBeInTheDocument();
   });
+
+  it("推荐来源在表里：「添加…」打开预填好的表单，保存前不写；「不用了」就不再出现", async () => {
+    localStorage.clear();
+    const r = routes();
+    const status = r["skills:status"] as Envelope<{ recommendations: unknown[] }>;
+    status.data!.recommendations = [
+      { name: "team-skills", description: "团队的技能", url: "https://github.com/example/team.git", skill_paths: ["skills"], added: false, definition: { url: "https://github.com/example/team.git", skill_paths: ["skills"] } },
+      { name: "agent-skills", description: "已添加", url: "https://github.com/example/agent-skills.git", skill_paths: ["skills"], added: true, definition: {} },
+    ];
+    const { calls } = renderWithEngine(<SourcesPage />, r);
+    const row = await screen.findByTestId("source-suggest-team-skills");
+    expect(screen.queryByTestId("source-suggest-agent-skills")).toBeNull();
+    await userEvent.click(within(row).getByRole("button", { name: "添加…" }));
+    const dialog = await screen.findByRole("dialog", { name: "添加来源" });
+    expect(within(dialog).getByDisplayValue("team-skills")).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await userEvent.click(within(screen.getByTestId("source-suggest-team-skills")).getByRole("button", { name: "不用了" }));
+    expect(screen.queryByTestId("source-suggest-team-skills")).toBeNull();
+    expect(calls.filter((call) => call.command !== "skills:status" && call.command !== "rules:status" && call.command !== "policy:get")).toEqual([]);
+  });
 });

@@ -349,4 +349,31 @@ describe("账号页", () => {
     expect(valueOf(apply.args, "--remove")).toBe("ds");
     expect(calls.find((call) => call.command === "aliases:preview")?.args).toEqual(apply.args);
   });
+
+  it("开始使用：列出还没做的几步，就地去做；全做完或点关掉就不再出现", async () => {
+    localStorage.clear();
+    const r = routes({ statusline: "custom" });
+    r["skills:status"] = makeEnvelope({ domain: "skills", elements: [], recommendations: [] }, { command: "skills.status" });
+    let opened = 0;
+    renderWithEngine(<AccountsPage onOpenSources={() => opened++} />, r);
+    const card = await screen.findByTestId("getting-started");
+    await waitFor(() => expect(screen.getByTestId("start-step-login")).toHaveAttribute("data-done", "true"));
+    expect(screen.getByTestId("start-step-account")).toHaveAttribute("data-done", "true");
+    expect(screen.getByTestId("start-step-source")).toHaveAttribute("data-done", "false");
+    expect(card).toHaveTextContent("2/3");
+    await userEvent.click(screen.getByTestId("start-action-source"));
+    expect(opened).toBe(1);
+    await userEvent.click(screen.getByTestId("getting-started-hide"));
+    expect(screen.queryByTestId("getting-started")).toBeNull();
+  });
+
+  it("几步都做完时不显示开始使用", async () => {
+    localStorage.clear();
+    const r = routes();
+    r["skills:status"] = makeEnvelope({ domain: "skills", elements: [makeElement({ id: "skill:agent-skills", domain: "skills" })], recommendations: [] }, { command: "skills.status" });
+    renderWithEngine(<AccountsPage />, r);
+    await screen.findByTestId("accounts-list");
+    await waitFor(() => expect(screen.getByTestId("account-type-agents:claude-code")).toHaveTextContent("Max 5x"));
+    expect(screen.queryByTestId("getting-started")).toBeNull();
+  });
 });

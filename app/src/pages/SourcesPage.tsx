@@ -8,11 +8,11 @@ import { PageError, PageLoading } from "../components/PageState";
 import { RemoveCollectionDialog } from "../components/RemoveCollectionDialog";
 import { AddSourceDialog, RemoveSourceDialog, useRuleSources, type UserSource } from "../components/RuleSources";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
-import type { EngineElement, PolicyData, StatusData } from "../lib/contract";
+import type { EngineElement, PolicyData, SkillRecommendation, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import type { SkillCollectionObserved, SkillCollectionSpec, SkillSpec } from "../lib/observed";
 import { engineKeys, useEngineQuery } from "../lib/queries";
-import { dismissRecommendation } from "../lib/recommendDismiss";
+import { dismissRecommendation, loadDismissed } from "../lib/recommendDismiss";
 import { availableSkills, fullSkillDefinition, isCollection } from "../lib/skillCollections";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -36,6 +36,8 @@ export default function SourcesPage() {
   const [editing, setEditing] = useState<EngineElement | null>(null);
   const [removingCollection, setRemovingCollection] = useState<EngineElement | null>(null);
   const [removingSource, setRemovingSource] = useState<UserSource | null>(null);
+  const [dismissed, setDismissed] = useState(loadDismissed);
+  const [draft, setDraft] = useState<SkillRecommendation | null>(null);
 
   if (skills.isPending) return <PageLoading />;
   if (skills.isError) return <PageError title="来源读取失败" error={skills.error} />;
@@ -56,8 +58,9 @@ export default function SourcesPage() {
   const dismissIfRecommended = (collection: EngineElement) => {
     const spec = collection.spec as SkillCollectionSpec;
     const match = recommendations.find((item) => item.name === nameOf(collection) || (spec.url && item.url === spec.url));
-    if (match) dismissRecommendation(match.name);
+    if (match) setDismissed(dismissRecommendation(match.name));
   };
+  const suggested = recommendations.filter((item) => !item.added && !dismissed.includes(item.name));
   const collectionAction = (collection: EngineElement, action: "update" | "enable" | "disable") => {
     const verb = { update: "更新", enable: "启用", disable: "停用" }[action];
     if (action === "disable") dismissIfRecommended(collection);
@@ -96,6 +99,25 @@ export default function SourcesPage() {
             <Plus className="h-3.5 w-3.5" aria-hidden /> 规则文件或目录
           </button>
         </TableHeader>
+        {suggested.map((item) => (
+          <div key={item.name} data-testid={`source-suggest-${item.name}`} className={cn(ROW, "border-b bg-primary/5")}>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                {item.name}
+                <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-normal text-primary">推荐</span>
+              </div>
+              <div className="truncate text-xs text-muted-foreground">{item.description}</div>
+            </div>
+            <div className="flex w-60 shrink-0 items-center justify-end gap-1">
+              <button type="button" data-testid={`source-suggest-dismiss-${item.name}`} onClick={() => setDismissed(dismissRecommendation(item.name))} className={TEXT_BUTTON}>
+                不用了
+              </button>
+              <button type="button" data-testid={`source-suggest-add-${item.name}`} onClick={() => setDraft(item)} className="rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:bg-primary/90">
+                添加…
+              </button>
+            </div>
+          </div>
+        ))}
         {total === 0 ? (
           <EmptyState compact title="还没有来源" description="添加一个 git 仓库或本机目录（提供技能、规则和推荐的启动命令），或一个规则文件、规则目录。" testId="sources-empty" />
         ) : (
@@ -181,9 +203,10 @@ export default function SourcesPage() {
         git 仓库或本机目录提供技能，也可以带规则（默认在 rules/ 里）和推荐的启动命令；规则文件或目录只提供规则。停用可以随时再启用，移除后想用可以重新添加。
       </p>
 
-      {(adding === "collection" || editing) && (
+      {(adding === "collection" || editing || draft) && (
         <SkillCollectionFormDialog
           agentIds={agentIds}
+          draft={draft ? { name: draft.name, definition: draft.definition } : undefined}
           initial={editing ? { name: nameOf(editing), definition: editing.spec } : undefined}
           fullDefinition={editing ? fullSkillDefinition(layers, nameOf(editing)) : null}
           available={editing ? availableSkills(editing.observed as SkillCollectionObserved) : undefined}
@@ -191,11 +214,13 @@ export default function SourcesPage() {
           onClose={() => {
             setAdding(null);
             setEditing(null);
+            setDraft(null);
           }}
           onSubmit={(name, definition, complete) => {
             const isNew = !editing;
             setAdding(null);
             setEditing(null);
+            setDraft(null);
             void definitionOps.saveDefinition({ name, definition, isNew, complete }).then((ok) => {
               if (ok && isNew) toast.info(`来源 ${name} 已添加，点「更新」取回内容。`);
             });

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AccountDrawer, type DrawerMode } from "../components/AccountDrawer";
 import { AccountReadiness } from "../components/AccountReadiness";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { GettingStarted, type StartStep } from "../components/GettingStarted";
 import { LaunchCommandsDrawer } from "../components/LaunchCommandsDrawer";
 import { PageError, PageLoading } from "../components/PageState";
 import { buildAccounts, type Account, type AgentAccounts } from "../lib/accounts";
@@ -18,7 +19,13 @@ import { useAccountOps } from "../lib/useAccountOps";
 import type { AgentUsage, OfficialAuthStatus } from "../lib/observed";
 import { authTerminalCommand, parseProfileDefinition } from "../lib/profileDefinition";
 import { engineKeys, useEngineQuery } from "../lib/queries";
+import { isCollection } from "../lib/skillCollections";
 import { cn } from "../lib/utils";
+
+/** 表头与每行同宽的列：登录状态、额度、操作。 */
+const COL_LOGIN = "w-56 shrink-0 min-w-0";
+const COL_QUOTA = "hidden w-60 shrink-0 md:block";
+const COL_ACTIONS = "flex w-28 shrink-0 items-center justify-end gap-1";
 
 const TONE_BAR = { ok: "bg-success", warn: "bg-warning", critical: "bg-destructive" } as const;
 
@@ -34,7 +41,12 @@ async function copyText(text: string, message: string) {
 /** 一行放得下的额度：每个未过重置点的窗口一小段条。 */
 function QuotaCells({ usage, testId }: { usage: AgentUsage | null; testId: string }) {
   const windows = (usage?.windows ?? []).filter((w) => !isWindowExpired(w.resets_at));
-  if (!usage || windows.length === 0) return <span className="text-xs text-muted-foreground">—</span>;
+  if (!usage || windows.length === 0)
+    return (
+      <span className="text-xs text-muted-foreground" title="额度读自这个账号的使用记录；用它跑过一次后才有">
+        用过后显示
+      </span>
+    );
   const stale = isStale(usage.checked_at);
   return (
     <div data-testid={testId} className="flex items-center gap-3" title={`读自 ${usage.source}`}>
@@ -152,7 +164,7 @@ function AccountRow({
   if (account.blockedReason) badges.push({ text: "登记读不了", tone: "warn" });
 
   return (
-    <li data-testid={`account-row-${id}`} className="flex items-center gap-3 px-4 py-3">
+    <li data-testid={`account-row-${id}`} className="flex items-center gap-4 px-4 py-2.5">
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate font-medium">{account.name}</span>
@@ -171,74 +183,83 @@ function AccountRow({
             </span>
           ))}
         </div>
-        <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-          {account.command && <code className="font-mono text-foreground">{account.command}</code>}
-          <span data-testid={`account-type-${id}`} title={typeTitle} className={cn("truncate", loggedOut && "text-warning")}>
-            {typeText}
-          </span>
-          {account.type === "official" && auth !== "pending" && auth?.state === "unknown" && (
-            <button
-              type="button"
-              data-testid={`account-probe-${id}`}
-              title={`${auth.reason ?? "本机文件说明不了登录状态"}。点一下运行官方命令确认（官方命令可能在配置目录里写自己的记录）`}
-              onClick={actions.onProbeAuth}
-              className="shrink-0 text-primary hover:underline"
-            >
-              确认
-            </button>
-          )}
-          {account.model && <span className="truncate">· {account.model}</span>}
-        </div>
+        {account.command && <code className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">{account.command}</code>}
       </div>
-      <div className="hidden md:block">
+      <div className={cn(COL_LOGIN, "flex items-center gap-2 text-xs text-muted-foreground")}>
+        <span data-testid={`account-type-${id}`} title={typeTitle} className={cn("truncate", loggedOut && "text-warning")}>
+          {typeText}
+        </span>
+        {account.type === "official" && auth !== "pending" && auth?.state === "unknown" && (
+          <button
+            type="button"
+            data-testid={`account-probe-${id}`}
+            title={`${auth.reason ?? "本机文件说明不了登录状态"}。点一下运行官方命令确认（官方命令可能在配置目录里写自己的记录）`}
+            onClick={actions.onProbeAuth}
+            className="shrink-0 text-primary hover:underline"
+          >
+            确认
+          </button>
+        )}
+        {account.model && <span className="truncate">· {account.model}</span>}
+      </div>
+      <div className={COL_QUOTA}>
         <QuotaCells usage={account.usage} testId={`account-quota-${id}`} />
       </div>
-      {loggedOut ? (
-        <button
-          type="button"
-          data-testid={`account-login-${id}`}
-          onClick={() => void copyText(loginCommand, "已复制登录命令，到终端里运行")}
-          className="inline-flex w-20 items-center justify-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs text-primary-foreground hover:bg-primary/90"
-        >
-          <LogIn className="h-3.5 w-3.5" aria-hidden /> 登录
-        </button>
-      ) : (
-        <button
-          type="button"
-          data-testid={`account-copy-${id}`}
-          disabled={!account.command}
-          onClick={() => account.command && void copyText(account.command, `已复制启动命令 ${account.command}`)}
-          className="inline-flex w-20 items-center justify-center gap-1 rounded-md border px-2.5 py-1.5 text-xs hover:bg-accent disabled:opacity-40"
-        >
-          <Copy className="h-3.5 w-3.5" aria-hidden /> 复制
-        </button>
-      )}
-      <RowMenu
-        items={[
-          ...(!account.isMain ? [{ label: "编辑", testId: `account-menu-edit-${id}`, onSelect: actions.onEdit }] : []),
-          { label: "启动命令", testId: `account-menu-commands-${id}`, onSelect: actions.onLaunchCommands },
-          ...(!account.isMain && !account.command
-            ? [{ label: "写入启动命令", testId: `account-menu-launch-${id}`, onSelect: actions.onAddLaunch }]
-            : []),
-          ...(account.drifted && account.profileBase
-            ? [{ label: "采用目录里的内容", testId: `account-menu-adopt-${id}`, onSelect: actions.onAdopt }]
-            : []),
-          ...(account.type === "official"
-            ? [{ label: "复制登录命令", testId: `account-menu-login-${id}`, onSelect: () => void copyText(loginCommand, "已复制登录命令") }]
-            : []),
-          { label: "准备情况", testId: `account-menu-readiness-${id}`, onSelect: actions.onReadiness },
-          { label: "技能", testId: `account-menu-skills-${id}`, onSelect: actions.onManageSkills },
-          { label: "复制目录路径", testId: `account-menu-dir-${id}`, onSelect: () => void copyText(account.configDir, "已复制目录路径") },
-          ...(!account.isMain ? [{ label: "移除", testId: `account-menu-remove-${id}`, onSelect: actions.onRemove }] : []),
-        ]}
-      />
+      <div className={COL_ACTIONS}>
+        {loggedOut ? (
+          <button
+            type="button"
+            data-testid={`account-login-${id}`}
+            onClick={() => void copyText(loginCommand, "已复制登录命令，到终端里运行")}
+            className="inline-flex w-20 items-center justify-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs text-primary-foreground hover:bg-primary/90"
+          >
+            <LogIn className="h-3.5 w-3.5" aria-hidden /> 登录
+          </button>
+        ) : (
+          <button
+            type="button"
+            data-testid={`account-copy-${id}`}
+            disabled={!account.command}
+            onClick={() => account.command && void copyText(account.command, `已复制启动命令 ${account.command}`)}
+            className="inline-flex w-20 items-center justify-center gap-1 rounded-md border px-2.5 py-1.5 text-xs hover:bg-accent disabled:opacity-40"
+          >
+            <Copy className="h-3.5 w-3.5" aria-hidden /> 复制
+          </button>
+        )}
+        <RowMenu
+          items={[
+            ...(!account.isMain ? [{ label: "编辑", testId: `account-menu-edit-${id}`, onSelect: actions.onEdit }] : []),
+            { label: "启动命令", testId: `account-menu-commands-${id}`, onSelect: actions.onLaunchCommands },
+            ...(!account.isMain && !account.command
+              ? [{ label: "写入启动命令", testId: `account-menu-launch-${id}`, onSelect: actions.onAddLaunch }]
+              : []),
+            ...(account.drifted && account.profileBase
+              ? [{ label: "采用目录里的内容", testId: `account-menu-adopt-${id}`, onSelect: actions.onAdopt }]
+              : []),
+            ...(account.type === "official"
+              ? [{ label: "复制登录命令", testId: `account-menu-login-${id}`, onSelect: () => void copyText(loginCommand, "已复制登录命令") }]
+              : []),
+            { label: "准备情况", testId: `account-menu-readiness-${id}`, onSelect: actions.onReadiness },
+            { label: "技能", testId: `account-menu-skills-${id}`, onSelect: actions.onManageSkills },
+            { label: "复制目录路径", testId: `account-menu-dir-${id}`, onSelect: () => void copyText(account.configDir, "已复制目录路径") },
+            ...(!account.isMain ? [{ label: "移除", testId: `account-menu-remove-${id}`, onSelect: actions.onRemove }] : []),
+          ]}
+        />
+      </div>
     </li>
   );
 }
 
 /** 账号页：每个助手的全部账号并列，一行一个；添加与编辑在右侧抽屉里。 */
-export default function AccountsPage({ onManageSkills }: { onManageSkills?: (accountId: string) => void }) {
+export default function AccountsPage({
+  onManageSkills,
+  onOpenSources,
+}: {
+  onManageSkills?: (accountId: string) => void;
+  onOpenSources?: () => void;
+}) {
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
+  const skillsQuery = useEngineQuery<StatusData>("skills:status");
   const profilesQuery = useEngineQuery<StatusData>("profiles:status");
   const secretsQuery = useEngineQuery<StatusData>("secrets:status");
   const ops = useAccountOps();
@@ -347,9 +368,41 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
     return query.data?.ok ? query.data.data : null;
   };
 
+  const mainAccount = group.accounts.find((account) => account.isMain);
+  const mainAuth = mainAccount ? authOf(mainAccount) : null;
+  const startSteps: StartStep[] = [
+    {
+      id: "login",
+      label: `登录 ${group.label} 主账号`,
+      hint: "主账号只用官方登录",
+      done: mainAuth !== "pending" && mainAuth?.state === "logged-in",
+      action:
+        !mainAccount || mainAuth === "pending"
+          ? undefined
+          : mainAuth?.state === "unknown"
+            ? { label: "确认", onClick: actionsOf(mainAccount).onProbeAuth }
+            : { label: "复制登录命令", onClick: () => void copyText(authTerminalCommand(group.kind, group.bin, "login"), "已复制登录命令，到终端里运行") },
+    },
+    {
+      id: "source",
+      label: "添加技能来源",
+      hint: "推荐 agent-skills，也可以用自己的目录",
+      done: !skillsQuery.data?.ok || (skillsQuery.data.data.elements ?? []).some(isCollection),
+      action: onOpenSources ? { label: "去添加", onClick: onOpenSources } : undefined,
+    },
+    {
+      id: "account",
+      label: "添加一个账号",
+      hint: "一个账号 = 一个配置目录 + 一条启动命令，可以和主账号同时开",
+      done: groups.some((item) => item.accounts.some((account) => !account.isMain)),
+      action: { label: "添加账号", onClick: () => setDrawer({ type: "create", group }) },
+    },
+  ];
+
   return (
     <div className="space-y-3">
       <h1 className="sr-only">账号</h1>
+      <GettingStarted steps={startSteps} />
       <div className="flex items-center gap-3">
         <div role="tablist" className="inline-flex rounded-lg bg-muted p-1">
           {groups.map((item) => (
@@ -410,17 +463,25 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
           />
         );
       })()}
-      <ul data-testid="accounts-list" className="divide-y rounded-lg border bg-card">
-        {group.accounts.map((account) => (
-          <AccountRow
-            key={account.elementId}
-            account={account}
-            group={group}
-            auth={authOf(account)}
-            actions={actionsOf(account)}
-          />
-        ))}
-      </ul>
+      <section aria-label="账号列表" className="overflow-clip rounded-lg border bg-card">
+        <div className="flex items-center gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
+          <span className="min-w-0 flex-1 font-medium text-foreground">账号与启动命令</span>
+          <span className={COL_LOGIN}>登录</span>
+          <span className={COL_QUOTA}>额度</span>
+          <span className={COL_ACTIONS} />
+        </div>
+        <ul data-testid="accounts-list" className="divide-y">
+          {group.accounts.map((account) => (
+            <AccountRow
+              key={account.elementId}
+              account={account}
+              group={group}
+              auth={authOf(account)}
+              actions={actionsOf(account)}
+            />
+          ))}
+        </ul>
+      </section>
       {drawer && (
         <AccountDrawer
           mode={drawer}

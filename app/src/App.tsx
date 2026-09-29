@@ -154,6 +154,7 @@ export default function App() {
                 setSkillSearch(null);
                 setActivePage("skills");
               }}
+              onOpenSources={() => handleNavigate("sources")}
             />
           )}
           {activePage === "skills" && (
