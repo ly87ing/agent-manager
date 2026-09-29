@@ -41,3 +41,20 @@ export function mcpFillRows(elements: EngineElement[], targets: McpTarget[], age
 export function mcpFillArgs(row: McpFillRow): string[] {
   return ["--only", row.elementId, "--agent", row.from, "--to", row.to, "--action", "copy", "--base", row.base];
 }
+
+/**
+ * 新账号除了从主账号带上的 MCP，还会从同格式账号补齐哪些服务：
+ * 在同格式的其他账号上启用着、主账号却没有的。
+ */
+export function mcpInUseElsewhere(elements: EngineElement[], targets: McpTarget[], mainAgent: string): string[] {
+  const format = targets.find((target) => target.agent === mainAgent)?.format;
+  if (!format) return [];
+  const sameFormat = new Set(targets.filter((target) => target.format === format).map((target) => target.agent));
+  return elements
+    .filter((element) => {
+      const cells = cellsOf(element);
+      return !cells[mainAgent] && Object.entries(cells).some(([agent, cell]) =>
+        sameFormat.has(agent) && cell.source === "file" && cell.state === "enabled" && cell.actions.includes("copy"));
+    })
+    .map((element) => element.id.replace(/^mcp:/, ""));
+}

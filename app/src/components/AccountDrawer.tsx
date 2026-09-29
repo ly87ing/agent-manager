@@ -12,7 +12,13 @@ import {
   parseProfileDefinition,
   type ProfileFormInput,
 } from "../lib/profileDefinition";
-import type { SecretSourceState } from "../lib/secretSource";
+import { DEFAULT_SECRETS_PATH, type SecretSourceState } from "../lib/secretSource";
+import type { StatusData } from "../lib/contract";
+import { mcpInUseElsewhere } from "../lib/mcpFill";
+import { authTerminalCommand } from "../lib/profileDefinition";
+import { useEngineQuery } from "../lib/queries";
+import { inUseSkillCount } from "../lib/skillFill";
+import { CreatePlan } from "./CreatePlan";
 import type { CreatePreview, useAccountOps } from "../lib/useAccountOps";
 import { cn } from "../lib/utils";
 
@@ -70,7 +76,8 @@ export function AccountDrawer({
   const [apiKey, setApiKey] = useState("");
   const [extraArgs, setExtraArgs] = useState(editing?.extraArgs ?? ops.mainExtraArgs(bin));
   const [preview, setPreview] = useState<{ key: string; result: CreatePreview | string } | null>(null);
-  const [showFiles, setShowFiles] = useState(false);
+  const skillsQuery = useEngineQuery<StatusData>("skills:status", [], { enabled: !editing });
+  const mcpQuery = useEngineQuery<StatusData>("mcp:status", [], { enabled: !editing });
   const [saving, setSaving] = useState(false);
   const serial = useRef(0);
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
@@ -170,12 +177,25 @@ export function AccountDrawer({
     }
   };
 
-  const files = previewReady
-    ? [
-        ...(previewReady.config.files ?? [{ path: previewReady.config.path, content: previewReady.config.content, exists: previewReady.config.exists }]),
-        ...previewReady.alias.files.map((file) => ({ path: file.path, content: file.content, exists: file.exists })),
-      ]
-    : [];
+  const planFacts = previewReady && !editing
+    ? {
+        configDir: input.configDir,
+        mainDir: group.kind === "codex" ? "~/.codex" : "~/.claude",
+        command: ops.launchValue(input, bin),
+        commandName: input.id,
+        api: type === "api"
+          ? {
+              baseUrl: input.baseUrl,
+              model: input.model,
+              tokenVar: input.tokenVar,
+              keyFile: apiKey ? (secretSource?.configured && secretSource.path ? secretSource.path : DEFAULT_SECRETS_PATH) : null,
+            }
+          : null,
+        skills: skillsQuery.data?.ok ? inUseSkillCount(skillsQuery.data.data.elements) : 0,
+        extraMcp: mcpQuery.data?.ok ? mcpInUseElsewhere(mcpQuery.data.data.elements, mcpQuery.data.data.targets ?? [], group.agentId) : [],
+        loginCommand: type === "official" ? authTerminalCommand(group.kind, bin, "login", input.configDir) : null,
+      }
+    : null;
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/30" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -204,7 +224,13 @@ export function AccountDrawer({
                   role="radio"
                   aria-checked={type === value}
                   data-testid={`account-type-choice-${value}`}
-                  onClick={() => setType(value)}
+                  onClick={() => {
+                    setType(value);
+                    if (value === "official" && preset) {
+                      if (name === preset.label) setName("");
+                      setPresetId("custom");
+                    }
+                  }}
                   className={cn(
                     "rounded-md border px-3 py-2 text-left text-sm",
                     type === value ? "border-primary bg-primary/10 font-medium text-primary" : "hover:bg-accent",
@@ -276,28 +302,13 @@ export function AccountDrawer({
           )}
 
           {!editing && (
-            <div className="rounded-md border">
-              <button
-                type="button"
-                onClick={() => setShowFiles((value) => !value)}
-                className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-muted-foreground hover:bg-accent"
-              >
-                <span data-testid="account-preview-state">
-                  {previewReady ? `将写入 ${files.length} 个文件` : previewError ? `预览失败：${previewError}` : "正在生成将写入的文件…"}
-                </span>
-                {previewReady && <span>{showFiles ? "收起" : "查看"}</span>}
-              </button>
-              {showFiles && previewReady && (
-                <div className="space-y-2 border-t p-3">
-                  {files.map((file) => (
-                    <div key={file.path}>
-                      <p className="font-mono text-[11px] text-muted-foreground">{file.path}{file.exists ? "" : "（新建）"}</p>
-                      <pre className="mt-1 max-h-40 overflow-auto rounded bg-muted p-2 text-[11px]">{file.content}</pre>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            planFacts && previewReady ? (
+              <CreatePlan preview={previewReady} facts={planFacts} />
+            ) : (
+              <p data-testid="account-preview-state" className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
+                {previewError ? `没法预览要写的内容，暂不能创建：${previewError}` : idError || apiError ? "填好上面几项后，这里会逐条列出创建时要做的事。" : "正在计算创建时要做的事…"}
+              </p>
+            )
           )}
         </div>
         <footer className="flex items-center justify-end gap-2 border-t px-5 py-3">

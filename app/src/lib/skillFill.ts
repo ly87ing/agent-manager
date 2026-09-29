@@ -49,3 +49,8 @@ export function addToAllRows(skill: EngineElement): BatchApplyRow[] {
     .filter(([, cell]) => canAdd(cell))
     .map(([agent]) => row(skill, agent, "添加"));
 }
+
+/** 在用的技能数：新账号建好后会链接的就是这些。 */
+export function inUseSkillCount(elements: EngineElement[]): number {
+  return elements.filter(isSkillElement).filter((skill) => Object.values(cellsOf(skill)).some(isActive)).length;
+}

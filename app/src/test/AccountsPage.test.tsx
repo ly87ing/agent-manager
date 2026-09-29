@@ -149,7 +149,14 @@ describe("账号页", () => {
     await userEvent.type(within(drawer).getByTestId("account-name"), "Work");
     expect(within(drawer).getByTestId("account-id")).toHaveValue("work");
     expect(within(drawer).getByTestId("account-extra-args")).toHaveValue("--dangerously-skip-permissions");
-    expect(await within(drawer).findByText(/将写入 2 个文件/)).toBeInTheDocument();
+    // 点「创建」前逐条列出要做的事：目录、文件、启动命令、技能与 MCP，以及不会动什么
+    const plan = await within(drawer).findByTestId("account-create-plan");
+    expect(plan).toHaveTextContent("新建目录 ~/.claude-work");
+    expect(plan).toHaveTextContent("另从其他账号复制在用的 MCP：only-ds");
+    expect(plan).toHaveTextContent("链接 1 个在用的技能");
+    expect(plan).toHaveTextContent(`alias work='TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude --dangerously-skip-permissions'`);
+    expect(plan).toHaveTextContent("不会改动主账号 ~/.claude");
+    expect(plan).toHaveTextContent('CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude auth login');
     await userEvent.click(within(drawer).getByTestId("account-save"));
     await waitFor(() => expect(screen.queryByTestId("account-drawer")).toBeNull());
 
@@ -174,7 +181,7 @@ describe("账号页", () => {
     const { calls } = renderWithEngine(<AccountsPage />, routes({ previewVersion: () => version }));
     const drawer = await openCreate();
     await userEvent.type(within(drawer).getByTestId("account-name"), "Work");
-    await within(drawer).findByText(/将写入 2 个文件/);
+    await within(drawer).findByTestId("account-create-plan");
     version = 2;
     await userEvent.click(within(drawer).getByTestId("account-save"));
     expect(await screen.findByText(/目标文件在预览后变了/)).toBeInTheDocument();
@@ -189,7 +196,7 @@ describe("账号页", () => {
     await userEvent.type(within(drawer).getByTestId("account-base-url"), "https://relay.example.com");
     await userEvent.type(within(drawer).getByTestId("account-token-var"), "RELAY_KEY");
     await userEvent.type(within(drawer).getByTestId("account-api-key"), "sk-secret-value");
-    await within(drawer).findByText(/将写入 2 个文件/);
+    await within(drawer).findByTestId("account-create-plan");
     await userEvent.click(within(drawer).getByTestId("account-save"));
     await waitFor(() => expect(screen.queryByTestId("account-drawer")).toBeNull());
 
