@@ -11,7 +11,6 @@ const preview = {
     seed_results: [
       { item: "permissions", state: "copied", detail: "已带上权限规则" },
       { item: "statusline", state: "copied", detail: "已带上状态栏" },
-      { item: "hooks", state: "absent", detail: "默认环境没有 hooks" },
       { item: "rules", state: "copied", detail: "已复制 CLAUDE.md" },
       { item: "mcp", state: "copied", detail: "已复制 demo-fs" },
     ],

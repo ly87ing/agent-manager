@@ -12,7 +12,7 @@ import { PageError, PageLoading } from "./components/PageState";
 
 const AccountsPage = lazy(() => import("./pages/AccountsPage"));
 const McpPage = lazy(() => import("./pages/McpPage"));
-const RulesHooksPage = lazy(() => import("./pages/RulesHooksPage"));
+const RulesPage = lazy(() => import("./pages/RulesPage"));
 const RunsPage = lazy(() => import("./pages/RunsPage"));
 const SkillsPage = lazy(() => import("./pages/SkillsPage"));
 const AliasesPage = lazy(() => import("./pages/AliasesPage"));
@@ -26,7 +26,7 @@ const NAV: NavItem[] = [
   { key: "accounts", label: "账号", icon: Users },
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
-  { key: "rules-hooks", label: "规则", icon: ScrollText },
+  { key: "rules", label: "规则", icon: ScrollText },
   { key: "commands", label: "命令", icon: SquareTerminal },
   { key: "sources", label: "来源", icon: Library },
 ];
@@ -176,7 +176,7 @@ export default function App() {
           )}
           {activePage === "commands" && <AliasesPage onOpenSkills={() => handleNavigate("skills")} />}
           {activePage === "sources" && <SourcesPage />}
-          {activePage === "rules-hooks" && <RulesHooksPage onNavigate={handleNavigate} />}
+          {activePage === "rules" && <RulesPage onOpenSkills={() => handleNavigate("skills")} />}
           {activePage === "takeover" && <TakeoverPage />}
           {activePage === "usage" && <UsagePage />}
           {activePage === "runs" && <RunsPage />}

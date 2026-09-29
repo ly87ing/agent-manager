@@ -4,17 +4,17 @@
 
 ## 功能
 
-- **账号**：按助手列出全部账号——主账号（`claude` / `codex`，只放官方登录）和各个独立账号（例如 `cc2`、`ds`），每行显示启动命令、官方还是 API、登录状态与 5 小时 / 每周额度。「添加账号」只问官方还是 API、叫什么；API 账号可选厂商预设，API Key 只写进外部密钥文件。建好后自动写好目录、启动命令（沿用主账号命令里的时区与参数），带上主账号的权限、状态栏、hooks、规则与 MCP，并链接全部在用的技能。编辑 API 账号时登记与目录里的配置一起写；移除只删启动命令与登记，目录、登录和会话都保留。登录只复制官方命令，由你在终端执行。
+- **账号**：按助手列出全部账号——主账号（`claude` / `codex`，只放官方登录）和各个独立账号（例如 `cc2`、`ds`），每行显示启动命令、官方还是 API、登录状态与 5 小时 / 每周额度。「添加账号」只问官方还是 API、叫什么；API 账号可选厂商预设，API Key 只写进外部密钥文件。建好后自动写好目录、启动命令（沿用主账号命令里的时区与参数），带上主账号的权限、状态栏、规则与 MCP，并链接全部在用的技能。编辑 API 账号时登记与目录里的配置一起写；移除只删启动命令与登记，目录、登录和会话都保留。登录只复制官方命令，由你在终端执行。
 - **实时额度**：一键为全部 Claude 账号装上 Agent Manager 的用量状态栏，它每次刷新时把额度记在本工具的数据目录里，账号页与托盘据此显示实时额度；Codex 的额度直接读它自己的会话记录。
 - **技能**：以集合（git 仓库或本机目录）管理技能，软链接到各账号的技能目录。在用的技能默认给全部账号，「补齐」一键链接到还缺它的账号；某个账号上停用是例外，补齐不会加回。新发现的技能点「添加」就加到全部账号。
 - **MCP**：直接读写各账号配置文件里的条目，一服务一行汇总在哪些账号上启用；同一种助手内可一键补齐，跨助手用「复制到…」。编辑、启停、删除都先预览完整文件并核对是否被外部改过。
-- **规则与 Hooks**：直接编辑各账号的 `CLAUDE.md` / `AGENTS.md` 与 hooks；规则模板只存在本机，推荐规则来自技能来源（agent-skills 的 `rules/`）；「补齐」只给还没有规则文件的账号复制主账号的规则，已有内容一律不动。
+- **规则**：直接编辑各账号的 `CLAUDE.md` / `AGENTS.md`；规则模板只存在本机，推荐规则来自技能来源（agent-skills 的 `rules/`）；「补齐」只给还没有规则文件的账号复制主账号的规则，已有内容一律不动。
 - **用量**：读本机会话记录按账号累加 token，可按时间、账号与模型筛选，按单价表折算（不是账单）。
 - **设置**：导入本机已有的配置、操作记录、密钥文件、终端快捷命令、客户端诊断、主题与配置备份。
 
 ## 体验
 
-- 顶栏入口：账号、技能、MCP、规则（含自动命令 Hooks）、命令、来源；右侧是「搜索 ⌘K」、主题切换、用量与设置。每页首屏就是列表，一行一项。
+- 顶栏入口：账号、技能、MCP、规则、命令、来源；右侧是「搜索 ⌘K」、主题切换、用量与设置。每页首屏就是列表，一行一项。
 - `⌘K` 搜页面、账号与资源，选中账号即复制它的启动命令；`⌘⇧K` 只列账号。`⌘F` 页内搜索，`⌘,` 打开设置。
 - 托盘按助手列出全部账号（名称 · 启动命令 · 额度），点一下唤回命令面板并定位到它，按 Enter 复制启动命令；托盘不写任何配置。
 - 浅色 / 深色 / 跟随系统主题；窗口位置与尺寸跨会话记忆；单实例运行；新版本提示。
@@ -63,7 +63,7 @@ AI CLI 的安装、升级与卸载不在本工具内执行。
 ## 数据与安全
 
 - **以实际配置为准**：各账号的真实文件与目录是生效配置的唯一事实源；应用数据目录下的 `native-manager.db`（SQLite）只保存偏好、账号登记、归属记录和未生效的备选（如 Claude 侧停用的 MCP），没有第二份可写配置文件；查询与状态读取只读，缺库时不创建文件。内置默认只作推荐，确认后才应用。
-- **写入范围**：仅写入受管目标——各账号配置目录里的受管条目（`settings.json` / `config.toml` 的本工具负责的键、MCP 条目、规则与 hooks 文件、技能链接），以及 `~/.zshrc` / `~/.zprofile` 的受管区块。主账号只放官方登录，本工具不往主配置写第三方接入；登录凭据只由助手自己的 `/login` 保存，本工具从不读写。
+- **写入范围**：仅写入受管目标——各账号配置目录里的受管条目（`settings.json` / `config.toml` 的本工具负责的键、MCP 条目、规则文件、技能链接），以及 `~/.zshrc` / `~/.zprofile` 的受管区块。主账号只放官方登录，本工具不往主配置写第三方接入；登录凭据只由助手自己的 `/login` 保存，本工具从不读写。
 - **密钥模型**：MCP 的生效条目就在各助手配置文件里，本工具只在「已保存未生效」项（如 Claude 侧停用的条目）里存东西：密钥一律改成 `${VAR}` 引用、取值转存到外部文件，只有不像凭据的普通取值（如 `NODE_ENV=production`）原样保存。用户在「密钥」页显式选择一个外部 `.env` 文件后，应用会校验它是普通文件、权限为 `600` 且内容是合法 `KEY=VALUE`；填写和接管的取值只写该文件。页面不回显取值，数据库只保存文件路径，配置备份不包含路径或取值；未选择可用文件时写入操作 fail-closed。
 - **不收集数据**：无遥测上传；日志仅写入本机应用数据目录，严格脱敏并按保留期自动清理。
 
@@ -99,7 +99,7 @@ cd app && pnpm test:unit run && pnpm typecheck && pnpm build
 
 Agent Manager is a desktop app (Tauri 2 + React + Rust/SQLite) for running several Claude Code and Codex accounts side by side on one Mac. Each account is its own config directory plus a shell launch command; skills, MCP servers and rules are shared with every account by default. The desktop app and CLI share one Rust engine. The UI is in Simplified Chinese.
 
-- **Features**: an accounts page listing the main account and every extra account with launch command, official/API type, login state and live quota; add, edit and remove accounts in a side drawer (API keys go to an external secrets file only); skill collections symlinked into every account with one-click "fill"; MCP entries edited in each account's own config file; rules and hooks edited in place; one-click live quota via the built-in status line; local usage totals per account.
+- **Features**: an accounts page listing the main account and every extra account with launch command, official/API type, login state and live quota; add, edit and remove accounts in a side drawer (API keys go to an external secrets file only); skill collections symlinked into every account with one-click "fill"; MCP entries edited in each account's own config file; rules edited in place; one-click live quota via the built-in status line; local usage totals per account.
 - **Install**: no public GitHub Release yet; see [platform status](docs/GUI-PLATFORM-STATUS.md). To build from source on macOS, install the Rust toolchain, Node.js and pnpm, clone without `--recursive`, then run `pnpm --dir app install --frozen-lockfile && pnpm --dir app run build:macos`.
 - **Safety model**: the real files in each account's directory are the only source of truth; every write re-reads the file and refuses if it changed since you looked, runs under an exclusive lock with rollback and an audit log, and never touches login credentials. The main account keeps only the official login. No telemetry.
 - **License**: [MIT](LICENSE).

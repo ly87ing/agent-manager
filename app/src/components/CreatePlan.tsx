@@ -26,7 +26,6 @@ export interface PlanFacts {
 const SEED_TEXT: Record<string, string> = {
   permissions: "权限规则",
   statusline: "状态栏",
-  hooks: "Hooks",
 };
 
 function FileStep({ title, path, content, children }: { title: string; path: string; content: string; children?: React.ReactNode }) {

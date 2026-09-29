@@ -28,14 +28,14 @@ impl EngineError {
 // ---------- 命令面白名单 ----------
 
 /// 桌面界面仍使用 status + apply 的域；助手安装生命周期只保留在 CLI。
-const READ_WRITE_DOMAINS: &[&str] = &["mcp", "skills", "rules", "hooks", "aliases", "profiles"];
+const READ_WRITE_DOMAINS: &[&str] = &["mcp", "skills", "rules", "aliases", "profiles"];
 
 pub fn validate_command(command: &str) -> Result<(), EngineError> {
     let rejected = || {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 mcp/skills/rules/hooks/aliases/profiles:status|apply / mcp:preview|hooks:preview|aliases:preview / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:preview|apply-definition|adopt|seed|shared-status|shared-apply / agents:status|configure|preview-runtime|auth-status / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 mcp/skills/rules/aliases/profiles:status|apply / mcp:preview|aliases:preview / rules:save-template|delete-template / aliases:discard-legacy / profiles:preview|apply-definition|adopt|seed|shared-status|shared-apply / agents:status|configure|preview-runtime|auth-status / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -54,16 +54,14 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("config", "export" | "import") => true,
         // 规则模板只写库：保存与删除，不动规则文件
         ("rules", "save-template" | "delete-template") => true,
-        // 丢弃旧版本保存的 hooks：只写库，不动助手文件
-        ("hooks", "discard-legacy") => true,
         // 丢弃旧版本保存的终端快捷命令：只写库，不动 rc 文件
         ("aliases", "discard-legacy") => true,
         // 以实例的实际配置更新实例定义：只写库，不动实例文件
         ("profiles", "adopt") => true,
-        ("mcp" | "hooks" | "aliases", "preview") => true,
+        ("mcp" | "aliases", "preview") => true,
         // 用户逐环境确认后同时更新定义与实际配置文件
         ("profiles", "apply-definition") => true,
-        // 把默认环境的权限、状态栏、hooks、规则与 MCP 一次性带进实例：只补实例没有的
+        // 把默认环境的权限、状态栏、规则与 MCP 一次性带进实例：只补实例没有的
         ("profiles", "seed") => true,
         ("profiles", "shared-status" | "shared-apply" | "preview") => true,
         // 运行参数写助手自己的配置文件（如实时额度状态栏）：与装卸升级的 apply 分开
@@ -162,15 +160,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--revision", ArgValueKind::Revision));
         }
         ("rules", "delete-template") => specs.push(("--template", ArgValueKind::TemplateId)),
-        // Hooks 以实际配置为准：写一个目标，base 做 CAS；新 hooks 三选一（引擎再强制恰好一个）
-        ("hooks", "apply" | "preview") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--base", ArgValueKind::RuleBase));
-            specs.push(("--value", ArgValueKind::JsonValue));
-            specs.push(("--cleanup", ArgValueKind::SuggestionId));
-            specs.push(("--legacy", ArgValueKind::SuggestionId));
-        }
-        ("hooks", "discard-legacy") => specs.push(("--legacy", ArgValueKind::SuggestionId)),
         // 终端快捷命令以 rc 文件受管区块为准：按名编辑一条，要写的文件各带自己的 base 做 CAS；
         // 操作四选一（引擎再强制恰好一个）。名称与元素 id 同一把尺子，取值由引擎校验。
         ("aliases", "apply" | "preview") => {
@@ -341,7 +330,7 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
         ArgValueKind::Flag => Ok(()),
         ArgValueKind::ElementId => validate_element_id(value),
         ArgValueKind::SeedItems => {
-            const ITEMS: &[&str] = &["permissions", "statusline", "hooks", "rules", "mcp"];
+            const ITEMS: &[&str] = &["permissions", "statusline", "rules", "mcp"];
             if !value.is_empty() && value.split(',').all(|item| ITEMS.contains(&item)) {
                 Ok(())
             } else {
@@ -557,28 +546,12 @@ fn is_rules_target(value: &str) -> bool {
     })
 }
 
-/// Hooks 目标 id：两个主助手目标，或 `hooks:profile:<实例 id>`。
-fn is_hooks_target(value: &str) -> bool {
-    if value == "hooks:claude" || value == "hooks:codex" {
-        return true;
-    }
-    value.strip_prefix("hooks:profile:").is_some_and(|id| {
-        id.chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
-            && id
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-    })
-}
-
 pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> {
     let specs = allowed_arg_specs(command);
     let (domain, _) = command.split_once(':').unwrap_or(("", ""));
     let is_rules = domain == "rules";
-    let is_hooks = domain == "hooks";
-    // rules、hooks 与 aliases 同 native 严格参数保持一致：拒绝重复 flag。
-    let reject_duplicates = is_rules || is_hooks || domain == "aliases";
+    // rules 与 aliases 同 native 严格参数保持一致：拒绝重复 flag。
+    let reject_duplicates = is_rules || domain == "aliases";
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut index = 0;
     while index < args.len() {
@@ -609,14 +582,6 @@ pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> 
                     "invalid_args",
                     format!(
                         "非法 rules 目标 '{value}'（仅 rules:codex_global|rules:claude_global|rules:profile:<实例>）"
-                    ),
-                ));
-            }
-            if is_hooks && arg == "--only" && !is_hooks_target(value) {
-                return Err(EngineError::new(
-                    "invalid_args",
-                    format!(
-                        "非法 hooks 目标 '{value}'（仅 hooks:claude|hooks:codex|hooks:profile:<实例>）"
                     ),
                 ));
             }
@@ -692,10 +657,6 @@ mod tests {
             "rules:apply",
             "rules:save-template",
             "rules:delete-template",
-            "hooks:status",
-            "hooks:preview",
-            "hooks:apply",
-            "hooks:discard-legacy",
             "aliases:status",
             "aliases:preview",
             "aliases:apply",
@@ -740,6 +701,11 @@ mod tests {
             "rules:set",
             "hooks:save-template",
             "hooks:plan",
+            // 2026-09-29 Hooks 功能移除
+            "hooks:status",
+            "hooks:preview",
+            "hooks:apply",
+            "hooks:discard-legacy",
             "aliases:plan",
             "secrets:plan",
             "secrets:apply",
@@ -1127,7 +1093,6 @@ mod tests {
         );
         for (command, args) in [
             ("mcp:status", vec!["--allow-takeover".into()]),
-            ("hooks:status", vec!["--allow-takeover".into()]),
             ("skills:status", vec!["--allow-takeover".into()]),
             ("rules:status", vec!["--allow-takeover".into()]),
             // 规则以实际文件为准，没有「接管」：直接编辑本身就是写实际文件
@@ -1140,15 +1105,6 @@ mod tests {
                 ],
             ),
             ("aliases:status", vec!["--allow-takeover".into()]),
-            // hooks 以实际配置为准，同样没有「接管」
-            (
-                "hooks:apply",
-                vec![
-                    "--only".into(),
-                    "hooks:codex".into(),
-                    "--allow-takeover".into(),
-                ],
-            ),
         ] {
             assert!(
                 validate_args(command, &args).is_err(),
@@ -1386,7 +1342,7 @@ mod tests {
                 "{\"profile\":{}}",
                 "--on-save",
                 "--items",
-                "permissions,statusline,hooks,rules,mcp"
+                "permissions,statusline,rules,mcp"
             ])
         )
         .is_ok());
@@ -1398,7 +1354,7 @@ mod tests {
                 "--definition",
                 "{\"profile\":{}}",
                 "--items",
-                "permissions,statusline,hooks,rules,mcp"
+                "permissions,statusline,rules,mcp"
             ])
         )
         .is_ok());
@@ -1570,11 +1526,18 @@ mod tests {
                 "--only",
                 "profiles:cc-ly",
                 "--items",
-                "permissions,hooks,mcp"
+                "permissions,rules,mcp"
             ])
         )
         .is_ok());
-        for items in ["", "env", "permissions,env", "mcp;rm", "permissions, hooks"] {
+        for items in [
+            "",
+            "env",
+            "permissions,env",
+            "mcp;rm",
+            "permissions, rules",
+            "permissions,hooks",
+        ] {
             assert!(
                 validate_args(
                     "profiles:seed",
@@ -1630,106 +1593,6 @@ mod tests {
             ])
         )
         .is_err());
-    }
-
-    #[test]
-    fn hooks_args_follow_the_actual_config_contract() {
-        let base = "a".repeat(64);
-        let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        for (command, list) in [
-            (
-                "hooks:apply",
-                args(&[
-                    "--only",
-                    "hooks:claude",
-                    "--base",
-                    &base,
-                    "--value",
-                    r#"{"Stop":[{"hooks":[{"type":"command","command":"x"}]}]}"#,
-                ]),
-            ),
-            (
-                "hooks:preview",
-                args(&[
-                    "--only",
-                    "hooks:claude",
-                    "--base",
-                    &base,
-                    "--value",
-                    r#"{"Stop":[{"hooks":[{"type":"command","command":"x"}]}]}"#,
-                ]),
-            ),
-            (
-                "hooks:apply",
-                args(&[
-                    "--only",
-                    "hooks:profile:cc-ly",
-                    "--base",
-                    "missing",
-                    "--cleanup",
-                    "cleanup-0123456789abcdef",
-                ]),
-            ),
-            (
-                "hooks:apply",
-                args(&[
-                    "--only",
-                    "hooks:codex",
-                    "--base",
-                    "missing",
-                    "--legacy",
-                    "legacy-0123456789abcdef",
-                ]),
-            ),
-            (
-                "hooks:discard-legacy",
-                args(&["--legacy", "legacy-0123456789abcdef"]),
-            ),
-        ] {
-            assert!(
-                validate_args(command, &list).is_ok(),
-                "{command} {list:?} should pass"
-            );
-        }
-        for (command, list) in [
-            ("hooks:status", args(&["--offline"])),
-            (
-                "hooks:preview",
-                args(&["--only", "hooks:claude", "--base", "bad"]),
-            ),
-            (
-                "hooks:apply",
-                args(&["--only", "hooks:nope", "--base", "missing"]),
-            ),
-            ("hooks:apply", args(&["--only", "rules:claude_global"])),
-            (
-                "hooks:apply",
-                args(&["--only", "hooks:claude", "--only", "hooks:codex"]),
-            ),
-            (
-                "hooks:apply",
-                args(&["--only", "hooks:claude", "--base", "nothex"]),
-            ),
-            (
-                "hooks:apply",
-                args(&["--only", "hooks:claude", "--value", "{not json"]),
-            ),
-            (
-                "hooks:apply",
-                args(&["--only", "hooks:claude", "--cleanup", "cleanup-xyz"]),
-            ),
-            (
-                "hooks:apply",
-                args(&["--only", "hooks:claude", "--dry-run"]),
-            ),
-            ("hooks:discard-legacy", args(&["--legacy", "Bad"])),
-            ("hooks:discard-legacy", args(&["--only", "hooks:claude"])),
-        ] {
-            assert!(
-                validate_args(command, &list).is_err(),
-                "{command} {list:?} should fail"
-            );
-        }
     }
 
     #[test]

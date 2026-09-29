@@ -24,7 +24,7 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
   { key: "accounts", label: "账号", keywords: "accounts 账号 claude codex 启动命令 额度" },
   { key: "skills", label: "技能", keywords: "skills 技能" },
   { key: "mcp", label: "MCP", keywords: "mcp 服务器" },
-  { key: "rules-hooks", label: "规则", keywords: "rules hooks 规则" },
+  { key: "rules", label: "规则", keywords: "rules 规则" },
   { key: "usage", label: "用量", keywords: "usage 用量 token 花费 成本" },
   { key: "settings", label: "设置", keywords: "settings 偏好" },
   // 设置里的二级页面也要搜得到

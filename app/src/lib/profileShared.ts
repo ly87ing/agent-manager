@@ -20,7 +20,7 @@ export interface SharedPreview {
 
 export function sharedItemLabel(item: string): string {
   if (item.startsWith("mcp:")) return `MCP · ${item.slice(4)}`;
-  return ({ permissions: "权限规则", statusline: "状态栏", hooks: "Hooks", rules: "规则文件", mcp: "MCP 服务" } as Record<string, string>)[item] ?? item;
+  return ({ permissions: "权限规则", statusline: "状态栏", rules: "规则文件", mcp: "MCP 服务" } as Record<string, string>)[item] ?? item;
 }
 
 export function sharedApplyArgs(profileId: string, item: SharedItem): string[] {

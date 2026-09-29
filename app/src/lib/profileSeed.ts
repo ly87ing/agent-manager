@@ -7,7 +7,7 @@
  */
 import type { ProfileKind } from "./profileDefinition";
 
-export type SeedItem = "permissions" | "statusline" | "hooks" | "rules" | "mcp";
+export type SeedItem = "permissions" | "statusline" | "rules" | "mcp";
 
 export type SeedState = "copied" | "exists" | "absent" | "skipped" | "failed" | "unsupported";
 
@@ -29,7 +29,6 @@ export const SEED_ITEMS: { id: SeedItem; label: string; source: Record<ProfileKi
     },
   },
   { id: "statusline", label: "状态栏", source: { claude: "settings.json 的 statusLine", codex: "config.toml 的 [tui] status_line" } },
-  { id: "hooks", label: "Hooks", source: { claude: "settings.json 的 hooks", codex: "hooks.json" } },
   { id: "rules", label: "规则文件", source: { claude: "CLAUDE.md", codex: "AGENTS.md" } },
   { id: "mcp", label: "MCP 服务", source: { claude: "~/.claude.json 的用户级 MCP 服务", codex: "config.toml 的 mcp_servers" } },
 ];

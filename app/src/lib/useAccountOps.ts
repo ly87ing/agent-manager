@@ -32,7 +32,7 @@ export interface CreatePreview {
  * 账号的新建、编辑、移除（docs/MULTI-ACCOUNT-DESIGN.md P2）。
  *
  * 写入保护沿用实例域：新建前预览并在保存时重读比对，编辑带 status 给出的文件与定义基准，
- * 引擎拒绝时文件与库都不动。新账号默认带上主账号的全部共用设置（权限、状态栏、hooks、规则、MCP），
+ * 引擎拒绝时文件与库都不动。新账号默认带上主账号的全部共用设置（权限、状态栏、规则、MCP），
  * 启动命令沿用主账号命令里的时区与语言。
  */
 export function useAccountOps() {

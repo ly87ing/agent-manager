@@ -73,7 +73,7 @@ export function useAttentionCounts(): Record<string, number> {
   return {
     skills: skillsAttention(elementsOf(skills)),
     mcp: mcpAttention(elementsOf(mcp)),
-    "rules-hooks": rulesAttention(elementsOf(rules)),
+    rules: rulesAttention(elementsOf(rules)),
     accounts: accountsAttention(
       elementsOf(agents),
       elementsOf(profiles),

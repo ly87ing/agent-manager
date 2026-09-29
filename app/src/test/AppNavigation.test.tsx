@@ -80,7 +80,9 @@ describe("App 顶层导航", () => {
     const rulesNav = within(nav).getByRole("button", { name: "规则" });
     await userEvent.click(rulesNav);
     expect(rulesNav).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("tab", { name: "规则" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "规则" })).toBeInTheDocument();
+    // Hooks 已移除：规则页不再有标签切换
+    expect(screen.queryByRole("tab", { name: /Hooks/ })).toBeNull();
   }, 15000);
 
   it("导航上标出各页待处理数；数字不进按钮名字，没有待处理的不标", async () => {
@@ -242,7 +244,7 @@ describe("App 顶层导航", () => {
     expect(agentSelect.value).toBe("all");
   }, 15000);
 
-  it("未实现的 mcp/rules/hooks status 返回 ok:false 与 data:{} 时，页面展示错误，顶层导航仍在且可切回账号", async () => {
+  it("未实现的 mcp/rules status 返回 ok:false 与 data:{} 时，页面展示错误，顶层导航仍在且可切回账号", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -266,14 +268,6 @@ describe("App 顶层导航", () => {
           errors: [{ code: "DOMAIN_NOT_IMPLEMENTED", element: null, message: "Rules 域尚未实现" }],
         },
       ),
-      "hooks:status": makeEnvelope(
-        {} as unknown as { domain: string; elements: [] },
-        {
-          command: "hooks.status",
-          ok: false,
-          errors: [{ code: "DOMAIN_NOT_IMPLEMENTED", element: null, message: "Hooks 域尚未实现" }],
-        },
-      ),
     };
 
     renderWithEngine(<App />, notImplementedRoutes);
@@ -295,20 +289,12 @@ describe("App 顶层导航", () => {
     expect(await screen.findByRole("heading", { name: "账号" })).toBeInTheDocument();
 
     // 切换至规则页：展示 Rules 错误
-    const rulesHooksNav = within(nav).getByRole("button", { name: "规则" });
-    await userEvent.click(rulesHooksNav);
-    expect(rulesHooksNav).toHaveAttribute("aria-current", "page");
+    const rulesNav = within(nav).getByRole("button", { name: "规则" });
+    await userEvent.click(rulesNav);
+    expect(rulesNav).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("heading", { name: "规则" })).toBeInTheDocument();
     expect(screen.getByText("DOMAIN_NOT_IMPLEMENTED")).toBeInTheDocument();
     expect(screen.getByText("Rules 域尚未实现")).toBeInTheDocument();
-
-    // 切换至 Hooks Tab：不抛异常，展示 Hooks 错误
-    const hooksTab = screen.getByRole("tab", { name: "自动命令（Hooks）" });
-    await userEvent.click(hooksTab);
-    expect(hooksTab).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByRole("heading", { name: "自动命令（Hooks）" })).toBeInTheDocument();
-    expect(screen.getByText("DOMAIN_NOT_IMPLEMENTED")).toBeInTheDocument();
-    expect(screen.getByText("Hooks 域尚未实现")).toBeInTheDocument();
 
     // 顶层导航仍在，再次切回账号
     await userEvent.click(accountsNav);

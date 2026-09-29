@@ -213,7 +213,7 @@ describe("账号页", () => {
     expect(valueOf(writes[2].args, "--value")).toBe(
       'TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude --dangerously-skip-permissions',
     );
-    expect(valueOf(writes[3].args, "--items")).toBe("permissions,statusline,hooks,rules,mcp");
+    expect(valueOf(writes[3].args, "--items")).toBe("permissions,statusline,rules,mcp");
     // 建好后直接给出新账号的准备情况
     expect(await screen.findByTestId("account-readiness-profiles:work")).toHaveTextContent("新账号「");
   });
