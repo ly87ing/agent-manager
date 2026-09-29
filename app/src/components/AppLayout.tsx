@@ -9,6 +9,8 @@ export interface NavItem {
   icon: LucideIcon;
   /** 只显示图标（顶栏右侧的次级入口）。 */
   iconOnly?: boolean;
+  /** 这一页待处理的项数；0 或不给不显示。 */
+  badge?: number;
 }
 
 /** 应用外壳：顶栏导航 + 内容区。主入口在左，次级入口（用量、设置）在右。 */
@@ -54,6 +56,16 @@ export function AppLayout({
         >
           <Icon className="h-4 w-4 shrink-0" aria-hidden />
           {!item.iconOnly && item.label}
+          {Boolean(item.badge) && (
+            <span
+              data-testid={`nav-badge-${item.key}`}
+              title={`${item.badge} 项需要处理`}
+              aria-hidden
+              className="min-w-[1.125rem] rounded-full bg-warning/20 px-1 text-center text-[11px] font-medium leading-[1.125rem] text-warning"
+            >
+              {item.badge}
+            </span>
+          )}
           {showUpdateBadge && (
             <span
               data-testid="update-badge"

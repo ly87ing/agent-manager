@@ -5,6 +5,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { useSettings } from "./lib/settings";
 import { subscribeTrayActions } from "./lib/trayActions";
 import { useUpdateCheck } from "./lib/update-check";
+import { useAttentionCounts } from "./lib/attention";
 import { PageError, PageLoading } from "./components/PageState";
 
 const AccountsPage = lazy(() => import("./pages/AccountsPage"));
@@ -54,6 +55,7 @@ export default function App() {
   const [paletteScope, setPaletteScope] = useState<"all" | "quick">("all");
   const [paletteTarget, setPaletteTarget] = useState<{ keyword: string; itemId: string } | null>(null);
   const update = useUpdateCheck();
+  const attention = useAttentionCounts();
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -121,7 +123,7 @@ export default function App() {
 
   return (
     <AppLayout
-      nav={NAV}
+      nav={NAV.map((item) => ({ ...item, badge: attention[item.key] }))}
       secondaryNav={SECONDARY_NAV}
       active={activePage === "runs" || activePage === "takeover" ? "settings" : activePage}
       onNavigate={handleNavigate}

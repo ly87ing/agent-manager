@@ -79,6 +79,24 @@ describe("App 顶层导航", () => {
     expect(await screen.findByRole("tab", { name: "规则" })).toBeInTheDocument();
   }, 15000);
 
+  it("导航上标出各页待处理数；数字不进按钮名字，没有待处理的不标", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    renderWithEngine(<App />, {
+      ...routes(),
+      "skills:status": makeEnvelope({
+        domain: "skills",
+        elements: [
+          makeElement({ id: "skill:c", domain: "skills", spec: { url: "https://example.com/c.git" }, observed: { repo_cached: true } }),
+          makeElement({ id: "skill:c/broken", domain: "skills", spec: { collection: "c", name: "broken" }, observed: { agents: { "claude-code": { state: "dead-link", actions: ["update"] } } } }),
+        ],
+      }, { command: "skills.status" }),
+    });
+    const nav = await screen.findByRole("navigation");
+    expect(await within(nav).findByTestId("nav-badge-skills")).toHaveTextContent("1");
+    expect(within(nav).getByRole("button", { name: "技能" })).toBeInTheDocument();
+    expect(within(nav).queryByTestId("nav-badge-mcp")).toBeNull();
+  });
+
   it("从账号行进入技能页并预选对应账号，点击顶栏「技能」重置为全部助手", async () => {
     setSettingsClient({
       get: async () => dummySettings,
