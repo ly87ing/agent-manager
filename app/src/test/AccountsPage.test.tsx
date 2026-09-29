@@ -91,6 +91,22 @@ function routes(options: { previewVersion?: () => number } = {}): Record<string,
     "profiles:apply": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply" }),
     "profiles:apply-definition": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply-definition" }),
     "profiles:seed": makeEnvelope({ results: [{ item: "permissions", state: "copied", detail: "" }] }, { command: "profiles.seed" }),
+    // 在用技能 alpha：主账号已链接；新登记的账号还没分配。beta 从没被选用，不自动加。
+    "skills:status": async () => makeEnvelope({
+      domain: "skills",
+      elements: ["alpha", "beta"].map((name) => makeElement({
+        id: `skill:repo/${name}`,
+        domain: "skills",
+        spec: { collection: "repo", name },
+        observed: {
+          agents: {
+            "claude-code": name === "alpha" ? { state: "linked", assigned: true, enabled: true, actions: ["disable"] } : { state: "not-assigned", assigned: false, actions: ["add"] },
+            ...Object.fromEntries(registered.map((id) => [id, { state: "not-assigned", assigned: false, actions: ["add"] }])),
+          },
+        },
+      })),
+    }, { command: "skills.status" }),
+    "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
   };
 }
 
@@ -120,8 +136,10 @@ describe("账号页", () => {
     await userEvent.click(within(drawer).getByTestId("account-save"));
     await waitFor(() => expect(screen.queryByTestId("account-drawer")).toBeNull());
 
-    const writes = calls.filter((call) => ["policy:set", "profiles:apply", "aliases:apply", "profiles:seed"].includes(call.command));
-    expect(writes.map((call) => call.command)).toEqual(["policy:set", "profiles:apply", "aliases:apply", "profiles:seed"]);
+    const writes = calls.filter((call) => ["policy:set", "profiles:apply", "aliases:apply", "profiles:seed", "skills:apply"].includes(call.command));
+    expect(writes.map((call) => call.command)).toEqual(["policy:set", "profiles:apply", "aliases:apply", "profiles:seed", "skills:apply"]);
+    // 只把在用的 alpha 链接给新账号
+    expect(writes[4].args).toEqual(["--only", "skill:repo/alpha", "--action", "add", "--agent", "work"]);
     const definition = JSON.parse(valueOf(writes[0].args, "--value")!);
     expect(definition.profile).toMatchObject({ base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-work" });
     expect(valueOf(writes[0].args, "--expect-definition")).toBe("null");

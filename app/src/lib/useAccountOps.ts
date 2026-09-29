@@ -14,6 +14,7 @@ import {
 } from "./profileDefinition";
 import { ALL_SEED_ITEMS, seedArgs, summarizeSeed, type SeedResult } from "./profileSeed";
 import { engineKeys } from "./queries";
+import { fillRows } from "./skillFill";
 import { DEFAULT_SECRETS_PATH, secretSourceOf } from "./secretSource";
 import { useAliasSource, type AliasFilePreview } from "./useAliasSource";
 import { sameJson } from "./utils";
@@ -122,6 +123,25 @@ export function useAccountOps() {
     return applied?.ok === true;
   };
 
+  /** 新账号拿到全部在用的技能（按技能逐个 add，单个失败不影响其余）。 */
+  const linkSkills = async (agent: string): Promise<{ linked: number; failed: number }> => {
+    const status = await runEngine<StatusData>("skills:status", []).catch(() => null);
+    if (!status?.ok) return { linked: 0, failed: 0 };
+    let linked = 0;
+    let failed = 0;
+    for (const row of fillRows(status.data.elements, [agent])) {
+      const result = await execute({
+        command: "skills:apply",
+        label: row.label,
+        args: ["--only", row.elementId, "--action", row.action, "--agent", row.agent],
+        silent: true,
+      });
+      if (result?.ok) linked += 1;
+      else failed += 1;
+    }
+    return { linked, failed };
+  };
+
   const create = async (
     input: ProfileFormInput,
     bin: string,
@@ -174,9 +194,11 @@ export function useAccountOps() {
     });
     const seedResults = (seeded?.data as { results?: SeedResult[] } | null)?.results ?? [];
     const seedFailed = !seeded?.ok || summarizeSeed(seedResults).failed;
+    const skills = await linkSkills(input.id);
     if (!aliasOk) toast.error(`已创建账号 ${input.id}，但启动命令没写进终端配置`, { description: "原因见任务记录。" });
     else if (seedFailed) toast.warning(`已创建账号 ${input.id}，部分共用设置没带上`, { description: summarizeSeed(seedResults).description || undefined });
-    else toast.success(`已创建账号 ${input.id}`, { description: `新开终端后输入 ${input.id} 启动。` });
+    else if (skills.failed > 0) toast.warning(`已创建账号 ${input.id}，${skills.failed} 个技能没链接上`, { description: "到技能页点「补齐」重试，原因见任务记录。" });
+    else toast.success(`已创建账号 ${input.id}`, { description: `已链接 ${skills.linked} 个技能；新开终端后输入 ${input.id} 启动。` });
     await refresh();
     return true;
   };
