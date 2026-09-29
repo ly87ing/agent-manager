@@ -1,7 +1,8 @@
 # AGENTS.md
 
 ## 当前目标
-- 实现 Tauri 2 界面与 Rust 原生后端；产品与数据语义见 `docs/GUI-REDESIGN.md`，实施与验收见 `docs/goal-rust-gui.md`。
+- 实现 Tauri 2 界面与 Rust 原生后端。产品定位与分期计划见 `docs/MULTI-ACCOUNT-DESIGN.md`（多账号并行：账号 = 配置目录 + 启动命令，技能 / MCP / 规则默认分配给全部账号）；数据语义与写入保护见 `docs/GUI-REDESIGN.md`，两者冲突时以前者为准；实施与验收记录见 `docs/goal-rust-gui.md`。
+- 主账号（`~/.claude`、`~/.codex`）只放官方登录；不再开发主配置切换第三方、接入备选库等附录 A 列出的功能，已有实现按分期计划清理。
 - 桌面和 CLI 复用同一 Rust 库。新版不依赖 Python、`manage.sh`、旧适配器或源码目录。
 - Python 不再维护，用户已授权清理；不新增 Python 功能、投影兼容层或双实现对照义务。
 - 当前目标不等于已实现状态。未通过编译、实际操作和独立验收的候选不得称为完成。
