@@ -391,13 +391,6 @@ export default function AccountsPage({
       done: !skillsQuery.data?.ok || (skillsQuery.data.data.elements ?? []).some(isCollection),
       action: onOpenSources ? { label: "去添加", onClick: onOpenSources } : undefined,
     },
-    {
-      id: "account",
-      label: "添加一个账号",
-      hint: "一个账号 = 一个配置目录 + 一条启动命令，可以和主账号同时开",
-      done: groups.some((item) => item.accounts.some((account) => !account.isMain)),
-      action: { label: "添加账号", onClick: () => setDrawer({ type: "create", group }) },
-    },
   ];
 
   return (

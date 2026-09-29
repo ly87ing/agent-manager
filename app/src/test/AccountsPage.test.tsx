@@ -358,9 +358,10 @@ describe("账号页", () => {
     renderWithEngine(<AccountsPage onOpenSources={() => opened++} />, r);
     const card = await screen.findByTestId("getting-started");
     await waitFor(() => expect(screen.getByTestId("start-step-login")).toHaveAttribute("data-done", "true"));
-    expect(screen.getByTestId("start-step-account")).toHaveAttribute("data-done", "true");
+    // 添加账号不是必须的，不在引导里
+    expect(screen.queryByTestId("start-step-account")).toBeNull();
     expect(screen.getByTestId("start-step-source")).toHaveAttribute("data-done", "false");
-    expect(card).toHaveTextContent("2/3");
+    expect(card).toHaveTextContent("1/2");
     await userEvent.click(screen.getByTestId("start-action-source"));
     expect(opened).toBe(1);
     await userEvent.click(screen.getByTestId("getting-started-hide"));
@@ -375,7 +376,7 @@ describe("账号页", () => {
     await waitFor(() => expect(screen.getByTestId("start-step-login")).toHaveAttribute("data-done", "true"));
     expect(screen.getByTestId("start-step-source")).toHaveTextContent("可选");
     await userEvent.click(screen.getByTestId("start-skip-source"));
-    // 其余两步已做完：整张清单收起，下次也不再催
+    // 登录那一步已做完：整张清单收起，下次也不再催
     expect(screen.queryByTestId("getting-started")).toBeNull();
     expect(localStorage.getItem("agent-manager:getting-started-skipped")).toBe('["source"]');
     expect(calls.some((call) => /:(apply|set)$/.test(call.command))).toBe(false);
