@@ -40,6 +40,11 @@ function fullSkillDefinition(layers: PolicyLayers | null, name: string): Record<
   return typeof definition === "object" && definition !== null ? (definition as Record<string, unknown>) : null;
 }
 
+/** 来源里的全部技能；旧引擎没有 available 时退回按 discovered（当作顶层技能）。 */
+function availableSkills(observed: SkillCollectionObserved) {
+  return observed.available ?? (observed.discovered ?? []).map((name) => ({ name, path: name }));
+}
+
 const ACTIVE = new Set(["linked", "missing-link", "dead-link", "drifted"]);
 const TONE = {
   ok: "text-muted-foreground",
@@ -516,7 +521,7 @@ export default function SkillsPage({
           agentIds={agentOptions}
           initial={editing ? { name: collName(editing), definition: editing.spec } : undefined}
           fullDefinition={editing ? fullSkillDefinition(layers, collName(editing)) : null}
-          discovered={editing ? (editing.observed as SkillCollectionObserved).discovered : undefined}
+          available={editing ? availableSkills(editing.observed as SkillCollectionObserved) : undefined}
           repoCached={editing ? (editing.observed as SkillCollectionObserved).repo_cached : undefined}
           onClose={() => {
             setShowAddForm(false);

@@ -322,6 +322,8 @@ export interface SkillCollectionObserved {
   repo_cached?: boolean;
   owner_marked?: boolean;
   discovered?: string[];
+  /** 来源里全部技能（不受 skill_paths 限制）：名字与相对来源根的路径。 */
+  available?: { name: string; path: string }[];
   discovery_error?: SkillDiscoveryError | null;
   discovery_inbox?: string[];
   extra_links?: string[];

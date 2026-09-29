@@ -2874,3 +2874,49 @@ fn assert_status_matches_contract(data: &serde_json::Value) {
         assert!(origins.contains(&item["origin"]), "{}", item["origin"]);
     }
 }
+
+/// 编辑集合要列出来源里的全部技能：不受 skill_paths 限制，带相对路径，不把规则目录、隐藏目录当技能。
+#[test]
+fn collection_lists_all_available_skills_regardless_of_skill_paths() {
+    let (root, context) = temp_ctx("skills-available");
+    let repo_dir = context.data_dir.join("repositories").join("picked");
+    for rel in [
+        "skills/alpha",
+        "skills/beta",
+        "tools/gamma",
+        ".github/hidden",
+    ] {
+        std::fs::create_dir_all(repo_dir.join(rel)).unwrap();
+        std::fs::write(repo_dir.join(rel).join("SKILL.md"), "# x\n").unwrap();
+    }
+    std::fs::create_dir_all(repo_dir.join("rules")).unwrap();
+    std::fs::write(repo_dir.join("rules").join("core.md"), "# core\n").unwrap();
+    set_collection(
+        &context,
+        "picked",
+        r#"{"url":"https://example.com/picked.git","skill_paths":["alpha"]}"#,
+    );
+
+    let (discovered, error) = collection_discovery(&context, "picked");
+    assert!(error.is_null(), "{error}");
+    assert_eq!(discovered, ["alpha"], "在用的仍只按 skill_paths");
+
+    let status = execute(&context, &request("skills:status", &[]));
+    let coll = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|el| el["id"] == "skill:picked")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        coll["observed"]["available"],
+        serde_json::json!([
+            {"name": "alpha", "path": "skills/alpha"},
+            {"name": "beta", "path": "skills/beta"},
+            {"name": "gamma", "path": "tools/gamma"},
+        ])
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}

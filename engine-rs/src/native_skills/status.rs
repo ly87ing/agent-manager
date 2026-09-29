@@ -533,6 +533,7 @@ fn build_collection_element(
     repo_cached: bool,
     owner_marked: bool,
     discovered_names: &[String],
+    available: &[(String, String)],
     discovery_error: Option<&Value>,
     inbox_skills: &[String],
     probes: &BTreeMap<String, crate::native_upstream::ProbeRecord>,
@@ -599,6 +600,11 @@ fn build_collection_element(
             "repo_cached": repo_cached,
             "owner_marked": owner_marked,
             "discovered": discovered_names,
+            // 来源里全部技能（不受 skill_paths 限制），供编辑集合时勾选
+            "available": available
+                .iter()
+                .map(|(name, path)| json!({"name": name, "path": path}))
+                .collect::<Vec<_>>(),
             "discovery_error": discovery_error.cloned().unwrap_or(Value::Null),
             "discovery_inbox": inbox_skills,
             "extra_links": [],
@@ -672,6 +678,11 @@ pub fn build_status(ctx: &Context) -> Result<Value> {
             repo_cached,
             owner_marked,
             &discovered_names,
+            &if repo_cached {
+                super::snapshot::available_repo_skills(&repo_dir)
+            } else {
+                Vec::new()
+            },
             discovery_error.as_ref(),
             &inbox_skills,
             &probes,

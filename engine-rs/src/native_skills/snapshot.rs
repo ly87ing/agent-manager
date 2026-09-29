@@ -259,6 +259,51 @@ fn is_single_segment(rel: &str) -> bool {
     )
 }
 
+/// 来源里全部可用的技能（不受 skill_paths 限制），给「用哪些技能」列候选：
+/// (技能名, 相对来源根的路径)。含 SKILL.md 的目录即一个技能，不再往里找；最多往下三层，
+/// 跳过隐藏目录与 EXCLUDED_DIRS。来源根本身就是技能时路径为空串。同名只留先找到的。只读。
+pub fn available_repo_skills(repo_dir: &Path) -> Vec<(String, String)> {
+    fn walk(dir: &Path, rel: &str, depth: usize, out: &mut Vec<(String, String)>) {
+        let Ok(read) = std::fs::read_dir(dir) else {
+            return;
+        };
+        let mut entries: Vec<PathBuf> = read.flatten().map(|entry| entry.path()).collect();
+        entries.sort();
+        for path in entries {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if !path.is_dir() || name.starts_with('.') || EXCLUDED_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+            let child = if rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel}/{name}")
+            };
+            if path.join("SKILL.md").is_file() {
+                if !out.iter().any(|(existing, _)| existing == &name) {
+                    out.push((name, child));
+                }
+            } else if depth < 3 {
+                walk(&path, &child, depth + 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if repo_dir.join("SKILL.md").is_file() {
+        let name = repo_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        out.push((name, String::new()));
+        return out;
+    }
+    walk(repo_dir, "", 1, &mut out);
+    out
+}
+
 pub fn discover_repo_skills(
     repo_dir: &Path,
     def: &Map<String, Value>,
