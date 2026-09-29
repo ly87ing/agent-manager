@@ -182,7 +182,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("hooks", "discard-legacy") => specs.push(("--legacy", ArgValueKind::SuggestionId)),
         // 终端快捷命令以 rc 文件受管区块为准：按名编辑一条，要写的文件各带自己的 base 做 CAS；
         // 操作四选一（引擎再强制恰好一个）。名称与元素 id 同一把尺子，取值由引擎校验。
-        ("aliases", "apply") => {
+        ("aliases", "apply" | "preview") => {
             specs.push(("--zshrc-base", ArgValueKind::RuleBase));
             specs.push(("--zprofile-base", ArgValueKind::RuleBase));
             specs.push(("--set", ArgValueKind::ElementId));
@@ -2033,6 +2033,19 @@ mod tests {
                 ]),
             ),
             (
+                "aliases:preview",
+                args(&[
+                    "--zshrc-base",
+                    &base,
+                    "--zprofile-base",
+                    "missing",
+                    "--set",
+                    "cc-work",
+                    "--value",
+                    "CLAUDE_CONFIG_DIR=\"$HOME/.claude-cc-work\" claude",
+                ]),
+            ),
+            (
                 "aliases:apply",
                 args(&["--zprofile-base", "missing", "--remove", "ll"]),
             ),
@@ -2058,6 +2071,7 @@ mod tests {
             ("aliases:status", args(&["--offline"])),
             ("aliases:apply", args(&["--only", "aliases:zshrc"])),
             ("aliases:apply", args(&["--zshrc-base", "nothex"])),
+            ("aliases:preview", args(&["--zshrc-base", "nothex"])),
             (
                 "aliases:apply",
                 args(&["--zshrc-base", "missing", "--zshrc-base", "missing"]),
