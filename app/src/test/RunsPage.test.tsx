@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import RunsPage from "../pages/RunsPage";
 import { useExecutions } from "../lib/execution";
 import { makeApplyResult, makeEnvelope, makeRunEntry } from "./fixtures";
+import { waitFor } from "@testing-library/react";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
@@ -141,6 +142,31 @@ describe("执行中心", () => {
     expect(screen.getAllByText("mcp:apply")).toHaveLength(2);
     const getCall = calls.find((call) => call.command === "runs:get");
     expect(getCall?.args).toEqual(["--run", runId]);
+  });
+
+  it("撤回：技能的启停先确认再做反向动作；不能撤回的说明原因", async () => {
+    const base = routes();
+    const { calls } = renderWithEngine(<RunsPage />, {
+      ...base,
+      "runs:get": async () => makeEnvelope({
+        run_id: "r",
+        operations: [
+          { id: "op-skill", operation_type: "skills:disable", target: "agent-skills/verification@claude-code", detail: { action: "disable" }, created_at: "2026-09-05T23:59:00Z" },
+          { id: "op-mcp", operation_type: "mcp:apply", target: "mcp:grok-search", detail: {}, created_at: "2026-09-05T23:59:00Z" },
+        ],
+      }, { command: "runs.get" }),
+      "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
+    });
+    const row = await screen.findByTestId("run-row-20260905T235900Z-legacy1");
+    await userEvent.click(within(row).getByText("详情"));
+    expect(await screen.findByTestId("rollback-none-op-mcp")).toHaveTextContent("不能自动撤回");
+    await userEvent.click(screen.getByTestId("rollback-op-skill"));
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
+    await userEvent.click(await screen.findByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual([
+      "--only", "skill:agent-skills/verification", "--action", "enable", "--agent", "claude-code",
+    ]);
   });
 
   it("清空任务记录：二次确认弹窗、执行 runs:clear、刷新列表并关闭操作详情", async () => {

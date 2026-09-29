@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { CheckCircle2, History, Loader2, SearchX, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, History, Loader2, SearchX, Trash2, Undo2, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
@@ -8,7 +8,8 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { Skeleton } from "../components/Skeleton";
-import type { ApplyResultData, RunDetailData, RunEntry, RunsClearData, RunsListData } from "../lib/contract";
+import type { ApplyResultData, RunDetailData, RunEntry, RunOperation, RunsClearData, RunsListData, StatusData } from "../lib/contract";
+import { rollbackPlan, type RollbackPlan } from "../lib/rollback";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { useExecutions, type ExecutionRecord } from "../lib/execution";
 import { engineKeys } from "../lib/queries";
@@ -83,20 +84,80 @@ function ExecutionCard({ record, onSelectRun }: { record: ExecutionRecord; onSel
   );
 }
 function OperationDetail({ data }: { data: RunDetailData }) {
+  const { execute } = useExecutions();
+  const [pending, setPending] = useState<{ operation: RunOperation; plan: Exclude<RollbackPlan, { kind: "none" }> } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  /** 撤回：技能直接做反向动作；规则先读出文件当前的写入基准，再把备份写回（引擎照常核对与备份）。 */
+  const rollback = async () => {
+    if (!pending) return;
+    setBusy(true);
+    try {
+      const { plan } = pending;
+      if (plan.kind === "skills") {
+        await execute({ command: "skills:apply", label: `撤回：${plan.label}`, args: ["--only", plan.elementId, "--action", plan.action, "--agent", plan.agent] });
+      } else {
+        const status = await runEngine<StatusData>("rules:status", []);
+        const element = status.ok ? status.data.elements.find((item) => item.id === plan.target) : undefined;
+        const base = (element?.observed as { base?: string | null } | undefined)?.base;
+        if (typeof base !== "string") {
+          toast.error("这个规则文件现在读写不了，没有撤回");
+          return;
+        }
+        await execute({ command: "rules:apply", label: `撤回：${plan.label}`, args: ["--only", plan.target, "--base", base, "--template", plan.template] });
+      }
+      setPending(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-2">
-      {data.operations.map((operation) => (
-        <article key={operation.id} className="rounded border p-3">
-          <div className="flex flex-wrap items-center gap-3 text-xs">
-            <code className="font-mono font-medium text-foreground">{operation.operation_type}</code>
-            <span className="text-muted-foreground">{operation.target ?? "—"}</span>
-            <time className="text-muted-foreground">{formatCheckedAt(operation.created_at)}</time>
-          </div>
-          <pre className="mt-2 overflow-x-auto rounded bg-muted p-2 font-mono text-xs text-muted-foreground">
-            {JSON.stringify(operation.detail, null, 2)}
-          </pre>
-        </article>
-      ))}
+      {data.operations.map((operation) => {
+        const plan = rollbackPlan(operation);
+        return (
+          <article key={operation.id} className="rounded border p-3">
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <code className="font-mono font-medium text-foreground">{operation.operation_type}</code>
+              <span className="text-muted-foreground">{operation.target ?? "—"}</span>
+              <time className="text-muted-foreground">{formatCheckedAt(operation.created_at)}</time>
+              {plan.kind === "none" ? (
+                <span data-testid={`rollback-none-${operation.id}`} className="ml-auto text-muted-foreground" title={plan.reason}>
+                  不能自动撤回
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  data-testid={`rollback-${operation.id}`}
+                  onClick={() => setPending({ operation, plan })}
+                  className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs hover:bg-accent"
+                >
+                  <Undo2 className="h-3.5 w-3.5" aria-hidden /> 撤回
+                </button>
+              )}
+            </div>
+            <pre className="mt-2 overflow-x-auto rounded bg-muted p-2 font-mono text-xs text-muted-foreground">
+              {JSON.stringify(operation.detail, null, 2)}
+            </pre>
+          </article>
+        );
+      })}
+      {pending && (
+        <ConfirmModal
+          title="撤回这次操作"
+          description={
+            pending.plan.kind === "skills"
+              ? `${pending.plan.label}。只动这一个账号上的这一个技能。`
+              : `${pending.plan.label}（用当时另存的备份模板）。写入前核对文件；现在的内容如果对不上任何已知内容，会先另存一份备份。`
+          }
+          risk="write-local"
+          confirmLabel="撤回"
+          executing={busy}
+          onConfirm={() => void rollback()}
+          onClose={() => setPending(null)}
+        />
+      )}
     </div>
   );
 }
