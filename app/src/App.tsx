@@ -2,6 +2,8 @@ import { ScrollText, Server, Settings, Sparkles, SquareTerminal, Users, Wallet }
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
+import { ImportLinkDialog } from "./components/ImportLinkDialog";
+import type { SharePayload } from "./lib/shareLink";
 import { useSettings } from "./lib/settings";
 import { subscribeTrayActions } from "./lib/trayActions";
 import { useUpdateCheck } from "./lib/update-check";
@@ -56,6 +58,9 @@ export default function App() {
   const [paletteTarget, setPaletteTarget] = useState<{ keyword: string; itemId: string } | null>(null);
   const update = useUpdateCheck();
   const attention = useAttentionCounts();
+  /** 从分享链接导入：对话框里的链接文字（null = 没打开），以及确认后交给页面预填的内容。 */
+  const [importText, setImportText] = useState<string | null>(null);
+  const [importPayload, setImportPayload] = useState<SharePayload | null>(null);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -104,6 +109,10 @@ export default function App() {
   if (settings.isError) return <PageError title="应用设置加载失败" error={settings.error} />;
 
   const handleNavigate = (page: string) => {
+    if (page === "import-link") {
+      setImportText("");
+      return;
+    }
     if (page === "settings:aliases") {
       setActivePage("commands");
       return;
@@ -144,12 +153,16 @@ export default function App() {
           )}
           {activePage === "skills" && (
             <SkillsPage
+              importPayload={importPayload?.kind === "skills" ? importPayload : null}
+              onImportConsumed={() => setImportPayload(null)}
               initialAgent={selectedSkillAgent}
               initialSearch={skillSearch}
               onResetAgent={() => setSelectedSkillAgent(null)}
             />
           )}
-          {activePage === "mcp" && <McpPage />}
+          {activePage === "mcp" && (
+            <McpPage importPayload={importPayload?.kind === "mcp" ? importPayload : null} onImportConsumed={() => setImportPayload(null)} />
+          )}
           {activePage === "commands" && <AliasesPage onOpenSkills={() => handleNavigate("skills")} />}
           {activePage === "rules-hooks" && <RulesHooksPage onNavigate={handleNavigate} />}
           {activePage === "takeover" && <TakeoverPage />}
@@ -175,6 +188,10 @@ export default function App() {
           setPaletteTarget(null);
         }}
         onNavigate={(page) => {
+          if (page === "import-link") {
+            setImportText("");
+            return;
+          }
           if (page === "skills") {
             setSelectedSkillAgent(null);
             setSkillSearch(null);
@@ -187,6 +204,17 @@ export default function App() {
           setActivePage("skills");
         }}
       />
+      {importText !== null && (
+        <ImportLinkDialog
+          initialText={importText}
+          onClose={() => setImportText(null)}
+          onContinue={(payload) => {
+            setImportText(null);
+            setImportPayload(payload);
+            setActivePage(payload.kind === "mcp" ? "mcp" : "skills");
+          }}
+        />
+      )}
     </AppLayout>
   );
 }

@@ -261,8 +261,11 @@ describe("SkillsPage 三级视图", () => {
     expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
   });
 
-  it("更新集合：点击直接 skills:apply 限定在所选集合（带 run_id），不取 plan、不开弹窗", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+  it("更新集合：有新版本时行上常驻「更新」，点击直接 skills:apply 限定在所选集合（带 run_id），不取 plan、不开弹窗", async () => {
+    const routes = skillsRoutes();
+    const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
+    status.data.elements[0].freshness = { ...status.data.elements[0].freshness, state: "behind" };
+    const { calls } = renderWithEngine(<SkillsPage />, routes);
     await userEvent.click(await screen.findByTestId("update-collection-agent-skills"));
     await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
 
@@ -619,6 +622,19 @@ describe("SkillsPage 集合展开与收起", () => {
 
     await userEvent.type(screen.getByTestId("skills-search"), "two");
     expect(screen.getByTestId("skill-row-skill:healthy/two")).toBeInTheDocument();
+  });
+});
+
+describe("技能集合的分享链接", () => {
+  it("从分享链接导入：打开预填好的新增集合表单，名称可改，保存前不写", async () => {
+    const { calls } = renderWithEngine(
+      <SkillsPage importPayload={{ kind: "skills", name: "team-skills", definition: { url: "https://github.com/example/team.git", skill_paths: ["skills"], rules_path: null } }} />,
+      skillsRoutes(),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "新增集合" });
+    expect(within(dialog).getByTestId("collection-name-input")).toHaveValue("team-skills");
+    expect(within(dialog).getByTestId("collection-url-input")).toHaveValue("https://github.com/example/team.git");
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 });
 

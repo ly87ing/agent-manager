@@ -1,6 +1,6 @@
 import type { EngineElement } from "../lib/contract";
 import type { McpAgentCell, McpObserved, McpSpec } from "../lib/observed";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, Share2, Trash2 } from "lucide-react";
 import type { AccountGroup } from "../lib/accounts";
 import { AccountCells, AccountSwitch, RowActions, type CellTone } from "./AccountGrid";
 import { mcpBrief, mcpEntrySummary } from "./McpAssignmentRow";
@@ -61,6 +61,7 @@ export function McpServerCard({
   onAction,
   onAddHere,
   onEdit,
+  onShare,
   onRemove,
   onAddFromSaved,
   onForget,
@@ -76,6 +77,7 @@ export function McpServerCard({
   /** 这个账号还没有：从 from 账号的条目复制过来。 */
   onAddHere: (element: EngineElement, from: string, to: string) => void;
   onEdit: (element: EngineElement) => void;
+  onShare?: (element: EngineElement) => void;
   onRemove: (element: EngineElement) => void;
   onAddFromSaved: (element: EngineElement) => void;
   onForget: (element: EngineElement) => void;
@@ -156,6 +158,18 @@ export function McpServerCard({
               className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <Pencil className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          )}
+          {onShare && first && (
+            <button
+              type="button"
+              data-testid={`share-${element.id}`}
+              aria-label={`复制 ${name} 的分享链接`}
+              title="复制分享链接（不含明文取值）"
+              onClick={() => onShare(element)}
+              className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <Share2 className="h-3.5 w-3.5" aria-hidden />
             </button>
           )}
           {removable && (

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, SearchX, Server } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -21,6 +21,7 @@ import { useDirectApply } from "../lib/useDirectApply";
 import { useExecutions } from "../lib/execution";
 import { mcpFillArgs, mcpFillRows } from "../lib/mcpFill";
 import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
+import { encodeShareLink, type SharePayload } from "../lib/shareLink";
 
 function cellsOf(element: EngineElement): Record<string, McpAgentCell> {
   return (element.observed as McpObserved).agents ?? {};
@@ -42,7 +43,14 @@ function showNotices(envelope: Envelope | null) {
  * 打开时该条目的摘要，外部改过就拒绝并刷新。停用：Codex/OpenCode 写官方 enabled=false，
  * Claude Code 把条目移出配置、保存在本工具里（启用时写回）。
  */
-export default function McpPage() {
+export default function McpPage({
+  importPayload,
+  onImportConsumed,
+}: {
+  /** 从分享链接导入的服务：打开预填好的「新增」表单，用户检查后保存。 */
+  importPayload?: Extract<SharePayload, { kind: "mcp" }> | null;
+  onImportConsumed?: () => void;
+} = {}) {
   const query = useEngineQuery<StatusData>("mcp:status");
   const directApply = useDirectApply();
   const { execute } = useExecutions();
@@ -57,6 +65,13 @@ export default function McpPage() {
   const [removing, setRemoving] = useState<EngineElement | null>(null);
   const [pendingForget, setPendingForget] = useState<EngineElement | null>(null);
   const [editingSecret, setEditingSecret] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!importPayload || !query.data?.ok) return;
+    savedExtraArgs.current = {};
+    setForm({ kind: "add", targets: query.data.data.targets ?? [], initialName: importPayload.name, initial: importPayload.spec });
+    onImportConsumed?.();
+  }, [importPayload, query.data]);
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="MCP 状态读取失败" error={query.error} />;
   if (!query.data.ok) {
@@ -106,6 +121,34 @@ export default function McpPage() {
         undo: undoWith(element, agent, `撤销：${label}`, action === "enable" ? "disable" : "enable"),
       })
       .then(showNotices);
+  };
+
+  /**
+   * 复制分享链接：取一份能读出内容的条目；明文取值（界面上是 <literal>）不放进链接，
+   * 换成同名的 ${变量} 引用，对方要在自己机器上配这个变量。
+   */
+  const shareServer = async (element: EngineElement) => {
+    const cell = Object.values(cellsOf(element)).find((item) => item.source === "file" && (item.entry?.command || item.entry?.url));
+    if (!cell?.entry) return;
+    const replaced: string[] = [];
+    const asVars = (map: Record<string, string> | undefined) =>
+      Object.fromEntries(
+        Object.entries(map ?? {}).map(([key, value]) => {
+          if (/^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/.test(value)) return [key, value];
+          replaced.push(key);
+          return [key, `\${${key.replace(/[^A-Za-z0-9_]/g, "_").toUpperCase()}}`];
+        }),
+      );
+    const entry = cell.entry;
+    const spec = entry.url ? { url: entry.url, headers: asVars(entry.headers) } : { command: entry.command, args: entry.args ?? [], env: asVars(entry.env) };
+    try {
+      await navigator.clipboard.writeText(encodeShareLink({ kind: "mcp", name: nameOf(element), spec }));
+      toast.success(`已复制 ${nameOf(element)} 的分享链接`, {
+        description: replaced.length ? `这些取值没放进链接，改成了同名变量：${replaced.join("、")}；对方要自己配。` : undefined,
+      });
+    } catch (reason) {
+      toast.error(`没能复制：${reason instanceof Error ? reason.message : String(reason)}`);
+    }
   };
 
   /** 编辑：一张表单写到所有有这个服务的账号；各账号内容不同时先以 base 那份预填。 */
@@ -398,6 +441,7 @@ export default function McpPage() {
                 }}
                 onAction={handleAction}
                 onEdit={(target) => openEdit(target)}
+                onShare={(target) => void shareServer(target)}
                 onRemove={setRemoving}
                 onAddFromSaved={openAddFromSaved}
                 onForget={setPendingForget}

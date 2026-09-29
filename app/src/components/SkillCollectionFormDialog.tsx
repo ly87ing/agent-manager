@@ -15,6 +15,7 @@ const AGENT_LABEL: Record<string, string> = { "claude-code": "Claude", codex: "C
 export function SkillCollectionFormDialog({
   agentIds,
   initial,
+  draft,
   fullDefinition,
   available,
   repoCached,
@@ -27,20 +28,23 @@ export function SkillCollectionFormDialog({
   /** git 来源是否已把仓库取到本地——没取下来就没有候选可勾。 */
   repoCached?: boolean;
   initial?: { name: string; definition: Record<string, unknown> };
+  /** 新增时的预填（例如来自分享链接）；和编辑不同，名称仍可改。 */
+  draft?: { name: string; definition: Record<string, unknown> };
   /** 完整原定义（整条替换基底）；新增或未传入时为 null/缺省。 */
   fullDefinition?: Record<string, unknown> | null;
   /** complete=false 表示 definition 只是表单负责字段，需由保存方迁移后取完整定义合并再整条替换。 */
   onSubmit: (name: string, definition: Record<string, unknown>, complete: boolean) => void;
   onClose: () => void;
 }) {
-  const [name, setName] = useState(initial?.name ?? "");
+  const seed = initial ?? draft;
+  const [name, setName] = useState(seed?.name ?? "");
   /** 来源二选一：git 仓库（下载到本地后按版本分发）或本地目录（直接链到该目录，内容随其更新）。 */
-  const [sourceKind, setSourceKind] = useState<"git" | "local">(initial?.definition.source_path ? "local" : "git");
-  const [url, setUrl] = useState(String(initial?.definition.url ?? ""));
-  const [sourcePath, setSourcePath] = useState(String(initial?.definition.source_path ?? ""));
+  const [sourceKind, setSourceKind] = useState<"git" | "local">(seed?.definition.source_path ? "local" : "git");
+  const [url, setUrl] = useState(String(seed?.definition.url ?? ""));
+  const [sourcePath, setSourcePath] = useState(String(seed?.definition.source_path ?? ""));
   /** 集合里规则的位置（相对集合根）：子目录或某个 .md 文件；留空用默认的 rules/。 */
-  const [rulesPath, setRulesPath] = useState(String(initial?.definition.rules_path ?? ""));
-  const initialPaths = (initial?.definition.skill_paths as string[] | null | undefined) ?? null;
+  const [rulesPath, setRulesPath] = useState(String(seed?.definition.rules_path ?? ""));
+  const initialPaths = (seed?.definition.skill_paths as string[] | null | undefined) ?? null;
   const skills = available ?? [];
   const listed = skills.length > 0;
   /** 来源本身就是一个技能文件夹：没有可挑的。 */
@@ -229,7 +233,7 @@ export function SkillCollectionFormDialog({
             )}
           </div>
 
-          <details className="group rounded-md border" open={Boolean(initial?.definition.rules_path) || selectedAgents.length > 0}>
+          <details className="group rounded-md border" open={Boolean(seed?.definition.rules_path) || selectedAgents.length > 0}>
             <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
               <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" aria-hidden />
               更多设置

@@ -163,6 +163,14 @@ export function CommandPalette({
       out.push({ id: `mcp:${id}`, label: id, hint: "MCP 服务", keywords: `${id} mcp`, group: "资源", run: () => onNavigate("mcp") });
     }
     out.push({
+      id: "action:import-link",
+      label: "从分享链接导入…",
+      hint: "MCP 服务或技能集合",
+      keywords: "import share link 分享 导入 链接",
+      group: "动作",
+      run: () => onNavigate("import-link"),
+    });
+    out.push({
       id: "action:refresh-upstream",
       label: "检查更新",
       hint: "对比官方最新版本",

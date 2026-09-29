@@ -6,6 +6,7 @@ import type { Envelope, StatusData } from "../lib/contract";
 import { makeApplyResult, makeEnvelope } from "./fixtures";
 import { BASE_CLAUDE_FS, BASE_CLAUDE_SNAPSHOT, BASE_CODEX_FS, BASE_CODEX_REMOTE, mcpStatusData, mcpTargets } from "./mcp-fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { decodeShareLink } from "../lib/shareLink";
 
 /** 等服务列表出现（开关直接在行上，不用再展开）。 */
 async function expandAll() {
@@ -326,6 +327,30 @@ describe("McpPage：实际条目为主", () => {
     await userEvent.click(await screen.findByRole("button", { name: "撤销" }));
     await waitFor(() => expect(applyCalls(calls)).toHaveLength(2));
     expect(applyCalls(calls)[1].args).toEqual(["--only", "mcp:fs", "--agent", "claude-code", "--action", "enable", "--base", "c".repeat(63) + "f"]);
+  });
+
+  it("复制分享链接：明文取值不进链接，换成同名变量；链接解回来就是这条服务", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    renderWithEngine(<McpPage />, routes());
+    await userEvent.click(await screen.findByTestId("share-mcp:fs"));
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    const link = (writeText.mock.calls[0] as unknown as [string])[0];
+    const decoded = decodeShareLink(link);
+    expect(decoded).toMatchObject({ kind: "mcp", name: "fs", spec: { command: "npx" } });
+    expect(link).not.toContain("literal");
+    expect(JSON.stringify(decoded)).toContain("${");
+  });
+
+  it("从分享链接导入：打开预填好的新增表单，保存前不写任何东西", async () => {
+    const { calls } = renderWithEngine(
+      <McpPage importPayload={{ kind: "mcp", name: "shared-srv", spec: { command: "uvx", args: ["shared-srv"], env: { KEY: "${SHARED_KEY}" } } }} />,
+      routes(),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "新增服务" });
+    expect(within(dialog).getByTestId("server-name-input")).toHaveValue("shared-srv");
+    expect(within(dialog).getByTestId("server-env-input")).toHaveValue("KEY=${SHARED_KEY}");
+    expect(applyCalls(calls)).toHaveLength(0);
   });
 
   it("填写缺失变量：打开密钥输入并写入外部文件", async () => {

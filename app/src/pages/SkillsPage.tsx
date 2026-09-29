@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, PackageOpen, Pencil, Power, PowerOff, Plus, RefreshCw, SearchX, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, PackageOpen, Pencil, Power, PowerOff, Plus, RefreshCw, SearchX, Share2, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -25,6 +25,7 @@ import {
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import { addToAllRows, fillRows, versionUpdateRows } from "../lib/skillFill";
 import { useExecutions } from "../lib/execution";
+import { encodeShareLink, type SharePayload } from "../lib/shareLink";
 import { useBatchApply } from "../lib/useBatchApply";
 import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
@@ -110,7 +111,12 @@ export default function SkillsPage({
   initialAgent,
   initialSearch,
   onResetAgent,
+  importPayload,
+  onImportConsumed,
 }: {
+  /** 从分享链接导入的技能集合：打开预填好的「新增集合」表单，用户检查后保存。 */
+  importPayload?: Extract<SharePayload, { kind: "skills" }> | null;
+  onImportConsumed?: () => void;
   /** 从账号页进来：只看这个账号。 */
   initialAgent?: string | null;
   /** 从总览「去处理」进来时直接搜到那个技能。 */
@@ -146,6 +152,14 @@ export default function SkillsPage({
   useEffect(() => {
     setAgentFilter(initialAgent ?? "all");
   }, [initialAgent]);
+
+  const [importDraft, setImportDraft] = useState<{ name: string; definition: Record<string, unknown> } | null>(null);
+  useEffect(() => {
+    if (!importPayload) return;
+    setImportDraft({ name: importPayload.name, definition: importPayload.definition });
+    setShowAddForm(true);
+    onImportConsumed?.();
+  }, [importPayload]);
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="技能状态读取失败" error={query.error} />;
@@ -227,6 +241,21 @@ export default function SkillsPage({
     } finally {
       setUpdatingAll(false);
       await queryClient.invalidateQueries({ queryKey: engineKeys.all });
+    }
+  };
+
+  /** 复制技能集合的分享链接：只含 git 地址与技能、规则位置，不含本机路径。 */
+  const shareCollection = async (name: string, spec: SkillCollectionSpec) => {
+    try {
+      const link = encodeShareLink({
+        kind: "skills",
+        name,
+        definition: { url: spec.url as string, skill_paths: spec.skill_paths ?? null, rules_path: (spec as { rules_path?: string | null }).rules_path ?? null },
+      });
+      await navigator.clipboard.writeText(link);
+      toast.success(`已复制 ${name} 的分享链接`);
+    } catch (reason) {
+      toast.error(`没能复制：${reason instanceof Error ? reason.message : String(reason)}`);
     }
   };
 
@@ -577,9 +606,9 @@ export default function SkillsPage({
                       ) : null
                     }
                   >
-                    {actions.includes("update") && collection.freshness.state !== "behind" && observed.repo_cached && (
-                      <IconAction label={`更新集合 ${name}`} testId={`update-collection-${name}`} onClick={() => runCollectionAction(collection, "update", `更新集合 ${name}`)}>
-                        <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                    {spec.url && (
+                      <IconAction label={`复制 ${name} 的分享链接`} testId={`share-collection-${name}`} onClick={() => void shareCollection(name, spec)}>
+                        <Share2 className="h-3.5 w-3.5" aria-hidden />
                       </IconAction>
                     )}
                     <IconAction label={`编辑集合 ${name}`} testId={`edit-collection-${name}`} onClick={() => setEditing(collection)}>
@@ -693,16 +722,19 @@ export default function SkillsPage({
         <SkillCollectionFormDialog
           agentIds={agentOptions}
           initial={editing ? { name: collName(editing), definition: editing.spec } : undefined}
+          draft={editing ? undefined : importDraft ?? undefined}
           fullDefinition={editing ? fullSkillDefinition(layers, collName(editing)) : null}
           available={editing ? availableSkills(editing.observed as SkillCollectionObserved) : undefined}
           repoCached={editing ? (editing.observed as SkillCollectionObserved).repo_cached : undefined}
           onClose={() => {
             setShowAddForm(false);
             setEditing(null);
+            setImportDraft(null);
           }}
           onSubmit={(name, definition, complete) => {
             setShowAddForm(false);
             setEditing(null);
+            setImportDraft(null);
             const isNew = !editing;
             void definitionOps.saveDefinition({ name, definition, isNew, complete }).then(() => {
               if (isNew) toast.info(`集合 ${name} 已保存，点「更新」取回技能。`);

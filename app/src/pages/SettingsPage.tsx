@@ -5,6 +5,7 @@ import {
   ChevronRight,
   History,
   KeyRound,
+  Link2,
   PackageCheck,
   Monitor,
   Moon,
@@ -101,6 +102,12 @@ const ADVANCED_ENTRIES = [
     title: "操作记录",
     description: "每次写入的记录：做了什么、成功与否、失败原因。",
     icon: History,
+  },
+  {
+    key: "import-link",
+    title: "从分享链接导入",
+    description: "粘贴别人分享的 MCP 服务或技能集合链接，检查后添加。",
+    icon: Link2,
   },
   {
     key: "client-diagnostics",
@@ -288,7 +295,8 @@ export default function SettingsPage({
     );
   }
 
-  const openTool = (key: string) => ((key === "takeover" || key === "runs") && onNavigate ? onNavigate(key) : setActiveAdvanced(key));
+  const openTool = (key: string) =>
+    (key === "takeover" || key === "runs" || key === "import-link") && onNavigate ? onNavigate(key) : setActiveAdvanced(key);
 
   return (
     <div className="space-y-3">

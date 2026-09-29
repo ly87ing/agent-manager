@@ -3,6 +3,8 @@ import App from "../App";
 import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import { setSettingsClient } from "../lib/settings";
+import { encodeShareLink, SHARE_PREFIX } from "../lib/shareLink";
+import { fireEvent } from "@testing-library/react";
 import type { SettingsData } from "../lib/contract";
 
 const dummySettings: SettingsData = {
@@ -96,6 +98,25 @@ describe("App 顶层导航", () => {
     expect(within(nav).getByRole("button", { name: "技能" })).toBeInTheDocument();
     expect(within(nav).queryByTestId("nav-badge-mcp")).toBeNull();
   });
+
+  it("从分享链接导入：设置里打开，带明文取值的链接拦下，合法的跳到 MCP 页并预填新增表单", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    renderWithEngine(<App />, routes());
+    const nav = await screen.findByRole("navigation");
+    await userEvent.click(within(nav).getByRole("button", { name: "设置" }));
+    await userEvent.click(await screen.findByTestId("advanced-entry-import-link"));
+    const dialog = await screen.findByRole("dialog", { name: "从分享链接导入" });
+    const input = within(dialog).getByTestId("import-link-input");
+    fireEvent.change(input, { target: { value: SHARE_PREFIX + btoa(JSON.stringify({ v: 1, kind: "mcp", name: "x", spec: { command: "npx", env: { T: "sk-SECRET" } } })) } });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("明文取值");
+    expect(within(dialog).getByTestId("import-link-continue")).toBeDisabled();
+    fireEvent.change(input, { target: { value: encodeShareLink({ kind: "mcp", name: "shared-srv", spec: { command: "uvx", args: ["shared-srv"], env: {} } }) } });
+    expect(within(dialog).getByTestId("import-link-summary")).toHaveTextContent("shared-srv");
+    await userEvent.click(within(dialog).getByTestId("import-link-continue"));
+    expect(within(nav).getByRole("button", { name: "MCP" })).toHaveAttribute("aria-current", "page");
+    const form = await screen.findByRole("dialog", { name: "新增服务" });
+    expect(within(form).getByTestId("server-name-input")).toHaveValue("shared-srv");
+  }, 15000);
 
   it("从账号行进入技能页并预选对应账号，点击顶栏「技能」重置为全部助手", async () => {
     setSettingsClient({
