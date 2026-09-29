@@ -11,7 +11,6 @@ import { AccountCells, AccountHeader, AccountSwitch, ActionMenu, IconAction, Row
 import { skillChip, skillNeedsUpdate } from "../lib/skillChip";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import { SkillInstalledView } from "../components/SkillInstalledView";
-import { SkillRecommendations } from "../components/SkillRecommendations";
 import type { EngineElement, PolicyData, SkillRecommendation, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import {
@@ -111,7 +110,6 @@ export default function SkillsPage({
   const [showAddForm, setShowAddForm] = useState(false);
   const [editing, setEditing] = useState<EngineElement | null>(null);
   const [pendingRemove, setPendingRemove] = useState<EngineElement | null>(null);
-  const [pendingRecommendation, setPendingRecommendation] = useState<SkillRecommendation | null>(null);
   /** 推荐卡片上的「启用…」：确认后一次做完登记、下载、链接到全部账号。 */
   const [enabling, setEnabling] = useState<SkillRecommendation | null>(null);
   const [enablingBusy, setEnablingBusy] = useState(false);
@@ -323,15 +321,6 @@ export default function SkillsPage({
     setPendingRemove(null);
   };
 
-  const confirmRecommendation = () => {
-    if (!pendingRecommendation) return;
-    const { name, definition } = pendingRecommendation;
-    setPendingRecommendation(null);
-    void definitionOps.saveDefinition({ name, definition, isNew: true }).then((ok) => {
-      if (ok) toast.info(`集合 ${name} 已添加。点「更新」取回仓库后，在技能上点「添加」加到全部账号。`);
-    });
-  };
-
   /**
    * 启用推荐来源：保存集合定义 → 下载 → 把其中的技能链接到全部账号。账号里已有同名技能目录或链接的，
    * 引擎不给 add，跳过、不覆盖；规则不在这里写。任何一步失败就停在那一步，已做的如实保留。
@@ -522,7 +511,7 @@ export default function SkillsPage({
           icon={PackageOpen}
           testId="skills-collections-empty"
           title="还没有技能来源"
-          description="添加一个 git 仓库或本机目录，或从下面的推荐来源添加。"
+          description="点右上角「添加来源」，添加一个 git 仓库或本机目录。"
         />
       ) : search.trim() && shownSkillCount === 0 ? (
         <EmptyState
@@ -753,7 +742,6 @@ export default function SkillsPage({
           <SkillInstalledView entries={installed} agents={agentOptions} />
         </div>
       </details>
-      {recommendations.length > 0 && <SkillRecommendations items={recommendations} onAdd={setPendingRecommendation} />}
 
       {(showAddForm || editing) && (
         <SkillCollectionFormDialog
@@ -807,17 +795,6 @@ export default function SkillsPage({
           </ol>
           <p className="mt-2 text-xs text-muted-foreground">以后不想用了：在集合上停用或删除，账号里的链接随之移除。</p>
         </ConfirmModal>
-      )}
-      {pendingRecommendation && (
-        <ConfirmModal
-          title={`添加推荐来源 ${pendingRecommendation.name}`}
-          description={`只保存集合定义：仓库 ${pendingRecommendation.url}，技能取自 ${pendingRecommendation.skill_paths.map((path) => `${path}/`).join("、")}。不会下载，也不会加到任何账号；保存后点「更新」取回仓库，再在技能上点「添加」。`}
-          risk="write-local"
-          confirmLabel="添加"
-          executing={false}
-          onConfirm={confirmRecommendation}
-          onClose={() => setPendingRecommendation(null)}
-        />
       )}
       {forking && (
         <ForkSkillDialog

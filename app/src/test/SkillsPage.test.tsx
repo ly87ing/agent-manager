@@ -1075,13 +1075,13 @@ describe("首次使用：推荐启用 agent-skills，可以不用", () => {
     first.unmount();
 
     renderWithEngine(<SkillsPage />, recommendationRoutes());
-    await screen.findByTestId("recommendation-agent-skills-rec");
+    await screen.findByTestId("add-collection-button");
     expect(screen.queryByTestId("recommend-banner-agent-skills-rec")).toBeNull();
   });
 
   it("已添加过就不推荐", async () => {
     renderWithEngine(<SkillsPage />, recommendationRoutes({ added: true }));
-    await screen.findByTestId("recommendation-agent-skills-rec");
+    await screen.findByTestId("add-collection-button");
     expect(screen.queryByTestId("recommend-banner-agent-skills-rec")).toBeNull();
   });
 
@@ -1136,49 +1136,6 @@ describe("首次使用：推荐启用 agent-skills，可以不用", () => {
 });
 
 describe("SkillsPage 推荐来源与当前安装", () => {
-  it("推荐来源：确认后才保存为集合定义（不限助手、不分配），不下载、不同步", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, recommendationRoutes());
-    const card = await screen.findByTestId("recommendation-agent-skills-rec");
-    expect(card).toHaveTextContent("技能取自 skills/");
-    await userEvent.click(within(card).getByTestId("recommendation-add-agent-skills-rec"));
-
-    // 逐项确认：弹窗出现前后都还没写
-    const dialog = await screen.findByRole("dialog", { name: "添加推荐来源 agent-skills-rec" });
-    expect(dialog).toHaveTextContent("技能取自 skills/");
-    expect(dialog).toHaveTextContent("不会下载，也不会加到任何账号");
-    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
-    await userEvent.click(within(dialog).getByRole("button", { name: "添加" }));
-
-    await waitFor(() => expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(1));
-    const write = calls.find((call) => call.command === "policy:set")!;
-    expect(write.args[write.args.indexOf("--key") + 1]).toBe("skills.repositories.agent-skills-rec");
-    const definition = JSON.parse(write.args[write.args.indexOf("--value") + 1]);
-    expect(definition).toEqual({
-      url: "https://github.com/ly87ing/agent-skills.git",
-      skill_paths: RECOMMENDED_PATHS,
-      _delete: false,
-      _replace: true,
-    });
-    expect("agents" in definition).toBe(false);
-    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
-    expect(calls.some((call) => call.command === "db:migrate")).toBe(false);
-  });
-
-  it("推荐来源：取消确认零写入；已添加的不再给添加按钮", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, recommendationRoutes());
-    await userEvent.click(await screen.findByTestId("recommendation-add-agent-skills-rec"));
-    const dialog = await screen.findByRole("dialog", { name: "添加推荐来源 agent-skills-rec" });
-    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
-  });
-
-  it("推荐来源已添加时只显示「已添加」", async () => {
-    renderWithEngine(<SkillsPage />, recommendationRoutes({ added: true }));
-    expect(await screen.findByTestId("recommendation-added-agent-skills-rec")).toHaveTextContent("已添加");
-    expect(screen.queryByTestId("recommendation-add-agent-skills-rec")).toBeNull();
-  });
-
   it("当前安装：按助手列出实际条目并分类，只展示不给操作", async () => {
     renderWithEngine(<SkillsPage />, recommendationRoutes());
     const section = await screen.findByTestId("skills-installed");
@@ -1196,10 +1153,10 @@ describe("SkillsPage 推荐来源与当前安装", () => {
     expect(within(section).queryAllByRole("button")).toHaveLength(0);
   });
 
-  it("还没有任何集合时给出空态，推荐来源仍可添加", async () => {
+  it("还没有任何集合时给出空态，推荐来源仍可启用", async () => {
     renderWithEngine(<SkillsPage />, recommendationRoutes({ collections: false }));
     expect(await screen.findByTestId("skills-collections-empty")).toHaveTextContent("还没有技能来源");
-    expect(screen.getByTestId("recommendation-add-agent-skills-rec")).toBeInTheDocument();
+    expect(screen.getByTestId("recommend-enable-agent-skills-rec")).toBeInTheDocument();
   });
 });
 

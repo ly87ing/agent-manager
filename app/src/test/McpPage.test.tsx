@@ -59,7 +59,7 @@ describe("McpPage：实际条目为主", () => {
     // 一句话说明取包名，完整命令在悬停里
     expect(within(card).getByText("本地命令 · fs-mcp")).toBeInTheDocument();
     expect(within(card).getByTestId("configure-secrets-mcp:fs")).toBeInTheDocument();
-    expect(screen.getByTestId("mcp-counts")).toHaveTextContent("共 3 个服务，2 个已停用");
+    expect(screen.getByTestId("mcp-counts")).toHaveTextContent("MCP 服务 · 3（2 个已停用）");
     // 停用快照与未分配的已保存定义
     expect(screen.getByTestId("action-enable-mcp:old-snap-claude-code")).toHaveAttribute("data-tone", "off");
     expect(screen.getByTestId("action-enable-mcp:old-snap-claude-code").getAttribute("title")).toContain("内容保存在本工具里");
@@ -76,6 +76,16 @@ describe("McpPage：实际条目为主", () => {
     status.targets = mcpTargets({ codex: { error: "配置文件解析失败: TOML 语法错误" } });
     renderWithEngine(<McpPage />, routes(status));
     expect(await screen.findByTestId("mcp-target-error-codex")).toHaveTextContent("配置文件解析失败");
+    expect(screen.getByTestId("action-disable-mcp:fs-claude-code")).toBeInTheDocument();
+  });
+
+  it("配置格式还不支持的账号不占列，只在表头说明里提一句", async () => {
+    const status = mcpStatusData();
+    status.targets = mcpTargets({ codex: { error: "不支持的 MCP 配置格式: kimi-json" } });
+    renderWithEngine(<McpPage />, routes(status));
+    expect(await screen.findByTestId("mcp-unsupported")).toHaveTextContent("暂不支持");
+    expect(screen.queryByTestId("mcp-target-error-codex")).toBeNull();
+    expect(screen.queryByTestId("action-disable-mcp:fs-codex")).toBeNull();
     expect(screen.getByTestId("action-disable-mcp:fs-claude-code")).toBeInTheDocument();
   });
 

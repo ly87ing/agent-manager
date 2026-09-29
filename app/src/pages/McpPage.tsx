@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, SearchX, Server } from "lucide-react";
+import { Info, Plus, SearchX, Server } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
@@ -84,8 +84,14 @@ export default function McpPage({
   }
 
   const elements = query.data.data.elements;
-  const targets: McpTarget[] = query.data.data.targets ?? [];
+  const allTargets: McpTarget[] = query.data.data.targets ?? [];
+  /** 配置格式本工具还不支持的账号（如 Kimi Code）：不占列，只在表头说明里提一句。 */
+  const unsupported = allTargets.filter((target) => target.error?.startsWith("不支持的 MCP 配置格式"));
+  const targets = allTargets.filter((target) => !unsupported.includes(target));
   const agentColumns = targets.map((target) => target.agent);
+  /** 账号名单里没有的助手（如 kimi-code）写成 Kimi Code。 */
+  const readableName = (agent: string) =>
+    nameOfAgent(agent) !== agent ? nameOfAgent(agent) : agent.split("-").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
   const targetOf = (agent: string) => targets.find((target) => target.agent === agent);
   const busy = directApply.executing;
 
@@ -336,9 +342,6 @@ export default function McpPage({
             <option key={agent} value={agent}>{nameOfAgent(agent)}</option>
           ))}
         </select>
-        <span className="text-xs text-muted-foreground" data-testid="mcp-counts">
-          共 {elements.length} 个服务{disabledCount > 0 ? `，${disabledCount} 个已停用` : ""}
-        </span>
         <div className="ml-auto flex items-center gap-2">
           {fillAllCount > 0 && (
             <button
@@ -394,7 +397,19 @@ export default function McpPage({
           <AccountHeader
             className="sticky top-0 z-10"
             groups={groups}
-            left={<span className="font-medium text-foreground">MCP 服务 · {shown.length}</span>}
+            left={
+              <span className="flex items-center gap-2">
+                <span className="font-medium text-foreground" data-testid="mcp-counts">
+                  MCP 服务 · {shown.length}
+                  {disabledCount > 0 && <span className="font-normal text-muted-foreground">（{disabledCount} 个已停用）</span>}
+                </span>
+                {unsupported.length > 0 && (
+                  <span data-testid="mcp-unsupported" title="这些账号的 MCP 配置格式本工具还不支持，没有列出；它们自己的 MCP 不受影响。">
+                    <Info className="inline h-3.5 w-3.5 align-[-2px]" aria-hidden /> {unsupported.map((target) => readableName(target.agent)).join("、")} 暂不支持
+                  </span>
+                )}
+              </span>
+            }
             below={(column) => {
               const missing = writableAgents.includes(column.id) ? mcpFillRows(elements, targets, [column.id]).length : 0;
               return (

@@ -83,8 +83,29 @@ describe("来源页", () => {
     const dialog = await screen.findByRole("dialog", { name: "添加来源" });
     expect(within(dialog).getByDisplayValue("team-skills")).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
     await userEvent.click(within(screen.getByTestId("source-suggest-team-skills")).getByRole("button", { name: "不用了" }));
     expect(screen.queryByTestId("source-suggest-team-skills")).toBeNull();
     expect(calls.filter((call) => call.command !== "skills:status" && call.command !== "rules:status" && call.command !== "policy:get")).toEqual([]);
+  });
+
+  it("添加推荐来源只保存定义（不限账号、不分配），不下载", async () => {
+    localStorage.clear();
+    const r = routes();
+    const status = r["skills:status"] as Envelope<{ recommendations: unknown[] }>;
+    status.data!.recommendations = [
+      { name: "team-skills", description: "团队的技能", url: "https://github.com/example/team.git", skill_paths: ["skills"], added: false, definition: { url: "https://github.com/example/team.git", skill_paths: ["skills"] } },
+    ];
+    const { calls } = renderWithEngine(<SourcesPage />, r);
+    await userEvent.click(await screen.findByTestId("source-suggest-add-team-skills"));
+    const dialog = await screen.findByRole("dialog", { name: "添加来源" });
+    await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const write = calls.find((call) => call.command === "policy:set")!;
+    expect(write.args[write.args.indexOf("--key") + 1]).toBe("skills.repositories.team-skills");
+    const definition = JSON.parse(write.args[write.args.indexOf("--value") + 1]);
+    expect(definition.url).toBe("https://github.com/example/team.git");
+    expect(definition.agents ?? null).toBeNull();
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
   });
 });
