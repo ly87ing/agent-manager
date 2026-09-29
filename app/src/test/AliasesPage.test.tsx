@@ -74,10 +74,14 @@ describe("终端快捷命令页", () => {
     const { calls } = renderWithEngine(<AliasesPage />, aliasRoutes());
     await userEvent.click(await screen.findByTestId("add-alias-button"));
     const dialog = await screen.findByRole("dialog");
-    await userEvent.type(within(dialog).getByTestId("alias-name-input"), "codex");
-    await userEvent.type(within(dialog).getByTestId("alias-command-input"), "codex");
+    // 一次粘贴而不是逐字输入：用例不依赖逐字输入，逐字输入在全量并发时会慢到超时
+    await userEvent.click(within(dialog).getByTestId("alias-name-input"));
+    await userEvent.paste("codex");
+    await userEvent.click(within(dialog).getByTestId("alias-command-input"));
+    await userEvent.paste("codex");
     await userEvent.selectOptions(within(dialog).getByTestId("alias-timezone-select"), "Asia/Shanghai");
-    await userEvent.type(within(dialog).getByTestId("alias-extra-args-input"), "--full-auto");
+    await userEvent.click(within(dialog).getByTestId("alias-extra-args-input"));
+    await userEvent.paste("--full-auto");
     expect(within(dialog).getByTestId("alias-preview")).toHaveTextContent(
       `alias codex='TZ="Asia/Shanghai" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" codex --full-auto'`,
     );
@@ -95,7 +99,7 @@ describe("终端快捷命令页", () => {
     expect(args).not.toContain("--rename-from");
     expect(calls.find((call) => call.command === "aliases:preview")?.args).toEqual(args);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  });
+  }, 15000);
 
   it("新增时预填内置默认的时区与语言（字面量），没有「跟随全局」", async () => {
     renderWithEngine(<AliasesPage />, aliasRoutes());
