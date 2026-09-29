@@ -77,7 +77,7 @@ describe("用量页", () => {
     });
     renderWithEngine(<UsagePage />, withInstance);
     const filter = await screen.findByTestId("usage-agent-filter");
-    await waitFor(() => expect(filter).toHaveTextContent("Claude Code · cc-relay"));
+    await waitFor(() => expect(filter).toHaveTextContent("Claude · cc-relay"));
     await userEvent.selectOptions(filter, "claude:cc-relay");
     expect(screen.getByTestId(`usage-row-${new Date().toISOString().slice(0, 10)}-relay-model`)).toBeInTheDocument();
     expect(screen.queryByTestId(`usage-row-${new Date().toISOString().slice(0, 10)}-claude-opus-5`)).toBeNull();

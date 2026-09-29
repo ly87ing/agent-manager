@@ -268,7 +268,7 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
     return (
       <>
         <h1 className="sr-only">账号</h1>
-        <p className="text-sm text-muted-foreground">没有识别到 Claude Code 或 Codex。</p>
+        <p className="text-sm text-muted-foreground">没有识别到 Claude 或 Codex。</p>
       </>
     );
 

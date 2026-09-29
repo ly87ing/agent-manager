@@ -96,7 +96,7 @@ describe("命令面板", () => {
     await renderApp();
     await userEvent.keyboard("{Meta>}k{/Meta}");
     const palette = await screen.findByTestId("command-palette");
-    expect(within(palette).getByTestId("command-item-account:agents:claude-code")).toHaveTextContent("Claude Code · 主账号");
+    expect(within(palette).getByTestId("command-item-account:agents:claude-code")).toHaveTextContent("Claude · 主账号");
     expect(within(palette).getByTestId("command-item-account:profiles:work")).toHaveTextContent("复制 cw");
     expect(within(palette).getByTestId("command-item-skill:agent-skills")).toBeInTheDocument();
     await userEvent.type(screen.getByTestId("command-palette-input"), "MCP");

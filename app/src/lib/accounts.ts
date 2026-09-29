@@ -52,10 +52,15 @@ function hostOf(url: string | null | undefined): string | null {
   }
 }
 
+/** 界面上的助手名：Claude Code 简称 Claude。 */
+export function agentLabel(displayName: string): string {
+  return displayName === "Claude Code" ? "Claude" : displayName;
+}
+
 /** 实例名常带「助手 · 」前缀（旧写法）；同一分组里已经知道是哪个助手，去掉它。 */
-function shortName(displayName: string, agentLabel: string): string {
-  const prefix = `${agentLabel} · `;
-  return displayName.startsWith(prefix) ? displayName.slice(prefix.length) : displayName;
+function shortName(displayName: string, labels: string[]): string {
+  const prefix = labels.map((label) => `${label} · `).find((candidate) => displayName.startsWith(candidate));
+  return prefix ? displayName.slice(prefix.length) : displayName;
 }
 
 export function buildAccounts(
@@ -72,7 +77,8 @@ export function buildAccounts(
       const kind = connectionKindOf(element) as ProfileKind;
       const spec = element.spec as AgentsSpec;
       const observed = element.observed as AgentsObserved;
-      const label = spec.display_name ?? agentId;
+      const fullLabel = spec.display_name ?? agentId;
+      const label = agentLabel(fullLabel);
       const bin = spec.bin ?? (kind === "codex" ? "codex" : "claude");
       const main: Account = {
         elementId: element.id,
@@ -104,7 +110,7 @@ export function buildAccounts(
           const api = pObserved.third_party ?? Boolean(pSpec.base_url);
           return {
             elementId: profile.id,
-            name: shortName(pSpec.display_name || profile.id.replace(/^profiles:/, ""), label),
+            name: shortName(pSpec.display_name || profile.id.replace(/^profiles:/, ""), [fullLabel, label]),
             isMain: false,
             command: launch[0]?.name ?? null,
             configDir,
