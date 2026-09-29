@@ -441,10 +441,13 @@ list` 在实例目录里只列出不含明文凭据的那一条，Codex 能加�
 格式、助手形态、名称、URL、模型与变量名校验，再明确以“保存但不启用”提交。
 
 官方账号登录状态不进 status（不读认证文件内容，也不在每次刷新时调用官方命令）。账号页为每个官方账号调用一次
-`agents:auth-status`（结果缓存 5 分钟），返回里的 `account` 给出 Claude 登录记录 `oauthAccount` 的邮箱、组织名与订阅档位
+`agents:auth-status`（结果缓存 5 分钟）。默认只看本机文件、不调用官方命令，因为官方命令自己会写配置目录（见下）：
+Claude 看 `.claude.json` 的登录记录，没有这个文件即未登录；Codex 看 `auth.json` 里 `tokens`、`OPENAI_API_KEY`
+在不在（取值跳过），配置目录不存在即未登录。本机文件说明不了时报「未确认」，用户点「确认」才带 `--probe` 用官方
+命令查（下面的探测细节都指这一步）；写入前的登录核对由用户操作发起，照旧用官方命令。返回里的 `account` 给出 Claude 登录记录 `oauthAccount` 的邮箱、组织名与订阅档位
 （`organizationType` + `organizationRateLimitTier`，如 `Max 5x`；走官方命令时取 `email`、`orgName`、`subscriptionType`），
 只用于界面认出是哪个账号，不入库、不进审计与日志。Codex 的官方命令不给账号，因此在确认是 ChatGPT 登录后，读该目录 `auth.json` 里 `tokens.id_token` 的 `email` 与 `chatgpt_plan_type`（2026-09-28 用户裁决的唯一例外）：访问令牌、刷新令牌与 API key 解析时跳过、不进内存结构，不写文件、不联网；文件不存在（登录存在钥匙串）或看不懂时只显示登录方式。主配置的「官方账号」
-卡片与实例卡片都提供「检查登录」与只复制不执行的登录、退出命令，点「检查登录」时调用只读的 `agents:auth-status --only <agents:助手 | profiles:实例>`：用官方命令查一次，只看这个配置目录
+卡片与实例卡片都提供「确认」与只复制不执行的登录、退出命令，点「确认」时调用只读的 `agents:auth-status --only <agents:助手 | profiles:实例> --probe`：用官方命令查一次，只看这个配置目录
 自己存的登录——实例带各自的 `CLAUDE_CONFIG_DIR` / `CODEX_HOME`，主配置不带。Claude 的探测：
 去掉进程环境里排在 `/login` 之前的全部来源（两种第三方凭据、长期令牌、五个云厂商开关、`ANTHROPIC_PROFILE`
 与工作负载身份联合变量、`CLAUDE_CODE_SIMPLE` 等）；经官方 `--settings` 参数取消目录 `settings.json` 自己声明的
@@ -460,7 +463,10 @@ Codex 的探测去掉 `CODEX_API_KEY`、`CODEX_ACCESS_TOKEN`（`codex login stat
 跟着走、不再使用时先退出），不返回账号、令牌或文件正文，本工具不写库也不写文件。`.claude.json` 的登录记录键
 只判断在不在，解析时取值直接跳过、不进内存结构。官方命令第一次在 Claude 从没启动过的目录里运行时（空目录，
 或只有本工具写过 MCP 条目的 `.claude.json`）会补上它自己的首次启动记录并把原文件备份到 `backups/`（实测，之后
-再查不再改动；Codex 不会），那是官方 CLI 自身行为；MCP 条目按各自内容核对外部修改，不受这些记录影响。以上每一支都用真实 claude 2.1.281 以隔离用户核对过。第三方实例里查到官方登录时标为 `mixed`，卡片提示
+再查不再改动），`codex` 每次运行都会在 `CODEX_HOME/tmp` 建临时目录，这些是官方 CLI 自身行为；MCP 条目按各自
+内容核对外部修改，不受这些记录影响。正因如此，打开页面的查询不调用它们：status 里的版本探测（`--version`）把
+`CODEX_HOME` 与 `CLAUDE_CONFIG_DIR` 指到系统临时目录里的专用位置，登录状态默认只看本机文件（2026-09-29 以隔离
+HOME 实测：全部查询跑完后用户目录零变化）。以上每一支都用真实 claude 2.1.281 以隔离用户核对过。第三方实例里查到官方登录时标为 `mixed`，卡片提示
 退出登录或换目录；第三方实例也不提供「复制登录命令」。普通接入保存、排序、导入导出及运行设置都不得写
 认证文件；第三方接入只在独立环境里用，官方账号的登录与第三方凭据不在同一个配置目录。登录和退出入口只
 复制官方 CLI 命令，从不代用户执行；实例命令显式带各自的 `CLAUDE_CONFIG_DIR` 或 `CODEX_HOME`，用户须在
