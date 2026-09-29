@@ -1,14 +1,4 @@
-import {
-  Activity,
-  Bot,
-  LayoutDashboard,
-  PackageCheck,
-  ScrollText,
-  Server,
-  Settings,
-  Sparkles,
-  Wallet,
-} from "lucide-react";
+import { ScrollText, Server, Settings, Sparkles, Users, Wallet } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
@@ -18,6 +8,7 @@ import { subscribeTrayActions } from "./lib/trayActions";
 import { useUpdateCheck } from "./lib/update-check";
 import { PageError, PageLoading } from "./components/PageState";
 
+const AccountsPage = lazy(() => import("./pages/AccountsPage"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const McpPage = lazy(() => import("./pages/McpPage"));
 const RulesHooksPage = lazy(() => import("./pages/RulesHooksPage"));
@@ -27,16 +18,17 @@ const UsagePage = lazy(() => import("./pages/UsagePage"));
 const TakeoverPage = lazy(() => import("./pages/TakeoverPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 
+// 多账号设计（docs/MULTI-ACCOUNT-DESIGN.md）：主入口是账号与共享资源；总览、操作记录待 P6 清理，
+// 导入现有配置在设置里，旧的助手管理页只从账号页的「编辑与管理」进入，直到 P2 换成抽屉。
 const NAV: NavItem[] = [
-  { key: "dashboard", label: "总览", icon: LayoutDashboard },
-  { key: "takeover", label: "导入现有配置", icon: PackageCheck },
-  { key: "agents", label: "助手", icon: Bot },
+  { key: "accounts", label: "账号", icon: Users },
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
-  { key: "rules-hooks", label: "规则与 Hooks", icon: ScrollText },
-  { key: "usage", label: "用量", icon: Wallet },
-  { key: "runs", label: "操作记录", icon: Activity },
-  { key: "settings", label: "设置", icon: Settings },
+  { key: "rules-hooks", label: "规则", icon: ScrollText },
+];
+const SECONDARY_NAV: NavItem[] = [
+  { key: "usage", label: "用量", icon: Wallet, iconOnly: true },
+  { key: "settings", label: "设置", icon: Settings, iconOnly: true },
 ];
 
 /** 事件目标是否处于文本编辑语境（输入框/文本域/下拉/可编辑区）：命中时全局快捷键不抢按键。 */
@@ -55,7 +47,7 @@ function isTextEditableTarget(target: EventTarget | null): boolean {
 export default function App() {
   // 预加载本机偏好，确保首次打开任意预览时已有默认演练值。
   const settings = useSettings();
-  const [activePage, setActivePage] = useState<string>("agents");
+  const [activePage, setActivePage] = useState<string>("accounts");
   const [selectedSkillAgent, setSelectedSkillAgent] = useState<string | null>(null);
   const [profileTarget, setProfileTarget] = useState<{ agentId: string; profileId: string } | null>(null);
   /** 「skills:<名称>」跳转带进来的技能搜索词：总览「去处理」直接定位到那一行。 */
@@ -142,7 +134,8 @@ export default function App() {
   return (
     <AppLayout
       nav={NAV}
-      active={activePage}
+      secondaryNav={SECONDARY_NAV}
+      active={activePage === "agents" ? "accounts" : activePage}
       onNavigate={handleNavigate}
       updateVersion={update.availableVersion}
       onDismissUpdate={update.dismiss}
@@ -150,6 +143,7 @@ export default function App() {
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
       <Suspense fallback={<PageLoading text="正在打开页面…" />}>
         <div key={activePage} className="animate-page-in">
+          {activePage === "accounts" && <AccountsPage onManage={() => setActivePage("agents")} />}
           {activePage === "dashboard" && <DashboardPage onNavigate={handleNavigate} />}
           {activePage === "agents" && (
             <AgentsPage

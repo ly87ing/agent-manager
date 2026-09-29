@@ -25,7 +25,7 @@ describe("SettingsPage", () => {
     setSettingsClient({ get: async () => settings, save: async () => settings });
     renderWithEngine(<App />, {});
     expect(screen.getByText("正在读取应用设置…")).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "助手" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "账号" })).toBeInTheDocument();
     expect(screen.queryByText("正在读取应用设置…")).toBeNull();
   });
   afterEach(() => { setSettingsClient(null); window.history.pushState({}, "", "/"); vi.clearAllMocks(); });

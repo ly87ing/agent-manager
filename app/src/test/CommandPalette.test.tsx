@@ -194,7 +194,7 @@ describe("命令面板", () => {
   it("⌘K 打开后能搜到资源，选中跳到对应页面", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     const palette = await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "grok");
@@ -208,7 +208,7 @@ describe("命令面板", () => {
   it("⌘⇧K 只列官方账号与独立环境，不列主配置第三方接入或其他资源", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     const switcher = await openAccountAndEnvironmentPalette();
     expect(within(switcher).getByTestId("command-item-connection:claude-code:default")).toHaveTextContent("Claude Code · 官方账号");
@@ -245,7 +245,7 @@ describe("命令面板", () => {
     }, { command: "profiles.status" });
     testRoutes["aliases:status"] = makeEnvelope(makeAliasStatus({ "cc-work": 'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude' }), { command: "aliases.status" });
     const { calls } = renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
     await openAccountAndEnvironmentPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "cc-work");
     await userEvent.click(await screen.findByTestId("command-item-profile-launch:cc-work:cc-work"));
@@ -274,7 +274,7 @@ describe("命令面板", () => {
     }, { command: "profiles.status" });
     testRoutes["aliases:status"] = makeEnvelope(makeAliasStatus({ "cc-work": 'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude' }), { command: "aliases.status" });
     const { calls } = renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
     await waitFor(() => expect(trayEvents.listeners.size).toBe(1));
     for (const listener of trayEvents.listeners) {
       listener({ payload: {
@@ -322,7 +322,7 @@ describe("命令面板", () => {
     }, { command: "profiles.status" });
     testRoutes["aliases:status"] = makeEnvelope(makeAliasStatus({ pending: 'CLAUDE_CONFIG_DIR="$HOME/.claude-pending" claude' }), { command: "aliases.status" });
     renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
     await openAccountAndEnvironmentPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "待写入");
     expect(await screen.findByTestId("command-item-profile:pending")).toHaveTextContent("配置尚未可用");
@@ -336,7 +336,7 @@ describe("命令面板", () => {
   it("规则与终端快捷命令都以实际文件为准、逐条编辑，没有一键同步动作", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     const { calls } = renderWithEngine(<App />, routes());
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "同步规则");
@@ -352,7 +352,7 @@ describe("命令面板", () => {
   it("键盘可完成：方向键选择、回车执行、Esc 关闭", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "接管");
@@ -369,7 +369,7 @@ describe("命令面板", () => {
   it("无匹配时给出空态，不误触发任何动作", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     const { calls } = renderWithEngine(<App />, routes());
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "zzzz-not-exist");
@@ -381,7 +381,7 @@ describe("命令面板", () => {
   it("设置里的二级页也搜得到，选中直达（密钥要填东西，不该只藏在二级菜单）", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "密钥");
@@ -400,7 +400,7 @@ describe("命令面板", () => {
       return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
     };
     const { calls } = renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
@@ -435,7 +435,7 @@ describe("命令面板", () => {
       }, { command: "agents.preview-default" }));
     });
     const { calls } = renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
     await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
@@ -456,7 +456,7 @@ describe("命令面板", () => {
       errors: [{ code: "AGENT_CONFIG_CHANGED", element: null, message: "配置文件已在外部修改" }],
     });
     const { calls } = renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
     await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
@@ -472,7 +472,7 @@ describe("命令面板", () => {
   it("命令面板不再提供切到第三方接入：按接入名或备注都搜不到切换项", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "Kimi Code");
@@ -492,7 +492,7 @@ describe("命令面板", () => {
       return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
     };
     const { calls } = renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
     await waitFor(() => expect(trayEvents.listeners.size).toBe(1));
 
     for (const listener of trayEvents.listeners) {
@@ -547,7 +547,7 @@ describe("命令面板", () => {
       return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
     };
     const { calls } = renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
     await waitFor(() => expect(trayEvents.listeners.size).toBe(1));
 
     for (const listener of trayEvents.listeners) {
@@ -597,7 +597,7 @@ describe("命令面板", () => {
           errors: [{ code: "AGENT_LIVE_TOKEN_UNSAVED", element: "agents:claude-code", message: "当前令牌没有保存" }],
         });
     const { calls } = renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
     await userEvent.click(await screen.findByTestId("command-item-connection:claude-code:default"));
@@ -622,7 +622,7 @@ describe("命令面板", () => {
       return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
     };
     const { calls } = renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
@@ -651,7 +651,7 @@ describe("命令面板", () => {
       return makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" });
     };
     renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
@@ -667,7 +667,7 @@ describe("命令面板", () => {
     const testRoutes = routes();
     testRoutes["agents:status"] = agentsStatus("kimi", "");
     const { calls } = renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
@@ -694,7 +694,7 @@ describe("命令面板", () => {
       );
     };
     const { calls } = renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");
@@ -723,7 +723,7 @@ describe("命令面板", () => {
         },
       );
     renderWithEngine(<App />, testRoutes);
-    await screen.findByRole("heading", { name: "助手" }, { timeout: 10_000 });
+    await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
 
     await openPalette();
     await userEvent.type(screen.getByTestId("command-palette-input"), "官方账号");

@@ -31,7 +31,7 @@ function routes() {
 }
 
 describe("App 顶层导航", () => {
-  it("侧边栏保留现有配置导入入口，默认渲染助手页，点击导航可切换页面", async () => {
+  it("顶栏只保留账号与共享资源入口，默认渲染账号页；导入现有配置从设置进入", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -42,41 +42,32 @@ describe("App 顶层导航", () => {
     const nav = await screen.findByRole("navigation");
     const navButtons = within(nav).getAllByRole("button");
 
-    const expectedLabels = [
-      "总览",
-      "导入现有配置",
-      "助手",
+    // 用量、设置只显示图标，按无障碍名称核对
+    expect(navButtons.map((b) => b.getAttribute("aria-label") ?? b.textContent?.trim())).toEqual([
+      "账号",
       "技能",
       "MCP",
-      "规则与 Hooks",
+      "规则",
       "用量",
-      "操作记录",
       "设置",
-    ];
+    ]);
 
-    expect(navButtons.map((b) => b.textContent?.trim())).toEqual(expectedLabels);
+    const accountsNav = within(nav).getByRole("button", { name: "账号" });
+    expect(accountsNav).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "账号" })).toBeInTheDocument();
 
-    // 默认助手处于当前页
-    const agentsNav = within(nav).getByRole("button", { name: "助手" });
-    expect(agentsNav).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("heading", { name: "助手" })).toBeInTheDocument();
-
-    // 点击设置
     const settingsNav = within(nav).getByRole("button", { name: "设置" });
     await userEvent.click(settingsNav);
     expect(settingsNav).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
 
-    // 点击规则与 Hooks
-    const rulesHooksNav = within(nav).getByRole("button", { name: "规则与 Hooks" });
-    await userEvent.click(rulesHooksNav);
-    expect(rulesHooksNav).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("tab", { name: "规则" })).toBeInTheDocument();
-
-    const takeoverNav = within(nav).getByRole("button", { name: "导入现有配置" });
-    await userEvent.click(takeoverNav);
-    expect(takeoverNav).toHaveAttribute("aria-current", "page");
+    await userEvent.click(screen.getByTestId("advanced-entry-takeover"));
     expect(await screen.findByRole("heading", { name: "导入现有配置" })).toBeInTheDocument();
+
+    const rulesNav = within(nav).getByRole("button", { name: "规则" });
+    await userEvent.click(rulesNav);
+    expect(rulesNav).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("tab", { name: "规则" })).toBeInTheDocument();
   }, 15000);
 
   it("从实例卡片点击「管理技能」跳转到技能页并预选对应实例，点击侧栏「技能」重置为全部助手", async () => {
@@ -183,7 +174,10 @@ describe("App 顶层导航", () => {
 
     renderWithEngine(<App />, customRoutes);
 
-    // 默认助手页：独立环境与默认环境在同一页，直接点实例的「管理技能」
+    // 账号页的「编辑与管理」进入管理页（P2 前的过渡入口），再点实例的「管理技能」
+    const row = await screen.findByTestId("account-row-agents:claude-code");
+    await userEvent.click(within(row).getByRole("button", { name: "更多操作" }));
+    await userEvent.click(within(row).getByRole("menuitem", { name: "编辑与管理" }));
     const manageBtn = await screen.findByTestId("profile-skills-cc-work");
     await userEvent.click(manageBtn);
 
@@ -203,7 +197,7 @@ describe("App 顶层导航", () => {
     expect(agentSelect.value).toBe("all");
   }, 15000);
 
-  it("未实现的 mcp/rules/hooks status 返回 ok:false 与 data:{} 时，页面展示错误，顶层导航仍在且可切回助手", async () => {
+  it("未实现的 mcp/rules/hooks status 返回 ok:false 与 data:{} 时，页面展示错误，顶层导航仍在且可切回账号", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -249,14 +243,14 @@ describe("App 顶层导航", () => {
     expect(screen.getByText("DOMAIN_NOT_IMPLEMENTED")).toBeInTheDocument();
     expect(screen.getByText("MCP 域尚未实现")).toBeInTheDocument();
 
-    // 顶层导航仍在，切回助手
-    const agentsNav = within(nav).getByRole("button", { name: "助手" });
-    await userEvent.click(agentsNav);
-    expect(agentsNav).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("heading", { name: "助手" })).toBeInTheDocument();
+    // 顶层导航仍在，切回账号
+    const accountsNav = within(nav).getByRole("button", { name: "账号" });
+    await userEvent.click(accountsNav);
+    expect(accountsNav).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "账号" })).toBeInTheDocument();
 
-    // 切换至规则与 Hooks 页：展示 Rules 错误
-    const rulesHooksNav = within(nav).getByRole("button", { name: "规则与 Hooks" });
+    // 切换至规则页：展示 Rules 错误
+    const rulesHooksNav = within(nav).getByRole("button", { name: "规则" });
     await userEvent.click(rulesHooksNav);
     expect(rulesHooksNav).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("heading", { name: "规则" })).toBeInTheDocument();
@@ -271,9 +265,9 @@ describe("App 顶层导航", () => {
     expect(screen.getByText("DOMAIN_NOT_IMPLEMENTED")).toBeInTheDocument();
     expect(screen.getByText("Hooks 域尚未实现")).toBeInTheDocument();
 
-    // 顶层导航仍在，再次切回助手
-    await userEvent.click(agentsNav);
-    expect(agentsNav).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("heading", { name: "助手" })).toBeInTheDocument();
+    // 顶层导航仍在，再次切回账号
+    await userEvent.click(accountsNav);
+    expect(accountsNav).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "账号" })).toBeInTheDocument();
   }, 15000);
 });

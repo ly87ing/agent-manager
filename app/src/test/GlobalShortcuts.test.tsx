@@ -27,25 +27,20 @@ function routes() {
 }
 
 describe("全局快捷键", () => {
-  it("Cmd/Ctrl+, 跳到设置页；侧边栏常驻快捷键说明", async () => {
+  it("Cmd/Ctrl+, 跳到设置页", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
 
     const nav = await screen.findByRole("navigation");
-    expect(await screen.findByRole("heading", { name: "助手" })).toBeInTheDocument();
-    // 侧边栏底部的快捷键说明
-    expect(screen.getByText("快捷键")).toBeInTheDocument();
-    expect(screen.getByText("账号与环境")).toBeInTheDocument();
-    expect(screen.getByText("打开设置")).toBeInTheDocument();
-    expect(screen.getByText("聚焦页内搜索")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "账号" })).toBeInTheDocument();
 
     await userEvent.keyboard("{Meta>},{/Meta}");
     expect(within(nav).getByRole("button", { name: "设置" })).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
 
-    // Ctrl 变体（非 macOS 约定）：先回助手页再用 Ctrl+, 进设置
-    await userEvent.click(within(nav).getByRole("button", { name: "助手" }));
-    expect(within(nav).getByRole("button", { name: "助手" })).toHaveAttribute("aria-current", "page");
+    // Ctrl 变体（非 macOS 约定）：先回账号页再用 Ctrl+, 进设置
+    await userEvent.click(within(nav).getByRole("button", { name: "账号" }));
+    expect(within(nav).getByRole("button", { name: "账号" })).toHaveAttribute("aria-current", "page");
     await userEvent.keyboard("{Control>},{/Control}");
     expect(within(nav).getByRole("button", { name: "设置" })).toHaveAttribute("aria-current", "page");
   }, 15000);
