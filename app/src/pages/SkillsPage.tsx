@@ -245,10 +245,21 @@ export default function SkillsPage({
     const labels: Record<string, string> = isExtraLinkAction
       ? { add: "纳入管理", remove: "取消链接" }
       : { add: "启用", update: "更新", enable: "启用", disable: "停用" };
+    // 能干净回到原状的才给撤销：启用 ↔ 停用；首次启用（add）撤销是取消分配，回到「未启用」
+    const reverse: Record<string, string> = isExtraLinkAction ? {} : { enable: "disable", disable: "enable", add: "remove" };
+    const undoAction = reverse[action];
     void directApply.apply({
       command: "skills:apply",
       label: `${labels[action] ?? action} ${skillName} @ ${nameOf(agent)}`,
       args: ["--only", skill.id, "--action", action, "--agent", agent],
+      undo: undoAction
+        ? () =>
+            void directApply.apply({
+              command: "skills:apply",
+              label: `撤销：${labels[action] ?? action} ${skillName} @ ${nameOf(agent)}`,
+              args: ["--only", skill.id, "--action", undoAction, "--agent", agent],
+            })
+        : undefined,
     });
   };
 

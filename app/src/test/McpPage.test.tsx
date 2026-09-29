@@ -309,6 +309,25 @@ describe("McpPage：实际条目为主", () => {
     );
   });
 
+  it("停用后可以撤销：先重读状态拿这一条的新基准，再重新启用", async () => {
+    let reads = 0;
+    const base = routes();
+    const { calls } = renderWithEngine(<McpPage />, {
+      ...base,
+      "mcp:status": async () => {
+        reads += 1;
+        const data = mcpStatusData();
+        // 停用之后 claude-code 上 fs 的基准变了
+        if (reads > 1) (data.elements[0].observed as { agents: Record<string, { base: string }> }).agents["claude-code"].base = "c".repeat(63) + "f";
+        return makeEnvelope(data, { command: "mcp.status" });
+      },
+    });
+    await userEvent.click(await screen.findByTestId("action-disable-mcp:fs-claude-code"));
+    await userEvent.click(await screen.findByRole("button", { name: "撤销" }));
+    await waitFor(() => expect(applyCalls(calls)).toHaveLength(2));
+    expect(applyCalls(calls)[1].args).toEqual(["--only", "mcp:fs", "--agent", "claude-code", "--action", "enable", "--base", "c".repeat(63) + "f"]);
+  });
+
   it("填写缺失变量：打开密钥输入并写入外部文件", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
     await userEvent.click(await screen.findByTestId("configure-secrets-mcp:fs"));

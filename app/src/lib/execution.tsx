@@ -36,6 +36,8 @@ export interface ExecuteRequest {
   label: string;
   /** 批量编排时压掉单行结果 toast（执行记录、run_id、查询刷新、错误返回全部保留），由调用方统一汇总反馈。 */
   silent?: boolean;
+  /** 可逆的写入：成功提示上给「撤销」，点了执行反向操作。只给能干净回到原状的动作。 */
+  undo?: () => void;
 }
 
 const ExecutionContext = createContext<ExecutionContextValue | null>(null);
@@ -81,7 +83,11 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
         if (ok) {
           // 写入完成不等于助手已经用上：直接把生效条件说清楚
           const hint = effectHint(request.command, request.args ?? []);
-          toast.success(`${request.label}完成`, hint ? { description: hint } : undefined);
+          const undo = request.undo;
+          toast.success(`${request.label}完成`, {
+            ...(hint ? { description: hint } : {}),
+            ...(undo ? { action: { label: "撤销", onClick: () => undo() } } : {}),
+          });
         } else {
           toast.error(`${request.label} 失败：${firstError?.message ?? "详见任务记录"}`);
         }

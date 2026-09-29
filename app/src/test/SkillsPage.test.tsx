@@ -344,6 +344,17 @@ describe("SkillsPage 三级视图", () => {
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 
+  it("启用 / 停用后提示条上可以撤销：停用的撤销是重新启用，同一账号", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+    await expandAll();
+    await userEvent.click(screen.getByTestId("action-disable-skill:agent-skills/alpha-claude-code"));
+    await userEvent.click(await screen.findByRole("button", { name: "撤销" }));
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
+    const applies = calls.filter((call) => call.command === "skills:apply").map((call) => call.args);
+    expect(applies[0]).toEqual(["--only", "skill:agent-skills/alpha", "--action", "disable", "--agent", "claude-code"]);
+    expect(applies[1]).toEqual(["--only", "skill:agent-skills/alpha", "--action", "enable", "--agent", "claude-code"]);
+  });
+
   it("账号开关：位置反映账号里有没有这个技能的链接，损坏的链接显示为需要处理但仍算开", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
     await expandAll();

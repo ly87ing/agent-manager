@@ -80,10 +80,32 @@ export default function McpPage() {
       return envelope;
     });
 
-  /** 账号开关：启用 / 停用这一个账号上的条目。 */
+  /**
+   * 撤销：写入后条目的基准变了，先重读状态拿这个账号条目的新基准再做反向操作；
+   * 期间被外部改过就由引擎照常拒绝。
+   */
+  const undoWith = (element: EngineElement, agent: string, label: string, action: string) => () =>
+    void runEngine<StatusData>("mcp:status", []).then((envelope) => {
+      const cell = envelope.ok ? cellsOf(envelope.data.elements.find((item) => item.id === element.id) ?? element)[agent] : undefined;
+      if (!cell) {
+        toast.error(`${label}：这个账号上已经找不到这一条`);
+        return;
+      }
+      void apply(label, ["--only", element.id, "--agent", agent, "--action", action, "--base", cell.base]);
+    });
+
+  /** 账号开关：启用 / 停用这一个账号上的条目，可撤销。 */
   const handleAction = (element: EngineElement, agent: string, action: string, cell: McpAgentCell) => {
-    const label = `${action === "enable" ? "启用" : "停用"} ${nameOf(element)} @ ${nameOfAgent(agent)}`;
-    void apply(label, ["--only", element.id, "--agent", agent, "--action", action, "--base", cell.base]);
+    const verb = action === "enable" ? "启用" : "停用";
+    const label = `${verb} ${nameOf(element)} @ ${nameOfAgent(agent)}`;
+    void directApply
+      .apply({
+        command: "mcp:apply",
+        label,
+        args: ["--only", element.id, "--agent", agent, "--action", action, "--base", cell.base],
+        undo: undoWith(element, agent, `撤销：${label}`, action === "enable" ? "disable" : "enable"),
+      })
+      .then(showNotices);
   };
 
   /** 编辑：一张表单写到所有有这个服务的账号；各账号内容不同时先以 base 那份预填。 */
@@ -362,7 +384,17 @@ export default function McpPage() {
                 formatOf={(agent) => targetOf(agent)?.format}
                 onAddHere={(target, from, to) => {
                   const cell = cellsOf(target)[from];
-                  if (cell) void apply(`把 ${nameOf(target)} 复制到 ${nameOfAgent(to)}`, copyArgs(target, from, cell.base, to, null));
+                  if (!cell) return;
+                  const label = `把 ${nameOf(target)} 复制到 ${nameOfAgent(to)}`;
+                  void directApply
+                    .apply({
+                      command: "mcp:apply",
+                      label,
+                      args: copyArgs(target, from, cell.base, to, null),
+                      // 撤销复制 = 从这个账号删掉刚复制过来的那一条
+                      undo: undoWith(target, to, `撤销：${label}`, "remove"),
+                    })
+                    .then(showNotices);
                 }}
                 onAction={handleAction}
                 onEdit={(target) => openEdit(target)}

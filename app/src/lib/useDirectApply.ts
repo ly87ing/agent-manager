@@ -12,7 +12,7 @@ export function useDirectApply() {
   const busyRef = useRef(false);
   const [executing, setExecuting] = useState(false);
 
-  const apply = (request: { command: string; label: string; args?: string[] }): Promise<Envelope | null> => {
+  const apply = (request: { command: string; label: string; args?: string[]; undo?: () => void }): Promise<Envelope | null> => {
     if (busyRef.current) return Promise.resolve(null);
     busyRef.current = true;
     setExecuting(true);
@@ -20,6 +20,7 @@ export function useDirectApply() {
       command: request.command,
       args: request.args ?? [],
       label: request.label,
+      undo: request.undo,
     }).finally(() => {
       busyRef.current = false;
       setExecuting(false);
