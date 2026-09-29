@@ -22,9 +22,8 @@ import { engineKeys, useEngineQuery } from "../lib/queries";
 import { isCollection } from "../lib/skillCollections";
 import { cn } from "../lib/utils";
 
-/** 表头与每行同宽的列：登录状态、额度、操作。 */
-const COL_LOGIN = "w-56 shrink-0 min-w-0";
-const COL_QUOTA = "hidden w-60 shrink-0 md:block";
+/** 表头与每行同宽的列：额度、操作。 */
+const COL_QUOTA = "hidden w-80 shrink-0 md:block";
 const COL_ACTIONS = "flex w-28 shrink-0 items-center justify-end gap-1";
 
 const TONE_BAR = { ok: "bg-success", warn: "bg-warning", critical: "bg-destructive" } as const;
@@ -52,7 +51,7 @@ function QuotaCells({ usage, testId }: { usage: AgentUsage | null; testId: strin
     <div data-testid={testId} className="flex items-center gap-3" title={`读自 ${usage.source}`}>
       {windows.map((w) => (
         <span key={w.window_minutes} className="flex items-center gap-1.5 text-xs">
-          <span className="text-muted-foreground">{windowLabel(w.window_minutes)}</span>
+          <span className="whitespace-nowrap text-muted-foreground">{windowLabel(w.window_minutes)}</span>
           <span className="h-1.5 w-14 overflow-hidden rounded bg-muted">
             <span
               className={cn("block h-full", stale ? "bg-muted-foreground/40" : TONE_BAR[usageTone(w.used_percent)])}
@@ -183,24 +182,25 @@ function AccountRow({
             </span>
           ))}
         </div>
-        {account.command && <code className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">{account.command}</code>}
-      </div>
-      <div className={cn(COL_LOGIN, "flex items-center gap-2 text-xs text-muted-foreground")}>
-        <span data-testid={`account-type-${id}`} title={typeTitle} className={cn("truncate", loggedOut && "text-warning")}>
-          {typeText}
-        </span>
-        {account.type === "official" && auth !== "pending" && auth?.state === "unknown" && (
-          <button
-            type="button"
-            data-testid={`account-probe-${id}`}
-            title={`${auth.reason ?? "本机文件说明不了登录状态"}。点一下运行官方命令确认（官方命令可能在配置目录里写自己的记录）`}
-            onClick={actions.onProbeAuth}
-            className="shrink-0 text-primary hover:underline"
-          >
-            确认
-          </button>
-        )}
-        {account.model && <span className="truncate">· {account.model}</span>}
+        <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          {account.command && <code className="max-w-[45%] shrink-0 truncate font-mono">{account.command}</code>}
+          {account.command && <span aria-hidden>·</span>}
+          <span data-testid={`account-type-${id}`} title={typeTitle} className={cn("truncate", loggedOut && "text-warning")}>
+            {typeText}
+          </span>
+          {account.type === "official" && auth !== "pending" && auth?.state === "unknown" && (
+            <button
+              type="button"
+              data-testid={`account-probe-${id}`}
+              title={`${auth.reason ?? "本机文件说明不了登录状态"}。点一下运行官方命令确认（官方命令可能在配置目录里写自己的记录）`}
+              onClick={actions.onProbeAuth}
+              className="shrink-0 text-primary hover:underline"
+            >
+              确认
+            </button>
+          )}
+          {account.model && <span className="truncate">· {account.model}</span>}
+        </div>
       </div>
       <div className={COL_QUOTA}>
         <QuotaCells usage={account.usage} testId={`account-quota-${id}`} />
@@ -466,8 +466,7 @@ export default function AccountsPage({
       })()}
       <section aria-label="账号列表" className="overflow-clip rounded-lg border bg-card">
         <div className="flex items-center gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
-          <span className="min-w-0 flex-1 font-medium text-foreground">账号与启动命令</span>
-          <span className={COL_LOGIN}>登录</span>
+          <span className="min-w-0 flex-1 font-medium text-foreground">账号、启动命令与登录</span>
           <span className={COL_QUOTA}>额度</span>
           <span className={COL_ACTIONS} />
         </div>
