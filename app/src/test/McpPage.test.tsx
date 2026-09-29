@@ -298,6 +298,17 @@ describe("McpPage：实际条目为主", () => {
     expect(applyCalls(calls).every((call) => call.args[call.args.indexOf("--to") + 1] === "work")).toBe(true);
   });
 
+  it("全部补齐：一次补所有账号，与按账号补齐是同样的复制", async () => {
+    const status = mcpStatusData();
+    status.targets = [...(status.targets ?? []), { ...(status.targets ?? [])[0], agent: "work", path: "/work/.claude.json" }];
+    const { calls } = renderWithEngine(<McpPage />, routes(status));
+    await userEvent.click(await screen.findByTestId("mcp-fill-all"));
+    await waitFor(() => expect(applyCalls(calls).length).toBeGreaterThan(0));
+    expect(applyCalls(calls).map((call) => call.args)).toContainEqual(
+      ["--only", "mcp:fs", "--agent", "claude-code", "--to", "work", "--action", "copy", "--base", BASE_CLAUDE_FS],
+    );
+  });
+
   it("填写缺失变量：打开密钥输入并写入外部文件", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
     await userEvent.click(await screen.findByTestId("configure-secrets-mcp:fs"));

@@ -54,3 +54,16 @@ export function addToAllRows(skill: EngineElement): BatchApplyRow[] {
 export function inUseSkillCount(elements: EngineElement[]): number {
   return elements.filter(isSkillElement).filter((skill) => Object.values(cellsOf(skill)).some(isActive)).length;
 }
+
+/**
+ * 各账号在用、来源里已有新版本的技能：「全部更新」把它们换到新版本。
+ * 只看版本变化；链接损坏的修复、新发现技能的添加都不在这里。
+ */
+export function versionUpdateRows(elements: EngineElement[]): BatchApplyRow[] {
+  return elements.filter(isSkillElement).flatMap((skill) =>
+    Object.entries(cellsOf(skill))
+      .filter(([, cell]) =>
+        cell.state === "linked" && (cell.actions ?? []).includes("update") && Boolean(cell.available_version) && cell.version !== cell.available_version)
+      .map(([agent]) => ({ ...row(skill, agent, "更新"), action: "update" })),
+  );
+}

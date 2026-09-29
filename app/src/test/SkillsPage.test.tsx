@@ -327,6 +327,23 @@ describe("SkillsPage 三级视图", () => {
     expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual(["--only", "skill:agent-skills/alpha", "--action", "add", "--agent", "work"]);
   });
 
+  it("全部更新：先逐个取回集合，再把在用、已有新版本的技能换到新版本；新发现的不加，停用的不动", async () => {
+    const routes: Record<string, Envelope> = {
+      ...skillsRoutes(),
+      "system:refresh-upstream": makeEnvelope({}, { command: "system.refresh-upstream" }),
+    };
+    const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
+    const alpha = status.data.elements.find((element) => element.id === "skill:agent-skills/alpha")!;
+    Object.assign((alpha.observed as { agents: Record<string, Record<string, unknown>> }).agents["claude-code"], { version: "v1", available_version: "v2", actions: ["update", "disable", "remove"] });
+    const { calls } = renderWithEngine(<SkillsPage />, routes);
+    await userEvent.click(await screen.findByTestId("skills-update-all"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
+    const applies = calls.filter((call) => call.command === "skills:apply").map((call) => call.args);
+    expect(applies[0]).toEqual(["--only", "skill:agent-skills", "--action", "update"]);
+    expect(applies[1]).toEqual(["--only", "skill:agent-skills/alpha", "--action", "update", "--agent", "claude-code"]);
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+
   it("账号开关：位置反映账号里有没有这个技能的链接，损坏的链接显示为需要处理但仍算开", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
     await expandAll();

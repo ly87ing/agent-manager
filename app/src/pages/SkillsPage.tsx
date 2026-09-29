@@ -23,7 +23,8 @@ import {
   type SkillSpec,
 } from "../lib/observed";
 import { engineKeys, useEngineQuery } from "../lib/queries";
-import { addToAllRows, fillRows } from "../lib/skillFill";
+import { addToAllRows, fillRows, versionUpdateRows } from "../lib/skillFill";
+import { useExecutions } from "../lib/execution";
 import { useBatchApply } from "../lib/useBatchApply";
 import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
@@ -122,6 +123,8 @@ export default function SkillsPage({
 
   const directApply = useDirectApply();
   const batchApply = useBatchApply();
+  const { execute } = useExecutions();
+  const [updatingAll, setUpdatingAll] = useState(false);
   const queryClient = useQueryClient();
   const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
 
@@ -169,6 +172,48 @@ export default function SkillsPage({
         // 拉完代码顺手重查一次最新提交，否则还挂着「可更新」
         if (action === "update" && envelope?.ok) return refreshUpstream(collection);
       });
+
+  /**
+   * 全部更新：逐个取回启用中的集合（git 拉到最新、本机目录重新扫描），再把各账号在用、
+   * 已有新版本的技能换到新版本。新发现的技能不自动添加，账号上停用的不动；单个失败不拦其余。
+   */
+  const updateAll = async () => {
+    if (updatingAll) return;
+    setUpdatingAll(true);
+    let fetched = 0;
+    let failed = 0;
+    try {
+      const targets = collections.filter(
+        (collection) =>
+          (collection.policy as { enabled?: boolean }).enabled !== false &&
+          ((collection.observed as SkillCollectionObserved).actions ?? []).includes("update"),
+      );
+      for (const collection of targets) {
+        const envelope = await execute({
+          command: "skills:apply",
+          label: `更新集合 ${collName(collection)}`,
+          args: ["--only", collection.id, "--action", "update"],
+          silent: true,
+        });
+        if (envelope?.ok) {
+          fetched += 1;
+          await runEngine("system:refresh-upstream", ["--only", collection.id]).catch(() => undefined);
+        } else {
+          failed += 1;
+        }
+      }
+      // 取回之后按最新状态算哪些技能有新版本
+      const fresh = await runEngine<StatusData>("skills:status", []);
+      const rows = fresh.ok ? versionUpdateRows(fresh.data.elements ?? []) : [];
+      (failed ? toast.error : toast.success)(
+        `已取回 ${fetched} 个集合${failed ? `，${failed} 个失败（详见任务记录）` : ""}；${rows.length ? `${rows.length} 处技能换到新版本` : "各账号的技能都已是最新"}`,
+      );
+      await batchApply.applyBatch({ actionLabel: "更新", rows });
+    } finally {
+      setUpdatingAll(false);
+      await queryClient.invalidateQueries({ queryKey: engineKeys.all });
+    }
+  };
 
   /** 单个账号上的动作：外部链接接管、移除来源里已删除的技能先确认，其余直接执行。 */
   const handleSkillAction = (skill: EngineElement, agent: string, action: string, cell: SkillAgentCell | null) => {
@@ -289,6 +334,30 @@ export default function SkillsPage({
           ))}
         </select>
         <div className="ml-auto flex items-center gap-2">
+          {collections.length > 0 && (
+            <button
+              type="button"
+              data-testid="skills-update-all"
+              disabled={updatingAll || batchApply.executing}
+              title="取回所有集合的新版本，并把各账号在用的技能换到新版本；新发现的技能不会自动添加，账号上停用的不动"
+              onClick={() => void updateAll()}
+              className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40"
+            >
+              <RefreshCw className={cn("h-4 w-4", updatingAll && "animate-spin")} aria-hidden /> {updatingAll ? "正在更新…" : "全部更新"}
+            </button>
+          )}
+          {agentFilter === "all" && pendingFill.length > 0 && (
+            <button
+              type="button"
+              data-testid="skills-fill-all"
+              disabled={updatingAll || batchApply.executing}
+              title="把在用的技能加到所有还缺它的账号；账号上停用的不动"
+              onClick={() => void batchApply.applyBatch({ actionLabel: "补齐", rows: pendingFill })}
+              className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/15 disabled:opacity-40"
+            >
+              全部补齐 {pendingFill.length}
+            </button>
+          )}
           {visibleCollections.length > 1 && !search.trim() && (
             <button
               type="button"

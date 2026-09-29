@@ -220,8 +220,9 @@ export default function McpPage() {
   const enabledOn = (agent: string) => elements.filter((element) => cellsOf(element)[agent]?.state === "enabled").length;
   const shown = agentFilter === "all" ? filtered : filtered.filter((element) => cellsOf(element)[agentFilter]);
   /** 补齐一个账号：把在用的服务从同类账号逐条复制过来，单条失败不影响其余；每条仍由引擎带 base 锁内核对。 */
-  const runFill = async (agent: string) => {
-    const pendingFill = mcpFillRows(elements, targets, [agent]);
+  /** 不给账号时补齐所有账号。 */
+  const runFill = async (agent?: string) => {
+    const pendingFill = mcpFillRows(elements, targets, agent ? [agent] : undefined);
     if (filling || pendingFill.length === 0) return;
     setFilling(true);
     let ok = 0;
@@ -239,6 +240,7 @@ export default function McpPage() {
   };
 
   const brokenTargets = targets.filter((target) => target.error !== null);
+  const fillAllCount = agentFilter === "all" ? mcpFillRows(elements, targets).length : 0;
 
   return (
     <div className="space-y-3">
@@ -273,6 +275,18 @@ export default function McpPage() {
           共 {elements.length} 个服务{disabledCount > 0 ? `，${disabledCount} 个已停用` : ""}
         </span>
         <div className="ml-auto flex items-center gap-2">
+          {fillAllCount > 0 && (
+            <button
+              type="button"
+              data-testid="mcp-fill-all"
+              disabled={filling || busy}
+              title="把在用的服务从同类账号复制到所有还没有它的账号；账号上停用的不动"
+              onClick={() => void runFill()}
+              className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/15 disabled:opacity-40"
+            >
+              全部补齐 {fillAllCount}
+            </button>
+          )}
           <button
             type="button"
             data-testid="add-server-button"
