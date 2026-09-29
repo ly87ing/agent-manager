@@ -235,7 +235,11 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         }
         // 配置备份：导出不带参数，导入只接整份备份正文
         ("config", "import") => specs.push(("--value", ArgValueKind::JsonValue)),
-        ("agents", "auth-status") => specs.push(("--only", ArgValueKind::ElementId)),
+        ("agents", "auth-status") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            // 用户点「确认」时才带：用官方命令查
+            specs.push(("--probe", ArgValueKind::Flag));
+        }
         // 运行参数写助手配置文件：每次写入都带 status 给出的基准，外部改过就被拒；
         // 降安全等级要显式标志。主账号只放官方登录，不再有切换与保存实际配置。
         ("agents", "configure") => {
@@ -1317,6 +1321,11 @@ mod tests {
         )
         .is_ok());
         assert!(validate_args("agents:auth-status", &args(&["--only", "profiles:cc-ly"])).is_ok());
+        assert!(validate_args(
+            "agents:auth-status",
+            &args(&["--only", "profiles:cc-ly", "--probe"])
+        )
+        .is_ok());
         assert!(validate_args(
             "agents:auth-status",
             &args(&["--only", "agents:claude-code", "--base", &base])

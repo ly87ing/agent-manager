@@ -2063,8 +2063,57 @@ fn codex_第三方实例_目录已登录官方账号时拒绝_未登录才写() 
     let _ = std::fs::remove_dir_all(root);
 }
 
+/// 用户点「确认」：带 --probe，用官方命令查。
 fn auth_status(ctx: &Context, only: &str) -> agent_manager_engine::Envelope {
+    execute(
+        ctx,
+        &request("agents:auth-status", &["--only", only, "--probe"]),
+    )
+}
+
+/// 打开页面时的查询：不带 --probe，只看本机文件。
+fn auth_status_local(ctx: &Context, only: &str) -> agent_manager_engine::Envelope {
     execute(ctx, &request("agents:auth-status", &["--only", only]))
+}
+
+/// 打开页面查登录不调用官方命令（它们会写配置目录）：只看本机登录记录，说明不了的报未知，
+/// 用户目录与数据库都不变。
+#[test]
+fn 打开页面查登录只看本机文件_不调用官方命令_不改用户目录() {
+    let (root, ctx) = temp_ctx("auth-status-local");
+    // 从没运行过 claude：没有 .claude.json，确定没登录
+    let fresh = auth_status_local(&ctx, "agents:claude-code");
+    assert_eq!(fresh.data["state"], "logged-out");
+    // 有 .claude.json 但没有登录记录：本机说明不了，报未知，等用户确认
+    std::fs::write(ctx.home_dir.join(".claude.json"), "{\"mcpServers\":{}}\n").unwrap();
+    let unclear = auth_status_local(&ctx, "agents:claude-code");
+    assert_eq!(unclear.data["state"], "unknown");
+    // 有登录记录：已登录并带出账号
+    std::fs::write(
+        ctx.home_dir.join(".claude.json"),
+        "{\"oauthAccount\":{\"emailAddress\":\"YOUR_EMAIL@example.com\"}}\n",
+    )
+    .unwrap();
+    let logged_in = auth_status_local(&ctx, "agents:claude-code");
+    assert_eq!(logged_in.data["state"], "logged-in");
+
+    // Codex：auth.json 里有登录项即已登录，取值不出现在结果里；没有 auth.json 报未知
+    let codex = ctx.home_dir.join(".codex");
+    std::fs::create_dir_all(&codex).unwrap();
+    let unknown = auth_status_local(&ctx, "agents:codex");
+    assert_eq!(unknown.data["state"], "unknown");
+    std::fs::write(
+        codex.join("auth.json"),
+        "{\"OPENAI_API_KEY\":\"sk-SECRET_VALUE\",\"tokens\":null}\n",
+    )
+    .unwrap();
+    let key = auth_status_local(&ctx, "agents:codex");
+    assert_eq!(key.data["state"], "logged-in");
+    assert_eq!(key.data["method"], "api_key");
+    assert!(!key.data.to_string().contains("SECRET_VALUE"));
+
+    assert_eq!(probe_log(&ctx), "", "没有调用任何官方命令");
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]

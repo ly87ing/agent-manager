@@ -407,11 +407,18 @@ fn run_shell(_home_dir: &Path, _cmd: &str, _timeout: Duration, action: &str) -> 
 }
 
 /// status 的版本探测：只对已解析出的实际二进制执行固定 `--version`，不执行策略中的 shell。
+///
+/// 版本号与配置目录无关，但官方 CLI 启动时会写配置目录（`codex` 每次都在 `CODEX_HOME/tmp` 建临时
+/// 目录）；查询不能改动用户目录，所以把两个配置目录变量指到系统临时目录里的专用位置。
 pub(crate) fn probe_version(bin_path: &Path) -> Option<String> {
+    let scratch = std::env::temp_dir().join("agent-manager-version-probe");
+    let _ = std::fs::create_dir_all(&scratch);
     let mut command = Command::new(bin_path);
     command
         .arg("--version")
         .env("PATH", path_for_command(bin_path))
+        .env("CODEX_HOME", &scratch)
+        .env("CLAUDE_CONFIG_DIR", &scratch)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

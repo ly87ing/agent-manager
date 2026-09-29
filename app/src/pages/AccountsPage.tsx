@@ -1,4 +1,4 @@
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { Activity, Copy, LogIn, MoreHorizontal, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -107,6 +107,8 @@ interface RowActions {
   onAddLaunch: () => void;
   onAdopt: () => void;
   onManageSkills: () => void;
+  /** 本机文件说明不了登录状态时，用官方命令确认一次（官方命令自己会写配置目录，所以只在点击时调用）。 */
+  onProbeAuth: () => void;
 }
 
 function AccountRow({
@@ -137,7 +139,9 @@ function AccountRow({
           ? `官方 · ${identity}`
           : auth?.state === "logged-out"
             ? "官方 · 未登录"
-            : "官方";
+            : auth?.state === "unknown"
+              ? "官方 · 未确认"
+              : "官方";
   const typeTitle = auth && auth !== "pending" && auth.account?.org ? `组织：${auth.account.org}` : undefined;
   const badges: { text: string; tone: "warn" | "muted" }[] = [];
   if (!account.isMain && !account.command) badges.push({ text: "没有启动命令", tone: "warn" });
@@ -170,6 +174,17 @@ function AccountRow({
           <span data-testid={`account-type-${id}`} title={typeTitle} className={cn("truncate", loggedOut && "text-warning")}>
             {typeText}
           </span>
+          {account.type === "official" && auth !== "pending" && auth?.state === "unknown" && (
+            <button
+              type="button"
+              data-testid={`account-probe-${id}`}
+              title={`${auth.reason ?? "本机文件说明不了登录状态"}。点一下运行官方命令确认（官方命令可能在配置目录里写自己的记录）`}
+              onClick={actions.onProbeAuth}
+              className="shrink-0 text-primary hover:underline"
+            >
+              确认
+            </button>
+          )}
           {account.model && <span className="truncate">· {account.model}</span>}
         </div>
       </div>
@@ -224,6 +239,7 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
   const profilesQuery = useEngineQuery<StatusData>("profiles:status");
   const secretsQuery = useEngineQuery<StatusData>("secrets:status");
   const ops = useAccountOps();
+  const queryClient = useQueryClient();
   const aliasSource = ops.aliasSource;
   const [selected, setSelected] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerMode | null>(null);
@@ -298,6 +314,13 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
       onAddLaunch: () => withDefinition(account, (definition) => void ops.addLaunch(profileId, definition, group.bin)),
       onAdopt: () => account.profileBase && void ops.adopt(account.elementId, account.profileBase),
       onManageSkills: () => onManageSkills?.(account.isMain ? group.agentId : profileId),
+      onProbeAuth: () =>
+        void runEngine<OfficialAuthStatus>("agents:auth-status", ["--only", account.elementId, "--probe"])
+          .then((envelope) => {
+            if (envelope.ok) queryClient.setQueryData(engineKeys.request("agents:auth-status", ["--only", account.elementId]), envelope);
+            else toast.error(envelope.errors[0]?.message ?? "确认失败");
+          })
+          .catch((reason) => toast.error(String(reason))),
     };
   };
 

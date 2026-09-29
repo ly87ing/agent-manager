@@ -149,6 +149,23 @@ describe("账号页", () => {
     expect(within(ds).getByText("API · api.deepseek.com")).toBeInTheDocument();
   });
 
+  it("打开页面只看本机登录记录；说明不了时显示「未确认」，点「确认」才带 --probe 用官方命令查", async () => {
+    const base = routes();
+    const { calls } = renderWithEngine(<AccountsPage />, {
+      ...base,
+      "agents:auth-status": async (args) =>
+        args.includes("--probe")
+          ? makeEnvelope({ element: "agents:claude-code", state: "logged-out", logged_in: false, method: null, account: null, third_party: false, mixed: false, reason: null }, { command: "agents.auth-status" })
+          : makeEnvelope({ element: "agents:claude-code", state: "unknown", logged_in: null, method: null, account: null, third_party: false, mixed: false, reason: "本机登录记录里没有账号" }, { command: "agents.auth-status" }),
+    });
+    const main = await screen.findByTestId("account-row-agents:claude-code");
+    expect(await within(main).findByText("官方 · 未确认")).toBeInTheDocument();
+    expect(calls.filter((call) => call.command === "agents:auth-status").every((call) => !call.args.includes("--probe"))).toBe(true);
+    await userEvent.click(within(main).getByTestId("account-probe-agents:claude-code"));
+    expect(await within(main).findByText("官方 · 未登录")).toBeInTheDocument();
+    expect(calls.find((call) => call.args.includes("--probe"))?.args).toEqual(["--only", "agents:claude-code", "--probe"]);
+  });
+
   it("新建官方账号：预览通过后依次登记、写目录、写启动命令（沿用主账号时区与参数）、带上全部共用设置", async () => {
     const { calls } = renderWithEngine(<AccountsPage />, routes());
     const drawer = await openCreate();

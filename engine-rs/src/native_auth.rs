@@ -160,6 +160,47 @@ struct CodexAuthTokens {
     id_token: Option<String>,
 }
 
+/// `auth.json` 里有没有登录项：只看 `tokens`、`OPENAI_API_KEY` 是否存在且非空，取值由
+/// `IgnoredAny` 跳过、不进任何内存结构。
+#[derive(serde::Deserialize)]
+struct CodexLoginPresence {
+    #[serde(default)]
+    tokens: Option<serde::de::IgnoredAny>,
+    #[serde(default, rename = "OPENAI_API_KEY")]
+    api_key: Option<serde::de::IgnoredAny>,
+}
+
+/// 不调用官方命令、只看本机文件判断 Codex 登录：`Some(true)` 有登录记录，`Some(false)` 确定没有，
+/// `None` 本机文件说明不了（例如登录存在钥匙串里），需要官方命令确认。
+fn codex_local_login(codex_home: &Path) -> Result<Option<LoginStatus>, String> {
+    if !codex_home.is_dir() {
+        return Ok(Some(logged_out()));
+    }
+    let bytes = match std::fs::read(codex_home.join("auth.json")) {
+        Ok(bytes) if bytes.len() <= 1024 * 1024 => bytes,
+        Ok(_) => return Err("auth.json 过大".into()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("无法读取 auth.json".into()),
+    };
+    let found = serde_json::from_slice::<CodexLoginPresence>(&bytes)
+        .map_err(|_| "auth.json 不是合法 JSON".to_string())?;
+    Ok(Some(if found.tokens.is_some() {
+        LoginStatus {
+            logged_in: true,
+            method: Some("chatgpt"),
+            account: codex_account(codex_home),
+        }
+    } else if found.api_key.is_some() {
+        LoginStatus {
+            logged_in: true,
+            method: Some("api_key"),
+            account: None,
+        }
+    } else {
+        logged_out()
+    }))
+}
+
 /// JWT 载荷用的 base64url（无填充）解码；只解码 `id_token` 的中段，不校验签名（只用于显示）。
 fn base64url_decode(text: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(text.len() * 3 / 4);
@@ -331,11 +372,16 @@ fn logged_out() -> LoginStatus {
 
 /// 某个配置目录里存的官方账号登录。`config_dir` 为 `None` 表示助手的主配置（不设
 /// `CLAUDE_CONFIG_DIR` / 用默认 `CODEX_HOME`），`Some` 是实例目录。`Err` 表示无法确认。
+///
+/// `probe` 为 false 时只看本机文件、不调用官方命令：官方命令本身会写配置目录（`claude` 首次运行
+/// 往 `.claude.json` 写首次启动字段并留备份，`codex` 在 `CODEX_HOME/tmp` 建临时文件），打开页面
+/// 这类查询不能因此改动用户目录。本机文件说明不了时返回 `Err`，由用户点「确认」再带 probe 查。
 pub(crate) fn official_status(
     home_dir: &Path,
     kind: AuthKind,
     bin: &str,
     config_dir: Option<&Path>,
+    probe: bool,
 ) -> Result<LoginStatus, String> {
     if config_dir.is_some_and(|dir| !dir.is_dir()) {
         return Ok(logged_out());
@@ -355,6 +401,21 @@ pub(crate) fn official_status(
                 account,
             });
         }
+        if !probe {
+            // 从没运行过（没有 .claude.json）就一定没登录；有文件但没有登录记录时，可能是托管设置里的
+            // 长期令牌等官方命令才看得到的来源，交给用户确认
+            return if claude_json.exists() {
+                Err("本机登录记录里没有账号；需要时用官方命令确认".into())
+            } else {
+                Ok(logged_out())
+            };
+        }
+    }
+    if matches!(kind, AuthKind::Codex) && !probe {
+        let codex_home = config_dir.map_or_else(|| home_dir.join(".codex"), Path::to_path_buf);
+        return codex_local_login(&codex_home)?.ok_or_else(|| {
+            "本机没有 auth.json（登录可能存在钥匙串里）；需要时用官方命令确认".into()
+        });
     }
     let cli = resolve_cli(home_dir, bin)
         .ok_or_else(|| format!("找不到 {bin} 命令，无法用官方命令确认登录状态"))?;
@@ -448,24 +509,28 @@ pub(crate) fn official_login(
     bin: &str,
     config_dir: &Path,
 ) -> Result<bool, String> {
-    official_status(home_dir, kind, bin, Some(config_dir)).map(|status| status.logged_in)
+    // 写入前的核对（用户已发起操作）：本机文件说明不了时用官方命令确认
+    official_status(home_dir, kind, bin, Some(config_dir), true).map(|status| status.logged_in)
 }
 
 /// `agents:auth-status --only <agents:助手 | profiles:实例>`：用官方命令查一次登录状态。
 ///
 /// 只读：不写库、不取锁、不读取凭据内容，只返回是否登录与登录方式。第三方实例里有官方登录时
-/// 标为 `mixed`（两种凭据混在同一个配置目录）。官方命令一次要一两秒，只在界面上点它时才调用。
+/// 标为 `mixed`（两种凭据混在同一个配置目录）。默认只看本机文件；带 `--probe` 才调用官方命令
+/// （一次要一两秒，且官方命令自己会写配置目录），只在用户点「确认」时带上。
 pub(crate) fn status_command(
     ctx: &crate::native::Context,
     req: &crate::native::Request,
 ) -> anyhow::Result<Value> {
     let mut only = None;
+    let mut probe = false;
     let mut iter = req.args.iter();
     while let Some(arg) = iter.next() {
         match (arg.as_str(), only.is_some()) {
             ("--only", false) => only = iter.next().cloned(),
+            ("--probe", _) => probe = true,
             _ => {
-                anyhow::bail!("agents:auth-status 只接受一个 --only <agents:助手 | profiles:实例>")
+                anyhow::bail!("agents:auth-status 只接受一个 --only <agents:助手 | profiles:实例> 与可选的 --probe")
             }
         }
     }
@@ -506,7 +571,7 @@ pub(crate) fn status_command(
         };
         (kind, def.bin.clone(), None, false)
     };
-    let result = official_status(&ctx.home_dir, kind, &bin, config_dir.as_deref());
+    let result = official_status(&ctx.home_dir, kind, &bin, config_dir.as_deref(), probe);
     Ok(match result {
         Ok(status) => json!({
             "element": only,
@@ -1505,7 +1570,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         assert_eq!(resolve_cli(&home, &cli), Some(bin.join(&cli)));
-        let status = official_status(&home, AuthKind::Codex, &cli, Some(&dir));
+        let status = official_status(&home, AuthKind::Codex, &cli, Some(&dir), true);
         assert_eq!(status.map(|s| s.logged_in), Ok(false));
         let _ = std::fs::remove_dir_all(&home);
     }
