@@ -311,10 +311,11 @@ export default function McpPage() {
           }
         />
       ) : (
-        <div className="overflow-hidden rounded-lg border bg-card">
+        <div className="overflow-clip rounded-lg border bg-card">
           <AccountHeader
+            className="sticky top-0 z-10"
             groups={groups}
-            left={<span>点账号下的「补齐」把在用的服务复制到这个账号</span>}
+            left={<span className="font-medium text-foreground">MCP 服务 · {shown.length}</span>}
             below={(column) => {
               const missing = writableAgents.includes(column.id) ? mcpFillRows(elements, targets, [column.id]).length : 0;
               return (

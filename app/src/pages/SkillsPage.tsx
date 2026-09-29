@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, PackageOpen, Pencil, Plus, RefreshCw, SearchX, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, PackageOpen, Pencil, Power, PowerOff, Plus, RefreshCw, SearchX, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -7,7 +7,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
-import { AccountCells, AccountHeader, AccountSwitch, ActionMenu, RowActions } from "../components/AccountGrid";
+import { AccountCells, AccountHeader, AccountSwitch, ActionMenu, IconAction, RowActions } from "../components/AccountGrid";
 import { skillChip, skillNeedsUpdate } from "../lib/skillChip";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import { SkillInstalledView } from "../components/SkillInstalledView";
@@ -330,11 +330,11 @@ export default function SkillsPage({
           }
         />
       ) : (
-        <div className="space-y-2">
+        <div className="overflow-clip rounded-lg border bg-card">
           <AccountHeader
-            className="sticky top-0 z-10 rounded-lg border bg-muted"
+            className="sticky top-0 z-10"
             groups={groups}
-            left={<span data-testid="skills-counts">{shownSkillCount} 个技能 · 点账号下的「补齐」把在用的技能加到这个账号</span>}
+            left={<span data-testid="skills-counts" className="font-medium text-foreground">技能 · {shownSkillCount}</span>}
             below={(column) => {
               const rows = fillOf(column.id);
               return rows.length > 0 ? (
@@ -348,9 +348,7 @@ export default function SkillsPage({
                 >
                   补齐 {rows.length}
                 </button>
-              ) : (
-                <span className="text-muted-foreground/70">齐了</span>
-              );
+              ) : null;
             }}
           />
           {visibleCollections.map((collection) => {
@@ -366,8 +364,8 @@ export default function SkillsPage({
             const onCount = (agent: string) =>
               rows.filter((skill) => ACTIVE.has((skill.observed as SkillObserved).agents?.[agent]?.state ?? "")).length;
             return (
-              <section key={collection.id} data-testid={`collection-card-${name}`} className="overflow-hidden rounded-lg border bg-card">
-                <header className={cn("group flex items-center gap-3 py-2.5 pl-3 pr-4", open && "border-b bg-muted/50")}>
+              <section key={collection.id} data-testid={`collection-card-${name}`} className="border-b last:border-b-0">
+                <header className={cn("group flex items-center gap-3 bg-muted/40 py-2 pl-3 pr-4", open && "border-b")}>
                   <div className="flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap [&>span]:shrink-0">
                   <button
                     type="button"
@@ -403,52 +401,6 @@ export default function SkillsPage({
                       新发现 {inboxCount}
                     </span>
                   )}
-                  <div className="ml-auto flex shrink-0 items-center gap-1">
-                    {actions.includes("update") && (
-                      <button
-                        type="button"
-                        data-testid={`update-collection-${name}`}
-                        onClick={() => runCollectionAction(collection, "update", `更新集合 ${name}`)}
-                        className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-primary hover:bg-primary/10"
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" aria-hidden /> 更新
-                      </button>
-                    )}
-                    <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                    <button
-                      type="button"
-                      data-testid={`edit-collection-${name}`}
-                      aria-label={`编辑集合 ${name}`}
-                      title="编辑定义"
-                      onClick={() => setEditing(collection)}
-                      className="rounded p-1.5 text-muted-foreground hover:bg-accent"
-                    >
-                      <Pencil className="h-3.5 w-3.5" aria-hidden />
-                    </button>
-                    {actions.includes("enable") && !enabled && (
-                      <button type="button" data-testid={`enable-collection-${name}`} onClick={() => runCollectionAction(collection, "enable", `启用集合 ${name}`)} className="rounded px-2 py-1 text-xs text-success hover:bg-success/10">
-                        启用
-                      </button>
-                    )}
-                    {actions.includes("disable") && enabled && (
-                      <button type="button" data-testid={`disable-collection-${name}`} onClick={() => runCollectionAction(collection, "disable", `停用集合 ${name}`)} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent">
-                        停用
-                      </button>
-                    )}
-                    {actions.includes("remove") && (
-                      <button
-                        type="button"
-                        data-testid={`remove-collection-${name}`}
-                        aria-label={`删除集合 ${name}`}
-                        title="删除集合"
-                        onClick={() => setPendingRemove(collection)}
-                        className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                      </button>
-                    )}
-                    </div>
-                  </div>
                   </div>
                   <AccountCells
                     groups={groups}
@@ -458,7 +410,39 @@ export default function SkillsPage({
                       </span>
                     )}
                   />
-                  <div className="w-16 shrink-0" />
+                  <RowActions
+                    always={
+                      actions.includes("update") && (collection.freshness.state === "behind" || !observed.repo_cached) ? (
+                        <IconAction tone="primary" label={`更新集合 ${name}`} testId={`update-collection-${name}`} onClick={() => runCollectionAction(collection, "update", `更新集合 ${name}`)}>
+                          <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                        </IconAction>
+                      ) : null
+                    }
+                  >
+                    {actions.includes("update") && collection.freshness.state !== "behind" && observed.repo_cached && (
+                      <IconAction label={`更新集合 ${name}`} testId={`update-collection-${name}`} onClick={() => runCollectionAction(collection, "update", `更新集合 ${name}`)}>
+                        <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                      </IconAction>
+                    )}
+                    <IconAction label={`编辑集合 ${name}`} testId={`edit-collection-${name}`} onClick={() => setEditing(collection)}>
+                      <Pencil className="h-3.5 w-3.5" aria-hidden />
+                    </IconAction>
+                    {actions.includes("enable") && !enabled && (
+                      <IconAction label={`启用集合 ${name}`} testId={`enable-collection-${name}`} onClick={() => runCollectionAction(collection, "enable", `启用集合 ${name}`)}>
+                        <Power className="h-3.5 w-3.5" aria-hidden />
+                      </IconAction>
+                    )}
+                    {actions.includes("disable") && enabled && (
+                      <IconAction label={`停用集合 ${name}`} testId={`disable-collection-${name}`} onClick={() => runCollectionAction(collection, "disable", `停用集合 ${name}`)}>
+                        <PowerOff className="h-3.5 w-3.5" aria-hidden />
+                      </IconAction>
+                    )}
+                    {actions.includes("remove") && (
+                      <IconAction danger label={`删除集合 ${name}`} testId={`remove-collection-${name}`} onClick={() => setPendingRemove(collection)}>
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                      </IconAction>
+                    )}
+                  </RowActions>
                 </header>
                 {observed.discovery_error && (
                   <p data-testid={`discovery-error-${name}`} className="bg-warning/10 px-4 py-1.5 text-xs text-warning">
