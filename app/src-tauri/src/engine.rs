@@ -73,6 +73,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("agents", "status") => true,
         // 用量：status 只读，scan 读会话文件后写聚合，clear 清空重来
         ("usage", "status" | "scan" | "clear") => true,
+        // 「改成我的版本」：把技能复制到用户目录并登记为用户的本机集合
+        ("skills", "fork") => true,
         (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
     };
@@ -235,6 +237,11 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         }
         // 配置备份：导出不带参数，导入只接整份备份正文
         ("config", "import") => specs.push(("--value", ArgValueKind::JsonValue)),
+        ("skills", "fork") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--dest", ArgValueKind::FilePath));
+            specs.push(("--collection", ArgValueKind::ElementId));
+        }
         ("agents", "auth-status") => {
             specs.push(("--only", ArgValueKind::ElementId));
             // 用户点「确认」时才带：用官方命令查
@@ -1328,6 +1335,24 @@ mod tests {
             &args(&["--only", "profiles:cc-ly", "--probe"])
         )
         .is_ok());
+        assert!(validate_command("skills:fork").is_ok());
+        assert!(validate_args(
+            "skills:fork",
+            &args(&[
+                "--only",
+                "skill:agent-skills/verification",
+                "--dest",
+                "~/my-skills",
+                "--collection",
+                "my-skills"
+            ])
+        )
+        .is_ok());
+        assert!(validate_args(
+            "skills:fork",
+            &args(&["--only", "skill:a/b", "--action", "remove"])
+        )
+        .is_err());
         assert!(validate_args(
             "agents:auth-status",
             &args(&["--only", "agents:claude-code", "--base", &base])

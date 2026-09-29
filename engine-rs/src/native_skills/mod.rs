@@ -8,6 +8,7 @@
 
 mod apply;
 mod discover;
+mod fork;
 mod paths;
 mod persistence;
 mod preflight;
@@ -96,6 +97,7 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     match req.command.as_str() {
         "skills:status" | "skills.status" => status::build_status(ctx),
         "skills:apply" | "skills.apply" => apply::apply(ctx, req),
+        "skills:fork" | "skills.fork" => fork::fork(ctx, req),
         other => bail!("native_skills 不支持命令 '{}'", other),
     }
 }

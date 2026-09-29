@@ -61,7 +61,7 @@ pub fn hash_skill_dir(dir: &Path) -> Result<String> {
     Ok(format!("{:x}", h.finalize()))
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     std::fs::create_dir_all(dst)?;
     let mut stack = vec![src.to_path_buf()];
     while let Some(current) = stack.pop() {

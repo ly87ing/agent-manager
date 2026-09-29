@@ -3033,3 +3033,103 @@ fn removing_a_collection_without_purge_keeps_downloads() {
     assert!(repo.exists());
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 「改成我的版本」：复制现在用着的那一版到用户目录（可改），登记为用户的本机集合并记下来历；
+/// 账号换过去后上游出新版只提示、不动用户文件；同名目录或指向别处的集合名一律拒绝。
+#[test]
+fn forking_a_skill_copies_it_into_the_users_collection_and_tracks_upstream() {
+    let (root, context) = temp_ctx("skills-fork");
+    let repo = context.data_dir.join("repositories").join("upstream");
+    std::fs::create_dir_all(repo.join("skills/alpha")).unwrap();
+    std::fs::write(repo.join("skills/alpha/SKILL.md"), "# alpha v1\n").unwrap();
+    std::fs::write(repo.join(".agent-manager-owned"), "{}").unwrap();
+    set_collection(
+        &context,
+        "upstream",
+        r#"{"url":"https://example.com/upstream.git","skill_paths":["skills"]}"#,
+    );
+    assert!(skill_action(&context, "skill:upstream/alpha", "add", "claude-code").ok);
+
+    let mine_root = root.join("mine");
+    let dest = mine_root.to_string_lossy().to_string();
+    let forked = execute(
+        &context,
+        &request(
+            "skills:fork",
+            &["--only", "skill:upstream/alpha", "--dest", &dest],
+        ),
+    );
+    assert!(forked.ok, "{:?}", forked.errors);
+    assert_eq!(forked.data["collection"], "my-skills");
+    let copy = mine_root.join("alpha/SKILL.md");
+    assert_eq!(std::fs::read_to_string(&copy).unwrap(), "# alpha v1\n");
+    std::fs::write(&copy, "# alpha v1\n我的修改\n").expect("复制出来的文件可以改");
+
+    // 账号换到用户的版本：先取消原分配，再加用户的
+    assert!(skill_action(&context, "skill:upstream/alpha", "remove", "claude-code").ok);
+    let added = skill_action(&context, "skill:my-skills/alpha", "add", "claude-code");
+    assert!(added.ok, "{:?}", added.errors);
+    let link = context.home_dir.join(".claude/skills/alpha");
+    assert_eq!(
+        std::fs::read_to_string(link.join("SKILL.md")).unwrap(),
+        "# alpha v1\n我的修改\n"
+    );
+
+    let status = execute(&context, &request("skills:status", &[]));
+    let element = |id: &str| {
+        status.data["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        element("skill:my-skills/alpha")["observed"]["forked_from"]["collection"],
+        "upstream"
+    );
+    assert_eq!(
+        element("skill:my-skills/alpha")["observed"]["forked_from"]["upstream_changed"],
+        false
+    );
+
+    // 上游出新版：只提示，用户文件不动
+    std::fs::write(repo.join("skills/alpha/SKILL.md"), "# alpha v2\n").unwrap();
+    let status = execute(&context, &request("skills:status", &[]));
+    let forked_from = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "skill:my-skills/alpha")
+        .unwrap()["observed"]["forked_from"]
+        .clone();
+    assert_eq!(forked_from["upstream_changed"], true);
+    assert_eq!(
+        std::fs::read_to_string(&copy).unwrap(),
+        "# alpha v1\n我的修改\n"
+    );
+
+    // 再复制一次：目录已经有了，不覆盖
+    let again = execute(
+        &context,
+        &request(
+            "skills:fork",
+            &["--only", "skill:upstream/alpha", "--dest", &dest],
+        ),
+    );
+    assert!(!again.ok);
+    assert!(format!("{:?}", again.errors).contains("不覆盖"));
+    // 集合名已指向别处：拒绝
+    let elsewhere = root.join("other").to_string_lossy().to_string();
+    let clash = execute(
+        &context,
+        &request(
+            "skills:fork",
+            &["--only", "skill:upstream/alpha", "--dest", &elsewhere],
+        ),
+    );
+    assert!(!clash.ok);
+    assert!(format!("{:?}", clash.errors).contains("已经指向别处"));
+    let _ = std::fs::remove_dir_all(root);
+}

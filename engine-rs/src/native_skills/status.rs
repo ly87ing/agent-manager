@@ -512,6 +512,8 @@ fn build_skill_element(
         "observed": {
             "agents": Value::Object(agg.agents_cell_map),
             "discovery_inbox": is_inbox,
+            // 用户「改成我的版本」时记下的来历：来自哪个集合的哪个版本、上游是否已有新版
+            "forked_from": super::fork::origin_json(ctx, meta, coll, skill_name),
         },
         "state": skill_state,
         "freshness": {
