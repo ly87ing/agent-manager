@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import { Plus, SearchX, Server, Wand2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { Plus, SearchX, Server } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { mcpEntrySummary } from "../components/McpAssignmentRow";
-import { McpCopyDialog } from "../components/McpCopyDialog";
+import { AccountHeader } from "../components/AccountGrid";
+import { McpRemoveDialog, type McpRemovePreview } from "../components/McpRemoveDialog";
 import { McpServerCard } from "../components/McpServerCard";
 import { McpServerFormDialog, type McpFilePreview, type McpFormMode, type McpFormPayload } from "../components/McpServerFormDialog";
 import { PageError, PageLoading } from "../components/PageState";
@@ -19,7 +20,7 @@ import { useEngineQuery } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
 import { useExecutions } from "../lib/execution";
 import { mcpFillArgs, mcpFillRows } from "../lib/mcpFill";
-import { useAccountNames } from "../lib/useAccountNames";
+import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
 
 function cellsOf(element: EngineElement): Record<string, McpAgentCell> {
   return (element.observed as McpObserved).agents ?? {};
@@ -46,42 +47,16 @@ export default function McpPage() {
   const directApply = useDirectApply();
   const { execute } = useExecutions();
   const nameOfAgent = useAccountNames();
+  const groupsOf = useAccountGroups();
   const [search, setSearch] = useState("");
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [filling, setFilling] = useState(false);
   const [form, setForm] = useState<McpFormMode | null>(null);
   /** 从已保存定义添加时，按助手追加的参数（旧版 extra_args_by_agent）。 */
   const savedExtraArgs = useRef<Record<string, string[]>>({});
-  const [copying, setCopying] = useState<{ element: EngineElement; agent: string; cell: McpAgentCell; to?: string } | null>(null);
-  const [pendingRemove, setPendingRemove] = useState<{ element: EngineElement; agent: string; cell: McpAgentCell } | null>(null);
-  const [removePreview, setRemovePreview] = useState<{
-    key: string;
-    files: { path: string; exists: boolean; content: string }[];
-    warnings: string[];
-    error?: string;
-  } | null>(null);
+  const [removing, setRemoving] = useState<EngineElement | null>(null);
   const [pendingForget, setPendingForget] = useState<EngineElement | null>(null);
   const [editingSecret, setEditingSecret] = useState<string | null>(null);
-  const removeKey = pendingRemove ? JSON.stringify([pendingRemove.element.id, pendingRemove.agent, pendingRemove.cell.base]) : "";
-
-  useEffect(() => {
-    if (!pendingRemove) return;
-    let current = true;
-    const args = ["--only", pendingRemove.element.id, "--agent", pendingRemove.agent,
-      "--action", "remove", "--base", pendingRemove.cell.base];
-    void runEngine<{ files: { path: string; exists: boolean; content: string }[] }>("mcp:preview", args)
-      .then((envelope) => {
-        if (!current) return;
-        setRemovePreview(envelope.ok
-          ? { key: removeKey, files: envelope.data.files, warnings: envelope.warnings.map((warning) => warning.message) }
-          : { key: removeKey, files: [], warnings: [], error: envelope.errors[0]?.message ?? "预览失败" });
-      })
-      .catch((reason) => {
-        if (current) setRemovePreview({ key: removeKey, files: [], warnings: [], error: engineErrorMessage(reason) });
-      });
-    return () => { current = false; };
-  }, [removeKey]);
-
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="MCP 状态读取失败" error={query.error} />;
   if (!query.data.ok) {
@@ -105,23 +80,48 @@ export default function McpPage() {
       return envelope;
     });
 
+  /** 账号开关：启用 / 停用这一个账号上的条目。 */
   const handleAction = (element: EngineElement, agent: string, action: string, cell: McpAgentCell) => {
-    const name = nameOf(element);
-    if (action === "edit") {
-      setForm({ kind: "edit", name, agent, cell, format: targetOf(agent)?.format ?? "" });
-      return;
-    }
-    if (action === "copy") {
-      setCopying({ element, agent, cell });
-      return;
-    }
-    if (action === "remove") {
-      setRemovePreview(null);
-      setPendingRemove({ element, agent, cell });
-      return;
-    }
-    const label = `${action === "enable" ? "启用" : "停用"} ${name} @ ${agent}`;
+    const label = `${action === "enable" ? "启用" : "停用"} ${nameOf(element)} @ ${nameOfAgent(agent)}`;
     void apply(label, ["--only", element.id, "--agent", agent, "--action", action, "--base", cell.base]);
+  };
+
+  /** 编辑：一张表单写到所有有这个服务的账号；各账号内容不同时先以 base 那份预填。 */
+  const openEdit = (element: EngineElement, base?: string) => {
+    const editable = Object.entries(cellsOf(element)).filter(([, cell]) => cell.actions.includes("edit"));
+    if (editable.length === 0) return;
+    const [agent, cell] = editable.find(([key]) => key === base) ?? editable[0];
+    setForm({
+      kind: "edit",
+      name: nameOf(element),
+      agent,
+      cell,
+      format: targetOf(agent)?.format ?? "",
+      targets: editable.map(([key, item]) => ({ agent: key, cell: item, format: targetOf(key)?.format ?? "" })),
+      differs: new Set(editable.map(([, item]) => mcpEntrySummary(item))).size > 1,
+    });
+  };
+
+  const removePreview = async (element: EngineElement, agent: string, cell: McpAgentCell): Promise<McpRemovePreview> => {
+    const args = ["--only", element.id, "--agent", agent, "--action", "remove", "--base", cell.base];
+    try {
+      const envelope = await runEngine<{ files: { path: string; exists: boolean; content: string }[] }>("mcp:preview", args);
+      return envelope.ok
+        ? { files: envelope.data.files, warnings: envelope.warnings.map((warning) => warning.message) }
+        : envelope.errors[0]?.message ?? "预览失败";
+    } catch (reason) {
+      return engineErrorMessage(reason);
+    }
+  };
+
+  /** 删除：逐个账号执行，各自带写入基准；一个失败不拦其他。 */
+  const runRemove = async (element: EngineElement, agents: string[]) => {
+    setRemoving(null);
+    for (const agent of agents) {
+      const cell = cellsOf(element)[agent];
+      if (!cell) continue;
+      await apply(`从 ${nameOfAgent(agent)} 删除 ${nameOf(element)}`, ["--only", element.id, "--agent", agent, "--action", "remove", "--base", cell.base]);
+    }
   };
 
   const specFor = (payload: McpFormPayload, agent: string): Record<string, unknown> => {
@@ -134,12 +134,15 @@ export default function McpPage() {
     return spec;
   };
 
+  /** 编辑时每个账号用它自己条目的写入基准。 */
+  const baseOf = (agent: string) => (form?.kind === "edit" ? form.targets.find((target) => target.agent === agent)?.cell.base : undefined);
   const previewForm = async (payload: McpFormPayload): Promise<McpFilePreview[]> => {
     return Promise.all(payload.agents.map(async (agent): Promise<McpFilePreview> => {
+      const base = baseOf(agent);
       const args = [
         "--only", `mcp:${payload.name}`, "--agent", agent,
         "--action", form?.kind === "edit" ? "edit" : "add",
-        ...(form?.kind === "edit" ? ["--base", form.cell.base] : []),
+        ...(base ? ["--base", base] : []),
         "--spec", JSON.stringify(specFor(payload, agent)),
       ];
       try {
@@ -163,23 +166,26 @@ export default function McpPage() {
     setForm(null);
     if (!mode) return;
     if (mode.kind === "edit") {
-      void apply(`编辑 ${payload.name} @ ${mode.agent}`, [
-        "--only",
-        `mcp:${payload.name}`,
-        "--agent",
-        mode.agent,
-        "--action",
-        "edit",
-        "--base",
-        mode.cell.base,
-        "--spec",
-        JSON.stringify(specFor(payload, mode.agent)),
-      ]);
+      // 各账号逐个写入，各自核对是否被外部改过：一个失败不拦其他
+      for (const target of mode.targets) {
+        await apply(`编辑 ${payload.name} @ ${nameOfAgent(target.agent)}`, [
+          "--only",
+          `mcp:${payload.name}`,
+          "--agent",
+          target.agent,
+          "--action",
+          "edit",
+          "--base",
+          target.cell.base,
+          "--spec",
+          JSON.stringify(specFor(payload, target.agent)),
+        ]);
+      }
       return;
     }
     // 各助手逐个写入，互不影响：一个失败不拦其他
     for (const agent of payload.agents) {
-      await apply(`新增 ${payload.name} @ ${agent}`, [
+      await apply(`新增 ${payload.name} @ ${nameOfAgent(agent)}`, [
         "--only",
         `mcp:${payload.name}`,
         "--agent",
@@ -210,12 +216,13 @@ export default function McpPage() {
   const disabledCount = elements.filter((element) => element.state === "disabled").length;
 
   const writableAgents = targets.filter((target) => target.error === null && target.agent_enabled).map((target) => target.agent);
-  const shownAgents = agentFilter === "all" ? writableAgents : writableAgents.filter((agent) => agent === agentFilter);
+  const groups = groupsOf(agentFilter === "all" ? agentColumns : agentColumns.filter((agent) => agent === agentFilter));
+  const enabledOn = (agent: string) => elements.filter((element) => cellsOf(element)[agent]?.state === "enabled").length;
   const shown = agentFilter === "all" ? filtered : filtered.filter((element) => cellsOf(element)[agentFilter]);
-  const pendingFill = mcpFillRows(elements, targets, agentFilter === "all" ? undefined : [agentFilter]);
-  /** 补齐：逐条复制，单条失败不影响其余；每条仍由引擎带 base 锁内核对。 */
-  const runFill = async () => {
-    if (filling) return;
+  /** 补齐一个账号：把在用的服务从同类账号逐条复制过来，单条失败不影响其余；每条仍由引擎带 base 锁内核对。 */
+  const runFill = async (agent: string) => {
+    const pendingFill = mcpFillRows(elements, targets, [agent]);
+    if (filling || pendingFill.length === 0) return;
     setFilling(true);
     let ok = 0;
     let failed = 0;
@@ -266,18 +273,6 @@ export default function McpPage() {
           共 {elements.length} 个服务{disabledCount > 0 ? `，${disabledCount} 个已停用` : ""}
         </span>
         <div className="ml-auto flex items-center gap-2">
-          {pendingFill.length > 0 && (
-            <button
-              type="button"
-              data-testid="mcp-fill"
-              disabled={filling || busy}
-              title="把在用的服务从同类账号复制到还没有它的账号；账号上停用的不动"
-              onClick={() => void runFill()}
-              className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/15 disabled:opacity-40"
-            >
-              <Wand2 className="h-4 w-4" aria-hidden /> 补齐 {pendingFill.length}
-            </button>
-          )}
           <button
             type="button"
             data-testid="add-server-button"
@@ -316,102 +311,83 @@ export default function McpPage() {
           }
         />
       ) : (
-        <ul className="divide-y rounded-lg border bg-card">
-          {shown.map((element) => (
-            <McpServerCard
-              key={element.id}
-              element={element}
-              agents={shownAgents}
-              busy={busy}
-              exclusive={agentFilter !== "all"}
-              nameOf={nameOfAgent}
-              onAddHere={(target, from, to) => {
-                const cell = cellsOf(target)[from];
-                if (cell) setCopying({ element: target, agent: from, cell, to });
-              }}
-              onAction={handleAction}
-              onAddFromSaved={openAddFromSaved}
-              onForget={setPendingForget}
-              onConfigureSecrets={setEditingSecret}
-            />
-          ))}
-        </ul>
+        <div className="overflow-hidden rounded-lg border bg-card">
+          <AccountHeader
+            groups={groups}
+            left={<span>点账号下的「补齐」把在用的服务复制到这个账号</span>}
+            below={(column) => {
+              const missing = writableAgents.includes(column.id) ? mcpFillRows(elements, targets, [column.id]).length : 0;
+              return (
+                <>
+                  <span className="tabular-nums" data-testid={`mcp-count-${column.id}`}>{enabledOn(column.id)}/{elements.length}</span>
+                  {missing > 0 && (
+                    <button
+                      type="button"
+                      data-testid={`mcp-fill-${column.id}`}
+                      disabled={filling || busy}
+                      title={`把在用的 ${missing} 个服务复制到 ${column.fullName}；账号上停用的不动`}
+                      onClick={() => void runFill(column.id)}
+                      className="text-primary hover:underline disabled:opacity-40"
+                    >
+                      补齐 {missing}
+                    </button>
+                  )}
+                </>
+              );
+            }}
+          />
+          <ul className="divide-y">
+            {shown.map((element) => (
+              <McpServerCard
+                key={element.id}
+                element={element}
+                groups={groups}
+                writable={writableAgents}
+                busy={busy}
+                formatOf={(agent) => targetOf(agent)?.format}
+                onAddHere={(target, from, to) => {
+                  const cell = cellsOf(target)[from];
+                  if (cell) void apply(`把 ${nameOf(target)} 复制到 ${nameOfAgent(to)}`, copyArgs(target, from, cell.base, to, null));
+                }}
+                onAction={handleAction}
+                onEdit={(target) => openEdit(target)}
+                onRemove={setRemoving}
+                onAddFromSaved={openAddFromSaved}
+                onForget={setPendingForget}
+                onConfigureSecrets={setEditingSecret}
+              />
+            ))}
+          </ul>
+        </div>
       )}
 
-      {form && <McpServerFormDialog mode={form} onClose={() => setForm(null)} onSubmit={(payload) => void submitForm(payload)} onPreview={previewForm} />}
-
-      {copying && (
-        <McpCopyDialog
-          name={nameOf(copying.element)}
-          from={copying.agent}
-          initialTo={copying.to}
-          targets={targets}
-          cells={cellsOf(copying.element)}
-          busy={busy}
-          onPreview={async ({ to, replaceBase }) => {
-            const args = copyArgs(copying.element, copying.agent, copying.cell.base, to, replaceBase);
-            try {
-              const envelope = await runEngine<{ files: { path: string; exists: boolean; content: string }[] }>("mcp:preview", args);
-              return envelope.ok
-                ? { files: envelope.data.files, warnings: envelope.warnings.map((warning) => warning.message) }
-                : envelope.errors[0]?.message ?? "预览失败";
-            } catch (reason) {
-              return engineErrorMessage(reason);
-            }
+      {form && (
+        <McpServerFormDialog
+          key={form.kind === "edit" ? `edit:${form.agent}` : "add"}
+          mode={form}
+          nameOf={nameOfAgent}
+          onSwitchBase={(agent) => {
+            const element = elements.find((item) => item.id === `mcp:${form.kind === "edit" ? form.name : ""}`);
+            if (element) openEdit(element, agent);
           }}
-          onClose={() => setCopying(null)}
-          onSubmit={({ to, replaceBase }) => {
-            const { element, agent, cell } = copying;
-            setCopying(null);
-            void apply(`复制 ${nameOf(element)}：${agent} → ${to}`, copyArgs(element, agent, cell.base, to, replaceBase));
-          }}
+          onClose={() => setForm(null)}
+          onSubmit={(payload) => void submitForm(payload)}
+          onPreview={previewForm}
         />
       )}
 
-      {pendingRemove && (
-        <ConfirmModal
-          title={`从 ${pendingRemove.agent} 删除 ${nameOf(pendingRemove.element)}`}
-          description={
-            pendingRemove.cell.source === "saved"
-              ? "删除本工具里保存的这份停用内容，之后无法再启用。确认后执行。"
-              : `从 ${pendingRemove.agent} 的配置文件里删掉这一条${pendingRemove.cell.has_saved ? "，连同本工具保存的停用内容" : ""}，其他条目与配置保持不变。确认后执行。`
-          }
-          risk="write-local"
-          riskLabel={pendingRemove.cell.source === "saved" ? "删除已保存内容" : undefined}
-          confirmLabel="确认删除"
-          confirmDisabled={removePreview?.key !== removeKey || Boolean(removePreview.error)}
-          executing={busy}
-          onConfirm={() => {
-            const { element, agent, cell } = pendingRemove;
-            setPendingRemove(null);
-            void apply(`从 ${agent} 删除 ${nameOf(element)}`, [
-              "--only",
-              element.id,
-              "--agent",
-              agent,
-              "--action",
-              "remove",
-              "--base",
-              cell.base,
-            ]);
-          }}
-          onClose={() => setPendingRemove(null)}
-        >
-          <section className="mt-3 space-y-2 rounded border p-3 text-xs" data-testid="mcp-remove-preview">
-            <p className="font-medium">删除后的配置文件</p>
-            {removePreview?.key !== removeKey && <p className="text-muted-foreground">正在读取实际文件并计算…</p>}
-            {removePreview?.key === removeKey && removePreview.error && <p role="alert" className="text-destructive">{removePreview.error}</p>}
-            {removePreview?.key === removeKey && !removePreview.error && <>
-              {removePreview.files.length === 0 && <p className="text-muted-foreground">只删除已保存的停用内容，助手配置文件不变。</p>}
-              {removePreview.files.map((file) => <div key={file.path} className="space-y-1">
-                <p className="break-all font-mono">{file.path}{file.exists ? "（已有文件）" : "（将新建）"}</p>
-                <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono" data-testid="mcp-remove-preview-content">{file.content}</pre>
-              </div>)}
-              {removePreview.warnings.map((warning) => <p key={warning} className="text-warning">{warning}</p>)}
-            </>}
-            <p className="text-muted-foreground">只读预览；文件原文可能含敏感值，仅在本机查看。</p>
-          </section>
-        </ConfirmModal>
+      {removing && (
+        <McpRemoveDialog
+          name={nameOf(removing)}
+          entries={Object.entries(cellsOf(removing))
+            .filter(([, cell]) => cell.actions.includes("remove"))
+            .map(([agent, cell]) => ({ agent, cell }))}
+          busy={busy}
+          nameOf={nameOfAgent}
+          onPreview={(agent, cell) => removePreview(removing, agent, cell)}
+          onConfirm={(agents) => void runRemove(removing, agents)}
+          onClose={() => setRemoving(null)}
+        />
       )}
 
       {pendingForget && (

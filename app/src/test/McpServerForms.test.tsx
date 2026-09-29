@@ -25,8 +25,9 @@ describe("McpServerFormDialog", () => {
     render(<McpServerFormDialog mode={{ kind: "add", targets: mcpTargets() }} onSubmit={vi.fn()} onPreview={onPreview} onClose={vi.fn()} />);
     const dialog = screen.getByRole("dialog");
     await userEvent.type(within(dialog).getByTestId("server-name-input"), "example");
-    await userEvent.click(within(dialog).getByTestId("server-agent-claude-code"));
-    await userEvent.click(within(dialog).getByTestId("server-agent-codex"));
+    // 新服务默认写到全部账号
+    expect(within(dialog).getByTestId("server-agent-claude-code")).toBeChecked();
+    expect(within(dialog).getByTestId("server-agent-codex")).toBeChecked();
     await userEvent.type(within(dialog).getByTestId("server-command-input"), "npx");
     await waitFor(() => expect(within(dialog).getByTestId("mcp-preview-content-codex")).toHaveTextContent('"command":"npx"'));
     expect(within(dialog).getByTestId("mcp-preview-content-claude-code")).toHaveTextContent('"command":"npx"');
@@ -47,13 +48,15 @@ describe("McpServerFormDialog", () => {
     expect(within(dialog).queryByTestId("mcp-preview-content-claude-code")).toBeNull();
   });
 
-  it("新增：名称与助手必填；超时输入只在选中 Codex 时出现", async () => {
+  it("新增：名称必填；账号默认全选、全取消时要求至少选一个；超时输入只在选中 Codex 时出现", async () => {
     const { onSubmit, dialog } = renderForm({ kind: "add", targets: mcpTargets() });
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
     expect(within(dialog).getByRole("alert")).toHaveTextContent("名称只能用");
     await userEvent.type(within(dialog).getByTestId("server-name-input"), "srv");
+    await userEvent.click(within(dialog).getByTestId("server-agent-claude-code"));
+    await userEvent.click(within(dialog).getByTestId("server-agent-codex"));
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
-    expect(within(dialog).getByRole("alert")).toHaveTextContent("至少选一个助手");
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("至少选一个账号");
     await userEvent.click(within(dialog).getByTestId("server-agent-claude-code"));
     expect(within(dialog).queryByTestId("server-timeout-input")).toBeNull();
     await userEvent.click(within(dialog).getByTestId("server-agent-codex"));
@@ -96,7 +99,7 @@ describe("McpServerFormDialog", () => {
       transport: "remote",
       entry: { url: "http://192.168.1.5:8080/mcp", headers: { "X-Static": "<literal>", Authorization: "${TOKEN}" } },
     });
-    const { onSubmit, dialog } = renderForm({ kind: "edit", name: "lan", agent: "claude-code", cell, format: "claude-json" });
+    const { onSubmit, dialog } = renderForm({ kind: "edit", name: "lan", agent: "claude-code", cell, format: "claude-json", targets: [{ agent: "claude-code", cell, format: "claude-json" }], differs: false });
     expect(within(dialog).getByTestId("server-transport-stdio")).toBeDisabled();
     expect(within(dialog).getByTestId("server-headers-input")).toHaveValue("X-Static=<literal>\nAuthorization=${TOKEN}");
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
@@ -113,7 +116,7 @@ describe("McpServerFormDialog", () => {
       entry: { command: "npx", args: ["-y", "fs"], env: { SECRET: "<literal>", REF: "${REF_VAR}" } },
       extra: { alwaysLoad: true, type: "stdio" },
     });
-    const { onSubmit, dialog } = renderForm({ kind: "edit", name: "fs", agent: "claude-code", cell, format: "claude-json" });
+    const { onSubmit, dialog } = renderForm({ kind: "edit", name: "fs", agent: "claude-code", cell, format: "claude-json", targets: [{ agent: "claude-code", cell, format: "claude-json" }], differs: false });
     expect(within(dialog).queryByTestId("server-timeout-input")).toBeNull();
     expect(within(dialog).getByTestId("server-preserved-fields")).toHaveTextContent("alwaysLoad");
     const env = within(dialog).getByTestId("server-env-input");

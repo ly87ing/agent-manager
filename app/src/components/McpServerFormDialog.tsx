@@ -53,7 +53,18 @@ export type McpFormMode =
       initialName?: string;
       initial?: McpSavedDefinition["definition"];
     }
-  | { kind: "edit"; name: string; agent: string; cell: McpAgentCell; format: string };
+  | {
+      kind: "edit";
+      name: string;
+      /** 表单预填取自这个账号的条目。 */
+      agent: string;
+      cell: McpAgentCell;
+      format: string;
+      /** 保存时写入的全部账号（含 agent），各自带写入基准。 */
+      targets: { agent: string; cell: McpAgentCell; format: string }[];
+      /** 各账号的内容不一样：保存后统一成表单里这一份。 */
+      differs: boolean;
+    };
 
 /**
  * MCP 条目表单：新增直接写入所选助手的配置文件；编辑只改这一条的已建模字段，
@@ -66,11 +77,17 @@ export function McpServerFormDialog({
   onSubmit,
   onPreview,
   onClose,
+  nameOf = (agent) => agent,
+  onSwitchBase,
 }: {
   mode: McpFormMode;
   onSubmit: (payload: McpFormPayload) => void;
   onPreview: (payload: McpFormPayload) => Promise<McpFilePreview[] | string>;
   onClose: () => void;
+  /** 账号键 → 账号名。 */
+  nameOf?: (agent: string) => string;
+  /** 各账号内容不同时，换成以另一个账号的内容为准重新预填。 */
+  onSwitchBase?: (agent: string) => void;
 }) {
   const isNew = mode.kind === "add";
   const editEntry = mode.kind === "edit" ? (mode.cell.entry ?? {}) : null;
@@ -89,7 +106,8 @@ export function McpServerFormDialog({
   );
   const [name, setName] = useState(mode.kind === "edit" ? mode.name : (mode.initialName ?? ""));
   const [selectedAgents, setSelectedAgents] = useState<string[]>(
-    mode.kind === "edit" ? [mode.agent] : writableTargets.length === 1 ? [writableTargets[0].agent] : [],
+    // 新增默认给全部账号（产品规则：新服务默认分配给所有账号），可以取消
+    mode.kind === "edit" ? mode.targets.map((target) => target.agent) : writableTargets.map((target) => target.agent),
   );
   const [command, setCommand] = useState(editEntry?.command ?? initial?.command ?? "");
   const [argsText, setArgsText] = useState((editEntry?.args ?? initial?.args ?? []).join("\n"));
@@ -106,7 +124,7 @@ export function McpServerFormDialog({
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
 
   const formatOf = (agent: string) =>
-    mode.kind === "edit" ? mode.format : (mode.targets.find((target) => target.agent === agent)?.format ?? "");
+    mode.targets.find((target) => target.agent === agent)?.format ?? "";
   const involvesCodex = selectedAgents.some((agent) => formatOf(agent) === "codex-toml");
   const preserved = mode.kind === "edit" ? Object.keys(mode.cell.extra ?? {}).filter((key) => key !== "type") : [];
 
@@ -115,7 +133,7 @@ export function McpServerFormDialog({
       return "名称只能用字母、数字、- 与 _（如 my-server）";
     }
     if (selectedAgents.length === 0) {
-      return "至少选一个助手";
+      return "至少选一个账号";
     }
     let spec: Record<string, unknown>;
     if (transport === "remote") {
@@ -186,7 +204,7 @@ export function McpServerFormDialog({
   const previewKey = typeof draft === "string" ? "" : JSON.stringify({
     draft,
     mode: mode.kind,
-    base: mode.kind === "edit" ? mode.cell.base : null,
+    base: mode.kind === "edit" ? mode.targets.map((target) => target.cell.base) : null,
   });
 
   useEffect(() => {
@@ -228,7 +246,7 @@ export function McpServerFormDialog({
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={isNew ? "新增服务" : `编辑 ${name}`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95 sm:p-6">
         <div className="flex items-start justify-between">
           <h3 className="text-base font-semibold text-foreground">
-            {isNew ? "新增 MCP 服务" : `编辑 ${name}（${mode.kind === "edit" ? mode.agent : ""}）`}
+            {isNew ? "新增 MCP 服务" : `编辑 ${name}`}
           </h3>
           <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">
             <X className="h-4 w-4" aria-hidden />
@@ -249,7 +267,7 @@ export function McpServerFormDialog({
           </div>
           {mode.kind === "add" && (
             <div className="lg:col-span-2">
-              <span className="mb-1 block text-xs font-medium text-muted-foreground">写入哪些助手的配置</span>
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">写入哪些账号</span>
               <div className="flex flex-wrap gap-3">
                 {writableTargets.map((target) => (
                   <label key={target.agent} className="flex items-center gap-1.5 text-xs text-foreground">
@@ -263,11 +281,35 @@ export function McpServerFormDialog({
                       }
                       data-testid={`server-agent-${target.agent}`}
                     />
-                    <span className="font-mono">{target.agent}</span>
+                    <span>{nameOf(target.agent)}</span>
                   </label>
                 ))}
                 {writableTargets.length === 0 && <span className="text-xs text-muted-foreground">没有可写入的助手配置</span>}
               </div>
+            </div>
+          )}
+          {mode.kind === "edit" && (
+            <div className="space-y-1.5 text-xs lg:col-span-2" data-testid="server-edit-targets">
+              <p className="text-muted-foreground">
+                保存后写入：<span className="text-foreground">{mode.targets.map((target) => nameOf(target.agent)).join("、")}</span>
+                。各账号条目里没在这里列出的字段原样保留，环境变量写 &lt;literal&gt; 的保留各账号自己的原值。
+              </p>
+              {mode.differs && (
+                <div className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-warning">
+                  <span>各账号的内容不一样，保存后统一成下面这一份。以哪个账号的为准：</span>
+                  <select
+                    aria-label="以哪个账号的内容为准"
+                    data-testid="server-edit-base"
+                    value={mode.agent}
+                    onChange={(e) => onSwitchBase?.(e.target.value)}
+                    className="rounded border bg-card px-1.5 py-0.5 text-foreground"
+                  >
+                    {mode.targets.map((target) => (
+                      <option key={target.agent} value={target.agent}>{nameOf(target.agent)}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           )}
           <div className="lg:col-span-2">
@@ -377,7 +419,7 @@ export function McpServerFormDialog({
             {preview?.key === previewKey && typeof preview.result === "string" && <p role="alert" className="text-destructive">{preview.result}</p>}
             {preview?.key === previewKey && Array.isArray(preview.result) && preview.result.map((item) => (
               <div key={item.agent} className="space-y-1 border-t pt-2">
-                <p className="font-medium text-foreground">{item.agent}</p>
+                <p className="font-medium text-foreground">{nameOf(item.agent)}</p>
                 {item.error && <p role="alert" className="text-destructive">{item.error}</p>}
                 {!item.error && item.files.length === 0 && <p className="text-muted-foreground">文件内容不变。</p>}
                 {item.files.map((file) => (
@@ -394,7 +436,7 @@ export function McpServerFormDialog({
 
         <div className="mt-5 flex items-center justify-end gap-2">
           <span className="mr-auto text-xs text-muted-foreground">
-            {isNew ? "直接写入所选助手的配置文件" : "只改这一条，写入前会核对是否已被外部修改"}
+            {isNew ? "直接写入所选账号的配置文件" : "只改这一条，每个账号写入前都会核对是否已被外部修改"}
           </span>
           <button type="button" onClick={onClose} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent">
             取消
