@@ -711,7 +711,7 @@ export default function SkillsPage({
                           )}
                           {forkedFrom?.upstream_changed && (
                             <span data-testid={`upstream-changed-${skill.id}`} className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info" title={`${forkedFrom.collection} 里的这个技能在你复制之后更新过；要不要合进来由你决定`}>
-                              上游有新版
+                              原版有更新
                             </span>
                           )}
                           {summary.badges.map((badge) => (

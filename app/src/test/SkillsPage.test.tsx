@@ -688,7 +688,7 @@ describe("改成我的版本", () => {
     renderWithEngine(<SkillsPage />, routes);
     await expandAll();
     expect(await screen.findByTestId("forked-from-skill:my-skills/alpha")).toHaveTextContent("基于 agent-skills");
-    expect(screen.getByTestId("upstream-changed-skill:my-skills/alpha")).toHaveTextContent("上游有新版");
+    expect(screen.getByTestId("upstream-changed-skill:my-skills/alpha")).toHaveTextContent("原版有更新");
   });
 });
 
