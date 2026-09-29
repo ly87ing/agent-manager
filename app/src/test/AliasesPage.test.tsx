@@ -100,11 +100,13 @@ describe("终端快捷命令页", () => {
     expect(within(dialog).getByTestId("alias-preview")).toHaveTextContent(
       `alias codex='TZ="Asia/Shanghai" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" codex --full-auto'`,
     );
-    expect(await within(dialog).findByTestId("alias-file-preview-aliases:zshrc")).toHaveTextContent("# 保留用户注释");
-    await waitFor(() => expect(within(dialog).getByTestId("alias-form-submit")).not.toBeDisabled());
+    // 预览有防抖、全量并发时可能超过默认 1 秒才出来：这几处等待放宽到 5 秒
+    const slow = { timeout: 5000 };
+    expect(await within(dialog).findByTestId("alias-file-preview-aliases:zshrc", {}, slow)).toHaveTextContent("# 保留用户注释");
+    await waitFor(() => expect(within(dialog).getByTestId("alias-form-submit")).not.toBeDisabled(), slow);
     await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
 
-    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
+    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true), slow);
     const args = applyArgs(calls);
     expect(valueOf(args, "--zshrc-base")).toBe("base-aliases:zshrc");
     expect(valueOf(args, "--zprofile-base")).toBe("base-aliases:zprofile");
@@ -113,7 +115,7 @@ describe("终端快捷命令页", () => {
     expect(valueOf(args, "--value")).toBe('TZ="Asia/Shanghai" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" codex --full-auto');
     expect(args).not.toContain("--rename-from");
     expect(calls.find((call) => call.command === "aliases:preview")?.args).toEqual(args);
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), slow);
   }, 15000);
 
   it("新增时预填内置默认的时区与语言（字面量），没有「跟随全局」", async () => {
