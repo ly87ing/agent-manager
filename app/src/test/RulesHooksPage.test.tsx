@@ -215,7 +215,7 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     const { calls } = renderWithEngine(<RulesPage />, routes);
     const row = await screen.findByTestId("rule-source-my-rules");
     expect(row).toHaveTextContent("没读到规则");
-    expect(row).toHaveTextContent("我的规则来源 · ~/notes/rules");
+    expect(row).toHaveTextContent("规则文件 · ~/notes/rules");
     await userEvent.click(within(row).getByRole("button", { name: "移除规则来源 my-rules" }));
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
     await userEvent.click(await screen.findByTestId("confirm-modal-confirm"));
@@ -429,8 +429,8 @@ describe("RulesPage：实际文件为准", () => {
     expect(section).toHaveTextContent("1 个账号在用");
     await userEvent.click(within(section).getByRole("button", { name: "查看 core" }));
     expect(screen.getByTestId("rules-source-body-agent-skills/core").textContent).toBe(SOURCE_BODY);
-    await userEvent.click(screen.getByRole("button", { name: "应用来源规则「core」（agent-skills）到…" }));
-    const dialog = screen.getByRole("dialog", { name: "应用来源规则「core」（agent-skills）" });
+    await userEvent.click(screen.getByRole("button", { name: "应用规则「core」（来自 agent-skills）到…" }));
+    const dialog = screen.getByRole("dialog", { name: "应用规则「core」（来自 agent-skills）" });
     // 只列可写目标：阻塞与停用的实例不在其中
     const targetSelect = within(dialog).getByRole("combobox", { name: "写入目标" });
     // 与账号页同序：Claude 主号、Claude 其他账号、Codex
@@ -460,7 +460,7 @@ describe("RulesPage：实际文件为准", () => {
     expect(calls.find((call) => call.command === "rules:apply")!.args).toEqual([
       "--only", "rules:codex_global", "--base", CODEX_BASE, "--source-rule", "agent-skills/core",
     ]);
-    await waitFor(() => expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("已跟随来源规则「core」")));
+    await waitFor(() => expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("已跟随规则「core」")));
   });
 
   it("来源出了新版且文件没改过：标出「来源有新版本」，一键打开差异后更新", async () => {
@@ -475,7 +475,7 @@ describe("RulesPage：实际文件为准", () => {
     expect(await screen.findByTestId("rules-update-available-rules:codex_global")).toHaveTextContent("有新版本");
     expect(screen.queryByTestId("rules-follow-rules:codex_global")).toBeNull();
     await userEvent.click(screen.getByTestId("rules-update-from-source-rules:codex_global"));
-    const dialog = screen.getByRole("dialog", { name: "用来源规则「core」（agent-skills）更新 Codex 全局规则" });
+    const dialog = screen.getByRole("dialog", { name: "用规则「core」（来自 agent-skills）更新 Codex 全局规则" });
     expect(within(dialog).getByTestId("rules-diff")).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: "写入" }));
     await waitFor(() => expect(calls.some((call) => call.command === "rules:apply")).toBe(true));
@@ -520,7 +520,7 @@ describe("RulesPage：实际文件为准", () => {
     const onOpenSkills = vi.fn();
     const first = renderWithEngine(<RulesPage onOpenSkills={onOpenSkills} />, routes);
     const empty = await screen.findByTestId("rules-no-source");
-    expect(empty).toHaveTextContent("添加规则来源，或从技能集合取回");
+    expect(empty).toHaveTextContent("添加规则文件，或添加带规则的仓库");
     await userEvent.click(within(empty).getByRole("button", { name: "技能页" }));
     expect(onOpenSkills).toHaveBeenCalled();
     first.unmount();

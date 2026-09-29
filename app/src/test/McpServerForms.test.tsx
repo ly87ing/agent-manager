@@ -85,7 +85,7 @@ describe("McpServerFormDialog", () => {
     const headers = within(dialog).getByTestId("server-headers-input");
     await userEvent.type(headers, "Authorization=Bearer abc");
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
-    expect(within(dialog).getByRole("alert")).toHaveTextContent("header 值只能写");
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("请求头的值只能写");
     await userEvent.clear(headers);
     await userEvent.type(headers, "Authorization=MY_TOKEN");
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
@@ -101,7 +101,7 @@ describe("McpServerFormDialog", () => {
     });
     const { onSubmit, dialog } = renderForm({ kind: "edit", name: "lan", agent: "claude-code", cell, format: "claude-json", targets: [{ agent: "claude-code", cell, format: "claude-json" }], differs: false });
     expect(within(dialog).getByTestId("server-transport-stdio")).toBeDisabled();
-    expect(within(dialog).getByTestId("server-headers-input")).toHaveValue("X-Static=<literal>\nAuthorization=${TOKEN}");
+    expect(within(dialog).getByTestId("server-headers-input")).toHaveValue("X-Static=（保留原值）\nAuthorization=${TOKEN}");
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
     expect(onSubmit).toHaveBeenCalledWith({
       name: "lan",

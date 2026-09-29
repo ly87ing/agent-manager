@@ -23,7 +23,7 @@ import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
 
 const PAGE_NOTE =
-  "以各助手的规则文件为准：这里显示并直接编辑实际文件。模板只保存在本机库里；推荐规则来自技能来源（如 agent-skills 的 rules/），不随程序发布。应用模板、来源规则或从另一处复制之前，目标现有内容若对不上任何已知内容，会先另存为一份备份模板。";
+  "以各助手的规则文件为准：这里显示并直接编辑实际文件。模板只保存在本机库里；推荐规则来自技能来源（如 agent-skills 的 rules/），不随程序发布。应用模板、来源里的规则或从另一处复制之前，目标现有内容若对不上任何已知内容，会先另存为一份备份模板。";
 
 /** 写入前被外部改过时引擎给出的固定说法。 */
 const EXTERNAL_EDIT = "已在外部修改";
@@ -79,7 +79,7 @@ type DialogState =
   | { kind: "delete-template"; template: RuleTemplate };
 
 function sourceRuleLabel(rule: RuleSourceRule): string {
-  return `来源规则「${rule.name}」（${rule.collection}）`;
+  return `规则「${rule.name}」（来自 ${rule.collection}）`;
 }
 
 export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void } = {}) {
@@ -478,7 +478,7 @@ function RuleLibrary({
                   <div className="text-xs text-muted-foreground">{used(usage.rule(rule))}</div>
                 </div>
                 <div className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")} title={mine?.path}>
-                  {mine ? `我的规则来源 · ${mine.path}` : `${rule.collection} · ${rule.local ? "本地目录" : "git"}`}
+                  {mine ? `规则文件 · ${mine.path}` : `${rule.collection} · ${rule.local ? "本机目录" : "git 仓库"}`}
                 </div>
                 <span className={cn(COL_NARROW, "text-xs text-muted-foreground")}>{lineCount(rule.body)} 行</span>
                 <div className={COL_ACTION}>
@@ -528,7 +528,7 @@ function RuleLibrary({
               <div className="truncate text-sm font-medium">{source.name}</div>
               <div className="text-xs text-warning">没读到规则</div>
             </div>
-            <div className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")} title={source.path}>我的规则来源 · {source.path}</div>
+            <div className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")} title={source.path}>规则文件 · {source.path}</div>
             <span className={COL_NARROW} />
             <div className={COL_ACTION} />
             <div className={COL_ICONS}>
@@ -575,7 +575,7 @@ function RuleLibrary({
         ))}
         {sourceRules.length === 0 && (
           <li data-testid="rules-no-source" className="space-y-2 px-4 py-3 text-xs text-muted-foreground">
-            <p>还没有来源提供规则：添加规则来源，或从技能集合取回。</p>
+            <p>还没有来源提供规则：添加规则文件，或添加带规则的仓库（如 agent-skills）。</p>
             {suggested.map((item) => (
               <div key={item.name} className="flex items-center justify-between gap-3">
                 <span className="min-w-0">
@@ -860,7 +860,7 @@ function ApplyContentDialog({
         </label>
       </div>
       <p className="mt-3 text-xs text-muted-foreground">
-        目标现有内容 → 将写入的内容（<span className="font-mono">{specOf(target).target ?? observed.target}</span>）。现有内容对不上任何已保存模板、来源规则或上次从来源写入的那一版时，会先另存为备份模板再写入。
+        目标现有内容 → 将写入的内容（<span className="font-mono">{specOf(target).target ?? observed.target}</span>）。现有内容对不上任何已保存模板、来源里的规则或上次从来源写入的那一版时，会先另存为备份模板再写入。
       </p>
       <div className="mt-2">
         <DiffView current={observed.content} after={source.body} />

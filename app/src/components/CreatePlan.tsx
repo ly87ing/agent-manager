@@ -109,7 +109,7 @@ export function CreatePlan({ preview, facts }: { preview: CreatePreview; facts: 
           </li>
         )}
         <li>
-          在 {aliasFiles.join("、")} 的 Agent Manager 区块加一行启动命令：
+          在 {aliasFiles.join("、")} 里由本工具管理的那几行加一条启动命令：
           <code className="mt-1 block break-all rounded bg-muted p-1.5 font-mono text-[11px]">{aliasLine}</code>
           <span className="text-muted-foreground">新开终端后输入 <code className="font-mono">{facts.commandName}</code> 启动。</span>
         </li>

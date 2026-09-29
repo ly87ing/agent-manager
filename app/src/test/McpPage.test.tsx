@@ -91,7 +91,7 @@ describe("McpPage：实际条目为主", () => {
     expect(within(dialog).getByTestId("server-name-input")).toBeDisabled();
     expect(within(dialog).getByTestId("server-transport-remote")).toBeDisabled();
     expect(within(dialog).getByTestId("server-args-input")).toHaveValue("-y\nfs-mcp@2");
-    expect(within(dialog).getByTestId("server-env-input")).toHaveValue("TOKEN=<literal>");
+    expect(within(dialog).getByTestId("server-env-input")).toHaveValue("TOKEN=（保留原值）");
     expect(within(dialog).getByTestId("server-timeout-input")).toHaveValue("30");
     expect(within(dialog).getByTestId("server-preserved-fields")).toHaveTextContent("cwd、enabled_tools、tools");
 

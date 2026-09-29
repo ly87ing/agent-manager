@@ -133,7 +133,7 @@ export default function TakeoverPage() {
           });
         }
       }
-      map.set(`skill-group:${group.name}`, { key: `skill-group:${group.name}`, label: `技能集合 ${group.name}`, steps });
+      map.set(`skill-group:${group.name}`, { key: `skill-group:${group.name}`, label: `技能来源 ${group.name}`, steps });
     }
     for (const item of extraLinks) {
       if (!item.collection) continue;

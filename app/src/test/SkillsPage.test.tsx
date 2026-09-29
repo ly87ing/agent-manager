@@ -139,7 +139,7 @@ describe("SkillsPage 三级视图", () => {
     await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
     // 名称不能改：只在标题里显示
     expect(screen.queryByTestId("collection-name-input")).toBeNull();
-    expect(screen.getByRole("heading", { name: "编辑技能集合 agent-skills" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "编辑来源 agent-skills" })).toBeInTheDocument();
     expect(screen.getByTestId("collection-url-input")).toHaveValue("https://github.com/example/agent-skills.git");
     await userEvent.click(screen.getByTestId("collection-paths-select-all"));
     await userEvent.click(screen.getByTestId("collection-auto-include"));
@@ -698,7 +698,7 @@ describe("技能集合的分享链接", () => {
       <SkillsPage importPayload={{ kind: "skills", name: "team-skills", definition: { url: "https://github.com/example/team.git", skill_paths: ["skills"], rules_path: null } }} />,
       skillsRoutes(),
     );
-    const dialog = await screen.findByRole("dialog", { name: "新增集合" });
+    const dialog = await screen.findByRole("dialog", { name: "添加来源" });
     expect(within(dialog).getByTestId("collection-name-input")).toHaveValue("team-skills");
     expect(within(dialog).getByTestId("collection-url-input")).toHaveValue("https://github.com/example/team.git");
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
@@ -1198,7 +1198,7 @@ describe("SkillsPage 推荐来源与当前安装", () => {
 
   it("还没有任何集合时给出空态，推荐来源仍可添加", async () => {
     renderWithEngine(<SkillsPage />, recommendationRoutes({ collections: false }));
-    expect(await screen.findByTestId("skills-collections-empty")).toHaveTextContent("还没有技能集合");
+    expect(await screen.findByTestId("skills-collections-empty")).toHaveTextContent("还没有技能来源");
     expect(screen.getByTestId("recommendation-add-agent-skills-rec")).toBeInTheDocument();
   });
 });

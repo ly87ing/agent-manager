@@ -12,7 +12,7 @@ const SRC_ROOT = join(process.cwd(), "src");
 const SCAN_DIRS = ["components", "pages", "lib"];
 
 /** 禁用词（新文案见 lib/ui-copy.ts 与各徽章映射表）。 */
-const BANNED = ["收敛", "漂移", "物化", "上游", "托管", "受管", "收件箱", "死链", "快照", "回滚", "策略", "探测", "占位符"];
+const BANNED = ["收敛", "漂移", "物化", "上游", "托管", "受管", "收件箱", "死链", "快照", "回滚", "策略", "探测", "占位符", "技能集合", "来源规则", "写入基准", "区块", "本工具那一段", "本工具维护的那一段", "已保存的定义"];
 const BANNED_PATTERNS: [string, RegExp][] = [
   ...BANNED.map((word) => [word, new RegExp(word, "g")] as [string, RegExp]),
   // dry-run 作为面向用户的文案禁用；公共入口已退役，正则仅防用户可见文案回归。

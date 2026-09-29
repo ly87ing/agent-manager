@@ -14,7 +14,7 @@ import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource, type AliasTarget } from
 import { cn } from "../lib/utils";
 
 const PAGE_NOTE =
-  "以 ~/.zshrc 与 ~/.zprofile 里本工具维护的那一段为准：这里显示并直接编辑实际的快捷命令，保存即写入两个文件，新开终端窗口生效。这段以外你自己写的 alias 只读列出、不会改动；打开后文件若被别处改过，保存会被拒绝，不会覆盖。";
+  "以 ~/.zshrc 与 ~/.zprofile 里由本工具管理的那几行为准：这里显示并直接编辑实际的快捷命令，保存即写入两个文件，新开终端窗口生效。你自己另写的 alias 只读列出、不会改动；打开后文件若被别处改过，保存会被拒绝，不会覆盖。";
 
 function fileLabel(targets: AliasTarget[], id: string): string {
   return targets.find((target) => target.id === id)?.target ?? id;
@@ -22,8 +22,8 @@ function fileLabel(targets: AliasTarget[], id: string): string {
 
 function targetStateLabel(target: AliasTarget): string {
   if (target.blockedReason) return "不能读写";
-  if (target.state === "managed-ok") return "有本工具那一段";
-  return "还没有本工具那一段";
+  if (target.state === "managed-ok") return "正常";
+  return "还没有本工具管理的命令";
 }
 
 type Dialog =
@@ -277,7 +277,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
       {external.length > 0 && (
         <DataTable label="其他来源" testId="alias-external">
           <TableHeader title={`其他来源 · ${external.length}`} middle="启动的账号" narrow="文件">
-            <span className="text-muted-foreground">写在本工具那一段以外，只读</span>
+            <span className="text-muted-foreground">你自己另写的，只读</span>
           </TableHeader>
           <ul className="divide-y">
             {external.map(({ target, line }) => {
@@ -340,7 +340,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
       {dialog?.kind === "remove" && (
         <AliasApplyConfirm
           title={`移除 ${dialog.name}`}
-          description="确认后直接从 ~/.zshrc 与 ~/.zprofile 里本工具维护的那一段中去掉这一条；这段空了会连同两行注释一起移除，段外的内容不动。"
+          description="确认后直接从 ~/.zshrc 与 ~/.zprofile 里由本工具管理的那几行中去掉这一条；你自己写的内容不动。"
           confirmLabel="确认移除"
           previewBase={previewBase}
           op={["--remove", dialog.name]}
@@ -354,7 +354,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
       {dialog?.kind === "recommend" && (
         <AliasApplyConfirm
           title={`添加推荐的 ${dialog.item.name}`}
-          description="把这一行写进 ~/.zshrc 与 ~/.zprofile 里本工具维护的那一段；写入前重读文件，被别处改过就不写。"
+          description="把这一行写进 ~/.zshrc 与 ~/.zprofile 里由本工具管理的那几行；写入前重读文件，被别处改过就不写。"
           confirmLabel="添加"
           previewBase={previewBase}
           op={["--recommended", dialog.item.name]}

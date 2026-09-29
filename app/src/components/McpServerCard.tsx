@@ -195,7 +195,7 @@ export function McpServerCard({
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0 text-xs">
-              <span className="font-medium text-foreground">已保存的定义（还没写进任何账号）</span>
+              <span className="font-medium text-foreground">存着但还没用上的配置（没写进任何账号）</span>
               <code className="ml-2 font-mono text-muted-foreground">{savedSummary(spec)}</code>
               {!spec.saved.valid && <span className="ml-2 text-warning">内容不完整，只能删除</span>}
             </div>

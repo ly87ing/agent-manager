@@ -157,7 +157,7 @@ export function CommandPalette({
     for (const element of skills.data?.ok ? skills.data.data.elements : []) {
       const id = element.id.replace(/^skill:/, "");
       if (id.includes("/")) continue;
-      out.push({ id: `skill:${id}`, label: id, hint: "技能集合", keywords: `${id} skills`, group: "资源", run: () => onNavigate("skills") });
+      out.push({ id: `skill:${id}`, label: id, hint: "技能来源", keywords: `${id} skills`, group: "资源", run: () => onNavigate("skills") });
     }
     for (const element of mcp.data?.ok ? mcp.data.data.elements : []) {
       const id = element.id.replace(/^mcp:/, "");
@@ -166,7 +166,7 @@ export function CommandPalette({
     out.push({
       id: "action:import-link",
       label: "从分享链接导入…",
-      hint: "MCP 服务或技能集合",
+      hint: "MCP 服务或技能来源",
       keywords: "import share link 分享 导入 链接",
       group: "动作",
       run: () => onNavigate("import-link"),

@@ -123,7 +123,7 @@ export function LaunchCommandsDrawer({
               </li>
             ))}
           </ul>
-          <p className="text-xs text-muted-foreground">只改 {files} 里 Agent Manager 区块中的这几行，改完新开终端生效。</p>
+          <p className="text-xs text-muted-foreground">只改 {files} 里由本工具管理的这几行，改完新开终端生效。</p>
         </div>
         <footer className="flex justify-end border-t px-5 py-3">
           <button
@@ -165,7 +165,7 @@ export function LaunchCommandsDrawer({
       {removing && (
         <AliasApplyConfirm
           title={`删除启动命令 ${removing}`}
-          description="只删这一条命令，账号的目录与登录不受影响。确认后从 Agent Manager 区块里去掉。"
+          description="只删这一条命令，账号的目录与登录不受影响。确认后从终端配置里去掉。"
           confirmLabel="确认删除"
           previewBase={previewBase}
           op={["--remove", removing]}

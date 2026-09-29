@@ -45,7 +45,7 @@ export function ImportLinkDialog({
           {payload && (
             <div data-testid="import-link-summary" className="space-y-1 rounded-md border bg-muted/40 p-3 text-xs">
               <p>
-                <span className="text-muted-foreground">{payload.kind === "mcp" ? "MCP 服务" : "技能集合"}：</span>
+                <span className="text-muted-foreground">{payload.kind === "mcp" ? "MCP 服务" : "技能来源"}：</span>
                 <span className="font-mono font-medium">{payload.name}</span>
               </p>
               {payload.kind === "mcp" && (

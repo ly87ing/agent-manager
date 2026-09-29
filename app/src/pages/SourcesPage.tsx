@@ -90,14 +90,14 @@ export default function SourcesPage() {
       <DataTable label="来源" testId="sources-page">
         <TableHeader title={`来源 · ${total}`} middle="提供" narrow="状态">
           <button type="button" data-testid="source-add-collection" onClick={() => setAdding("collection")} className="inline-flex items-center gap-1 text-primary hover:underline">
-            <Plus className="h-3.5 w-3.5" aria-hidden /> 技能集合
+            <Plus className="h-3.5 w-3.5" aria-hidden /> git 仓库或目录
           </button>
           <button type="button" data-testid="source-add-rule" onClick={() => setAdding("rule")} className="inline-flex items-center gap-1 text-primary hover:underline">
             <Plus className="h-3.5 w-3.5" aria-hidden /> 规则文件或目录
           </button>
         </TableHeader>
         {total === 0 ? (
-          <EmptyState compact title="还没有来源" description="添加一个技能集合（git 仓库或本机目录），或指定一个规则文件、规则目录。" testId="sources-empty" />
+          <EmptyState compact title="还没有来源" description="添加一个 git 仓库或本机目录（提供技能、规则和推荐的启动命令），或一个规则文件、规则目录。" testId="sources-empty" />
         ) : (
           <ul className="divide-y">
             {collections.map((collection) => {
@@ -178,7 +178,7 @@ export default function SourcesPage() {
         )}
       </DataTable>
       <p className="px-1 text-xs text-muted-foreground">
-        技能集合提供技能，也可以带规则（默认在 rules/ 里）和推荐的启动命令；规则文件或目录只提供规则。停用可以随时再启用，移除后想用可以重新添加。
+        git 仓库或本机目录提供技能，也可以带规则（默认在 rules/ 里）和推荐的启动命令；规则文件或目录只提供规则。停用可以随时再启用，移除后想用可以重新添加。
       </p>
 
       {(adding === "collection" || editing) && (

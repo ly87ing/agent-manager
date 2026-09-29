@@ -30,7 +30,7 @@ export function rollbackPlan(operation: RunOperation): RollbackPlan {
     if (detail.action === "write" && detail.backup_template && operation.target) {
       return { kind: "rules", label: `把 ${operation.target} 恢复成覆盖前的内容`, target: operation.target, template: detail.backup_template };
     }
-    return { kind: "none", reason: "覆盖前的内容是已知模板或来源规则，没有另存备份；到规则页选回那一条即可" };
+    return { kind: "none", reason: "覆盖前的内容是已知模板或来源里的规则，没有另存备份；到规则页选回那一条即可" };
   }
   return { kind: "none", reason: "这次写入没有保留原内容，不能自动撤回" };
 }

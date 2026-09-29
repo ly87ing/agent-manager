@@ -483,7 +483,7 @@ export default function McpPage({
 
       {pendingForget && (
         <ConfirmModal
-          title={`删除已保存的定义 ${nameOf(pendingForget)}`}
+          title={`删除存着的配置 ${nameOf(pendingForget)}`}
           description="只删除本工具里保存、还没写进任何助手的这份定义，各助手的配置文件不受影响。"
           risk="write-local"
           confirmLabel="确认删除"
@@ -491,7 +491,7 @@ export default function McpPage({
           onConfirm={() => {
             const element = pendingForget;
             setPendingForget(null);
-            void apply(`删除已保存的定义 ${nameOf(element)}`, ["--only", element.id, "--action", "forget"]);
+            void apply(`删除存着的配置 ${nameOf(element)}`, ["--only", element.id, "--action", "forget"]);
           }}
           onClose={() => setPendingForget(null)}
         />

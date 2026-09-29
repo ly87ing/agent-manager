@@ -106,7 +106,7 @@ const ADVANCED_ENTRIES = [
   {
     key: "import-link",
     title: "从分享链接导入",
-    description: "粘贴别人分享的 MCP 服务或技能集合链接，检查后添加。",
+    description: "粘贴别人分享的 MCP 服务或技能来源链接，检查后添加。",
     icon: Link2,
   },
   {

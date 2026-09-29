@@ -83,7 +83,7 @@ export const OVERLAY_COPY = {
   addServer: "新增服务",
   editServer: "编辑",
   removeServer: "移除",
-  addCollection: "新增集合",
+  addCollection: "添加来源",
   removeCollection: "移除",
   /** 移除定义时确认文案（tombstone 语义）。 */
   removeDefinitionNote: "写入移除标记，使该条目停止生效；删除标记即可恢复定义。确认后会清理本工具管理的配置或链接。",

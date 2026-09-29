@@ -59,10 +59,10 @@ describe("来源页", () => {
     expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1);
   });
 
-  it("添加：技能集合打开新增集合表单，规则文件或目录打开添加规则来源", async () => {
+  it("添加：git 仓库或目录打开添加来源表单，规则文件或目录打开添加规则来源", async () => {
     renderWithEngine(<SourcesPage />, routes());
     await userEvent.click(await screen.findByTestId("source-add-collection"));
-    expect(await screen.findByRole("dialog", { name: "新增集合" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "添加来源" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "取消" }));
     await userEvent.click(screen.getByTestId("source-add-rule"));
     expect(await screen.findByRole("dialog", { name: "添加规则来源" })).toBeInTheDocument();

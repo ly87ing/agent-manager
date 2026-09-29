@@ -88,7 +88,7 @@ function validate(payload: SharePayload): SharePayload | string {
   }
   if (payload.kind === "skills") {
     const def: Partial<Extract<SharePayload, { kind: "skills" }>["definition"]> = payload.definition ?? {};
-    if (typeof def.url !== "string" || !/^(https:\/\/|git@)/.test(def.url)) return "技能集合只接受 git 地址（https:// 或 git@），不接受本机路径";
+    if (typeof def.url !== "string" || !/^(https:\/\/|git@)/.test(def.url)) return "分享的来源只接受 git 地址（https:// 或 git@），不接受本机路径";
     const paths = def.skill_paths ?? null;
     if (paths !== null && !(Array.isArray(paths) && paths.every((item) => typeof item === "string" && !item.includes("..") && !item.startsWith("/")))) {
       return "技能位置格式不对";
@@ -97,7 +97,7 @@ function validate(payload: SharePayload): SharePayload | string {
     if (rules !== null && (typeof rules !== "string" || rules.includes("..") || rules.startsWith("/"))) return "规则位置格式不对";
     return { kind: "skills", name: payload.name, definition: { url: def.url, skill_paths: paths, rules_path: rules } };
   }
-  return "只支持分享 MCP 服务与技能集合";
+  return "只支持分享 MCP 服务与技能来源";
 }
 
 /** 系统里点开分享链接时，桌面壳发来的事件；只带链接文字，校验与确认都在界面里做。 */

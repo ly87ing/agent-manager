@@ -117,9 +117,9 @@ export function SkillCollectionFormDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={initial ? "编辑集合" : "新增集合"} tabIndex={-1} onKeyDown={onDialogKeyDown} className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-xl border bg-card shadow-xl animate-zoom-in-95">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={initial ? "编辑来源" : "添加来源"} tabIndex={-1} onKeyDown={onDialogKeyDown} className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-xl border bg-card shadow-xl animate-zoom-in-95">
         <div className="flex items-center justify-between border-b px-5 py-3">
-          <h3 className="text-base font-semibold text-foreground">{initial ? `编辑技能集合 ${initial.name}` : "新增技能集合"}</h3>
+          <h3 className="text-base font-semibold text-foreground">{initial ? `编辑来源 ${initial.name}` : "添加来源"}</h3>
           <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">
             <X className="h-4 w-4" aria-hidden />
           </button>

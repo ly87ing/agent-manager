@@ -22,10 +22,13 @@ const HEADER_NAME_RE = /^[!#$%&'*+.^_`|~A-Za-z0-9-]+$/;
 const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PLACEHOLDER_RE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
 const KEEP = "<literal>";
+/** 表单里显示「保留原值」的写法；保存时换回引擎约定的 <literal>，两种写法都认。 */
+const KEEP_LABEL = "（保留原值）";
+const isKeep = (value: string) => value === KEEP || value === KEEP_LABEL;
 
 function lines(map: Record<string, string> | undefined): string {
   return Object.entries(map ?? {})
-    .map(([key, value]) => `${key}=${value}`)
+    .map(([key, value]) => `${key}=${value === KEEP ? KEEP_LABEL : value}`)
     .join("\n");
 }
 
@@ -153,14 +156,14 @@ export function McpServerFormDialog({
         if (!HEADER_NAME_RE.test(headerName)) {
           return `非法 header 名:${line}`;
         }
-        if (value === KEEP && !isNew) {
+        if (isKeep(value) && !isNew) {
           headers[headerName] = KEEP;
         } else if (PLACEHOLDER_RE.test(value)) {
           headers[headerName] = value;
         } else if (VAR_NAME_RE.test(value)) {
           headers[headerName] = `\${${value}}`;
         } else {
-          return `header 值只能写 \${VAR} 变量引用${isNew ? "" : "或保留原值 <literal>"}:${headerName}`;
+          return `请求头的值只能写 \${变量名}${isNew ? "" : "或「（保留原值）」"}：${headerName}`;
         }
       }
       spec = { url: trimmedUrl, headers };
@@ -179,10 +182,10 @@ export function McpServerFormDialog({
         if (/\s/.test(key)) {
           return `非法变量名:${key}`;
         }
-        if (value === KEEP && isNew) {
+        if (isKeep(value) && isNew) {
           return `新增时没有可保留的原值，请写 ${key}=\${VAR} 或直接写取值`;
         }
-        env[key] = value;
+        env[key] = isKeep(value) ? KEEP : value;
       }
       spec = {
         command: command.trim(),
@@ -325,7 +328,7 @@ export function McpServerFormDialog({
                     onChange={() => setTransport(kind)}
                     data-testid={`server-transport-${kind}`}
                   />
-                  {kind === "stdio" ? "本地 stdio（启动命令）" : "远程 HTTP（服务地址）"}
+                  {kind === "stdio" ? "本地命令" : "远程地址"}
                 </label>
               ))}
             </div>
@@ -345,7 +348,7 @@ export function McpServerFormDialog({
               </div>
               <div className="lg:col-span-2">
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  请求头（每行一个 Header-Name=${"{VAR}"}；{isNew ? "" : "<literal> 表示保留原值；"}取值由变量提供，不在此显示）
+                  请求头（每行一个 名称=${"{变量名}"}；{isNew ? "" : "「（保留原值）」表示不改；"}取值由变量提供，不在这里显示）
                 </label>
                 <textarea
                   value={headersText}
@@ -382,7 +385,7 @@ export function McpServerFormDialog({
               </div>
               <div className="lg:col-span-2">
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                  环境变量（每行一个 KEY=取值；${"{VAR}"} 为变量引用{isNew ? "" : "，<literal> 表示保留原值"}；密钥请用变量引用）
+                  环境变量（每行一个 名称=取值；密钥写 ${"{变量名}"}，取值放进密钥文件{isNew ? "" : "；「（保留原值）」表示不改"}）
                 </label>
                 <textarea
                   value={envText}

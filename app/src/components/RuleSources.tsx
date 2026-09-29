@@ -114,7 +114,7 @@ export function AddSourceDialog({
   const error = !NAME_RE.test(name)
     ? "名称只能用小写字母、数字和连字符"
     : taken.includes(name)
-      ? `${name} 已被占用（与已有来源或技能集合同名）`
+      ? `${name} 已被占用（与已有来源同名）`
       : !/^(~\/|\/)/.test(trimmed)
         ? "路径填绝对路径或以 ~/ 开头"
         : null;

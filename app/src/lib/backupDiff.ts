@@ -108,7 +108,7 @@ export function diffBackup(current: Json, incoming: Json): BackupDiff {
     // 导入只新增或覆盖同名项，本机已有的 MCP 已保存项不会消失
     { ...diffMaps("MCP 已保存项", mcpSavedItems(current), mcpSavedItems(incoming)), removed: [] },
     diffMaps(
-      "技能集合",
+      "技能来源",
       asObject(asObject(currentPolicy.skills).repositories),
       asObject(asObject(incomingPolicy.skills).repositories),
     ),

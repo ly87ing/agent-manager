@@ -46,7 +46,7 @@ describe("创建前的动作清单", () => {
     expect(plan).toHaveTextContent("置空 3 个凭据相关变量");
     expect(plan).toHaveTextContent("复制主账号的规则到 ~/.claude-glm/CLAUDE.md");
     expect(plan).toHaveTextContent("写入 MCP 服务 ~/.claude-glm/.claude.json已复制 demo-fs");
-    expect(plan).toHaveTextContent("在 ~/.zshrc 的 Agent Manager 区块加一行启动命令");
+    expect(plan).toHaveTextContent("在 ~/.zshrc 里由本工具管理的那几行加一条启动命令");
   });
 
   it("API 账号写明接口、模型与 API Key 存到哪", () => {

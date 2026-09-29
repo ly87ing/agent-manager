@@ -512,7 +512,7 @@ export default function SkillsPage({
             onClick={() => setShowAddForm(true)}
             className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
           >
-            <Plus className="h-4 w-4" aria-hidden /> 添加集合
+            <Plus className="h-4 w-4" aria-hidden /> 添加来源
           </button>
         </div>
       </div>
@@ -521,7 +521,7 @@ export default function SkillsPage({
         <EmptyState
           icon={PackageOpen}
           testId="skills-collections-empty"
-          title="还没有技能集合"
+          title="还没有技能来源"
           description="添加一个 git 仓库或本机目录，或从下面的推荐来源添加。"
         />
       ) : search.trim() && shownSkillCount === 0 ? (
@@ -800,7 +800,7 @@ export default function SkillsPage({
           onClose={() => !enablingBusy && setEnabling(null)}
         >
           <ol data-testid="recommend-enable-steps" className="mt-3 list-decimal space-y-1.5 pl-5 text-sm">
-            <li>登记技能集合 {enabling.name}（{enabling.url}）</li>
+            <li>登记来源 {enabling.name}（{enabling.url}）</li>
             <li>把仓库下载到本工具的数据目录</li>
             <li>把其中的技能链接到全部账号；账号里已有同名技能目录或链接的跳过，不覆盖</li>
             <li className="text-muted-foreground">规则、MCP、启动命令都不动；它带的规则可以到规则页看过差异再决定</li>

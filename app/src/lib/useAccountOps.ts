@@ -266,7 +266,7 @@ export function useAccountOps() {
     const bases = ["--only", `profiles:${id}`, "--base", observed.base, "--definition-base", observed.definition_base];
     const preview = await runEngine<ProfileDraftPreview>("profiles:preview", [...bases, "--candidate", JSON.stringify(candidate), "--exact"]);
     if (!preview.ok || !preview.data.file_base || !preview.data.content_base) {
-      toast.error(`没有保存：${preview.ok ? "预览没有给出写入基准" : preview.errors[0]?.message ?? "预览失败"}`);
+      toast.error(`没有保存：${preview.ok ? "预览没有完成，请重试" : preview.errors[0]?.message ?? "预览失败"}`);
       return false;
     }
     const applied = await execute({
@@ -340,7 +340,7 @@ export function useAccountOps() {
       const runtime = { statusline: "builtin" };
       const preview = await runEngine<{ file_base?: string }>("agents:preview-runtime", ["--only", main.id, "--base", base, "--runtime", JSON.stringify(runtime)]);
       if (!preview.ok || !preview.data.file_base) {
-        toast.error(`没有写入：${preview.ok ? "预览没有给出写入基准" : preview.errors[0]?.message ?? "预览失败"}`);
+        toast.error(`没有写入：${preview.ok ? "预览没有完成，请重试" : preview.errors[0]?.message ?? "预览失败"}`);
         return false;
       }
       const written = await execute({
