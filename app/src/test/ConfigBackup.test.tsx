@@ -54,6 +54,7 @@ describe("配置备份", () => {
 
   it("导入前先给差异预览，确认后才整份提交", async () => {
     const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
+    fireEvent.click(screen.getByTestId("config-import-toggle"));
     // 这份旧格式备份多了 newcomer（服务库定义按 MCP 已保存项计入），还带着旧的规则来源
     //（导入时转为模板）；本机已有的 MCP 已保存项 demo 导入后保留，不算消失
     fireEvent.change(screen.getByTestId("config-import-input"), {
@@ -90,6 +91,7 @@ describe("配置备份", () => {
 
   it("与当前完全一致时明说不会改变任何东西", async () => {
     renderWithEngine(<ConfigBackupSection />, routes());
+    fireEvent.click(screen.getByTestId("config-import-toggle"));
     fireEvent.change(screen.getByTestId("config-import-input"), {
       target: { value: JSON.stringify(BACKUP) },
     });
@@ -99,6 +101,7 @@ describe("配置备份", () => {
 
   it("粘贴的不是合法 JSON 时当场拦下，不去读当前配置", async () => {
     const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
+    fireEvent.click(screen.getByTestId("config-import-toggle"));
     fireEvent.change(screen.getByTestId("config-import-input"), { target: { value: "not json" } });
     await userEvent.click(screen.getByTestId("config-import-button"));
     expect(screen.queryByTestId("config-import-diff")).toBeNull();
@@ -107,6 +110,7 @@ describe("配置备份", () => {
 
   it("旧备份含明文 secrets 时当场停止，不读取也不写入", async () => {
     const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
+    fireEvent.click(screen.getByTestId("config-import-toggle"));
     fireEvent.change(screen.getByTestId("config-import-input"), {
       target: {
         value: JSON.stringify({
@@ -123,6 +127,7 @@ describe("配置备份", () => {
 
   it("旧备份的 secrets 不是空对象时也在预览前停止", async () => {
     const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
+    fireEvent.click(screen.getByTestId("config-import-toggle"));
     fireEvent.change(screen.getByTestId("config-import-input"), {
       target: { value: JSON.stringify({ ...BACKUP, secrets: ["legacy-secret-under-test"] }) },
     });
@@ -134,6 +139,7 @@ describe("配置备份", () => {
 
   it("没粘贴内容时导入按钮不可点", async () => {
     renderWithEngine(<ConfigBackupSection />, routes());
+    fireEvent.click(screen.getByTestId("config-import-toggle"));
     expect(screen.getByTestId("config-import-button")).toBeDisabled();
   });
 

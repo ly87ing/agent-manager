@@ -380,7 +380,7 @@ describe("SettingsPage", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("渲染配置工具区块，点击可下钻，常驻返回设置按钮可返回", async () => {
+  it("设置分组：通用在前、工具其次；工具点击可下钻，常驻返回设置按钮可返回", async () => {
     setSettingsClient({
       get: async () => settings,
       save: async (preferences) => ({ ...settings, preferences }),
@@ -395,10 +395,11 @@ describe("SettingsPage", () => {
       "system:version": makeEnvelope({ version: "0.1.0" }, { command: "system.version" }),
     });
 
-    expect(await screen.findByRole("heading", { name: "配置工具" })).toBeInTheDocument();
-    const tools = screen.getByRole("heading", { name: "配置工具" }).closest("section")!;
-    const appearance = screen.getByRole("heading", { name: "外观" }).closest("section")!;
-    expect(tools.compareDocumentPosition(appearance) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(await screen.findByRole("heading", { name: "工具" })).toBeInTheDocument();
+    const tools = screen.getByRole("heading", { name: "工具" }).closest("section")!;
+    const general = screen.getByRole("heading", { name: "通用" }).closest("section")!;
+    expect(general).toHaveTextContent("外观");
+    expect(general.compareDocumentPosition(tools) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
 
     const expectedKeys = [
       "takeover",
@@ -427,13 +428,13 @@ describe("SettingsPage", () => {
     // 常驻返回设置按钮出现，且在面包屑中展示
     const backButton = await screen.findByTestId("back-to-settings-button");
     expect(backButton).toBeInTheDocument();
-    expect(screen.getByText(/配置工具 \/ 密钥/)).toBeInTheDocument();
+    expect(screen.getByText(/工具 \/ 密钥/)).toBeInTheDocument();
 
     // 点击返回设置
     await userEvent.click(backButton);
 
     // 重新回到基础设置页
-    expect(await screen.findByRole("heading", { name: "配置工具" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "工具" })).toBeInTheDocument();
     expect(screen.queryByTestId("back-to-settings-button")).toBeNull();
   });
 
@@ -449,13 +450,15 @@ describe("SettingsPage", () => {
     renderWithEngine(<SettingsPage />, {});
     const input = await screen.findByLabelText("日志保留天数");
     expect(input).toHaveValue(30);
-    expect(screen.getByText("（操作记录保留多久，0 为不自动清理，最大 3650 天）")).toBeInTheDocument();
+    expect(screen.getByText("0 为不自动清理，最多 3650 天")).toBeInTheDocument();
 
-    const saveBtn = screen.getByRole("button", { name: "保存设置" });
+    // 没改过不显示保存按钮
+    expect(screen.queryByRole("button", { name: "保存设置" })).toBeNull();
 
     // 超出范围 3651：禁用保存
     await userEvent.clear(input);
     await userEvent.type(input, "3651");
+    const saveBtn = screen.getByRole("button", { name: "保存设置" });
     expect(saveBtn).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent("请输入 0 到 3650 之间的整数");
 

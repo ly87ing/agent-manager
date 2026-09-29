@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   ArrowLeft,
+  ChevronRight,
   History,
   KeyRound,
   PackageCheck,
@@ -12,7 +13,7 @@ import {
   Sun,
 } from "lucide-react";
 import { toast } from "sonner";
-import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { PageError, PageLoading } from "../components/PageState";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { engineErrorMessage } from "../lib/engine";
 import type { SettingsData, SettingsPreferences } from "../lib/contract";
@@ -29,35 +30,54 @@ const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "system", label: "跟随系统", icon: Monitor },
 ];
 
-function AppearanceSection() {
+function ThemeControl() {
   const { theme, setTheme } = useTheme();
   return (
-    <section className="rounded-lg border bg-card p-5 shadow-sm">
-      <h2 className="text-sm font-semibold text-foreground">外观</h2>
-      <p className="mt-1 text-xs text-muted-foreground">选择界面主题，立即生效并保存在本机。</p>
-      <div className="mt-3 inline-flex rounded-lg border bg-muted p-0.5" role="group" aria-label="外观主题">
-        {THEME_OPTIONS.map((option) => {
-          const Icon = option.icon;
-          const active = theme === option.value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              aria-pressed={active}
-              data-testid={`theme-option-${option.value}`}
-              onClick={() => setTheme(option.value)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors",
-                active ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" aria-hidden />
-              {option.label}
-            </button>
-          );
-        })}
-      </div>
+    <div className="inline-flex rounded-lg border bg-muted p-0.5" role="group" aria-label="外观主题">
+      {THEME_OPTIONS.map((option) => {
+        const Icon = option.icon;
+        const active = theme === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={active}
+            data-testid={`theme-option-${option.value}`}
+            onClick={() => setTheme(option.value)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-xs transition-colors",
+              active ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" aria-hidden />
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 设置分组：与其他页的表格同一个样子，灰底表头行加一行一项。 */
+function SettingsGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="overflow-clip rounded-lg border bg-card" aria-label={title}>
+      <h2 className="border-b bg-muted px-4 py-2 text-xs font-medium text-foreground">{title}</h2>
+      <div className="divide-y">{children}</div>
     </section>
+  );
+}
+
+/** 一行一项：左边名称与一句说明，右边控件。 */
+function SettingsRow({ label, note, children }: { label: string; note?: string; children?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm">{label}</div>
+        {note && <div className="text-xs text-muted-foreground">{note}</div>}
+      </div>
+      {children}
+    </div>
   );
 }
 
@@ -95,39 +115,6 @@ const ADVANCED_ENTRIES = [
     icon: KeyRound,
   },
 ];
-
-function ConfigurationToolsSection({ onSelect }: { onSelect: (key: string) => void }) {
-  return (
-    <section className="rounded-lg border bg-card p-5 shadow-sm">
-      <div>
-        <h2 className="text-sm font-semibold text-foreground">配置工具</h2>
-        <p className="mt-1 text-xs text-muted-foreground">导入、操作记录、密钥和客户端诊断都在这里。</p>
-      </div>
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {ADVANCED_ENTRIES.map((entry) => {
-          const Icon = entry.icon;
-          return (
-            <button
-              key={entry.key}
-              type="button"
-              data-testid={`advanced-entry-${entry.key}`}
-              onClick={() => onSelect(entry.key)}
-              className="flex flex-col items-start rounded-lg border bg-muted/50 p-3.5 text-left transition-all hover:border-primary/40 hover:bg-primary/10 hover:shadow-xs focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-            >
-              <div className="flex w-full items-center justify-between gap-2">
-                <span className="flex items-center gap-2 text-xs font-semibold text-foreground">
-                  <Icon className="h-4 w-4 text-primary" aria-hidden />
-                  {entry.title}
-                </span>
-              </div>
-              <p className="mt-1.5 text-xs text-muted-foreground line-clamp-2">{entry.description}</p>
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
 
 function initialPreferences(data?: SettingsData): SettingsPreferences {
   return { logRetentionDays: data?.preferences?.logRetentionDays ?? 30 };
@@ -293,7 +280,7 @@ export default function SettingsPage({
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
             返回设置
           </button>
-          <span className="text-xs text-muted-foreground">/ 配置工具 / {currentEntry?.title}</span>
+          <span className="text-xs text-muted-foreground">/ 工具 / {currentEntry?.title}</span>
         </div>
         {activeAdvanced === "client-diagnostics" && <ClientDiagnosticsPage />}
         {activeAdvanced === "secrets" && <SecretsPage />}
@@ -301,24 +288,18 @@ export default function SettingsPage({
     );
   }
 
+  const openTool = (key: string) => ((key === "takeover" || key === "runs") && onNavigate ? onNavigate(key) : setActiveAdvanced(key));
+
   return (
-    <div className="space-y-4">
-      <PageHeader title="设置" description="外观、配置备份与本机运行路径。" />
-      <ConfigurationToolsSection
-        onSelect={(key) => ((key === "takeover" || key === "runs") && onNavigate ? onNavigate(key) : setActiveAdvanced(key))}
-      />
-      <AppearanceSection />
-      <ConfigBackupSection />
-      <section className="rounded-lg border bg-card p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-foreground">应用与运行路径</h2>
-        <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-          {[["应用版本", data.appVersion], ["资源目录", data.resourceDir], ["数据目录", data.dataDir]].map(([label, value]) => (
-            <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-all font-mono text-xs text-foreground">{value}</dd></div>
-          ))}
-        </dl>
-        <div className="mt-4 space-y-3 border-t pt-4 text-sm">
-          <label className="flex flex-wrap items-center gap-3">
-            <span>日志保留天数</span>
+    <div className="space-y-3">
+      <h1 className="sr-only">设置</h1>
+
+      <SettingsGroup title="通用">
+        <SettingsRow label="外观" note="立即生效，保存在本机">
+          <ThemeControl />
+        </SettingsRow>
+        <SettingsRow label="操作记录保留" note="0 为不自动清理，最多 3650 天">
+          <div className="flex items-center gap-2">
             <input
               aria-label="日志保留天数"
               type="number"
@@ -329,37 +310,104 @@ export default function SettingsPage({
               onChange={(e) => setPreferences({ ...preferences, logRetentionDays: e.target.value === "" ? NaN : Number(e.target.value) })}
               aria-invalid={!isRetentionValid}
               aria-describedby={!isRetentionValid ? "log-retention-error" : undefined}
-              className={cn("w-32 rounded border px-2 py-1", !isRetentionValid && "border-destructive")}
+              className={cn("w-20 rounded-md border border-input bg-background px-2 py-1 text-right text-sm tabular-nums", !isRetentionValid && "border-destructive")}
             />
-            <span className="text-xs text-muted-foreground">（操作记录保留多久，0 为不自动清理，最大 3650 天）</span>
-          </label>
+            <span className="text-sm text-muted-foreground">天</span>
+            {changed && (
+              <button
+                type="button"
+                onClick={savePreferences}
+                disabled={save.isPending || !isFormValid}
+                className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                <Save className="h-3.5 w-3.5" aria-hidden />
+                保存设置
+              </button>
+            )}
+          </div>
           {!isRetentionValid && (
-            <p id="log-retention-error" role="alert" className="text-xs text-destructive">
+            <p id="log-retention-error" role="alert" className="w-full text-right text-xs text-destructive">
               请输入 0 到 3650 之间的整数。
             </p>
           )}
-          <button type="button" onClick={savePreferences} disabled={!changed || save.isPending || !isFormValid} className={cn("inline-flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-primary-foreground", !changed || save.isPending || !isFormValid ? "bg-muted text-muted-foreground" : "bg-primary hover:bg-primary/90")}><Save className="h-4 w-4" aria-hidden />保存设置</button>
-          {saveStatus && <p role={saveStatus.startsWith("设置保存失败") ? "alert" : "status"} className={saveStatus.startsWith("设置保存失败") ? "text-sm text-destructive" : "text-sm text-success"}>{saveStatus}</p>}
-        </div>
-      </section>
-      {data.updaterConfigured && <section className="rounded-lg border bg-card p-5 shadow-sm">
-        <div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-semibold text-foreground">应用更新</h2><p className="mt-1 text-xs text-muted-foreground">手动检查，确认后下载并安装。</p></div><button type="button" onClick={() => void checkForUpdate()} disabled={updateState !== "idle"} className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"><RefreshCw className={cn("h-4 w-4", updateState === "checking" && "animate-spin")} aria-hidden />检查更新</button></div>
-        {updateState === "idle" && !update && !updateError && <p role="status" className="mt-3 text-sm text-muted-foreground">{updateStatus ?? "尚未检查更新。"}</p>}
-        {updateError && (
-          <div className="mt-3 flex items-center justify-between gap-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
-            <p role="alert">{updateError}</p>
+          {saveStatus && (
+            <p role={saveStatus.startsWith("设置保存失败") ? "alert" : "status"} className={cn("w-full text-right text-xs", saveStatus.startsWith("设置保存失败") ? "text-destructive" : "text-success")}>
+              {saveStatus}
+            </p>
+          )}
+        </SettingsRow>
+        {data.updaterConfigured && (
+          <SettingsRow label="应用更新" note="手动检查，确认后下载并安装">
             <button
               type="button"
-              onClick={() => void (update ? installUpdate() : checkForUpdate())}
+              onClick={() => void checkForUpdate()}
               disabled={updateState !== "idle"}
-              className="rounded border border-destructive/30 bg-card px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm hover:bg-accent disabled:opacity-50"
             >
-              重试
+              <RefreshCw className={cn("h-3.5 w-3.5", updateState === "checking" && "animate-spin")} aria-hidden />
+              检查更新
             </button>
-          </div>
+            {updateState === "idle" && !update && !updateError && (
+              <p role="status" className="w-full text-right text-xs text-muted-foreground">{updateStatus ?? "尚未检查更新。"}</p>
+            )}
+            {updateError && (
+              <div className="flex w-full items-center justify-between gap-2 rounded-md bg-destructive/10 p-2.5 text-sm text-destructive">
+                <p role="alert">{updateError}</p>
+                <button
+                  type="button"
+                  onClick={() => void (update ? installUpdate() : checkForUpdate())}
+                  disabled={updateState !== "idle"}
+                  className="rounded border border-destructive/30 bg-card px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                >
+                  重试
+                </button>
+              </div>
+            )}
+            {update && (
+              <div className="w-full rounded-md border border-primary/20 bg-primary/10 p-3 text-sm">
+                <p className="font-medium text-primary">发现新版本 {update.version}</p>
+                {update.date && <p className="mt-1 text-xs text-primary">发布时间：{update.date}</p>}
+                {update.body && <p className="mt-2 whitespace-pre-wrap text-xs text-primary">{update.body}</p>}
+                <button type="button" onClick={() => setConfirmUpdate(true)} disabled={updateState !== "idle"} className="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50">
+                  下载并安装
+                </button>
+              </div>
+            )}
+          </SettingsRow>
         )}
-        {update && <div className="mt-3 rounded-md border border-primary/20 bg-primary/10 p-3 text-sm"><p className="font-medium text-primary">发现新版本 {update.version}</p>{update.date && <p className="mt-1 text-xs text-primary">发布时间：{update.date}</p>}{update.body && <p className="mt-2 whitespace-pre-wrap text-xs text-primary">{update.body}</p>}<button type="button" onClick={() => setConfirmUpdate(true)} disabled={updateState !== "idle"} className="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">下载并安装</button></div>}
-      </section>}
+      </SettingsGroup>
+
+      <SettingsGroup title="工具">
+        {ADVANCED_ENTRIES.map((entry) => {
+          const Icon = entry.icon;
+          return (
+            <button
+              key={entry.key}
+              type="button"
+              data-testid={`advanced-entry-${entry.key}`}
+              onClick={() => openTool(entry.key)}
+              className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-accent/40 focus:outline-none focus-visible:bg-accent/60"
+            >
+              <Icon className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm">{entry.title}</span>
+                <span className="block truncate text-xs text-muted-foreground">{entry.description}</span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            </button>
+          );
+        })}
+      </SettingsGroup>
+
+      <ConfigBackupSection />
+
+      <SettingsGroup title="关于">
+        {[["应用版本", data.appVersion], ["数据目录", data.dataDir], ["资源目录", data.resourceDir]].map(([label, value]) => (
+          <SettingsRow key={label} label={label}>
+            <span className="min-w-0 max-w-[60%] break-all text-right font-mono text-xs text-muted-foreground">{value}</span>
+          </SettingsRow>
+        ))}
+      </SettingsGroup>
       {confirmUpdate && update && <ConfirmModal title="安装应用更新" description={`将下载并安装版本 ${update.version}，完成后请重启应用。`} risk="network" confirmLabel="确认下载并安装" executing={updateState === "installing"} onConfirm={() => void installUpdate()} onClose={() => setConfirmUpdate(false)} />}
     </div>
   );
