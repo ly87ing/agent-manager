@@ -32,6 +32,8 @@
 
 MCP 支持本地 stdio 与远程 HTTP 两种传输；条目以各助手配置文件为准，新增或修改远程地址时仅允许 `https://` 或本机回环 `http://localhost` / `http://127.0.0.1`，headers 只接受 `${VAR}` 引用或保留原值，以客户端原生引用形式写入。界面按 `mcp:status` 的 `targets` 列出全部配置了 MCP 的助手（含实例与 OpenCode）。
 
+多账号版本（2026-09-28）：基于提交 `beddc6d` 构建的 Darwin x86_64 DMG 通过 `verify:macos` 独立包验收（只读挂载、复制到临时目录、隔离 HOME 与最小 PATH 启动持续存活 5 秒、构建身份一致、路径脱敏、无 Python 残留），未签名，SHA256 `7c3ff59818692484fb76b39e4b5726713a7936e5d0fabe01328c139bbe4d3f39`，8705779 bytes。账号新建 / 编辑 / 移除、技能 / MCP / 规则补齐与实时额度的真实写入在隔离 HOME 用同一引擎 CLI 回读验证；打包应用内的界面点选流程未做自动化验收。
+
 旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（提交、SHA256 与验证结果见 [交付回执](goal-rust-gui.md)）。
 
 验证入口：`cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。macOS 打包与独立包验收使用 `pnpm --dir app run build:macos` 与 `./scripts/verify-macos-dmg.sh <path-to-dmg>`。本机验收允许如实报告未签名状态，不代表 Apple 签名或公证通过，也不替代其他平台和未完成域的 E2E。
