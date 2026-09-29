@@ -166,6 +166,23 @@ describe("账号页", () => {
     expect(calls.find((call) => call.args.includes("--probe"))?.args).toEqual(["--only", "agents:claude-code", "--probe"]);
   });
 
+  it("准备情况：逐项核对登录、启动命令、技能、MCP、规则，缺的就地补齐", async () => {
+    const { calls } = renderWithEngine(<AccountsPage />, routes());
+    const main = await screen.findByTestId("account-row-agents:claude-code");
+    await userEvent.click(within(main).getByRole("button", { name: /更多/ }));
+    await userEvent.click(await screen.findByTestId("account-menu-readiness-agents:claude-code"));
+    const panel = await screen.findByTestId("account-readiness-agents:claude-code");
+    expect(await within(panel).findByText("已登录 YOUR_EMAIL@example.com")).toBeInTheDocument();
+    expect(within(panel).getByTestId("readiness-skills")).toHaveTextContent("在用的技能都有了");
+    // 只在 ds 上启用着的服务：主账号缺，给补齐
+    expect(await within(panel).findByText("缺 1 个在用的服务")).toBeInTheDocument();
+    await userEvent.click(within(panel).getByTestId("readiness-action-mcp"));
+    await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "mcp:apply")!.args).toEqual([
+      "--only", "mcp:only-ds", "--agent", "ds", "--to", "claude-code", "--action", "copy", "--base", "ds-base",
+    ]);
+  });
+
   it("新建官方账号：预览通过后依次登记、写目录、写启动命令（沿用主账号时区与参数）、带上全部共用设置", async () => {
     const { calls } = renderWithEngine(<AccountsPage />, routes());
     const drawer = await openCreate();
@@ -197,6 +214,8 @@ describe("账号页", () => {
       'TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude --dangerously-skip-permissions',
     );
     expect(valueOf(writes[3].args, "--items")).toBe("permissions,statusline,hooks,rules,mcp");
+    // 建好后直接给出新账号的准备情况
+    expect(await screen.findByTestId("account-readiness-profiles:work")).toHaveTextContent("新账号「");
   });
 
   it("预览之后目标文件变了：不登记、不写任何文件", async () => {

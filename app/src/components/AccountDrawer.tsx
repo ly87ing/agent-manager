@@ -51,6 +51,7 @@ export function AccountDrawer({
   ops,
   secretSource,
   reservedNames,
+  onCreated,
   onClose,
 }: {
   mode: DrawerMode;
@@ -58,6 +59,8 @@ export function AccountDrawer({
   secretSource: SecretSourceState | null;
   /** 不能用作启动命令的名字：助手命令本身与已登记的账号。 */
   reservedNames: string[];
+  /** 新建成功：给出新账号的实例 id，账号页据此显示它的准备情况。 */
+  onCreated?: (profileId: string) => void;
   onClose: () => void;
 }) {
   const { group } = mode;
@@ -163,7 +166,10 @@ export function AccountDrawer({
     try {
       const secret = type === "api" && apiKey ? { variable: tokenVar.trim(), value: apiKey } : undefined;
       if (mode.type === "create") {
-        if (await ops.create(input, bin, previewReady!, reservedNames, secret)) onClose();
+        if (await ops.create(input, bin, previewReady!, reservedNames, secret)) {
+          onCreated?.(input.id);
+          onClose();
+        }
         return;
       }
       const profileId = mode.account.elementId.replace(/^profiles:/, "");

@@ -3,6 +3,7 @@ import { Activity, Copy, LogIn, MoreHorizontal, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AccountDrawer, type DrawerMode } from "../components/AccountDrawer";
+import { AccountReadiness } from "../components/AccountReadiness";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { LaunchCommandsDrawer } from "../components/LaunchCommandsDrawer";
 import { PageError, PageLoading } from "../components/PageState";
@@ -109,6 +110,7 @@ interface RowActions {
   onManageSkills: () => void;
   /** 本机文件说明不了登录状态时，用官方命令确认一次（官方命令自己会写配置目录，所以只在点击时调用）。 */
   onProbeAuth: () => void;
+  onReadiness: () => void;
 }
 
 function AccountRow({
@@ -224,6 +226,7 @@ function AccountRow({
           ...(account.type === "official"
             ? [{ label: "复制登录命令", testId: `account-menu-login-${id}`, onSelect: () => void copyText(loginCommand, "已复制登录命令") }]
             : []),
+          { label: "准备情况", testId: `account-menu-readiness-${id}`, onSelect: actions.onReadiness },
           { label: "技能", testId: `account-menu-skills-${id}`, onSelect: actions.onManageSkills },
           { label: "复制目录路径", testId: `account-menu-dir-${id}`, onSelect: () => void copyText(account.configDir, "已复制目录路径") },
           ...(!account.isMain ? [{ label: "移除", testId: `account-menu-remove-${id}`, onSelect: actions.onRemove }] : []),
@@ -240,6 +243,8 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
   const secretsQuery = useEngineQuery<StatusData>("secrets:status");
   const ops = useAccountOps();
   const queryClient = useQueryClient();
+  /** 正在看准备情况的账号；新建成功后自动打开。 */
+  const [readiness, setReadiness] = useState<{ id: string; isNew: boolean } | null>(null);
   const aliasSource = ops.aliasSource;
   const [selected, setSelected] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerMode | null>(null);
@@ -314,6 +319,7 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
       onAddLaunch: () => withDefinition(account, (definition) => void ops.addLaunch(profileId, definition, group.bin)),
       onAdopt: () => account.profileBase && void ops.adopt(account.elementId, account.profileBase),
       onManageSkills: () => onManageSkills?.(account.isMain ? group.agentId : profileId),
+      onReadiness: () => setReadiness({ id: account.elementId, isNew: false }),
       onProbeAuth: () =>
         void runEngine<OfficialAuthStatus>("agents:auth-status", ["--only", account.elementId, "--probe"])
           .then((envelope) => {
@@ -387,6 +393,23 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
           </button>
         </div>
       )}
+      {(() => {
+        const account = readiness && group.accounts.find((item) => item.elementId === readiness.id);
+        if (!account) return null;
+        const actions = actionsOf(account);
+        return (
+          <AccountReadiness
+            account={account}
+            group={group}
+            auth={authOf(account)}
+            isNew={readiness!.isNew}
+            loginCommand={authTerminalCommand(group.kind, group.bin, "login", account.isMain ? undefined : account.configDir)}
+            onAddLaunch={actions.onAddLaunch}
+            onProbeAuth={actions.onProbeAuth}
+            onClose={() => setReadiness(null)}
+          />
+        );
+      })()}
       <ul data-testid="accounts-list" className="divide-y rounded-lg border bg-card">
         {group.accounts.map((account) => (
           <AccountRow
@@ -404,6 +427,7 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
           ops={ops}
           secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}
           reservedNames={reservedNames}
+          onCreated={(profileId) => setReadiness({ id: `profiles:${profileId}`, isNew: true })}
           onClose={() => setDrawer(null)}
         />
       )}
