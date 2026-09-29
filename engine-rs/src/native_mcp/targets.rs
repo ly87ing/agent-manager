@@ -92,6 +92,10 @@ pub fn agent_targets(policy: &Value, home_dir: &Path) -> Vec<AgentTarget> {
         let Some(def_map) = def.as_object() else {
             continue;
         };
+        // 已移除的账号只留删除标记（目录保留）：不再是 MCP 目标，不能被列出或写入
+        if def_map.get("_delete") == Some(&Value::Bool(true)) {
+            continue;
+        }
         let enabled = policy
             .get("agents")
             .and_then(|a| a.get(raw_id).or_else(|| a.get(&agent)))

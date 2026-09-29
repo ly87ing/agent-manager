@@ -2278,3 +2278,96 @@ fn apply_lock_and_audit_never_record_values() {
     }
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn removed_account_is_not_a_target_and_cannot_receive_copies() {
+    let (root, ctx) = temp_ctx("removed-account");
+    let definition = json!({
+        "display_name": "Gone",
+        "bin": "claude",
+        "skills_dir": "~/.claude-gone/skills",
+        "mcp_config": {"path": "~/.claude-gone/.claude.json", "format": "json"},
+        "profile": {"base_agent": "claude-code", "kind": "claude", "config_dir": "~/.claude-gone"},
+        "_delete": false,
+        "_replace": true,
+    })
+    .to_string();
+    let set = run(
+        &ctx,
+        "policy:set",
+        &[
+            "--layer",
+            "local",
+            "--key",
+            "agents.definitions.gone",
+            "--value",
+            &definition,
+        ],
+    );
+    assert!(set.ok, "{}", errors(&set));
+    let listed = status(&ctx);
+    assert!(listed["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t["agent"] == "gone"));
+
+    // 移除账号只留删除标记（目录保留）
+    let removed = run(
+        &ctx,
+        "policy:set",
+        &[
+            "--layer",
+            "local",
+            "--key",
+            "agents.definitions.gone",
+            "--value",
+            r#"{"_delete": true}"#,
+        ],
+    );
+    assert!(removed.ok, "{}", errors(&removed));
+    let after = status(&ctx);
+    assert!(
+        after["targets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["agent"] != "gone"),
+        "已移除的账号不能再列为 MCP 目标"
+    );
+
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:fs",
+            "--agent",
+            "claude-code",
+            "--action",
+            "add",
+            "--spec",
+            r#"{"command":"npx","args":["-y","fs"]}"#,
+        ],
+    );
+    let base = base(&ctx, "fs", "claude-code");
+    apply_err(
+        &ctx,
+        &[
+            "--only",
+            "mcp:fs",
+            "--agent",
+            "claude-code",
+            "--to",
+            "gone",
+            "--action",
+            "copy",
+            "--base",
+            &base,
+        ],
+    );
+    assert!(
+        !ctx.home_dir.join(".claude-gone/.claude.json").exists(),
+        "不能写进已移除账号的目录"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
