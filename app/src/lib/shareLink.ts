@@ -99,3 +99,28 @@ function validate(payload: SharePayload): SharePayload | string {
   }
   return "只支持分享 MCP 服务与技能集合";
 }
+
+/** 系统里点开分享链接时，桌面壳发来的事件；只带链接文字，校验与确认都在界面里做。 */
+const IMPORT_LINK_EVENT = "import-link";
+
+/** 订阅点开的分享链接；返回取消订阅函数（浏览器环境没有这个通道，返回空操作）。 */
+export function subscribeImportLinks(onLink: (url: string) => void): () => void {
+  let disposed = false;
+  let unlisten: (() => void) | undefined;
+  void (async () => {
+    try {
+      const { listen } = await import("@tauri-apps/api/event");
+      const stop = await listen<unknown>(IMPORT_LINK_EVENT, (event) => {
+        if (typeof event.payload === "string" && event.payload.startsWith(SHARE_PREFIX.split("?")[0])) onLink(event.payload);
+      });
+      if (disposed) stop();
+      else unlisten = stop;
+    } catch {
+      // 浏览器环境没有桌面壳，不是错误
+    }
+  })();
+  return () => {
+    disposed = true;
+    unlisten?.();
+  };
+}

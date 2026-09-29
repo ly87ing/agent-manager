@@ -3,17 +3,24 @@ import { waitFor } from "@testing-library/react";
 import App from "../App";
 import type { Envelope, SettingsData } from "../lib/contract";
 import { setSettingsClient } from "../lib/settings";
+import { encodeShareLink } from "../lib/shareLink";
 import { agentManagementFixture, makeAliasStatus, makeAuditData, makeElement, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
+/** 按事件名记下界面订阅的桌面壳事件（托盘动作、点开的分享链接）。 */
 const trayEvents = vi.hoisted(() => ({
-  listeners: new Set<(event: { payload: unknown }) => void>(),
+  byName: new Map<string, Set<(event: { payload: unknown }) => void>>(),
+  get listeners() {
+    return this.byName.get("tray-action") ?? new Set();
+  },
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn(async (_event: string, listener: (event: { payload: unknown }) => void) => {
-    trayEvents.listeners.add(listener);
-    return () => trayEvents.listeners.delete(listener);
+  listen: vi.fn(async (name: string, listener: (event: { payload: unknown }) => void) => {
+    const set = trayEvents.byName.get(name) ?? new Set();
+    set.add(listener);
+    trayEvents.byName.set(name, set);
+    return () => set.delete(listener);
   }),
 }));
 
@@ -90,7 +97,7 @@ function writes(calls: { command: string }[]) {
 }
 
 describe("命令面板", () => {
-  beforeEach(() => trayEvents.listeners.clear());
+  beforeEach(() => trayEvents.byName.clear());
 
   it("⌘K 搜到页面、账号与资源，选中页面跳过去", async () => {
     await renderApp();
@@ -162,6 +169,17 @@ describe("命令面板", () => {
     expect(within(palette).getAllByRole("button")).toHaveLength(1);
     await userEvent.keyboard("{Enter}");
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("cw"));
+    expect(writes(calls)).toEqual([]);
+  });
+
+  it("系统里点开分享链接：打开导入对话框并填好链接，确认前不写任何东西", async () => {
+    const { calls } = await renderApp();
+    await waitFor(() => expect(trayEvents.byName.get("import-link")?.size).toBe(1));
+    const link = encodeShareLink({ kind: "mcp", name: "shared-srv", spec: { command: "uvx", args: [], env: {} } });
+    for (const listener of trayEvents.byName.get("import-link") ?? []) listener({ payload: link });
+    const dialog = await screen.findByRole("dialog", { name: "从分享链接导入" });
+    expect(within(dialog).getByTestId("import-link-input")).toHaveValue(link);
+    expect(within(dialog).getByTestId("import-link-summary")).toHaveTextContent("shared-srv");
     expect(writes(calls)).toEqual([]);
   });
 });

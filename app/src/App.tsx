@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
 import { ImportLinkDialog } from "./components/ImportLinkDialog";
-import type { SharePayload } from "./lib/shareLink";
+import { subscribeImportLinks, type SharePayload } from "./lib/shareLink";
 import { useSettings } from "./lib/settings";
 import { subscribeTrayActions } from "./lib/trayActions";
 import { useUpdateCheck } from "./lib/update-check";
@@ -88,6 +88,9 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [paletteScope]);
+
+  // 系统里点开 agentmanager://import 链接：打开导入对话框并填好链接，由用户检查确认
+  useEffect(() => subscribeImportLinks((url) => setImportText(url)), []);
 
   useEffect(
     () =>

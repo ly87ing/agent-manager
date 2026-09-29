@@ -5,7 +5,9 @@ mod settings;
 mod theme;
 mod tray;
 
+use tauri::Emitter;
 use tauri::RunEvent;
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_window_state::StateFlags;
 
 #[tauri::command]
@@ -54,6 +56,17 @@ fn classify_exit_request(code: Option<i32>) -> ExitRequestAction {
     }
 }
 
+const IMPORT_LINK_PREFIX: &str = "agentmanager://import";
+
+/// 把分享链接交给界面（唤起主窗口后发 `import-link` 事件）；不是导入链接的忽略。
+fn forward_import_link(app: &tauri::AppHandle, url: &str) {
+    if !url.starts_with(IMPORT_LINK_PREFIX) || url.len() > 64 * 1024 {
+        return;
+    }
+    tray::show_main_window(app);
+    let _ = app.emit("import-link", url.to_string());
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .manage(tray::TrayState::default())
@@ -75,8 +88,17 @@ fn main() {
                 let _ = window.hide();
             }
         })
+        .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
             tray::setup(app)?;
+            // 分享链接 agentmanager://import?data=…：只把链接文字交给界面的导入对话框，
+            // 由界面校验、展示并等用户确认；这里不解析、不写任何东西。其他链接一律忽略。
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    forward_import_link(&handle, url.as_str());
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

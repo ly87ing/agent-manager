@@ -29,6 +29,11 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["agentmanager"]
+      }
+    },
     "updater": {
       "endpoints": [
         "https://github.com/ly87ing/agent-manager/releases/latest/download/latest.json"
