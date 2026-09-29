@@ -1199,7 +1199,10 @@ describe("助手运行参数", () => {
     for (const tier of ["opus", "sonnet", "haiku", "fable"]) {
       expect(within(dialog).getByTestId(`new-connection-alias-${tier}`)).toHaveValue("deepseek-v4-pro");
     }
-    await userEvent.type(within(dialog).getByTestId("new-connection-subagent-model"), "deepseek-v4-flash");
+    const subagentModel = within(dialog).getByTestId("new-connection-subagent-model");
+    expect(subagentModel).toHaveValue("deepseek-flash");
+    await userEvent.clear(subagentModel);
+    await userEvent.type(subagentModel, "deepseek-v4-flash");
     await userEvent.click(within(dialog).getByTestId("connection-form-submit"));
     await waitFor(() => expect(rendered.calls.some((call) => call.command === "policy:set")).toBe(true));
     const saved = rendered.calls.find((call) => call.command === "policy:set")!;

@@ -414,6 +414,7 @@ describe("助手实例", () => {
       expect(definition.profile.source_connection).toBe(saveTemplate ? "deepseek" : undefined);
       expect(definition.profile.env.ANTHROPIC_BASE_URL).toBe("https://api.deepseek.com/anthropic");
       expect(definition.profile.env.ANTHROPIC_AUTH_TOKEN).toBe("${DEEPSEEK_API_KEY}");
+      expect(definition.profile.env.CLAUDE_CODE_SUBAGENT_MODEL).toBe("deepseek-flash");
       expect(calls.find((call) => call.command === "profiles:apply")!.args).toEqual(["--only", "profiles:deepseek", "--base", "missing"]);
       expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
       const card = await screen.findByTestId("profile-card-deepseek");
@@ -447,6 +448,8 @@ describe("助手实例", () => {
     expect(within(dialog).getByTestId("connection-form-submit")).toBeEnabled();
     expect(content).toHaveTextContent("https://api.deepseek.com/anthropic");
     expect(content).toHaveTextContent("${DEEPSEEK_API_KEY}");
+    expect(content).toHaveTextContent("CLAUDE_CODE_SUBAGENT_MODEL");
+    expect(content).toHaveTextContent("deepseek-flash");
     expect(within(dialog).getByTestId("connection-preview-file-deepseek-0")).toHaveTextContent("# Shared rule");
     expect(calls.find((call) => call.command === "profiles:preview")?.args.slice(0, 2)).toEqual(["--only", "profiles:deepseek"]);
     expect(calls.find((call) => call.command === "profiles:preview")?.args).toContain("--on-save");

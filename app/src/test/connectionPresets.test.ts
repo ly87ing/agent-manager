@@ -105,6 +105,12 @@ describe("接入配置预设", () => {
     }
   });
 
+  it("DeepSeek 的 Claude 预设按官方文档设置子代理模型", () => {
+    const preset = CONNECTION_PRESETS.find((p) => p.id === "deepseek-claude")!;
+    const entry = connectionFromPreset(preset, "deepseek");
+    expect(entry.subagentModel).toBe("deepseek-flash");
+  });
+
   it("密钥与文档链接只用 https；Kimi Code 的 Claude 接入按官方写法走 x-api-key 并带上 fable 与子代理模型", () => {
     for (const preset of CONNECTION_PRESETS) {
       for (const url of [preset.apiKeyUrl, preset.docsUrl]) {

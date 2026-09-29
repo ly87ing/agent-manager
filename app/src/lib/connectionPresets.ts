@@ -121,6 +121,7 @@ export const CONNECTION_PRESETS: ConnectionPreset[] = [
     aliasOpus: "deepseek-flash[1m]",
     aliasSonnet: "deepseek-flash[1m]",
     aliasHaiku: "deepseek-flash",
+    subagentModel: "deepseek-flash",
     tokenVar: "DEEPSEEK_API_KEY",
     source: "DeepSeek API 文档 api-docs.deepseek.com",
     apiKeyUrl: "https://platform.deepseek.com/api_keys",
