@@ -97,6 +97,14 @@ describe("接入配置预设", () => {
     expect(CONNECTION_PRESETS.find((p) => p.id === "minimax-global-codex")!.baseUrl).toBe("https://api.minimax.io/v1");
   });
 
+  it("MiniMax 的 Claude 预设按官方当前接入文档把常用模型都指向 M3", () => {
+    for (const id of ["minimax-cn-claude", "minimax-global-claude"]) {
+      const preset = CONNECTION_PRESETS.find((p) => p.id === id)!;
+      expect([preset.model, preset.aliasOpus, preset.aliasSonnet, preset.aliasHaiku], id)
+        .toEqual(Array(4).fill("MiniMax-M3[1m]"));
+    }
+  });
+
   it("密钥与文档链接只用 https；Kimi Code 的 Claude 接入按官方写法走 x-api-key 并带上 fable 与子代理模型", () => {
     for (const preset of CONNECTION_PRESETS) {
       for (const url of [preset.apiKeyUrl, preset.docsUrl]) {
