@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, Info, Plus, Wand2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Info, Plus } from "lucide-react";
+import { AgentIcon } from "../components/AgentIcon";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { RuleSourcesManager } from "../components/RuleSourcesManager";
 import { ErrorPanel } from "../components/ErrorPanel";
@@ -13,10 +14,9 @@ import { engineErrorMessage, runEngine } from "../lib/engine";
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import { newRunId } from "../lib/runId";
 import { diffLines, hasChanges } from "../lib/textDiff";
-import { rulesFillArgs, rulesFillRows } from "../lib/rulesFill";
+import { type RulesFillRow, rulesFillArgs, rulesFillRows } from "../lib/rulesFill";
 import { useAccountNames } from "../lib/useAccountNames";
 import { useDirectApply } from "../lib/useDirectApply";
-import { useExecutions } from "../lib/execution";
 import { cn } from "../lib/utils";
 
 const PAGE_NOTE =
@@ -30,6 +30,10 @@ const ORIGIN_LABEL: Record<string, string> = {
   backup: "备份",
   legacy: "旧来源",
 };
+
+/** 次要动作：鼠标移到行上（或键盘聚焦）才显示，与技能、MCP 页一致。 */
+const HOVER_ACTIONS = "flex flex-wrap gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100";
+const GHOST = "rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground";
 
 function specOf(element: EngineElement): RulesSpec {
   return element.spec as unknown as RulesSpec;
@@ -96,9 +100,7 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
   const query = useEngineQuery<StatusData>("rules:status");
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const directApply = useDirectApply();
-  const { execute } = useExecutions();
   const accountName = useAccountNames();
-  const [filling, setFilling] = useState(false);
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="规则状态读取失败" error={query.error} />;
@@ -146,23 +148,9 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
   };
 
   const pendingFill = rulesFillRows(elements);
-  /** 补齐：只给还没有规则文件的账号从主账号复制，逐个写入，单个失败不影响其余。 */
-  const runFill = async () => {
-    if (filling) return;
-    setFilling(true);
-    let ok = 0;
-    let failed = 0;
-    try {
-      for (const row of pendingFill) {
-        const envelope = await execute({ command: "rules:apply", label: `补齐 ${row.name}`, args: rulesFillArgs(row), silent: true });
-        if (envelope?.ok) ok += 1;
-        else failed += 1;
-      }
-    } finally {
-      setFilling(false);
-    }
-    (failed ? toast.error : toast.success)(`补齐完成：成功 ${ok}，失败 ${failed}${failed ? "，详见任务记录" : ""}`);
-  };
+  /** 补齐一个账号：还没有规则文件时从同类主账号复制；引擎写前再核对文件仍不存在。 */
+  const fillOne = (row: RulesFillRow) =>
+    void directApply.apply({ command: "rules:apply", label: `补齐 ${row.name}`, args: rulesFillArgs(row) });
 
   /** 账号名：主账号用助手名，实例用账号名。 */
   const labelOf = (element: EngineElement) => {
@@ -189,20 +177,6 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
         <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title={PAGE_NOTE}>
           <Info className="h-3.5 w-3.5" aria-hidden /> 各账号的规则文件
         </span>
-        <div className="ml-auto flex items-center gap-2">
-          {pendingFill.length > 0 && (
-            <button
-              type="button"
-              data-testid="rules-fill"
-              disabled={filling || directApply.executing}
-              title="给还没有规则文件的账号复制主账号的规则；已有内容的不动"
-              onClick={() => void runFill()}
-              className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/15 disabled:opacity-40"
-            >
-              <Wand2 className="h-4 w-4" aria-hidden /> 补齐 {pendingFill.length}
-            </button>
-          )}
-        </div>
       </div>
 
       <section className="divide-y rounded-lg border bg-card" aria-label="规则文件">
@@ -215,6 +189,8 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
               key={element.id}
               element={element}
               label={labelOf(element)}
+              fill={pendingFill.find((row) => row.elementId === element.id)}
+              onFill={fillOne}
               sourceRules={sourceRules}
               busy={directApply.executing}
               onEdit={() => setDialog({ kind: "edit", element })}
@@ -266,7 +242,7 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
         {templates.length === 0 && <p className="text-xs text-muted-foreground">还没有模板。</p>}
         <ul className="divide-y">
           {templates.map((template) => (
-            <li key={template.id} data-testid={`rule-template-${template.id}`} className="flex flex-wrap items-center justify-between gap-2 py-2">
+            <li key={template.id} data-testid={`rule-template-${template.id}`} className="group flex flex-wrap items-center justify-between gap-2 py-2">
               <div className="min-w-0">
                 <span className="text-sm font-medium">{template.name}</span>
                 <span className="ml-2 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground">
@@ -274,14 +250,14 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
                 </span>
                 <span className="ml-2 text-[11px] text-muted-foreground">{lineCount(template.body)} 行</span>
               </div>
-              <div className="flex gap-2">
+              <div className={HOVER_ACTIONS}>
                 {writable.length > 0 && (
                   <button
                     type="button"
                     onClick={() =>
                       setDialog({ kind: "apply", title: `应用模板「${template.name}」`, targets: writable, sources: [templateSource(template)] })
                     }
-                    className="rounded border border-primary/30 px-2.5 py-1 text-xs text-primary hover:bg-primary/10"
+                    className={GHOST}
                   >
                     应用到…
                   </button>
@@ -290,7 +266,7 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
                   type="button"
                   aria-label={`编辑模板 ${template.name}`}
                   onClick={() => setDialog({ kind: "template", template })}
-                  className="rounded border px-2.5 py-1 text-xs hover:bg-accent"
+                  className={GHOST}
                 >
                   编辑
                 </button>
@@ -298,7 +274,7 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
                   type="button"
                   aria-label={`删除模板 ${template.name}`}
                   onClick={() => setDialog({ kind: "delete-template", template })}
-                  className="rounded border border-destructive/30 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10"
+                  className={cn(GHOST, "hover:bg-destructive/10 hover:text-destructive")}
                 >
                   删除
                 </button>
@@ -341,10 +317,15 @@ function TargetCard({
   onApplyRule,
   onFollow,
   onCopy,
+  fill,
+  onFill,
 }: {
   element: EngineElement;
   /** 显示用：账号名 · 文件名。 */
   label: string;
+  /** 还没有规则文件、可以从主账号复制时给出。 */
+  fill?: RulesFillRow;
+  onFill: (row: RulesFillRow) => void;
   sourceRules: RuleSourceRule[];
   busy: boolean;
   onEdit: () => void;
@@ -370,10 +351,11 @@ function TargetCard({
     follow && !follow.file_unchanged && follow.current_revision && follow.current_revision !== follow.applied_revision,
   );
   return (
-    <div data-testid={`rules-target-${element.id}`} className="px-4 py-2.5">
+    <div data-testid={`rules-target-${element.id}`} className="group px-4 py-2.5 hover:bg-accent/40">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
+            <AgentIcon kind={spec.kind === "codex" ? "codex" : "claude"} />
             <span className="text-sm font-medium" title={nameOf(element)}>{label}</span>
             <span
               className={cn(
@@ -409,7 +391,19 @@ function TargetCard({
           )}
         </div>
         {writable && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {fill && (
+              <button
+                type="button"
+                data-testid={`rules-fill-${element.id}`}
+                disabled={busy}
+                title="从同一助手的主号复制规则文件过来；已有内容的账号不会走到这里"
+                onClick={() => onFill(fill)}
+                className="rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/15 disabled:opacity-40"
+              >
+                从主号补齐
+              </button>
+            )}
             {followedRule && (follow?.update_available || changedSinceFollow) && (
               <button
                 type="button"
@@ -432,12 +426,8 @@ function TargetCard({
                 跟随来源更新
               </button>
             )}
-            <button
-              type="button"
-              aria-label={`编辑 ${nameOf(element)}`}
-              onClick={onEdit}
-              className="rounded border border-primary/30 px-2.5 py-1 text-xs text-primary hover:bg-primary/10"
-            >
+            <div className={HOVER_ACTIONS}>
+            <button type="button" aria-label={`编辑 ${nameOf(element)}`} onClick={onEdit} className={GHOST}>
               编辑
             </button>
             {onApplyTemplate && (
@@ -445,7 +435,7 @@ function TargetCard({
                 type="button"
                 aria-label={`应用模板到 ${nameOf(element)}`}
                 onClick={onApplyTemplate}
-                className="rounded border px-2.5 py-1 text-xs hover:bg-accent"
+                className={GHOST}
               >
                 应用模板
               </button>
@@ -455,11 +445,12 @@ function TargetCard({
                 type="button"
                 aria-label={`复制 ${nameOf(element)} 到…`}
                 onClick={onCopy}
-                className="rounded border px-2.5 py-1 text-xs hover:bg-accent"
+                className={GHOST}
               >
                 复制到…
               </button>
             )}
+            </div>
           </div>
         )}
       </div>
@@ -571,7 +562,7 @@ function SourceRulesSection({
       )}
       <ul className="divide-y">
         {rules.map((rule) => (
-          <li key={rule.id} data-testid={`rules-source-rule-${rule.id}`} className="py-2">
+          <li key={rule.id} data-testid={`rules-source-rule-${rule.id}`} className="group py-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0">
                 <span className="text-sm font-medium">{rule.name}</span>
@@ -580,12 +571,12 @@ function SourceRulesSection({
                 </span>
                 <span className="ml-2 text-[11px] text-muted-foreground">{lineCount(rule.body)} 行</span>
               </div>
-              <div className="flex gap-2">
+              <div className={cn(HOVER_ACTIONS, openId === rule.id && "opacity-100")}>
                 <button
                   type="button"
                   aria-expanded={openId === rule.id}
                   onClick={() => setOpenId(openId === rule.id ? null : rule.id)}
-                  className="rounded border px-2.5 py-1 text-xs hover:bg-accent"
+                  className={GHOST}
                 >
                   {openId === rule.id ? "收起" : "预览"}
                 </button>
@@ -594,7 +585,7 @@ function SourceRulesSection({
                     type="button"
                     aria-label={`应用${sourceRuleLabel(rule)}到…`}
                     onClick={() => onApply(rule)}
-                    className="rounded border border-primary/30 px-2.5 py-1 text-xs text-primary hover:bg-primary/10"
+                    className={GHOST}
                   >
                     应用到…
                   </button>

@@ -158,10 +158,10 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     expect(rulesTab).toHaveAttribute("aria-selected", "true");
   });
 
-  it("补齐：只给还没有规则文件的账号从同类主账号复制，已有内容、阻塞与停用的不动", async () => {
+  it("补齐：只在还没有规则文件的账号行上给「从主号补齐」，从同类主账号复制；已有内容、阻塞与停用的不给", async () => {
     const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
-    const fill = await screen.findByTestId("rules-fill");
-    expect(fill).toHaveTextContent("补齐 1");
+    const fill = await screen.findByTestId("rules-fill-rules:profile:cc-work");
+    expect(screen.getAllByTestId(/^rules-fill-/)).toHaveLength(1);
     await userEvent.click(fill);
     await waitFor(() => expect(calls.filter((call) => call.command === "rules:apply")).toHaveLength(1));
     expect(calls.find((call) => call.command === "rules:apply")!.args).toEqual([

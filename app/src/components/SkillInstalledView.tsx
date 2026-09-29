@@ -1,4 +1,6 @@
 import { FolderOpen } from "lucide-react";
+import { useAccountGroups } from "../lib/useAccountNames";
+import { AgentIcon } from "./AgentIcon";
 import type { SkillInstalledEntry } from "../lib/contract";
 import { cn } from "../lib/utils";
 
@@ -35,7 +37,10 @@ function detailOf(entry: SkillInstalledEntry): string | null {
 }
 
 export function SkillInstalledView({ entries, agents }: { entries: SkillInstalledEntry[]; agents: string[] }) {
-  const agentIds = Array.from(new Set([...agents, ...entries.map((entry) => entry.agent)])).sort();
+  const groupsOf = useAccountGroups();
+  // 按账号页的顺序：同一助手的账号挨在一起，主号在前
+  const columns = groupsOf(Array.from(new Set([...agents, ...entries.map((entry) => entry.agent)])).sort())
+    .flatMap((group) => group.columns.map((column) => ({ ...column, kind: group.kind })));
   return (
     <section data-testid="skills-installed" className="rounded-lg border bg-card p-4 shadow-sm">
       <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -43,15 +48,15 @@ export function SkillInstalledView({ entries, agents }: { entries: SkillInstalle
         当前安装
       </h3>
       <p className="mt-1 text-xs text-muted-foreground">
-        各助手技能目录里现在实际有什么。这里只展示：外部链接和真实目录由它们原来的方式维护，不需要处理。
+        各账号技能目录里现在实际有什么。这里只展示：外部链接和真实目录由它们原来的方式维护，不需要处理。
       </p>
       {entries.length === 0 ? (
         <p data-testid="skills-installed-empty" className="mt-3 text-xs text-muted-foreground">
-          各助手的技能目录里还没有技能。
+          各账号的技能目录里还没有技能。
         </p>
       ) : (
         <div className="mt-3 space-y-2">
-          {agentIds.map((agent) => {
+          {columns.map(({ id: agent, fullName, kind }) => {
             const own = entries.filter((entry) => entry.agent === agent);
             const summary = SUMMARY_ORDER.map(({ key, label, origins }) => ({
               key,
@@ -61,7 +66,10 @@ export function SkillInstalledView({ entries, agents }: { entries: SkillInstalle
             return (
               <details key={agent} data-testid={`skills-installed-${agent}`} className="rounded-md border px-3 py-2">
                 <summary className="cursor-pointer text-xs text-foreground">
-                  <span className="font-mono font-semibold">{agent}</span>
+                  <span className="inline-flex items-center gap-1.5 align-middle font-semibold">
+                    <AgentIcon kind={kind} />
+                    {fullName}
+                  </span>
                   <span className="ml-2 text-muted-foreground">
                     {own.length} 项：
                     {summary.map(({ key, label, count }, index) => (
@@ -73,7 +81,7 @@ export function SkillInstalledView({ entries, agents }: { entries: SkillInstalle
                   </span>
                 </summary>
                 {own.length === 0 ? (
-                  <p className="mt-2 text-xs text-muted-foreground">这个助手的技能目录里还没有技能。</p>
+                  <p className="mt-2 text-xs text-muted-foreground">这个账号的技能目录里还没有技能。</p>
                 ) : (
                   <ul className="mt-2 space-y-1">
                     {own.map((entry) => {
