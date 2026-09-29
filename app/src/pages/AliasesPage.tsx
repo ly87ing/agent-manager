@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Info, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronRight, Copy, Info, Pencil, Plus, Trash2 } from "lucide-react";
 import { AgentIcon } from "../components/AgentIcon";
 import { COL_ACTION, COL_ICONS, COL_MIDDLE, COL_NARROW, DataTable, PILL, ROW, RowIcon, TableHeader } from "../components/DataTable";
 import { AliasApplyConfirm } from "../components/AliasApplyConfirm";
@@ -40,6 +40,7 @@ type Dialog =
 export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => void } = {}) {
   const { query, source, busy, setAlias, previewSetAlias, previewApply, removeAlias, addRecommended, addLegacy, discardLegacy, fetchSource } = useAliasSource();
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const [showMore, setShowMore] = useState(false);
   const accountOf = useCommandAccounts(
     source?.aliases ?? {},
     (source?.targets ?? []).flatMap((target) => target.external),
@@ -59,6 +60,8 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
   const names = source.current.map((item) => item.name);
   const previewBase = JSON.stringify(source.targets.map((target) => [target.id, target.base]));
   const external = source.targets.flatMap((target) => target.external.map((line) => ({ target, line })));
+  /** 有文件读写不了：终端配置文件直接摊开，不藏在「更多」里。 */
+  const problem = source.targets.some((target) => target.blockedReason);
   const close = () => setDialog(null);
   const refreshCurrent = () => {
     close();
@@ -240,8 +243,8 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
       )}
 
       {source.legacy.length > 0 && (
-        <DataTable label="已保存未生效" testId="alias-legacy">
-          <TableHeader title={`已保存未生效 · ${source.legacy.length}`} middle="说明" narrow="">
+        <DataTable label="旧版存着、还没用上的" testId="alias-legacy">
+          <TableHeader title={`旧版存着、还没用上的 · ${source.legacy.length}`} middle="说明" narrow="">
             <span className="text-muted-foreground">旧版本存在库里、文件里没有</span>
           </TableHeader>
           <ul className="divide-y">
@@ -274,9 +277,22 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
         </DataTable>
       )}
 
-      {external.length > 0 && (
-        <DataTable label="其他来源" testId="alias-external">
-          <TableHeader title={`其他来源 · ${external.length}`} middle="启动的账号" narrow="文件">
+      {!problem && (
+        <button
+          type="button"
+          data-testid="aliases-more"
+          aria-expanded={showMore}
+          onClick={() => setShowMore((value) => !value)}
+          className="inline-flex items-center gap-1 px-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", showMore && "rotate-90")} aria-hidden />
+          更多：{external.length > 0 ? `你自己写的 ${external.length} 条、` : ""}终端配置文件
+        </button>
+      )}
+
+      {showMore && external.length > 0 && (
+        <DataTable label="你自己写的" testId="alias-external">
+          <TableHeader title={`你自己写的 · ${external.length}`} middle="启动的账号" narrow="文件">
             <span className="text-muted-foreground">你自己另写的，只读</span>
           </TableHeader>
           <ul className="divide-y">
@@ -305,23 +321,25 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
         </DataTable>
       )}
 
-      <DataTable label="终端配置文件">
-        <TableHeader title={`终端配置文件 · ${source.targets.length}`} middle="状态" narrow="" />
-        <ul className="divide-y">
-          {source.targets.map((target) => (
-            <li key={target.id} data-testid={`alias-target-${target.id}`} className={ROW}>
-              <span className="min-w-0 flex-1 truncate font-mono text-sm">{target.target}</span>
-              <div className={cn(COL_MIDDLE, "min-w-0 text-sm", target.blockedReason ? "text-warning" : "text-muted-foreground")}>
-                <div>{targetStateLabel(target)}</div>
-                {target.blockedReason && <div className="truncate text-xs" title={target.blockedReason}>{target.blockedReason}</div>}
-              </div>
-              <span className={COL_NARROW} />
-              <div className={COL_ACTION} />
-              <div className={COL_ICONS} />
-            </li>
-          ))}
-        </ul>
-      </DataTable>
+      {(showMore || problem) && (
+        <DataTable label="终端配置文件">
+          <TableHeader title={`终端配置文件 · ${source.targets.length}`} middle="状态" narrow="" />
+          <ul className="divide-y">
+            {source.targets.map((target) => (
+              <li key={target.id} data-testid={`alias-target-${target.id}`} className={ROW}>
+                <span className="min-w-0 flex-1 truncate font-mono text-sm">{target.target}</span>
+                <div className={cn(COL_MIDDLE, "min-w-0 text-sm", target.blockedReason ? "text-warning" : "text-muted-foreground")}>
+                  <div>{targetStateLabel(target)}</div>
+                  {target.blockedReason && <div className="truncate text-xs" title={target.blockedReason}>{target.blockedReason}</div>}
+                </div>
+                <span className={COL_NARROW} />
+                <div className={COL_ACTION} />
+                <div className={COL_ICONS} />
+              </li>
+            ))}
+          </ul>
+        </DataTable>
+      )}
 
       {dialog?.kind === "edit" && (
         <AliasEditorDialog

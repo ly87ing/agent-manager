@@ -505,12 +505,14 @@ describe("终端快捷命令页", () => {
     expect(calls.find((call) => call.command === "aliases:discard-legacy")?.args).toEqual(["--legacy", legacy.id]);
   });
 
-  it("区块外用户自己的 alias 只读列出，标为其他来源", async () => {
+  it("用户自己写的 alias 收在「更多」里只读列出", async () => {
     renderWithEngine(<AliasesPage />, aliasRoutes({}, { external: { gp: "git push" } }));
+    // 次要内容收在「更多」里
+    await userEvent.click(await screen.findByTestId("aliases-more"));
     const item = await screen.findByTestId("alias-external-aliases:zshrc-gp");
     expect(within(item).getByTitle("alias gp='git push'")).toHaveTextContent("git push");
     const section = screen.getByTestId("alias-external");
-    expect(section).toHaveTextContent("其他来源");
+    expect(section).toHaveTextContent("你自己写的");
     expect(section).toHaveTextContent("只读");
     expect(within(section).queryByRole("button")).toBeNull();
   });
@@ -520,7 +522,9 @@ describe("终端快捷命令页", () => {
       <AliasesPage />,
       aliasRoutes({ codex: "codex" }, { blockedZprofile: "目标路径是符号链接，拒绝操作以保证安全" }),
     );
+    // 有问题时终端配置文件直接摊开
     expect(await screen.findByTestId("alias-target-aliases:zprofile")).toHaveTextContent("符号链接");
+    expect(screen.queryByTestId("aliases-more")).toBeNull();
     await userEvent.click(screen.getByTestId("remove-alias-codex"));
     const modal = await screen.findByRole("dialog");
     expect(await within(modal).findByTestId("alias-confirm-file-aliases:zshrc")).toHaveTextContent("# 保留用户注释");
