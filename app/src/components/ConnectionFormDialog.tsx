@@ -124,6 +124,7 @@ export function ConnectionFormDialog({
     results: { id: string; result: ProfileDraftPreview | string }[];
   } | null>(null);
   const rootRef = useRef<HTMLElement>(null);
+  const presetPickerRef = useRef<HTMLDetailsElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(
     typeof document === "undefined" ? null : (document.activeElement as HTMLElement | null),
   );
@@ -217,6 +218,17 @@ export function ConnectionFormDialog({
       || preview.results.some(({ result }) => typeof result === "string")))
     || (Boolean(newEnvironmentInput)
       && (aliasPreview?.key !== aliasPreviewKey || typeof aliasPreview.result === "string"));
+  const environmentPreview = preview?.key === previewKey
+    ? preview.results.find((item) => item.id === newEnvironmentInput?.id)?.result
+    : null;
+  const previewLines = environmentPreview && typeof environmentPreview !== "string" && !environmentPreview.exists
+    ? environmentPreview.content.split("\n").map((line) => line.trim()).filter((line) =>
+      /^(?:"(?:ANTHROPIC_BASE_URL|CLAUDE_CODE_SUBAGENT_MODEL|model)"|(?:model|model_provider|base_url)\s*=)/.test(line),
+    ).sort((left, right) => {
+      const rank = (line: string) => /(?:BASE_URL|base_url)/.test(line) ? 0 : /(?:"model"|^model\s*=)/.test(line) ? 1 : 2;
+      return rank(left) - rank(right);
+    }).slice(0, 3)
+    : [];
 
   const refreshPreview = async () => {
     const serial = ++previewSerial.current;
@@ -269,6 +281,7 @@ export function ConnectionFormDialog({
     const preset = presets.find((item) => item.id === presetId);
     if (!preset) return;
     setChoice(preset.id);
+    presetPickerRef.current?.removeAttribute("open");
     const next = connectionFromPreset(preset, presetConnectionName(preset, existingNames));
     setConnection(next);
     if (intent === "environment") {
@@ -286,6 +299,7 @@ export function ConnectionFormDialog({
       index += 1;
     }
     setChoice("custom");
+    presetPickerRef.current?.removeAttribute("open");
     const next = emptyConnection(name);
     setConnection(next);
     if (intent === "environment") {
@@ -403,6 +417,44 @@ export function ConnectionFormDialog({
   };
 
   const shownError = error ?? localError;
+  const filePreviewSection = (
+    <section className="space-y-2 rounded-lg border px-3 py-3 text-xs" data-testid="connection-file-preview">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-medium text-foreground">将改动的客户端文件</h3>
+        {previewRequests.length > 0 && (
+          <button type="button" data-testid="connection-preview-button"
+            disabled={busy || previewBusy}
+            onClick={() => void refreshPreview()}
+            className="rounded border px-2.5 py-1 disabled:opacity-50"
+          >{previewBusy ? "正在预览…" : "重新读取"}</button>
+        )}
+      </div>
+      {previewRequests.length === 0 && <p className="text-muted-foreground">{intent === "environment"
+        ? "选定接入并填写有效的环境名后，可预览客户端配置文件和启动命令。"
+        : "只保存 Provider 模板时，客户端配置文件和启动命令不变。"}</p>}
+      {previewRequests.length > 0 && <p className="text-muted-foreground">{selectedUpdates.length > 0
+        ? "已选环境按真实密钥取值计算最终文件；新建环境草稿仍以变量引用展示。保存时会重新校验原文件和候选内容。预览原文可能含敏感值，仅在本机查看，请勿分享。"
+        : "按保存流程预览文件及勾选的共用设置。新建文件的凭据以变量引用展示；已有主文件不会自动覆盖，接入字段可在环境卡片逐项应用。预览可能含敏感值，请勿直接分享。"}</p>}
+      {preview && preview.key !== previewKey && previewRequests.length > 0
+        && <p className="text-muted-foreground">表单或勾选目标已变化，正在更新预览。</p>}
+      {preview?.key === previewKey && preview.results.map(({ id, result }) => (
+        <div key={id} className="space-y-1 border-t pt-2">
+          <p className="font-medium text-foreground">{id}</p>
+          {typeof result === "string"
+            ? <p role="alert" className="text-destructive">{result}</p>
+            : <>
+                <p className="break-all font-mono text-muted-foreground">{result.path}{result.will_write === false ? (result.exists ? " · 保持现有文件" : " · 不创建文件") : (result.existing_profile_skipped ? " · 仅补勾选的共用设置" : (result.exists ? " · 合并现有文件" : " · 新文件"))}</p>
+                <pre data-testid={`connection-preview-content-${id}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">{result.content}</pre>
+                {result.files?.map((file, index) => <div key={file.path} className="space-y-1">
+                  <p className="break-all font-mono text-muted-foreground">{file.path}{file.exists ? " · 合并现有文件" : " · 新文件"}</p>
+                  <pre data-testid={`connection-preview-file-${id}-${index}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">{file.content}</pre>
+                </div>)}
+                {result.seed_results?.map((item) => <p key={item.item} className="text-muted-foreground">{item.detail}</p>)}
+              </>}
+        </div>
+      ))}
+    </section>
+  );
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in"
@@ -414,18 +466,18 @@ export function ConnectionFormDialog({
         aria-modal="true"
         aria-label={dialogTitle}
         onKeyDown={onKeyDown}
-        className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border bg-card shadow-xl animate-zoom-in-95"
+        className={cn("flex max-h-[calc(100vh-1rem)] w-full flex-col overflow-hidden rounded-2xl border bg-card shadow-xl animate-zoom-in-95", intent === "environment" ? "max-w-[60rem]" : "max-w-2xl")}
       >
-        <div className="flex items-start justify-between gap-3 border-b px-5 py-4">
+        <div className="flex items-start justify-between gap-3 border-b px-5 py-3">
           <div>
             <h2 className="text-lg font-semibold text-foreground">{dialogTitle}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
+            {intent !== "environment" && <p className="mt-1 text-sm text-muted-foreground">
               {editing
                 ? `修改 ${agentName} 的这套接入；已建环境可在下方逐项选择是否更新，默认不改。留空凭据取值不会覆盖外部密钥文件中的值。`
                 : duplicating
                   ? "确认新名称即可创建；原 Provider、当前接入和客户端配置都不会改变。"
-                : "先选厂商，再确认地址、模型和凭据；安装命令不在这里。"}
-            </p>
+                : "选择厂商，确认将写入的配置。"}
+            </p>}
           </div>
           <button
             type="button"
@@ -440,14 +492,15 @@ export function ConnectionFormDialog({
 
         <div className="overflow-y-auto px-5 py-4">
           {!prefilled && (
-            <fieldset>
-              <legend className="text-sm font-medium text-foreground">选择 Provider</legend>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {presets.map((preset, index) => (
+            <details ref={presetPickerRef} className="rounded-lg border px-3 py-2">
+              <summary data-testid="selected-connection-preset" className="cursor-pointer text-sm font-medium text-foreground">
+                厂商：{choice === "custom" ? "自定义" : presets.find((preset) => preset.id === choice)?.label ?? "请选择"}
+              </summary>
+              <div className="mt-3 flex flex-wrap gap-2 border-t pt-3">
+                {presets.map((preset) => (
                   <button
                     key={preset.id}
                     type="button"
-                    autoFocus={index === 0}
                     data-testid={`connection-preset-${preset.id}`}
                     aria-pressed={choice === preset.id}
                     onClick={() => choosePreset(preset.id)}
@@ -462,7 +515,6 @@ export function ConnectionFormDialog({
                 ))}
                 <button
                   type="button"
-                  autoFocus={presets.length === 0}
                   data-testid="connection-preset-custom"
                   aria-pressed={choice === "custom"}
                   onClick={chooseCustom}
@@ -474,11 +526,12 @@ export function ConnectionFormDialog({
                   <span className="font-medium text-foreground">自定义</span>
                 </button>
               </div>
-            </fieldset>
+            </details>
           )}
 
           {connection && (
-            <div className={cn("space-y-4", prefilled ? "" : "mt-4 border-t pt-4")}>
+            <div className={cn(intent === "environment" ? "mt-3 grid items-start gap-4 min-[800px]:grid-cols-2" : prefilled ? "" : "mt-4 border-t pt-4")}>
+              <div className="min-w-0 space-y-4">
               {duplicating ? (
                 <>
                   <label className="block text-sm font-medium text-foreground">
@@ -540,19 +593,16 @@ export function ConnectionFormDialog({
                 </>
               ) : (
                 <>
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-sm font-medium text-foreground">Provider 配置</h3>
-                {!prefilled && (
-                  <span data-testid="selected-connection-preset" className="text-xs text-muted-foreground">
-                    已选择：{presets.find((preset) => preset.id === choice)?.label ?? "自定义"}
-                  </span>
-                )}
-              </div>
+              {intent !== "environment" && <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-medium text-foreground">接入参数</h3>
+              </div>}
               {!prefilled && (() => {
                 const preset = presets.find((item) => item.id === choice);
                 if (!preset || (!preset.apiKeyUrl && !preset.docsUrl)) return null;
                 return (
-                  <div data-testid="connection-preset-links" className="space-y-1 rounded border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                  <details data-testid="connection-preset-links" className="rounded border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    <summary className="cursor-pointer">获取密钥与接入文档</summary>
+                    <div className="mt-2 space-y-1">
                     {[
                       { label: "获取密钥", url: preset.apiKeyUrl, id: "key" },
                       { label: "接入文档", url: preset.docsUrl, id: "docs" },
@@ -573,7 +623,8 @@ export function ConnectionFormDialog({
                         </p>
                       ))}
                     <p>出处：{preset.source}</p>
-                  </div>
+                    </div>
+                  </details>
                 );
               })()}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -670,21 +721,22 @@ export function ConnectionFormDialog({
                 )}
               </label>
               )}
-              <label className="block text-sm text-foreground">
-                备注（可选）
-                <textarea
-                  data-testid="new-connection-note"
-                  value={connection.note ?? ""}
-                  onChange={(event) => patch({ note: event.target.value })}
-                  maxLength={200}
-                  rows={2}
-                  placeholder="例如：工作账号、备用线路、套餐到期时间"
-                  className="mt-1 w-full resize-y rounded border border-input p-2 text-sm"
-                />
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  仅用于本应用展示和搜索，不会写进助手配置；导出接入时会一并包含。
-                </span>
-              </label>
+              <details className="rounded-lg border px-3 py-2">
+                <summary className="cursor-pointer text-sm text-foreground">备注（可选）</summary>
+                <label className="mt-2 block text-sm text-foreground">
+                  <span className="sr-only">备注（可选）</span>
+                  <textarea
+                    data-testid="new-connection-note"
+                    value={connection.note ?? ""}
+                    onChange={(event) => patch({ note: event.target.value })}
+                    maxLength={200}
+                    rows={2}
+                    placeholder="例如：工作账号、备用线路、套餐到期时间"
+                    className="w-full resize-y rounded border border-input p-2 text-sm"
+                  />
+                  <span className="mt-1 block text-xs text-muted-foreground">仅用于本应用展示，不写入助手配置。</span>
+                </label>
+              </details>
               {!referenced && (() => {
                 const status = keyStatus(secretSource ?? null, connection.tokenVar);
                 return (
@@ -897,13 +949,9 @@ export function ConnectionFormDialog({
                     </label>
                   </div>
                   <p className="text-xs text-muted-foreground">启动命令使用此目录，不修改当前默认环境。密钥取值写入外部密钥文件。</p>
-                  {newEnvironmentInput && (
-                    <pre data-testid="connection-environment-launch-preview" className="overflow-x-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">
-                      {`alias ${newEnvironmentInput.id}='${environmentLaunch}'`}
-                    </pre>
-                  )}
-                  {newEnvironmentInput && <div className="space-y-2 text-xs" data-testid="connection-alias-file-preview">
-                    <p className="font-medium">终端配置文件写入后</p>
+                  {newEnvironmentInput && <details className="text-xs" data-testid="connection-alias-file-preview">
+                    <summary className="cursor-pointer font-medium">查看终端文件完整内容</summary>
+                    <div className="mt-2 space-y-2">
                     {currentAliasPreview === null && <p className="text-muted-foreground">正在读取实际文件并计算…</p>}
                     {typeof currentAliasPreview === "string" && <p role="alert" className="text-destructive">{currentAliasPreview}</p>}
                     {currentAliasPreview && typeof currentAliasPreview !== "string" && <>
@@ -914,7 +962,8 @@ export function ConnectionFormDialog({
                       {currentAliasPreview.skipped.map((reason) => <p key={reason} className="text-muted-foreground">{reason}</p>)}
                     </>}
                     <p className="text-muted-foreground">只读预览；原文可能含敏感值，仅在本机查看。</p>
-                  </div>}
+                    </div>
+                  </details>}
                   {kind === "claude" && detectSystemPlatform() !== "linux" && (
                     <label className="flex items-center gap-2 text-sm">
                       <input type="checkbox" data-testid="connection-environment-scrub" checked={scrubSubprocess} onChange={(event) => setScrubSubprocess(event.target.checked)} />
@@ -1009,43 +1058,28 @@ export function ConnectionFormDialog({
                   </div>
                 </section>
               )}
-              <section className="space-y-2 rounded-lg border px-3 py-3 text-xs" data-testid="connection-file-preview">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="font-medium text-foreground">将改动的客户端文件</h3>
-                  {previewRequests.length > 0 && (
-                    <button type="button" data-testid="connection-preview-button"
-                      disabled={busy || previewBusy}
-                      onClick={() => void refreshPreview()}
-                      className="rounded border px-2.5 py-1 disabled:opacity-50"
-                    >{previewBusy ? "正在预览…" : "重新读取"}</button>
-                  )}
-                </div>
-                {previewRequests.length === 0 && <p className="text-muted-foreground">{intent === "environment"
-                  ? "选定接入并填写有效的环境名后，可预览客户端配置文件和启动命令。"
-                  : "只保存 Provider 模板时，客户端配置文件和启动命令不变。"}</p>}
-                {previewRequests.length > 0 && <p className="text-muted-foreground">{selectedUpdates.length > 0
-                  ? "已选环境按真实密钥取值计算最终文件；新建环境草稿仍以变量引用展示。保存时会重新校验原文件和候选内容。预览原文可能含敏感值，仅在本机查看，请勿分享。"
-                  : "按保存流程预览文件及勾选的共用设置。新建文件的凭据以变量引用展示；已有主文件不会自动覆盖，接入字段可在环境卡片逐项应用。预览可能含敏感值，请勿直接分享。"}</p>}
-                {preview && preview.key !== previewKey && previewRequests.length > 0
-                  && <p className="text-muted-foreground">表单或勾选目标已变化，正在更新预览。</p>}
-                {preview?.key === previewKey && preview.results.map(({ id, result }) => (
-                  <div key={id} className="space-y-1 border-t pt-2">
-                    <p className="font-medium text-foreground">{id}</p>
-                    {typeof result === "string"
-                      ? <p role="alert" className="text-destructive">{result}</p>
-                      : <>
-                          <p className="break-all font-mono text-muted-foreground">{result.path}{result.will_write === false ? (result.exists ? " · 保持现有文件" : " · 不创建文件") : (result.existing_profile_skipped ? " · 仅补勾选的共用设置" : (result.exists ? " · 合并现有文件" : " · 新文件"))}</p>
-                          <pre data-testid={`connection-preview-content-${id}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">{result.content}</pre>
-                          {result.files?.map((file, index) => <div key={file.path} className="space-y-1">
-                            <p className="break-all font-mono text-muted-foreground">{file.path}{file.exists ? " · 合并现有文件" : " · 新文件"}</p>
-                            <pre data-testid={`connection-preview-file-${id}-${index}`} className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs">{file.content}</pre>
-                          </div>)}
-                          {result.seed_results?.map((item) => <p key={item.item} className="text-muted-foreground">{item.detail}</p>)}
-                        </>}
-                  </div>
-                ))}
-              </section>
+              {intent !== "environment" && filePreviewSection}
                 </>
+              )}
+              </div>
+              {intent === "environment" && (
+                <aside className="min-w-0 space-y-3 min-[800px]:sticky min-[800px]:top-0" aria-label="保存结果预览">
+                  {newEnvironmentInput ? (
+                    <section data-testid="connection-preview-summary" className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-3 text-xs">
+                      <h3 className="text-sm font-medium text-foreground">保存后生效</h3>
+                      {environmentPreview && typeof environmentPreview !== "string" ? <>
+                        <p className="break-all text-muted-foreground">{environmentPreview.exists ? "当前已有文件" : "当前未创建"} → <code className="text-foreground">{environmentPreview.path}</code>{environmentPreview.will_write === false ? "（保持原样）" : "（将写入）"}</p>
+                        {previewLines.length > 0 ? <pre className="whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono">{previewLines.join("\n")}</pre>
+                          : environmentPreview.exists && <p className="text-muted-foreground">目标文件已有内容，请展开核对完整结果。</p>}
+                      </> : <p className="text-muted-foreground">{typeof environmentPreview === "string" ? environmentPreview : "正在读取并计算目标文件…"}</p>}
+                      <code data-testid="connection-environment-launch-preview" className="block break-all text-foreground">alias {newEnvironmentInput.id}='{environmentLaunch}'</code>
+                    </section>
+                  ) : <p className="rounded-lg border px-3 py-3 text-sm text-muted-foreground">选择厂商并填写环境名后，这里显示将写入的配置。</p>}
+                  <details className="rounded-lg border px-3 py-2">
+                    <summary className="cursor-pointer text-sm font-medium text-foreground">查看完整目标文件</summary>
+                    <div className="mt-3">{filePreviewSection}</div>
+                  </details>
+                </aside>
               )}
             </div>
           )}

@@ -299,7 +299,7 @@ export function ConnectionWorkbench({
             </details>
           )}
         </div>
-        <article data-testid="default-environment-card" className="flex flex-col gap-4 rounded-xl border bg-card p-4 shadow-sm sm:p-5">
+        <article data-testid="default-environment-card" className="flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -318,8 +318,12 @@ export function ConnectionWorkbench({
                 </dd>
                 <dt className="text-muted-foreground">登录</dt>
                 <dd data-testid="default-env-login" className="text-muted-foreground">
-                  {thirdParty ? "现在用的是配置里的第三方令牌，不是官方登录。" : ""}
-                  {envState.loginNote}
+                  {thirdParty ? <>现在用的是配置里的第三方令牌，不是官方登录。{envState.loginNote}</> : (
+                    <details>
+                      <summary className="cursor-pointer">由 {name} 管理</summary>
+                      <p className="mt-1">{envState.loginNote}</p>
+                    </details>
+                  )}
                 </dd>
                 <dt className="text-muted-foreground">模型</dt>
                 <dd data-testid="default-env-model" className="text-foreground">
@@ -542,32 +546,37 @@ export function ConnectionWorkbench({
               />
             )}
             {mainThirdParty && renderCard(mainThirdParty, true)}
-            <ConnectionCard
-              agentId={agentId}
-              connection={null}
-              active={official}
-              officialDetail={official
-                ? `正在使用 · 模型 ${envState?.modelText ?? "助手默认"}；登录由助手自己管理，本工具不读取`
-                : "官方登录没有被动过；切回后助手改用它"}
-              busy={busyTarget === `${agentId}/default`}
-              disabled={busyTarget !== null || Boolean(writeBlocked)}
-              onReset={kind && thirdParty ? () => onResetDefault(selected) : undefined}
-            />
-            {kind && onCheckAuth && (
-              <OfficialAuthPanel
-                key={`auth-${agentId}`}
-                kind={kind}
-                bin={bin}
-                testIds={{
-                  root: `main-auth-status-${agentId}`,
-                  text: `main-auth-text-${agentId}`,
-                  check: `main-auth-check-${agentId}`,
-                  mixed: `main-auth-mixed-${agentId}`,
-                  commands: `main-${agentId}`,
-                }}
-                onCheck={() => onCheckAuth(selected)}
-              />
-            )}
+            <details open={!official} className="rounded-lg border px-3 py-2">
+              <summary className="cursor-pointer text-sm font-medium text-foreground">登录与账号操作</summary>
+              <div className="mt-3 space-y-3">
+                <ConnectionCard
+                  agentId={agentId}
+                  connection={null}
+                  active={official}
+                  officialDetail={official
+                    ? `正在使用 · 模型 ${envState?.modelText ?? "助手默认"}；登录由助手自己管理，本工具不读取`
+                    : "官方登录没有被动过；切回后助手改用它"}
+                  busy={busyTarget === `${agentId}/default`}
+                  disabled={busyTarget !== null || Boolean(writeBlocked)}
+                  onReset={kind && thirdParty ? () => onResetDefault(selected) : undefined}
+                />
+                {kind && onCheckAuth && (
+                  <OfficialAuthPanel
+                    key={`auth-${agentId}`}
+                    kind={kind}
+                    bin={bin}
+                    testIds={{
+                      root: `main-auth-status-${agentId}`,
+                      text: `main-auth-text-${agentId}`,
+                      check: `main-auth-check-${agentId}`,
+                      mixed: `main-auth-mixed-${agentId}`,
+                      commands: `main-${agentId}`,
+                    }}
+                    onCheck={() => onCheckAuth(selected)}
+                  />
+                )}
+              </div>
+            </details>
         </div>}
         </article>
 
@@ -577,9 +586,7 @@ export function ConnectionWorkbench({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="text-base font-semibold text-foreground">第三方接入 · 用来建独立环境</h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                这里只保存接入参数（地址、模型、密钥变量名），不会写进默认环境；建成独立环境后才能用。编辑时可逐项选择更新已建独立环境，默认不改。
-              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">这里保存备选接入，建成独立环境后才生效。</p>
             </div>
             <div className="flex items-center gap-2">
               {connections.length > 1 && (
@@ -638,8 +645,8 @@ export function ConnectionWorkbench({
         )}
 
           {savedEntries.length === 0 ? (
-            <p data-testid={`third-party-empty-${agentId}`} className="rounded-lg border border-dashed px-4 py-3 text-xs text-muted-foreground">
-              还没有保存第三方接入。用右上角「新建环境 → 第三方厂商或中转」一步建好，或在这里「添加接入」先存起来。
+            <p data-testid={`third-party-empty-${agentId}`} className="rounded-lg border border-dashed px-3 py-3 text-sm text-muted-foreground">
+              还没有备选接入。点「添加接入」保存一套参数。
             </p>
           ) : (
             savedEntries.map((connection) => renderCard(connection, false))

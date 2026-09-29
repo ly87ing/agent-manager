@@ -28,8 +28,8 @@ export function AppLayout({
 }) {
   return (
     <div className="flex h-screen flex-col bg-background text-foreground sm:flex-row">
-      <aside className="flex w-full shrink-0 flex-col border-b bg-card sm:w-56 sm:border-b-0 sm:border-r">
-        <div className="border-b px-4 py-3 sm:px-5 sm:py-4">
+      <aside className="flex w-full shrink-0 flex-col border-b bg-card sm:w-44 sm:border-b-0 sm:border-r">
+        <div className="border-b px-4 py-3 sm:py-4">
           <h1 className="text-base font-semibold tracking-tight">Agent Manager</h1>
         </div>
         <nav className="flex gap-1 overflow-x-auto p-2 sm:block sm:flex-1 sm:space-y-0.5 sm:overflow-y-auto">
@@ -95,7 +95,7 @@ export function AppLayout({
         </div>
       </aside>
       <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
+        <div className="mx-auto max-w-5xl space-y-6 p-4">
           {children}
         </div>
       </main>

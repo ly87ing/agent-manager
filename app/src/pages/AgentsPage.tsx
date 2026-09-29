@@ -15,7 +15,6 @@ import {
 import { ConnectionWorkbench } from "../components/ConnectionWorkbench";
 import { ConnectionImportDialog } from "../components/ConnectionImportDialog";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
-import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import type { EngineElement, Envelope, PolicyData, StatusData } from "../lib/contract";
@@ -1241,22 +1240,14 @@ export default function AgentsPage({
           }
         }}
         renderInstances={() => (
-          <section data-testid="independent-environments" className="space-y-4 rounded-xl border bg-card p-5 shadow-sm">
-            <div>
-              <h3 className="text-base font-semibold text-foreground">
-                独立环境{visibleProfileElements.length > 0 ? `（${visibleProfileElements.length}）` : ""}
-              </h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                各有自己的配置目录、登录与会话，和默认环境可以同时开着；第三方厂商只在这里用，也可以在这里登录另一个官方账号。
-              </p>
-            </div>
+          <section data-testid="independent-environments" className="space-y-3 rounded-xl border bg-card p-4 shadow-sm">
+            <h3 className="text-base font-semibold text-foreground">
+              独立环境{visibleProfileElements.length > 0 ? `（${visibleProfileElements.length}）` : ""}
+            </h3>
         {visibleProfileElements.length === 0 ? (
-          <EmptyState
-            compact
-            testId="profiles-empty"
-            title="还没有独立环境"
-            description="用右上角「新建环境」：选第三方厂商直接创建，或手动填写环境与账号。下方保存过的第三方接入也可以建成环境。"
-          />
+          <p data-testid="profiles-empty" className="rounded-lg border border-dashed px-3 py-3 text-sm text-muted-foreground">
+            还没有独立环境。用右上角「新建环境」添加。
+          </p>
         ) : (
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             {visibleProfileElements.map((element) => {

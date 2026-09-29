@@ -1617,12 +1617,12 @@ describe("助手运行参数", () => {
     await userEvent.click(await screen.findByTestId("add-connection-button"));
     await screen.findByRole("dialog", { name: "为 Claude Code 添加接入" });
     await userEvent.click(screen.getByTestId("connection-preset-kimi-cn-claude"));
-    expect(screen.getByTestId("selected-connection-preset")).toHaveTextContent("已选择：Kimi 开放平台（国内）");
-    expect(screen.getByRole("heading", { name: "Provider 配置" })).toBeInTheDocument();
+    expect(screen.getByTestId("selected-connection-preset")).toHaveTextContent("厂商：Kimi 开放平台（国内）");
+    expect(screen.getByRole("heading", { name: "接入参数" })).toBeInTheDocument();
     expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://api.moonshot.cn/anthropic");
     expect(screen.getByTestId("new-connection-model")).toHaveValue("kimi-k3[1m]");
     await userEvent.click(screen.getByTestId("connection-preset-deepseek-claude"));
-    expect(screen.getByTestId("selected-connection-preset")).toHaveTextContent("已选择：DeepSeek");
+    expect(screen.getByTestId("selected-connection-preset")).toHaveTextContent("厂商：DeepSeek");
     expect(screen.getByTestId("new-connection-base-url")).toHaveValue("https://api.deepseek.com/anthropic");
     expect(screen.getByTestId("new-connection-model")).toHaveValue("deepseek-flash[1m]");
     await userEvent.click(screen.getByTestId("connection-preset-kimi-cn-claude"));
