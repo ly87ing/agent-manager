@@ -7,12 +7,23 @@ import { makeApplyResult, makeEnvelope } from "./fixtures";
 import { BASE_CLAUDE_FS, BASE_CLAUDE_SNAPSHOT, BASE_CODEX_FS, BASE_CODEX_REMOTE, mcpStatusData, mcpTargets } from "./mcp-fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
-/** 展开所有服务行，露出各账号上的条目与操作。 */
+/** 等服务列表出现（开关直接在行上，不用再展开）。 */
 async function expandAll() {
   await screen.findAllByTestId(/^mcp-card-/);
-  for (const button of screen.getAllByRole("button", { name: /在各账号上的条目/ })) {
-    if (button.getAttribute("aria-expanded") === "false") await userEvent.click(button);
+}
+
+/** 点某个动作：启停是行上的开关；编辑、复制、删除在所属行的「⋯」里，逐个打开找到它。 */
+async function clickAction(testId: string) {
+  await expandAll();
+  const direct = screen.queryByTestId(testId);
+  if (direct) return userEvent.click(direct);
+  for (const menu of screen.getAllByRole("button", { name: /的更多操作$/ })) {
+    await userEvent.click(menu);
+    const item = screen.queryByTestId(testId);
+    if (item) return userEvent.click(item);
+    await userEvent.click(menu);
   }
+  throw new Error(`找不到动作 ${testId}`);
 }
 
 function routes(
@@ -47,16 +58,15 @@ describe("McpPage：实际条目为主", () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
     await expandAll();
     const card = await screen.findByTestId("mcp-card-mcp:fs");
-    const claude = within(card).getByTestId("mcp-entry-mcp:fs-claude-code");
-    const codex = within(card).getByTestId("mcp-entry-mcp:fs-codex");
-    expect(claude).toHaveTextContent("npx -y fs-mcp");
-    expect(codex).toHaveTextContent("npx -y fs-mcp@2");
-    expect(codex).toHaveTextContent("另有字段原样保留：cwd、enabled_tools、tools");
-    expect(codex).toHaveTextContent("旧版 Agent Manager 标记");
-    expect(claude).toHaveTextContent("${FS_API_KEY}");
+    // 每个账号一个开关，悬停看到这个账号里的那一条；内容不同时行上标出来
+    expect(within(card).getByTestId("action-disable-mcp:fs-claude-code").getAttribute("title")).toContain("npx -y fs-mcp");
+    expect(within(card).getByTestId("action-disable-mcp:fs-codex").getAttribute("title")).toContain("npx -y fs-mcp@2");
+    expect(within(card).getByText("各账号内容不同")).toBeInTheDocument();
+    expect(within(card).getByTestId("configure-secrets-mcp:fs")).toBeInTheDocument();
     expect(screen.getByTestId("mcp-counts")).toHaveTextContent("共 3 个服务，2 个已停用");
     // 停用快照与未分配的已保存定义
-    expect(within(screen.getByTestId("mcp-card-mcp:old-snap")).getByText("已停用（已保存）")).toBeInTheDocument();
+    expect(screen.getByTestId("action-enable-mcp:old-snap-claude-code")).toHaveAttribute("data-tone", "off");
+    expect(screen.getByTestId("action-enable-mcp:old-snap-claude-code").getAttribute("title")).toContain("内容保存在本工具里");
     expect(screen.getByTestId("mcp-saved-mcp:old-snap")).toHaveTextContent("uvx old-snap");
     // 旧模型的入口都不在了
     expect(screen.queryByText("服务库")).toBeNull();
@@ -70,12 +80,12 @@ describe("McpPage：实际条目为主", () => {
     status.targets = mcpTargets({ codex: { error: "配置文件解析失败: TOML 语法错误" } });
     renderWithEngine(<McpPage />, routes(status));
     expect(await screen.findByTestId("mcp-target-error-codex")).toHaveTextContent("配置文件解析失败");
-    expect(screen.getByTestId("mcp-entry-mcp:fs-claude-code")).toBeInTheDocument();
+    expect(screen.getByTestId("action-disable-mcp:fs-claude-code")).toBeInTheDocument();
   });
 
   it("编辑：表单用实际值预填，字面量显示 <literal> 并按保留原值提交；带打开时的 base，只改这一条", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
-    await userEvent.click(await screen.findByTestId("action-edit-mcp:fs-codex"));
+    await clickAction("action-edit-mcp:fs-codex");
     const dialog = await screen.findByRole("dialog", { name: /编辑 fs/ });
     expect(within(dialog).getByTestId("server-name-input")).toBeDisabled();
     expect(within(dialog).getByTestId("server-transport-remote")).toBeDisabled();
@@ -118,7 +128,7 @@ describe("McpPage：实际条目为主", () => {
     await waitFor(() => expect(applyCalls(calls)).toHaveLength(2));
     expect(applyCalls(calls)[1].args).toEqual(["--only", "mcp:old-snap", "--agent", "claude-code", "--action", "enable", "--base", BASE_CLAUDE_SNAPSHOT]);
 
-    await userEvent.click(screen.getByTestId("action-remove-mcp:remote-api-codex"));
+    await clickAction("action-remove-mcp:remote-api-codex");
     expect(applyCalls(calls)).toHaveLength(2);
     const dialog = await screen.findByRole("dialog", { name: /从 codex 删除 remote-api/ });
     expect(await within(dialog).findByTestId("mcp-remove-preview-content")).toHaveTextContent("删除后完整配置");
@@ -133,7 +143,7 @@ describe("McpPage：实际条目为主", () => {
   it("删除已保存的停用内容时明确说明文件不变；预览失败时不能删除", async () => {
     const { calls, unmount } = renderWithEngine(<McpPage />, routes());
     await expandAll();
-    await userEvent.click(await screen.findByTestId("action-remove-mcp:old-snap-claude-code"));
+    await clickAction("action-remove-mcp:old-snap-claude-code");
     const dialog = await screen.findByRole("dialog", { name: /从 claude-code 删除 old-snap/ });
     expect(within(dialog).getByText("删除已保存内容")).toBeInTheDocument();
     expect(await within(dialog).findByText("只删除已保存的停用内容，助手配置文件不变。")).toBeInTheDocument();
@@ -150,7 +160,7 @@ describe("McpPage：实际条目为主", () => {
     });
     const failed = renderWithEngine(<McpPage />, failing);
     await expandAll();
-    await userEvent.click(await screen.findByTestId("action-remove-mcp:remote-api-codex"));
+    await clickAction("action-remove-mcp:remote-api-codex");
     const failedDialog = await screen.findByRole("dialog", { name: /从 codex 删除 remote-api/ });
     expect(await within(failedDialog).findByRole("alert")).toHaveTextContent("配置文件已变化");
     expect(within(failedDialog).getByRole("button", { name: "确认删除" })).toBeDisabled();
@@ -168,12 +178,11 @@ describe("McpPage：实际条目为主", () => {
     };
     renderWithEngine(<McpPage />, handlers);
     await expandAll();
-    const remove = await screen.findByTestId("action-remove-mcp:remote-api-codex");
-    await userEvent.click(remove);
+    await clickAction("action-remove-mcp:remote-api-codex");
     const first = await screen.findByRole("dialog", { name: /从 codex 删除 remote-api/ });
     expect(await within(first).findByTestId("mcp-remove-preview-content")).toHaveTextContent("第一次的结果");
     await userEvent.click(within(first).getByRole("button", { name: "取消" }));
-    await userEvent.click(remove);
+    await clickAction("action-remove-mcp:remote-api-codex");
     const second = await screen.findByRole("dialog", { name: /从 codex 删除 remote-api/ });
     expect(within(second).queryByTestId("mcp-remove-preview-content")).toBeNull();
     expect(within(second).getByRole("button", { name: "确认删除" })).toBeDisabled();
@@ -184,7 +193,7 @@ describe("McpPage：实际条目为主", () => {
 
   it("复制到另一个助手：目标有同名条目时必须勾选替换，并带目标条目的 base", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
-    await userEvent.click(await screen.findByTestId("action-copy-mcp:fs-claude-code"));
+    await clickAction("action-copy-mcp:fs-claude-code");
     const dialog = await screen.findByRole("dialog", { name: "复制 fs" });
     expect(within(dialog).getByTestId("mcp-copy-target")).toHaveValue("codex");
     expect(within(dialog).getByTestId("mcp-copy-submit")).toBeDisabled();
@@ -279,13 +288,15 @@ describe("McpPage：实际条目为主", () => {
     infoSpy.mockRestore();
   });
 
-  it("默认收起没有问题的服务，只显示汇总；展开后是逐账号的条目与操作", async () => {
-    renderWithEngine(<McpPage />, routes());
-    const card = await screen.findByTestId("mcp-card-mcp:old-snap");
-    expect(within(card).queryByTestId("action-enable-mcp:old-snap-claude-code")).toBeNull();
-    expect(screen.getByTestId("mcp-summary-mcp:old-snap")).toHaveTextContent("已停用");
-    await userEvent.click(within(card).getByRole("button", { name: /在各账号上的条目/ }));
-    expect(await within(card).findByTestId("action-enable-mcp:old-snap-claude-code")).toBeInTheDocument();
+  it("账号开关直接在行上：没有这个服务的账号点一下，打开复制并预选它，确认后才写", async () => {
+    const { calls } = renderWithEngine(<McpPage />, routes());
+    const card = await screen.findByTestId("mcp-card-mcp:remote-api");
+    const absent = within(card).getByTestId("action-add-here-mcp:remote-api-claude-code");
+    expect(absent).toHaveAttribute("data-tone", "off");
+    await userEvent.click(absent);
+    const dialog = await screen.findByRole("dialog", { name: "复制 remote-api" });
+    expect(within(dialog).getByTestId("mcp-copy-target")).toHaveValue("claude-code");
+    expect(applyCalls(calls)).toHaveLength(0);
   });
 
   it("补齐：在用服务从同格式账号复制到还没有它的账号，带来源条目的 base", async () => {

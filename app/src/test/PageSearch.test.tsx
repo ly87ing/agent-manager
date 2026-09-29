@@ -12,13 +12,11 @@ import {
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import { mcpStatusData } from "./mcp-fixtures";
 
-/** 展开所有技能行，露出各账号上的状态与操作。 */
+/** 等技能列表出现（开关直接在行上，不用再展开）。 */
 async function expandAll() {
   await screen.findAllByTestId(/^skill-row-/);
-  for (const button of screen.getAllByRole("button", { name: /在各账号上的情况/ })) {
-    if (button.getAttribute("aria-expanded") === "false") await userEvent.click(button);
-  }
 }
+
 
 function mcpRoutes(): Record<string, Envelope> {
   return { "mcp:status": makeEnvelope(mcpStatusData(), { command: "mcp.status" }) };
@@ -120,8 +118,8 @@ describe("页内搜索：MCP 页", () => {
 
     // 搜索中默认展开：只剩 remote-api，且只列 codex 的条目
     expect(screen.queryByTestId("mcp-card-mcp:fs")).toBeNull();
-    expect(await screen.findByTitle(/^codex: disabled/)).toBeInTheDocument();
-    expect(screen.queryByTitle(/^claude-code:/)).toBeNull();
+    expect(await screen.findByTestId("action-enable-mcp:remote-api-codex")).toBeInTheDocument();
+    expect(screen.queryAllByTestId(/-claude-code$/)).toHaveLength(0);
 
     await userEvent.clear(input);
     expect(await screen.findByTestId("mcp-card-mcp:fs")).toBeInTheDocument();

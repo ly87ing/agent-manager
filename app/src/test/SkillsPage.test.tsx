@@ -5,12 +5,22 @@ import type { Envelope } from "../lib/contract";
 import { makeApplyResult, makeElement, makeEnvelope, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
-/** 展开所有技能行，露出各账号上的状态与操作。 */
+/** 等技能列表出现（开关直接在行上，不用再展开）。 */
 async function expandAll() {
   await screen.findAllByTestId(/^skill-row-/);
-  for (const button of screen.getAllByRole("button", { name: /在各账号上的情况/ })) {
-    if (button.getAttribute("aria-expanded") === "false") await userEvent.click(button);
+}
+
+/** 点某个动作：主动作是行上的开关；次要动作在某一行的「⋯」里，逐个打开找到它。 */
+async function clickAction(testId: string) {
+  const direct = screen.queryByTestId(testId);
+  if (direct) return userEvent.click(direct);
+  for (const menu of screen.getAllByRole("button", { name: /的更多操作$/ })) {
+    await userEvent.click(menu);
+    const item = screen.queryByTestId(testId);
+    if (item) return userEvent.click(item);
+    await userEvent.click(menu);
   }
+  throw new Error(`找不到动作 ${testId}`);
 }
 
 function skillsRoutes() {
@@ -276,7 +286,7 @@ describe("SkillsPage 三级视图", () => {
   it("新发现的技能单独一行标「新发现」；没有可加的账号时不给「添加」", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
     expect(await screen.findByTestId("inbox-count-agent-skills")).toHaveTextContent("新发现 2");
-    expect(screen.getByTestId("skill-summary-skill:agent-skills/inbox-one")).toHaveTextContent("新发现");
+    expect(within(screen.getByTestId("skill-row-skill:agent-skills/inbox-one")).getByText("新发现")).toBeInTheDocument();
     expect(screen.queryByTestId("skill-add-all-skill:agent-skills/inbox-one")).toBeNull();
   });
 
@@ -315,12 +325,11 @@ describe("SkillsPage 三级视图", () => {
   it("启用矩阵：正常状态由启停动作表达，链接异常保留状态，新发现技能无 cell 时明确未配置", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
     await expandAll();
-    expect(await screen.findByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toHaveTextContent("停用");
-    expect(screen.queryByTitle("claude-code: linked")).toBeNull();
-    expect(screen.getByTitle("codex: dead-link")).toHaveTextContent("失效链接");
-    expect(screen.getByTitle("claude-code: missing-link")).toHaveTextContent("未生效");
-    expect(screen.getByTestId("action-enable-skill:agent-skills/beta-codex")).toHaveTextContent("启用");
-    expect(screen.queryByTitle("codex: disabled")).toBeNull();
+    // 开关直接在行上：点一下就是它的主动作，说明在悬停提示里
+    expect(await screen.findByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toHaveAttribute("title", "claude-code：已启用，点击停用");
+    expect(screen.getByTestId("action-update-skill:agent-skills/alpha-codex")).toHaveAttribute("title", "codex：链接损坏，点击修复");
+    expect(screen.getByTestId("action-update-skill:agent-skills/beta-claude-code")).toHaveAttribute("data-tone", "warn");
+    expect(screen.getByTestId("action-enable-skill:agent-skills/beta-codex")).toHaveAttribute("title", "codex：已停用，点击启用");
     // 原来有一列叫「当前分配版本」，里面放的却是「已链接/已分配」——那是状态不是版本，
     // 且与状态列语义重叠。矩阵里状态只由格子表达，版本等细节进悬停，不再单开一列。
     // 引擎未报告 cell 时不伪造可执行操作
@@ -405,7 +414,7 @@ describe("SkillsPage 三级视图", () => {
 
     const { calls } = renderWithEngine(<SkillsPage />, customRoutes);
     await expandAll();
-    expect(await screen.findByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toHaveTextContent("停用");
+    expect(await screen.findByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toHaveAttribute("title", "claude-code：已启用，点击停用");
     expect(screen.queryByTestId("action-remove-skill:agent-skills/alpha-claude-code")).toBeNull();
     expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
   });
@@ -426,13 +435,13 @@ describe("SkillsPage 三级视图", () => {
     const agentSelect = (await screen.findByTestId("filter-agent-select")) as HTMLSelectElement;
     expect(agentSelect.value).toBe("claude-code");
     expect(await screen.findByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toBeInTheDocument();
-    expect(screen.queryByTitle("codex: dead-link")).toBeNull();
+    expect(screen.queryByTestId("action-update-skill:agent-skills/alpha-codex")).toBeNull();
 
     await userEvent.selectOptions(agentSelect, "all");
     expect(agentSelect.value).toBe("all");
     // 链接损坏的行默认展开，codex 的状态可见
-    expect(screen.getByTitle("codex: dead-link")).toBeInTheDocument();
-    expect(screen.getByTestId("skill-summary-skill:agent-skills/beta")).toHaveTextContent("全部账号（codex 除外）");
+    expect(screen.getByTestId("action-update-skill:agent-skills/alpha-codex")).toBeInTheDocument();
+    expect(screen.getByTestId("action-enable-skill:agent-skills/beta-codex")).toHaveAttribute("data-tone", "off");
   });
 
   it("基于 observed.agents[agent].actions 渲染明确操作按钮，无 actions 时显示占位提示，展示明确阻断原因", async () => {
@@ -485,7 +494,9 @@ describe("SkillsPage 三级视图", () => {
     await expandAll();
 
     // 真有新版本才显示更新；删除分配与软链接停用重复，不进入日常界面。
-    expect(screen.getByTestId("action-update-skill:agent-skills/alpha-claude-code")).toBeInTheDocument();
+    // 有新版本：「更新到新版本」在行尾「⋯」里，开关仍是停用
+    await userEvent.click(within(screen.getByTestId("skill-row-skill:agent-skills/alpha")).getByRole("button", { name: /的更多操作$/ }));
+    expect(screen.getByTestId("action-update-skill:agent-skills/alpha-claude-code")).toHaveTextContent("更新到新版本");
     expect(screen.getByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toBeInTheDocument();
     expect(screen.queryByTestId("action-remove-skill:agent-skills/alpha-claude-code")).toBeNull();
     // 没有 assign / enable 按钮
@@ -505,7 +516,9 @@ describe("SkillsPage 三级视图", () => {
     // codex: actions 为空，不推测动作。引擎给了阻断原因就显示原因（下一句断言），
     // 没给才退到「这里没有可做的」——都不报告引擎的内部情况。
     // codex: 展示明确阻断原因
-    expect(screen.getAllByText("Rust 原生引擎暂未提供此操作").length).toBeGreaterThan(0);
+    const blocked = screen.getByTestId("chip-skill:agent-skills/alpha-codex");
+    expect(blocked).toHaveAttribute("title", "codex：Rust 原生引擎暂未提供此操作");
+    expect(blocked).toBeDisabled();
   });
 });
 
@@ -656,14 +669,12 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
     await expandAll();
 
     const addBtn = await screen.findByTestId("action-add-skill:agent-skills/alpha-codex");
-    expect(addBtn).toHaveTextContent("纳入管理");
-    expect(addBtn).toHaveAttribute("title", "保存当前技能内容并接管既有链接");
-    const removeBtn = screen.getByTestId("action-remove-skill:agent-skills/alpha-codex");
-    expect(removeBtn).toHaveTextContent("取消链接");
-    expect(removeBtn).toHaveAttribute("title", "移除磁盘上的链接入口，不删除技能本身");
+    expect(addBtn).toHaveAttribute("title", "codex：技能目录里有一条本工具以外的链接，点击纳入管理");
+    expect(addBtn).toHaveAttribute("data-tone", "warn");
+    await userEvent.click(within(screen.getByTestId("skill-row-skill:agent-skills/alpha")).getByRole("button", { name: /的更多操作$/ }));
+    expect(screen.getByTestId("action-remove-skill:agent-skills/alpha-codex")).toHaveTextContent("取消这条外部链接 · codex");
 
     const skillRow = screen.getByTestId("skill-row-skill:agent-skills/alpha");
-    expect(within(skillRow).getByTitle(/extra-link/)).toHaveTextContent("计划外链接");
     expect(within(skillRow).getByText("有外部链接")).toBeInTheDocument();
   });
 
@@ -698,7 +709,7 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
     const { calls } = renderWithEngine(<SkillsPage />, extraLinkRoutes());
     await expandAll();
 
-    await userEvent.click(await screen.findByTestId("action-remove-skill:agent-skills/alpha-codex"));
+    await clickAction("action-remove-skill:agent-skills/alpha-codex");
     const dialog = await screen.findByRole("dialog", { name: "取消链接 alpha @ codex" });
     expect(dialog).toHaveTextContent(/目标位置存在外部链接内容，确认后将被移除（此操作会修改你的文件系统）/);
 
@@ -713,7 +724,7 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
     const { calls } = renderWithEngine(<SkillsPage />, extraLinkRoutes());
     await expandAll();
 
-    await userEvent.click(await screen.findByTestId("action-remove-skill:agent-skills/beta-codex"));
+    await clickAction("action-remove-skill:agent-skills/beta-codex");
     await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(calls.filter((call) => call.command === "skills:apply")[0].args).toEqual([
@@ -733,8 +744,7 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
     await expandAll();
 
     const addBtn = await screen.findByTestId("action-add-skill:agent-skills/gamma-codex");
-    expect(addBtn).toHaveTextContent("启用");
-    expect(addBtn).toHaveAttribute("title", "首次启用并建立分配");
+    expect(addBtn).toHaveAttribute("title", "codex：未启用，点击启用");
     // 普通状态由可执行动作表达，不再重复放「未分配」徽标。
     const skillRow = screen.getByTestId("skill-row-skill:agent-skills/gamma");
     expect(within(skillRow).queryByTitle(/not-assigned/)).toBeNull();
@@ -963,7 +973,8 @@ describe("SkillsPage 来源里已删除的技能", () => {
     expect(screen.queryByTestId("action-disable-skill:agent-skills/beta-claude-code")).toBeNull();
     // 停用做不成，不再给
     expect(screen.queryByTestId("action-disable-skill:agent-skills/gone-claude-code")).toBeNull();
-    expect(screen.getAllByText("来源里已没有这个技能，可以移除").length).toBeGreaterThan(0);
+    expect(within(screen.getByTestId("skill-row-skill:agent-skills/gone")).getByText("来源里已删除")).toBeInTheDocument();
+    expect(screen.getByTestId("action-remove-skill:agent-skills/gone-claude-code")).toHaveAttribute("title", "claude-code：来源里已经没有这个技能，点击移除这条分配");
 
     await userEvent.click(screen.getByTestId("action-remove-skill:agent-skills/gone-claude-code"));
     const dialog = await screen.findByRole("dialog", { name: "移除 gone @ claude-code" });

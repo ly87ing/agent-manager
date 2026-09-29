@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronRight, PackageOpen, Pencil, Plus, RefreshCw, SearchX, Trash2, Wand2 } from "lucide-react";
+import { PackageOpen, Pencil, Plus, RefreshCw, SearchX, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -7,7 +7,8 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
-import { SkillAgentCellActions } from "../components/SkillAgentActions";
+import { AccountChip, ActionMenu } from "../components/AccountChip";
+import { skillChip } from "../lib/skillChip";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import { SkillInstalledView } from "../components/SkillInstalledView";
 import { SkillRecommendations } from "../components/SkillRecommendations";
@@ -84,8 +85,6 @@ export default function SkillsPage({
   const [collectionFilter, setCollectionFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>(() => initialAgent ?? "all");
   const [search, setSearch] = useState(initialSearch ?? "");
-  /** 用户点过展开/收起的行；搜索中或有待处理问题的行默认展开，点一下反过来。 */
-  const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set());
   const [showAddForm, setShowAddForm] = useState(false);
   const [editing, setEditing] = useState<EngineElement | null>(null);
   const [pendingRemove, setPendingRemove] = useState<EngineElement | null>(null);
@@ -164,14 +163,6 @@ export default function SkillsPage({
       args: ["--only", skill.id, "--action", action, "--agent", agent],
     });
   };
-
-  const toggleExpanded = (id: string) =>
-    setToggled((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
 
   const confirmRemove = () => {
     if (!pendingRemove) return;
@@ -382,40 +373,38 @@ export default function SkillsPage({
                 <ul className="divide-y">
                   {rows.map((skill) => {
                     const allCells = (skill.observed as SkillObserved).agents ?? {};
-                    const cells = agentFilter === "all"
-                      ? allCells
-                      : Object.fromEntries(Object.entries(allCells).filter(([agent]) => agent === agentFilter));
-                    const summary = summarize(skill, cells, nameOf);
+                    const cells = Object.entries(allCells).filter(([agent]) => agentFilter === "all" || agent === agentFilter);
+                    const summary = summarize(skill, Object.fromEntries(cells), nameOf);
                     const addRows = summary.inbox ? addToAllRows(skill) : [];
-                    const autoOpen = Boolean(search.trim()) || summary.badges.length > 0;
-                    const isOpen = autoOpen !== toggled.has(skill.id);
-                    const single = agentFilter !== "all" ? Object.entries(cells)[0] : undefined;
                     const skillName = (skill.spec as SkillSpec).name ?? skill.id;
+                    const chips = cells.map(([agent, cell]) => ({ agent, cell, chip: skillChip(cell) }));
+                    const menu = chips.flatMap(({ agent, cell, chip }) =>
+                      chip.secondary.map((item) => ({
+                        label: `${item.label} · ${nameOf(agent)}`,
+                        testId: `action-${item.action}-${skill.id}-${agent}`,
+                        danger: item.action === "remove",
+                        onSelect: () => handleSkillAction(skill, agent, item.action, cell),
+                      })),
+                    );
                     return (
-                      <li key={skill.id} data-testid={`skill-row-${skill.id}`}>
-                        <div className="flex items-center gap-2 px-4 py-2">
-                          <button
-                            type="button"
-                            aria-expanded={isOpen}
-                            aria-label={`${skillName} 在各账号上的情况`}
-                            onClick={() => toggleExpanded(skill.id)}
-                            className="rounded p-0.5 text-muted-foreground hover:bg-accent"
-                          >
-                            <ChevronRight className={cn("h-4 w-4 transition-transform", isOpen && "rotate-90")} aria-hidden />
-                          </button>
-                          <span className="min-w-0 truncate text-sm">{skillName}</span>
-                          {summary.badges.map((badge) => (
-                            <span key={badge.text} className={cn("rounded px-1.5 py-0.5 text-[11px]", TONE[badge.tone])}>{badge.text}</span>
+                      <li key={skill.id} data-testid={`skill-row-${skill.id}`} className="flex flex-wrap items-center gap-2 px-4 py-2">
+                        <span className="min-w-0 truncate text-sm">{skillName}</span>
+                        {summary.inbox && <span className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">新发现</span>}
+                        {summary.badges.map((badge) => (
+                          <span key={badge.text} className={cn("rounded px-1.5 py-0.5 text-[11px]", TONE[badge.tone])}>{badge.text}</span>
+                        ))}
+                        <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+                          {chips.map(({ agent, cell, chip }) => (
+                            <AccountChip
+                              key={agent}
+                              label={nameOf(agent)}
+                              tone={chip.tone}
+                              title={`${nameOf(agent)}：${chip.hint}`}
+                              testId={chip.primary ? `action-${chip.primary.action}-${skill.id}-${agent}` : `chip-${skill.id}-${agent}`}
+                              disabled={directApply.executing || batchApply.executing}
+                              onClick={chip.primary ? () => handleSkillAction(skill, agent, chip.primary!.action, cell) : undefined}
+                            />
                           ))}
-                          {single ? (
-                            <span className="ml-auto">
-                              <SkillAgentCellActions skill={skill} assignment={{ agent: single[0], cell: single[1] }} statusTitle={`${single[0]}: ${single[1].state}`} onAction={handleSkillAction} />
-                            </span>
-                          ) : (
-                            <span data-testid={`skill-summary-${skill.id}`} className={cn("ml-auto shrink-0 text-xs", summary.inbox ? "text-info" : "text-muted-foreground")}>
-                              {summary.text}
-                            </span>
-                          )}
                           {addRows.length > 0 && (
                             <button
                               type="button"
@@ -424,20 +413,11 @@ export default function SkillsPage({
                               onClick={() => void batchApply.applyBatch({ actionLabel: "添加", rows: addRows })}
                               className="rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-40"
                             >
-                              添加
+                              添加到全部
                             </button>
                           )}
+                          <ActionMenu label={`${skillName} 的更多操作`} items={menu} />
                         </div>
-                        {isOpen && !single && (
-                          <ul className="space-y-1 bg-muted/20 px-11 pb-2 pt-1">
-                            {Object.entries(cells).map(([agent, cell]) => (
-                              <li key={agent} className="flex items-center justify-between gap-2 text-xs">
-                                <span>{nameOf(agent)}</span>
-                                <SkillAgentCellActions skill={skill} assignment={{ agent, cell }} statusTitle={`${agent}: ${cell.state}`} onAction={handleSkillAction} />
-                              </li>
-                            ))}
-                          </ul>
-                        )}
                       </li>
                     );
                   })}

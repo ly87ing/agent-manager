@@ -51,29 +51,6 @@ export function versionRangeHint(freshness: Freshness): string {
 
 // ---------- 矩阵单元格 ----------
 
-/** MCP 服务 × 助手：该助手配置里这一条的状态（saved = 停用后保存在本工具里）。 */
-export const MCP_CELL_COPY: Record<string, string> = {
-  enabled: "已启用",
-  disabled: "已停用",
-  saved: "已停用（已保存）",
-  invalid: "无法识别",
-};
-
-/** 技能 × 助手 启用状态。 */
-export const SKILL_CELL_COPY: Record<string, string> = {
-  linked: "已启用",
-  "missing-link": "未生效",
-  "dead-link": "失效链接",
-  drifted: "不一致",
-  "extra-link": "计划外链接",
-  disabled: "已停用",
-  // 集合定义里没勾这个助手；「不支持」会被读成「这个助手用不了技能」
-  unsupported: "未分配",
-  "not-assigned": "未分配",
-  "not-materialized": "尚未生成",
-  "managed-ok": "已启用",
-};
-
 // ---------- 风险级（操作类型） ----------
 
 export const RISK_ORDER: RiskLevel[] = ["read", "write-local", "exec-local", "network", "install-remove"];

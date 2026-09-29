@@ -6,7 +6,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { mcpEntrySummary } from "../components/McpAssignmentRow";
 import { McpCopyDialog } from "../components/McpCopyDialog";
-import { McpServerCard, missingVariables } from "../components/McpServerCard";
+import { McpServerCard } from "../components/McpServerCard";
 import { McpServerFormDialog, type McpFilePreview, type McpFormMode, type McpFormPayload } from "../components/McpServerFormDialog";
 import { PageError, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
@@ -48,13 +48,11 @@ export default function McpPage() {
   const nameOfAgent = useAccountNames();
   const [search, setSearch] = useState("");
   const [agentFilter, setAgentFilter] = useState<string>("all");
-  /** 用户点过展开/收起的行；搜索中或有问题的行默认展开，点一下反过来。 */
-  const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set());
   const [filling, setFilling] = useState(false);
   const [form, setForm] = useState<McpFormMode | null>(null);
   /** 从已保存定义添加时，按助手追加的参数（旧版 extra_args_by_agent）。 */
   const savedExtraArgs = useRef<Record<string, string[]>>({});
-  const [copying, setCopying] = useState<{ element: EngineElement; agent: string; cell: McpAgentCell } | null>(null);
+  const [copying, setCopying] = useState<{ element: EngineElement; agent: string; cell: McpAgentCell; to?: string } | null>(null);
   const [pendingRemove, setPendingRemove] = useState<{ element: EngineElement; agent: string; cell: McpAgentCell } | null>(null);
   const [removePreview, setRemovePreview] = useState<{
     key: string;
@@ -215,17 +213,6 @@ export default function McpPage() {
   const shownAgents = agentFilter === "all" ? writableAgents : writableAgents.filter((agent) => agent === agentFilter);
   const shown = agentFilter === "all" ? filtered : filtered.filter((element) => cellsOf(element)[agentFilter]);
   const pendingFill = mcpFillRows(elements, targets, agentFilter === "all" ? undefined : [agentFilter]);
-  const hasProblem = (element: EngineElement) =>
-    missingVariables(element).length > 0
-    || Object.values(cellsOf(element)).some((cell) => cell.state === "invalid" || cell.command_available === false);
-  const toggle = (id: string) =>
-    setToggled((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
   /** 补齐：逐条复制，单条失败不影响其余；每条仍由引擎带 base 锁内核对。 */
   const runFill = async () => {
     if (filling) return;
@@ -336,10 +323,12 @@ export default function McpPage() {
               element={element}
               agents={shownAgents}
               busy={busy}
-              open={(Boolean(search_) || hasProblem(element)) !== toggled.has(element.id)}
-              onToggle={() => toggle(element.id)}
               exclusive={agentFilter !== "all"}
               nameOf={nameOfAgent}
+              onAddHere={(target, from, to) => {
+                const cell = cellsOf(target)[from];
+                if (cell) setCopying({ element: target, agent: from, cell, to });
+              }}
               onAction={handleAction}
               onAddFromSaved={openAddFromSaved}
               onForget={setPendingForget}
@@ -355,6 +344,7 @@ export default function McpPage() {
         <McpCopyDialog
           name={nameOf(copying.element)}
           from={copying.agent}
+          initialTo={copying.to}
           targets={targets}
           cells={cellsOf(copying.element)}
           busy={busy}

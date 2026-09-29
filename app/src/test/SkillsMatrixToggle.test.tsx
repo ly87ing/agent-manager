@@ -6,13 +6,11 @@ import { makeApplyResult, makeElement, makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
-/** 展开所有技能行，露出各账号上的状态与操作。 */
+/** 等技能列表出现（开关直接在行上，不用再展开）。 */
 async function expandAll() {
   await screen.findAllByTestId(/^skill-row-/);
-  for (const button of screen.getAllByRole("button", { name: /在各账号上的情况/ })) {
-    if (button.getAttribute("aria-expanded") === "false") await userEvent.click(button);
-  }
 }
+
 
 /** 逐技能操作链路：observed.actions 按钮 → 直接 skills:apply（--only/--action/--agent，带 run_id），
  * 不再先取 plan、不开预览弹窗。没有 policy:set 预写 enabled：动作完全由 apply 携带 --action 表达。 */

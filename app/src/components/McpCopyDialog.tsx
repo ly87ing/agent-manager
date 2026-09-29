@@ -11,6 +11,7 @@ import { useDialogFocus } from "../lib/dialogFocus";
 export function McpCopyDialog({
   name,
   from,
+  initialTo,
   targets,
   cells,
   busy,
@@ -20,6 +21,8 @@ export function McpCopyDialog({
 }: {
   name: string;
   from: string;
+  /** 从某个账号的开关进来：预先选中它。 */
+  initialTo?: string;
   targets: McpTarget[];
   /** 该服务在各助手里的现有条目（判断目标是否同名冲突）。 */
   cells: Record<string, McpAgentCell>;
@@ -29,7 +32,9 @@ export function McpCopyDialog({
   onClose: () => void;
 }) {
   const choices = targets.filter((target) => target.agent !== from && target.error === null && target.agent_enabled);
-  const [to, setTo] = useState(choices[0]?.agent ?? "");
+  const [to, setTo] = useState(
+    initialTo && choices.some((target) => target.agent === initialTo) ? initialTo : choices[0]?.agent ?? "",
+  );
   const [replace, setReplace] = useState(false);
   const [preview, setPreview] = useState<{ key: string; result: Awaited<ReturnType<typeof onPreview>> } | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
