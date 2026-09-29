@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, PackageOpen, Pencil, Power, PowerOff, Plus, RefreshCw, SearchX, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, PackageOpen, Pencil, Power, PowerOff, Plus, RefreshCw, SearchX, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -76,6 +76,17 @@ function summarize(skill: EngineElement, cells: Record<string, SkillAgentCell>, 
 }
 
 const EXPANDED_KEY = "agent-manager:skills-expanded";
+/** 点过「不用了」的推荐来源，只存本机浏览器；读不到就当没点过。 */
+const DISMISSED_KEY = "agent-manager:dismissed-recommendations";
+
+function loadDismissed(): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? "[]");
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];
+  }
+}
 
 /** 用户手动展开 / 收起过的集合，只存在本机浏览器里；读不到就按默认。 */
 function loadExpanded(): Record<string, boolean> {
@@ -118,6 +129,10 @@ export default function SkillsPage({
   const [editing, setEditing] = useState<EngineElement | null>(null);
   const [pendingRemove, setPendingRemove] = useState<EngineElement | null>(null);
   const [pendingRecommendation, setPendingRecommendation] = useState<SkillRecommendation | null>(null);
+  /** 推荐卡片上的「启用…」：确认后一次做完登记、下载、链接到全部账号。 */
+  const [enabling, setEnabling] = useState<SkillRecommendation | null>(null);
+  const [enablingBusy, setEnablingBusy] = useState(false);
+  const [dismissed, setDismissed] = useState<string[]>(loadDismissed);
   const [pendingTakeover, setPendingTakeover] = useState<{ element: EngineElement; agent: string; action: "add" | "remove" } | null>(null);
   const [pendingDropped, setPendingDropped] = useState<{ element: EngineElement; agent: string; cell: SkillAgentCell } | null>(null);
 
@@ -256,6 +271,43 @@ export default function SkillsPage({
     });
   };
 
+  /**
+   * 启用推荐来源：保存集合定义 → 下载 → 把其中的技能链接到全部账号。账号里已有同名技能目录或链接的，
+   * 引擎不给 add，跳过、不覆盖；规则不在这里写。任何一步失败就停在那一步，已做的如实保留。
+   */
+  const enableRecommended = async (item: SkillRecommendation) => {
+    setEnablingBusy(true);
+    try {
+      if (!(await definitionOps.saveDefinition({ name: item.name, definition: item.definition, isNew: true }))) return;
+      const fetched = await execute({ command: "skills:apply", label: `下载 ${item.name}`, args: ["--only", `skill:${item.name}`, "--action", "update"], silent: true });
+      if (!fetched?.ok) {
+        toast.error(`${item.name} 已登记，但下载失败：${fetched?.errors[0]?.message ?? "详见任务记录"}。稍后在集合上点「更新」重试`);
+        return;
+      }
+      const fresh = await runEngine<StatusData>("skills:status", []);
+      const rows = (fresh.ok ? fresh.data.elements ?? [] : [])
+        .filter((element) => (element.spec as SkillSpec).collection === item.name)
+        .flatMap(addToAllRows);
+      await batchApply.applyBatch({ actionLabel: "添加", rows });
+      toast.info(`${item.name} 已启用。规则没有改动：想用它的规则，到规则页看过差异再应用。`);
+    } finally {
+      setEnablingBusy(false);
+      setEnabling(null);
+      await queryClient.invalidateQueries({ queryKey: engineKeys.all });
+    }
+  };
+
+  const dismissRecommendation = (name: string) => {
+    const next = [...new Set([...dismissed, name])];
+    setDismissed(next);
+    try {
+      localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
+    } catch {
+      // 存不下只影响下次是否再提示
+    }
+  };
+  const featured = recommendations.find((item) => !item.added && !dismissed.includes(item.name));
+
   const confirmDropped = () => {
     if (!pendingDropped) return;
     const { element, agent, cell } = pendingDropped;
@@ -303,6 +355,32 @@ export default function SkillsPage({
     <div className="space-y-3">
       <h1 className="sr-only">技能</h1>
       {query.data.errors.length > 0 && <ErrorPanel title="技能状态读取失败" errors={query.data.errors} />}
+
+      {featured && (
+        <div data-testid={`recommend-banner-${featured.name}`} className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+          <Sparkles className="h-5 w-5 shrink-0 text-primary" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium">推荐启用 {featured.name}</p>
+            <p className="text-xs text-muted-foreground">{featured.description}</p>
+          </div>
+          <button
+            type="button"
+            data-testid={`recommend-dismiss-${featured.name}`}
+            onClick={() => dismissRecommendation(featured.name)}
+            className="shrink-0 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            不用了
+          </button>
+          <button
+            type="button"
+            data-testid={`recommend-enable-${featured.name}`}
+            onClick={() => setEnabling(featured)}
+            className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
+          >
+            启用…
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <SearchInput value={search} onChange={setSearch} placeholder="搜索技能…" testId="skills-search" />
@@ -633,6 +711,25 @@ export default function SkillsPage({
           onConfirm={confirmRemove}
           onClose={() => setPendingRemove(null)}
         />
+      )}
+      {enabling && (
+        <ConfirmModal
+          title={`启用 ${enabling.name}`}
+          description="确认后依次执行，只做下面这些，不改动其他任何配置："
+          risk="write-local"
+          confirmLabel="启用"
+          executing={enablingBusy}
+          onConfirm={() => void enableRecommended(enabling)}
+          onClose={() => !enablingBusy && setEnabling(null)}
+        >
+          <ol data-testid="recommend-enable-steps" className="mt-3 list-decimal space-y-1.5 pl-5 text-sm">
+            <li>登记技能集合 {enabling.name}（{enabling.url}）</li>
+            <li>把仓库下载到本工具的数据目录</li>
+            <li>把其中的技能链接到全部账号；账号里已有同名技能目录或链接的跳过，不覆盖</li>
+            <li className="text-muted-foreground">规则、MCP、启动命令都不动；它带的规则可以到规则页看过差异再决定</li>
+          </ol>
+          <p className="mt-2 text-xs text-muted-foreground">以后不想用了：在集合上停用或删除，账号里的链接随之移除。</p>
+        </ConfirmModal>
       )}
       {pendingRecommendation && (
         <ConfirmModal

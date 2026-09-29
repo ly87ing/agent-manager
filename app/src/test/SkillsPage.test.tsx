@@ -970,6 +970,77 @@ function recommendationRoutes(opts: { added?: boolean; collections?: boolean } =
   };
 }
 
+describe("首次使用：推荐启用 agent-skills，可以不用", () => {
+  it("没添加过就在顶部推荐；「不用了」之后不再出现，也不写任何东西", async () => {
+    const first = renderWithEngine(<SkillsPage />, recommendationRoutes());
+    const banner = await screen.findByTestId("recommend-banner-agent-skills-rec");
+    expect(banner).toHaveTextContent("推荐启用 agent-skills-rec");
+    await userEvent.click(within(banner).getByTestId("recommend-dismiss-agent-skills-rec"));
+    expect(screen.queryByTestId("recommend-banner-agent-skills-rec")).toBeNull();
+    expect(first.calls.some((call) => /:(apply|set|seed|configure)$/.test(call.command))).toBe(false);
+    first.unmount();
+
+    renderWithEngine(<SkillsPage />, recommendationRoutes());
+    await screen.findByTestId("recommendation-agent-skills-rec");
+    expect(screen.queryByTestId("recommend-banner-agent-skills-rec")).toBeNull();
+  });
+
+  it("已添加过就不推荐", async () => {
+    renderWithEngine(<SkillsPage />, recommendationRoutes({ added: true }));
+    await screen.findByTestId("recommendation-agent-skills-rec");
+    expect(screen.queryByTestId("recommend-banner-agent-skills-rec")).toBeNull();
+  });
+
+  it("启用：先确认，确认后依次登记、下载、把技能链接到能加的账号；已有同名内容的账号跳过", async () => {
+    const base = recommendationRoutes({ collections: false });
+    let saved = false;
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
+      ...base,
+      "policy:set": async () => {
+        saved = true;
+        return (base["policy:set"] as Envelope);
+      },
+      "skills:status": async () => {
+        const data = JSON.parse(JSON.stringify((base["skills:status"] as Envelope).data));
+        if (saved) {
+          data.recommendations[0].added = true;
+          data.elements = [
+            makeElement({ id: "skill:agent-skills-rec", domain: "skills", spec: { url: "https://github.com/ly87ing/agent-skills.git" }, observed: { repo_cached: true, actions: ["update"] } }),
+            makeElement({
+              id: "skill:agent-skills-rec/verification",
+              domain: "skills",
+              spec: { collection: "agent-skills-rec", name: "verification" },
+              observed: {
+                discovery_inbox: true,
+                agents: {
+                  "claude-code": { state: "not-assigned", assigned: false, enabled: false, actions: ["add"] },
+                  // 账号里已有同名的外部内容：引擎不给 add，不覆盖
+                  codex: { state: "extra-link", assigned: false, enabled: false, actions: [] },
+                },
+              },
+            }),
+          ];
+        }
+        return makeEnvelope(data, { command: "skills.status" });
+      },
+    };
+    const { calls } = renderWithEngine(<SkillsPage />, routes);
+    await userEvent.click(await screen.findByTestId("recommend-enable-agent-skills-rec"));
+    const dialog = await screen.findByRole("dialog", { name: "启用 agent-skills-rec" });
+    expect(within(dialog).getByTestId("recommend-enable-steps")).toHaveTextContent("不覆盖");
+    expect(within(dialog).getByTestId("recommend-enable-steps")).toHaveTextContent("规则、MCP、启动命令都不动");
+    expect(calls.some((call) => call.command === "policy:set" || call.command === "skills:apply")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "启用" }));
+
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
+    const writes = calls.filter((call) => call.command === "policy:set" || call.command === "skills:apply");
+    expect(writes[0].command).toBe("policy:set");
+    expect(writes[1].args).toEqual(["--only", "skill:agent-skills-rec", "--action", "update"]);
+    expect(writes[2].args).toEqual(["--only", "skill:agent-skills-rec/verification", "--action", "add", "--agent", "claude-code"]);
+    expect(calls.some((call) => call.command.startsWith("rules:") || call.command.startsWith("mcp:apply") || call.command.startsWith("aliases:apply"))).toBe(false);
+  });
+});
+
 describe("SkillsPage 推荐来源与当前安装", () => {
   it("推荐来源：确认后才保存为集合定义（不限助手、不分配），不下载、不同步", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, recommendationRoutes());
