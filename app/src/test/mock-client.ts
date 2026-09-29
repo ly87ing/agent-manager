@@ -1592,6 +1592,38 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
           : JSON.stringify({ [target.format === "opencode-json" ? "mcp" : "mcpServers"]: { [name]: spec } }, null, 2);
         return makeEnvelope({ files: [{ path: target.path, exists: target.exists, content }] }, { command: "mcp.preview" });
       }
+      if (command === "profiles:preview") {
+        const raw = argOf(args, "--definition") ?? argOf(args, "--candidate");
+        if (!raw) throw new EngineBridgeError({ kind: "invalid_args", message: "缺少实例定义" });
+        const definition = JSON.parse(raw) as { profile?: {
+          kind?: string; config_dir?: string; env?: Record<string, string>;
+          model?: string; base_url?: string; env_key?: string;
+        } };
+        const profile = definition.profile ?? {};
+        const isCodex = profile.kind === "codex";
+        const dir = (profile.config_dir ?? "~/.claude-new").replace(/\/$/, "");
+        const path = `${dir}/${isCodex ? "config.toml" : "settings.json"}`;
+        const officialCodex = isCodex && !profile.base_url && !profile.env_key;
+        const content = officialCodex ? "" : isCodex
+          ? [`# 演示数据；正式预览按实际文件计算`,
+              ...(profile.model ? [`model = ${JSON.stringify(profile.model)}`] : []),
+              ...(profile.base_url ? [`base_url = ${JSON.stringify(profile.base_url)}`] : []),
+              ...(profile.env_key ? [`env_key = ${JSON.stringify(profile.env_key)}`] : []),
+            ].join("\n") + "\n"
+          : JSON.stringify({
+              _demo_notice: "演示数据；正式预览按实际文件计算",
+              ...(profile.env ? { env: profile.env } : {}),
+              ...(profile.model ? { model: profile.model } : {}),
+            }, null, 2) + "\n";
+        const items = (argOf(args, "--items") ?? "").split(",").filter(Boolean);
+        const exact = args.includes("--exact");
+        return makeEnvelope({
+          path, exists: false, content, will_write: !officialCodex,
+          existing_profile_skipped: false, files: [],
+          seed_results: items.map((item) => ({ item, state: "absent", detail: `${item}：演示数据，正式预览按实际文件计算` })),
+          ...(exact ? { file_base: "missing", content_base: "d".repeat(64) } : {}),
+        }, { command: "profiles.preview" });
+      }
       if (command === "profiles:seed") {
         const id = (argOf(args, "--only") ?? "").replace(/^profiles:/, "");
         const items = (argOf(args, "--items") ?? "").split(",").filter(Boolean);

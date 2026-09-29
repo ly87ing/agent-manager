@@ -200,4 +200,30 @@ describe("dev-only mock 开关", () => {
     const removed = await client.run("agents:models", args);
     expect(removed.ok).toBe(false);
   });
+
+  it("mock 实例预览随定义变化且不写状态或回显凭据", async () => {
+    const client = createMockEngineClient();
+    const before = await client.run("profiles:status");
+    const definition = { profile: { kind: "claude", config_dir: "~/.claude-preview-demo", model: "demo-one" } };
+    const preview = async (model: string) => client.run("profiles:preview", [
+      "--only", "profiles:preview-demo", "--definition",
+      JSON.stringify({ ...definition, profile: { ...definition.profile, model } }),
+      "--on-save", "--items", "permissions,mcp",
+    ]);
+    const first = await preview("demo-one");
+    const second = await preview("demo-two");
+    expect(first.data).toMatchObject({ path: "~/.claude-preview-demo/settings.json", exists: false, will_write: true });
+    expect(JSON.stringify(first.data)).toContain("demo-one");
+    expect(JSON.stringify(second.data)).toContain("demo-two");
+    expect(JSON.stringify(second.data)).not.toContain("demo-one");
+
+    const candidate = await client.run("profiles:preview", [
+      "--only", "profiles:preview-demo", "--base", "missing", "--definition-base", "missing",
+      "--candidate", JSON.stringify(definition), "--exact",
+      "--preview-secret-var", "YOUR_DEMO_KEY", "--preview-secret-value", "YOUR_DEMO_TOKEN",
+    ]);
+    expect(candidate.data).toMatchObject({ file_base: "missing", content_base: "d".repeat(64) });
+    expect(JSON.stringify(candidate)).not.toContain("YOUR_DEMO_TOKEN");
+    expect(await client.run("profiles:status")).toEqual(before);
+  });
 });
