@@ -122,3 +122,21 @@ export function buildAccounts(
       return { agentId, label, kind, bin, accounts: [main, ...others] };
     });
 }
+
+/**
+ * 资源页用的账号名：技能 / MCP 格子里的键是助手 id（主账号）或实例 id，换成账号页上的名字。
+ * 读不到的键原样返回。
+ */
+export function accountNameMap(
+  agentElements: EngineElement[],
+  profileElements: EngineElement[],
+  aliases: Record<string, string>,
+): (agent: string) => string {
+  const names = new Map<string, string>();
+  for (const group of buildAccounts(agentElements, profileElements, aliases)) {
+    for (const account of group.accounts) {
+      names.set(account.isMain ? group.agentId : account.elementId.replace(/^profiles:/, ""), account.isMain ? group.label : account.name);
+    }
+  }
+  return (agent) => names.get(agent) ?? agent;
+}

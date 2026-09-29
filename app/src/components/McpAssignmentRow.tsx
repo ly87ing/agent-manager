@@ -111,12 +111,15 @@ function VarList({ cell }: { cell: McpAgentCell }) {
 export function McpEntryRow({
   element,
   agent,
+  label,
   cell,
   disabled,
   onAction,
 }: {
   element: EngineElement;
   agent: string;
+  /** 显示用的账号名；缺省显示 agent id。 */
+  label?: string;
   cell: McpAgentCell;
   disabled?: boolean;
   onAction: (element: EngineElement, agent: string, action: string, cell: McpAgentCell) => void;
@@ -125,7 +128,7 @@ export function McpEntryRow({
   return (
     <li data-testid={`mcp-entry-${element.id}-${agent}`} className="space-y-1 py-2 first:pt-0 last:pb-0">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="min-w-24 font-mono text-xs font-medium text-foreground">{agent}</span>
+        <span className="min-w-24 text-xs font-medium text-foreground" title={agent}>{label ?? agent}</span>
         <McpCellStatusBadge agent={agent} cell={cell} />
         {cell.transport === "remote" && (
           <span className="rounded border border-info/30 bg-info/10 px-1.5 py-0.5 text-[10px] text-info">远程 HTTP</span>

@@ -11,7 +11,6 @@ import { SkillAgentCellActions } from "../components/SkillAgentActions";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import { SkillInstalledView } from "../components/SkillInstalledView";
 import { SkillRecommendations } from "../components/SkillRecommendations";
-import { buildAccounts } from "../lib/accounts";
 import type { EngineElement, PolicyData, PolicyLayers, SkillRecommendation, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import {
@@ -25,6 +24,7 @@ import {
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import { addToAllRows, fillRows } from "../lib/skillFill";
 import { useBatchApply } from "../lib/useBatchApply";
+import { useAccountNames } from "../lib/useAccountNames";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
@@ -79,9 +79,7 @@ export default function SkillsPage({
   onResetAgent?: () => void;
 } = {}) {
   const query = useEngineQuery<StatusData>("skills:status");
-  const agentsQuery = useEngineQuery<StatusData>("agents:status");
-  const profilesQuery = useEngineQuery<StatusData>("profiles:status");
-  const aliasesQuery = useEngineQuery<StatusData>("aliases:status");
+  const nameOf = useAccountNames();
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const [collectionFilter, setCollectionFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>(() => initialAgent ?? "all");
@@ -114,22 +112,6 @@ export default function SkillsPage({
   const skills = elements.filter((element) => !isCollection(element));
   const layers = policyQuery.data?.data.layers ?? null;
 
-  // 账号名：主账号用助手名，其余用账号名；技能格子里的键就是 agent id / 实例 id
-  const accountNames = new Map<string, string>();
-  if (agentsQuery.data?.ok) {
-    const aliases = (aliasesQuery.data?.ok ? (aliasesQuery.data.data.aliases ?? []) : []) as { name: string; value: string | null }[];
-    const groups = buildAccounts(
-      agentsQuery.data.data.elements,
-      profilesQuery.data?.ok ? profilesQuery.data.data.elements : [],
-      Object.fromEntries(aliases.filter((alias) => alias.value).map((alias) => [alias.name, alias.value as string])),
-    );
-    for (const group of groups) {
-      for (const account of group.accounts) {
-        accountNames.set(account.isMain ? group.agentId : account.elementId.replace(/^profiles:/, ""), account.isMain ? group.label : account.name);
-      }
-    }
-  }
-  const nameOf = (agent: string) => accountNames.get(agent) ?? agent;
   const agentOptions = Array.from(new Set(skills.flatMap((skill) => Object.keys(agentCellsOf(skill))))).sort();
 
   const collName = (collection: EngineElement) => collection.id.replace(/^skill:/, "");

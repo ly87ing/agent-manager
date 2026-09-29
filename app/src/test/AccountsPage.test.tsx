@@ -107,6 +107,17 @@ function routes(options: { previewVersion?: () => number } = {}): Record<string,
       })),
     }, { command: "skills.status" }),
     "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
+    // 只有 ds 账号上启用着的 MCP：新 Claude 账号从同格式的 ds 复制过来
+    "mcp:status": async () => makeEnvelope({
+      domain: "mcp",
+      targets: ["claude-code", "ds", ...registered].map((agent) => ({ agent, path: `/${agent}/.claude.json`, format: "claude-json", exists: true, agent_enabled: true, disable_mode: "snapshot", error: null })),
+      elements: [makeElement({
+        id: "mcp:only-ds",
+        domain: "mcp",
+        observed: { agents: { ds: { state: "enabled", source: "file", base: "ds-base", actions: ["edit", "copy", "disable", "remove"] } } },
+      })],
+    }, { command: "mcp.status" }),
+    "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
   };
 }
 
@@ -136,8 +147,9 @@ describe("账号页", () => {
     await userEvent.click(within(drawer).getByTestId("account-save"));
     await waitFor(() => expect(screen.queryByTestId("account-drawer")).toBeNull());
 
-    const writes = calls.filter((call) => ["policy:set", "profiles:apply", "aliases:apply", "profiles:seed", "skills:apply"].includes(call.command));
-    expect(writes.map((call) => call.command)).toEqual(["policy:set", "profiles:apply", "aliases:apply", "profiles:seed", "skills:apply"]);
+    const writes = calls.filter((call) => ["policy:set", "profiles:apply", "aliases:apply", "profiles:seed", "skills:apply", "mcp:apply"].includes(call.command));
+    expect(writes.map((call) => call.command)).toEqual(["policy:set", "profiles:apply", "aliases:apply", "profiles:seed", "skills:apply", "mcp:apply"]);
+    expect(writes[5].args).toEqual(["--only", "mcp:only-ds", "--agent", "ds", "--to", "work", "--action", "copy", "--base", "ds-base"]);
     // 只把在用的 alpha 链接给新账号
     expect(writes[4].args).toEqual(["--only", "skill:repo/alpha", "--action", "add", "--agent", "work"]);
     const definition = JSON.parse(valueOf(writes[0].args, "--value")!);

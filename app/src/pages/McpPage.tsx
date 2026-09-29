@@ -1,15 +1,14 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { LayoutGrid, Plus, SearchX, Server } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Plus, SearchX, Server, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
-import { McpEntryRow, mcpCellKey, mcpEntrySummary } from "../components/McpAssignmentRow";
+import { mcpEntrySummary } from "../components/McpAssignmentRow";
 import { McpCopyDialog } from "../components/McpCopyDialog";
-import { ResourceAgentMatrix, type MatrixRow, type MatrixRowCell } from "../components/ResourceAgentMatrix";
-import { McpServerCard } from "../components/McpServerCard";
+import { McpServerCard, missingVariables } from "../components/McpServerCard";
 import { McpServerFormDialog, type McpFilePreview, type McpFormMode, type McpFormPayload } from "../components/McpServerFormDialog";
-import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { PageError, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { SecretValueDialog } from "../components/SecretValueDialog";
 import type { EngineElement, Envelope, McpTarget, StatusData } from "../lib/contract";
@@ -18,7 +17,9 @@ import { OVERLAY_COPY } from "../lib/ui-copy";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { useEngineQuery } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
-import { cn } from "../lib/utils";
+import { useExecutions } from "../lib/execution";
+import { mcpFillArgs, mcpFillRows } from "../lib/mcpFill";
+import { useAccountNames } from "../lib/useAccountNames";
 
 function cellsOf(element: EngineElement): Record<string, McpAgentCell> {
   return (element.observed as McpObserved).agents ?? {};
@@ -43,10 +44,13 @@ function showNotices(envelope: Envelope | null) {
 export default function McpPage() {
   const query = useEngineQuery<StatusData>("mcp:status");
   const directApply = useDirectApply();
-  const [activeTab, setActiveTab] = useState<"services" | "agents">("services");
+  const { execute } = useExecutions();
+  const nameOfAgent = useAccountNames();
   const [search, setSearch] = useState("");
   const [agentFilter, setAgentFilter] = useState<string>("all");
-  const [expandedMcpIds, setExpandedMcpIds] = useState<Set<string>>(new Set());
+  /** 用户点过展开/收起的行；搜索中或有问题的行默认展开，点一下反过来。 */
+  const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set());
+  const [filling, setFilling] = useState(false);
   const [form, setForm] = useState<McpFormMode | null>(null);
   /** 从已保存定义添加时，按助手追加的参数（旧版 extra_args_by_agent）。 */
   const savedExtraArgs = useRef<Record<string, string[]>>({});
@@ -60,7 +64,6 @@ export default function McpPage() {
   } | null>(null);
   const [pendingForget, setPendingForget] = useState<EngineElement | null>(null);
   const [editingSecret, setEditingSecret] = useState<string | null>(null);
-  const tabRefs = useRef<Record<"services" | "agents", HTMLButtonElement | null>>({ services: null, agents: null });
   const removeKey = pendingRemove ? JSON.stringify([pendingRemove.element.id, pendingRemove.agent, pendingRemove.cell.base]) : "";
 
   useEffect(() => {
@@ -81,27 +84,12 @@ export default function McpPage() {
     return () => { current = false; };
   }, [removeKey]);
 
-  const handleTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, tab: "services" | "agents") => {
-    const tabs: ("services" | "agents")[] = ["services", "agents"];
-    const index = tabs.indexOf(tab);
-    let next = -1;
-    if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (index + 1) % tabs.length;
-    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = (index - 1 + tabs.length) % tabs.length;
-    else if (e.key === "Home") next = 0;
-    else if (e.key === "End") next = tabs.length - 1;
-    if (next >= 0) {
-      e.preventDefault();
-      setActiveTab(tabs[next]);
-      tabRefs.current[tabs[next]]?.focus();
-    }
-  };
-
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="MCP 状态读取失败" error={query.error} />;
   if (!query.data.ok) {
     return (
-      <div className="space-y-6">
-        <PageHeader title="MCP" description="各助手配置文件里的 MCP 条目。" />
+      <div className="space-y-3">
+        <h1 className="sr-only">MCP</h1>
         <ErrorPanel title="MCP 状态读取失败" errors={query.data.errors} />
       </div>
     );
@@ -223,34 +211,44 @@ export default function McpPage() {
   const filtered = elements.filter(matches);
   const disabledCount = elements.filter((element) => element.state === "disabled").length;
 
-  const relevantAgents = agentFilter === "all" ? agentColumns : agentColumns.filter((agent) => agent === agentFilter);
-  const matrixRows: MatrixRow[] = filtered.map((element) => {
-    const cells = cellsOf(element);
-    const rowCells: Record<string, MatrixRowCell | null> = {};
-    for (const agent of relevantAgents) {
-      const cell = cells[agent];
-      rowCells[agent] = cell
-        ? {
-            state: mcpCellKey(cell),
-            title: [`${agent}: ${mcpCellKey(cell)}`, mcpEntrySummary(cell), cell.blocked_reason ?? null, cell.notice ?? null]
-              .filter(Boolean)
-              .join(" · "),
-            hasActions: cell.actions.length > 0,
-          }
-        : null;
+  const writableAgents = targets.filter((target) => target.error === null && target.agent_enabled).map((target) => target.agent);
+  const shownAgents = agentFilter === "all" ? writableAgents : writableAgents.filter((agent) => agent === agentFilter);
+  const shown = agentFilter === "all" ? filtered : filtered.filter((element) => cellsOf(element)[agentFilter]);
+  const pendingFill = mcpFillRows(elements, targets, agentFilter === "all" ? undefined : [agentFilter]);
+  const hasProblem = (element: EngineElement) =>
+    missingVariables(element).length > 0
+    || Object.values(cellsOf(element)).some((cell) => cell.state === "invalid" || cell.command_available === false);
+  const toggle = (id: string) =>
+    setToggled((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  /** 补齐：逐条复制，单条失败不影响其余；每条仍由引擎带 base 锁内核对。 */
+  const runFill = async () => {
+    if (filling) return;
+    setFilling(true);
+    let ok = 0;
+    let failed = 0;
+    try {
+      for (const row of pendingFill) {
+        const envelope = await execute({ command: "mcp:apply", label: `补齐 ${row.name} @ ${nameOfAgent(row.to)}`, args: mcpFillArgs(row), silent: true });
+        if (envelope?.ok) ok += 1;
+        else failed += 1;
+      }
+    } finally {
+      setFilling(false);
     }
-    return { key: element.id, label: nameOf(element), cells: rowCells };
-  });
+    (failed ? toast.error : toast.success)(`补齐完成：成功 ${ok}，失败 ${failed}${failed ? "，详见任务记录" : ""}`);
+  };
 
   const brokenTargets = targets.filter((target) => target.error !== null);
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="MCP"
-        description="直接查看和编辑各助手配置文件里的 MCP 条目；同名服务在不同助手里可以各不相同。"
-      />
-
+    <div className="space-y-3">
+      <h1 className="sr-only">MCP</h1>
       {query.data.errors.length > 0 && <ErrorPanel title="MCP 状态读取失败" errors={query.data.errors} />}
       {brokenTargets.map((target) => (
         <div
@@ -258,43 +256,41 @@ export default function McpPage() {
           data-testid={`mcp-target-error-${target.agent}`}
           className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
         >
-          <span className="font-mono font-medium">{target.agent}</span> 的 MCP 配置读不了：{target.error}
+          <span className="font-medium">{nameOfAgent(target.agent)}</span> 的 MCP 配置读不了：{target.error}
           <span className="block break-all font-mono text-[11px] opacity-80">{target.path}</span>
         </div>
       ))}
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div role="tablist" aria-label="MCP 视图" className="flex border-b">
-          {(["services", "agents"] as const).map((tab) => (
-            <button
-              key={tab}
-              ref={(el) => {
-                tabRefs.current[tab] = el;
-              }}
-              type="button"
-              role="tab"
-              id={`tab-${tab}`}
-              aria-controls={`panel-${tab}`}
-              aria-selected={activeTab === tab}
-              tabIndex={activeTab === tab ? 0 : -1}
-              onClick={() => setActiveTab(tab)}
-              onKeyDown={(e) => handleTabKeyDown(e, tab)}
-              className={cn(
-                "border-b-2 px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
-                activeTab === tab
-                  ? "border-primary font-semibold text-primary"
-                  : "border-transparent text-muted-foreground hover:border-input hover:text-foreground",
-              )}
-            >
-              {tab === "services" ? "服务" : "按助手查看"}
-            </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchInput value={search} onChange={setSearch} placeholder="搜索服务…" testId="mcp-search" />
+        <select
+          aria-label="账号筛选"
+          data-testid="filter-agent-select"
+          value={agentFilter}
+          onChange={(e) => setAgentFilter(e.target.value)}
+          className="rounded-md border bg-card px-2 py-1.5 text-sm"
+        >
+          <option value="all">全部账号</option>
+          {agentColumns.map((agent) => (
+            <option key={agent} value={agent}>{nameOfAgent(agent)}</option>
           ))}
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs text-muted-foreground" data-testid="mcp-counts">
-            共 {elements.length} 个服务{disabledCount > 0 ? `，${disabledCount} 个已停用` : ""}
-          </span>
-          <SearchInput value={search} onChange={setSearch} placeholder="搜索服务…" testId="mcp-search" />
+        </select>
+        <span className="text-xs text-muted-foreground" data-testid="mcp-counts">
+          共 {elements.length} 个服务{disabledCount > 0 ? `，${disabledCount} 个已停用` : ""}
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          {pendingFill.length > 0 && (
+            <button
+              type="button"
+              data-testid="mcp-fill"
+              disabled={filling || busy}
+              title="把在用的服务从同类账号复制到还没有它的账号；账号上停用的不动"
+              onClick={() => void runFill()}
+              className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/15 disabled:opacity-40"
+            >
+              <Wand2 className="h-4 w-4" aria-hidden /> 补齐 {pendingFill.length}
+            </button>
+          )}
           <button
             type="button"
             data-testid="add-server-button"
@@ -303,7 +299,7 @@ export default function McpPage() {
               setForm({ kind: "add", targets });
             }}
             disabled={targets.every((target) => target.error !== null || !target.agent_enabled)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="h-4 w-4" aria-hidden /> {OVERLAY_COPY.addServer}
           </button>
@@ -313,15 +309,15 @@ export default function McpPage() {
       {elements.length === 0 ? (
         <EmptyState
           icon={Server}
-          title="各助手的配置里还没有 MCP 服务"
+          title="各账号的配置里还没有 MCP 服务"
           description={<p>点击右上角「{OVERLAY_COPY.addServer}」写入第一个服务；在助手里直接加的条目也会出现在这里。</p>}
         />
-      ) : search_ && filtered.length === 0 ? (
+      ) : (search_ || agentFilter !== "all") && shown.length === 0 ? (
         <EmptyState
           icon={SearchX}
           testId="mcp-search-empty"
           title="无匹配结果"
-          description="没有名称、启动命令、地址或助手包含该关键词的服务。"
+          description="没有名称、启动命令、地址或账号包含该关键词的服务。"
           actions={
             <button
               type="button"
@@ -332,78 +328,25 @@ export default function McpPage() {
             </button>
           }
         />
-      ) : activeTab === "services" ? (
-        <div id="panel-services" role="tabpanel" aria-labelledby="tab-services" className="grid grid-cols-1 gap-4">
-          {filtered.map((element) => (
+      ) : (
+        <ul className="divide-y rounded-lg border bg-card">
+          {shown.map((element) => (
             <McpServerCard
               key={element.id}
               element={element}
-              agents={agentColumns}
+              agents={shownAgents}
               busy={busy}
+              open={(Boolean(search_) || hasProblem(element)) !== toggled.has(element.id)}
+              onToggle={() => toggle(element.id)}
+              exclusive={agentFilter !== "all"}
+              nameOf={nameOfAgent}
               onAction={handleAction}
               onAddFromSaved={openAddFromSaved}
               onForget={setPendingForget}
               onConfigureSecrets={setEditingSecret}
             />
           ))}
-        </div>
-      ) : (
-        <div id="panel-agents" role="tabpanel" aria-labelledby="tab-agents" className="space-y-3">
-          <label className="flex items-center gap-2 text-xs font-medium text-foreground">
-            <span>助手筛选:</span>
-            <select
-              aria-label="助手筛选"
-              data-testid="filter-agent-select"
-              value={agentFilter}
-              onChange={(e) => setAgentFilter(e.target.value)}
-              className="rounded border border-input bg-card px-2 py-1 font-mono text-xs text-foreground"
-            >
-              <option value="all">全部助手 ({agentColumns.length})</option>
-              {agentColumns.map((agent) => (
-                <option key={agent} value={agent}>
-                  {agent}
-                </option>
-              ))}
-            </select>
-          </label>
-          <ResourceAgentMatrix
-            rows={matrixRows}
-            agents={relevantAgents}
-            kind="mcp"
-            resourceHeader="服务"
-            expandedKeys={expandedMcpIds}
-            onToggleExpand={(key) =>
-              setExpandedMcpIds((prev) => {
-                const next = new Set(prev);
-                if (next.has(key)) next.delete(key);
-                else next.add(key);
-                return next;
-              })
-            }
-            renderExpanded={(row) => {
-              const element = filtered.find((item) => item.id === row.key);
-              if (!element) return null;
-              const cells = cellsOf(element);
-              return (
-                <ul className="divide-y divide-border/70">
-                  {relevantAgents
-                    .filter((agent) => cells[agent])
-                    .map((agent) => (
-                      <McpEntryRow
-                        key={agent}
-                        element={element}
-                        agent={agent}
-                        cell={cells[agent]}
-                        disabled={busy}
-                        onAction={handleAction}
-                      />
-                    ))}
-                </ul>
-              );
-            }}
-            emptyHint={<EmptyState compact icon={LayoutGrid} title="暂无可展示的服务" />}
-          />
-        </div>
+        </ul>
       )}
 
       {form && <McpServerFormDialog mode={form} onClose={() => setForm(null)} onSubmit={(payload) => void submitForm(payload)} onPreview={previewForm} />}

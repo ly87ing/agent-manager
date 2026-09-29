@@ -15,6 +15,8 @@ import {
 import { ALL_SEED_ITEMS, seedArgs, summarizeSeed, type SeedResult } from "./profileSeed";
 import { engineKeys } from "./queries";
 import { fillRows } from "./skillFill";
+import { mcpFillArgs, mcpFillRows } from "./mcpFill";
+import type { McpTarget } from "./contract";
 import { DEFAULT_SECRETS_PATH, secretSourceOf } from "./secretSource";
 import { useAliasSource, type AliasFilePreview } from "./useAliasSource";
 import { sameJson } from "./utils";
@@ -142,6 +144,20 @@ export function useAccountOps() {
     return { linked, failed };
   };
 
+  /** 新账号拿到同类账号上在用的 MCP（主账号的已由共用设置带上，这里补其他账号上才有的）。 */
+  const linkMcp = async (agent: string): Promise<{ copied: number; failed: number }> => {
+    const status = await runEngine<StatusData & { targets?: McpTarget[] }>("mcp:status", []).catch(() => null);
+    if (!status?.ok) return { copied: 0, failed: 0 };
+    let copied = 0;
+    let failed = 0;
+    for (const row of mcpFillRows(status.data.elements, status.data.targets ?? [], [agent])) {
+      const result = await execute({ command: "mcp:apply", label: `补齐 ${row.name} @ ${agent}`, args: mcpFillArgs(row), silent: true });
+      if (result?.ok) copied += 1;
+      else failed += 1;
+    }
+    return { copied, failed };
+  };
+
   const create = async (
     input: ProfileFormInput,
     bin: string,
@@ -195,9 +211,11 @@ export function useAccountOps() {
     const seedResults = (seeded?.data as { results?: SeedResult[] } | null)?.results ?? [];
     const seedFailed = !seeded?.ok || summarizeSeed(seedResults).failed;
     const skills = await linkSkills(input.id);
+    const mcp = await linkMcp(input.id);
     if (!aliasOk) toast.error(`已创建账号 ${input.id}，但启动命令没写进终端配置`, { description: "原因见任务记录。" });
     else if (seedFailed) toast.warning(`已创建账号 ${input.id}，部分共用设置没带上`, { description: summarizeSeed(seedResults).description || undefined });
     else if (skills.failed > 0) toast.warning(`已创建账号 ${input.id}，${skills.failed} 个技能没链接上`, { description: "到技能页点「补齐」重试，原因见任务记录。" });
+    else if (mcp.failed > 0) toast.warning(`已创建账号 ${input.id}，${mcp.failed} 个 MCP 服务没复制上`, { description: "到 MCP 页点「补齐」重试，原因见任务记录。" });
     else toast.success(`已创建账号 ${input.id}`, { description: `已链接 ${skills.linked} 个技能；新开终端后输入 ${input.id} 启动。` });
     await refresh();
     return true;

@@ -112,21 +112,19 @@ describe("页内搜索：MCP 页", () => {
     expect(screen.getByTestId("mcp-card-mcp:remote-api")).toBeInTheDocument();
   });
 
-  it("按助手查看：搜索与助手下拉筛选叠加（AND）", async () => {
+  it("账号筛选与搜索叠加（AND）：只剩该账号上的匹配条目", async () => {
     renderWithEngine(<McpPage />, mcpRoutes());
-    await userEvent.click(await screen.findByRole("tab", { name: "按助手查看" }));
-
-    await userEvent.selectOptions(screen.getByTestId("filter-agent-select"), "codex");
+    await userEvent.selectOptions(await screen.findByTestId("filter-agent-select"), "codex");
     const input = await screen.findByTestId("mcp-search");
     await userEvent.type(input, "remote");
 
-    // AND 生效：只剩 remote-api × codex（已停用），fs 被搜索过滤、Claude 列被助手筛选去掉
+    // 搜索中默认展开：只剩 remote-api，且只列 codex 的条目
+    expect(screen.queryByTestId("mcp-card-mcp:fs")).toBeNull();
     expect(await screen.findByTitle(/^codex: disabled/)).toBeInTheDocument();
-    expect(screen.queryByTitle(/^codex: enabled/)).toBeNull();
     expect(screen.queryByTitle(/^claude-code:/)).toBeNull();
 
     await userEvent.clear(input);
-    expect(await screen.findByTitle(/^codex: enabled/)).toBeInTheDocument();
+    expect(await screen.findByTestId("mcp-card-mcp:fs")).toBeInTheDocument();
   });
 });
 
