@@ -12,7 +12,7 @@ import { skillChip, skillNeedsUpdate } from "../lib/skillChip";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import { SkillInstalledView } from "../components/SkillInstalledView";
 import { SkillRecommendations } from "../components/SkillRecommendations";
-import type { EngineElement, PolicyData, PolicyLayers, SkillRecommendation, StatusData } from "../lib/contract";
+import type { EngineElement, PolicyData, SkillRecommendation, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import {
   agentCellsOf,
@@ -26,6 +26,7 @@ import { engineKeys, useEngineQuery } from "../lib/queries";
 import { addToAllRows, fillRows, versionUpdateRows } from "../lib/skillFill";
 import { useExecutions } from "../lib/execution";
 import { encodeShareLink, type SharePayload } from "../lib/shareLink";
+import { availableSkills, fullSkillDefinition, isCollection } from "../lib/skillCollections";
 import { dismissRecommendation as dismissRecommendationFor, loadDismissed } from "../lib/recommendDismiss";
 import { RemoveCollectionDialog } from "../components/RemoveCollectionDialog";
 import { ForkSkillDialog } from "../components/ForkSkillDialog";
@@ -34,21 +35,6 @@ import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
-
-function isCollection(element: EngineElement): boolean {
-  return element.id.startsWith("skill:") && !element.id.includes("/");
-}
-
-function fullSkillDefinition(layers: PolicyLayers | null, name: string): Record<string, unknown> | null {
-  const repositories = (layers?.sqlite as { skills?: { repositories?: Record<string, unknown> } } | null | undefined)?.skills?.repositories;
-  const definition = repositories?.[name];
-  return typeof definition === "object" && definition !== null ? (definition as Record<string, unknown>) : null;
-}
-
-/** 来源里的全部技能；旧引擎没有 available 时退回按 discovered（当作顶层技能）。 */
-function availableSkills(observed: SkillCollectionObserved) {
-  return observed.available ?? (observed.discovered ?? []).map((name) => ({ name, path: name }));
-}
 
 const ACTIVE = new Set(["linked", "missing-link", "dead-link", "drifted"]);
 const TONE = {

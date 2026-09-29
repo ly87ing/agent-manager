@@ -1,4 +1,4 @@
-import { ScrollText, Server, Settings, Sparkles, SquareTerminal, Users, Wallet } from "lucide-react";
+import { Library, ScrollText, Server, Settings, Sparkles, SquareTerminal, Users, Wallet } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
@@ -19,6 +19,7 @@ const AliasesPage = lazy(() => import("./pages/AliasesPage"));
 const UsagePage = lazy(() => import("./pages/UsagePage"));
 const TakeoverPage = lazy(() => import("./pages/TakeoverPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const SourcesPage = lazy(() => import("./pages/SourcesPage"));
 
 // 多账号设计（docs/MULTI-ACCOUNT-DESIGN.md）：主入口是账号与共享资源；导入现有配置与操作记录从设置进入。
 const NAV: NavItem[] = [
@@ -27,6 +28,7 @@ const NAV: NavItem[] = [
   { key: "mcp", label: "MCP", icon: Server },
   { key: "rules-hooks", label: "规则", icon: ScrollText },
   { key: "commands", label: "命令", icon: SquareTerminal },
+  { key: "sources", label: "来源", icon: Library },
 ];
 const SECONDARY_NAV: NavItem[] = [
   { key: "usage", label: "用量", icon: Wallet, iconOnly: true },
@@ -167,6 +169,7 @@ export default function App() {
             <McpPage importPayload={importPayload?.kind === "mcp" ? importPayload : null} onImportConsumed={() => setImportPayload(null)} />
           )}
           {activePage === "commands" && <AliasesPage onOpenSkills={() => handleNavigate("skills")} />}
+          {activePage === "sources" && <SourcesPage />}
           {activePage === "rules-hooks" && <RulesHooksPage onNavigate={handleNavigate} />}
           {activePage === "takeover" && <TakeoverPage />}
           {activePage === "usage" && <UsagePage />}

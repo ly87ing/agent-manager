@@ -15,18 +15,20 @@ import { ConfirmModal } from "./ConfirmModal";
 export interface UserSource {
   name: string;
   path: string;
+  /** false = 用户停用了：它的规则不出现，跟随记录保留。 */
+  enabled: boolean;
 }
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 function sourcesOf(policy: PolicyData | undefined): { sources: UserSource[]; collections: string[] } {
   const effective = (policy?.effective ?? {}) as {
-    rules?: { sources?: Record<string, { path?: unknown; _delete?: boolean }> };
+    rules?: { sources?: Record<string, { path?: unknown; enabled?: boolean; _delete?: boolean }> };
     skills?: { repositories?: Record<string, { _delete?: boolean }> };
   };
   const sources = Object.entries(effective.rules?.sources ?? {})
     .filter(([, def]) => def && def._delete !== true && typeof def.path === "string")
-    .map(([name, def]) => ({ name, path: def.path as string }));
+    .map(([name, def]) => ({ name, path: def.path as string, enabled: def.enabled !== false }));
   const collections = Object.entries(effective.skills?.repositories ?? {})
     .filter(([, def]) => def && def._delete !== true)
     .map(([name]) => name);
@@ -40,10 +42,10 @@ export function useRuleSources() {
   const [busy, setBusy] = useState(false);
   const { sources, collections } = sourcesOf(policy.data?.ok ? policy.data.data : undefined);
 
-  const write = async (name: string, value: Record<string, unknown>, done: string): Promise<boolean> => {
+  const write = async (key: string, value: unknown, done: string): Promise<boolean> => {
     setBusy(true);
     try {
-      const envelope = await runEngine("policy:set", ["--layer", "local", "--key", `rules.sources.${name}`, "--value", JSON.stringify(value)]);
+      const envelope = await runEngine("policy:set", ["--layer", "local", "--key", key, "--value", JSON.stringify(value)]);
       if (!envelope.ok) {
         toast.error(`没有保存：${envelope.errors[0]?.message ?? "未知错误"}`);
         return false;
@@ -61,8 +63,11 @@ export function useRuleSources() {
     /** 名字不能与已有来源或技能集合重名。 */
     taken: [...sources.map((source) => source.name), ...collections],
     busy,
-    add: (name: string, path: string) => write(name, { path, _delete: false, _replace: true }, `已添加规则来源 ${name}`),
-    remove: (source: UserSource) => write(source.name, { _delete: true }, `已移除规则来源 ${source.name}`),
+    add: (name: string, path: string) => write(`rules.sources.${name}`, { path, _delete: false, _replace: true }, `已添加规则来源 ${name}`),
+    remove: (source: UserSource) => write(`rules.sources.${source.name}`, { _delete: true }, `已移除规则来源 ${source.name}`),
+    /** 停用 / 启用：只改开关，路径与跟随记录都不动。 */
+    setEnabled: (source: UserSource, enabled: boolean) =>
+      write(`rules.sources.${source.name}.enabled`, enabled, `已${enabled ? "启用" : "停用"}规则来源 ${source.name}`),
   };
 }
 
