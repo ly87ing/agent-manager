@@ -443,24 +443,26 @@ fn plan_update_with_resolver(
     {
         bail!("--candidate 只能更新该助手实例的接入字段");
     }
-    let source = fields
-        .get("source_connection")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow!("--candidate 缺少来源 Provider 名称"))?;
-    if source.is_empty()
-        || source.len() > 64
-        || !source
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-    {
-        bail!("来源 Provider 名称格式不正确");
-    }
-    let old_source = original
-        .get("profile")
-        .and_then(|v| v.get("source_connection"))
-        .and_then(Value::as_str);
-    if old_source.is_some_and(|old| old != source) {
-        bail!("[{}] 来源 Provider 与现有定义不一致，没有写入", id);
+    // 账号可以直接编辑接入参数，不一定来自某个 Provider：不带来源时保留定义里原有的记录
+    if let Some(raw) = fields.get("source_connection") {
+        let source = raw
+            .as_str()
+            .ok_or_else(|| anyhow!("来源 Provider 名称格式不正确"))?;
+        if source.is_empty()
+            || source.len() > 64
+            || !source
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+        {
+            bail!("来源 Provider 名称格式不正确");
+        }
+        let old_source = original
+            .get("profile")
+            .and_then(|v| v.get("source_connection"))
+            .and_then(Value::as_str);
+        if old_source.is_some_and(|old| old != source) {
+            bail!("[{}] 来源 Provider 与现有定义不一致，没有写入", id);
+        }
     }
     let mut next = original.clone();
     let profile = next

@@ -317,6 +317,45 @@ fn provider_candidate_updates_one_profile_definition_and_live_file_together() {
 }
 
 #[test]
+fn account_candidate_without_provider_updates_file_and_keeps_no_source() {
+    let (root, ctx) = temp_ctx("account-candidate");
+    std::env::set_var("AM_TEST_ACCOUNT_CANDIDATE", "account-token-value");
+    let global = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(global.parent().unwrap()).unwrap();
+    std::fs::write(&global, b"{\"theme\":\"keep\"}\n").unwrap();
+    let global_before = std::fs::read(&global).unwrap();
+    assert!(save_definition(
+        &ctx,
+        "cc-ly",
+        &claude_profile("AM_TEST_ACCOUNT_CANDIDATE")
+    ));
+    assert!(apply_now(&ctx, "cc-ly").ok);
+    let base = base_of(&ctx, "cc-ly");
+    let definition_base = definition_base_of(&ctx, "cc-ly");
+    // 账号页直接改模型：候选里没有来源 Provider
+    let candidate = r#"{"env":{"ANTHROPIC_BASE_URL":"https://relay.example.com","ANTHROPIC_AUTH_TOKEN":"${AM_TEST_ACCOUNT_CANDIDATE}"},"model":"account-model"}"#;
+    let done = execute(
+        &ctx,
+        &request(
+            "profiles:apply-definition",
+            &["--only", "profiles:cc-ly", "--base", &base, "--definition-base", &definition_base, "--candidate", candidate],
+        ),
+    );
+    assert!(done.ok, "{:?}", done.errors);
+    let target = ctx.home_dir.join(".claude-ly/settings.json");
+    let file: serde_json::Value = serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
+    assert_eq!(file["model"], "account-model");
+    assert_eq!(file["env"]["ANTHROPIC_AUTH_TOKEN"], "account-token-value");
+    let policy = execute(&ctx, &request("policy:get", &[]));
+    let profile = &policy.data["effective"]["agents"]["definitions"]["cc-ly"]["profile"];
+    assert!(profile.get("source_connection").is_none());
+    assert_eq!(profile["model"], "account-model");
+    assert_eq!(std::fs::read(&global).unwrap(), global_before, "主账号配置不能被牵连");
+    std::env::remove_var("AM_TEST_ACCOUNT_CANDIDATE");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn provider_candidate_rejects_stale_file_definition_and_plaintext_before_writing() {
     let (root, ctx) = temp_ctx("provider-candidate-reject");
     std::env::set_var("AM_TEST_PROVIDER_REJECT", "candidate-token-value");
