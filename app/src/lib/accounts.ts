@@ -140,3 +140,42 @@ export function accountNameMap(
   }
   return (agent) => names.get(agent) ?? agent;
 }
+
+export interface AccountLaunchCommand {
+  name: string;
+  value: string;
+  /** false = 写在 Agent Manager 区块外、你自己维护的 alias：只读。 */
+  managed: boolean;
+  needsTildeFix: boolean;
+  needsCredentialClear: boolean;
+}
+
+/**
+ * 指向这个账号的全部启动命令：独立账号按命令里的配置目录变量认；主账号是直接调用助手命令、
+ * 没有指定配置目录的那些（如 `alias claude='TZ=… claude --…'`）。
+ */
+export function launchCommandsOfAccount(
+  account: Account,
+  group: AgentAccounts,
+  managed: Record<string, string>,
+  external: { name: string; value: string | null }[],
+): AccountLaunchCommand[] {
+  const envName = group.kind === "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR";
+  const binName = group.bin.split("/").pop() ?? group.bin;
+  const collect = (entries: [string, string][], isManaged: boolean): AccountLaunchCommand[] => {
+    if (account.isMain) {
+      return entries
+        .filter(([, value]) => {
+          const parsed = parseAliasValue(value);
+          return (parsed.command.split("/").pop() ?? parsed.command) === binName && parsed.otherEnv[envName] === undefined;
+        })
+        .map(([name, value]) => ({ name, value, managed: isManaged, needsTildeFix: false, needsCredentialClear: false }));
+    }
+    return launchCommandsForProfile(Object.fromEntries(entries), group.kind, account.configDir, (value) => parseAliasValue(value).otherEnv)
+      .map((command) => ({ ...command, managed: isManaged }));
+  };
+  const externalEntries = external
+    .filter((line): line is { name: string; value: string } => typeof line.value === "string" && managed[line.name] === undefined)
+    .map((line) => [line.name, line.value] as [string, string]);
+  return [...collect(Object.entries(managed), true), ...collect(externalEntries, false)];
+}

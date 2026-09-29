@@ -270,4 +270,47 @@ describe("账号页", () => {
     expect(writes[0].args).toEqual(["--only", "agents:claude-code", "--base", "main-base", "--preview-file-base", "preview-main", "--runtime", '{"statusline":"builtin"}']);
     expect(writes[1].args).toEqual(["--only", "profiles:ds", "--item", "statusline", "--source-base", "src-base", "--target-base", "dst-base"]);
   });
+
+  it("账号的启动命令：主账号列出直接调用 claude 的命令（区块外的只读），独立账号只列指向自己目录的", async () => {
+    const r = routes();
+    r["aliases:status"] = makeEnvelope(makeAliasStatus(
+      { cc: 'claude --dangerously-skip-permissions', ds: 'CLAUDE_CONFIG_DIR="$HOME/.claude-ds" claude', "ds-yolo": 'CLAUDE_CONFIG_DIR="$HOME/.claude-ds" claude --dangerously-skip-permissions' },
+      { external: { claude: MAIN_ALIAS } },
+    ), { command: "aliases.status" });
+    renderWithEngine(<AccountsPage />, r);
+    const main = await screen.findByTestId("account-row-agents:claude-code");
+    await userEvent.click(within(main).getByRole("button", { name: "更多操作" }));
+    await userEvent.click(within(main).getByRole("menuitem", { name: "启动命令" }));
+    let drawer = await screen.findByTestId("launch-commands-drawer");
+    expect(within(drawer).getByTestId("launch-command-cc")).toBeInTheDocument();
+    expect(within(drawer).getByTestId("launch-command-claude")).toHaveTextContent("你自己写的，只读");
+    expect(within(drawer).queryByTestId("launch-edit-claude")).toBeNull();
+    expect(within(drawer).queryByTestId("launch-command-ds")).toBeNull();
+    await userEvent.click(within(drawer).getByRole("button", { name: "关闭" }));
+
+    const ds = screen.getByTestId("account-row-profiles:ds");
+    await userEvent.click(within(ds).getByRole("button", { name: "更多操作" }));
+    await userEvent.click(within(ds).getByRole("menuitem", { name: "启动命令" }));
+    drawer = await screen.findByTestId("launch-commands-drawer");
+    expect(within(drawer).getByTestId("launch-command-ds")).toBeInTheDocument();
+    expect(within(drawer).getByTestId("launch-command-ds-yolo")).toBeInTheDocument();
+    expect(within(drawer).queryByTestId("launch-command-cc")).toBeNull();
+  });
+
+  it("删除一条启动命令：先看完整文件预览，确认后只删这一条", async () => {
+    const { calls } = renderWithEngine(<AccountsPage />, routes());
+    const ds = await screen.findByTestId("account-row-profiles:ds");
+    await userEvent.click(within(ds).getByRole("button", { name: "更多操作" }));
+    await userEvent.click(within(ds).getByRole("menuitem", { name: "启动命令" }));
+    const drawer = await screen.findByTestId("launch-commands-drawer");
+    await userEvent.click(within(drawer).getByTestId("launch-remove-ds"));
+    const confirm = await screen.findByRole("button", { name: "确认删除" });
+    await waitFor(() => expect(confirm).toBeEnabled());
+    expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
+    await userEvent.click(confirm);
+    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
+    const apply = calls.find((call) => call.command === "aliases:apply")!;
+    expect(valueOf(apply.args, "--remove")).toBe("ds");
+    expect(calls.find((call) => call.command === "aliases:preview")?.args).toEqual(apply.args);
+  });
 });

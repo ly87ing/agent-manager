@@ -31,7 +31,7 @@ function routes() {
 }
 
 describe("App 顶层导航", () => {
-  it("顶栏只保留账号与共享资源入口，默认渲染账号页；导入现有配置从设置进入", async () => {
+  it("顶栏是账号、共享资源与启动命令入口，默认渲染账号页；导入现有配置从设置进入", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -48,6 +48,7 @@ describe("App 顶层导航", () => {
       "技能",
       "MCP",
       "规则",
+      "命令",
       "用量",
       "设置",
     ]);

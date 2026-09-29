@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AccountDrawer, type DrawerMode } from "../components/AccountDrawer";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { LaunchCommandsDrawer } from "../components/LaunchCommandsDrawer";
 import { PageError, PageLoading } from "../components/PageState";
 import { buildAccounts, type Account, type AgentAccounts } from "../lib/accounts";
 import { isStale, isWindowExpired, usageTone, windowLabel } from "../lib/agentUsage";
@@ -14,7 +15,7 @@ import { currentConfigOf } from "../lib/agentCurrent";
 import type { SharedStatus } from "../lib/profileShared";
 import { useAccountOps } from "../lib/useAccountOps";
 import type { AgentUsage, OfficialAuthStatus } from "../lib/observed";
-import { authTerminalCommand } from "../lib/profileDefinition";
+import { authTerminalCommand, parseProfileDefinition } from "../lib/profileDefinition";
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import { cn } from "../lib/utils";
 
@@ -100,6 +101,7 @@ function RowMenu({ items }: { items: { label: string; onSelect: () => void; test
 }
 
 interface RowActions {
+  onLaunchCommands: () => void;
   onEdit: () => void;
   onRemove: () => void;
   onAddLaunch: () => void;
@@ -197,6 +199,7 @@ function AccountRow({
       <RowMenu
         items={[
           ...(!account.isMain ? [{ label: "编辑", testId: `account-menu-edit-${id}`, onSelect: actions.onEdit }] : []),
+          { label: "启动命令", testId: `account-menu-commands-${id}`, onSelect: actions.onLaunchCommands },
           ...(!account.isMain && !account.command
             ? [{ label: "写入启动命令", testId: `account-menu-launch-${id}`, onSelect: actions.onAddLaunch }]
             : []),
@@ -227,6 +230,7 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
   const [removing, setRemoving] = useState<{ id: string; name: string; definition: Record<string, unknown> } | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [confirmQuota, setConfirmQuota] = useState(false);
+  const [commandsOf, setCommandsOf] = useState<Account | null>(null);
   const [quotaBusy, setQuotaBusy] = useState(false);
 
   const groups =
@@ -288,6 +292,7 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
   const actionsOf = (account: Account): RowActions => {
     const profileId = account.elementId.replace(/^profiles:/, "");
     return {
+      onLaunchCommands: () => setCommandsOf(account),
       onEdit: () => withDefinition(account, (definition) => setDrawer({ type: "edit", group, account, definition })),
       onRemove: () => withDefinition(account, (definition) => setRemoving({ id: profileId, name: account.name, definition })),
       onAddLaunch: () => withDefinition(account, (definition) => void ops.addLaunch(profileId, definition, group.bin)),
@@ -377,6 +382,20 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
           secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}
           reservedNames={reservedNames}
           onClose={() => setDrawer(null)}
+        />
+      )}
+      {commandsOf && (
+        <LaunchCommandsDrawer
+          account={commandsOf}
+          group={group}
+          aliasSource={aliasSource}
+          defaultValue={(() => {
+            if (commandsOf.isMain) return group.bin;
+            const definition = definitionOf(commandsOf);
+            const id = commandsOf.elementId.replace(/^profiles:/, "");
+            return definition ? ops.launchValue(parseProfileDefinition(id, definition), group.bin) : group.bin;
+          })()}
+          onClose={() => setCommandsOf(null)}
         />
       )}
       {confirmQuota && mainElement && (

@@ -31,7 +31,7 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
   { key: "takeover", label: "导入现有配置", keywords: "takeover 接管 发现 导入 扫描" },
   { key: "runs", label: "操作记录", keywords: "runs 任务 日志 记录" },
   { key: "settings:secrets", label: "密钥", keywords: "secrets 密钥 变量 token api key 凭据" },
-  { key: "settings:aliases", label: "终端快捷命令", keywords: "aliases alias 别名 启动命令 时区" },
+  { key: "commands", label: "命令", keywords: "aliases alias 别名 启动命令 终端快捷命令 时区" },
 ];
 
 /**

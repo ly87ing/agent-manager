@@ -4,7 +4,6 @@ import {
   ArrowLeft,
   History,
   KeyRound,
-  Link2,
   PackageCheck,
   Monitor,
   Moon,
@@ -21,7 +20,6 @@ import { useSaveSettings, useSettings } from "../lib/settings";
 import { useTheme, type Theme } from "../lib/theme";
 import { cn } from "../lib/utils";
 import { ConfigBackupSection } from "../components/ConfigBackupSection";
-import AliasesPage from "./AliasesPage";
 import ClientDiagnosticsPage from "./ClientDiagnosticsPage";
 import SecretsPage from "./SecretsPage";
 
@@ -91,12 +89,6 @@ const ADVANCED_ENTRIES = [
     icon: Activity,
   },
   {
-    key: "aliases",
-    title: "终端快捷命令",
-    description: "每条命令的启动方式：时区、语言与固定参数。",
-    icon: Link2,
-  },
-  {
     key: "secrets",
     title: "密钥",
     description: "选择外部密钥文件，填写取值并查看哪些还没配。",
@@ -109,7 +101,7 @@ function ConfigurationToolsSection({ onSelect }: { onSelect: (key: string) => vo
     <section className="rounded-lg border bg-card p-5 shadow-sm">
       <div>
         <h2 className="text-sm font-semibold text-foreground">配置工具</h2>
-        <p className="mt-1 text-xs text-muted-foreground">导入、操作记录、密钥、终端快捷命令和客户端诊断都在这里。</p>
+        <p className="mt-1 text-xs text-muted-foreground">导入、操作记录、密钥和客户端诊断都在这里。</p>
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {ADVANCED_ENTRIES.map((entry) => {
@@ -303,7 +295,6 @@ export default function SettingsPage({
           </button>
           <span className="text-xs text-muted-foreground">/ 配置工具 / {currentEntry?.title}</span>
         </div>
-        {activeAdvanced === "aliases" && <AliasesPage onOpenSkills={onNavigate ? () => onNavigate("skills") : undefined} />}
         {activeAdvanced === "client-diagnostics" && <ClientDiagnosticsPage />}
         {activeAdvanced === "secrets" && <SecretsPage />}
       </div>

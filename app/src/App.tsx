@@ -1,4 +1,4 @@
-import { ScrollText, Server, Settings, Sparkles, Users, Wallet } from "lucide-react";
+import { ScrollText, Server, Settings, Sparkles, SquareTerminal, Users, Wallet } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
@@ -12,6 +12,7 @@ const McpPage = lazy(() => import("./pages/McpPage"));
 const RulesHooksPage = lazy(() => import("./pages/RulesHooksPage"));
 const RunsPage = lazy(() => import("./pages/RunsPage"));
 const SkillsPage = lazy(() => import("./pages/SkillsPage"));
+const AliasesPage = lazy(() => import("./pages/AliasesPage"));
 const UsagePage = lazy(() => import("./pages/UsagePage"));
 const TakeoverPage = lazy(() => import("./pages/TakeoverPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
@@ -22,6 +23,7 @@ const NAV: NavItem[] = [
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
   { key: "rules-hooks", label: "规则", icon: ScrollText },
+  { key: "commands", label: "命令", icon: SquareTerminal },
 ];
 const SECONDARY_NAV: NavItem[] = [
   { key: "usage", label: "用量", icon: Wallet, iconOnly: true },
@@ -100,6 +102,10 @@ export default function App() {
   if (settings.isError) return <PageError title="应用设置加载失败" error={settings.error} />;
 
   const handleNavigate = (page: string) => {
+    if (page === "settings:aliases") {
+      setActivePage("commands");
+      return;
+    }
     if (page.startsWith("skills:")) {
       setSelectedSkillAgent(null);
       setSkillSearch(page.slice("skills:".length));
@@ -142,6 +148,7 @@ export default function App() {
             />
           )}
           {activePage === "mcp" && <McpPage />}
+          {activePage === "commands" && <AliasesPage onOpenSkills={() => handleNavigate("skills")} />}
           {activePage === "rules-hooks" && <RulesHooksPage onNavigate={handleNavigate} />}
           {activePage === "takeover" && <TakeoverPage />}
           {activePage === "usage" && <UsagePage />}
