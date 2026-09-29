@@ -13,8 +13,8 @@ export type CellTone = "on" | "off" | "warn" | "blocked";
 
 /** 一个账号列的宽度；表头、每行都用它，列才对得齐。 */
 const COLUMN = "w-16 shrink-0";
-/** 行尾动作区宽度：放得下四个图标按钮（集合的更新、编辑、启停、删除）。 */
-export const TRAILING = "w-28 shrink-0";
+/** 行尾动作区宽度：放得下五个图标按钮（集合的更新、分享、编辑、启停、移除）。 */
+export const TRAILING = "w-36 shrink-0";
 
 /** 每个助手都只有一个账号时，表头只要一层（图标 + 助手名）。 */
 function singleLevel(groups: AccountGroup[]): boolean {

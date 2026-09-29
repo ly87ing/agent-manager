@@ -26,6 +26,8 @@ import { engineKeys, useEngineQuery } from "../lib/queries";
 import { addToAllRows, fillRows, versionUpdateRows } from "../lib/skillFill";
 import { useExecutions } from "../lib/execution";
 import { encodeShareLink, type SharePayload } from "../lib/shareLink";
+import { dismissRecommendation as dismissRecommendationFor, loadDismissed } from "../lib/recommendDismiss";
+import { RemoveCollectionDialog } from "../components/RemoveCollectionDialog";
 import { useBatchApply } from "../lib/useBatchApply";
 import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
@@ -77,18 +79,6 @@ function summarize(skill: EngineElement, cells: Record<string, SkillAgentCell>, 
 }
 
 const EXPANDED_KEY = "agent-manager:skills-expanded";
-/** 点过「不用了」的推荐来源，只存本机浏览器；读不到就当没点过。 */
-const DISMISSED_KEY = "agent-manager:dismissed-recommendations";
-
-function loadDismissed(): string[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(DISMISSED_KEY) ?? "[]");
-    return Array.isArray(value) ? value : [];
-  } catch {
-    return [];
-  }
-}
-
 /** 用户手动展开 / 收起过的集合，只存在本机浏览器里；读不到就按默认。 */
 function loadExpanded(): Record<string, boolean> {
   try {
@@ -194,13 +184,15 @@ export default function SkillsPage({
       .catch(() => undefined)
       .finally(() => void queryClient.invalidateQueries({ queryKey: engineKeys.all }));
 
-  const runCollectionAction = (collection: EngineElement, action: "update" | "enable" | "disable", title: string) =>
-    void directApply
+  const runCollectionAction = (collection: EngineElement, action: "update" | "enable" | "disable", title: string) => {
+    if (action === "disable") dismissIfRecommended(collection);
+    return void directApply
       .apply({ command: "skills:apply", label: title, args: ["--only", collection.id, "--action", action] })
       .then((envelope) => {
         // 拉完代码顺手重查一次最新提交，否则还挂着「可更新」
         if (action === "update" && envelope?.ok) return refreshUpstream(collection);
       });
+  };
 
   /**
    * 全部更新：逐个取回启用中的集合（git 拉到最新、本机目录重新扫描），再把各账号在用、
@@ -292,12 +284,13 @@ export default function SkillsPage({
     });
   };
 
-  const confirmRemove = () => {
+  const confirmRemove = (purge: boolean) => {
     if (!pendingRemove) return;
+    dismissIfRecommended(pendingRemove);
     void directApply.apply({
       command: "skills:apply",
-      label: `删除集合 ${collName(pendingRemove)}`,
-      args: ["--only", pendingRemove.id, "--action", "remove"],
+      label: `移除来源 ${collName(pendingRemove)}`,
+      args: ["--only", pendingRemove.id, "--action", "remove", ...(purge ? ["--purge"] : [])],
     });
     setPendingRemove(null);
   };
@@ -337,14 +330,12 @@ export default function SkillsPage({
     }
   };
 
-  const dismissRecommendation = (name: string) => {
-    const next = [...new Set([...dismissed, name])];
-    setDismissed(next);
-    try {
-      localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
-    } catch {
-      // 存不下只影响下次是否再提示
-    }
+  const dismissRecommendation = (name: string) => setDismissed(dismissRecommendationFor(name));
+  /** 停用或移除的是推荐来源（同名或同地址）：视为不想用了，不再推荐。 */
+  const dismissIfRecommended = (collection: EngineElement) => {
+    const spec = collection.spec as SkillCollectionSpec;
+    const match = recommendations.find((item) => item.name === collName(collection) || (spec.url && item.url === spec.url));
+    if (match) dismissRecommendation(match.name);
   };
   const featured = recommendations.find((item) => !item.added && !dismissed.includes(item.name));
 
@@ -597,15 +588,15 @@ export default function SkillsPage({
                       </span>
                     )}
                   />
+                  {/* 集合（来源）的操作常驻显示：移除来源等要一眼找得到 */}
                   <RowActions
                     always={
-                      actions.includes("update") && (collection.freshness.state === "behind" || !observed.repo_cached) ? (
+                      <>
+                    {actions.includes("update") && (collection.freshness.state === "behind" || !observed.repo_cached) && (
                         <IconAction tone="primary" label={`更新集合 ${name}`} testId={`update-collection-${name}`} onClick={() => runCollectionAction(collection, "update", `更新集合 ${name}`)}>
                           <RefreshCw className="h-3.5 w-3.5" aria-hidden />
                         </IconAction>
-                      ) : null
-                    }
-                  >
+                    )}
                     {spec.url && (
                       <IconAction label={`复制 ${name} 的分享链接`} testId={`share-collection-${name}`} onClick={() => void shareCollection(name, spec)}>
                         <Share2 className="h-3.5 w-3.5" aria-hidden />
@@ -625,11 +616,13 @@ export default function SkillsPage({
                       </IconAction>
                     )}
                     {actions.includes("remove") && (
-                      <IconAction danger label={`删除集合 ${name}`} testId={`remove-collection-${name}`} onClick={() => setPendingRemove(collection)}>
+                      <IconAction danger label={`移除来源 ${name}`} testId={`remove-collection-${name}`} onClick={() => setPendingRemove(collection)}>
                         <Trash2 className="h-3.5 w-3.5" aria-hidden />
                       </IconAction>
                     )}
-                  </RowActions>
+                      </>
+                    }
+                  />
                 </header>
                 {observed.discovery_error && (
                   <p data-testid={`discovery-error-${name}`} className="bg-warning/10 px-4 py-1.5 text-xs text-warning">
@@ -744,12 +737,9 @@ export default function SkillsPage({
       )}
       {definitionOps.modals}
       {pendingRemove && (
-        <ConfirmModal
-          title={`删除集合 ${collName(pendingRemove)}`}
-          description="删除集合会清理已分配给各账号的入口，源目录保留。确认后执行。"
-          risk="install-remove"
-          requireText={collName(pendingRemove)}
-          confirmLabel="确认删除"
+        <RemoveCollectionDialog
+          name={collName(pendingRemove)}
+          local={Boolean((pendingRemove.spec as SkillCollectionSpec).source_path)}
           executing={directApply.executing}
           onConfirm={confirmRemove}
           onClose={() => setPendingRemove(null)}

@@ -3,6 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowUpDown, Copy, Eye, Info, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { AgentIcon } from "../components/AgentIcon";
+import { RemoveCollectionDialog } from "../components/RemoveCollectionDialog";
+import { dismissRecommendation } from "../lib/recommendDismiss";
 import { COL_ACTION, COL_ICONS, COL_MIDDLE, COL_NARROW, PILL, PILL_HOVER, ROW, RowIcon, TableHeader } from "../components/DataTable";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { AddSourceDialog, RemoveSourceDialog, type UserSource, useRuleSources } from "../components/RuleSources";
@@ -241,6 +243,16 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
         onDeleteTemplate={(template) => setDialog({ kind: "delete-template", template })}
         onFetch={fetchSource}
         onOpenSkills={onOpenSkills}
+        onRemoveCollection={(collection, local, purge) => {
+          // 移除的来源若是推荐来源，之后不再推荐
+          dismissRecommendation(collection);
+          void directApply.apply({
+            command: "skills:apply",
+            label: `移除来源 ${collection}`,
+            args: ["--only", `skill:${collection}`, "--action", "remove", ...(purge && !local ? ["--purge"] : [])],
+          });
+        }}
+        collectionBusy={directApply.executing}
       />
 
       {dialog?.kind === "edit" && <EditDialog element={dialog.element} onClose={() => setDialog(null)} />}
@@ -410,7 +422,12 @@ function RuleLibrary({
   onDeleteTemplate,
   onFetch,
   onOpenSkills,
+  onRemoveCollection,
+  collectionBusy,
 }: {
+  /** 移除规则所在的技能集合（来源）：技能链接、跟随一并处理，见确认框说明。 */
+  onRemoveCollection: (collection: string, local: boolean, purge: boolean) => void;
+  collectionBusy: boolean;
   sourceRules: RuleSourceRule[];
   templates: RuleTemplate[];
   suggested: SuggestedSource[];
@@ -427,6 +444,7 @@ function RuleLibrary({
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<UserSource | null>(null);
+  const [removingCollection, setRemovingCollection] = useState<{ name: string; local: boolean } | null>(null);
   const userSources = useRuleSources();
   const userSourceOf = (collection: string) => userSources.sources.find((source) => source.name === collection);
   const emptySources = userSources.sources.filter((source) => !sourceRules.some((rule) => rule.collection === source.name));
@@ -484,8 +502,17 @@ function RuleLibrary({
                   <RowIcon label={openId === rule.id ? `收起 ${rule.name}` : `查看 ${rule.name}`} onClick={() => setOpenId(openId === rule.id ? null : rule.id)}>
                     <Eye className="h-3.5 w-3.5" aria-hidden />
                   </RowIcon>
-                  {mine && (
+                  {mine ? (
                     <RowIcon danger label={`移除规则来源 ${mine.name}`} onClick={() => setRemoving(mine)}>
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                    </RowIcon>
+                  ) : (
+                    <RowIcon
+                      danger
+                      label={`移除来源 ${rule.collection}`}
+                      testId={`rules-remove-collection-${rule.id}`}
+                      onClick={() => setRemovingCollection({ name: rule.collection, local: rule.local })}
+                    >
                       <Trash2 className="h-3.5 w-3.5" aria-hidden />
                     </RowIcon>
                   )}
@@ -584,6 +611,18 @@ function RuleLibrary({
           onSubmit={async (name, path) => {
             if (await userSources.add(name, path)) setAdding(false);
           }}
+        />
+      )}
+      {removingCollection && (
+        <RemoveCollectionDialog
+          name={removingCollection.name}
+          local={removingCollection.local}
+          executing={collectionBusy}
+          onConfirm={(purge) => {
+            onRemoveCollection(removingCollection.name, removingCollection.local, purge);
+            setRemovingCollection(null);
+          }}
+          onClose={() => setRemovingCollection(null)}
         />
       )}
       {removing && (

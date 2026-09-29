@@ -392,8 +392,10 @@ describe("SkillsPage 三级视图", () => {
     const removeBtn = await screen.findByTestId("remove-collection-agent-skills");
     await userEvent.click(removeBtn);
 
-    const dialog = await screen.findByRole("dialog", { name: "删除集合 agent-skills" });
-    expect(dialog).toHaveTextContent(/源目录保留/);
+    const dialog = await screen.findByRole("dialog", { name: "移除来源 agent-skills" });
+    // 说清会发生什么：技能链接移除、自己的目录不动、规则文件保留、启动命令不动
+    expect(dialog).toHaveTextContent("你自己放进账号的同名技能目录不动");
+    expect(dialog).toHaveTextContent("规则文件内容保留");
     expect(screen.getByTestId("confirm-modal-input")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "取消" }));
@@ -404,24 +406,39 @@ describe("SkillsPage 三级视图", () => {
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
   });
 
-  it("移除集合：输入集合名确认后 skills:apply 携带 --only skill:<name> --action remove（带 run_id），无 plan、零 policy:set", async () => {
+  it("移除集合：输入集合名确认后 skills:apply 携带 --only skill:<name> --action remove，git 集合默认一并清理（--purge），无 plan、零 policy:set", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
     const removeBtn = await screen.findByTestId("remove-collection-agent-skills");
     await userEvent.click(removeBtn);
 
-    await screen.findByRole("dialog", { name: "删除集合 agent-skills" });
+    await screen.findByRole("dialog", { name: "移除来源 agent-skills" });
+    expect(screen.getByTestId("remove-collection-purge")).toBeChecked();
     await userEvent.type(screen.getByTestId("confirm-modal-input"), "agent-skills");
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
     const applyCalls = calls.filter((call) => call.command === "skills:apply");
     expect(applyCalls).toHaveLength(1);
-    expect(applyCalls[0].args).toEqual(["--only", "skill:agent-skills", "--action", "remove"]);
+    expect(applyCalls[0].args).toEqual(["--only", "skill:agent-skills", "--action", "remove", "--purge"]);
     expect(applyCalls[0].args).not.toContain("--dry-run");
     expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("移除集合时取消勾选清理：只移除，下载的仓库留着；推荐来源之后不再推荐", async () => {
+    const routes = recommendationRoutes();
+    const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[]; recommendations: { name: string }[] }>;
+    status.data.recommendations[0].name = "agent-skills";
+    const { calls } = renderWithEngine(<SkillsPage />, routes);
+    await userEvent.click(await screen.findByTestId("remove-collection-agent-skills"));
+    await userEvent.click(screen.getByTestId("remove-collection-purge"));
+    await userEvent.type(screen.getByTestId("confirm-modal-input"), "agent-skills");
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual(["--only", "skill:agent-skills", "--action", "remove"]);
+    expect(JSON.parse(localStorage.getItem("agent-manager:dismissed-recommendations") ?? "[]")).toContain("agent-skills");
   });
 
   it("已分配技能：软链接模式只显示可逆的停用，不暴露与其重复的删除分配", async () => {

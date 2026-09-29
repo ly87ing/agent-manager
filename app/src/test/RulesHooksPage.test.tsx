@@ -191,6 +191,21 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
   });
 
+  it("规则库里来自技能集合的规则可以「移除来源」：同一个确认框，输入名称后移除这个集合并清理下载", async () => {
+    const { calls } = renderWithEngine(<RulesPage />, {
+      ...rulesRoutes(),
+      "skills:apply": makeEnvelope({ domain: "skills", steps: [], skipped: [] }, { command: "skills.apply" }),
+    });
+    await userEvent.click(await screen.findByTestId("rules-remove-collection-agent-skills/core"));
+    const dialog = await screen.findByRole("dialog", { name: "移除来源 agent-skills" });
+    expect(dialog).toHaveTextContent("规则文件内容保留");
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
+    await userEvent.type(within(dialog).getByTestId("confirm-modal-input"), "agent-skills");
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual(["--only", "skill:agent-skills", "--action", "remove", "--purge"]);
+  });
+
   it("我的规则来源在规则库里：没读到规则的也列出来；移除先确认，只删登记，不改任何规则文件", async () => {
     const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
       ...rulesRoutes(),
