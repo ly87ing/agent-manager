@@ -97,21 +97,22 @@ export function AppLayout({
     <div className="flex h-screen flex-col bg-background text-foreground">
       <header className="shrink-0 border-b bg-card">
         <nav className="flex items-center gap-1 overflow-x-auto px-3 py-2">
-          <span className="mr-3 shrink-0 text-sm font-semibold tracking-tight">Agent Manager</span>
+          {/* 窄窗口时让出位置：窗口标题栏里已有应用名 */}
+          <span className="mr-3 hidden shrink-0 text-sm font-semibold tracking-tight lg:inline">Agent Manager</span>
           {nav.map(renderItem)}
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex shrink-0 items-center gap-1">
             {onSearch && (
               <button
                 type="button"
                 data-testid="open-search"
                 aria-label="搜索（⌘K）"
                 onClick={onSearch}
-                title="搜索账号、技能、MCP、规则和操作"
+                title="搜索账号、技能、MCP、规则和操作（⌘K）"
                 className="mr-1 flex shrink-0 items-center gap-2 rounded-md border bg-background px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
               >
                 <Search className="h-3.5 w-3.5" aria-hidden />
-                搜索
-                <kbd className="rounded border bg-muted px-1 font-sans text-[10px]">⌘K</kbd>
+                <span className="hidden lg:inline">搜索</span>
+                <kbd className="hidden rounded border bg-muted px-1 font-sans text-[10px] lg:inline">⌘K</kbd>
               </button>
             )}
             <button
