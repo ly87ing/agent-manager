@@ -28,6 +28,7 @@ import { useExecutions } from "../lib/execution";
 import { encodeShareLink, type SharePayload } from "../lib/shareLink";
 import { dismissRecommendation as dismissRecommendationFor, loadDismissed } from "../lib/recommendDismiss";
 import { RemoveCollectionDialog } from "../components/RemoveCollectionDialog";
+import { ForkSkillDialog } from "../components/ForkSkillDialog";
 import { useBatchApply } from "../lib/useBatchApply";
 import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
@@ -130,6 +131,9 @@ export default function SkillsPage({
   const [enablingBusy, setEnablingBusy] = useState(false);
   const [dismissed, setDismissed] = useState<string[]>(loadDismissed);
   const [pendingTakeover, setPendingTakeover] = useState<{ element: EngineElement; agent: string; action: "add" | "remove" } | null>(null);
+  /** 正在「改成我的版本」的技能。 */
+  const [forking, setForking] = useState<EngineElement | null>(null);
+  const [forkBusy, setForkBusy] = useState(false);
   const [pendingDropped, setPendingDropped] = useState<{ element: EngineElement; agent: string; cell: SkillAgentCell } | null>(null);
 
   const directApply = useDirectApply();
@@ -248,6 +252,44 @@ export default function SkillsPage({
       toast.success(`已复制 ${name} 的分享链接`);
     } catch (reason) {
       toast.error(`没能复制：${reason instanceof Error ? reason.message : String(reason)}`);
+    }
+  };
+
+  /**
+   * 改成我的版本：先复制并登记（skills:fork），成功后把勾选的账号逐个换过去——
+   * 先取消原集合的分配，再加上用户的版本；每一步照常核对，某个账号失败不影响其余。
+   */
+  const runFork = async (skill: EngineElement, input: { dest: string; target: string; switchAccounts: string[] }) => {
+    const spec = skill.spec as SkillSpec;
+    const name = spec.name ?? skill.id;
+    setForkBusy(true);
+    try {
+      const forked = await execute({
+        command: "skills:fork",
+        label: `把 ${name} 改成我的版本`,
+        args: ["--only", skill.id, "--dest", input.dest, "--collection", input.target],
+        silent: true,
+      });
+      if (!forked?.ok) {
+        toast.error(`没有复制：${forked?.errors[0]?.message ?? "详见任务记录"}`);
+        return;
+      }
+      let failed = 0;
+      for (const agent of input.switchAccounts) {
+        const removed = await execute({ command: "skills:apply", label: `换掉原版本 ${name} @ ${nameOf(agent)}`, args: ["--only", skill.id, "--action", "remove", "--agent", agent], silent: true });
+        const added = removed?.ok
+          ? await execute({ command: "skills:apply", label: `换成我的版本 ${name} @ ${nameOf(agent)}`, args: ["--only", `skill:${input.target}/${name}`, "--action", "add", "--agent", agent], silent: true })
+          : null;
+        if (!added?.ok) failed += 1;
+      }
+      const path = (forked.data as { path?: string }).path ?? input.dest;
+      (failed ? toast.error : toast.success)(
+        failed ? `已复制到 ${path}，但 ${failed} 个账号没换过去，详见任务记录` : `已复制到 ${path}，${input.switchAccounts.length} 个账号换成了你的版本`,
+      );
+      setForking(null);
+    } finally {
+      setForkBusy(false);
+      await queryClient.invalidateQueries({ queryKey: engineKeys.all });
     }
   };
 
@@ -643,19 +685,35 @@ export default function SkillsPage({
                     const addRows = summary.inbox ? addToAllRows(skill) : [];
                     const skillName = (skill.spec as SkillSpec).name ?? skill.id;
                     const chips = cells.map(([agent, cell]) => ({ agent, cell, chip: skillChip(cell) }));
-                    const menu = chips.flatMap(({ agent, cell, chip }) =>
-                      chip.secondary.map((item) => ({
-                        label: `${item.label} · ${nameOf(agent)}`,
-                        testId: `action-${item.action}-${skill.id}-${agent}`,
-                        danger: item.action === "remove",
-                        onSelect: () => handleSkillAction(skill, agent, item.action, cell),
-                      })),
-                    );
+                    const menu = [
+                      ...chips.flatMap(({ agent, cell, chip }) =>
+                        chip.secondary.map((item) => ({
+                          label: `${item.label} · ${nameOf(agent)}`,
+                          testId: `action-${item.action}-${skill.id}-${agent}`,
+                          danger: item.action === "remove",
+                          onSelect: () => handleSkillAction(skill, agent, item.action, cell),
+                        })),
+                      ),
+                      ...(summary.inbox
+                        ? []
+                        : [{ label: "改成我的版本…", testId: `fork-${skill.id}`, onSelect: () => setForking(skill) }]),
+                    ];
+                    const forkedFrom = (skill.observed as SkillObserved).forked_from;
                     return (
                       <li key={skill.id} data-testid={`skill-row-${skill.id}`} className="group flex items-center gap-3 py-1.5 pl-10 pr-4 hover:bg-accent/40">
                         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                           <span className="min-w-0 truncate text-sm">{skillName}</span>
                           {summary.inbox && <span className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">新发现</span>}
+                          {forkedFrom && (
+                            <span data-testid={`forked-from-${skill.id}`} className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" title="你的版本，原集合更新不会改它">
+                              基于 {forkedFrom.collection}
+                            </span>
+                          )}
+                          {forkedFrom?.upstream_changed && (
+                            <span data-testid={`upstream-changed-${skill.id}`} className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info" title={`${forkedFrom.collection} 里的这个技能在你复制之后更新过；要不要合进来由你决定`}>
+                              上游有新版
+                            </span>
+                          )}
                           {summary.badges.map((badge) => (
                             <span key={badge.text} className={cn("rounded px-1.5 py-0.5 text-[11px]", TONE[badge.tone])}>{badge.text}</span>
                           ))}
@@ -773,6 +831,18 @@ export default function SkillsPage({
           executing={false}
           onConfirm={confirmRecommendation}
           onClose={() => setPendingRecommendation(null)}
+        />
+      )}
+      {forking && (
+        <ForkSkillDialog
+          skill={(forking.spec as SkillSpec).name ?? forking.id}
+          collection={(forking.spec as SkillSpec).collection ?? ""}
+          accounts={Object.entries((forking.observed as SkillObserved).agents ?? {})
+            .filter(([, cell]) => cell.state === "linked" || cell.state === "missing-link" || cell.state === "dead-link")
+            .map(([id]) => ({ id, name: nameOf(id) }))}
+          executing={forkBusy}
+          onConfirm={(input) => void runFork(forking, input)}
+          onClose={() => !forkBusy && setForking(null)}
         />
       )}
       {pendingDropped && (

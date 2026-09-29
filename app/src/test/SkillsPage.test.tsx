@@ -642,6 +642,56 @@ describe("SkillsPage 集合展开与收起", () => {
   });
 });
 
+describe("改成我的版本", () => {
+  it("从行尾菜单打开，确认前不写；确认后先复制登记，再把用着它的账号逐个换过去", async () => {
+    const routes: Record<string, Envelope> = {
+      ...skillsRoutes(),
+      "skills:fork": makeEnvelope({ domain: "skills", collection: "my-skills", skill: "alpha", path: "/home/me/my-skills/alpha" }, { command: "skills.fork" }),
+    };
+    const { calls } = renderWithEngine(<SkillsPage />, routes);
+    await expandAll();
+    await clickAction("fork-skill:agent-skills/alpha");
+    const dialog = await screen.findByRole("dialog", { name: "把 alpha 改成我的版本" });
+    expect(within(dialog).getByTestId("fork-dest")).toHaveValue("~/my-skills");
+    expect(within(dialog).getByTestId("fork-switch-claude-code")).toBeChecked();
+    // codex 那条链接损坏也算在用
+    expect(within(dialog).getByTestId("fork-switch-codex")).toBeChecked();
+    await userEvent.click(within(dialog).getByTestId("fork-switch-codex"));
+    expect(calls.some((call) => call.command === "skills:fork" || call.command === "skills:apply")).toBe(false);
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
+    const writes = calls.filter((call) => call.command === "skills:fork" || call.command === "skills:apply").map((call) => [call.command, ...call.args]);
+    expect(writes).toEqual([
+      ["skills:fork", "--only", "skill:agent-skills/alpha", "--dest", "~/my-skills", "--collection", "my-skills"],
+      ["skills:apply", "--only", "skill:agent-skills/alpha", "--action", "remove", "--agent", "claude-code"],
+      ["skills:apply", "--only", "skill:my-skills/alpha", "--action", "add", "--agent", "claude-code"],
+    ]);
+  });
+
+  it("用户的版本标出来历；上游出了新版只提示", async () => {
+    const routes = skillsRoutes();
+    const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
+    status.data.elements.push(
+      makeElement({ id: "skill:my-skills", domain: "skills", spec: { source_path: "~/my-skills" }, observed: { repo_cached: true, actions: ["update"] } }),
+      makeElement({
+        id: "skill:my-skills/alpha",
+        domain: "skills",
+        spec: { collection: "my-skills", name: "alpha" },
+        observed: {
+          agents: { "claude-code": { state: "linked", assigned: true, enabled: true, actions: ["disable"] } },
+          discovery_inbox: false,
+          forked_from: { collection: "agent-skills", version: "v1", upstream_version: "v2", upstream_changed: true },
+        },
+      }),
+    );
+    renderWithEngine(<SkillsPage />, routes);
+    await expandAll();
+    expect(await screen.findByTestId("forked-from-skill:my-skills/alpha")).toHaveTextContent("基于 agent-skills");
+    expect(screen.getByTestId("upstream-changed-skill:my-skills/alpha")).toHaveTextContent("上游有新版");
+  });
+});
+
 describe("技能集合的分享链接", () => {
   it("从分享链接导入：打开预填好的新增集合表单，名称可改，保存前不写", async () => {
     const { calls } = renderWithEngine(

@@ -345,6 +345,8 @@ export interface SkillPolicy {
 export interface SkillObserved {
   agents?: Record<string, SkillAgentCell>;
   discovery_inbox?: boolean;
+  /** 「改成我的版本」时记下的来历：来自哪个集合的哪个版本、上游现在是否有新版。 */
+  forked_from?: { collection: string; version: string; upstream_version: string | null; upstream_changed: boolean } | null;
 }
 
 // ---------- rules ----------
