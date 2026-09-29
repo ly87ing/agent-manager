@@ -37,6 +37,34 @@ describe("McpServerFormDialog", () => {
     await waitFor(() => expect(within(dialog).getByTestId("mcp-preview-content-codex")).toHaveTextContent('"command":"npx2"'));
   });
 
+  it("粘贴配置：整段贴进来填进表单，密钥改成变量并说明；没保存前不提交", async () => {
+    const onSubmit = vi.fn();
+    render(<McpServerFormDialog mode={{ kind: "add", targets: mcpTargets() }} onSubmit={onSubmit} onPreview={async () => []} onClose={vi.fn()} />);
+    const dialog = screen.getByRole("dialog");
+    await userEvent.click(within(dialog).getByTestId("server-paste-open"));
+    const input = within(dialog).getByTestId("server-paste-input");
+    await userEvent.click(input);
+    await userEvent.paste('{"mcpServers": {"github": {"command": "npx", "args": ["-y", "gh-mcp"], "env": {"GITHUB_TOKEN": "ghp_secret", "MODE": "fast"}}}}');
+    await userEvent.click(within(dialog).getByTestId("server-paste-fill"));
+    expect(within(dialog).getByTestId("server-name-input")).toHaveValue("github");
+    expect(within(dialog).getByTestId("server-command-input")).toHaveValue("npx");
+    expect(within(dialog).getByTestId("server-args-input")).toHaveValue("-y\ngh-mcp");
+    expect(within(dialog).getByTestId("server-env-input")).toHaveValue("GITHUB_TOKEN=${GITHUB_TOKEN}\nMODE=fast");
+    expect(within(dialog).getByTestId("server-paste-notes")).toHaveTextContent("GITHUB_TOKEN 的取值没有填进来");
+    expect(dialog).not.toHaveTextContent("ghp_secret");
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("粘贴读不出来时就地说明，表单不动", async () => {
+    render(<McpServerFormDialog mode={{ kind: "add", targets: mcpTargets() }} onSubmit={vi.fn()} onPreview={async () => []} onClose={vi.fn()} />);
+    const dialog = screen.getByRole("dialog");
+    await userEvent.click(within(dialog).getByTestId("server-paste-open"));
+    await userEvent.type(within(dialog).getByTestId("server-paste-input"), "not json");
+    await userEvent.click(within(dialog).getByTestId("server-paste-fill"));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("读不出来");
+    expect(within(dialog).getByTestId("server-name-input")).toHaveValue("");
+  });
+
   it("预览失败显示目标原因，不把失败结果当作配置文件", async () => {
     render(<McpServerFormDialog mode={{ kind: "add", targets: mcpTargets() }} onSubmit={vi.fn()}
       onPreview={async () => [{ agent: "claude-code", files: [], error: "目标配置已被外部修改" }]} onClose={vi.fn()} />);

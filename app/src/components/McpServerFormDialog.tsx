@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import type { McpTarget } from "../lib/contract";
 import type { McpAgentCell, McpSavedDefinition } from "../lib/observed";
 import { useDialogFocus } from "../lib/dialogFocus";
+import { parsePastedServer } from "../lib/mcpPaste";
 
 type McpTransport = "stdio" | "remote";
 
@@ -121,6 +122,8 @@ export function McpServerFormDialog({
     String(editEntry?.startup_timeout_sec ?? initial?.startup_timeout_sec ?? (mode.kind === "add" ? 120 : "")),
   );
   const [error, setError] = useState<string | null>(null);
+  /** 粘贴配置：null = 收起；notes 是填入后给用户的说明。 */
+  const [paste, setPaste] = useState<{ text: string; error: string | null; notes: string[] } | null>(null);
   const [preview, setPreview] = useState<{ key: string; result: McpFilePreview[] | string } | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const previewSerial = useRef(0);
@@ -235,6 +238,24 @@ export function McpServerFormDialog({
     };
   }, [previewKey]);
 
+  const fillFromPaste = () => {
+    if (!paste) return;
+    const parsed = parsePastedServer(paste.text);
+    if (typeof parsed === "string") {
+      setPaste({ ...paste, error: parsed });
+      return;
+    }
+    if (parsed.name) setName(parsed.name);
+    setTransport(parsed.transport);
+    setCommand(parsed.command);
+    setArgsText(parsed.args.join("\n"));
+    setEnvText(lines(parsed.env));
+    setUrl(parsed.url);
+    setHeadersText(lines(parsed.headers));
+    setError(null);
+    setPaste(parsed.notes.length ? { text: "", error: null, notes: parsed.notes } : null);
+  };
+
   const submit = () => {
     const payload = buildPayload();
     if (typeof payload === "string") {
@@ -251,10 +272,54 @@ export function McpServerFormDialog({
           <h3 className="text-base font-semibold text-foreground">
             {isNew ? "新增 MCP 服务" : `编辑 ${name}`}
           </h3>
-          <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">
-            <X className="h-4 w-4" aria-hidden />
-          </button>
+          <div className="flex items-center gap-2">
+            {isNew && !paste && (
+              <button
+                type="button"
+                data-testid="server-paste-open"
+                onClick={() => setPaste({ text: "", error: null, notes: [] })}
+                className="rounded-md border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/15"
+              >
+                粘贴配置
+              </button>
+            )}
+            <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
         </div>
+        {paste && paste.notes.length > 0 && (
+          <ul data-testid="server-paste-notes" className="mt-3 space-y-0.5 rounded-md border border-info/30 bg-info/5 px-3 py-2 text-xs">
+            {paste.notes.map((note) => (
+              <li key={note}>{note}</li>
+            ))}
+          </ul>
+        )}
+        {paste && paste.notes.length === 0 && (
+          <div className="mt-3 space-y-2 rounded-md border bg-muted/40 p-3">
+            <label htmlFor="server-paste-text" className="block text-xs text-muted-foreground">
+              把服务说明里的配置整段贴进来（如 {'{"mcpServers": {…}}'}），会填进下面的表单，保存前可以再改。
+            </label>
+            <textarea
+              id="server-paste-text"
+              data-testid="server-paste-input"
+              value={paste.text}
+              onChange={(e) => setPaste({ ...paste, text: e.target.value, error: null })}
+              rows={5}
+              className="w-full rounded border border-input bg-card px-2 py-1.5 font-mono text-xs"
+              placeholder='{"mcpServers": {"my-server": {"command": "npx", "args": ["-y", "my-mcp"]}}}'
+            />
+            {paste.error && <p role="alert" className="text-xs text-destructive">{paste.error}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setPaste(null)} className="rounded-md px-3 py-1 text-xs text-muted-foreground hover:bg-accent">
+                取消
+              </button>
+              <button type="button" data-testid="server-paste-fill" disabled={!paste.text.trim()} onClick={fillFromPaste} className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-40">
+                填入表单
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="mt-4 grid grid-cols-1 gap-4 text-sm lg:grid-cols-2">
           <div className="lg:col-span-2">
@@ -295,7 +360,7 @@ export function McpServerFormDialog({
             <div className="space-y-1.5 text-xs lg:col-span-2" data-testid="server-edit-targets">
               <p className="text-muted-foreground">
                 保存后写入：<span className="text-foreground">{mode.targets.map((target) => nameOf(target.agent)).join("、")}</span>
-                。各账号条目里没在这里列出的字段原样保留，环境变量写 &lt;literal&gt; 的保留各账号自己的原值。
+                。各账号条目里没在这里列出的字段原样保留，环境变量写「（保留原值）」的保留各账号自己的原值。
               </p>
               {mode.differs && (
                 <div className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-warning">
