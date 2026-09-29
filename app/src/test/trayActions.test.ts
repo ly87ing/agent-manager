@@ -2,34 +2,13 @@ import { describe, expect, it } from "vitest";
 import { isTrayAction, subscribeTrayActions } from "../lib/trayActions";
 
 describe("托盘动作", () => {
-  it("只认识约定的动作 id", () => {
+  it("只认识约定的动作：搜索与打开账号", () => {
     expect(isTrayAction("search")).toBe(true);
-    expect(isTrayAction("takeover")).toBe(true);
-    expect(isTrayAction({
-      type: "switch-connection",
-      agentId: "claude-code",
-      agentName: "Claude Code",
-      profile: "kimi",
-      profileLabel: "Kimi Code",
-    })).toBe(true);
-    expect(isTrayAction({ type: "switch-connection", agentId: "claude-code" })).toBe(false);
-    expect(isTrayAction({
-      type: "open-environment",
-      agentId: "claude-code",
-      agentName: "Claude Code",
-      environmentId: "cc-work",
-      environmentName: "工作账号",
-      launchName: "cc-work",
-    })).toBe(true);
-    expect(isTrayAction({
-      type: "open-environment",
-      agentId: "claude-code",
-      agentName: "Claude Code",
-      environmentId: "cc-work",
-      environmentName: "工作账号",
-      launchName: null,
-    })).toBe(true);
-    expect(isTrayAction({ type: "open-environment", environmentId: "cc-work" })).toBe(false);
+    expect(isTrayAction({ type: "open-account", agentName: "Claude Code", accountId: "profiles:work", accountName: "工作账号" })).toBe(true);
+    expect(isTrayAction({ type: "open-account", accountId: "profiles:work" })).toBe(false);
+    // 旧的切换主配置与环境动作已退役
+    expect(isTrayAction("takeover")).toBe(false);
+    expect(isTrayAction({ type: "switch-connection", agentId: "claude-code", agentName: "Claude Code", profile: "", profileLabel: "官方账号" })).toBe(false);
     expect(isTrayAction("quit")).toBe(false);
     expect(isTrayAction(undefined)).toBe(false);
   });

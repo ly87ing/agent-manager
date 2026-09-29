@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
-import AgentsPage from "../pages/AgentsPage";
 import AliasesPage from "../pages/AliasesPage";
 import type { Envelope } from "../lib/contract";
 import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode, makePolicyData } from "./fixtures";
@@ -46,18 +45,6 @@ function agentRoutes(): Record<string, Envelope> {
   };
 }
 
-describe("助手启停", () => {
-  it("助手主路径不再提供启停或安装维护菜单，不会误触定义与生命周期写入", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, agentRoutes());
-    await screen.findByTestId("connection-workbench");
-
-    expect(screen.queryByTestId("agent-menu-agents:claude-code")).toBeNull();
-    expect(screen.queryByTestId("policy-enabled-agents:claude-code")).toBeNull();
-    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
-    expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
-  });
-});
-
 describe("移除后的撤销", () => {
   it("移除快捷命令直接写回终端配置文件：先确认，写进文件的动作不给撤销", async () => {
     const { calls } = renderWithEngine(<AliasesPage />, agentRoutes());
@@ -72,14 +59,5 @@ describe("移除后的撤销", () => {
     expect(calls.find((call) => call.command === "aliases:preview")?.args).toEqual(args);
     expect(await screen.findByText(/移除快捷命令 claude/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "撤销" })).toBeNull();
-  });
-
-  it("助手定义移除入口随完整定义维护一起撤下，保留定义且零写入", async () => {
-    const { calls } = renderWithEngine(<AgentsPage />, agentRoutes());
-    await screen.findByTestId("connection-workbench");
-
-    expect(screen.queryByRole("menuitem", { name: "移除管理" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "添加助手" })).toBeNull();
-    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
   });
 });

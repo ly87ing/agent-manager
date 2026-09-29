@@ -1,66 +1,47 @@
 /**
  * 托盘动作的界面侧处理。
  *
- * 托盘列出官方账号与独立环境。前者交给界面侧现有切换通道，后者只打开精确入口；
- * 因此锁、确认、审计与双回读不另起一套。
+ * 托盘按助手列出全部账号（名称 · 启动命令 · 额度）。点中某个账号只打开命令面板并定位到它，
+ * 按 Enter 复制启动命令；托盘不写任何配置。
  * 非 Tauri 环境（浏览器预览、单测）拿不到事件通道，直接静默跳过。
  */
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
-export interface TrayConnection {
+export interface TrayAccount {
   agentId: string;
   agentName: string;
-  profile: string;
-  profileLabel: string;
-  /** 与客户端实际配置一致的那一项（引擎按内容识别）。 */
-  current: boolean;
-  /** 来自该助手实际配置目录的本机额度缓存；没有有效窗口时为 null。 */
+  /** 账号页的元素 id：主账号 `agents:<助手>`，其余 `profiles:<实例>`。 */
+  accountId: string;
+  accountName: string;
+  /** 启动命令；还没有时为 null。 */
+  command: string | null;
+  /** 来自这个账号配置目录的本机额度记录；没有有效窗口时为 null。 */
   usageSummary: string | null;
 }
 
-export interface TrayEnvironment {
-  agentId: string;
-  agentName: string;
-  environmentId: string;
-  environmentName: string;
-  /** 来自实际别名文件；没有可用命令时只打开环境卡片。 */
-  launchName: string | null;
-  /** 来自这个独立环境配置目录的本机额度缓存。 */
-  usageSummary: string | null;
-}
-
-export type TrayAction = "search" | "takeover"
-  | ({ type: "switch-connection" } & Omit<TrayConnection, "current" | "usageSummary">)
-  | ({ type: "open-environment" } & Omit<TrayEnvironment, "usageSummary">);
+export type TrayAction = "search"
+  | ({ type: "open-account" } & Pick<TrayAccount, "agentName" | "accountId" | "accountName">);
 
 const TRAY_ACTION_EVENT = "tray-action";
 
 export function isTrayAction(value: unknown): value is TrayAction {
-  if (value === "search" || value === "takeover") return true;
+  if (value === "search") return true;
   if (typeof value !== "object" || value === null) return false;
   const action = value as Record<string, unknown>;
-  if (action.type === "switch-connection") {
-    return typeof action.agentId === "string"
-      && typeof action.agentName === "string"
-      && typeof action.profile === "string"
-      && typeof action.profileLabel === "string";
-  }
-  return action.type === "open-environment"
-    && typeof action.agentId === "string"
+  return action.type === "open-account"
     && typeof action.agentName === "string"
-    && typeof action.environmentId === "string"
-    && typeof action.environmentName === "string"
-    && (action.launchName === null || typeof action.launchName === "string");
+    && typeof action.accountId === "string"
+    && typeof action.accountName === "string";
 }
 
-/** 用脱敏的 id/显示名刷新托盘菜单；浏览器预览中静默跳过。 */
-export async function publishTrayConnections(connections: TrayConnection[], environments: TrayEnvironment[]): Promise<void> {
+/** 用脱敏的 id / 显示名刷新托盘菜单；浏览器预览中静默跳过。 */
+export async function publishTrayAccounts(accounts: TrayAccount[]): Promise<void> {
   if (!isTauri()) return;
   try {
-    await invoke("tray_set_connections", { connections, environments });
+    await invoke("tray_set_accounts", { accounts });
   } catch (error) {
     // 原生菜单更新失败应留下诊断；它不影响主界面继续工作。
-    console.error("更新托盘接入菜单失败", error);
+    console.error("更新托盘账号菜单失败", error);
   }
 }
 

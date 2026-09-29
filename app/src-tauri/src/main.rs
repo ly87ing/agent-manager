@@ -83,7 +83,7 @@ fn main() {
             engine::engine_invoke,
             settings_get,
             settings_save,
-            tray::tray_set_connections,
+            tray::tray_set_accounts,
             theme::set_window_theme
         ])
         .build(tauri::generate_context!())

@@ -11,102 +11,54 @@ pub const TRAY_ID: &str = "agent-manager-tray";
 
 const MENU_SHOW_MAIN: &str = "show_main";
 const MENU_SEARCH: &str = "open_search";
-const MENU_TAKEOVER: &str = "open_takeover";
 const MENU_QUIT: &str = "quit";
-const MENU_CONNECTION_PREFIX: &str = "switch_connection:";
-const MENU_ENVIRONMENT_PREFIX: &str = "open_environment:";
+const MENU_ACCOUNT_PREFIX: &str = "open_account:";
 
-/// 托盘发给界面的动作事件名；载荷是界面侧认识的动作 id。
 pub const TRAY_ACTION_EVENT: &str = "tray-action";
 
+/// 界面发来的一个账号：只有 id、显示名、启动命令名与额度摘要，不含配置内容或凭据。
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct TrayConnection {
+pub struct TrayAccount {
     agent_id: String,
     agent_name: String,
-    profile: String,
-    profile_label: String,
-    /// 与客户端实际配置一致的那一项（引擎按内容识别）。
-    current: bool,
+    account_id: String,
+    account_name: String,
+    command: Option<String>,
     usage_summary: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct TrayEnvironment {
-    agent_id: String,
-    agent_name: String,
-    environment_id: String,
-    environment_name: String,
-    launch_name: Option<String>,
-    usage_summary: Option<String>,
-}
-
+/// 点中账号：界面打开命令面板并定位到它，按 Enter 复制启动命令。托盘本身不写任何配置。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TrayConnectionAction {
+struct TrayAccountAction {
     #[serde(rename = "type")]
     kind: &'static str,
-    agent_id: String,
     agent_name: String,
-    profile: String,
-    profile_label: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TrayEnvironmentAction {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    agent_id: String,
-    agent_name: String,
-    environment_id: String,
-    environment_name: String,
-    launch_name: Option<String>,
+    account_id: String,
+    account_name: String,
 }
 
 #[derive(Default)]
-struct TrayMenuState {
-    connections: Vec<TrayConnection>,
-    environments: Vec<TrayEnvironment>,
-}
-
-#[derive(Default)]
-pub struct TrayState(Mutex<TrayMenuState>);
+pub struct TrayState(Mutex<Vec<TrayAccount>>);
 
 fn escape_menu_text(value: &str) -> String {
     value.replace('&', "&&")
 }
 
-fn connection_menu_label(connection: &TrayConnection) -> String {
-    if connection.current {
-        format!("✓ {}", escape_menu_text(&connection.profile_label))
-    } else {
-        escape_menu_text(&connection.profile_label)
+/// 「名称 · 命令 · 额度」；还没有启动命令的账号标明，点开后去账号页处理。
+fn account_menu_label(account: &TrayAccount) -> String {
+    let mut label = escape_menu_text(&account.account_name);
+    match &account.command {
+        Some(command) => label.push_str(&format!(" · {}", escape_menu_text(command))),
+        None => label.push_str("（没有启动命令）"),
     }
-}
-
-fn environment_menu_label(environment: &TrayEnvironment) -> String {
-    let name = escape_menu_text(&environment.environment_name);
-    let label = match &environment.launch_name {
-        Some(launch) => format!("环境 · {name} · {}", escape_menu_text(launch)),
-        None => format!("环境 · {name}（查看）"),
-    };
-    match &environment.usage_summary {
-        Some(usage) => format!("{label} · {}", escape_menu_text(usage)),
-        None => label,
+    if let Some(usage) = &account.usage_summary {
+        label.push_str(&format!(" · {}", escape_menu_text(usage)));
     }
+    label
 }
 
-fn agent_menu_label(name: &str, current: &str, usage: Option<&str>) -> String {
-    escape_menu_text(&format!(
-        "{name} · {current}{}",
-        usage.map(|value| format!(" · {value}")).unwrap_or_default()
-    ))
-}
-
-/// 恢复并聚焦主窗口；托盘「显示主界面」、单实例二次启动回调与
-/// macOS Dock Reopen 共用同一条路径。
 pub fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
@@ -122,142 +74,67 @@ fn handle_menu_event(app: &AppHandle, event_id: &str) {
             show_main_window(app);
             let _ = app.emit(TRAY_ACTION_EVENT, "search");
         }
-        MENU_TAKEOVER => {
-            show_main_window(app);
-            let _ = app.emit(TRAY_ACTION_EVENT, "takeover");
-        }
-        id if id.starts_with(MENU_CONNECTION_PREFIX) => {
+        id if id.starts_with(MENU_ACCOUNT_PREFIX) => {
             let Some(index) = id
-                .strip_prefix(MENU_CONNECTION_PREFIX)
+                .strip_prefix(MENU_ACCOUNT_PREFIX)
                 .and_then(|value| value.parse::<usize>().ok())
             else {
                 return;
             };
-            let connection = app
+            let account = app
                 .state::<TrayState>()
                 .0
                 .lock()
                 .ok()
-                .and_then(|state| state.connections.get(index).cloned());
-            if let Some(connection) = connection {
+                .and_then(|accounts| accounts.get(index).cloned());
+            if let Some(account) = account {
                 show_main_window(app);
                 let _ = app.emit(
                     TRAY_ACTION_EVENT,
-                    TrayConnectionAction {
-                        kind: "switch-connection",
-                        agent_id: connection.agent_id,
-                        agent_name: connection.agent_name,
-                        profile: connection.profile,
-                        profile_label: connection.profile_label,
+                    TrayAccountAction {
+                        kind: "open-account",
+                        agent_name: account.agent_name,
+                        account_id: account.account_id,
+                        account_name: account.account_name,
                     },
                 );
             }
         }
-        id if id.starts_with(MENU_ENVIRONMENT_PREFIX) => {
-            let Some(index) = id
-                .strip_prefix(MENU_ENVIRONMENT_PREFIX)
-                .and_then(|value| value.parse::<usize>().ok())
-            else {
-                return;
-            };
-            let environment = app
-                .state::<TrayState>()
-                .0
-                .lock()
-                .ok()
-                .and_then(|state| state.environments.get(index).cloned());
-            if let Some(environment) = environment {
-                show_main_window(app);
-                let _ = app.emit(
-                    TRAY_ACTION_EVENT,
-                    TrayEnvironmentAction {
-                        kind: "open-environment",
-                        agent_id: environment.agent_id,
-                        agent_name: environment.agent_name,
-                        environment_id: environment.environment_id,
-                        environment_name: environment.environment_name,
-                        launch_name: environment.launch_name,
-                    },
-                );
-            }
-        }
-        // 退出统一走 app.exit(0) → RunEvent::ExitRequested，由 main.rs 收尾摘托盘图标。
         MENU_QUIT => app.exit(0),
         _ => {}
     }
 }
 
-fn build_menu(
-    app: &AppHandle,
-    connections: &[TrayConnection],
-    environments: &[TrayEnvironment],
-) -> tauri::Result<Menu<tauri::Wry>> {
+fn build_menu(app: &AppHandle, accounts: &[TrayAccount]) -> tauri::Result<Menu<tauri::Wry>> {
     let show_main = MenuItem::with_id(app, MENU_SHOW_MAIN, "显示主界面", true, None::<&str>)?;
-    let search = MenuItem::with_id(app, MENU_SEARCH, "搜索与执行…", true, None::<&str>)?;
-    let takeover = MenuItem::with_id(app, MENU_TAKEOVER, "导入现有配置", true, None::<&str>)?;
+    let search = MenuItem::with_id(app, MENU_SEARCH, "搜索账号与资源…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, MENU_QUIT, "退出", true, None::<&str>)?;
     let mut menu = MenuBuilder::new(app).item(&show_main);
 
     let mut agent_ids: Vec<&str> = Vec::new();
-    for connection in connections {
-        if !agent_ids.contains(&connection.agent_id.as_str()) {
-            agent_ids.push(&connection.agent_id);
-        }
-    }
-    for environment in environments {
-        if !agent_ids.contains(&environment.agent_id.as_str()) {
-            agent_ids.push(&environment.agent_id);
+    for account in accounts {
+        if !agent_ids.contains(&account.agent_id.as_str()) {
+            agent_ids.push(&account.agent_id);
         }
     }
     if !agent_ids.is_empty() {
         menu = menu.separator();
         for agent_id in agent_ids {
-            let agent_connections: Vec<(usize, &TrayConnection)> = connections
+            let members: Vec<(usize, &TrayAccount)> = accounts
                 .iter()
                 .enumerate()
-                .filter(|(_, connection)| connection.agent_id == agent_id)
+                .filter(|(_, account)| account.agent_id == agent_id)
                 .collect();
-            let agent_environments: Vec<(usize, &TrayEnvironment)> = environments
-                .iter()
-                .enumerate()
-                .filter(|(_, environment)| environment.agent_id == agent_id)
-                .collect();
-            let current_label = agent_connections
-                .iter()
-                .find(|(_, connection)| connection.current)
-                .map(|(_, connection)| connection.profile_label.as_str())
-                // 实际配置对不上任何已保存接入：切换前会先把它保存下来
-                .unwrap_or("实际配置（未保存）");
-            let agent_name = agent_connections
+            let agent_name = members
                 .first()
-                .map(|(_, connection)| connection.agent_name.as_str())
-                .or_else(|| {
-                    agent_environments
-                        .first()
-                        .map(|(_, environment)| environment.agent_name.as_str())
-                })
+                .map(|(_, account)| account.agent_name.as_str())
                 .unwrap_or(agent_id);
-            let usage = agent_connections
-                .first()
-                .and_then(|(_, connection)| connection.usage_summary.as_deref());
-            let submenu_label = agent_menu_label(agent_name, current_label, usage);
-            let mut submenu = SubmenuBuilder::new(app, submenu_label);
-            for (index, connection) in agent_connections {
-                let label = connection_menu_label(connection);
+            let mut submenu = SubmenuBuilder::new(app, escape_menu_text(agent_name));
+            for (index, account) in members {
                 let item = MenuItem::with_id(
                     app,
-                    format!("{MENU_CONNECTION_PREFIX}{index}"),
-                    label,
-                    !connection.current,
-                    None::<&str>,
-                )?;
-                submenu = submenu.item(&item);
-            }
-            for (index, environment) in agent_environments {
-                let item = MenuItem::with_id(
-                    app,
-                    format!("{MENU_ENVIRONMENT_PREFIX}{index}"),
-                    environment_menu_label(environment),
+                    format!("{MENU_ACCOUNT_PREFIX}{index}"),
+                    account_menu_label(account),
                     true,
                     None::<&str>,
                 )?;
@@ -269,31 +146,20 @@ fn build_menu(
 
     menu.separator()
         .item(&search)
-        .item(&takeover)
         .separator()
         .item(&quit)
         .build()
 }
 
 #[tauri::command]
-pub fn tray_set_connections(
-    app: AppHandle,
-    connections: Vec<TrayConnection>,
-    environments: Vec<TrayEnvironment>,
-) -> Result<(), String> {
-    let menu = build_menu(&app, &connections, &environments).map_err(|error| error.to_string())?;
+pub fn tray_set_accounts(app: AppHandle, accounts: Vec<TrayAccount>) -> Result<(), String> {
+    let menu = build_menu(&app, &accounts).map_err(|error| error.to_string())?;
     let tray = app
         .tray_by_id(TRAY_ID)
         .ok_or_else(|| "托盘尚未初始化".to_string())?;
     let state = app.state::<TrayState>();
     let mut stored = state.0.lock().map_err(|_| "托盘状态锁已损坏".to_string())?;
-    let previous = std::mem::replace(
-        &mut *stored,
-        TrayMenuState {
-            connections,
-            environments,
-        },
-    );
+    let previous = std::mem::replace(&mut *stored, accounts);
     if let Err(error) = tray.set_menu(Some(menu)) {
         *stored = previous;
         return Err(error.to_string());
@@ -319,7 +185,7 @@ fn tray_icon(app: &tauri::App) -> Option<tauri::image::Image<'static>> {
 }
 
 pub fn setup(app: &tauri::App) -> tauri::Result<()> {
-    let menu = build_menu(app.handle(), &[], &[])?;
+    let menu = build_menu(app.handle(), &[])?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("Agent Manager")
@@ -348,66 +214,44 @@ pub fn remove_tray_icon_before_exit(app: &AppHandle) {
 mod tests {
     use super::*;
 
-    fn connection(current: bool) -> TrayConnection {
-        TrayConnection {
+    fn account(command: Option<&str>, usage: Option<&str>) -> TrayAccount {
+        TrayAccount {
             agent_id: "claude-code".into(),
             agent_name: "Claude Code".into(),
-            profile: "kimi".into(),
-            profile_label: "Kimi Code".into(),
-            current,
-            usage_summary: None,
+            account_id: "profiles:work".into(),
+            account_name: "工作&A".into(),
+            command: command.map(str::to_string),
+            usage_summary: usage.map(str::to_string),
         }
     }
 
     #[test]
-    fn connection_labels_mark_only_the_current_connection() {
-        assert_eq!(connection_menu_label(&connection(true)), "✓ Kimi Code");
-        assert_eq!(connection_menu_label(&connection(false)), "Kimi Code");
-        let mut with_mnemonic = connection(false);
-        with_mnemonic.profile_label = "A&B".into();
-        assert_eq!(connection_menu_label(&with_mnemonic), "A&&B");
-    }
-
-    #[test]
-    fn environment_labels_show_each_launch_name_without_config_values() {
-        let environment = TrayEnvironment {
-            agent_id: "claude-code".into(),
-            agent_name: "Claude Code".into(),
-            environment_id: "work".into(),
-            environment_name: "工作&A".into(),
-            launch_name: Some("cc-work".into()),
-            usage_summary: None,
-        };
+    fn account_labels_show_name_command_and_usage_without_config_values() {
         assert_eq!(
-            environment_menu_label(&environment),
-            "环境 · 工作&&A · cc-work"
+            account_menu_label(&account(Some("cc-work"), None)),
+            "工作&&A · cc-work"
         );
         assert_eq!(
-            environment_menu_label(&TrayEnvironment {
-                launch_name: None,
-                ..environment
-            }),
-            "环境 · 工作&&A（查看）"
+            account_menu_label(&account(Some("cc-work"), Some("5 小时已用 82%（缓存）"))),
+            "工作&&A · cc-work · 5 小时已用 82%（缓存）"
+        );
+        assert_eq!(
+            account_menu_label(&account(None, None)),
+            "工作&&A（没有启动命令）"
         );
     }
 
     #[test]
-    fn tray_labels_show_cached_usage_without_touching_actions() {
-        assert_eq!(
-            agent_menu_label("Claude&Code", "官方账号", Some("5 小时已用 82%（缓存）")),
-            "Claude&&Code · 官方账号 · 5 小时已用 82%（缓存）"
-        );
-        let environment = TrayEnvironment {
-            agent_id: "claude-code".into(),
+    fn account_action_carries_only_ids_and_names() {
+        let action = TrayAccountAction {
+            kind: "open-account",
             agent_name: "Claude Code".into(),
-            environment_id: "work".into(),
-            environment_name: "工作账号".into(),
-            launch_name: Some("cc-work".into()),
-            usage_summary: Some("7 天已用 90%（旧记录）".into()),
+            account_id: "profiles:work".into(),
+            account_name: "工作".into(),
         };
         assert_eq!(
-            environment_menu_label(&environment),
-            "环境 · 工作账号 · cc-work · 7 天已用 90%（旧记录）"
+            serde_json::to_value(action).unwrap(),
+            serde_json::json!({"type": "open-account", "agentName": "Claude Code", "accountId": "profiles:work", "accountName": "工作"})
         );
     }
 }

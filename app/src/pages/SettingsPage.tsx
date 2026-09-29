@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Activity,
   ArrowLeft,
+  History,
   KeyRound,
   Link2,
   PackageCheck,
@@ -78,6 +79,12 @@ const ADVANCED_ENTRIES = [
     icon: PackageCheck,
   },
   {
+    key: "runs",
+    title: "操作记录",
+    description: "每次写入的记录：做了什么、成功与否、失败原因。",
+    icon: History,
+  },
+  {
     key: "client-diagnostics",
     title: "客户端诊断",
     description: "只读查看 AI CLI 的版本与安装来源。",
@@ -102,7 +109,7 @@ function ConfigurationToolsSection({ onSelect }: { onSelect: (key: string) => vo
     <section className="rounded-lg border bg-card p-5 shadow-sm">
       <div>
         <h2 className="text-sm font-semibold text-foreground">配置工具</h2>
-        <p className="mt-1 text-xs text-muted-foreground">导入、密钥、终端快捷命令和客户端诊断都在这里。</p>
+        <p className="mt-1 text-xs text-muted-foreground">导入、操作记录、密钥、终端快捷命令和客户端诊断都在这里。</p>
       </div>
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {ADVANCED_ENTRIES.map((entry) => {
@@ -307,7 +314,7 @@ export default function SettingsPage({
     <div className="space-y-4">
       <PageHeader title="设置" description="外观、配置备份与本机运行路径。" />
       <ConfigurationToolsSection
-        onSelect={(key) => (key === "takeover" && onNavigate ? onNavigate("takeover") : setActiveAdvanced(key))}
+        onSelect={(key) => ((key === "takeover" || key === "runs") && onNavigate ? onNavigate(key) : setActiveAdvanced(key))}
       />
       <AppearanceSection />
       <ConfigBackupSection />

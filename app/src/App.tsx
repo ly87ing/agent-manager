@@ -2,14 +2,12 @@ import { ScrollText, Server, Settings, Sparkles, Users, Wallet } from "lucide-re
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
-import AgentsPage from "./pages/AgentsPage";
 import { useSettings } from "./lib/settings";
 import { subscribeTrayActions } from "./lib/trayActions";
 import { useUpdateCheck } from "./lib/update-check";
 import { PageError, PageLoading } from "./components/PageState";
 
 const AccountsPage = lazy(() => import("./pages/AccountsPage"));
-const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const McpPage = lazy(() => import("./pages/McpPage"));
 const RulesHooksPage = lazy(() => import("./pages/RulesHooksPage"));
 const RunsPage = lazy(() => import("./pages/RunsPage"));
@@ -18,8 +16,7 @@ const UsagePage = lazy(() => import("./pages/UsagePage"));
 const TakeoverPage = lazy(() => import("./pages/TakeoverPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 
-// 多账号设计（docs/MULTI-ACCOUNT-DESIGN.md）：主入口是账号与共享资源；总览、操作记录待 P6 清理，
-// 导入现有配置在设置里，旧的助手管理页只从账号页的「编辑与管理」进入，直到 P2 换成抽屉。
+// 多账号设计（docs/MULTI-ACCOUNT-DESIGN.md）：主入口是账号与共享资源；导入现有配置与操作记录从设置进入。
 const NAV: NavItem[] = [
   { key: "accounts", label: "账号", icon: Users },
   { key: "skills", label: "技能", icon: Sparkles },
@@ -49,12 +46,11 @@ export default function App() {
   const settings = useSettings();
   const [activePage, setActivePage] = useState<string>("accounts");
   const [selectedSkillAgent, setSelectedSkillAgent] = useState<string | null>(null);
-  const [profileTarget, setProfileTarget] = useState<{ agentId: string; profileId: string } | null>(null);
-  /** 「skills:<名称>」跳转带进来的技能搜索词：总览「去处理」直接定位到那一行。 */
+  /** 「skills:<名称>」跳转带进来的技能搜索词：直接定位到那一行。 */
   const [skillSearch, setSkillSearch] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteScope, setPaletteScope] = useState<"all" | "quick">("all");
-  const [paletteConnectionTarget, setPaletteConnectionTarget] = useState<{ keyword: string; itemId: string } | null>(null);
+  const [paletteTarget, setPaletteTarget] = useState<{ keyword: string; itemId: string } | null>(null);
   const update = useUpdateCheck();
 
   useEffect(() => {
@@ -65,10 +61,10 @@ export default function App() {
         event.preventDefault();
         setActivePage("settings");
       } else if (event.key.toLowerCase() === "k") {
-        // ⌘K 搜全部；⌘⇧K 只看官方账号与独立环境。
+        // ⌘K 搜全部；⌘⇧K 只看账号。
         event.preventDefault();
         const nextScope = event.shiftKey ? "quick" : "all";
-        setPaletteConnectionTarget(null);
+        setPaletteTarget(null);
         setPaletteOpen((prev) => (prev && paletteScope === nextScope ? false : true));
         setPaletteScope(nextScope);
       } else if (event.key.toLowerCase() === "f") {
@@ -89,27 +85,13 @@ export default function App() {
       subscribeTrayActions((action) => {
         if (action === "search") {
           setPaletteScope("all");
-          setPaletteConnectionTarget(null);
-          setPaletteOpen(true);
-        }
-        else if (action === "takeover") setActivePage("takeover");
-        else if (action.type === "open-environment") {
-          setPaletteScope("all");
-          setPaletteConnectionTarget({
-            keyword: `${action.agentName} · ${action.environmentName}`,
-            itemId: action.launchName
-              ? `profile-launch:${action.environmentId}:${action.launchName}`
-              : `profile:${action.environmentId}`,
-          });
-          setPaletteOpen(true);
+          setPaletteTarget(null);
         } else {
+          // 托盘点中账号：面板定位到它，按 Enter 复制启动命令
           setPaletteScope("quick");
-          setPaletteConnectionTarget({
-            keyword: `${action.agentName} · ${action.profileLabel}`,
-            itemId: `connection:${action.agentId}:${action.profile || "default"}`,
-          });
-          setPaletteOpen(true);
+          setPaletteTarget({ keyword: `${action.agentName} · ${action.accountName}`, itemId: `account:${action.accountId}` });
         }
+        setPaletteOpen(true);
       }),
     [],
   );
@@ -135,7 +117,7 @@ export default function App() {
     <AppLayout
       nav={NAV}
       secondaryNav={SECONDARY_NAV}
-      active={activePage === "agents" ? "accounts" : activePage}
+      active={activePage === "runs" || activePage === "takeover" ? "settings" : activePage}
       onNavigate={handleNavigate}
       updateVersion={update.availableVersion}
       onDismissUpdate={update.dismiss}
@@ -150,18 +132,6 @@ export default function App() {
                 setSkillSearch(null);
                 setActivePage("skills");
               }}
-            />
-          )}
-          {activePage === "dashboard" && <DashboardPage onNavigate={handleNavigate} />}
-          {activePage === "agents" && (
-            <AgentsPage
-              profileTarget={profileTarget}
-              onManageSkills={(agentId) => {
-                setSelectedSkillAgent(agentId);
-                setSkillSearch(null);
-                setActivePage("skills");
-              }}
-              onOpenSecrets={() => setActivePage("settings:secrets")}
             />
           )}
           {activePage === "skills" && (
@@ -188,12 +158,12 @@ export default function App() {
       <CommandPalette
         open={paletteOpen}
         scope={paletteScope}
-        initialKeyword={paletteConnectionTarget?.keyword}
-        initialItemId={paletteConnectionTarget?.itemId}
+        initialKeyword={paletteTarget?.keyword}
+        initialItemId={paletteTarget?.itemId}
         onClose={() => {
           setPaletteOpen(false);
           setPaletteScope("all");
-          setPaletteConnectionTarget(null);
+          setPaletteTarget(null);
         }}
         onNavigate={(page) => {
           if (page === "skills") {
@@ -201,10 +171,6 @@ export default function App() {
             setSkillSearch(null);
           }
           setActivePage(page);
-        }}
-        onNavigateProfile={(agentId, profileId) => {
-          setProfileTarget({ agentId, profileId });
-          setActivePage("agents");
         }}
         onOpenAgentSkills={(agentId) => {
           setSelectedSkillAgent(agentId);
