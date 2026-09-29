@@ -7,7 +7,7 @@ MCP 以各助手配置文件里的实际条目为准：Claude Code 的 `~/.claud
 `mcp:status` 只读零写：`targets` 列出各助手的配置文件（格式、是否存在、停用方式、文件级错误）；`elements` 按服务名汇总各助手里的同名条目，同名条目内容可以各不相同。每条给出：
 
 - 状态：启用 / 停用 / 结构无法识别；来源是配置文件还是本工具保存的停用快照。
-- 已建模字段：stdio 的 `command`、`args`、`env`（Codex 另有 `startup_timeout_sec`），远程的 `url`、`headers`。env 与 headers 的变量引用原样显示为 `${VAR}`，字面量一律显示 `<literal>`。
+- 已建模字段：stdio 的 `command`、`args`、`env`（Codex 另有 `startup_timeout_sec`），远程的 `url`、`headers`。env 与 headers 的变量引用原样显示为 `${VAR}`，字面量在引擎输出里一律为 `<literal>`，界面显示为「（保留原值）」（保存时换回 `<literal>`，两种写法都认）。新增服务可「粘贴配置」：认 `mcpServers` 等常见片段，名字像密钥的明文取值与请求头取值不填进表单，改成同名 `${VAR}`。
 - 未建模的官方字段（如 Codex 的 `cwd`、`enabled_tools`、`tools.*`）：写入时原样保留；非凭据类的显示原值，其余显示 `<hidden>`。
 - 摘要 `base`：写入时作为基准回传。
 
