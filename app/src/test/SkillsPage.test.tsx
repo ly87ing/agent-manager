@@ -5,6 +5,14 @@ import type { Envelope } from "../lib/contract";
 import { makeApplyResult, makeElement, makeEnvelope, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
+/** 展开所有技能行，露出各账号上的状态与操作。 */
+async function expandAll() {
+  await screen.findAllByTestId(/^skill-row-/);
+  for (const button of screen.getAllByRole("button", { name: /在各账号上的情况/ })) {
+    if (button.getAttribute("aria-expanded") === "false") await userEvent.click(button);
+  }
+}
+
 function skillsRoutes() {
   return {
     "skills:status": makeEnvelope(
@@ -236,29 +244,60 @@ describe("SkillsPage 三级视图", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("集合卡片：缓存/收件箱计数徽标与新技能提示，不展示来源猜测徽标", async () => {
+  it("集合标题行：只提示异常与新发现数量，不展示来源猜测徽标", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
     const card = await screen.findByTestId("collection-card-agent-skills");
-    expect(within(card).getByText("已下载到本地")).toBeInTheDocument();
+    // 已下载是正常状态，不占位；只有没下载才提示
+    expect(within(card).queryByText("尚未下载")).toBeNull();
     expect(within(card).getByTestId("inbox-count-agent-skills")).toHaveTextContent("新发现 2");
-    expect(within(card).getByText(/新技能需单独添加到助手/)).toBeInTheDocument();
     // owner_marked 只表示本工具拥有缓存，不能判断来源：不展示 自研/第三方/整包分发 等旧徽标
     expect(within(card).queryByText("自研")).toBeNull();
     expect(within(card).queryByText("第三方")).toBeNull();
     expect(within(card).queryByText(/整包分发|按助手逐个授权|新技能默认/)).toBeNull();
   });
 
-  it("集合卡片仅提示新发现数量，不再重复列出技能与本机路径", async () => {
+  it("新发现的技能单独一行标「新发现」；没有可加的账号时不给「添加」", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
     expect(await screen.findByTestId("inbox-count-agent-skills")).toHaveTextContent("新发现 2");
-    expect(screen.queryByTestId("discovery-inbox")).toBeNull();
-    expect(screen.queryByText("inbox-one")).toBeNull();
-    expect(screen.queryByText("inbox-two")).toBeNull();
+    expect(screen.getByTestId("skill-summary-skill:agent-skills/inbox-one")).toHaveTextContent("新发现");
+    expect(screen.queryByTestId("skill-add-all-skill:agent-skills/inbox-one")).toBeNull();
+  });
+
+  it("新发现技能点「添加」：一次加到全部可加的账号，逐个 add", async () => {
+    const routes = skillsRoutes();
+    const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
+    const inbox = status.data.elements.find((element) => element.id === "skill:agent-skills/inbox-one")!;
+    inbox.observed = {
+      agents: {
+        "claude-code": { state: "not-assigned", assigned: false, enabled: false, actions: ["add"] },
+        codex: { state: "not-assigned", assigned: false, enabled: false, actions: ["add"] },
+      },
+      discovery_inbox: true,
+    };
+    const { calls } = renderWithEngine(<SkillsPage />, routes);
+    await userEvent.click(await screen.findByTestId("skill-add-all-skill:agent-skills/inbox-one"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
+    expect(calls.filter((call) => call.command === "skills:apply").map((call) => call.args)).toEqual([
+      ["--only", "skill:agent-skills/inbox-one", "--action", "add", "--agent", "claude-code"],
+      ["--only", "skill:agent-skills/inbox-one", "--action", "add", "--agent", "codex"],
+    ]);
+  });
+
+  it("补齐：在用技能补到缺它的账号，账号上停用的不动", async () => {
+    const routes = skillsRoutes();
+    const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
+    const alpha = status.data.elements.find((element) => element.id === "skill:agent-skills/alpha")!;
+    (alpha.observed as { agents: Record<string, unknown> }).agents.work = { state: "not-assigned", assigned: false, enabled: false, actions: ["add"] };
+    const { calls } = renderWithEngine(<SkillsPage />, routes);
+    // beta 在 codex 上是停用（例外），不算缺
+    await userEvent.click(await screen.findByTestId("skills-fill"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
+    expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual(["--only", "skill:agent-skills/alpha", "--action", "add", "--agent", "work"]);
   });
 
   it("启用矩阵：正常状态由启停动作表达，链接异常保留状态，新发现技能无 cell 时明确未配置", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAll();
     expect(await screen.findByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toHaveTextContent("停用");
     expect(screen.queryByTitle("claude-code: linked")).toBeNull();
     expect(screen.getByTitle("codex: dead-link")).toHaveTextContent("失效链接");
@@ -267,9 +306,8 @@ describe("SkillsPage 三级视图", () => {
     expect(screen.queryByTitle("codex: disabled")).toBeNull();
     // 原来有一列叫「当前分配版本」，里面放的却是「已链接/已分配」——那是状态不是版本，
     // 且与状态列语义重叠。矩阵里状态只由格子表达，版本等细节进悬停，不再单开一列。
-    // 新发现技能进入全部技能列表，可按助手添加；引擎未报告 cell 时不伪造可执行操作
+    // 引擎未报告 cell 时不伪造可执行操作
     expect(screen.getAllByText("inbox-one").length).toBeGreaterThan(0);
-    expect(screen.getAllByTitle("claude-code: 未配置").length).toBeGreaterThan(0);
     expect(screen.queryByTestId("action-add-skill:agent-skills/inbox-one-claude-code")).toBeNull();
   });
 
@@ -349,58 +387,35 @@ describe("SkillsPage 三级视图", () => {
     );
 
     const { calls } = renderWithEngine(<SkillsPage />, customRoutes);
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAll();
     expect(await screen.findByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toHaveTextContent("停用");
     expect(screen.queryByTestId("action-remove-skill:agent-skills/alpha-claude-code")).toBeNull();
     expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
   });
 
-  it("视图切换与键盘导航：支持键盘切换标签，点击集合卡片名称进入全部技能并筛选对应集合", async () => {
-    renderWithEngine(<SkillsPage />, skillsRoutes());
-    const tabCollections = await screen.findByRole("tab", { name: "集合列表" });
-    const tabSkills = screen.getByRole("tab", { name: "全部技能" });
-
-    // 默认集合列表
-    expect(tabCollections).toHaveAttribute("aria-selected", "true");
-    expect(tabCollections).toHaveAttribute("tabIndex", "0");
-    expect(tabSkills).toHaveAttribute("aria-selected", "false");
-    expect(tabSkills).toHaveAttribute("tabIndex", "-1");
-
-    // 键盘 ArrowRight 切换到全部技能
-    fireEvent.keyDown(tabCollections, { key: "ArrowRight" });
-    expect(tabSkills).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("filter-collection-select")).toBeInTheDocument();
-
-    // 键盘 ArrowLeft 切回集合列表
-    fireEvent.keyDown(tabSkills, { key: "ArrowLeft" });
-    expect(tabCollections).toHaveAttribute("aria-selected", "true");
-
-    // 点击集合名称下钻
-    const collectionLink = screen.getByRole("button", { name: "agent-skills" });
-    await userEvent.click(collectionLink);
-    expect(tabSkills).toHaveAttribute("aria-selected", "true");
-    const colSelect = screen.getByTestId("filter-collection-select") as HTMLSelectElement;
-    expect(colSelect.value).toBe("agent-skills");
+  it("集合筛选：只显示所选集合", async () => {
+    const routes = skillsRoutes();
+    const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
+    status.data.elements.push(makeElement({ id: "skill:team", domain: "skills", spec: { url: "https://example.com/team.git" }, observed: { repo_cached: true, actions: ["update"] } }));
+    renderWithEngine(<SkillsPage />, routes);
+    expect(await screen.findByTestId("collection-card-team")).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByTestId("filter-collection-select"), "agent-skills");
+    expect(screen.queryByTestId("collection-card-team")).toBeNull();
+    expect(screen.getByTestId("collection-card-agent-skills")).toBeInTheDocument();
   });
 
-  it("全部技能列表：集合筛选与助手筛选，可清除筛选", async () => {
+  it("从账号页进来只看一个账号：每行直接给这个账号的操作，切回全部账号看汇总", async () => {
     renderWithEngine(<SkillsPage initialAgent="claude-code" />, skillsRoutes());
-    // initialAgent 预设时默认进入全部技能且预选助手
-    const tabSkills = await screen.findByRole("tab", { name: "全部技能" });
-    expect(tabSkills).toHaveAttribute("aria-selected", "true");
-
-    const agentSelect = screen.getByTestId("filter-agent-select") as HTMLSelectElement;
+    const agentSelect = (await screen.findByTestId("filter-agent-select")) as HTMLSelectElement;
     expect(agentSelect.value).toBe("claude-code");
-
-    // 仅展示 claude-code 的行
+    expect(await screen.findByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toBeInTheDocument();
     expect(screen.queryByTitle("codex: dead-link")).toBeNull();
-    expect(screen.getByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toBeInTheDocument();
 
-    // 清除筛选按钮
-    const clearBtn = screen.getByRole("button", { name: /清除筛选/ });
-    await userEvent.click(clearBtn);
+    await userEvent.selectOptions(agentSelect, "all");
     expect(agentSelect.value).toBe("all");
+    // 链接损坏的行默认展开，codex 的状态可见
     expect(screen.getByTitle("codex: dead-link")).toBeInTheDocument();
+    expect(screen.getByTestId("skill-summary-skill:agent-skills/beta")).toHaveTextContent("全部账号（codex 除外）");
   });
 
   it("基于 observed.agents[agent].actions 渲染明确操作按钮，无 actions 时显示占位提示，展示明确阻断原因", async () => {
@@ -450,7 +465,7 @@ describe("SkillsPage 三级视图", () => {
     );
 
     const { calls } = renderWithEngine(<SkillsPage />, customRoutes);
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAll();
 
     // 真有新版本才显示更新；删除分配与软链接停用重复，不进入日常界面。
     expect(screen.getByTestId("action-update-skill:agent-skills/alpha-claude-code")).toBeInTheDocument();
@@ -478,7 +493,7 @@ describe("SkillsPage 三级视图", () => {
 });
 
 describe("SkillsPage 空态引导与发现失败呈现", () => {
-  it("存在集合但全部 repo_cached=false 时，全部技能空态引导去「集合列表」更新资源库", async () => {
+  it("集合还没下载：标题行标「尚未下载」，就地给「更新」", async () => {
     const routes = {
       "skills:status": makeEnvelope(
         {
@@ -507,17 +522,13 @@ describe("SkillsPage 空态引导与发现失败呈现", () => {
       ),
     };
     renderWithEngine(<SkillsPage />, routes);
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
-    const empty = await screen.findByTestId("skills-empty-state");
-    expect(empty).toHaveTextContent("集合资源库尚未拉取");
-    expect(empty).toHaveTextContent("先更新集合资源库，拉取成功后技能会出现在这里");
-    expect(empty).not.toHaveTextContent("无符合筛选条件的技能分配");
-    await userEvent.click(screen.getByTestId("open-collections-to-update"));
-    expect(screen.getByRole("tab", { name: "集合列表" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByTestId("update-collection-agent-skills")).toBeInTheDocument();
+    const card = await screen.findByTestId("collection-card-agent-skills");
+    expect(card).toHaveTextContent("尚未下载");
+    expect(card).toHaveTextContent("点「更新」取回后技能会出现在这里");
+    expect(within(card).getByTestId("update-collection-agent-skills")).toBeInTheDocument();
   });
 
-  it("集合已拉取但无技能行时保持现有空态文案；发现失败在集合卡片以警告样式呈现", async () => {
+  it("集合已取回但没有技能：说「没有找到技能」，发现失败以警告呈现", async () => {
     const routes = {
       "skills:status": makeEnvelope(
         {
@@ -550,13 +561,8 @@ describe("SkillsPage 空态引导与发现失败呈现", () => {
       ),
     };
     renderWithEngine(<SkillsPage />, routes);
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
-    const empty = await screen.findByTestId("skills-empty-state");
-    expect(empty).toHaveTextContent("无符合筛选条件的技能分配");
-    expect(empty).not.toHaveTextContent("集合资源库尚未拉取");
-
-    await userEvent.click(screen.getByRole("tab", { name: "集合列表" }));
     const card = await screen.findByTestId("collection-card-broken-skills");
+    expect(card).toHaveTextContent("没有找到技能");
     expect(within(card).getByTestId("discovery-error-broken-skills")).toHaveTextContent(
       "技能发现失败[missing-dir]: skill_paths 指向的目录不存在: ghost",
     );
@@ -628,9 +634,9 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
     };
   }
 
-  it("extra-link：动作为 纳入管理/取消链接，状态由上面矩阵那一格表达", async () => {
+  it("extra-link：动作为 纳入管理/取消链接，行上标「有外部链接」", async () => {
     renderWithEngine(<SkillsPage />, extraLinkRoutes());
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAll();
 
     const addBtn = await screen.findByTestId("action-add-skill:agent-skills/alpha-codex");
     expect(addBtn).toHaveTextContent("纳入管理");
@@ -639,15 +645,14 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
     expect(removeBtn).toHaveTextContent("取消链接");
     expect(removeBtn).toHaveAttribute("title", "移除磁盘上的链接入口，不删除技能本身");
 
-    // 状态和操作在同一个助手单元格内，不再有重复的展开行。
-    const matrixRow = screen.getByTestId("matrix-row-skill:agent-skills/alpha");
-    expect(within(matrixRow).getByTitle(/extra-link/)).toHaveTextContent("计划外链接");
-    expect(screen.queryByTestId("expand-skill:agent-skills/alpha")).toBeNull();
+    const skillRow = screen.getByTestId("skill-row-skill:agent-skills/alpha");
+    expect(within(skillRow).getByTitle(/extra-link/)).toHaveTextContent("计划外链接");
+    expect(within(skillRow).getByText("有外部链接")).toBeInTheDocument();
   });
 
   it("非受管外部链接：纳入管理先弹确认，取消零 apply，确认后 apply 携带 --allow-takeover", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, extraLinkRoutes());
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAll();
     const addBtn = await screen.findByTestId("action-add-skill:agent-skills/alpha-codex");
 
     await userEvent.click(addBtn);
@@ -674,7 +679,7 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
 
   it("非受管外部链接：取消链接先弹确认，确认后 apply 以 remove + --allow-takeover 执行", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, extraLinkRoutes());
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAll();
 
     await userEvent.click(await screen.findByTestId("action-remove-skill:agent-skills/alpha-codex"));
     const dialog = await screen.findByRole("dialog", { name: "取消链接 alpha @ codex" });
@@ -689,7 +694,7 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
 
   it("受管残留链接（managed=true）：纳入管理与取消链接均直接执行，不弹确认、不带 --allow-takeover", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, extraLinkRoutes());
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAll();
 
     await userEvent.click(await screen.findByTestId("action-remove-skill:agent-skills/beta-codex"));
     await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
@@ -708,15 +713,15 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
 
   it("not-assigned 行：底层 add 对用户显示为「启用」，不重复显示未分配状态", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, extraLinkRoutes());
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAll();
 
     const addBtn = await screen.findByTestId("action-add-skill:agent-skills/gamma-codex");
     expect(addBtn).toHaveTextContent("启用");
     expect(addBtn).toHaveAttribute("title", "首次启用并建立分配");
     // 普通状态由可执行动作表达，不再重复放「未分配」徽标。
-    const matrixRow = screen.getByTestId("matrix-row-skill:agent-skills/gamma");
-    expect(within(matrixRow).queryByTitle(/not-assigned/)).toBeNull();
-    expect(within(matrixRow).queryByText("未分配")).toBeNull();
+    const skillRow = screen.getByTestId("skill-row-skill:agent-skills/gamma");
+    expect(within(skillRow).queryByTitle(/not-assigned/)).toBeNull();
+    expect(within(skillRow).queryByText("未分配")).toBeNull();
     expect(screen.queryByTestId("action-remove-skill:agent-skills/gamma-codex")).toBeNull();
 
     await userEvent.click(addBtn);
@@ -831,7 +836,7 @@ describe("SkillsPage 推荐来源与当前安装", () => {
     // 逐项确认：弹窗出现前后都还没写
     const dialog = await screen.findByRole("dialog", { name: "添加推荐来源 agent-skills-rec" });
     expect(dialog).toHaveTextContent("技能取自 skills/");
-    expect(dialog).toHaveTextContent("不会下载，也不会启用到任何助手");
+    expect(dialog).toHaveTextContent("不会下载，也不会加到任何账号");
     expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
     await userEvent.click(within(dialog).getByRole("button", { name: "添加" }));
 
@@ -965,7 +970,7 @@ describe("SkillsPage 来源里已删除的技能", () => {
     await userEvent.click(await screen.findByTestId("action-remove-skill:agent-skills/gone-codex"));
     const dialog = await screen.findByRole("dialog", { name: "移除 gone @ codex" });
     expect(dialog).toHaveTextContent("并删除本工具建的入口链接");
-    expect(dialog).toHaveTextContent("不影响其他助手");
+    expect(dialog).toHaveTextContent("不影响其他账号");
     await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(0);
   });

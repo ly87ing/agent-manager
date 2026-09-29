@@ -12,6 +12,14 @@ import {
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import { mcpStatusData } from "./mcp-fixtures";
 
+/** 展开所有技能行，露出各账号上的状态与操作。 */
+async function expandAll() {
+  await screen.findAllByTestId(/^skill-row-/);
+  for (const button of screen.getAllByRole("button", { name: /在各账号上的情况/ })) {
+    if (button.getAttribute("aria-expanded") === "false") await userEvent.click(button);
+  }
+}
+
 function mcpRoutes(): Record<string, Envelope> {
   return { "mcp:status": makeEnvelope(mcpStatusData(), { command: "mcp.status" }) };
 }
@@ -157,7 +165,7 @@ describe("页内搜索：技能页", () => {
 
   it("全部技能：搜索与集合下拉筛选叠加（AND），无匹配时给出空态与清除入口", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAll();
 
     const input = await screen.findByTestId("skills-search");
     await userEvent.type(input, "lint");

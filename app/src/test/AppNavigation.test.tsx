@@ -184,13 +184,10 @@ describe("App 顶层导航", () => {
     const skillsNav = within(nav).getByRole("button", { name: "技能" });
     expect(skillsNav).toHaveAttribute("aria-current", "page");
 
-    const tabSkills = await screen.findByRole("tab", { name: "全部技能" });
-    expect(tabSkills).toHaveAttribute("aria-selected", "true");
-
-    const agentSelect = screen.getByTestId("filter-agent-select") as HTMLSelectElement;
+    const agentSelect = (await screen.findByTestId("filter-agent-select")) as HTMLSelectElement;
     expect(agentSelect.value).toBe("cc-work");
 
-    // 点击侧栏「技能」项，重置为全部助手
+    // 点击顶栏「技能」，重置为全部账号
     await userEvent.click(skillsNav);
     expect(agentSelect.value).toBe("all");
   }, 15000);

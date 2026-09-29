@@ -6,6 +6,14 @@ import { makeApplyResult, makeElement, makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
+/** 展开所有技能行，露出各账号上的状态与操作。 */
+async function expandAll() {
+  await screen.findAllByTestId(/^skill-row-/);
+  for (const button of screen.getAllByRole("button", { name: /在各账号上的情况/ })) {
+    if (button.getAttribute("aria-expanded") === "false") await userEvent.click(button);
+  }
+}
+
 /** 逐技能操作链路：observed.actions 按钮 → 直接 skills:apply（--only/--action/--agent，带 run_id），
  * 不再先取 plan、不开预览弹窗。没有 policy:set 预写 enabled：动作完全由 apply 携带 --action 表达。 */
 function routes(): Record<string, Envelope> {
@@ -47,7 +55,7 @@ describe("Skills 逐技能操作链路", () => {
   it("codex 行点「启用」→ 直接 skills:apply 带 --action enable --agent codex 与 run_id，不取 plan、不开弹窗、零 policy:set", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, routes());
 
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAll();
     await userEvent.click(await screen.findByTestId("action-enable-skill:agent-skills/alpha-codex"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
@@ -74,7 +82,7 @@ describe("Skills 逐技能操作链路", () => {
     const toastErrorSpy = vi.spyOn(toast, "error");
     const { calls } = renderWithEngine(<SkillsPage />, rejected);
 
-    await userEvent.click(await screen.findByRole("tab", { name: "全部技能" }));
+    await expandAll();
     await userEvent.click(await screen.findByTestId("action-enable-skill:agent-skills/alpha-codex"));
 
     await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());

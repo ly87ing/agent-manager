@@ -19,7 +19,7 @@ export function SkillRecommendations({
         推荐来源
       </h3>
       <p className="mt-1 text-xs text-muted-foreground">
-        内置推荐，添加后才会保存为集合。添加不会下载，也不会启用到任何助手；之后按需逐个启用。
+        添加后保存为集合，不会下载，也不会加到任何账号；取回后在技能上点「添加」。
       </p>
       <div className="mt-3 space-y-2">
         {items.map((item) => (
