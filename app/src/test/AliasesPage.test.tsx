@@ -219,7 +219,8 @@ describe("终端快捷命令页", () => {
     await waitFor(() => expect(within(dialog).getByTestId("alias-form-submit")).not.toBeDisabled());
     await userEvent.click(within(dialog).getByTestId("alias-form-submit"));
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
-    expect(await screen.findByText(/已在外部修改/)).toBeInTheDocument();
+    // 通知说人话：出了什么事、怎么办；原文留在任务记录里
+    expect(await screen.findByText(/被别处改过，这次没有写入/)).toBeInTheDocument();
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 

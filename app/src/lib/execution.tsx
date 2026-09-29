@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { errorSummary } from "./errorAdvice";
 import { effectHint } from "./effectHints";
 import { engineErrorMessage, runEngine } from "./engine";
 import type { Diagnostic, Envelope } from "./contract";
@@ -71,7 +72,11 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         const message = engineErrorMessage(err);
         patch({ status: "failed", finishedAt: Date.now(), bridgeError: message });
-        if (!request.silent) toast.error(`${request.label} 调用失败：${message}`);
+        if (!request.silent) {
+          const summary = errorSummary(message);
+          if (summary.description) toast.error(`${request.label} 调用失败：${summary.text}`, { description: summary.description });
+          else toast.error(`${request.label} 调用失败：${summary.text}`);
+        }
         void queryClient.invalidateQueries({ queryKey: engineKeys.all });
         return null;
       }
@@ -89,7 +94,9 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
             ...(undo ? { action: { label: "撤销", onClick: () => undo() } } : {}),
           });
         } else {
-          toast.error(`${request.label} 失败：${firstError?.message ?? "详见任务记录"}`);
+          const summary = errorSummary(firstError?.message ?? "详见任务记录");
+          if (summary.description) toast.error(`${request.label} 失败：${summary.text}`, { description: summary.description });
+          else toast.error(`${request.label} 失败：${summary.text}`);
         }
       }
       void queryClient.invalidateQueries({ queryKey: engineKeys.all });

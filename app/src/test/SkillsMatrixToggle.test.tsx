@@ -88,7 +88,7 @@ describe("Skills 逐技能操作链路", () => {
     await userEvent.click(await screen.findByTestId("action-enable-skill:agent-skills/alpha-codex"));
 
     await waitFor(() => expect(toastErrorSpy).toHaveBeenCalled());
-    expect(toastErrorSpy).toHaveBeenCalledWith(expect.stringContaining("目标被外部修改，拒绝覆盖"));
+    expect(toastErrorSpy).toHaveBeenCalledWith(expect.stringContaining("被别处改过"), { description: expect.stringContaining("怎么办") });
     const applyCalls = calls.filter((call) => call.command === "skills:apply");
     expect(applyCalls).toHaveLength(1);
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);

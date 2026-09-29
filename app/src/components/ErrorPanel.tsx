@@ -1,5 +1,6 @@
 import { AlertOctagon, AlertTriangle } from "lucide-react";
 import type { Diagnostic } from "../lib/contract";
+import { adviseError } from "../lib/errorAdvice";
 import { cn } from "../lib/utils";
 
 /** 渲染 envelope 的 errors / warnings（code + element + message）。 */
@@ -36,9 +37,20 @@ export function ErrorPanel({
       <ul className="space-y-2">
         {errors.map((diag, index) => (
           <li key={`${diag.code}-${index}`} className="text-sm text-foreground">
-            <p>{diag.message}</p>
+            {(() => {
+              const advice = adviseError(diag.message);
+              return advice ? (
+                <>
+                  <p>{advice.what}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">怎么办：{advice.todo}</p>
+                </>
+              ) : (
+                <p>{diag.message}</p>
+              );
+            })()}
             <details className="mt-1 text-xs text-muted-foreground">
-              <summary className="w-fit cursor-pointer select-none">技术详情</summary>
+              <summary className="w-fit cursor-pointer select-none">详细信息</summary>
+              {adviseError(diag.message) && <p className="mt-1 break-all pl-2">{diag.message}</p>}
               <div className="mt-1 flex flex-wrap gap-2 pl-2">
                 <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{diag.code}</code>
                 {diag.element && <code className="break-all font-mono">{diag.element}</code>}

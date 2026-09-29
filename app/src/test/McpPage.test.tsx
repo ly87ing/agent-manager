@@ -272,7 +272,7 @@ describe("McpPage：实际条目为主", () => {
       }),
     );
     await userEvent.click(await screen.findByTestId("action-disable-mcp:fs-claude-code"));
-    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("已在外部修改")));
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("被别处改过"), { description: expect.stringContaining("怎么办") }));
     await waitFor(() => expect(calls.filter((call) => call.command === "mcp:status").length).toBeGreaterThan(1));
 
     await userEvent.click(screen.getByTestId("action-disable-mcp:fs-claude-code"));
