@@ -884,6 +884,28 @@ fn apply_coll_update(
     Ok(())
 }
 
+/// 账号里这个名字的链接是否指向本集合为它准备的内容：git 集合是这条分配记录的版本快照，
+/// 本机目录集合是它的源目录。同名链接可能已归别的集合（例如「改成我的版本」之后），
+/// 那样的链接在停用、移除本集合时一律不动。
+fn link_owned_by(ctx: &Context, coll: &CollectionDef, version: &str, link_path: &Path) -> bool {
+    if !is_link_entry(link_path) {
+        return false;
+    }
+    let Ok(actual) = resolve_link_target(link_path) else {
+        return false;
+    };
+    if is_local_source(coll) {
+        return super::paths::is_path_within(&actual, &collection_source_root(ctx, coll));
+    }
+    actual
+        == resolve_loose(
+            &ctx.data_dir
+                .join("skill-versions")
+                .join(version)
+                .join("content"),
+        )
+}
+
 fn apply_coll_toggle_link(
     ctx: &Context,
     coll: &CollectionDef,
@@ -911,7 +933,7 @@ fn apply_coll_toggle_link(
                 ExpectedLinkState::Present(resolve_loose(&content)),
             );
         }
-    } else if link_path.exists() || is_link_entry(&link_path) {
+    } else if link_owned_by(ctx, coll, &binding.version, &link_path) {
         check_not_external_conflict(&link_path, bases)?;
         let old_target = if is_link_entry(&link_path) {
             resolve_link_target(&link_path).ok()
@@ -1075,7 +1097,8 @@ fn apply_coll_remove(
         }
         if let Some(agent_info) = meta.agents.get(a) {
             let link_path = agent_info.skills_dir.join(s);
-            if link_path.exists() || is_link_entry(&link_path) {
+            // 只移除指向本集合内容的链接；同名链接已归别的集合（如用户的版本）时不动
+            if link_owned_by(ctx, coll, &b.version, &link_path) {
                 check_not_external_conflict(&link_path, bases)?;
                 let old_target = if is_link_entry(&link_path) {
                     resolve_link_target(&link_path).ok()

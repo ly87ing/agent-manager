@@ -3133,3 +3133,64 @@ fn forking_a_skill_copies_it_into_the_users_collection_and_tracks_upstream() {
     assert!(format!("{:?}", clash.errors).contains("已经指向别处"));
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 回归：换成用户的版本后，停用或移除原集合只动它自己的链接，不碰已归用户集合的同名链接。
+#[test]
+fn disabling_or_removing_the_origin_keeps_the_users_version_linked() {
+    let (root, context) = temp_ctx("skills-fork-origin-removed");
+    let repo = context.data_dir.join("repositories").join("upstream");
+    std::fs::create_dir_all(repo.join("skills/alpha")).unwrap();
+    std::fs::write(repo.join("skills/alpha/SKILL.md"), "# alpha\n").unwrap();
+    std::fs::write(repo.join(".agent-manager-owned"), "{}").unwrap();
+    set_collection(
+        &context,
+        "upstream",
+        r#"{"url":"https://example.com/upstream.git","skill_paths":["skills"]}"#,
+    );
+    assert!(skill_action(&context, "skill:upstream/alpha", "add", "claude-code").ok);
+    let dest = root.join("mine").to_string_lossy().to_string();
+    assert!(
+        execute(
+            &context,
+            &request(
+                "skills:fork",
+                &["--only", "skill:upstream/alpha", "--dest", &dest]
+            )
+        )
+        .ok
+    );
+    assert!(skill_action(&context, "skill:upstream/alpha", "remove", "claude-code").ok);
+    assert!(skill_action(&context, "skill:my-skills/alpha", "add", "claude-code").ok);
+    let link = context.home_dir.join(".claude/skills/alpha");
+    let mine = root.join("mine/alpha");
+
+    let disabled = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &["--only", "skill:upstream", "--action", "disable"],
+        ),
+    );
+    assert!(disabled.ok, "{:?}", disabled.errors);
+    assert_eq!(
+        std::fs::canonicalize(&link).unwrap(),
+        std::fs::canonicalize(&mine).unwrap(),
+        "停用原集合不碰用户版本的链接"
+    );
+
+    let removed = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &["--only", "skill:upstream", "--action", "remove", "--purge"],
+        ),
+    );
+    assert!(removed.ok, "{:?}", removed.errors);
+    assert_eq!(
+        std::fs::canonicalize(&link).unwrap(),
+        std::fs::canonicalize(&mine).unwrap(),
+        "移除原集合不碰用户版本的链接"
+    );
+    assert!(mine.join("SKILL.md").is_file());
+    let _ = std::fs::remove_dir_all(root);
+}
