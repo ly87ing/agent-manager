@@ -6,7 +6,7 @@
 //! 版本、而你的文件还是上次写入的那版」。读取零写：没有镜像目录或表就当没有。
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension};
@@ -61,8 +61,61 @@ fn valid_stem(stem: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
-/// 读出所有启用来源里的规则。镜像还没取回、目录不存在、不是普通文件、过大或非 UTF-8 的
-/// 条目都跳过，不报错：来源规则只是可选的模板。
+/// 一个规则位置下的规则文件：指到 `.md` 文件就是这一条，指到目录就是目录里的 `*.md`（README 除外，
+/// 不递归）。符号链接不跟：来源里的规则必须就是来源自己的文件。
+fn rule_files(location: &Path) -> Vec<PathBuf> {
+    let Ok(meta) = std::fs::symlink_metadata(location) else {
+        return Vec::new();
+    };
+    if meta.is_file() {
+        return vec![location.to_path_buf()];
+    }
+    if !meta.is_dir() {
+        return Vec::new();
+    }
+    let Ok(entries) = std::fs::read_dir(location) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
+    files.sort();
+    files
+        .into_iter()
+        .filter(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| !name.eq_ignore_ascii_case("readme.md"))
+        })
+        .collect()
+}
+
+fn read_rule(path: &Path, collection: &str, local: bool, root: &Path) -> Option<SourceRule> {
+    let stem = path.file_name()?.to_str()?.strip_suffix(".md")?;
+    if !valid_stem(stem) {
+        return None;
+    }
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > MAX_RULE_BYTES {
+        return None;
+    }
+    let body = std::fs::read_to_string(path).ok()?;
+    Some(SourceRule {
+        id: format!("{collection}/{stem}"),
+        collection: collection.to_string(),
+        name: stem.to_string(),
+        revision: sha256_hex(&body),
+        body,
+        local,
+        root: root.to_path_buf(),
+    })
+}
+
+/// 读出所有来源里的规则。两类来源：
+/// - 技能集合（git 镜像或本地目录）：默认读根下 `rules/`；集合定义里的 `rules_path` 可改指集合内
+///   的某个子目录或某个 `.md` 文件（越出集合根的忽略）。
+/// - 用户自己指定的规则来源 `rules.sources.<名>.path`：本机的一个 `.md` 文件或一个目录，
+///   原地读取、改了即时生效，不复制、不入库。与集合同名的来源忽略，避免规则 id 撞车。
+///
+/// 镜像还没取回、路径不存在、不是普通文件、过大或非 UTF-8 的条目都跳过，不报错：来源规则只是可选的模板。
 pub(crate) fn load(ctx: &Context) -> Result<Vec<SourceRule>> {
     let meta = crate::native_skills::load_metadata(ctx)?;
     let mut out = Vec::new();
@@ -71,40 +124,55 @@ pub(crate) fn load(ctx: &Context) -> Result<Vec<SourceRule>> {
             continue;
         }
         let root = crate::native_skills::collection_source_root(ctx, coll);
-        let Ok(entries) = std::fs::read_dir(root.join("rules")) else {
+        let rel = coll
+            .raw
+            .get("rules_path")
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+            .unwrap_or("rules");
+        let location = crate::native_skills::resolve_loose(&root.join(rel));
+        if !crate::native_skills::is_path_within(&location, &root) {
             continue;
-        };
-        let mut files: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
-        files.sort();
-        for path in files {
-            let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            let Some(stem) = file_name.strip_suffix(".md") else {
-                continue;
-            };
-            if file_name.eq_ignore_ascii_case("readme.md") || !valid_stem(stem) {
+        }
+        for path in rule_files(&location) {
+            out.extend(read_rule(
+                &path,
+                &coll.name,
+                coll.source_path.is_some(),
+                &root,
+            ));
+        }
+    }
+    let policy = store::effective_policy(ctx)?;
+    if let Some(sources) = policy
+        .get("rules")
+        .and_then(|r| r.get("sources"))
+        .and_then(Value::as_object)
+    {
+        for (name, def) in sources {
+            if def.get("_delete") == Some(&Value::Bool(true)) || meta.collections.contains_key(name)
+            {
                 continue;
             }
-            // 符号链接不跟：来源目录里的规则必须就是来源自己的文件
-            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            let Some(raw) = def
+                .get("path")
+                .and_then(Value::as_str)
+                .filter(|v| !v.is_empty())
+            else {
                 continue;
             };
-            if !meta.is_file() || meta.len() > MAX_RULE_BYTES {
-                continue;
+            let location = crate::native_skills::resolve_loose(&crate::native_skills::expand_home(
+                raw,
+                &ctx.home_dir,
+            ));
+            let root = if location.is_dir() {
+                location.clone()
+            } else {
+                location.parent().map(Path::to_path_buf).unwrap_or_default()
+            };
+            for path in rule_files(&location) {
+                out.extend(read_rule(&path, name, true, &root));
             }
-            let Ok(body) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            out.push(SourceRule {
-                id: format!("{}/{stem}", coll.name),
-                collection: coll.name.clone(),
-                name: stem.to_string(),
-                revision: sha256_hex(&body),
-                body,
-                local: coll.source_path.is_some(),
-                root: root.clone(),
-            });
         }
     }
     Ok(out)

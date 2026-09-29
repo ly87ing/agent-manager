@@ -169,6 +169,28 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     ]);
   });
 
+  it("添加规则来源：直接指定一个文件或目录，只登记位置，不改任何规则文件", async () => {
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
+      ...rulesRoutes(),
+      "policy:get": makeEnvelope({ layers: null, effective: { skills: { repositories: { "agent-skills": {} } } }, attribution: null, layer: null, key: null, value: null, path: null }, { command: "policy.get" }),
+      "policy:set": makeEnvelope({}, { command: "policy.set" }),
+    };
+    const { calls } = renderWithEngine(<RulesPage />, routes);
+    await userEvent.click(await screen.findByTestId("rule-source-add"));
+    await userEvent.type(screen.getByTestId("rule-source-name"), "agent-skills");
+    await userEvent.type(screen.getByTestId("rule-source-path"), "~/notes/CLAUDE.md");
+    // 与技能集合同名会撞规则 id：拦下
+    expect(screen.getByTestId("rule-source-save")).toBeDisabled();
+    await userEvent.clear(screen.getByTestId("rule-source-name"));
+    await userEvent.type(screen.getByTestId("rule-source-name"), "my-rules");
+    await userEvent.click(screen.getByTestId("rule-source-save"));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const set = calls.find((call) => call.command === "policy:set")!;
+    expect(set.args.slice(0, 4)).toEqual(["--layer", "local", "--key", "rules.sources.my-rules"]);
+    expect(JSON.parse(set.args[set.args.indexOf("--value") + 1])).toEqual({ path: "~/notes/CLAUDE.md", _delete: false, _replace: true });
+    expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
+  });
+
   it("规则文件可展开查看实际全文，只读展示、不发起任何写入或 plan", async () => {
     const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
 
@@ -461,7 +483,7 @@ describe("RulesPage：实际文件为准", () => {
     const onOpenSkills = vi.fn();
     const first = renderWithEngine(<RulesPage onOpenSkills={onOpenSkills} />, routes);
     const empty = await screen.findByTestId("rules-no-source");
-    expect(empty).toHaveTextContent("规则内容不随程序发布");
+    expect(empty).toHaveTextContent("添加上面的规则来源");
     await userEvent.click(within(empty).getByRole("button", { name: "技能页" }));
     expect(onOpenSkills).toHaveBeenCalled();
     first.unmount();

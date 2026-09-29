@@ -188,6 +188,23 @@ describe("SkillsPage 三级视图", () => {
     expect(calls.filter((call) => call.command === "db:migrate")).toHaveLength(0);
   });
 
+  it("本机位置可以直接选某个技能的 SKILL.md：存成它所在的技能文件夹；规则位置可改指", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+    await userEvent.click(await screen.findByTestId("add-collection-button"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByTestId("collection-name-input"), { target: { value: "review" } });
+    await userEvent.click(within(dialog).getByTestId("collection-source-local"));
+    fireEvent.change(within(dialog).getByTestId("collection-source-path-input"), { target: { value: "~/my-skills/review/SKILL.md" } });
+    fireEvent.change(within(dialog).getByTestId("collection-rules-path-input"), { target: { value: "docs/CLAUDE.md" } });
+    await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
+    const write = calls.find((call) => call.command === "policy:set")!;
+    expect(JSON.parse(write.args[write.args.indexOf("--value") + 1])).toMatchObject({
+      source_path: "~/my-skills/review",
+      rules_path: "docs/CLAUDE.md",
+      url: null,
+    });
+  });
+
   it("新增集合可选本机目录来源：只写 source_path 并清空 url", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
     await userEvent.click(await screen.findByTestId("add-collection-button"));

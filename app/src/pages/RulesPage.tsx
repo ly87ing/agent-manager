@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ChevronDown, ChevronRight, Info, Plus, Wand2 } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
+import { RuleSourcesManager } from "../components/RuleSourcesManager";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import type { EngineElement, RuleSourceRule, SuggestedSource, RuleTemplate, StatusData } from "../lib/contract";
@@ -511,7 +512,7 @@ function SourceRulesSection({
         <div>
           <h3 className="text-sm font-semibold">来源规则</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            来自技能来源里的 rules/，只读；应用前会先展示与目标现有内容的差异。来源更新后，跟随它的规则文件会提示可更新。
+            来自你指定的规则文件或目录，以及技能集合里的规则位置（默认 rules/）；只读，应用前先看差异，来源更新后会提示。
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -529,9 +530,12 @@ function SourceRulesSection({
           ))}
         </div>
       </div>
+      <RuleSourcesManager
+        ruleCounts={rules.reduce<Record<string, number>>((acc, rule) => ({ ...acc, [rule.collection]: (acc[rule.collection] ?? 0) + 1 }), {})}
+      />
       {rules.length === 0 && (
         <div data-testid="rules-no-source" className="space-y-2">
-          <p className="text-xs text-muted-foreground">还没有来源提供规则。规则内容不随程序发布，需要从技能来源取回。</p>
+          <p className="text-xs text-muted-foreground">还没有来源提供规则：添加上面的规则来源，或从技能集合取回。</p>
           {suggested.map((item) => (
             <div key={item.name} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-3">
               <div className="min-w-0">

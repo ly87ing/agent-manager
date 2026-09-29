@@ -412,6 +412,71 @@ fn apply_source_rule(ctx: &Context, target: &str, rule: &str) -> Envelope {
     )
 }
 
+/// 规则来源由用户指定：可以直接指到一个 .md 文件或一个目录；技能集合里的规则位置也能改指到
+/// 子目录。与集合同名的来源忽略，不覆盖集合的规则。
+#[test]
+fn user_rule_sources_point_at_a_file_or_folder() {
+    let (root, ctx) = temp_ctx("rule-sources-user");
+    let base = ctx.data_dir.parent().unwrap().to_path_buf();
+    write_file(&base.join("notes").join("mine.md"), "- 我的规则\n");
+    write_file(&base.join("team").join("a.md"), "- 团队 A\n");
+    write_file(&base.join("team").join("README.md"), "说明\n");
+    write_file(
+        &base.join("pack").join("policies").join("core.md"),
+        "- 集合内\n",
+    );
+    write_file(
+        &base.join("pack").join("rules").join("old.md"),
+        "- 默认位置\n",
+    );
+    for (key, value) in [
+        (
+            "rules.sources.mine",
+            serde_json::json!({"path": base.join("notes").join("mine.md").to_string_lossy()}),
+        ),
+        (
+            "rules.sources.team",
+            serde_json::json!({"path": base.join("team").to_string_lossy()}),
+        ),
+        (
+            "rules.sources.pack",
+            serde_json::json!({"path": base.join("notes").to_string_lossy()}),
+        ),
+        (
+            "skills.repositories.pack",
+            serde_json::json!({"source_path": base.join("pack").to_string_lossy(), "rules_path": "policies"}),
+        ),
+    ] {
+        let env = run(
+            &ctx,
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                key,
+                "--value",
+                &value.to_string(),
+            ],
+        );
+        assert!(env.ok, "{key}: {:?}", env.errors);
+    }
+    let ids: Vec<String> = status(&ctx)["source_rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|rule| rule["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(ids, vec!["pack/core", "mine/mine", "team/a"]);
+    let applied = apply_source_rule(&ctx, "rules:claude_global", "team/a");
+    assert!(applied.ok, "{:?}", applied.errors);
+    assert_eq!(
+        std::fs::read_to_string(claude_md(&ctx)).unwrap(),
+        "- 团队 A\n"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// 来源规则：应用后跟随；来源出新版而文件没改过时提示可更新，更新不把旧版当备份；
 /// 文件被外部改过就不提示可更新；用别的内容写入后不再跟随。来源正文从不入库。
 #[test]

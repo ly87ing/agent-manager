@@ -70,6 +70,7 @@ pub(crate) use paths::repo_base_dir;
 
 // 供 rules 域读取来源规则：集合元数据、来源根目录与推荐来源（与技能共用一份）
 pub(crate) use paths::collection_source_root;
+pub(crate) use paths::{expand_home, is_path_within, resolve_loose};
 pub(crate) use recommend::suggested_sources;
 pub(crate) use status::load_metadata;
 

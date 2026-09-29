@@ -34,6 +34,8 @@ export function SkillCollectionFormDialog({
   const [sourceKind, setSourceKind] = useState<"git" | "local">(initial?.definition.source_path ? "local" : "git");
   const [url, setUrl] = useState(String(initial?.definition.url ?? ""));
   const [sourcePath, setSourcePath] = useState(String(initial?.definition.source_path ?? ""));
+  /** 集合里规则的位置（相对集合根）：子目录或某个 .md 文件；留空用默认的 rules/。 */
+  const [rulesPath, setRulesPath] = useState(String(initial?.definition.rules_path ?? ""));
   const initialPaths = (initial?.definition.skill_paths as string[] | undefined) ?? null;
   /** 不限定 = skill_paths 为 null（来源里有什么就用什么）；限定 = 一份明确清单。 */
   const [limitScope, setLimitScope] = useState(initialPaths !== null && initialPaths.length > 0);
@@ -68,6 +70,13 @@ export function SkillCollectionFormDialog({
       setError("本地目录要填绝对路径或以 ~/ 开头");
       return;
     }
+    const rulesRel = rulesPath.trim().replace(/^\.\//, "");
+    if (rulesRel && (rulesRel.startsWith("/") || rulesRel.startsWith("~") || rulesRel.split("/").includes(".."))) {
+      setError("规则位置填集合里的相对路径，例如 rules 或 docs/CLAUDE.md");
+      return;
+    }
+    // 直接选了某个技能的 SKILL.md：来源就是它所在的那个技能文件夹
+    const localPath = sourcePath.trim().replace(/\/SKILL\.md$/i, "");
     const manual = manualText.split("\n").map((line) => line.trim()).filter(Boolean);
     const skillPaths = limitScope ? [...new Set([...selectedPaths, ...manual])] : [];
     if (limitScope && skillPaths.length === 0) {
@@ -79,7 +88,8 @@ export function SkillCollectionFormDialog({
     // 两种来源互斥：保存哪一种，另一种就显式清空，避免遗留字段让引擎拒绝。
     const owned: Record<string, unknown> = {
       url: sourceKind === "git" ? url.trim() : null,
-      source_path: sourceKind === "local" ? sourcePath.trim() : null,
+      source_path: sourceKind === "local" ? localPath : null,
+      rules_path: rulesRel || null,
       skill_paths: skillPaths.length ? skillPaths : null,
       agents: selectedAgents.length ? selectedAgents : null,
     };
@@ -129,10 +139,15 @@ export function SkillCollectionFormDialog({
             </div>
           ) : (
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">本机目录（助手目录里的链接直接指向它，内容仍由原处维护）</label>
-              <input value={sourcePath} onChange={(e) => setSourcePath(e.target.value)} data-testid="collection-source-path-input" className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs" placeholder="~/.some-tool/skills" />
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">本机位置：装着多个技能的目录，或直接是一个技能文件夹（里面有 SKILL.md）</label>
+              <input value={sourcePath} onChange={(e) => setSourcePath(e.target.value)} data-testid="collection-source-path-input" className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs" placeholder="~/.some-tool/skills 或 ~/my-skills/review" />
+              <p className="mt-1 text-[11px] text-muted-foreground">账号目录里的链接直接指向它，内容仍在原处维护。</p>
             </div>
           )}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">规则位置（可选）：集合里的子目录或某个 .md 文件，留空用 rules/</label>
+            <input value={rulesPath} onChange={(e) => setRulesPath(e.target.value)} data-testid="collection-rules-path-input" className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs" placeholder="rules" />
+          </div>
           <div>
             <span className="mb-1 block text-xs font-medium text-muted-foreground">用这个来源里的哪些技能</span>
             <div className="flex flex-col gap-1.5 text-xs">
