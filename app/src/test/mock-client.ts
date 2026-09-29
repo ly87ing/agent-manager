@@ -735,6 +735,13 @@ function demoEnvelopes(): Record<string, Envelope> {
 
 export function createMockEngineClient(options: { fresh?: boolean } = {}): EngineClient {
   const routes = demoEnvelopes();
+  if (options.fresh) {
+    // 全新机器：还没有任何技能集合，推荐来源都没添加，各账号目录里也还没有本工具的链接
+    const skills = routes["skills:status"].data as { elements: unknown[]; recommendations: Array<{ added: boolean }>; installed: unknown[] };
+    skills.elements = [];
+    skills.recommendations = skills.recommendations.map((item) => ({ ...item, added: false }));
+    skills.installed = [];
+  }
   const initialSecretVariables = ((routes["secrets:status"].data as { elements: Array<{ observed: { variables?: Array<{ placeholder?: string; env_key?: string; resolved?: boolean; stored?: boolean }> } }> })
     .elements[0]?.observed.variables ?? []);
   const externallyResolvedSecrets = new Set(
@@ -1469,6 +1476,19 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       if (command === "agents:preview-runtime") return previewRuntime(args);
       if (command === "agents:auth-status") {
         const only = args[args.indexOf("--only") + 1] ?? "";
+        // 全新机器：本机文件说明不了登录状态，点「确认」（--probe）才用官方命令查
+        if (options.fresh && !args.includes("--probe")) {
+          return makeEnvelope(
+            { element: only, state: "unknown", logged_in: null, method: null, account: null, third_party: false, mixed: false, reason: "本机登录记录里没有账号；需要时用官方命令确认" },
+            { command: "agents.auth-status" },
+          );
+        }
+        if (options.fresh) {
+          return makeEnvelope(
+            { element: only, state: "logged-in", logged_in: true, method: "claude.ai", account: { email: "YOUR_EMAIL@example.com", org: null, plan: "Max 5x" }, third_party: false, mixed: false, reason: null },
+            { command: "agents.auth-status" },
+          );
+        }
         return makeEnvelope(
           { element: only, state: "logged-out", logged_in: false, method: null, third_party: only.startsWith("profiles:"), mixed: false, reason: null },
           { command: "agents.auth-status" },
