@@ -118,6 +118,16 @@ pub fn collection_source_root(ctx: &Context, coll: &CollectionDef) -> PathBuf {
     }
 }
 
+/// 本地来源里某个技能的实际目录：按发现结果取（来源本身就是一个技能文件夹、或 skill_paths
+/// 指向更深的目录时都对得上），发现不到时退回「源根/技能名」。
+fn local_skill_dir(ctx: &Context, coll: &CollectionDef, skill: &str) -> PathBuf {
+    let root = collection_source_root(ctx, coll);
+    super::snapshot::discover_repo_skills(&root, &coll.raw)
+        .ok()
+        .and_then(|(found, _)| found.get(skill).cloned())
+        .unwrap_or_else(|| root.join(skill))
+}
+
 /// 期望链接目标（只读路径计算，不做存在性/快照校验，供 status 判定漂移）：
 /// 本地来源集合指向源目录下的同名 skill，git 集合指向内容快照目录。
 pub fn expected_link_path(
@@ -127,7 +137,7 @@ pub fn expected_link_path(
     version: Option<&str>,
 ) -> PathBuf {
     if is_local_source(coll) {
-        collection_source_root(ctx, coll).join(skill)
+        local_skill_dir(ctx, coll, skill)
     } else {
         ctx.data_dir
             .join("skill-versions")
@@ -148,7 +158,7 @@ pub fn expected_link_target(
         return super::snapshot::verify_skill_version(&ctx.data_dir, version);
     }
     let root = collection_source_root(ctx, coll);
-    let target = resolve_loose(&root.join(skill));
+    let target = resolve_loose(&local_skill_dir(ctx, coll, skill));
     if !is_path_within(&target, &root) {
         bail!("[{}/{}] 源路径越界，拒绝链接", coll.name, skill);
     }

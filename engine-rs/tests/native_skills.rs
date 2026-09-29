@@ -1832,6 +1832,68 @@ fn skills_extra_link_takeover_and_unlink() {
 
 // ---------- 本地来源集合（source_path 直链接管） ----------
 
+/// 用户直接指定到某个技能文件夹（里面就是 SKILL.md）或更深的子目录：链接指向那个文件夹本身，
+/// 不拼成「源根/技能名」。
+#[test]
+fn local_source_can_point_at_a_single_skill_folder_or_nested_path() {
+    let (root, context) = temp_ctx("skills-local-single");
+    let solo = context.home_dir.join("solo").join("gamma");
+    std::fs::create_dir_all(&solo).unwrap();
+    std::fs::write(solo.join("SKILL.md"), "# Gamma").unwrap();
+    let packs = context.home_dir.join("packs").join("team").join("delta");
+    std::fs::create_dir_all(&packs).unwrap();
+    std::fs::write(packs.join("SKILL.md"), "# Delta").unwrap();
+    std::fs::create_dir_all(context.home_dir.join(".claude").join("skills")).unwrap();
+    for (name, def) in [
+        ("gamma", r#"{"source_path":"~/solo/gamma"}"#),
+        (
+            "packs",
+            r#"{"source_path":"~/packs","skill_paths":["team/delta"]}"#,
+        ),
+    ] {
+        let key = format!("skills.repositories.{name}");
+        let set = execute(
+            &context,
+            &request(
+                "policy:set",
+                &["--layer", "local", "--key", &key, "--value", def],
+            ),
+        );
+        assert!(set.ok, "{:?}", set.errors);
+    }
+    for (only, expected) in [("gamma/gamma", &solo), ("packs/delta", &packs)] {
+        let add = execute(
+            &context,
+            &request(
+                "skills:apply",
+                &["--only", only, "--agent", "claude-code", "--action", "add"],
+            ),
+        );
+        assert!(add.ok, "{only}: {:?}", add.errors);
+        let name = only.rsplit('/').next().unwrap();
+        let link = context.home_dir.join(".claude").join("skills").join(name);
+        assert_eq!(
+            std::fs::read_link(&link).unwrap().canonicalize().unwrap(),
+            expected.canonicalize().unwrap(),
+            "{only}"
+        );
+    }
+    let status = execute(&context, &request("skills:status", &[]));
+    for id in ["skill:gamma/gamma", "skill:packs/delta"] {
+        let element = status.data["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|el| el["id"] == id)
+            .unwrap();
+        assert_eq!(
+            element["observed"]["agents"]["claude-code"]["state"], "linked",
+            "{id}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// 本地来源集合的端到端接管：登记外部源目录后，add 直接把助手目录里的链接指向源，
 /// 内容跟随外部更新；停用/移除只动链接，绝不触碰外部源。
 #[test]
