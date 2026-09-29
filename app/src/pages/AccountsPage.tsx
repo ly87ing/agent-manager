@@ -385,8 +385,9 @@ export default function AccountsPage({
     },
     {
       id: "source",
-      label: "添加技能来源",
-      hint: "推荐 agent-skills，也可以用自己的目录",
+      label: "添加技能来源（可选）",
+      hint: "推荐 agent-skills；不用也行，各账号里已有的技能照常用",
+      optional: true,
       done: !skillsQuery.data?.ok || (skillsQuery.data.data.elements ?? []).some(isCollection),
       action: onOpenSources ? { label: "去添加", onClick: onOpenSources } : undefined,
     },

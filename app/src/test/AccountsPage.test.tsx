@@ -367,6 +367,20 @@ describe("账号页", () => {
     expect(screen.queryByTestId("getting-started")).toBeNull();
   });
 
+  it("开始使用：技能来源可以不用，点「不用」就算这一步做完，不写任何配置", async () => {
+    localStorage.clear();
+    const r = routes();
+    r["skills:status"] = makeEnvelope({ domain: "skills", elements: [], recommendations: [] }, { command: "skills.status" });
+    const { calls } = renderWithEngine(<AccountsPage />, r);
+    await waitFor(() => expect(screen.getByTestId("start-step-login")).toHaveAttribute("data-done", "true"));
+    expect(screen.getByTestId("start-step-source")).toHaveTextContent("可选");
+    await userEvent.click(screen.getByTestId("start-skip-source"));
+    // 其余两步已做完：整张清单收起，下次也不再催
+    expect(screen.queryByTestId("getting-started")).toBeNull();
+    expect(localStorage.getItem("agent-manager:getting-started-skipped")).toBe('["source"]');
+    expect(calls.some((call) => /:(apply|set)$/.test(call.command))).toBe(false);
+  });
+
   it("几步都做完时不显示开始使用", async () => {
     localStorage.clear();
     const r = routes();
