@@ -20,7 +20,7 @@
 ### 非目标
 
 - 在主配置里切换第三方接入（交给 cc-switch 等工具或新建 API 账号）。
-- 读写登录凭据：登录只通过助手自己的 `/login` / `codex login`。
+- 读写登录凭据：登录只通过助手自己的 `/login` / `codex login`。为认出是哪个账号，只读取身份信息：Claude 的 `.claude.json` 登录记录，Codex `auth.json` 里 `id_token` 的邮箱与套餐；令牌取值一律不读、不存。
 - 助手软件的安装、升级、卸载。
 - 为 Agent Manager 另存一份生效配置：实际文件仍是唯一事实源。
 

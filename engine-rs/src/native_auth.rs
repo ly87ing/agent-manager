@@ -1,8 +1,10 @@
 //! 助手官方账号登录的只读判断。
 //!
 //! 只经官方 CLI 的状态命令（`claude auth status` / `codex login status`）和官方文档说明的
-//! 登录记录判断，不读取任何凭据内容、不返回令牌、不写文件。为让用户分得清是哪个账号，Claude
-//! 会带出登录记录里的邮箱、组织名与订阅档位（只返回给界面显示，不入库、不进审计与日志）。认证修改只由用户在终端
+//! 登录记录判断，不读取任何凭据内容、不返回令牌、不写文件。为让用户分得清是哪个账号，会带出
+//! 账号标识（只返回给界面显示，不入库、不进审计与日志，全程只读本机文件、不联网）：Claude 取
+//! `.claude.json` 登录记录里的邮箱、组织名与订阅档位；Codex 取 `auth.json` 里 `id_token` 的邮箱
+//! 与套餐——同一文件里的访问令牌、刷新令牌与 API key 解析时跳过，取值不进任何内存结构。认证修改只由用户在终端
 //! 亲自执行官方命令完成，本工具从不代为登录或退出。
 
 use serde_json::{json, Value};
@@ -142,6 +144,83 @@ impl AccountLabel {
         };
         (label != AccountLabel::default()).then_some(label)
     }
+}
+
+/// Codex `auth.json` 里只取 `tokens.id_token`；其余字段（`access_token`、`refresh_token`、
+/// `OPENAI_API_KEY` 等）由 serde 按未知字段跳过，取值不保留。
+#[derive(serde::Deserialize)]
+struct CodexAuthFile {
+    #[serde(default)]
+    tokens: Option<CodexAuthTokens>,
+}
+
+#[derive(serde::Deserialize)]
+struct CodexAuthTokens {
+    #[serde(default)]
+    id_token: Option<String>,
+}
+
+/// JWT 载荷用的 base64url（无填充）解码；只解码 `id_token` 的中段，不校验签名（只用于显示）。
+fn base64url_decode(text: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len() * 3 / 4);
+    let (mut buffer, mut bits) = (0u32, 0u32);
+    for byte in text.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'-' | b'+' => 62,
+            b'_' | b'/' => 63,
+            b'=' => break,
+            _ => return None,
+        };
+        buffer = (buffer << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+            buffer &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
+}
+
+fn chatgpt_plan_label(plan: &str) -> String {
+    match plan {
+        "prolite" => "Pro Lite".to_string(),
+        other => capitalize(other),
+    }
+}
+
+/// `<CODEX_HOME>/auth.json` 的账号标识；文件不存在（例如登录存在钥匙串里）或看不懂时为 None。
+fn codex_account(codex_home: &Path) -> Option<AccountLabel> {
+    let bytes = std::fs::read(codex_home.join("auth.json")).ok()?;
+    if bytes.len() > 1024 * 1024 {
+        return None;
+    }
+    let id_token = serde_json::from_slice::<CodexAuthFile>(&bytes)
+        .ok()?
+        .tokens?
+        .id_token?;
+    let claims: Value =
+        serde_json::from_slice(&base64url_decode(id_token.split('.').nth(1)?)?).ok()?;
+    let text = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    };
+    let label = AccountLabel {
+        email: text(claims.get("email")),
+        org: None,
+        plan: text(
+            claims
+                .get("https://api.openai.com/auth")
+                .and_then(|auth| auth.get("chatgpt_plan_type")),
+        )
+        .map(|plan| chatgpt_plan_label(&plan)),
+    };
+    (label != AccountLabel::default()).then_some(label)
 }
 
 fn capitalize(word: &str) -> String {
@@ -323,7 +402,7 @@ pub(crate) fn official_status(
             let codex_home = config_dir.map_or_else(|| home_dir.join(".codex"), Path::to_path_buf);
             command
                 .args(["login", "status"])
-                .env("CODEX_HOME", codex_home);
+                .env("CODEX_HOME", &codex_home);
             for name in CODEX_PROBE_ENV_REMOVE {
                 command.env_remove(name);
             }
@@ -345,7 +424,9 @@ pub(crate) fn official_status(
                     Ok(LoginStatus {
                         logged_in: true,
                         method: Some(method),
-                        account: None,
+                        account: (method == "chatgpt")
+                            .then(|| codex_account(&codex_home))
+                            .flatten(),
                     })
                 }
                 Some((1, stdout, stderr))
@@ -1070,6 +1151,65 @@ mod tests {
         assert_eq!(account.org.as_deref(), Some("YOUR_ORG"));
         assert_eq!(account.plan.as_deref(), Some("Max 20x"));
         assert!(!format!("{account:?}").contains("sk-ant"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn base64url(bytes: &[u8]) -> String {
+        const TABLE: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+        let mut out = String::new();
+        for chunk in bytes.chunks(3) {
+            let n = chunk.iter().fold(0u32, |acc, b| (acc << 8) | u32::from(*b))
+                << (8 * (3 - chunk.len()));
+            for i in 0..=chunk.len() {
+                out.push(TABLE[((n >> (18 - 6 * i)) & 63) as usize] as char);
+            }
+        }
+        out
+    }
+
+    /// Codex 账号标识只取 id_token 里的邮箱与套餐；访问令牌、刷新令牌与 API key 的取值不进结果。
+    #[test]
+    fn codex_account_reads_only_the_id_token_claims() {
+        let dir = std::env::temp_dir().join(format!("am-auth-codex-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let payload = json!({
+            "email": "YOUR_EMAIL@example.com",
+            "https://api.openai.com/auth": {"chatgpt_plan_type": "prolite", "chatgpt_account_id": "a"}
+        });
+        let id_token = format!(
+            "{}.{}.sig",
+            base64url(br#"{"alg":"RS256"}"#),
+            base64url(payload.to_string().as_bytes())
+        );
+        std::fs::write(
+            dir.join("auth.json"),
+            json!({
+                "auth_mode": "chatgpt",
+                "OPENAI_API_KEY": "sk-proj-SECRET_KEY",
+                "tokens": {"id_token": id_token, "access_token": "SECRET_ACCESS", "refresh_token": "SECRET_REFRESH", "account_id": "a"}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let account = codex_account(&dir).unwrap();
+        assert_eq!(account.email.as_deref(), Some("YOUR_EMAIL@example.com"));
+        assert_eq!(account.plan.as_deref(), Some("Pro Lite"));
+        let shown = format!("{account:?}");
+        for secret in ["SECRET_ACCESS", "SECRET_REFRESH", "SECRET_KEY"] {
+            assert!(!shown.contains(secret), "{shown}");
+        }
+
+        // 登录存在钥匙串里（没有 auth.json）或内容看不懂：认不出，不报错
+        std::fs::write(
+            dir.join("auth.json"),
+            r#"{"tokens":{"id_token":"not-a-jwt"}}"#,
+        )
+        .unwrap();
+        assert_eq!(codex_account(&dir), None);
+        std::fs::remove_file(dir.join("auth.json")).unwrap();
+        assert_eq!(codex_account(&dir), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
