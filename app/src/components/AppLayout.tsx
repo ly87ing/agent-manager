@@ -1,4 +1,4 @@
-import { Moon, Sun, X, type LucideIcon } from "lucide-react";
+import { Moon, Search, Sun, X, type LucideIcon } from "lucide-react";
 import { useTheme } from "../lib/theme";
 import type { ReactNode } from "react";
 import { cn } from "../lib/utils";
@@ -21,6 +21,7 @@ export function AppLayout({
   onNavigate,
   updateVersion,
   onDismissUpdate,
+  onSearch,
   children,
 }: {
   nav: NavItem[];
@@ -32,6 +33,8 @@ export function AppLayout({
   updateVersion?: string | null;
   /** 按版本记住「不再提示」，直到出现更新版本再提示。 */
   onDismissUpdate?: () => void;
+  /** 打开全局搜索（与 ⌘K 相同）。 */
+  onSearch?: () => void;
   children: ReactNode;
 }) {
   const { resolvedTheme, setTheme } = useTheme();
@@ -97,6 +100,20 @@ export function AppLayout({
           <span className="mr-3 shrink-0 text-sm font-semibold tracking-tight">Agent Manager</span>
           {nav.map(renderItem)}
           <div className="ml-auto flex items-center gap-1">
+            {onSearch && (
+              <button
+                type="button"
+                data-testid="open-search"
+                aria-label="搜索（⌘K）"
+                onClick={onSearch}
+                title="搜索账号、技能、MCP、规则和操作"
+                className="mr-1 flex shrink-0 items-center gap-2 rounded-md border bg-background px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <Search className="h-3.5 w-3.5" aria-hidden />
+                搜索
+                <kbd className="rounded border bg-muted px-1 font-sans text-[10px]">⌘K</kbd>
+              </button>
+            )}
             <button
               type="button"
               data-testid="theme-toggle"

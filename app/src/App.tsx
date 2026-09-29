@@ -143,6 +143,11 @@ export default function App() {
       onNavigate={handleNavigate}
       updateVersion={update.availableVersion}
       onDismissUpdate={update.dismiss}
+      onSearch={() => {
+        setPaletteScope("all");
+        setPaletteTarget(null);
+        setPaletteOpen(true);
+      }}
     >
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
       <Suspense fallback={<PageLoading text="正在打开页面…" />}>

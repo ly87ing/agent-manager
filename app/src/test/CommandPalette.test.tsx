@@ -112,6 +112,12 @@ describe("命令面板", () => {
     expect(within(screen.getByRole("navigation")).getByRole("button", { name: "MCP" })).toHaveAttribute("aria-current", "page");
   });
 
+  it("顶栏的「搜索」按钮与 ⌘K 打开同一个面板", async () => {
+    await renderApp();
+    await userEvent.click(await screen.findByTestId("open-search"));
+    expect(await screen.findByTestId("command-palette")).toBeInTheDocument();
+  });
+
   it("⌘⇧K 只列账号；选中复制启动命令，没有启动命令的去账号页；全程不写配置", async () => {
     const writeText = mockClipboard();
     const { calls } = await renderApp();
