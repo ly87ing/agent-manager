@@ -686,7 +686,12 @@ fn apply_collection(
         "enable" | "disable" => {
             apply_coll_toggle(ctx, req, coll, meta, &bases, action == "enable")?
         }
-        "remove" => apply_coll_remove(ctx, req, coll, meta, &bases)?,
+        "remove" => {
+            apply_coll_remove(ctx, req, coll, meta, &bases)?;
+            if req.flag("--purge") {
+                purge_collection_leftovers(ctx, req, coll, meta)?;
+            }
+        }
         _ => bail!("不支持的集合动作: {}", action),
     }
     Ok(())
@@ -983,6 +988,75 @@ fn apply_coll_toggle(
     Ok(())
 }
 
+/// 移除集合后的收尾（`--purge`）：删掉本工具下载的仓库镜像（只删带所有权标记、位于
+/// repositories/ 下的；本机目录来源一律不碰），并清理再没有任何分配记录或账号链接用到的版本快照。
+fn purge_collection_leftovers(
+    ctx: &Context,
+    req: &Request,
+    coll: &CollectionDef,
+    meta: &DomainMetadata,
+) -> Result<()> {
+    let mut removed_repo = false;
+    if !is_local_source(coll) {
+        let base = repo_base_dir(ctx);
+        let repo = base.join(&coll.name);
+        if repo.join(".agent-manager-owned").is_file()
+            && repo.parent() == Some(base.as_path())
+            && !is_link_entry(&repo)
+        {
+            std::fs::remove_dir_all(&repo)
+                .with_context(|| format!("删除仓库镜像 {} 失败", repo.display()))?;
+            removed_repo = true;
+        }
+    }
+    // 仍在用的快照：任何分配记录里的版本，加上任何账号技能目录里链接指向的快照
+    let versions_dir = ctx.data_dir.join("skill-versions");
+    let mut in_use: std::collections::BTreeSet<String> = load_bindings_readonly(ctx)?
+        .values()
+        .map(|b| b.version.clone())
+        .collect();
+    for agent in meta.agents.values() {
+        let Ok(entries) = std::fs::read_dir(&agent.skills_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if let Ok(target) = std::fs::read_link(entry.path()) {
+                if let Ok(rest) = target.strip_prefix(&versions_dir) {
+                    if let Some(first) = rest.components().next() {
+                        in_use.insert(first.as_os_str().to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+    let mut removed_snapshots = 0usize;
+    if let Ok(entries) = std::fs::read_dir(&versions_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.')
+                || !super::paths::is_sha256_hex(&name)
+                || in_use.contains(&name)
+            {
+                continue;
+            }
+            if std::fs::remove_dir_all(entry.path()).is_ok() {
+                removed_snapshots += 1;
+            }
+        }
+    }
+    let mut conn = store::open_write(ctx)?;
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    store::record_operation(
+        &tx,
+        Some(&req.run_id),
+        "skills:purge",
+        Some(&coll.name),
+        Some(&json!({"removed_repo": removed_repo, "removed_snapshots": removed_snapshots})),
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
 fn apply_coll_remove(
     ctx: &Context,
     req: &Request,
@@ -1027,12 +1101,23 @@ fn apply_coll_remove(
             }
         }
         store::write_policy(&tx, &policy)?;
+        // 来源没了：跟随它的规则文件不再跟随（文件内容不动），规则页不再挂「来源已不在」
+        let unfollowed = crate::native_rules::sources::forget_rules_of_source(&tx, &coll.name)?;
+        // 连同收尾：这个集合的分配记录一并删掉，之后才能判定哪些快照没人再用
+        if req.flag("--purge") {
+            tx.execute(
+                "DELETE FROM skill_bindings WHERE collection = ?1",
+                [&coll.name],
+            )?;
+        }
         store::record_operation(
             &tx,
             Some(&req.run_id),
             "skills:remove",
             Some(&coll.name),
-            Some(&json!({"action": "remove"})),
+            Some(
+                &json!({"action": "remove", "purge": req.flag("--purge"), "unfollowed_rules": unfollowed}),
+            ),
         )?;
         tx.commit()?;
         Ok(())

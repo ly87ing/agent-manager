@@ -2920,3 +2920,116 @@ fn collection_lists_all_available_skills_regardless_of_skill_paths() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 移除来源并收尾（--purge）：各账号链接、分配记录、下载的仓库镜像与没人再用的快照都清掉；
+/// 其他集合仍在用的快照、用户自己的技能目录不动；跟随这个来源的规则不再跟随，规则文件不动。
+#[test]
+fn removing_a_collection_with_purge_cleans_up_only_what_it_owned() {
+    let (root, context) = temp_ctx("skills-purge");
+    let make_repo = |name: &str, skill: &str, body: &str| {
+        let repo = context.data_dir.join("repositories").join(name);
+        std::fs::create_dir_all(repo.join("skills").join(skill)).unwrap();
+        std::fs::write(repo.join("skills").join(skill).join("SKILL.md"), body).unwrap();
+        std::fs::write(repo.join(".agent-manager-owned"), "{}").unwrap();
+        repo
+    };
+    let gone_repo = make_repo("gone", "alpha", "# alpha\n");
+    make_repo("kept", "beta", "# beta\n");
+    set_collection(
+        &context,
+        "gone",
+        r#"{"url":"https://example.com/gone.git","skill_paths":["skills"]}"#,
+    );
+    set_collection(
+        &context,
+        "kept",
+        r#"{"url":"https://example.com/kept.git","skill_paths":["skills"]}"#,
+    );
+    assert!(skill_action(&context, "skill:gone/alpha", "add", "claude-code").ok);
+    assert!(skill_action(&context, "skill:kept/beta", "add", "claude-code").ok);
+    // 用户自己的技能目录
+    let own = context.home_dir.join(".claude/skills/mine");
+    std::fs::create_dir_all(&own).unwrap();
+    std::fs::write(own.join("SKILL.md"), "# mine\n").unwrap();
+    // 规则文件跟随 gone/core 与 kept/core 各一条
+    {
+        let conn = rusqlite::Connection::open(context.data_dir.join("native-manager.db")).unwrap();
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS rule_source_applied (target TEXT PRIMARY KEY NOT NULL, rule TEXT NOT NULL, digest TEXT NOT NULL, applied_at TEXT NOT NULL)").unwrap();
+        conn.execute("INSERT INTO rule_source_applied VALUES ('rules:claude_global','gone/core','d','t'), ('rules:codex_global','kept/core','d','t')", []).unwrap();
+    }
+    let versions = |ctx: &Context| {
+        std::fs::read_dir(ctx.data_dir.join("skill-versions"))
+            .unwrap()
+            .flatten()
+            .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+            .count()
+    };
+    assert_eq!(versions(&context), 2);
+
+    let removed = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &["--only", "skill:gone", "--action", "remove", "--purge"],
+        ),
+    );
+    assert!(removed.ok, "{:?}", removed.errors);
+
+    assert!(
+        !context.home_dir.join(".claude/skills/alpha").exists(),
+        "这个集合的链接移除了"
+    );
+    assert!(
+        context.home_dir.join(".claude/skills/beta").exists(),
+        "别的集合的链接不动"
+    );
+    assert_eq!(
+        std::fs::read_to_string(own.join("SKILL.md")).unwrap(),
+        "# mine\n",
+        "用户自己的技能目录不动"
+    );
+    assert!(!gone_repo.exists(), "下载的仓库镜像删掉了");
+    assert!(context.data_dir.join("repositories/kept").exists());
+    assert_eq!(versions(&context), 1, "只留下别的集合还在用的快照");
+    assert!(
+        binding_agents(&context, "gone", "alpha").is_empty(),
+        "分配记录删掉了"
+    );
+    let conn = rusqlite::Connection::open(context.data_dir.join("native-manager.db")).unwrap();
+    let follows: Vec<String> = conn
+        .prepare("SELECT rule FROM rule_source_applied ORDER BY rule")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(follows, ["kept/core"], "只解除跟随被移除来源的规则");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 不带 --purge 的移除：链接移除、规则不再跟随，但下载的仓库与快照都保留（可以再加回来）。
+#[test]
+fn removing_a_collection_without_purge_keeps_downloads() {
+    let (root, context) = temp_ctx("skills-remove-keep");
+    let repo = context.data_dir.join("repositories").join("gone");
+    std::fs::create_dir_all(repo.join("skills/alpha")).unwrap();
+    std::fs::write(repo.join("skills/alpha/SKILL.md"), "# alpha\n").unwrap();
+    std::fs::write(repo.join(".agent-manager-owned"), "{}").unwrap();
+    set_collection(
+        &context,
+        "gone",
+        r#"{"url":"https://example.com/gone.git","skill_paths":["skills"]}"#,
+    );
+    assert!(skill_action(&context, "skill:gone/alpha", "add", "claude-code").ok);
+    let removed = execute(
+        &context,
+        &request(
+            "skills:apply",
+            &["--only", "skill:gone", "--action", "remove"],
+        ),
+    );
+    assert!(removed.ok, "{:?}", removed.errors);
+    assert!(!context.home_dir.join(".claude/skills/alpha").exists());
+    assert!(repo.exists());
+    let _ = std::fs::remove_dir_all(root);
+}

@@ -195,10 +195,43 @@ fn element(
     })
 }
 
+/// 还登记着的规则来源名：技能集合与「我的规则来源」（带删除标记的不算）。
+fn defined_sources(policy: &Value) -> std::collections::BTreeSet<String> {
+    let live = |section: Option<&Value>| -> Vec<String> {
+        section
+            .and_then(Value::as_object)
+            .map(|map| {
+                map.iter()
+                    .filter(|(_, def)| def.get("_delete").and_then(Value::as_bool) != Some(true))
+                    .map(|(name, _)| name.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut names: std::collections::BTreeSet<String> =
+        live(policy.pointer("/skills/repositories"))
+            .into_iter()
+            .collect();
+    names.extend(live(policy.pointer("/rules/sources")));
+    names
+}
+
 pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
     let (policy, list) = load_snapshot(ctx)?;
     let rules = sources::load(ctx)?;
-    let applied = sources::load_applied(ctx)?;
+    // 跟随记录只对还登记着的来源有意义：来源（技能集合或我的规则来源）被移除后不再算跟随，
+    // 规则文件照常显示为自定义或与某条规则一致；来源还登记着、只是暂时读不到的，保留「来源已不在」。
+    let defined = defined_sources(&policy);
+    let applied: BTreeMap<String, Applied> = sources::load_applied(ctx)?
+        .into_iter()
+        .filter(|(_, applied)| {
+            applied
+                .rule
+                .split('/')
+                .next()
+                .is_some_and(|source| defined.contains(source))
+        })
+        .collect();
     let elements: Vec<Value> = model::resolve_targets(ctx, &policy)
         .iter()
         .map(|target| element(target, &list, &rules, &applied))

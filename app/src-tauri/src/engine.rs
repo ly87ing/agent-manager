@@ -263,6 +263,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--link", ArgValueKind::ElementId));
                 // 逐 skill add/remove 的显式接管通道（引擎侧再强制动作范围与非受管判定）
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
+                // 移除集合时一并清理下载的仓库与没人再用的快照
+                specs.push(("--purge", ArgValueKind::Flag));
             }
             // MCP 逐条写入：条目内容（--spec，JSON）、写入基准摘要（--base，
             // 复制覆盖同名时另带目标的 --to-base）、复制目标助手（--to）。

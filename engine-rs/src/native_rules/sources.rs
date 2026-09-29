@@ -233,6 +233,17 @@ pub(crate) fn record_applied(
     Ok(())
 }
 
+/// 来源（技能集合或我的规则来源）被移除：跟随它的规则文件不再跟随，文件内容不动。
+/// 返回解除跟随的规则文件数。
+pub(crate) fn forget_rules_of_source(conn: &Connection, source: &str) -> Result<usize> {
+    conn.execute_batch(APPLIED_DDL)?;
+    let prefix = format!("{source}/");
+    Ok(conn.execute(
+        "DELETE FROM rule_source_applied WHERE substr(rule, 1, length(?1)) = ?1",
+        [prefix],
+    )?)
+}
+
 /// 用别的内容写了这个规则文件：它不再跟随来源。
 pub(crate) fn forget_applied(conn: &Connection, target: &str) -> Result<()> {
     if load_applied_from(conn)?.contains_key(target) {

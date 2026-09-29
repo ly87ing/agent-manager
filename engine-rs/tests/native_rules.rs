@@ -1336,3 +1336,56 @@ fn corrupt_template_table_fails_closed_without_blocking_other_domains() {
     assert!(env.ok, "其他域写入不受影响: {:?}", env.errors);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// 来源停用时保留跟随（显示「来源已不在」，重新启用就接上）；来源被移除后不再算跟随，
+/// 规则文件内容不动，查询也不写库。
+#[test]
+fn removed_source_is_no_longer_followed_but_disabled_one_still_is() {
+    let (root, ctx) = temp_ctx("source-removed");
+    let body = "- 规则一\n";
+    add_local_source(&ctx, "mine", &[("core.md", body)]);
+    write_file(&claude_md(&ctx), "- 旧内容\n");
+    assert!(apply_source_rule(&ctx, "rules:claude_global", "mine/core").ok);
+    let follow = |ctx: &Context| {
+        element(&status(ctx), "rules:claude_global")["observed"]["source_follow"].clone()
+    };
+    assert_eq!(follow(&ctx)["rule"], "mine/core");
+
+    // 停用：还登记着，跟随保留、来源暂时读不到
+    let disabled = run(
+        &ctx,
+        "skills:apply",
+        &["--only", "skill:mine", "--action", "disable"],
+    );
+    assert!(disabled.ok, "{:?}", disabled.errors);
+    assert_eq!(follow(&ctx)["rule"], "mine/core");
+    assert_eq!(follow(&ctx)["current_revision"], Value::Null);
+
+    // 只删登记（例如移除「我的规则来源」走的 policy:set _delete）：不再算跟随
+    let removed = run(
+        &ctx,
+        "policy:set",
+        &[
+            "--layer",
+            "local",
+            "--key",
+            "skills.repositories.mine",
+            "--value",
+            r#"{"_delete":true}"#,
+        ],
+    );
+    assert!(removed.ok, "{:?}", removed.errors);
+    let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
+    assert_eq!(follow(&ctx), Value::Null);
+    assert_eq!(
+        std::fs::read(store::db_path(&ctx)).unwrap(),
+        db_before,
+        "status 零写"
+    );
+    assert_eq!(
+        std::fs::read_to_string(claude_md(&ctx)).unwrap(),
+        body,
+        "规则文件内容不动"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
