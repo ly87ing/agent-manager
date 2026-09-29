@@ -1389,3 +1389,44 @@ fn removed_source_is_no_longer_followed_but_disabled_one_still_is() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// 用户停用「我的规则来源」：它的规则不再出现，跟随保留（显示来源暂时读不到）；重新启用就接上。
+#[test]
+fn disabled_user_rule_source_hides_its_rules_but_keeps_following() {
+    let (root, ctx) = temp_ctx("user-source-disabled");
+    let notes = root.join("notes");
+    write_file(&notes.join("mine.md"), "- 我的规则\n");
+    let set = |key: &str, value: &str| {
+        let env = run(
+            &ctx,
+            "policy:set",
+            &["--layer", "local", "--key", key, "--value", value],
+        );
+        assert!(env.ok, "{:?}", env.errors);
+    };
+    set(
+        "rules.sources.notes",
+        &serde_json::json!({"path": notes.to_string_lossy()}).to_string(),
+    );
+    write_file(&claude_md(&ctx), "- 旧\n");
+    assert!(apply_source_rule(&ctx, "rules:claude_global", "notes/mine").ok);
+    let rule_ids = |ctx: &Context| {
+        status(ctx)["source_rules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(rule_ids(&ctx), ["notes/mine"]);
+
+    set("rules.sources.notes.enabled", "false");
+    assert!(rule_ids(&ctx).is_empty());
+    let follow = element(&status(&ctx), "rules:claude_global")["observed"]["source_follow"].clone();
+    assert_eq!(follow["rule"], "notes/mine");
+    assert_eq!(follow["current_revision"], Value::Null);
+
+    set("rules.sources.notes.enabled", "true");
+    assert_eq!(rule_ids(&ctx), ["notes/mine"]);
+    let _ = std::fs::remove_dir_all(&root);
+}

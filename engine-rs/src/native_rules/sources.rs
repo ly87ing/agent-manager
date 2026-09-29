@@ -113,7 +113,8 @@ fn read_rule(path: &Path, collection: &str, local: bool, root: &Path) -> Option<
 /// - 技能集合（git 镜像或本地目录）：默认读根下 `rules/`；集合定义里的 `rules_path` 可改指集合内
 ///   的某个子目录或某个 `.md` 文件（越出集合根的忽略）。
 /// - 用户自己指定的规则来源 `rules.sources.<名>.path`：本机的一个 `.md` 文件或一个目录，
-///   原地读取、改了即时生效，不复制、不入库。与集合同名的来源忽略，避免规则 id 撞车。
+///   原地读取、改了即时生效，不复制、不入库。与集合同名的来源忽略，避免规则 id 撞车；
+///   `enabled: false` 的是用户停用的，不读（跟随记录保留，重新启用即接上）。
 ///
 /// 镜像还没取回、路径不存在、不是普通文件、过大或非 UTF-8 的条目都跳过，不报错：来源规则只是可选的模板。
 pub(crate) fn load(ctx: &Context) -> Result<Vec<SourceRule>> {
@@ -150,7 +151,10 @@ pub(crate) fn load(ctx: &Context) -> Result<Vec<SourceRule>> {
         .and_then(Value::as_object)
     {
         for (name, def) in sources {
-            if def.get("_delete") == Some(&Value::Bool(true)) || meta.collections.contains_key(name)
+            // 删除标记、与集合同名、或被用户停用（enabled: false）的来源都不读
+            if def.get("_delete") == Some(&Value::Bool(true))
+                || def.get("enabled") == Some(&Value::Bool(false))
+                || meta.collections.contains_key(name)
             {
                 continue;
             }
