@@ -5,7 +5,7 @@ import { cn } from "../lib/utils";
 
 const TABS = [
   { id: "rules", label: "规则" },
-  { id: "hooks", label: "Hooks" },
+  { id: "hooks", label: "自动命令（Hooks）" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -42,7 +42,7 @@ export default function RulesHooksPage({ onNavigate }: { onNavigate?: (page: str
 
   return (
     <div className="space-y-4">
-      <div role="tablist" aria-label="规则与 Hooks" className="flex border-b">
+      <div role="tablist" aria-label="规则与自动命令" className="flex border-b">
         {TABS.map((tab, idx) => {
           const isSelected = activeTab === tab.id;
           return (
@@ -60,7 +60,7 @@ export default function RulesHooksPage({ onNavigate }: { onNavigate?: (page: str
               onClick={() => setActiveTab(tab.id)}
               onKeyDown={(e) => handleKeyDown(e, idx)}
               className={cn(
-                "border-b-2 px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+                "border-b-2 px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 isSelected
                   ? "border-primary font-semibold text-primary"
                   : "border-transparent text-muted-foreground hover:border-input hover:text-foreground",

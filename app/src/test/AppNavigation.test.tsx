@@ -302,10 +302,10 @@ describe("App 顶层导航", () => {
     expect(screen.getByText("Rules 域尚未实现")).toBeInTheDocument();
 
     // 切换至 Hooks Tab：不抛异常，展示 Hooks 错误
-    const hooksTab = screen.getByRole("tab", { name: "Hooks" });
+    const hooksTab = screen.getByRole("tab", { name: "自动命令（Hooks）" });
     await userEvent.click(hooksTab);
     expect(hooksTab).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByRole("heading", { name: "Hooks" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "自动命令（Hooks）" })).toBeInTheDocument();
     expect(screen.getByText("DOMAIN_NOT_IMPLEMENTED")).toBeInTheDocument();
     expect(screen.getByText("Hooks 域尚未实现")).toBeInTheDocument();
 

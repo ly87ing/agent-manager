@@ -93,7 +93,7 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     renderWithEngine(<RulesHooksPage />, routes());
 
     const rulesTab = screen.getByRole("tab", { name: "规则" });
-    const hooksTab = screen.getByRole("tab", { name: "Hooks" });
+    const hooksTab = screen.getByRole("tab", { name: "自动命令（Hooks）" });
 
     expect(rulesTab).toHaveAttribute("aria-selected", "true");
     expect(rulesTab).toHaveAttribute("tabindex", "0");
@@ -107,7 +107,7 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
   it("支持鼠标点击切换 Tab 与对应视图内容", async () => {
     renderWithEngine(<RulesHooksPage />, routes());
 
-    const hooksTab = screen.getByRole("tab", { name: "Hooks" });
+    const hooksTab = screen.getByRole("tab", { name: "自动命令（Hooks）" });
     await userEvent.click(hooksTab);
 
     expect(hooksTab).toHaveAttribute("aria-selected", "true");
@@ -116,7 +116,7 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     expect(screen.getByRole("tab", { name: "规则" })).toHaveAttribute("tabindex", "-1");
 
     // 渲染 Hooks 页内容
-    expect(await screen.findByRole("heading", { name: "Hooks" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "自动命令（Hooks）" })).toBeInTheDocument();
 
     // 切换回规则 Tab
     const rulesTab = screen.getByRole("tab", { name: "规则" });
@@ -129,7 +129,7 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     renderWithEngine(<RulesHooksPage />, routes());
 
     const rulesTab = screen.getByRole("tab", { name: "规则" });
-    const hooksTab = screen.getByRole("tab", { name: "Hooks" });
+    const hooksTab = screen.getByRole("tab", { name: "自动命令（Hooks）" });
 
     // 聚焦初始规则 Tab
     rulesTab.focus();
@@ -139,7 +139,7 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     await userEvent.keyboard("{ArrowRight}");
     expect(hooksTab).toHaveFocus();
     expect(hooksTab).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByRole("heading", { name: "Hooks" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "自动命令（Hooks）" })).toBeInTheDocument();
 
     // 按下左方向键 -> 切回 规则 Tab
     await userEvent.keyboard("{ArrowLeft}");
@@ -269,10 +269,10 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     expect(screen.getByText("Rules 域尚未实现")).toBeInTheDocument();
 
     // 切换到 Hooks Tab: 不抛异常，展示 DOMAIN_NOT_IMPLEMENTED 与对应错误消息
-    const hooksTab = screen.getByRole("tab", { name: "Hooks" });
+    const hooksTab = screen.getByRole("tab", { name: "自动命令（Hooks）" });
     await userEvent.click(hooksTab);
     expect(hooksTab).toHaveAttribute("aria-selected", "true");
-    expect(await screen.findByRole("heading", { name: "Hooks" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "自动命令（Hooks）" })).toBeInTheDocument();
     expect(screen.getByText("DOMAIN_NOT_IMPLEMENTED")).toBeInTheDocument();
     expect(screen.getByText("Hooks 域尚未实现")).toBeInTheDocument();
 
@@ -698,7 +698,7 @@ function nativeHooksRoutes(): Record<string, Envelope> {
 
 async function openHooksTab(routesMap: Record<string, Envelope>) {
   const view = renderWithEngine(<RulesHooksPage />, routesMap);
-  await userEvent.click(screen.getByRole("tab", { name: "Hooks" }));
+  await userEvent.click(screen.getByRole("tab", { name: "自动命令（Hooks）" }));
   await screen.findByTestId("hooks-target-hooks:claude");
   return view;
 }
@@ -706,8 +706,8 @@ async function openHooksTab(routesMap: Record<string, Envelope>) {
 describe("Hooks 页：实际配置为准", () => {
   it("编辑输入后显示完整目标文件，改动后只使用当前输入的预览", async () => {
     const { calls } = await openHooksTab(nativeHooksRoutes());
-    await userEvent.click(screen.getByRole("button", { name: "编辑 Claude Code Hooks" }));
-    const dialog = await screen.findByRole("dialog", { name: "编辑 Claude Code Hooks" });
+    await userEvent.click(screen.getByRole("button", { name: "编辑 Claude 主账号" }));
+    const dialog = await screen.findByRole("dialog", { name: "编辑 Claude 主账号" });
     expect(await within(dialog).findByTestId("hooks-preview-content")).toHaveTextContent('"theme":"dark"');
     const first = calls.find((call) => call.command === "hooks:preview")!;
     expect(first.args.slice(0, 5)).toEqual(["--only", "hooks:claude", "--base", CLAUDE_HOOKS_BASE, "--value"]);
@@ -731,11 +731,11 @@ describe("Hooks 页：实际配置为准", () => {
     expect(within(claude).getByText('{"url":"https://hooks.example.com/stop"}')).toBeInTheDocument();
     expect(within(screen.getByTestId("hooks-cleanup-hooks:claude")).getByText(OLD_BLOCK)).toBeInTheDocument();
     expect(within(screen.getByTestId("hooks-legacy-hooks:claude")).getByText("echo saved-old")).toBeInTheDocument();
-    expect(screen.getByText("旧版已保存的 hooks（未生效）")).toBeInTheDocument();
+    expect(screen.getByText("旧版存着、还没用上的自动命令")).toBeInTheDocument();
 
     const codex = screen.getByTestId("hooks-target-hooks:codex");
     expect(within(codex).getByText("还没有文件")).toBeInTheDocument();
-    expect(within(codex).getByRole("button", { name: "编辑 Codex Hooks" })).toBeInTheDocument();
+    expect(within(codex).getByRole("button", { name: "编辑 Codex 主账号" })).toBeInTheDocument();
 
     const blocked = screen.getByTestId("hooks-target-hooks:profile:cc-link");
     expect(within(blocked).getByText(/符号链接/)).toBeInTheDocument();
@@ -750,8 +750,8 @@ describe("Hooks 页：实际配置为准", () => {
 
   it("编辑：保存直接写回实际文件，带 --only --base --value，不走来源保存", async () => {
     const { calls } = await openHooksTab(nativeHooksRoutes());
-    await userEvent.click(screen.getByRole("button", { name: "编辑 Claude Code Hooks" }));
-    const dialog = await screen.findByRole("dialog", { name: "编辑 Claude Code Hooks" });
+    await userEvent.click(screen.getByRole("button", { name: "编辑 Claude 主账号" }));
+    const dialog = await screen.findByRole("dialog", { name: "编辑 Claude 主账号" });
     expect(within(dialog).getByTestId("hooks-command-1")).toHaveValue("./guard.sh");
     await userEvent.click(within(dialog).getByTestId("hooks-remove-0"));
     await userEvent.click(within(dialog).getByTestId("hooks-save"));
@@ -776,12 +776,12 @@ describe("Hooks 页：实际配置为准", () => {
       errors: [{ code: "HOOK_ERROR", element: null, message: "Claude Code Hooks 已在外部修改（与打开时读到的内容不同），没有写入；请刷新后重新操作" }],
     });
     await openHooksTab(routesMap);
-    await userEvent.click(screen.getByRole("button", { name: "编辑 Claude Code Hooks" }));
+    await userEvent.click(screen.getByRole("button", { name: "编辑 Claude 主账号" }));
     await userEvent.click(await screen.findByTestId("hooks-save"));
     const alert = await screen.findByTestId("hooks-save-error");
     expect(alert).toHaveTextContent("已在外部修改");
     expect(alert).toHaveTextContent("页面已刷新");
-    expect(screen.getByRole("dialog", { name: "编辑 Claude Code Hooks" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "编辑 Claude 主账号" })).toBeInTheDocument();
   });
 
   it("清理建议：确认后才 hooks:apply --cleanup，只针对这一条", async () => {
