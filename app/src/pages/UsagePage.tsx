@@ -6,7 +6,12 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { engineKeys, useEngineQuery } from "../lib/queries";
+import { AgentIcon } from "../components/AgentIcon";
+import { useAccountNames } from "../lib/useAccountNames";
 import {
+  byAccount,
+  dailySeries,
+  usageAccountKey,
   formatCost,
   filterUsage,
   groupUsage,
@@ -154,18 +159,74 @@ const RANGES: { days: number; label: string }[] = [
   { days: 0, label: "全部" },
 ];
 
-/** 助手一栏：主配置记作 claude / codex，独立环境记作 `claude:<实例>` / `codex:<实例>`。 */
-function agentLabel(agent: string): string {
-  if (agent === "claude" || agent === "claude-code") return "Claude";
-  if (agent === "codex") return "Codex";
-  const [kind, instance] = agent.split(":", 2);
-  if (instance && kind === "claude") return `Claude · ${instance}`;
-  if (instance && kind === "codex") return `Codex · ${instance}`;
-  return agent;
+/** 趋势图里区分账号的颜色（按用量从多到少依次取）。 */
+const SERIES_COLORS = ["hsl(var(--primary))", "hsl(var(--orange))", "hsl(var(--violet))", "hsl(var(--success))", "hsl(var(--rose))", "hsl(var(--info))"];
+
+/** 每日趋势：一天一根柱，按账号叠起来；悬停看当天各账号的数。 */
+function UsageTrend({
+  series,
+  agents,
+  colorOf,
+  labelOf,
+}: {
+  series: ReturnType<typeof dailySeries>;
+  agents: string[];
+  colorOf: (agent: string) => string;
+  labelOf: (agent: string) => string;
+}) {
+  const max = Math.max(1, ...series.map((point) => point.total));
+  const barGap = series.length > 31 ? 1 : 3;
+  return (
+    <section data-testid="usage-trend" className="rounded-lg border bg-card p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">每日用量</span>
+        <span>输入 + 输出 token</span>
+        <span className="ml-auto flex flex-wrap gap-3">
+          {agents.map((agent) => (
+            <span key={agent} className="inline-flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-sm" style={{ background: colorOf(agent) }} aria-hidden />
+              {labelOf(agent)}
+            </span>
+          ))}
+        </span>
+      </div>
+      <div className="flex h-32 items-end justify-around" style={{ gap: barGap }}>
+        {series.map((point) => (
+          <div
+            key={point.day}
+            data-testid={`usage-trend-${point.day}`}
+            title={`${point.day}：${shortTokens(point.total)}${agents
+              .filter((agent) => point.byAgent[agent])
+              .map((agent) => `\n${labelOf(agent)} ${shortTokens(point.byAgent[agent])}`)
+              .join("")}`}
+            className="flex h-full min-w-0 max-w-10 flex-1 flex-col-reverse overflow-hidden rounded-sm bg-muted/40"
+          >
+            {agents.map((agent) =>
+              point.byAgent[agent] ? (
+                <div key={agent} style={{ height: `${(point.byAgent[agent] / max) * 100}%`, background: colorOf(agent) }} />
+              ) : null,
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="mt-1.5 flex justify-between text-[11px] tabular-nums text-muted-foreground">
+        <span>{series[0]?.day.slice(5)}</span>
+        <span>{series[series.length - 1]?.day.slice(5)}</span>
+      </div>
+    </section>
+  );
 }
 
 export default function UsagePage() {
   const query = useEngineQuery<UsageData>("usage:status");
+  const nameOf = useAccountNames();
+  /** 账号全名：「Claude · 主号」「Claude · 工作」，与命令页一致。 */
+  const labelOf = (agent: string) => {
+    const { id, kind } = usageAccountKey(agent);
+    if (!kind) return agent;
+    const assistant = kind === "codex" ? "Codex" : "Claude";
+    return id === "claude-code" || id === "codex" ? `${assistant} · 主号` : `${assistant} · ${nameOf(id)}`;
+  };
   const queryClient = useQueryClient();
   const [days, setDays] = useState(7);
   const [agent, setAgent] = useState("");
@@ -202,6 +263,9 @@ export default function UsagePage() {
   const models = [...new Set(agentGroups.map((group) => group.model))].sort();
   const groups = filterUsage(agentGroups, "", model);
   const totals = totalsOf(groups);
+  const perAccount = byAccount(filterUsage(timeGroups, "", model));
+  const colorOf = (item: string) => SERIES_COLORS[Math.max(0, perAccount.findIndex((row) => row.agent === item)) % SERIES_COLORS.length];
+  const series = dailySeries(groups, days);
   const filtersActive = Boolean(agent || model);
   const lastScan = data.last_scan_at ? new Date(data.last_scan_at).toLocaleString("zh-CN", { hour12: false }) : null;
 
@@ -209,7 +273,7 @@ export default function UsagePage() {
     <div className="space-y-4">
       <PageHeader
         title="用量"
-        description="按助手与模型累加本机会话记录里的 token。数字来自本机文件，不联网。"
+        description="按账号与模型累加本机会话记录里的 token。数字来自本机文件，不联网。"
       />
       {query.data.errors.length > 0 && <ErrorPanel title="用量读取失败" errors={query.data.errors} />}
 
@@ -236,10 +300,10 @@ export default function UsagePage() {
           ))}
         </div>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          助手
+          账号
           <select
             data-testid="usage-agent-filter"
-            aria-label="按助手筛选用量"
+            aria-label="按账号筛选用量"
             value={agent}
             onChange={(event) => {
               setAgent(event.target.value);
@@ -247,8 +311,8 @@ export default function UsagePage() {
             }}
             className="rounded-md border border-input bg-card px-2 py-1.5 text-xs text-foreground"
           >
-            <option value="">全部助手</option>
-            {agents.map((item) => <option key={item} value={item}>{agentLabel(item)}</option>)}
+            <option value="">全部账号</option>
+            {agents.map((item) => <option key={item} value={item}>{labelOf(item)}</option>)}
           </select>
         </label>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -335,12 +399,58 @@ export default function UsagePage() {
         )}
       </section>
 
+      {groups.length > 0 && days !== 1 && (
+        <UsageTrend series={series} agents={perAccount.map((row) => row.agent).filter((item) => !agent || item === agent)} colorOf={colorOf} labelOf={labelOf} />
+      )}
+
+      {perAccount.length > 1 && !agent && (
+        <section data-testid="usage-by-account" className="rounded-lg border bg-card p-5 shadow-sm">
+          <h3 className="mb-2 text-sm font-medium">按账号</h3>
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b text-xs text-muted-foreground">
+                <th className="py-2 pr-4 font-medium">账号</th>
+                <th className="py-2 pr-4 text-right font-medium">输入</th>
+                <th className="py-2 pr-4 text-right font-medium">输出</th>
+                <th className="py-2 pr-4 text-right font-medium">请求</th>
+                <th className="py-2 text-right font-medium">折算</th>
+              </tr>
+            </thead>
+            <tbody>
+              {perAccount.map((row) => (
+                <tr key={row.agent} data-testid={`usage-account-${row.agent}`} className="border-b last:border-0">
+                  <td className="py-1.5 pr-4 text-sm">
+                    <button type="button" onClick={() => setAgent(row.agent)} className="inline-flex items-center gap-1.5 hover:text-primary" title="只看这个账号">
+                      <span className="h-2 w-2 rounded-sm" style={{ background: colorOf(row.agent) }} aria-hidden />
+                      <AgentIcon kind={usageAccountKey(row.agent).kind} />
+                      {labelOf(row.agent)}
+                    </button>
+                  </td>
+                  <td className="py-1.5 pr-4 text-right text-xs tabular-nums">{shortTokens(row.totals.input)}</td>
+                  <td className="py-1.5 pr-4 text-right text-xs tabular-nums">{shortTokens(row.totals.output)}</td>
+                  <td className="py-1.5 pr-4 text-right text-xs tabular-nums text-muted-foreground">{row.totals.requests}</td>
+                  <td
+                    className={cn("py-1.5 text-right text-xs tabular-nums", row.totals.unpricedModels.length > 0 && "text-muted-foreground")}
+                    title={row.totals.unpricedModels.length ? `没有单价、没算进去：${row.totals.unpricedModels.join("、")}` : undefined}
+                  >
+                    {/* 全部没有单价就不报；部分没有单价报下限，不拿 0 冒充 */}
+                    {row.totals.unpricedModels.length && row.totals.cost === 0
+                      ? "—"
+                      : `${row.totals.unpricedModels.length ? "≥" : ""}${formatCost(row.totals.cost)}`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
+
       {groups.length === 0 ? (
         <EmptyState
           testId="usage-empty"
           title={filtersActive ? "当前筛选没有用量记录" : "这段时间没有用量记录"}
           description={filtersActive
-            ? "换一个助手或模型，或清除筛选查看这段时间的全部记录。"
+            ? "换一个账号或模型，或清除筛选查看这段时间的全部记录。"
             : "换个时间范围，或点「重新统计」读一次会话记录。刚用过助手的话，它要写完这一轮才会出现在这里。"}
           actions={filtersActive ? (
             <button
@@ -376,7 +486,7 @@ export default function UsagePage() {
                   <td className="py-1.5 pr-4 text-xs text-muted-foreground">{group.day}</td>
                   <td className="py-1.5 pr-4 font-mono text-xs text-foreground">
                     {group.model}
-                    <span className="ml-1.5 text-muted-foreground">{group.agent}</span>
+                    <span className="ml-1.5 font-sans text-muted-foreground">{labelOf(group.agent)}</span>
                   </td>
                   <td className="py-1.5 pr-4 text-right text-xs tabular-nums">{shortTokens(group.input)}</td>
                   <td className="py-1.5 pr-4 text-right text-xs tabular-nums">{shortTokens(group.output)}</td>

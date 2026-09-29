@@ -182,3 +182,48 @@ export function formatCost(value: number | null): string {
   if (value > 0 && value < 0.01) return "<$0.01";
   return `$${value.toFixed(2)}`;
 }
+
+/**
+ * 用量记录里「助手」一栏其实就是账号：主账号记作 claude / codex，独立账号记作 `claude:<实例>`。
+ * 换成账号页、技能页用的账号键（主账号是助手 id，独立账号是实例 id）。
+ */
+export function usageAccountKey(agent: string): { id: string; kind: "claude" | "codex" | null } {
+  if (agent === "claude" || agent === "claude-code") return { id: "claude-code", kind: "claude" };
+  if (agent === "codex") return { id: "codex", kind: "codex" };
+  const [kind, instance] = agent.split(":", 2);
+  if (instance && (kind === "claude" || kind === "codex")) return { id: instance, kind };
+  return { id: agent, kind: null };
+}
+
+/** 按账号合计（同一账号的各模型、各天加在一起），用量多的在前。 */
+export function byAccount(groups: UsageGroup[]): { agent: string; totals: ReturnType<typeof totalsOf> }[] {
+  const agents = [...new Set(groups.map((group) => group.agent))];
+  return agents
+    .map((agent) => ({ agent, totals: totalsOf(groups.filter((group) => group.agent === agent)) }))
+    .sort((a, b) => b.totals.input + b.totals.output - (a.totals.input + a.totals.output));
+}
+
+/**
+ * 每日趋势：最近 days 天（0 = 有记录的全部，最多 60 天）每天每个账号的 token（输入 + 输出），
+ * 没有记录的日子补 0，日期从早到晚。
+ */
+export function dailySeries(
+  groups: UsageGroup[],
+  days: number,
+  today = new Date(),
+): { day: string; byAgent: Record<string, number>; total: number }[] {
+  const recorded = [...new Set(groups.map((group) => group.day))].sort();
+  const span = days > 0 ? days : Math.min(60, recorded.length ? Math.round((Date.parse(localDay(today.toISOString())) - Date.parse(recorded[0])) / 86_400_000) + 1 : 0);
+  const out: { day: string; byAgent: Record<string, number>; total: number }[] = [];
+  for (let offset = span - 1; offset >= 0; offset -= 1) {
+    const date = new Date(today);
+    date.setDate(date.getDate() - offset);
+    const day = localDay(date.toISOString());
+    const byAgent: Record<string, number> = {};
+    for (const group of groups.filter((item) => item.day === day)) {
+      byAgent[group.agent] = (byAgent[group.agent] ?? 0) + group.input + group.output;
+    }
+    out.push({ day, byAgent, total: Object.values(byAgent).reduce((sum, value) => sum + value, 0) });
+  }
+  return out;
+}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
 import UsagePage from "../pages/UsagePage";
 import { makeEnvelope } from "./fixtures";
-import { renderWithEngine, screen, userEvent } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
 function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelope> {
@@ -32,6 +32,23 @@ describe("用量页", () => {
     await waitFor(() => expect(screen.getByTestId("usage-total-cost")).toHaveTextContent("$10.00"));
     const unpriced = screen.getByTestId("usage-unpriced");
     expect(unpriced).toHaveTextContent("gpt-5.6-sol");
+  });
+
+  it("按账号：主账号与独立账号分开合计，点一个账号只看它；趋势图按账号叠起来", async () => {
+    const hour = (h: string) => `${new Date().toISOString().slice(0, 10)}T${h}:00:00Z`;
+    const base = routes();
+    const data = JSON.parse(JSON.stringify(base["usage:status"].data));
+    data.rows.push({ hour: hour("04"), agent: "claude:work", model: "claude-opus-5", input: 2_000_000, output: 100_000, cache_write: 0, cache_read: 0, requests: 5 });
+    renderWithEngine(<UsagePage />, { ...base, "usage:status": makeEnvelope(data, { command: "usage.status" }) });
+    const table = await screen.findByTestId("usage-by-account");
+    // 用量多的在前：work 2.1M > 主号 1.2M > Codex 0.51M
+    const rows = within(table).getAllByTestId(/^usage-account-/).map((row) => row.getAttribute("data-testid"));
+    expect(rows).toEqual(["usage-account-claude:work", "usage-account-claude", "usage-account-codex"]);
+    expect(screen.getByTestId("usage-account-claude")).toHaveTextContent("Claude · 主号");
+    expect(screen.getByTestId("usage-trend")).toHaveTextContent("Claude · 主号");
+    await userEvent.click(within(screen.getByTestId("usage-account-claude:work")).getByRole("button"));
+    expect(screen.getByTestId("usage-agent-filter")).toHaveValue("claude:work");
+    expect(screen.queryByTestId("usage-by-account")).toBeNull();
   });
 
   it("说清楚这是按 API 价折算，不是账单", async () => {

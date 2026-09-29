@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  byAccount,
   costOf,
+  dailySeries,
+  usageAccountKey,
   formatCost,
   filterUsage,
   groupUsage,
@@ -106,5 +109,28 @@ describe("用量口径", () => {
     expect(formatCost(0)).toBe("$0.00");
     expect(formatCost(0.0004)).toBe("<$0.01");
     expect(formatCost(12.345)).toBe("$12.35");
+  });
+});
+
+describe("按账号的用量", () => {
+  const g = (day: string, agent: string, input: number, output: number) =>
+    ({ day, agent, model: "m", input, output, cacheWrite: 0, cacheRead: 0, requests: 1, cost: null }) as const;
+
+  it("记录里的助手一栏换成账号键：主账号是助手 id，独立账号是实例 id", () => {
+    expect(usageAccountKey("claude")).toEqual({ id: "claude-code", kind: "claude" });
+    expect(usageAccountKey("codex")).toEqual({ id: "codex", kind: "codex" });
+    expect(usageAccountKey("claude:work")).toEqual({ id: "work", kind: "claude" });
+    expect(usageAccountKey("other")).toEqual({ id: "other", kind: null });
+  });
+
+  it("按账号合计，用量多的在前", () => {
+    const rows = byAccount([g("2026-09-28", "claude", 10, 5), g("2026-09-27", "claude:work", 100, 50), g("2026-09-28", "claude:work", 1, 1)]);
+    expect(rows.map((row) => [row.agent, row.totals.input, row.totals.output])).toEqual([["claude:work", 101, 51], ["claude", 10, 5]]);
+  });
+
+  it("每日趋势补齐没有记录的日子，按账号拆开，从早到晚", () => {
+    const series = dailySeries([g("2026-09-28", "claude", 10, 5), g("2026-09-26", "claude:work", 3, 1)], 3, new Date("2026-09-28T12:00:00"));
+    expect(series.map((point) => [point.day, point.total])).toEqual([["2026-09-26", 4], ["2026-09-27", 0], ["2026-09-28", 15]]);
+    expect(series[0].byAgent).toEqual({ "claude:work": 4 });
   });
 });
