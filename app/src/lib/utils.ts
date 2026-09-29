@@ -27,3 +27,19 @@ export function formatCheckedAt(iso: string | null): string {
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleString("zh-CN", { hour12: false });
 }
+
+/** 引擎回读的 JSON 对象键顺序可能与表单不同，按值比较完整字段。 */
+export function sameJson(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length
+      && left.every((item, index) => sameJson(item, right[index]));
+  }
+  if (left && right && typeof left === "object" && typeof right === "object") {
+    const a = left as Record<string, unknown>;
+    const b = right as Record<string, unknown>;
+    return Object.keys(a).length === Object.keys(b).length
+      && Object.keys(a).every((key) => Object.prototype.hasOwnProperty.call(b, key) && sameJson(a[key], b[key]));
+  }
+  return false;
+}

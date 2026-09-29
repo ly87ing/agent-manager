@@ -31,6 +31,8 @@ export interface Account {
   mainHasThirdParty: boolean;
   /** 登记本身按现有规则读不了。 */
   blockedReason: string | null;
+  /** 目录配置文件的写入基准（profiles:status observed.base）；主账号为 null。 */
+  profileBase: string | null;
 }
 
 export interface AgentAccounts {
@@ -85,6 +87,7 @@ export function buildAccounts(
         drifted: false,
         mainHasThirdParty: Boolean(observed.current_config?.current) && !isOfficial(observed.current_config?.current ?? null),
         blockedReason: null,
+        profileBase: null,
       };
       const others = profileElements
         .filter((profile) => (profile.spec as unknown as ProfileSpec).base_agent === agentId)
@@ -112,6 +115,7 @@ export function buildAccounts(
             drifted: profile.state === "drifted",
             mainHasThirdParty: false,
             blockedReason: pObserved.blocked_reason ?? null,
+            profileBase: pObserved.base ?? null,
           };
         })
         .sort((a, b) => a.name.localeCompare(b.name));

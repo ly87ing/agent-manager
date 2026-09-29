@@ -70,7 +70,7 @@ describe("App 顶层导航", () => {
     expect(await screen.findByRole("tab", { name: "规则" })).toBeInTheDocument();
   }, 15000);
 
-  it("从实例卡片点击「管理技能」跳转到技能页并预选对应实例，点击侧栏「技能」重置为全部助手", async () => {
+  it("从账号行进入技能页并预选对应账号，点击顶栏「技能」重置为全部助手", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -174,12 +174,10 @@ describe("App 顶层导航", () => {
 
     renderWithEngine(<App />, customRoutes);
 
-    // 账号页的「编辑与管理」进入管理页（P2 前的过渡入口），再点实例的「管理技能」
-    const row = await screen.findByTestId("account-row-agents:claude-code");
+    // 账号行的「技能」直达技能页，并预选这个账号
+    const row = await screen.findByTestId("account-row-profiles:cc-work");
     await userEvent.click(within(row).getByRole("button", { name: "更多操作" }));
-    await userEvent.click(within(row).getByRole("menuitem", { name: "编辑与管理" }));
-    const manageBtn = await screen.findByTestId("profile-skills-cc-work");
-    await userEvent.click(manageBtn);
+    await userEvent.click(within(row).getByRole("menuitem", { name: "技能" }));
 
     // 跳转到技能页，并且助手筛选预选为 cc-work
     const nav = screen.getByRole("navigation");

@@ -15,6 +15,7 @@ import {
 import { ConnectionWorkbench } from "../components/ConnectionWorkbench";
 import { ConnectionImportDialog } from "../components/ConnectionImportDialog";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
+import { sameJson } from "../lib/utils";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import type { EngineElement, Envelope, PolicyData, StatusData } from "../lib/contract";
@@ -85,22 +86,6 @@ function overwriteDescription(element: EngineElement): string {
   return blanked.length > 0
     ? `${base}注意：配置文件里自己设的 ${blanked.join("、")} 定义里没有，会被置空；要保留请先编辑定义把它们加进去。`
     : base;
-}
-
-/** 引擎回读的 JSON 对象键顺序可能与表单不同，按值比较完整字段。 */
-function sameJson(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true;
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) && Array.isArray(right) && left.length === right.length
-      && left.every((item, index) => sameJson(item, right[index]));
-  }
-  if (left && right && typeof left === "object" && typeof right === "object") {
-    const a = left as Record<string, unknown>;
-    const b = right as Record<string, unknown>;
-    return Object.keys(a).length === Object.keys(b).length
-      && Object.keys(a).every((key) => Object.prototype.hasOwnProperty.call(b, key) && sameJson(a[key], b[key]));
-  }
-  return false;
 }
 
 export default function AgentsPage({

@@ -143,7 +143,15 @@ export default function App() {
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
       <Suspense fallback={<PageLoading text="正在打开页面…" />}>
         <div key={activePage} className="animate-page-in">
-          {activePage === "accounts" && <AccountsPage onManage={() => setActivePage("agents")} />}
+          {activePage === "accounts" && (
+            <AccountsPage
+              onManageSkills={(accountId) => {
+                setSelectedSkillAgent(accountId);
+                setSkillSearch(null);
+                setActivePage("skills");
+              }}
+            />
+          )}
           {activePage === "dashboard" && <DashboardPage onNavigate={handleNavigate} />}
           {activePage === "agents" && (
             <AgentsPage

@@ -2,15 +2,18 @@ import { useQueries } from "@tanstack/react-query";
 import { Copy, LogIn, MoreHorizontal, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { AccountDrawer, type DrawerMode } from "../components/AccountDrawer";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { PageError, PageLoading } from "../components/PageState";
 import { buildAccounts, type Account, type AgentAccounts } from "../lib/accounts";
 import { isStale, isWindowExpired, usageTone, windowLabel } from "../lib/agentUsage";
 import type { StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
+import { secretSourceOf } from "../lib/secretSource";
+import { useAccountOps } from "../lib/useAccountOps";
 import type { AgentUsage, OfficialAuthStatus } from "../lib/observed";
 import { authTerminalCommand } from "../lib/profileDefinition";
 import { engineKeys, useEngineQuery } from "../lib/queries";
-import { useAliasSource } from "../lib/useAliasSource";
 import { cn } from "../lib/utils";
 
 const TONE_BAR = { ok: "bg-success", warn: "bg-warning", critical: "bg-destructive" } as const;
@@ -94,16 +97,24 @@ function RowMenu({ items }: { items: { label: string; onSelect: () => void; test
   );
 }
 
+interface RowActions {
+  onEdit: () => void;
+  onRemove: () => void;
+  onAddLaunch: () => void;
+  onAdopt: () => void;
+  onManageSkills: () => void;
+}
+
 function AccountRow({
   account,
   group,
   auth,
-  onManage,
+  actions,
 }: {
   account: Account;
   group: AgentAccounts;
   auth: OfficialAuthStatus | "pending" | null;
-  onManage: () => void;
+  actions: RowActions;
 }) {
   const id = account.elementId;
   const loginCommand = authTerminalCommand(group.kind, group.bin, "login", account.isMain ? undefined : account.configDir);
@@ -177,23 +188,36 @@ function AccountRow({
       )}
       <RowMenu
         items={[
+          ...(!account.isMain ? [{ label: "编辑", testId: `account-menu-edit-${id}`, onSelect: actions.onEdit }] : []),
+          ...(!account.isMain && !account.command
+            ? [{ label: "写入启动命令", testId: `account-menu-launch-${id}`, onSelect: actions.onAddLaunch }]
+            : []),
+          ...(account.drifted && account.profileBase
+            ? [{ label: "采用目录里的内容", testId: `account-menu-adopt-${id}`, onSelect: actions.onAdopt }]
+            : []),
           ...(account.type === "official"
             ? [{ label: "复制登录命令", testId: `account-menu-login-${id}`, onSelect: () => void copyText(loginCommand, "已复制登录命令") }]
             : []),
+          { label: "技能", testId: `account-menu-skills-${id}`, onSelect: actions.onManageSkills },
           { label: "复制目录路径", testId: `account-menu-dir-${id}`, onSelect: () => void copyText(account.configDir, "已复制目录路径") },
-          { label: "编辑与管理", testId: `account-menu-manage-${id}`, onSelect: onManage },
+          ...(!account.isMain ? [{ label: "移除", testId: `account-menu-remove-${id}`, onSelect: actions.onRemove }] : []),
         ]}
       />
     </li>
   );
 }
 
-/** 账号页：每个助手的全部账号并列，一行一个；编辑与新建在 P2 改为抽屉，暂时进入旧管理页。 */
-export default function AccountsPage({ onManage }: { onManage: () => void }) {
+/** 账号页：每个助手的全部账号并列，一行一个；添加与编辑在右侧抽屉里。 */
+export default function AccountsPage({ onManageSkills }: { onManageSkills?: (accountId: string) => void }) {
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
   const profilesQuery = useEngineQuery<StatusData>("profiles:status");
-  const aliasSource = useAliasSource();
+  const secretsQuery = useEngineQuery<StatusData>("secrets:status");
+  const ops = useAccountOps();
+  const aliasSource = ops.aliasSource;
   const [selected, setSelected] = useState<string | null>(null);
+  const [drawer, setDrawer] = useState<DrawerMode | null>(null);
+  const [removing, setRemoving] = useState<{ id: string; name: string; definition: Record<string, unknown> } | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
 
   const groups =
     agentsQuery.data?.ok
@@ -222,6 +246,34 @@ export default function AccountsPage({ onManage }: { onManage: () => void }) {
         <p className="text-sm text-muted-foreground">没有识别到 Claude Code 或 Codex。</p>
       </>
     );
+
+  const agentElements = agentsQuery.data.ok ? agentsQuery.data.data.elements : [];
+  /** 实例的完整登记：agents:status 里同名元素的 spec。 */
+  const definitionOf = (account: Account): Record<string, unknown> | null => {
+    const spec = agentElements.find((item) => item.id === `agents:${account.elementId.replace(/^profiles:/, "")}`)?.spec;
+    return spec && typeof spec === "object" && !Array.isArray(spec) ? (spec as Record<string, unknown>) : null;
+  };
+  const reservedNames = [
+    ...groups.map((item) => item.bin.split("/").pop() ?? item.bin),
+    "claude",
+    "codex",
+    ...agentElements.map((item) => item.id.replace(/^agents:/, "")),
+  ];
+  const withDefinition = (account: Account, run: (definition: Record<string, unknown>) => void) => {
+    const definition = definitionOf(account);
+    if (definition) run(definition);
+    else toast.error("读不到这个账号的登记，刷新后重试");
+  };
+  const actionsOf = (account: Account): RowActions => {
+    const profileId = account.elementId.replace(/^profiles:/, "");
+    return {
+      onEdit: () => withDefinition(account, (definition) => setDrawer({ type: "edit", group, account, definition })),
+      onRemove: () => withDefinition(account, (definition) => setRemoving({ id: profileId, name: account.name, definition })),
+      onAddLaunch: () => withDefinition(account, (definition) => void ops.addLaunch(profileId, definition, group.bin)),
+      onAdopt: () => account.profileBase && void ops.adopt(account.elementId, account.profileBase),
+      onManageSkills: () => onManageSkills?.(account.isMain ? group.agentId : profileId),
+    };
+  };
 
   const authOf = (account: Account): OfficialAuthStatus | "pending" | null => {
     const index = officialIds.indexOf(account.elementId);
@@ -257,7 +309,7 @@ export default function AccountsPage({ onManage }: { onManage: () => void }) {
         <button
           type="button"
           data-testid="accounts-add"
-          onClick={onManage}
+          onClick={() => setDrawer({ type: "create", group })}
           className="ml-auto inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
         >
           <Plus className="h-4 w-4" aria-hidden /> 添加账号
@@ -270,10 +322,37 @@ export default function AccountsPage({ onManage }: { onManage: () => void }) {
             account={account}
             group={group}
             auth={authOf(account)}
-            onManage={onManage}
+            actions={actionsOf(account)}
           />
         ))}
       </ul>
+      {drawer && (
+        <AccountDrawer
+          mode={drawer}
+          ops={ops}
+          secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}
+          reservedNames={reservedNames}
+          onClose={() => setDrawer(null)}
+        />
+      )}
+      {removing && (
+        <ConfirmModal
+          title={`移除账号 ${removing.name}`}
+          description="删掉它的启动命令并停止管理；目录、登录和会话都保留。以后不用这个目录了，可以先在终端退出登录再自己删掉。"
+          risk="write-local"
+          confirmLabel="移除"
+          executing={removeBusy}
+          onConfirm={async () => {
+            setRemoveBusy(true);
+            try {
+              if (await ops.remove(removing.id, removing.definition)) setRemoving(null);
+            } finally {
+              setRemoveBusy(false);
+            }
+          }}
+          onClose={() => setRemoving(null)}
+        />
+      )}
     </div>
   );
 }
