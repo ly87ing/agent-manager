@@ -94,6 +94,11 @@ fn cfg_quote(value: &str) -> String {
     format!("\"{escaped}\"")
 }
 
+fn curl_config_args(config_path: &str) -> [&str; 3] {
+    // -q 必须是首参数：否则 curl 仍会先读用户的 .curlrc，可能按其中的 location 跨主机转发 x-api-key。
+    ["-q", "--config", config_path]
+}
+
 struct Probe {
     status: u16,
     latency_ms: u64,
@@ -164,9 +169,10 @@ fn run_request(
         };
     }
 
+    let config_path = cfg_path.display().to_string();
     let captured = crate::native_upstream::run_capture_public(
         "curl",
-        &["--config", &cfg_path.display().to_string()],
+        &curl_config_args(&config_path),
         None,
         ctx,
         timeout + Duration::from_secs(5),
@@ -202,25 +208,31 @@ fn run_request(
 }
 
 /// 响应体里的错误说明。各家格式不一，按常见形状找，找不到就不编。
-fn upstream_message(body: &str) -> Option<String> {
+fn upstream_message(body: &str, token: Option<&str>) -> Option<String> {
     let parsed: Value = serde_json::from_str(body).ok()?;
     let error = parsed.get("error")?;
     let text = error
         .get("message")
         .and_then(Value::as_str)
         .or_else(|| error.as_str())?;
-    // 上游消息原样回显有带回凭据的风险，统一走脱敏
-    Some(crate::sanitize::sanitize_diagnostic_message(text))
+    // 上游可能原样回显任意格式的凭据；通用规则认不出的短值也要按本次取值遮住。
+    // 过短的值会大量匹配普通文字，直接不展示上游原话。
+    let text = match token {
+        Some(token) if token.chars().count() < 3 => return None,
+        Some(token) => text.replace(token, "***"),
+        None => text.to_string(),
+    };
+    Some(crate::sanitize::sanitize_diagnostic_message(&text))
 }
 
 /// 把 HTTP 结果翻成一句能照着做的话。
 ///
 /// 这才是这个功能的价值：知道「401」不如知道「令牌没权限，换一个或去控制台确认」。
-fn verdict(kind: Kind, probe: &Probe) -> (bool, String) {
+fn verdict(kind: Kind, probe: &Probe, token: Option<&str>) -> (bool, String) {
     if let Some(err) = &probe.transport_error {
         return (false, err.clone());
     }
-    let upstream = upstream_message(&probe.body);
+    let upstream = upstream_message(&probe.body, token);
     let detail = |fallback: &str| match &upstream {
         Some(msg) if !msg.is_empty() => format!("{fallback}：{msg}"),
         _ => fallback.to_string(),
@@ -414,7 +426,7 @@ fn probe_and_report(
         &headers(kind, auth, token),
         &probe_body(kind, model),
     );
-    let (ok, detail) = verdict(kind, &probe);
+    let (ok, detail) = verdict(kind, &probe, token);
 
     if let Ok(mut conn) = crate::store::open_write(ctx) {
         if let Ok(tx) = conn.transaction() {
@@ -782,7 +794,7 @@ pub(crate) fn handle_models(ctx: &Context, req: &Request) -> Result<Value, Dispa
         let probe = run_request(ctx, "GET", url, &headers, None, MODELS_TIMEOUT);
         last_status = probe.status;
         if probe.transport_error.is_some() {
-            outcome = Err(verdict(target.kind, &probe).1);
+            outcome = Err(verdict(target.kind, &probe, token.as_deref()).1);
             break;
         }
         match probe.status {
@@ -795,7 +807,7 @@ pub(crate) fn handle_models(ctx: &Context, req: &Request) -> Result<Value, Dispa
             // 这个地址没有列表接口：换下一个
             404 | 405 => {}
             _ => {
-                let (_, detail) = verdict(target.kind, &probe);
+                let (_, detail) = verdict(target.kind, &probe, token.as_deref());
                 outcome = Err(format!("获取模型列表失败：{detail}"));
                 break;
             }
@@ -912,7 +924,10 @@ pub(crate) fn handle_balance(ctx: &Context, req: &Request) -> Result<Value, Disp
     ];
     let probe = run_request(ctx, "GET", &url, &headers, None, MODELS_TIMEOUT);
     let outcome = if probe.transport_error.is_some() || probe.status != 200 {
-        Err(format!("查余额失败：{}", verdict(target.kind, &probe).1))
+        Err(format!(
+            "查余额失败：{}",
+            verdict(target.kind, &probe, Some(&token)).1
+        ))
     } else {
         balance_items(vendor, &probe.body)
             .ok_or_else(|| "余额接口的返回看不懂，请到厂商控制台查看".to_string())
@@ -1100,29 +1115,31 @@ mod tests {
 
     #[test]
     fn 状态码翻成能照着做的话() {
-        assert!(verdict(Kind::Claude, &probe(200, "")).0);
+        assert!(verdict(Kind::Claude, &probe(200, ""), None).0);
         // 限流说明地址与令牌都对，算通过
-        let (ok, text) = verdict(Kind::Claude, &probe(429, ""));
+        let (ok, text) = verdict(Kind::Claude, &probe(429, ""), None);
         assert!(ok);
         assert!(text.contains("限流"));
 
         let (ok, text) = verdict(
             Kind::Claude,
             &probe(401, r#"{"error":{"message":"invalid key"}}"#),
+            None,
         );
         assert!(!ok);
         assert!(text.contains("令牌无效"));
         assert!(text.contains("invalid key"), "上游原话要带上：{text}");
 
-        let (_, text) = verdict(Kind::Codex, &probe(404, ""));
+        let (_, text) = verdict(Kind::Codex, &probe(404, ""), None);
         assert!(text.contains("/v1"), "Codex 的 404 要提示端点形状：{text}");
-        let (_, text) = verdict(Kind::Claude, &probe(404, ""));
+        let (_, text) = verdict(Kind::Claude, &probe(404, ""), None);
         assert!(text.contains("/anthropic"));
 
         // 400 且上游提到 model：指向模型名而不是笼统的「请求被拒」
         let (_, text) = verdict(
             Kind::Claude,
             &probe(400, r#"{"error":{"message":"model not found: glm-9"}}"#),
+            None,
         );
         assert!(text.contains("模型名"), "{text}");
     }
@@ -1130,8 +1147,21 @@ mod tests {
     #[test]
     fn 上游错误里的凭据要脱敏() {
         let leaked = r#"{"error":{"message":"bad Authorization: Bearer sk-secret-value-123"}}"#;
-        let (_, text) = verdict(Kind::Claude, &probe(401, leaked));
+        let (_, text) = verdict(Kind::Claude, &probe(401, leaked), None);
         assert!(!text.contains("sk-secret-value-123"), "{text}");
+    }
+
+    #[test]
+    fn 上游回显本次凭据时按取值脱敏() {
+        let leaked = r#"{"error":{"message":"credential rejected: YOUR_SHORT_KEY"}}"#;
+        let (_, text) = verdict(Kind::Codex, &probe(401, leaked), Some("YOUR_SHORT_KEY"));
+        assert!(text.contains("credential rejected"), "{text}");
+        assert!(!text.contains("YOUR_SHORT_KEY"), "{text}");
+        assert!(text.contains("***"), "{text}");
+
+        let tiny = r#"{"error":{"message":"credential rejected: X"}}"#;
+        let (_, text) = verdict(Kind::Codex, &probe(401, tiny), Some("X"));
+        assert_eq!(text, "令牌无效或过期");
     }
 
     #[test]
@@ -1142,7 +1172,7 @@ mod tests {
             body: String::new(),
             transport_error: Some("连不上：地址不对、网络不通，或本机没有 curl".into()),
         };
-        let (ok, text) = verdict(Kind::Claude, &failed);
+        let (ok, text) = verdict(Kind::Claude, &failed, None);
         assert!(!ok);
         assert!(text.contains("连不上"));
     }
@@ -1151,13 +1181,14 @@ mod tests {
     #[test]
     fn 只收编码助手客户端的端点_说明无法代为检查() {
         let body = r#"{"error":{"message":"Kimi For Coding is currently only available for Coding Agents such as Kimi CLI, Claude Code, Roo Code","type":"access_terminated_error"}}"#;
-        let (ok, text) = verdict(Kind::Codex, &probe(403, body));
+        let (ok, text) = verdict(Kind::Codex, &probe(403, body), None);
         assert!(!ok);
         assert!(text.contains("无法代为检查"), "{text}");
         // 普通的 403 照旧
         let (_, text) = verdict(
             Kind::Codex,
             &probe(403, r#"{"error":{"message":"model not enabled"}}"#),
+            None,
         );
         assert!(text.contains("没有这个权限"), "{text}");
     }
@@ -1171,6 +1202,7 @@ mod tests {
                 403,
                 "<!DOCTYPE html><html><head><title>Just a moment...</title>",
             ),
+            None,
         );
         assert!(!ok);
         assert!(text.contains("网页"), "{text}");
@@ -1181,5 +1213,13 @@ mod tests {
     fn curl_config_转义_引号与反斜杠不破坏结构() {
         assert_eq!(cfg_quote(r#"a"b"#), r#""a\"b""#);
         assert_eq!(cfg_quote(r"a\b"), r#""a\\b""#);
+    }
+
+    #[test]
+    fn curl_先禁用用户默认配置再读取本次请求配置() {
+        assert_eq!(
+            curl_config_args("/tmp/request.cfg"),
+            ["-q", "--config", "/tmp/request.cfg"]
+        );
     }
 }
