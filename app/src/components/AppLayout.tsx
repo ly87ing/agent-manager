@@ -1,4 +1,5 @@
-import { X, type LucideIcon } from "lucide-react";
+import { Moon, Sun, X, type LucideIcon } from "lucide-react";
+import { useTheme } from "../lib/theme";
 import type { ReactNode } from "react";
 import { cn } from "../lib/utils";
 
@@ -31,6 +32,8 @@ export function AppLayout({
   onDismissUpdate?: () => void;
   children: ReactNode;
 }) {
+  const { resolvedTheme, setTheme } = useTheme();
+  const nextTheme = resolvedTheme === "dark" ? "light" : "dark";
   const renderItem = (item: NavItem) => {
     const Icon = item.icon;
     const isActive = item.key === active || active.startsWith(`${item.key}:`);
@@ -81,7 +84,19 @@ export function AppLayout({
         <nav className="flex items-center gap-1 overflow-x-auto px-3 py-2">
           <span className="mr-3 shrink-0 text-sm font-semibold tracking-tight">Agent Manager</span>
           {nav.map(renderItem)}
-          <div className="ml-auto flex items-center gap-1">{secondaryNav.map(renderItem)}</div>
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              data-testid="theme-toggle"
+              aria-label={nextTheme === "light" ? "切换到浅色" : "切换到深色"}
+              title={nextTheme === "light" ? "切换到浅色" : "切换到深色"}
+              onClick={() => setTheme(nextTheme)}
+              className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              {resolvedTheme === "dark" ? <Sun className="h-4 w-4" aria-hidden /> : <Moon className="h-4 w-4" aria-hidden />}
+            </button>
+            {secondaryNav.map(renderItem)}
+          </div>
         </nav>
       </header>
       <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">

@@ -3,33 +3,34 @@
 @tailwind utilities;
 
 @layer base {
+  /* 晴空：暖白底色 + 天蓝强调（浅色）；带暖意的深蓝灰 + 亮天蓝（深色）。启用（天蓝）与需要处理（琥珀）色相拉开。 */
   :root {
-    --background: 210 40% 98%;
-    --foreground: 222 47% 11%;
+    --background: 42 60% 97%;
+    --foreground: 215 30% 16%;
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 215 30% 16%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover-foreground: 215 30% 16%;
 
-    --primary: 243 75% 59%;
+    --primary: 199 89% 44%;
     --primary-foreground: 0 0% 100%;
 
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 210 40% 94%;
-    --accent-foreground: 222 47% 11%;
+    --muted: 40 40% 93%;
+    --muted-foreground: 215 12% 44%;
+    --accent: 199 80% 94%;
+    --accent-foreground: 215 30% 16%;
 
-    --destructive: 0 72% 51%;
+    --destructive: 0 72% 52%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 214 32% 91%;
-    --input: 213 27% 84%;
-    --ring: 243 75% 59%;
+    --border: 38 30% 88%;
+    --input: 38 20% 80%;
+    --ring: 199 89% 44%;
 
     /* 语义色：徽章/状态指示（border-X/30 bg-X/10 text-X 三段式使用） */
-    --success: 160 84% 30%;
-    --warning: 26 90% 36%;
-    --info: 201 96% 32%;
+    --success: 152 60% 36%;
+    --warning: 36 92% 44%;
+    --info: 199 89% 44%;
     --violet: 263 70% 50%;
     --orange: 21 88% 40%;
     --rose: 347 83% 41%;
@@ -38,31 +39,31 @@
   }
 
   .dark {
-    --background: 240 4% 11%;
-    --foreground: 0 0% 96%;
-    --card: 240 3% 15%;
-    --card-foreground: 0 0% 96%;
-    --popover: 240 3% 17%;
-    --popover-foreground: 0 0% 96%;
+    --background: 215 25% 11%;
+    --foreground: 40 30% 94%;
+    --card: 215 22% 14%;
+    --card-foreground: 40 30% 94%;
+    --popover: 215 22% 16%;
+    --popover-foreground: 40 30% 94%;
 
-    --primary: 239 84% 67%;
-    --primary-foreground: 0 0% 100%;
+    --primary: 198 90% 58%;
+    --primary-foreground: 215 30% 10%;
 
-    --muted: 240 4% 20%;
-    --muted-foreground: 240 3% 65%;
-    --accent: 240 4% 24%;
-    --accent-foreground: 0 0% 96%;
+    --muted: 215 18% 18%;
+    --muted-foreground: 215 12% 64%;
+    --accent: 215 18% 21%;
+    --accent-foreground: 40 30% 94%;
 
-    --destructive: 0 72% 60%;
+    --destructive: 0 72% 64%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 240 4% 26%;
-    --input: 240 4% 32%;
-    --ring: 239 84% 67%;
+    --border: 215 16% 22%;
+    --input: 215 14% 28%;
+    --ring: 198 90% 58%;
 
-    --success: 158 64% 52%;
-    --warning: 43 96% 56%;
-    --info: 199 93% 60%;
+    --success: 152 55% 55%;
+    --warning: 40 95% 60%;
+    --info: 198 90% 62%;
     --violet: 255 92% 76%;
     --orange: 27 96% 61%;
     --rose: 351 95% 71%;

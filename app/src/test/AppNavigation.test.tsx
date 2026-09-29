@@ -49,9 +49,17 @@ describe("App 顶层导航", () => {
       "MCP",
       "规则",
       "命令",
+      "切换到深色",
       "用量",
       "设置",
     ]);
+
+    // 顶栏一键切换浅色 / 深色，只改界面，不调用引擎
+    await userEvent.click(within(nav).getByTestId("theme-toggle"));
+    expect(document.documentElement).toHaveClass("dark");
+    expect(within(nav).getByTestId("theme-toggle")).toHaveAccessibleName("切换到浅色");
+    await userEvent.click(within(nav).getByTestId("theme-toggle"));
+    expect(document.documentElement).not.toHaveClass("dark");
 
     const accountsNav = within(nav).getByRole("button", { name: "账号" });
     expect(accountsNav).toHaveAttribute("aria-current", "page");
