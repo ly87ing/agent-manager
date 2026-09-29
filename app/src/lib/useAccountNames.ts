@@ -1,4 +1,4 @@
-import { accountGroups, accountNameMap, buildAccounts, type AccountGroup } from "./accounts";
+import { accountGroups, accountNameMap, buildAccounts, launchCommandsOfAccount, type AccountGroup } from "./accounts";
 import type { EngineElement, StatusData } from "./contract";
 import { useEngineQuery } from "./queries";
 
@@ -24,4 +24,21 @@ export function useAccountNames(): (agent: string) => string {
 export function useAccountGroups(): (ids: string[]) => AccountGroup[] {
   const groups = buildAccounts(...useAccountSources());
   return (ids) => accountGroups(groups, ids);
+}
+
+/** 启动命令启动的是哪个账号：按命令里的配置目录变量认，直接调用助手命令的是主账号。 */
+export function useCommandAccounts(
+  managed: Record<string, string>,
+  external: { name: string; value: string | null }[],
+): (name: string) => { kind: "claude" | "codex"; label: string } | null {
+  const sources = useAccountSources();
+  const byName = new Map<string, { kind: "claude" | "codex"; label: string }>();
+  for (const group of buildAccounts(sources[0], sources[1], managed)) {
+    for (const account of group.accounts) {
+      for (const command of launchCommandsOfAccount(account, group, managed, external)) {
+        byName.set(command.name, { kind: group.kind, label: account.isMain ? `${group.label} · 主号` : `${group.label} · ${account.name}` });
+      }
+    }
+  }
+  return (name) => byName.get(name) ?? null;
 }

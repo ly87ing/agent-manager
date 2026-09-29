@@ -1,11 +1,14 @@
-import { useState, type ReactNode } from "react";
-import { Copy, Plus, Terminal, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { Copy, Info, Pencil, Plus, Trash2 } from "lucide-react";
+import { AgentIcon } from "../components/AgentIcon";
+import { COL_ACTION, COL_ICONS, COL_MIDDLE, COL_NARROW, DataTable, PILL, ROW, RowIcon, TableHeader } from "../components/DataTable";
 import { AliasApplyConfirm } from "../components/AliasApplyConfirm";
 import { AliasEditorDialog } from "../components/AliasEditorDialog";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { useCommandAccounts } from "../lib/useAccountNames";
 import type { AliasCurrent, AliasLegacySuggestion, AliasRecommendation } from "../lib/contract";
 import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource, type AliasTarget } from "../lib/useAliasSource";
 import { cn } from "../lib/utils";
@@ -37,6 +40,10 @@ type Dialog =
 export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => void } = {}) {
   const { query, source, busy, setAlias, previewSetAlias, previewApply, removeAlias, addRecommended, addLegacy, discardLegacy, fetchSource } = useAliasSource();
   const [dialog, setDialog] = useState<Dialog | null>(null);
+  const accountOf = useCommandAccounts(
+    source?.aliases ?? {},
+    (source?.targets ?? []).flatMap((target) => target.external),
+  );
 
   if (query.isPending) return <PageLoading text="正在读取终端快捷命令…" />;
   if (query.isError) return <PageError title="读取终端快捷命令失败" error={query.error} />;
@@ -72,30 +79,31 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
     setDialog({ kind: "edit", value: item.value ?? undefined, presetName: candidate });
   };
 
-  return (
-    <div className="space-y-4">
-      <PageHeader title="终端快捷命令" description={PAGE_NOTE} />
+  /** 文件列放不下两个文件名：两个都有写「都有」，只在一个里有写那个文件名，完整路径在悬停提示里。 */
+  const fileNames = (ids: string[]) =>
+    ids.length > 1 && ids.length === source.targets.length
+      ? "都有"
+      : ids.map((id) => fileLabel(source.targets, id).replace(/^~\/\./, "")).join("、");
 
-      <section className="rounded-lg border bg-card p-5 shadow-sm">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Terminal className="h-4 w-4 text-primary" aria-hidden />
-              快捷命令
-            </h3>
-            <p className="mt-1 text-xs text-muted-foreground">每条命令对应终端里的一个名字，展示的就是终端配置文件里现在的那一行。</p>
-          </div>
+  return (
+    <div className="space-y-3">
+      <h1 className="sr-only">终端快捷命令</h1>
+
+      <DataTable label="启动命令" testId="aliases-current">
+        <TableHeader title={`启动命令 · ${source.current.length}`} middle="启动的账号" narrow="文件">
+          <span className="text-muted-foreground" title={PAGE_NOTE}>
+            <Info className="inline h-3.5 w-3.5 align-[-2px]" aria-hidden /> 说明
+          </span>
           <button
             type="button"
             data-testid="add-alias-button"
             disabled={!source.writable || busy}
             onClick={() => setDialog({ kind: "edit" })}
-            className="inline-flex shrink-0 items-center gap-1 rounded border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary hover:bg-primary/15 disabled:opacity-50"
+            className="inline-flex items-center gap-1 text-primary hover:underline disabled:opacity-50"
           >
             <Plus className="h-3.5 w-3.5" aria-hidden /> 新增
           </button>
-        </div>
-
+        </TableHeader>
         {source.current.length === 0 ? (
           <EmptyState
             compact
@@ -104,218 +112,216 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
             testId="aliases-empty"
           />
         ) : (
-          <ul className="mt-3 space-y-2">
+          <ul className="divide-y">
             {source.current.map((item) => {
               const missingIn = source.targets.filter((target) => target.base !== null && !item.targets.includes(target.id));
+              const account = accountOf(item.name);
               return (
-                <li key={item.name} data-testid={`alias-row-${item.name}`} className="flex flex-wrap items-center justify-between gap-3 rounded-md border px-3 py-2">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="font-mono text-xs font-semibold text-foreground">{item.name}</span>
-                      {item.targets.map((id) => (
-                        <span key={id} className="rounded border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                          {fileLabel(source.targets, id)}
-                        </span>
-                      ))}
+                <li key={item.name} data-testid={`alias-row-${item.name}`} className={ROW}>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm font-medium">{item.name}</span>
                       {!item.consistent && (
-                        <span data-testid={`alias-inconsistent-${item.name}`} className="rounded border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[10px] text-warning">
-                          两个文件写法不同
-                        </span>
+                        <span data-testid={`alias-inconsistent-${item.name}`} className="text-xs text-warning">⚠ 两个文件写法不同</span>
                       )}
                       {missingIn.length > 0 && (
-                        <span data-testid={`alias-missing-in-${item.name}`} className="rounded border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[10px] text-warning">
-                          {missingIn.map((target) => target.target).join("、")} 里没有
+                        <span data-testid={`alias-missing-in-${item.name}`} className="text-xs text-warning">
+                          ⚠ {missingIn.map((target) => target.target).join("、")} 里没有
                         </span>
                       )}
                     </div>
-                    <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.line}</p>
-                    {item.value === null && (
-                      <p className="mt-0.5 text-[11px] text-muted-foreground">不是本工具的写法，只能删除，或在文件里手改。</p>
+                    <div className="truncate font-mono text-xs text-muted-foreground" title={item.line}>{item.value ?? item.line}</div>
+                    {item.value === null && <div className="text-xs text-muted-foreground">不是本工具的写法，只能删除，或在文件里手改</div>}
+                  </div>
+                  <div className={cn(COL_MIDDLE, "flex min-w-0 items-center gap-1.5 text-sm")}>
+                    {account ? (
+                      <>
+                        <AgentIcon kind={account.kind} />
+                        <span className="truncate">{account.label}</span>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">不是启动助手的命令</span>
                     )}
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <span className={cn(COL_NARROW, "text-xs text-muted-foreground")} title={item.targets.map((id) => fileLabel(source.targets, id)).join("、")}>
+                    {fileNames(item.targets)}
+                  </span>
+                  <div className={COL_ACTION} />
+                  <div className={COL_ICONS}>
                     {item.value !== null && (
                       <>
-                        <button
-                          type="button"
-                          data-testid={`edit-alias-${item.name}`}
-                          disabled={busy}
-                          onClick={() => setDialog({ kind: "edit", name: item.name, value: item.value ?? undefined })}
-                          className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
-                        >
-                          编辑
-                        </button>
-                        <button
-                          type="button"
-                          data-testid={`duplicate-alias-${item.name}`}
-                          disabled={busy}
-                          onClick={() => duplicate(item)}
-                          className="inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:opacity-50"
-                        >
-                          <Copy className="h-3.5 w-3.5" aria-hidden /> 复制
-                        </button>
+                        <RowIcon label={`编辑 ${item.name}`} testId={`edit-alias-${item.name}`} disabled={busy} onClick={() => setDialog({ kind: "edit", name: item.name, value: item.value ?? undefined })}>
+                          <Pencil className="h-3.5 w-3.5" aria-hidden />
+                        </RowIcon>
+                        <RowIcon label={`照着 ${item.name} 新建一条`} testId={`duplicate-alias-${item.name}`} disabled={busy} onClick={() => duplicate(item)}>
+                          <Copy className="h-3.5 w-3.5" aria-hidden />
+                        </RowIcon>
                       </>
                     )}
-                    <button
-                      type="button"
-                      data-testid={`remove-alias-${item.name}`}
-                      disabled={busy}
-                      onClick={() => setDialog({ kind: "remove", name: item.name })}
-                      className="inline-flex items-center gap-1 rounded border border-destructive/30 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden /> 移除
-                    </button>
+                    <RowIcon danger label={`移除 ${item.name}`} testId={`remove-alias-${item.name}`} disabled={busy} onClick={() => setDialog({ kind: "remove", name: item.name })}>
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                    </RowIcon>
                   </div>
                 </li>
               );
             })}
           </ul>
         )}
-      </section>
+      </DataTable>
 
       {source.recommendations.length > 0 && (
-        <SuggestionSection
-          testId="alias-recommendations"
-          title="推荐"
-          note="来自技能来源（如 agent-skills 的 aliases/）的常用快捷命令，不随程序发布，不会自动写入；逐条确认后才添加。已有同名命令的不再推荐。"
-        >
-          {source.recommendations.map((item) => (
-            <li key={item.name} data-testid={`alias-recommend-${item.name}`} className="flex flex-wrap items-start justify-between gap-2">
-              <div className="min-w-0">
-                <AliasLineView name={item.name} line={item.line} />
-                <p className="mt-0.5 text-[11px] text-muted-foreground">来自 {item.source}</p>
-              </div>
-              <button
-                type="button"
-                data-testid={`add-recommended-${item.name}`}
-                disabled={!source.writable || busy}
-                onClick={() => setDialog({ kind: "recommend", item })}
-                className="shrink-0 rounded border border-primary/30 px-2.5 py-1 text-xs text-primary hover:bg-primary/10 disabled:opacity-50"
-              >
-                添加
-              </button>
-            </li>
-          ))}
-        </SuggestionSection>
+        <DataTable label="推荐" testId="alias-recommendations">
+          <TableHeader title={`推荐 · ${source.recommendations.length}`} middle="来源" narrow="">
+            <span className="text-muted-foreground">逐条确认后才写入</span>
+          </TableHeader>
+          <ul className="divide-y">
+            {source.recommendations.map((item) => (
+              <li key={item.name} data-testid={`alias-recommend-${item.name}`} className={ROW}>
+                <LineCell name={item.name} line={item.line} value={item.value} />
+                <span className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")}>来自 {item.source}</span>
+                <span className={COL_NARROW} />
+                <div className={COL_ACTION}>
+                  <button
+                    type="button"
+                    data-testid={`add-recommended-${item.name}`}
+                    disabled={!source.writable || busy}
+                    onClick={() => setDialog({ kind: "recommend", item })}
+                    className={PILL}
+                  >
+                    添加
+                  </button>
+                </div>
+                <div className={COL_ICONS} />
+              </li>
+            ))}
+          </ul>
+        </DataTable>
       )}
 
       {source.recommendations.length === 0 && source.suggestedSources.length > 0 && (
-        <SuggestionSection
-          testId="alias-suggested-sources"
-          title="推荐"
-          note="推荐的快捷命令不随程序发布，需要从技能来源取回。"
-        >
-          {source.suggestedSources.map((item) => (
-            <li key={item.name} className="flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{item.name}</p>
-                <p className="text-xs text-muted-foreground">{item.description}</p>
-              </div>
-              {item.collection ? (
-                <button
-                  type="button"
-                  data-testid={`alias-fetch-source-${item.collection}`}
-                  disabled={busy}
-                  onClick={() => void fetchSource(item.collection as string)}
-                  className="shrink-0 rounded border border-primary/30 px-2.5 py-1 text-xs text-primary hover:bg-primary/10 disabled:opacity-50"
-                >
-                  取回 {item.collection}
-                </button>
-              ) : (
-                <span className="text-xs text-muted-foreground">
-                  还没添加：到
-                  {onOpenSkills ? (
-                    <button type="button" onClick={onOpenSkills} className="mx-1 text-primary underline-offset-2 hover:underline">
-                      技能页
-                    </button>
-                  ) : (
-                    "技能页"
-                  )}
-                  添加推荐来源 {item.name}，再回来取回。
-                </span>
-              )}
-            </li>
-          ))}
-        </SuggestionSection>
+        <DataTable label="推荐" testId="alias-suggested-sources">
+          <TableHeader title="推荐" middle="" narrow="">
+            <span className="text-muted-foreground">推荐的快捷命令不随程序发布，要从技能来源取回</span>
+          </TableHeader>
+          <ul className="divide-y">
+            {source.suggestedSources.map((item) => (
+              <li key={item.name} className={ROW}>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">{item.name}</div>
+                  <div className="truncate text-xs text-muted-foreground">{item.description}</div>
+                </div>
+                {item.collection ? (
+                  <button
+                    type="button"
+                    data-testid={`alias-fetch-source-${item.collection}`}
+                    disabled={busy}
+                    onClick={() => void fetchSource(item.collection as string)}
+                    className={PILL}
+                  >
+                    取回 {item.collection}
+                  </button>
+                ) : (
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    还没添加：到
+                    {onOpenSkills ? (
+                      <button type="button" onClick={onOpenSkills} className="mx-1 text-primary underline-offset-2 hover:underline">
+                        技能页
+                      </button>
+                    ) : (
+                      "技能页"
+                    )}
+                    添加推荐来源 {item.name}，再回来取回。
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </DataTable>
       )}
 
       {source.legacy.length > 0 && (
-        <SuggestionSection
-          testId="alias-legacy"
-          title="已保存未生效"
-          note="旧版本保存在本机库里、但终端配置文件里没有的快捷命令。可以加入终端配置，或丢弃（只删库里这一条）。"
-        >
-          {source.legacy.map((item) => (
-            <li key={item.id} data-testid={`alias-legacy-${item.name}`} className="flex flex-wrap items-start justify-between gap-2">
-              <div className="min-w-0">
-                <AliasLineView name={item.name} line={item.line} />
-                {item.actual && (
-                  <p className="mt-0.5 break-all text-[11px] text-warning">
-                    终端配置里现在是：<span className="font-mono">{item.actual}</span>；加入会替换它。
-                  </p>
-                )}
-              </div>
-              <div className="flex shrink-0 gap-2">
-                <button
-                  type="button"
-                  data-testid={`add-legacy-${item.name}`}
-                  disabled={!source.writable || busy}
-                  onClick={() => setDialog({ kind: "legacy-add", item })}
-                  className="rounded border border-primary/30 px-2.5 py-1 text-xs text-primary hover:bg-primary/10 disabled:opacity-50"
-                >
-                  加入
-                </button>
-                <button
-                  type="button"
-                  data-testid={`discard-legacy-${item.name}`}
-                  disabled={busy}
-                  onClick={() => setDialog({ kind: "legacy-discard", item })}
-                  className="rounded border border-destructive/30 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
-                >
-                  丢弃
-                </button>
-              </div>
-            </li>
-          ))}
-        </SuggestionSection>
+        <DataTable label="已保存未生效" testId="alias-legacy">
+          <TableHeader title={`已保存未生效 · ${source.legacy.length}`} middle="说明" narrow="">
+            <span className="text-muted-foreground">旧版本存在库里、文件里没有</span>
+          </TableHeader>
+          <ul className="divide-y">
+            {source.legacy.map((item) => (
+              <li key={item.id} data-testid={`alias-legacy-${item.name}`} className={ROW}>
+                <LineCell name={item.name} line={item.line} value={item.value} />
+                <span className={cn(COL_MIDDLE, "truncate text-sm", item.actual ? "text-warning" : "text-muted-foreground")} title={item.actual ?? undefined}>
+                  {item.actual ? `文件里现在是另一条写法，加入会替换它` : "加入后写进两个文件"}
+                </span>
+                <span className={COL_NARROW} />
+                <div className={COL_ACTION}>
+                  <button
+                    type="button"
+                    data-testid={`add-legacy-${item.name}`}
+                    disabled={!source.writable || busy}
+                    onClick={() => setDialog({ kind: "legacy-add", item })}
+                    className={PILL}
+                  >
+                    加入
+                  </button>
+                </div>
+                <div className={COL_ICONS}>
+                  <RowIcon danger label={`丢弃 ${item.name}`} testId={`discard-legacy-${item.name}`} disabled={busy} onClick={() => setDialog({ kind: "legacy-discard", item })}>
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                  </RowIcon>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </DataTable>
       )}
 
       {external.length > 0 && (
-        <SuggestionSection
-          testId="alias-external"
-          title="其他来源（不由本工具写入）"
-          note="写在本工具那一段以外的 alias，由你自己或其他工具维护，这里只读列出，不会改动。"
-        >
-          {external.map(({ target, line }) => (
-            <li key={`${target.id}:${line.name}`} data-testid={`alias-external-${target.id}-${line.name}`} className="flex flex-wrap items-start justify-between gap-2">
-              <AliasLineView name={line.name} line={line.line} />
-              <span className="shrink-0 rounded border bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{target.target}</span>
-            </li>
-          ))}
-        </SuggestionSection>
+        <DataTable label="其他来源" testId="alias-external">
+          <TableHeader title={`其他来源 · ${external.length}`} middle="启动的账号" narrow="文件">
+            <span className="text-muted-foreground">写在本工具那一段以外，只读</span>
+          </TableHeader>
+          <ul className="divide-y">
+            {external.map(({ target, line }) => {
+              const account = accountOf(line.name);
+              return (
+                <li key={`${target.id}:${line.name}`} data-testid={`alias-external-${target.id}-${line.name}`} className={ROW}>
+                  <LineCell name={line.name} line={line.line} value={line.value} />
+                  <div className={cn(COL_MIDDLE, "flex min-w-0 items-center gap-1.5 text-sm")}>
+                    {account ? (
+                      <>
+                        <AgentIcon kind={account.kind} />
+                        <span className="truncate">{account.label}</span>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">不是启动助手的命令</span>
+                    )}
+                  </div>
+                  <span className={cn(COL_NARROW, "text-xs text-muted-foreground")}>{fileNames([target.id])}</span>
+                  <div className={COL_ACTION} />
+                  <div className={COL_ICONS} />
+                </li>
+              );
+            })}
+          </ul>
+        </DataTable>
       )}
 
-      <section className="rounded-lg border bg-card p-5 shadow-sm" aria-label="终端配置文件">
-        <h3 className="text-sm font-semibold text-foreground">终端配置文件</h3>
-        <ul className="mt-3 space-y-2">
+      <DataTable label="终端配置文件">
+        <TableHeader title={`终端配置文件 · ${source.targets.length}`} middle="状态" narrow="" />
+        <ul className="divide-y">
           {source.targets.map((target) => (
-            <li key={target.id} data-testid={`alias-target-${target.id}`} className="rounded-md border px-3 py-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-mono text-xs">{target.target}</span>
-                <span
-                  className={cn(
-                    "rounded-full border px-2 py-0.5 text-[11px]",
-                    target.blockedReason ? "border-warning/30 bg-warning/10 text-warning" : "bg-muted text-muted-foreground",
-                  )}
-                >
-                  {targetStateLabel(target)}
-                </span>
+            <li key={target.id} data-testid={`alias-target-${target.id}`} className={ROW}>
+              <span className="min-w-0 flex-1 truncate font-mono text-sm">{target.target}</span>
+              <div className={cn(COL_MIDDLE, "min-w-0 text-sm", target.blockedReason ? "text-warning" : "text-muted-foreground")}>
+                <div>{targetStateLabel(target)}</div>
+                {target.blockedReason && <div className="truncate text-xs" title={target.blockedReason}>{target.blockedReason}</div>}
               </div>
-              {target.blockedReason && <p className="mt-1 text-xs text-warning">{target.blockedReason}</p>}
+              <span className={COL_NARROW} />
+              <div className={COL_ACTION} />
+              <div className={COL_ICONS} />
             </li>
           ))}
         </ul>
-      </section>
+      </DataTable>
 
       {dialog?.kind === "edit" && (
         <AliasEditorDialog
@@ -398,21 +404,12 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
   );
 }
 
-function SuggestionSection({ testId, title, note, children }: { testId: string; title: string; note: string; children: ReactNode }) {
+/** 名字列：命令名，下面一行是它的取值（完整一行在悬停提示里）。 */
+function LineCell({ name, line, value }: { name: string; line: string; value: string | null }) {
   return (
-    <section data-testid={testId} className="rounded-lg border border-dashed bg-card p-5">
-      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-      <p className="mt-1 text-xs text-muted-foreground">{note}</p>
-      <ul className="mt-3 space-y-2">{children}</ul>
-    </section>
-  );
-}
-
-function AliasLineView({ name, line }: { name: string; line: string }) {
-  return (
-    <div className="min-w-0">
-      <span className="font-mono text-xs font-semibold text-foreground">{name}</span>
-      <p className="break-all font-mono text-[11px] text-muted-foreground">{line}</p>
+    <div className="min-w-0 flex-1">
+      <div className="font-mono text-sm font-medium">{name}</div>
+      <div className="truncate font-mono text-xs text-muted-foreground" title={line}>{value ?? line}</div>
     </div>
   );
 }

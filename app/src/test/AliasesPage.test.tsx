@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import AliasesPage from "../pages/AliasesPage";
 import type { Envelope } from "../lib/contract";
-import { makeAliasStatus, makeApplyResult, makeEnvelope } from "./fixtures";
+import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeElement, makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
 const CLAUDE = 'TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" claude --dangerously-skip-permissions';
@@ -59,12 +59,27 @@ function valueOf(args: string[], flag: string): string | undefined {
 }
 
 describe("终端快捷命令页", () => {
+  it("每条命令标出它启动的是哪个账号：直接调用 claude 的是 Claude 主号，与账号无关的不标", async () => {
+    renderWithEngine(<AliasesPage />, {
+      ...aliasRoutes({ gs: "git status" }),
+      "agents:status": makeEnvelope({
+        domain: "agents",
+        elements: [makeElement({ id: "agents:claude-code", domain: "agents", spec: { display_name: "Claude Code", bin: "claude" }, observed: { management: agentManagementFixture("claude") } })],
+      }, { command: "agents.status" }),
+      "profiles:status": makeEnvelope({ domain: "profiles", elements: [] }, { command: "profiles.status" }),
+    });
+    expect(await screen.findByTestId("alias-row-claude")).toHaveTextContent("Claude · 主号");
+    expect(screen.getByTestId("alias-row-gs")).toHaveTextContent("不是启动助手的命令");
+  });
+
   it("按条列出终端配置文件里实际的那一行，标出在哪些文件里", async () => {
     renderWithEngine(<AliasesPage />, aliasRoutes());
     const row = await screen.findByTestId("alias-row-claude");
-    expect(row).toHaveTextContent(`alias claude='${CLAUDE}'`);
-    expect(row).toHaveTextContent("~/.zshrc");
-    expect(row).toHaveTextContent("~/.zprofile");
+    // 行里显示取值，终端配置文件里完整的那一行在悬停提示里
+    expect(row).toHaveTextContent(CLAUDE);
+    expect(within(row).getByTitle(`alias claude='${CLAUDE}'`)).toBeInTheDocument();
+    // 两个文件里都有：写「都有」，完整路径在悬停提示里
+    expect(within(row).getByTitle("~/.zshrc、~/.zprofile")).toHaveTextContent("都有");
     // 没有「立即同步」与全局时区：每次编辑都直接写回文件
     expect(screen.queryByTestId("apply-aliases-button")).toBeNull();
     expect(screen.queryByTestId("global-timezone-select")).toBeNull();
@@ -422,7 +437,7 @@ describe("终端快捷命令页", () => {
       aliasRoutes({}, { recommendations: [{ name: "grok", value: "grok", line: "alias grok='grok'", source: "agent-skills" }] }),
     );
     const item = await screen.findByTestId("alias-recommend-grok");
-    expect(item).toHaveTextContent("alias grok='grok'");
+    expect(within(item).getByTitle("alias grok='grok'")).toHaveTextContent("grok");
     expect(item).toHaveTextContent("来自 agent-skills");
     expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
     await userEvent.click(screen.getByTestId("add-recommended-grok"));
@@ -491,9 +506,10 @@ describe("终端快捷命令页", () => {
   it("区块外用户自己的 alias 只读列出，标为其他来源", async () => {
     renderWithEngine(<AliasesPage />, aliasRoutes({}, { external: { gp: "git push" } }));
     const item = await screen.findByTestId("alias-external-aliases:zshrc-gp");
-    expect(item).toHaveTextContent("alias gp='git push'");
+    expect(within(item).getByTitle("alias gp='git push'")).toHaveTextContent("git push");
     const section = screen.getByTestId("alias-external");
-    expect(section).toHaveTextContent("其他来源（不由本工具写入）");
+    expect(section).toHaveTextContent("其他来源");
+    expect(section).toHaveTextContent("只读");
     expect(within(section).queryByRole("button")).toBeNull();
   });
 

@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowUpDown, Copy, Eye, Info, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { AgentIcon } from "../components/AgentIcon";
+import { COL_ACTION, COL_ICONS, COL_MIDDLE, COL_NARROW, PILL, PILL_HOVER, ROW, RowIcon, TableHeader } from "../components/DataTable";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { AddSourceDialog, RemoveSourceDialog, type UserSource, useRuleSources } from "../components/RuleSources";
 import { ErrorPanel } from "../components/ErrorPanel";
@@ -164,7 +165,7 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
       {query.data.errors.length > 0 && <ErrorPanel title="规则状态读取失败" errors={query.data.errors} />}
 
       <section className="overflow-clip rounded-lg border bg-card" aria-label="规则文件">
-        <TableHeader title={`规则文件 · ${elements.length}`} middle="使用的规则" lines="行数">
+        <TableHeader title={`规则文件 · ${elements.length}`} middle="使用的规则" narrow="行数">
           <span className="text-muted-foreground" title={PAGE_NOTE}>
             <Info className="inline h-3.5 w-3.5 align-[-2px]" aria-hidden /> 说明
           </span>
@@ -249,47 +250,6 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
       {dialog?.kind === "template" && <TemplateDialog template={dialog.template} onClose={() => setDialog(null)} />}
       {dialog?.kind === "delete-template" && <DeleteTemplateDialog template={dialog.template} onClose={() => setDialog(null)} />}
     </div>
-  );
-}
-
-/*
- * 两张表共用一套列：名字（占满剩余）| 中间说明（w-72）| 行数（w-16）| 需要处理的按钮（w-28）| 图标（w-28）。
- * 表头与每一行都用同样的列宽，所有内容上下对齐。
- */
-const COL_MIDDLE = "w-72 shrink-0";
-const COL_LINES = "w-16 shrink-0 text-right tabular-nums";
-const COL_ACTION = "flex w-28 shrink-0 justify-start";
-const COL_ICONS = "flex w-28 shrink-0 items-center justify-end gap-0.5";
-const ROW = "group flex items-center gap-4 px-4 py-2 hover:bg-accent/40";
-const PILL = "whitespace-nowrap rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-40";
-
-function TableHeader({ title, middle, lines, children }: { title: string; middle: string; lines: string; children?: ReactNode }) {
-  return (
-    <div className="flex items-center gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
-      <span className="min-w-0 flex-1 font-medium text-foreground">{title}</span>
-      <span className={COL_MIDDLE}>{middle}</span>
-      <span className={COL_LINES}>{lines}</span>
-      <span className="flex w-60 shrink-0 items-center justify-end gap-3">{children}</span>
-    </div>
-  );
-}
-
-function Icon({ label, testId, danger, onClick, children, disabled }: { label: string; testId?: string; danger?: boolean; onClick: () => void; children: ReactNode; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      data-testid={testId}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "rounded p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-40",
-        danger && "hover:bg-destructive/10 hover:text-destructive",
-      )}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -394,7 +354,7 @@ function TargetRow({
           </div>
           {status.detail && <p className="truncate text-xs text-warning" title={status.detail}>{status.detail}</p>}
         </div>
-        <span className={cn(COL_LINES, "text-xs text-muted-foreground")}>{typeof content === "string" ? `${lineCount(content)} 行` : ""}</span>
+        <span className={cn(COL_NARROW, "text-xs text-muted-foreground")}>{typeof content === "string" ? `${lineCount(content)} 行` : ""}</span>
         <div className={COL_ACTION}>
           {action && (
             <button type="button" data-testid={action.testId} disabled={busy} title={action.title} onClick={action.run} className={PILL}>
@@ -406,22 +366,22 @@ function TargetRow({
           {writable && (
             <>
               {onSwitch && (
-                <Icon label={`更换 ${nameOf(element)} 的规则`} onClick={onSwitch}>
+                <RowIcon label={`更换 ${nameOf(element)} 的规则`} onClick={onSwitch}>
                   <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
-                </Icon>
+                </RowIcon>
               )}
               {typeof content === "string" && (
-                <Icon label={open ? `收起 ${nameOf(element)} 全文` : `查看 ${nameOf(element)} 全文`} onClick={() => setOpen(!open)}>
+                <RowIcon label={open ? `收起 ${nameOf(element)} 全文` : `查看 ${nameOf(element)} 全文`} onClick={() => setOpen(!open)}>
                   <Eye className="h-3.5 w-3.5" aria-hidden />
-                </Icon>
+                </RowIcon>
               )}
-              <Icon label={`编辑 ${nameOf(element)}`} onClick={onEdit}>
+              <RowIcon label={`编辑 ${nameOf(element)}`} onClick={onEdit}>
                 <Pencil className="h-3.5 w-3.5" aria-hidden />
-              </Icon>
+              </RowIcon>
               {onCopy && (
-                <Icon label={`复制 ${nameOf(element)} 到…`} onClick={onCopy}>
+                <RowIcon label={`复制 ${nameOf(element)} 到…`} onClick={onCopy}>
                   <Copy className="h-3.5 w-3.5" aria-hidden />
-                </Icon>
+                </RowIcon>
               )}
             </>
           )}
@@ -481,7 +441,7 @@ function RuleLibrary({
 
   return (
     <section className="overflow-clip rounded-lg border bg-card" aria-label="规则库">
-      <TableHeader title={`规则库 · ${count}`} middle="来源" lines="行数">
+      <TableHeader title={`规则库 · ${count}`} middle="来源" narrow="行数">
         <button type="button" data-testid="rule-source-add" onClick={() => setAdding(true)} className="inline-flex items-center gap-1 text-primary hover:underline">
           <Plus className="h-3.5 w-3.5" aria-hidden /> 添加规则来源
         </button>
@@ -502,14 +462,14 @@ function RuleLibrary({
                 <div className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")} title={mine?.path}>
                   {mine ? `我的规则来源 · ${mine.path}` : `${rule.collection} · ${rule.local ? "本地目录" : "git"}`}
                 </div>
-                <span className={cn(COL_LINES, "text-xs text-muted-foreground")}>{lineCount(rule.body)} 行</span>
+                <span className={cn(COL_NARROW, "text-xs text-muted-foreground")}>{lineCount(rule.body)} 行</span>
                 <div className={COL_ACTION}>
                   {onApplyRule && (
                     <button
                       type="button"
                       aria-label={`应用${sourceRuleLabel(rule)}到…`}
                       onClick={() => onApplyRule(rule)}
-                      className={cn(PILL, "opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100")}
+                      className={PILL_HOVER}
                     >
                       应用到…
                     </button>
@@ -517,17 +477,17 @@ function RuleLibrary({
                 </div>
                 <div className={COL_ICONS}>
                   {!rule.local && (
-                    <Icon label={`更新来源 ${rule.collection}`} testId={`rules-fetch-source-${rule.collection}`} disabled={busy} onClick={() => onFetch(rule.collection)}>
+                    <RowIcon label={`更新来源 ${rule.collection}`} testId={`rules-fetch-source-${rule.collection}`} disabled={busy} onClick={() => onFetch(rule.collection)}>
                       <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-                    </Icon>
+                    </RowIcon>
                   )}
-                  <Icon label={openId === rule.id ? `收起 ${rule.name}` : `查看 ${rule.name}`} onClick={() => setOpenId(openId === rule.id ? null : rule.id)}>
+                  <RowIcon label={openId === rule.id ? `收起 ${rule.name}` : `查看 ${rule.name}`} onClick={() => setOpenId(openId === rule.id ? null : rule.id)}>
                     <Eye className="h-3.5 w-3.5" aria-hidden />
-                  </Icon>
+                  </RowIcon>
                   {mine && (
-                    <Icon danger label={`移除规则来源 ${mine.name}`} onClick={() => setRemoving(mine)}>
+                    <RowIcon danger label={`移除规则来源 ${mine.name}`} onClick={() => setRemoving(mine)}>
                       <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                    </Icon>
+                    </RowIcon>
                   )}
                 </div>
               </div>
@@ -542,12 +502,12 @@ function RuleLibrary({
               <div className="text-xs text-warning">没读到规则</div>
             </div>
             <div className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")} title={source.path}>我的规则来源 · {source.path}</div>
-            <span className={COL_LINES} />
+            <span className={COL_NARROW} />
             <div className={COL_ACTION} />
             <div className={COL_ICONS}>
-              <Icon danger label={`移除规则来源 ${source.name}`} onClick={() => setRemoving(source)}>
+              <RowIcon danger label={`移除规则来源 ${source.name}`} onClick={() => setRemoving(source)}>
                 <Trash2 className="h-3.5 w-3.5" aria-hidden />
-              </Icon>
+              </RowIcon>
             </div>
           </li>
         ))}
@@ -559,28 +519,28 @@ function RuleLibrary({
                 <div className="text-xs text-muted-foreground">{used(usage.template(template))}</div>
               </div>
               <div className={cn(COL_MIDDLE, "text-sm text-muted-foreground")}>本机模板 · {ORIGIN_LABEL[template.origin] ?? template.origin}</div>
-              <span className={cn(COL_LINES, "text-xs text-muted-foreground")}>{lineCount(template.body)} 行</span>
+              <span className={cn(COL_NARROW, "text-xs text-muted-foreground")}>{lineCount(template.body)} 行</span>
               <div className={COL_ACTION}>
                 {onApplyTemplate && (
                   <button
                     type="button"
                     onClick={() => onApplyTemplate(template)}
-                    className={cn(PILL, "opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100")}
+                    className={PILL_HOVER}
                   >
                     应用到…
                   </button>
                 )}
               </div>
               <div className={COL_ICONS}>
-                <Icon label={openId === template.id ? `收起 ${template.name}` : `查看 ${template.name}`} onClick={() => setOpenId(openId === template.id ? null : template.id)}>
+                <RowIcon label={openId === template.id ? `收起 ${template.name}` : `查看 ${template.name}`} onClick={() => setOpenId(openId === template.id ? null : template.id)}>
                   <Eye className="h-3.5 w-3.5" aria-hidden />
-                </Icon>
-                <Icon label={`编辑模板 ${template.name}`} onClick={() => onEditTemplate(template)}>
+                </RowIcon>
+                <RowIcon label={`编辑模板 ${template.name}`} onClick={() => onEditTemplate(template)}>
                   <Pencil className="h-3.5 w-3.5" aria-hidden />
-                </Icon>
-                <Icon danger label={`删除模板 ${template.name}`} onClick={() => onDeleteTemplate(template)}>
+                </RowIcon>
+                <RowIcon danger label={`删除模板 ${template.name}`} onClick={() => onDeleteTemplate(template)}>
                   <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                </Icon>
+                </RowIcon>
               </div>
             </div>
             {body(template.id, template.body, `rules-template-body-${template.id}`)}
