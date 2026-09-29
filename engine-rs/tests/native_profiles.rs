@@ -338,7 +338,16 @@ fn account_candidate_without_provider_updates_file_and_keeps_no_source() {
         &ctx,
         &request(
             "profiles:apply-definition",
-            &["--only", "profiles:cc-ly", "--base", &base, "--definition-base", &definition_base, "--candidate", candidate],
+            &[
+                "--only",
+                "profiles:cc-ly",
+                "--base",
+                &base,
+                "--definition-base",
+                &definition_base,
+                "--candidate",
+                candidate,
+            ],
         ),
     );
     assert!(done.ok, "{:?}", done.errors);
@@ -350,7 +359,11 @@ fn account_candidate_without_provider_updates_file_and_keeps_no_source() {
     let profile = &policy.data["effective"]["agents"]["definitions"]["cc-ly"]["profile"];
     assert!(profile.get("source_connection").is_none());
     assert_eq!(profile["model"], "account-model");
-    assert_eq!(std::fs::read(&global).unwrap(), global_before, "主账号配置不能被牵连");
+    assert_eq!(
+        std::fs::read(&global).unwrap(),
+        global_before,
+        "主账号配置不能被牵连"
+    );
     std::env::remove_var("AM_TEST_ACCOUNT_CANDIDATE");
     let _ = std::fs::remove_dir_all(root);
 }
