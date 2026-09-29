@@ -43,7 +43,7 @@ function ruleElement(
   return makeElement({
     id,
     domain: "rules",
-    spec: { name, group: id.startsWith("rules:profile:") ? "profile-rules" : "global-rules", kind: "claude", profile_id: null, target },
+    spec: { name, group: id.startsWith("rules:profile:") ? "profile-rules" : "global-rules", kind: id.includes("codex") ? "codex" : "claude", profile_id: null, target },
     policy: { enabled: state !== "disabled", agent_id: "claude-code" },
     observed: { target: `/tmp/home/${target.slice(2)}`, target_exists: null, content: null, base: null, matched_template: null, matched_source_rule: null, source_follow: null, blocked_reason: null, ...observed },
     state,
@@ -156,6 +156,17 @@ describe("RulesHooksPage 规则与 Hooks 切换容器", () => {
     await userEvent.keyboard("{Home}");
     expect(rulesTab).toHaveFocus();
     expect(rulesTab).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("补齐：只给还没有规则文件的账号从同类主账号复制，已有内容、阻塞与停用的不动", async () => {
+    const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
+    const fill = await screen.findByTestId("rules-fill");
+    expect(fill).toHaveTextContent("补齐 1");
+    await userEvent.click(fill);
+    await waitFor(() => expect(calls.filter((call) => call.command === "rules:apply")).toHaveLength(1));
+    expect(calls.find((call) => call.command === "rules:apply")!.args).toEqual([
+      "--only", "rules:profile:cc-work", "--base", "missing", "--from", "rules:claude_global",
+    ]);
   });
 
   it("规则文件可展开查看实际全文，只读展示、不发起任何写入或 plan", async () => {

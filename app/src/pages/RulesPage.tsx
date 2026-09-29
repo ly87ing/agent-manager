@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ChevronDown, ChevronRight, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Info, Plus, Wand2 } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ErrorPanel } from "../components/ErrorPanel";
-import { PageError, PageHeader, PageLoading } from "../components/PageState";
+import { PageError, PageLoading } from "../components/PageState";
 import type { EngineElement, RuleSourceRule, SuggestedSource, RuleTemplate, StatusData } from "../lib/contract";
 import type { RulesObserved, RulesSpec } from "../lib/observed";
 import { useDialogFocus } from "../lib/dialogFocus";
@@ -12,7 +12,10 @@ import { engineErrorMessage, runEngine } from "../lib/engine";
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import { newRunId } from "../lib/runId";
 import { diffLines, hasChanges } from "../lib/textDiff";
+import { rulesFillArgs, rulesFillRows } from "../lib/rulesFill";
+import { useAccountNames } from "../lib/useAccountNames";
 import { useDirectApply } from "../lib/useDirectApply";
+import { useExecutions } from "../lib/execution";
 import { cn } from "../lib/utils";
 
 const PAGE_NOTE =
@@ -92,13 +95,16 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
   const query = useEngineQuery<StatusData>("rules:status");
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const directApply = useDirectApply();
+  const { execute } = useExecutions();
+  const accountName = useAccountNames();
+  const [filling, setFilling] = useState(false);
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="规则状态读取失败" error={query.error} />;
   if (!query.data.ok) {
     return (
       <div className="space-y-4">
-        <PageHeader title="规则" description={PAGE_NOTE} />
+        <h2 className="sr-only">规则</h2>
         <ErrorPanel title="规则状态读取失败" errors={query.data.errors} />
       </div>
     );
@@ -138,6 +144,32 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
       });
   };
 
+  const pendingFill = rulesFillRows(elements);
+  /** 补齐：只给还没有规则文件的账号从主账号复制，逐个写入，单个失败不影响其余。 */
+  const runFill = async () => {
+    if (filling) return;
+    setFilling(true);
+    let ok = 0;
+    let failed = 0;
+    try {
+      for (const row of pendingFill) {
+        const envelope = await execute({ command: "rules:apply", label: `补齐 ${row.name}`, args: rulesFillArgs(row), silent: true });
+        if (envelope?.ok) ok += 1;
+        else failed += 1;
+      }
+    } finally {
+      setFilling(false);
+    }
+    (failed ? toast.error : toast.success)(`补齐完成：成功 ${ok}，失败 ${failed}${failed ? "，详见任务记录" : ""}`);
+  };
+
+  /** 账号名：主账号用助手名，实例用账号名。 */
+  const labelOf = (element: EngineElement) => {
+    const spec = specOf(element);
+    const account = spec.profile_id ? accountName(spec.profile_id) : spec.kind === "codex" ? accountName("codex") : accountName("claude-code");
+    return `${account} · ${spec.kind === "codex" ? "AGENTS.md" : "CLAUDE.md"}`;
+  };
+
   /** git 来源：取回仓库新版本（与技能页的「更新资源库」同一个动作）。 */
   const fetchSource = (collection: string) => {
     void directApply.apply({
@@ -149,12 +181,31 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
 
   return (
     <div className="space-y-4">
-      <PageHeader title="规则" description={PAGE_NOTE} />
+      <h2 className="sr-only">规则</h2>
       {query.data.errors.length > 0 && <ErrorPanel title="规则状态读取失败" errors={query.data.errors} />}
 
-      <section className="space-y-3 rounded-lg border bg-card p-5 shadow-sm" aria-label="规则文件">
-        <h3 className="text-sm font-semibold">规则文件</h3>
-        {elements.length === 0 && <p className="text-xs text-muted-foreground">没有可显示的规则文件。</p>}
+      <div className="flex items-center gap-2">
+        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title={PAGE_NOTE}>
+          <Info className="h-3.5 w-3.5" aria-hidden /> 各账号的规则文件
+        </span>
+        <div className="ml-auto flex items-center gap-2">
+          {pendingFill.length > 0 && (
+            <button
+              type="button"
+              data-testid="rules-fill"
+              disabled={filling || directApply.executing}
+              title="给还没有规则文件的账号复制主账号的规则；已有内容的不动"
+              onClick={() => void runFill()}
+              className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/15 disabled:opacity-40"
+            >
+              <Wand2 className="h-4 w-4" aria-hidden /> 补齐 {pendingFill.length}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <section className="divide-y rounded-lg border bg-card" aria-label="规则文件">
+        {elements.length === 0 && <p className="px-4 py-3 text-xs text-muted-foreground">没有可显示的规则文件。</p>}
         {elements.map((element) => {
           const others = writable.filter((item) => item.id !== element.id);
           const content = observedOf(element).content;
@@ -162,6 +213,7 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
             <TargetCard
               key={element.id}
               element={element}
+              label={labelOf(element)}
               sourceRules={sourceRules}
               busy={directApply.executing}
               onEdit={() => setDialog({ kind: "edit", element })}
@@ -196,7 +248,7 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
         })}
       </section>
 
-      <section className="space-y-3 rounded-lg border bg-card p-5 shadow-sm" aria-label="规则模板">
+      <section className="space-y-2 rounded-lg border bg-card px-4 py-3" aria-label="规则模板">
         <div className="flex items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold">规则模板</h3>
@@ -280,6 +332,7 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
 
 function TargetCard({
   element,
+  label,
   sourceRules,
   busy,
   onEdit,
@@ -289,6 +342,8 @@ function TargetCard({
   onCopy,
 }: {
   element: EngineElement;
+  /** 显示用：账号名 · 文件名。 */
+  label: string;
   sourceRules: RuleSourceRule[];
   busy: boolean;
   onEdit: () => void;
@@ -314,11 +369,11 @@ function TargetCard({
     follow && !follow.file_unchanged && follow.current_revision && follow.current_revision !== follow.applied_revision,
   );
   return (
-    <div data-testid={`rules-target-${element.id}`} className="rounded-md border p-3">
+    <div data-testid={`rules-target-${element.id}`} className="px-4 py-2.5">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">{nameOf(element)}</span>
+            <span className="text-sm font-medium" title={nameOf(element)}>{label}</span>
             <span
               className={cn(
                 "rounded-full border px-2 py-0.5 text-[11px]",
@@ -341,7 +396,7 @@ function TargetCard({
               </span>
             )}
           </div>
-          <p className="font-mono text-xs break-all text-muted-foreground">{spec.target ?? observed.target}</p>
+          <p className="font-mono text-[11px] break-all text-muted-foreground">{spec.target ?? observed.target}</p>
           {observed.blocked_reason && <p className="text-xs text-warning">{observed.blocked_reason}</p>}
           {changedSinceFollow && (
             <p data-testid={`rules-changed-since-follow-${element.id}`} className="text-xs text-muted-foreground">
