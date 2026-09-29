@@ -35,7 +35,7 @@ function profileElement(id: string, configDir: string, observed: Record<string, 
   });
 }
 
-function routes(options: { previewVersion?: () => number } = {}): Record<string, Route> {
+function routes(options: { previewVersion?: () => number; statusline?: string } = {}): Record<string, Route> {
   /** 登记成功后状态里才有新账号，目录文件还不存在（base = missing）。 */
   const registered: string[] = [];
   return {
@@ -46,7 +46,7 @@ function routes(options: { previewVersion?: () => number } = {}): Record<string,
           id: "agents:claude-code",
           domain: "agents",
           spec: { display_name: "Claude Code", bin: "claude" },
-          observed: { management: agentManagementFixture("claude"), current_config: { state: "ready", file: "~/.claude/settings.json", current: { profile: null, default: true, official: true } } },
+          observed: { management: agentManagementFixture("claude"), current_config: { state: "ready", file: "~/.claude/settings.json", base: "main-base", config: { runtime: { statusline: options.statusline ?? "builtin" } }, current: { profile: null, default: true, official: true } } },
         }),
         makeElement({ id: "agents:ds", domain: "agents", spec: DS_DEFINITION, observed: {} }),
       ],
@@ -118,6 +118,12 @@ function routes(options: { previewVersion?: () => number } = {}): Record<string,
       })],
     }, { command: "mcp.status" }),
     "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
+    "profiles:shared-status": async () => makeEnvelope({
+      items: [{ item: "statusline", state: options.statusline === "builtin" || !options.statusline ? "same" : "different", source: "", target: "", changed_fields: [], field_diffs: [], source_base: "src-base", target_base: "dst-base", blocked_reason: null }],
+    }, { command: "profiles.shared-status" }),
+    "profiles:shared-apply": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.shared-apply" }),
+    "agents:preview-runtime": makeEnvelope({ path: "~/.claude/settings.json", content: "{}", file_base: "preview-main" }, { command: "agents.preview-runtime" }),
+    "agents:configure": makeEnvelope(makeApplyResult({ domain: "agents" }), { command: "agents.configure" }),
   };
 }
 
@@ -229,5 +235,26 @@ describe("账号页", () => {
     expect(JSON.parse(valueOf(policy.args, "--expect-definition")!)).toEqual(DS_DEFINITION);
     expect(valueOf(calls.find((call) => call.command === "aliases:apply")!.args, "--remove")).toBe("ds");
     expect(calls.some((call) => call.command.startsWith("profiles:apply"))).toBe(false);
+  });
+
+  it("主账号的状态栏已是本工具的、各账号也一致：不提示", async () => {
+    renderWithEngine(<AccountsPage />, routes());
+    await screen.findByTestId("account-row-profiles:ds");
+    expect(screen.queryByTestId("accounts-quota-notice")).toBeNull();
+  });
+
+  it("开启实时额度：先按完整文件预览的基准写主账号，再把状态栏同步给其余 Claude 账号", async () => {
+    const { calls } = renderWithEngine(<AccountsPage />, routes({ statusline: "custom" }));
+    await userEvent.click(await screen.findByTestId("accounts-enable-live-quota"));
+    const dialog = await screen.findByRole("dialog", { name: "为全部 Claude 账号开启实时额度" });
+    expect(dialog).toHaveTextContent("主账号现在的自定义状态栏会被替换");
+    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "开启" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "profiles:shared-apply")).toBe(true));
+
+    const writes = calls.filter((call) => ["agents:configure", "profiles:shared-apply"].includes(call.command));
+    expect(writes.map((call) => call.command)).toEqual(["agents:configure", "profiles:shared-apply"]);
+    expect(writes[0].args).toEqual(["--only", "agents:claude-code", "--base", "main-base", "--preview-file-base", "preview-main", "--runtime", '{"statusline":"builtin"}']);
+    expect(writes[1].args).toEqual(["--only", "profiles:ds", "--item", "statusline", "--source-base", "src-base", "--target-base", "dst-base"]);
   });
 });

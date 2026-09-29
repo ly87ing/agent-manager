@@ -1,5 +1,5 @@
 import { useQueries } from "@tanstack/react-query";
-import { Copy, LogIn, MoreHorizontal, Plus } from "lucide-react";
+import { Activity, Copy, LogIn, MoreHorizontal, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AccountDrawer, type DrawerMode } from "../components/AccountDrawer";
@@ -10,6 +10,8 @@ import { isStale, isWindowExpired, usageTone, windowLabel } from "../lib/agentUs
 import type { StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import { secretSourceOf } from "../lib/secretSource";
+import { currentConfigOf } from "../lib/agentCurrent";
+import type { SharedStatus } from "../lib/profileShared";
 import { useAccountOps } from "../lib/useAccountOps";
 import type { AgentUsage, OfficialAuthStatus } from "../lib/observed";
 import { authTerminalCommand } from "../lib/profileDefinition";
@@ -218,6 +220,8 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
   const [drawer, setDrawer] = useState<DrawerMode | null>(null);
   const [removing, setRemoving] = useState<{ id: string; name: string; definition: Record<string, unknown> } | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
+  const [confirmQuota, setConfirmQuota] = useState(false);
+  const [quotaBusy, setQuotaBusy] = useState(false);
 
   const groups =
     agentsQuery.data?.ok
@@ -234,6 +238,17 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
       queryKey: engineKeys.request("agents:auth-status", ["--only", only]),
       queryFn: () => runEngine<OfficialAuthStatus>("agents:auth-status", ["--only", only]),
       staleTime: 5 * 60_000,
+    })),
+  });
+
+  // 实时额度：只看 Claude 账号（Codex 没有状态栏，额度直接读它自己的会话记录）
+  const claudeProfileIds = group?.kind === "claude"
+    ? group.accounts.filter((account) => !account.isMain).map((account) => account.elementId.replace(/^profiles:/, ""))
+    : [];
+  const sharedQueries = useQueries({
+    queries: claudeProfileIds.map((id) => ({
+      queryKey: engineKeys.request("profiles:shared-status", ["--only", `profiles:${id}`]),
+      queryFn: () => runEngine<SharedStatus>("profiles:shared-status", ["--only", `profiles:${id}`]),
     })),
   });
 
@@ -275,6 +290,15 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
     };
   };
 
+  const mainElement = agentElements.find((item) => item.id === `agents:${group.agentId}`);
+  const mainStatusline = mainElement
+    ? (currentConfigOf(mainElement)?.config?.runtime as { statusline?: string } | undefined)?.statusline
+    : undefined;
+  const quotaNotLive = group.kind === "claude" && Boolean(mainElement) && (
+    mainStatusline !== "builtin"
+    || sharedQueries.some((query) => query.data?.ok && query.data.data.items.some((item) => item.item === "statusline" && item.state !== "same"))
+  );
+
   const authOf = (account: Account): OfficialAuthStatus | "pending" | null => {
     const index = officialIds.indexOf(account.elementId);
     if (index < 0) return null;
@@ -315,6 +339,20 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
           <Plus className="h-4 w-4" aria-hidden /> 添加账号
         </button>
       </div>
+      {quotaNotLive && (
+        <div data-testid="accounts-quota-notice" className="flex items-center gap-2 rounded-md border border-info/30 bg-info/5 px-3 py-2 text-xs">
+          <Activity className="h-3.5 w-3.5 text-info" aria-hidden />
+          <span>额度还不是实时的：只在 Claude 自己查询时才更新。</span>
+          <button
+            type="button"
+            data-testid="accounts-enable-live-quota"
+            onClick={() => setConfirmQuota(true)}
+            className="ml-auto rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/15"
+          >
+            开启实时额度
+          </button>
+        </div>
+      )}
       <ul data-testid="accounts-list" className="divide-y rounded-lg border bg-card">
         {group.accounts.map((account) => (
           <AccountRow
@@ -333,6 +371,25 @@ export default function AccountsPage({ onManageSkills }: { onManageSkills?: (acc
           secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}
           reservedNames={reservedNames}
           onClose={() => setDrawer(null)}
+        />
+      )}
+      {confirmQuota && mainElement && (
+        <ConfirmModal
+          title="为全部 Claude 账号开启实时额度"
+          description={`把状态栏换成 Agent Manager 的用量状态栏（模型、目录、上下文、额度），它每次刷新时把额度记在本工具的数据目录里，账号页据此显示实时额度。${mainStatusline === "custom" ? "主账号现在的自定义状态栏会被替换。" : ""}先写主账号，再同步给其余 Claude 账号；被外部改过的文件不会覆盖。`}
+          risk="write-local"
+          confirmLabel="开启"
+          executing={quotaBusy}
+          onConfirm={async () => {
+            setQuotaBusy(true);
+            try {
+              await ops.enableLiveQuota(mainElement, claudeProfileIds);
+              setConfirmQuota(false);
+            } finally {
+              setQuotaBusy(false);
+            }
+          }}
+          onClose={() => setConfirmQuota(false)}
         />
       )}
       {removing && (
