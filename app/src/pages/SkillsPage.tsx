@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { PackageOpen, Pencil, Plus, RefreshCw, SearchX, Trash2, Wand2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, PackageOpen, Pencil, Plus, RefreshCw, SearchX, Trash2, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -68,6 +68,26 @@ function summarize(skill: EngineElement, cells: Record<string, SkillAgentCell>, 
   return { text, badges, inbox };
 }
 
+const EXPANDED_KEY = "agent-manager:skills-expanded";
+
+/** 用户手动展开 / 收起过的集合，只存在本机浏览器里；读不到就按默认。 */
+function loadExpanded(): Record<string, boolean> {
+  try {
+    const value = JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? "{}");
+    return typeof value === "object" && value !== null ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveExpanded(value: Record<string, boolean>) {
+  try {
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify(value));
+  } catch {
+    // 存不下只影响下次打开时的展开状态
+  }
+}
+
 export default function SkillsPage({
   initialAgent,
   initialSearch,
@@ -85,6 +105,7 @@ export default function SkillsPage({
   const [collectionFilter, setCollectionFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>(() => initialAgent ?? "all");
   const [search, setSearch] = useState(initialSearch ?? "");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>(loadExpanded);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editing, setEditing] = useState<EngineElement | null>(null);
   const [pendingRemove, setPendingRemove] = useState<EngineElement | null>(null);
@@ -207,6 +228,21 @@ export default function SkillsPage({
 
   const shownSkillCount = visibleCollections.reduce((sum, collection) => sum + skillsOf(collection).length, 0);
 
+  const cellsIn = (skill: EngineElement) =>
+    Object.entries((skill.observed as SkillObserved).agents ?? {}).filter(([agent]) => agentFilter === "all" || agent === agentFilter);
+  /** 需要处理：有黄色开关（损坏、占用、来源已删、外部链接）或新发现待添加。 */
+  const needsAttention = (skill: EngineElement) =>
+    (skill.observed as SkillObserved).discovery_inbox === true || cellsIn(skill).some(([, cell]) => skillChip(cell).tone === "warn");
+  /** 搜索或只看一个集合时展开命中的；否则按用户上次的选择，没选过的有待处理或还没有技能时才展开。 */
+  const isOpen = (name: string, rows: EngineElement[]) =>
+    Boolean(search.trim()) || collectionFilter === name || (expanded[name] ?? (rows.length === 0 || rows.some(needsAttention)));
+  const setOpen = (next: Record<string, boolean>) => {
+    const merged = { ...expanded, ...next };
+    setExpanded(merged);
+    saveExpanded(merged);
+  };
+  const allOpen = visibleCollections.every((collection) => isOpen(collName(collection), skillsOf(collection)));
+
   return (
     <div className="space-y-3">
       <h1 className="sr-only">技能</h1>
@@ -242,6 +278,17 @@ export default function SkillsPage({
           ))}
         </select>
         <div className="ml-auto flex items-center gap-2">
+          {visibleCollections.length > 1 && !search.trim() && (
+            <button
+              type="button"
+              data-testid="skills-toggle-all"
+              onClick={() => setOpen(Object.fromEntries(visibleCollections.map((collection) => [collName(collection), !allOpen])))}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              {allOpen ? <ChevronsDownUp className="h-4 w-4" aria-hidden /> : <ChevronsUpDown className="h-4 w-4" aria-hidden />}
+              {allOpen ? "全部收起" : "全部展开"}
+            </button>
+          )}
           {pendingFill.length > 0 && (
             <button
               type="button"
@@ -284,7 +331,7 @@ export default function SkillsPage({
           }
         />
       ) : (
-        <div className="divide-y rounded-lg border bg-card">
+        <div className="space-y-2">
           {visibleCollections.map((collection) => {
             const name = collName(collection);
             const spec = collection.spec as SkillCollectionSpec;
@@ -293,11 +340,38 @@ export default function SkillsPage({
             const enabled = (collection.policy as { enabled?: boolean }).enabled !== false;
             const inboxCount = observed.discovery_inbox?.length ?? 0;
             const rows = skillsOf(collection);
+            const open = isOpen(name, rows);
+            const attention = rows.filter(needsAttention).length;
+            const perAgent = (agentFilter === "all" ? agentOptions : [agentFilter]).map((agent) => ({
+              agent,
+              on: rows.filter((skill) => ACTIVE.has((skill.observed as SkillObserved).agents?.[agent]?.state ?? "")).length,
+            }));
             return (
-              <section key={collection.id} data-testid={`collection-card-${name}`}>
-                <header className="flex items-center gap-2 bg-muted/40 px-4 py-2">
-                  <span className="font-medium">{name}</span>
-                  <span className="truncate font-mono text-xs text-muted-foreground" title={spec.source_path ?? spec.url ?? undefined}>
+              <section key={collection.id} data-testid={`collection-card-${name}`} className="overflow-hidden rounded-lg border bg-card">
+                <header className={cn("flex items-center gap-2 px-3 py-2.5", open && "border-b bg-muted/50")}>
+                  <button
+                    type="button"
+                    data-testid={`collection-toggle-${name}`}
+                    aria-expanded={open}
+                    aria-label={`${open ? "收起" : "展开"}集合 ${name}`}
+                    onClick={() => setOpen({ [name]: !open })}
+                    className="flex min-w-0 items-center gap-2 rounded text-left hover:text-primary"
+                  >
+                    {open ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />}
+                    <span className="font-semibold">{name}</span>
+                    <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{rows.length} 个技能</span>
+                  </button>
+                  {attention > 0 && (
+                    <span data-testid={`collection-attention-${name}`} className="shrink-0 rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning">
+                      {attention} 个待处理
+                    </span>
+                  )}
+                  {!open && rows.length > 0 && (
+                    <span data-testid={`collection-summary-${name}`} className="truncate text-xs text-muted-foreground">
+                      {perAgent.map(({ agent, on }) => `${nameOf(agent)} ${on}/${rows.length}`).join(" · ")}
+                    </span>
+                  )}
+                  <span className={cn("truncate font-mono text-xs text-muted-foreground", !open && "hidden")} title={spec.source_path ?? spec.url ?? undefined}>
                     {spec.source_path ?? spec.url ?? "（未填来源）"}
                   </span>
                   {!enabled && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">已停用</span>}
@@ -365,15 +439,15 @@ export default function SkillsPage({
                   </p>
                 )}
                 {observed.blocked_reason && <p className="bg-warning/10 px-4 py-1.5 text-xs text-warning">{observed.blocked_reason}</p>}
-                {rows.length === 0 && !search.trim() && (
+                {open && rows.length === 0 && !search.trim() && (
                   <p className="px-4 py-2 text-xs text-muted-foreground">
                     {observed.repo_cached ? "没有找到技能" : "点「更新」取回后技能会出现在这里"}
                   </p>
                 )}
+                {open && (
                 <ul className="divide-y">
                   {rows.map((skill) => {
-                    const allCells = (skill.observed as SkillObserved).agents ?? {};
-                    const cells = Object.entries(allCells).filter(([agent]) => agentFilter === "all" || agent === agentFilter);
+                    const cells = cellsIn(skill);
                     const summary = summarize(skill, Object.fromEntries(cells), nameOf);
                     const addRows = summary.inbox ? addToAllRows(skill) : [];
                     const skillName = (skill.spec as SkillSpec).name ?? skill.id;
@@ -387,7 +461,7 @@ export default function SkillsPage({
                       })),
                     );
                     return (
-                      <li key={skill.id} data-testid={`skill-row-${skill.id}`} className="flex flex-wrap items-center gap-2 px-4 py-2">
+                      <li key={skill.id} data-testid={`skill-row-${skill.id}`} className="flex flex-wrap items-center gap-2 py-1.5 pl-10 pr-3 hover:bg-accent/40">
                         <span className="min-w-0 truncate text-sm">{skillName}</span>
                         {summary.inbox && <span className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">新发现</span>}
                         {summary.badges.map((badge) => (
@@ -422,6 +496,7 @@ export default function SkillsPage({
                     );
                   })}
                 </ul>
+                )}
               </section>
             );
           })}

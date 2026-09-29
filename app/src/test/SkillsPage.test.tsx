@@ -5,8 +5,12 @@ import type { Envelope } from "../lib/contract";
 import { makeApplyResult, makeElement, makeEnvelope, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
-/** 等技能列表出现（开关直接在行上，不用再展开）。 */
+/** 等集合出现，把收起的集合逐个展开（没有待处理的集合默认收起）。 */
 async function expandAll() {
+  await screen.findAllByTestId(/^collection-card-/);
+  for (const toggle of screen.getAllByTestId(/^collection-toggle-/)) {
+    if (toggle.getAttribute("aria-expanded") === "false") await userEvent.click(toggle);
+  }
   await screen.findAllByTestId(/^skill-row-/);
 }
 
@@ -519,6 +523,57 @@ describe("SkillsPage 三级视图", () => {
     const blocked = screen.getByTestId("chip-skill:agent-skills/alpha-codex");
     expect(blocked).toHaveAttribute("title", "codex：Rust 原生引擎暂未提供此操作");
     expect(blocked).toBeDisabled();
+  });
+});
+
+/** 在 skillsRoutes（agent-skills 有损坏链接与新发现）之外加一个一切正常的集合 healthy。 */
+function collapseRoutes() {
+  const routes = skillsRoutes();
+  const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
+  const cell = (state: string) => ({ state, assigned: true, enabled: state === "linked", actions: [state === "linked" ? "disable" : "enable"] });
+  status.data.elements.push(
+    makeElement({ id: "skill:healthy", domain: "skills", spec: { url: "https://example.com/healthy.git" }, observed: { repo_cached: true, actions: ["update"] } }),
+    makeElement({ id: "skill:healthy/one", domain: "skills", spec: { collection: "healthy", name: "one" }, observed: { agents: { "claude-code": cell("linked"), codex: cell("linked") }, discovery_inbox: false } }),
+    makeElement({ id: "skill:healthy/two", domain: "skills", spec: { collection: "healthy", name: "two" }, observed: { agents: { "claude-code": cell("linked"), codex: cell("disabled") }, discovery_inbox: false } }),
+  );
+  return routes;
+}
+
+describe("SkillsPage 集合展开与收起", () => {
+  it("没有待处理的集合默认收起，标题行给出技能数与各账号启用数；有待处理的默认展开", async () => {
+    renderWithEngine(<SkillsPage />, collapseRoutes());
+    const healthy = await screen.findByTestId("collection-card-healthy");
+    expect(screen.getByTestId("collection-toggle-healthy")).toHaveAttribute("aria-expanded", "false");
+    expect(within(healthy).queryByTestId(/^skill-row-/)).toBeNull();
+    expect(within(healthy).getByText("2 个技能")).toBeInTheDocument();
+    expect(screen.getByTestId("collection-summary-healthy")).toHaveTextContent(/2\/2 · .*1\/2/);
+
+    expect(screen.getByTestId("collection-toggle-agent-skills")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("collection-attention-agent-skills")).toHaveTextContent("4 个待处理");
+    expect(screen.getByTestId("skill-row-skill:agent-skills/alpha")).toBeInTheDocument();
+  });
+
+  it("手动展开会记住，重新打开页面仍是展开的；只在本机存储，不调用引擎写入", async () => {
+    const first = renderWithEngine(<SkillsPage />, collapseRoutes());
+    await userEvent.click(await screen.findByTestId("collection-toggle-healthy"));
+    expect(screen.getByTestId("skill-row-skill:healthy/one")).toBeInTheDocument();
+    expect(first.calls.filter((call) => /:(apply|configure|set|seed|shared-apply)$/.test(call.command))).toEqual([]);
+    first.unmount();
+
+    renderWithEngine(<SkillsPage />, collapseRoutes());
+    expect(await screen.findByTestId("skill-row-skill:healthy/one")).toBeInTheDocument();
+  });
+
+  it("全部收起 / 全部展开；搜索时命中的集合自动展开", async () => {
+    renderWithEngine(<SkillsPage />, collapseRoutes());
+    await userEvent.click(await screen.findByTestId("skills-toggle-all"));
+    expect(screen.getByTestId("skills-toggle-all")).toHaveTextContent("全部收起");
+    expect(screen.getByTestId("skill-row-skill:healthy/two")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("skills-toggle-all"));
+    expect(screen.queryByTestId(/^skill-row-/)).toBeNull();
+
+    await userEvent.type(screen.getByTestId("skills-search"), "two");
+    expect(screen.getByTestId("skill-row-skill:healthy/two")).toBeInTheDocument();
   });
 });
 

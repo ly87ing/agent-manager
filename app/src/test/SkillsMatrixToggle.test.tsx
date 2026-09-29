@@ -6,8 +6,12 @@ import { makeApplyResult, makeElement, makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
-/** 等技能列表出现（开关直接在行上，不用再展开）。 */
+/** 等集合出现，把收起的集合逐个展开（没有待处理的集合默认收起）。 */
 async function expandAll() {
+  await screen.findAllByTestId(/^collection-card-/);
+  for (const toggle of screen.getAllByTestId(/^collection-toggle-/)) {
+    if (toggle.getAttribute("aria-expanded") === "false") await userEvent.click(toggle);
+  }
   await screen.findAllByTestId(/^skill-row-/);
 }
 
