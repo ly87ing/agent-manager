@@ -314,16 +314,31 @@ describe("SkillsPage 三级视图", () => {
     ]);
   });
 
-  it("补齐：在用技能补到缺它的账号，账号上停用的不动", async () => {
+  it("补齐：表头按账号给出「补齐」，只补这个账号缺的在用技能，账号上停用的不动", async () => {
     const routes = skillsRoutes();
     const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
     const alpha = status.data.elements.find((element) => element.id === "skill:agent-skills/alpha")!;
     (alpha.observed as { agents: Record<string, unknown> }).agents.work = { state: "not-assigned", assigned: false, enabled: false, actions: ["add"] };
     const { calls } = renderWithEngine(<SkillsPage />, routes);
-    // beta 在 codex 上是停用（例外），不算缺
-    await userEvent.click(await screen.findByTestId("skills-fill"));
+    // beta 在 codex 上是停用（例外），不算缺：codex 列显示「齐了」
+    await userEvent.click(await screen.findByTestId("skills-fill-work"));
+    expect(screen.queryByTestId("skills-fill-codex")).toBeNull();
     await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
     expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual(["--only", "skill:agent-skills/alpha", "--action", "add", "--agent", "work"]);
+  });
+
+  it("账号开关：位置反映账号里有没有这个技能的链接，损坏的链接显示为需要处理但仍算开", async () => {
+    renderWithEngine(<SkillsPage />, skillsRoutes());
+    await expandAll();
+    const linked = screen.getByTestId("action-disable-skill:agent-skills/alpha-claude-code");
+    expect(linked).toHaveAttribute("role", "switch");
+    expect(linked).toHaveAttribute("aria-checked", "true");
+    expect(linked).toHaveAttribute("data-tone", "on");
+    const broken = screen.getByTestId("action-update-skill:agent-skills/alpha-codex");
+    expect(broken).toHaveAttribute("aria-checked", "true");
+    expect(broken).toHaveAttribute("data-tone", "warn");
+    const disabled = screen.getByTestId("action-enable-skill:agent-skills/beta-codex");
+    expect(disabled).toHaveAttribute("aria-checked", "false");
   });
 
   it("启用矩阵：正常状态由启停动作表达，链接异常保留状态，新发现技能无 cell 时明确未配置", async () => {
@@ -546,7 +561,9 @@ describe("SkillsPage 集合展开与收起", () => {
     expect(screen.getByTestId("collection-toggle-healthy")).toHaveAttribute("aria-expanded", "false");
     expect(within(healthy).queryByTestId(/^skill-row-/)).toBeNull();
     expect(within(healthy).getByText("2 个技能")).toBeInTheDocument();
-    expect(screen.getByTestId("collection-summary-healthy")).toHaveTextContent(/2\/2 · .*1\/2/);
+    // 各账号启用数在与表头对齐的列里
+    expect(screen.getByTestId("collection-count-healthy-claude-code")).toHaveTextContent("2/2");
+    expect(screen.getByTestId("collection-count-healthy-codex")).toHaveTextContent("1/2");
 
     expect(screen.getByTestId("collection-toggle-agent-skills")).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByTestId("collection-attention-agent-skills")).toHaveTextContent("4 个待处理");

@@ -1,4 +1,4 @@
-import type { ChipTone } from "../components/AccountChip";
+import type { CellTone } from "../components/AccountGrid";
 import type { SkillAgentCell } from "./observed";
 
 /** update 是引擎能力，不等于当前需要更新；只对版本变化或链接损坏提示。 */
@@ -16,9 +16,14 @@ export interface ChipAction {
 
 /**
  * 技能在一个账号上的开关：主动作放在开关上（点一下），其余可做的放进「⋯」。
+ * checked 是开关位置：账号里有这个技能的链接（哪怕损坏、被占用）就算开。
  * 动作只取引擎在 cell.actions 里给出的；已分配技能的 remove 与可逆的停用重复，不暴露。
  */
-export function skillChip(cell: SkillAgentCell): { tone: ChipTone; hint: string; primary: ChipAction | null; secondary: ChipAction[] } {
+export function skillChip(cell: SkillAgentCell): { tone: CellTone; checked: boolean; hint: string; primary: ChipAction | null; secondary: ChipAction[] } {
+  return { ...chipOf(cell), checked: ["linked", "missing-link", "dead-link", "drifted", "extra-link"].includes(cell.state) };
+}
+
+function chipOf(cell: SkillAgentCell): { tone: CellTone; hint: string; primary: ChipAction | null; secondary: ChipAction[] } {
   const actions = cell.actions ?? [];
   const has = (action: string) => actions.includes(action);
   if (cell.source_missing) {

@@ -185,3 +185,51 @@ export function launchCommandsOfAccount(
     .map((line) => [line.name, line.value] as [string, string]);
   return [...collect(Object.entries(managed), true), ...collect(externalEntries, false)];
 }
+
+/** 资源表格的一列：一个账号。 */
+export interface AccountColumn {
+  /** 技能 / MCP 格子里的键：主账号是助手 id，其余是实例 id。 */
+  id: string;
+  /** 表头第二层显示的短名：主账号叫「主号」。 */
+  name: string;
+  /** 悬停提示里的全名，如「Claude · 工作」。 */
+  fullName: string;
+}
+
+/** 表头第一层：一个助手及其账号列。 */
+export interface AccountGroup {
+  key: string;
+  label: string;
+  kind: ProfileKind | null;
+  columns: AccountColumn[];
+}
+
+/**
+ * 把资源格子里出现的账号键按助手分组，顺序同账号页（主账号在前）。
+ * 账号页不认识的键（如不支持多账号的助手）各自成组，列名用「主号」。
+ */
+export function accountGroups(groups: AgentAccounts[], ids: string[]): AccountGroup[] {
+  const wanted = new Set(ids);
+  const used = new Set<string>();
+  const result: AccountGroup[] = [];
+  for (const group of groups) {
+    const columns = group.accounts
+      .map((account) => {
+        const id = account.isMain ? group.agentId : account.elementId.replace(/^profiles:/, "");
+        return {
+          id,
+          name: account.isMain ? "主号" : account.name,
+          fullName: account.isMain ? group.label : `${group.label} · ${account.name}`,
+        };
+      })
+      .filter((column) => wanted.has(column.id));
+    columns.forEach((column) => used.add(column.id));
+    if (columns.length) result.push({ key: group.agentId, label: group.label, kind: group.kind, columns });
+  }
+  for (const id of ids) {
+    if (used.has(id)) continue;
+    used.add(id);
+    result.push({ key: id, label: id, kind: null, columns: [{ id, name: "主号", fullName: id }] });
+  }
+  return result;
+}

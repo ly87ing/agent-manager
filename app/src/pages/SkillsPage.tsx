@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, PackageOpen, Pencil, Plus, RefreshCw, SearchX, Trash2, Wand2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, PackageOpen, Pencil, Plus, RefreshCw, SearchX, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -7,8 +7,8 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
-import { AccountChip, ActionMenu } from "../components/AccountChip";
-import { skillChip } from "../lib/skillChip";
+import { AccountCells, AccountHeader, AccountSwitch, ActionMenu, RowActions } from "../components/AccountGrid";
+import { skillChip, skillNeedsUpdate } from "../lib/skillChip";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import { SkillInstalledView } from "../components/SkillInstalledView";
 import { SkillRecommendations } from "../components/SkillRecommendations";
@@ -25,7 +25,7 @@ import {
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import { addToAllRows, fillRows } from "../lib/skillFill";
 import { useBatchApply } from "../lib/useBatchApply";
-import { useAccountNames } from "../lib/useAccountNames";
+import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
@@ -62,6 +62,7 @@ function summarize(skill: EngineElement, cells: Record<string, SkillAgentCell>, 
   if (entries.some(([, cell]) => cell.state === "missing-link" || cell.state === "dead-link")) badges.push({ text: "链接损坏", tone: "warn" });
   if (entries.some(([, cell]) => cell.state === "drifted")) badges.push({ text: "入口被外部内容占用", tone: "warn" });
   if (entries.some(([, cell]) => cell.state === "extra-link")) badges.push({ text: "有外部链接", tone: "info" });
+  if (entries.some(([, cell]) => skillNeedsUpdate(cell))) badges.push({ text: "有新版本", tone: "info" });
   const inbox = (skill.observed as SkillObserved).discovery_inbox === true;
   const text = inbox
     ? "新发现"
@@ -106,6 +107,7 @@ export default function SkillsPage({
 } = {}) {
   const query = useEngineQuery<StatusData>("skills:status");
   const nameOf = useAccountNames();
+  const groupsOf = useAccountGroups();
   const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const [collectionFilter, setCollectionFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>(() => initialAgent ?? "all");
@@ -247,6 +249,10 @@ export default function SkillsPage({
     saveExpanded(merged);
   };
   const allOpen = visibleCollections.every((collection) => isOpen(collName(collection), skillsOf(collection)));
+  const shownAgents = agentFilter === "all" ? agentOptions : [agentFilter];
+  const groups = groupsOf(shownAgents);
+  /** 每个账号还缺哪些在用的技能：表头「补齐」逐个账号做。 */
+  const fillOf = (agent: string) => pendingFill.filter((row) => row.agent === agent);
 
   return (
     <div className="space-y-3">
@@ -294,18 +300,6 @@ export default function SkillsPage({
               {allOpen ? "全部收起" : "全部展开"}
             </button>
           )}
-          {pendingFill.length > 0 && (
-            <button
-              type="button"
-              data-testid="skills-fill"
-              disabled={batchApply.executing}
-              title="把在用的技能链接到还缺它的账号；账号上停用的不动"
-              onClick={() => void batchApply.applyBatch({ actionLabel: "补齐", rows: pendingFill })}
-              className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/15 disabled:opacity-40"
-            >
-              <Wand2 className="h-4 w-4" aria-hidden /> 补齐 {pendingFill.length}
-            </button>
-          )}
           <button
             type="button"
             data-testid="add-collection-button"
@@ -337,6 +331,28 @@ export default function SkillsPage({
         />
       ) : (
         <div className="space-y-2">
+          <AccountHeader
+            className="sticky top-0 z-10 rounded-lg border bg-muted"
+            groups={groups}
+            left={<span data-testid="skills-counts">{shownSkillCount} 个技能 · 点账号下的「补齐」把在用的技能加到这个账号</span>}
+            below={(column) => {
+              const rows = fillOf(column.id);
+              return rows.length > 0 ? (
+                <button
+                  type="button"
+                  data-testid={`skills-fill-${column.id}`}
+                  disabled={batchApply.executing}
+                  title={`把在用的 ${rows.length} 个技能加到 ${column.fullName}；账号上停用的不动`}
+                  onClick={() => void batchApply.applyBatch({ actionLabel: "补齐", rows })}
+                  className="text-primary hover:underline disabled:opacity-40"
+                >
+                  补齐 {rows.length}
+                </button>
+              ) : (
+                <span className="text-muted-foreground/70">齐了</span>
+              );
+            }}
+          />
           {visibleCollections.map((collection) => {
             const name = collName(collection);
             const spec = collection.spec as SkillCollectionSpec;
@@ -347,20 +363,19 @@ export default function SkillsPage({
             const rows = skillsOf(collection);
             const open = isOpen(name, rows);
             const attention = rows.filter(needsAttention).length;
-            const perAgent = (agentFilter === "all" ? agentOptions : [agentFilter]).map((agent) => ({
-              agent,
-              on: rows.filter((skill) => ACTIVE.has((skill.observed as SkillObserved).agents?.[agent]?.state ?? "")).length,
-            }));
+            const onCount = (agent: string) =>
+              rows.filter((skill) => ACTIVE.has((skill.observed as SkillObserved).agents?.[agent]?.state ?? "")).length;
             return (
               <section key={collection.id} data-testid={`collection-card-${name}`} className="overflow-hidden rounded-lg border bg-card">
-                <header className={cn("flex items-center gap-2 px-3 py-2.5", open && "border-b bg-muted/50")}>
+                <header className={cn("group flex items-center gap-3 py-2.5 pl-3 pr-4", open && "border-b bg-muted/50")}>
+                  <div className="flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap [&>span]:shrink-0">
                   <button
                     type="button"
                     data-testid={`collection-toggle-${name}`}
                     aria-expanded={open}
                     aria-label={`${open ? "收起" : "展开"}集合 ${name}`}
                     onClick={() => setOpen({ [name]: !open })}
-                    className="flex min-w-0 items-center gap-2 rounded text-left hover:text-primary"
+                    className="flex shrink-0 items-center gap-2 rounded text-left hover:text-primary"
                   >
                     {open ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />}
                     <span className="font-semibold">{name}</span>
@@ -371,12 +386,7 @@ export default function SkillsPage({
                       {attention} 个待处理
                     </span>
                   )}
-                  {!open && rows.length > 0 && (
-                    <span data-testid={`collection-summary-${name}`} className="truncate text-xs text-muted-foreground">
-                      {perAgent.map(({ agent, on }) => `${nameOf(agent)} ${on}/${rows.length}`).join(" · ")}
-                    </span>
-                  )}
-                  <span className={cn("truncate font-mono text-xs text-muted-foreground", !open && "hidden")} title={spec.source_path ?? spec.url ?? undefined}>
+                  <span className={cn("!shrink min-w-0 truncate font-mono text-xs text-muted-foreground", !open && "hidden")} title={spec.source_path ?? spec.url ?? undefined}>
                     {spec.source_path ?? spec.url ?? "（未填来源）"}
                   </span>
                   {!enabled && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">已停用</span>}
@@ -393,7 +403,7 @@ export default function SkillsPage({
                       新发现 {inboxCount}
                     </span>
                   )}
-                  <div className="ml-auto flex items-center gap-1">
+                  <div className="ml-auto flex shrink-0 items-center gap-1">
                     {actions.includes("update") && (
                       <button
                         type="button"
@@ -404,6 +414,7 @@ export default function SkillsPage({
                         <RefreshCw className="h-3.5 w-3.5" aria-hidden /> 更新
                       </button>
                     )}
+                    <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
                     <button
                       type="button"
                       data-testid={`edit-collection-${name}`}
@@ -436,7 +447,18 @@ export default function SkillsPage({
                         <Trash2 className="h-3.5 w-3.5" aria-hidden />
                       </button>
                     )}
+                    </div>
                   </div>
+                  </div>
+                  <AccountCells
+                    groups={groups}
+                    cell={(column) => (
+                      <span data-testid={`collection-count-${name}-${column.id}`} className="text-xs tabular-nums text-muted-foreground" title={`${column.fullName}：启用 ${onCount(column.id)} / ${rows.length}`}>
+                        {onCount(column.id)}/{rows.length}
+                      </span>
+                    )}
+                  />
+                  <div className="w-16 shrink-0" />
                 </header>
                 {observed.discovery_error && (
                   <p data-testid={`discovery-error-${name}`} className="bg-warning/10 px-4 py-1.5 text-xs text-warning">
@@ -466,23 +488,12 @@ export default function SkillsPage({
                       })),
                     );
                     return (
-                      <li key={skill.id} data-testid={`skill-row-${skill.id}`} className="flex flex-wrap items-center gap-2 py-1.5 pl-10 pr-3 hover:bg-accent/40">
-                        <span className="min-w-0 truncate text-sm">{skillName}</span>
-                        {summary.inbox && <span className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">新发现</span>}
-                        {summary.badges.map((badge) => (
-                          <span key={badge.text} className={cn("rounded px-1.5 py-0.5 text-[11px]", TONE[badge.tone])}>{badge.text}</span>
-                        ))}
-                        <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
-                          {chips.map(({ agent, cell, chip }) => (
-                            <AccountChip
-                              key={agent}
-                              label={nameOf(agent)}
-                              tone={chip.tone}
-                              title={`${nameOf(agent)}：${chip.hint}`}
-                              testId={chip.primary ? `action-${chip.primary.action}-${skill.id}-${agent}` : `chip-${skill.id}-${agent}`}
-                              disabled={directApply.executing || batchApply.executing}
-                              onClick={chip.primary ? () => handleSkillAction(skill, agent, chip.primary!.action, cell) : undefined}
-                            />
+                      <li key={skill.id} data-testid={`skill-row-${skill.id}`} className="group flex items-center gap-3 py-1.5 pl-10 pr-4 hover:bg-accent/40">
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                          <span className="min-w-0 truncate text-sm">{skillName}</span>
+                          {summary.inbox && <span className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">新发现</span>}
+                          {summary.badges.map((badge) => (
+                            <span key={badge.text} className={cn("rounded px-1.5 py-0.5 text-[11px]", TONE[badge.tone])}>{badge.text}</span>
                           ))}
                           {addRows.length > 0 && (
                             <button
@@ -492,11 +503,31 @@ export default function SkillsPage({
                               onClick={() => void batchApply.applyBatch({ actionLabel: "添加", rows: addRows })}
                               className="rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-40"
                             >
-                              添加到全部
+                              添加到全部账号
                             </button>
                           )}
-                          <ActionMenu label={`${skillName} 的更多操作`} items={menu} />
                         </div>
+                        <AccountCells
+                          groups={groups}
+                          cell={(column) => {
+                            const found = chips.find((item) => item.agent === column.id);
+                            if (!found) return null;
+                            const { cell, chip } = found;
+                            return (
+                              <AccountSwitch
+                                tone={chip.tone}
+                                checked={chip.checked}
+                                title={`${column.fullName}：${chip.hint}`}
+                                testId={chip.primary ? `action-${chip.primary.action}-${skill.id}-${column.id}` : `chip-${skill.id}-${column.id}`}
+                                disabled={directApply.executing || batchApply.executing}
+                                onClick={chip.primary ? () => handleSkillAction(skill, column.id, chip.primary!.action, cell) : undefined}
+                              />
+                            );
+                          }}
+                        />
+                        <RowActions>
+                          <ActionMenu label={`${skillName} 的更多操作`} items={menu} />
+                        </RowActions>
                       </li>
                     );
                   })}
