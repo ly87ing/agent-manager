@@ -293,32 +293,9 @@ pub fn source_state() -> (Option<String>, Option<String>) {
     })
 }
 
-/// 已选择外部密钥文件且当前可读：只有这时才能把新取值写进去。
-pub fn source_ready() -> bool {
-    CACHE.with(|cache| {
-        let snapshot = cache.borrow();
-        snapshot.configured_path.is_some() && snapshot.error.is_none()
-    })
-}
-
 /// 外部密钥文件里已有的变量名（含空值）；只返回名字。
 pub fn stored_names() -> BTreeSet<String> {
     CACHE.with(|cache| cache.borrow().values.keys().cloned().collect())
-}
-
-/// 外部密钥文件里取值恰好等于 `value` 的变量名；只比较，不返回取值。
-pub fn var_holding(value: &str) -> Option<String> {
-    if value.is_empty() {
-        return None;
-    }
-    CACHE.with(|cache| {
-        cache
-            .borrow()
-            .values
-            .iter()
-            .find(|(_, stored)| stored.as_str() == value)
-            .map(|(name, _)| name.clone())
-    })
 }
 
 fn render_line(name: &str, value: &str) -> Result<String> {
@@ -407,11 +384,10 @@ pub fn set(ctx: &Context, name: &str, value: &str) -> Result<()> {
     update_values(ctx, &updates)
 }
 
-/// 计算好、还没落盘的一次密钥文件写入：调用方可把它放进自己的回滚事务里写。
-pub struct PlannedWrite {
-    pub path: PathBuf,
-    pub old: Vec<u8>,
-    pub new: Vec<u8>,
+/// 计算好、还没落盘的一次密钥文件写入。
+struct PlannedWrite {
+    path: PathBuf,
+    new: Vec<u8>,
 }
 
 /// 只补缺失值的合并结果：同名不同值时拒绝；没有要补的返回 None。不落盘。
@@ -451,19 +427,10 @@ fn plan_merge_named(
     Ok((
         Some(PlannedWrite {
             path,
-            old: text.into_bytes(),
             new: updated.into_bytes(),
         }),
         merged,
     ))
-}
-
-/// 与 [`merge_without_overwrite`] 同一套合并规则，但只算出要写的内容，由调用方落盘。
-pub fn plan_merge(
-    ctx: &Context,
-    incoming: &BTreeMap<String, String>,
-) -> Result<Option<PlannedWrite>> {
-    Ok(plan_merge_named(ctx, incoming)?.0)
 }
 
 /// 只补缺失值；同名不同值时拒绝，避免接管覆盖用户在外部仓库维护的凭据。

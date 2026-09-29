@@ -35,7 +35,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         EngineError::new(
             "unknown_command",
             format!(
-                "命令 '{command}' 不在契约命令面内（允许 mcp/skills/rules/hooks/aliases/profiles:status|apply / mcp:preview|hooks:preview|aliases:preview / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:config-file|preview|apply-definition|adopt|seed|shared-status|shared-preview|shared-apply / agents:status|configure|preview-runtime|preview-default|check|models|balance|auth-status|config-file|edit-config / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
+                "命令 '{command}' 不在契约命令面内（允许 mcp/skills/rules/hooks/aliases/profiles:status|apply / mcp:preview|hooks:preview|aliases:preview / rules:save-template|delete-template / hooks:discard-legacy / aliases:discard-legacy / profiles:preview|apply-definition|adopt|seed|shared-status|shared-apply / agents:status|configure|preview-runtime|auth-status / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
             ),
         )
     };
@@ -65,20 +65,11 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("profiles", "apply-definition") => true,
         // 把默认环境的权限、状态栏、hooks、规则与 MCP 一次性带进实例：只补实例没有的
         ("profiles", "seed") => true,
-        (
-            "profiles",
-            "shared-status" | "shared-preview" | "shared-apply" | "config-file" | "preview",
-        ) => true,
-        // 运行参数写助手自己的配置文件：与装卸升级的 apply 分开，那条走 shell 命令
-        ("agents", "configure" | "preview-runtime" | "preview-default") => true,
-        // 接入配置可用性检查：会联网，但只在界面上点它时才发
-        ("agents", "check") => true,
-        // 列模型：同样会联网、只在界面上点它时才发；只读（除审计）
-        ("agents", "models" | "balance") => true,
+        ("profiles", "shared-status" | "shared-apply" | "preview") => true,
+        // 运行参数写助手自己的配置文件（如实时额度状态栏）：与装卸升级的 apply 分开
+        ("agents", "configure" | "preview-runtime") => true,
         // 官方账号登录状态：只读，用官方命令查一次
         ("agents", "auth-status") => true,
-        // 配置文件原文：仅用户主动展开时读，可能含凭据；整文件按基准写回
-        ("agents", "config-file" | "edit-config") => true,
         ("agents", "status") => true,
         // 用量：status 只读，scan 读会话文件后写聚合，clear 清空重来
         ("usage", "status" | "scan" | "clear") => true,
@@ -136,8 +127,6 @@ enum ArgValueKind {
     Revision,
     /// profiles:seed 要带的项：逗号分隔，只能是引擎认得的几项（引擎再校验一次）。
     SeedItems,
-    /// 独立环境只读文件选择；实际是否属于该助手仍由引擎校验。
-    ProfileFile,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -212,14 +201,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--items", ArgValueKind::SeedItems));
         }
         ("profiles", "shared-status") => specs.push(("--only", ArgValueKind::ElementId)),
-        ("profiles", "shared-preview") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--selection", ArgValueKind::JsonValue));
-        }
-        ("profiles", "config-file") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--file", ArgValueKind::ProfileFile));
-        }
         ("profiles", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--definition", ArgValueKind::JsonValue));
@@ -254,47 +235,20 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         }
         // 配置备份：导出不带参数，导入只接整份备份正文
         ("config", "import") => specs.push(("--value", ArgValueKind::JsonValue)),
-        ("agents", "check") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--use", ArgValueKind::ElementId));
-        }
-        // 表单里还没保存的接入：地址、凭据变量名与形态放在一个 JSON 里，引擎再逐项校验
-        ("agents", "models" | "balance") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--use", ArgValueKind::ElementId));
-            specs.push(("--draft", ArgValueKind::JsonValue));
-        }
-        ("agents", "config-file" | "auth-status") => {
-            specs.push(("--only", ArgValueKind::ElementId))
-        }
-        // 整文件写回：基准是 config-file 给出的文件摘要（或 missing），正文由引擎按格式校验
-        ("agents", "edit-config") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--file-base", ArgValueKind::RuleBase));
-            specs.push(("--value", ArgValueKind::RuleText));
-        }
+        ("agents", "auth-status") => specs.push(("--only", ArgValueKind::ElementId)),
         // 运行参数写助手配置文件：每次写入都带 status 给出的基准，外部改过就被拒；
-        // 降安全等级与放弃实际配置都要显式标志。「接管 = 用库覆盖」的通道已退役。
+        // 降安全等级要显式标志。主账号只放官方登录，不再有切换与保存实际配置。
         ("agents", "configure") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--base", ArgValueKind::Digest));
             specs.push(("--preview-file-base", ArgValueKind::RuleBase));
-            // 主配置只放官方账号：只能切回官方（--use-default），不能写入第三方接入
-            specs.push(("--use-default", ArgValueKind::Flag));
-            specs.push(("--save-current", ArgValueKind::Flag));
             specs.push(("--runtime", ArgValueKind::JsonValue));
-            specs.push(("--discard-live", ArgValueKind::Flag));
-            specs.push(("--discard-live-token", ArgValueKind::Flag));
             specs.push(("--allow-yolo", ArgValueKind::Flag));
         }
         ("agents", "preview-runtime") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--base", ArgValueKind::Digest));
             specs.push(("--runtime", ArgValueKind::JsonValue));
-        }
-        ("agents", "preview-default") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--base", ArgValueKind::Digest));
         }
         (_, "apply") | ("mcp", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -384,13 +338,6 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
                 ))
             }
         }
-        ArgValueKind::ProfileFile => match value {
-            "main" | "mcp" | "hooks" | "rules" => Ok(()),
-            _ => Err(EngineError::new(
-                "invalid_args",
-                "独立环境文件只能选主配置、MCP、Hooks 或规则",
-            )),
-        },
         ArgValueKind::RunId => validate_run_id(value),
         ArgValueKind::PolicyLayer => {
             if value == "local" {
@@ -720,10 +667,6 @@ mod tests {
             "agents:status",
             "agents:configure",
             "agents:preview-runtime",
-            "agents:preview-default",
-            "agents:check",
-            "agents:models",
-            "agents:balance",
             "agents:auth-status",
             "usage:status",
             "usage:scan",
@@ -745,14 +688,12 @@ mod tests {
             "aliases:apply",
             "aliases:discard-legacy",
             "profiles:status",
-            "profiles:config-file",
             "profiles:preview",
             "profiles:apply",
             "profiles:apply-definition",
             "profiles:adopt",
             "profiles:seed",
             "profiles:shared-status",
-            "profiles:shared-preview",
             "profiles:shared-apply",
             "secrets:status",
             "secrets:set",
@@ -790,6 +731,15 @@ mod tests {
             "secrets:plan",
             "secrets:apply",
             "system:status",
+            // 2026-09-28 多账号设计退役：主配置切换、接入检查 / 模型 / 余额、配置原文编辑
+            "agents:preview-default",
+            "agents:check",
+            "agents:models",
+            "agents:balance",
+            "agents:config-file",
+            "agents:edit-config",
+            "profiles:config-file",
+            "profiles:shared-preview",
             // 2026-09-12 裁决退役：tools 域、snapshots 域、system:converge 全部拒绝
             "tools:status",
             "tools:plan",
@@ -1348,17 +1298,10 @@ mod tests {
     }
 
     #[test]
-    fn config_file_args_follow_the_contract() {
+    fn agents_runtime_and_auth_args_follow_the_contract() {
         let base = "c".repeat(64);
         let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert!(validate_command("agents:config-file").is_ok());
-        assert!(validate_command("agents:edit-config").is_ok());
         assert!(validate_command("agents:preview-runtime").is_ok());
-        assert!(validate_args(
-            "agents:preview-default",
-            &args(&["--only", "agents:claude-code", "--base", &base])
-        )
-        .is_ok());
         assert!(validate_args(
             "agents:configure",
             &args(&[
@@ -1366,96 +1309,13 @@ mod tests {
                 "agents:claude-code",
                 "--base",
                 &base,
-                "--use-default",
+                "--runtime",
+                r#"{"statusline":"builtin"}"#,
                 "--preview-file-base",
                 &base
             ])
         )
         .is_ok());
-        assert!(validate_args(
-            "agents:configure",
-            &args(&[
-                "--only",
-                "agents:claude-code",
-                "--base",
-                &base,
-                "--use-default",
-                "--preview-file-base",
-                "bad"
-            ])
-        )
-        .is_err());
-        assert!(validate_args(
-            "agents:preview-default",
-            &args(&[
-                "--only",
-                "agents:claude-code",
-                "--base",
-                &base,
-                "--use-default"
-            ])
-        )
-        .is_err());
-        assert!(validate_args(
-            "agents:preview-runtime",
-            &args(&[
-                "--only",
-                "agents:claude-code",
-                "--base",
-                &base,
-                "--runtime",
-                r#"{"default_model":"x"}"#
-            ])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "agents:preview-runtime",
-            &args(&[
-                "--only",
-                "agents:claude-code",
-                "--base",
-                &base,
-                "--runtime",
-                "{}",
-                "--allow-yolo"
-            ])
-        )
-        .is_err());
-        assert!(validate_args(
-            "agents:config-file",
-            &args(&["--only", "agents:claude-code"])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "agents:edit-config",
-            &args(&[
-                "--only",
-                "agents:claude-code",
-                "--file-base",
-                &base,
-                "--value",
-                "{\n  \"a\": 1\n}"
-            ])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "agents:edit-config",
-            &args(&[
-                "--only",
-                "agents:claude-code",
-                "--file-base",
-                "BAD",
-                "--value",
-                "{}"
-            ])
-        )
-        .is_err());
-        assert!(validate_args(
-            "agents:config-file",
-            &args(&["--only", "agents:claude-code", "--value", "x"])
-        )
-        .is_err());
-        // 登录状态：只读，只接受一个 --only（主助手或实例）
         assert!(validate_args("agents:auth-status", &args(&["--only", "profiles:cc-ly"])).is_ok());
         assert!(validate_args(
             "agents:auth-status",
@@ -1470,24 +1330,6 @@ mod tests {
         let base = "b".repeat(64);
         let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert!(validate_command("profiles:adopt").is_ok());
-        assert!(
-            validate_args("profiles:config-file", &args(&["--only", "profiles:cc-ly"])).is_ok()
-        );
-        assert!(validate_args(
-            "profiles:config-file",
-            &args(&["--only", "profiles:cc-ly", "--file", "mcp"])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "profiles:config-file",
-            &args(&["--only", "profiles:cc-ly", "--file", "../auth.json"])
-        )
-        .is_err());
-        assert!(validate_args(
-            "profiles:config-file",
-            &args(&["--only", "profiles:cc-ly", "--value", "secret"])
-        )
-        .is_err());
         assert!(validate_command("profiles:preview").is_ok());
         assert!(validate_args(
             "profiles:preview",
@@ -1723,16 +1565,7 @@ mod tests {
             &args(&["--only", "profiles:cc-ly"])
         )
         .is_ok());
-        assert!(validate_args(
-            "profiles:shared-preview",
-            &args(&["--only", "profiles:cc-ly", "--selection", "[]"])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "profiles:shared-preview",
-            &args(&["--only", "profiles:cc-ly", "--selection", "not-json"])
-        )
-        .is_err());
+        assert!(validate_command("profiles:shared-preview").is_err());
         assert!(validate_args(
             "profiles:shared-apply",
             &args(&[
@@ -1866,16 +1699,11 @@ mod tests {
     #[test]
     fn agents_configure_args_require_digest_shape_and_reject_retired_takeover() {
         let digest = "a".repeat(64);
-        for extra in [
-            vec!["--use-default".to_string(), "--discard-live-token".into()],
-            vec!["--use-default".into(), "--discard-live".into()],
-            vec!["--save-current".into()],
-            vec![
-                "--runtime".into(),
-                r#"{"automation_mode":"full"}"#.into(),
-                "--allow-yolo".into(),
-            ],
-        ] {
+        for extra in [vec![
+            "--runtime".to_string(),
+            r#"{"automation_mode":"full"}"#.into(),
+            "--allow-yolo".into(),
+        ]] {
             let mut args = vec![
                 "--only".to_string(),
                 "agents:claude-code".into(),
@@ -1889,9 +1717,12 @@ mod tests {
             ("--base", "ABC"),
             ("--base", "g".repeat(64).as_str()),
             ("--runtime", "{not json"),
-            // 主配置不写第三方接入：桥上就不放行
+            // 主账号只放官方登录：写入第三方、切回官方、保存实际配置在桥上就不放行
             ("--use", "relay"),
             ("--connection", r#"{"base_url":"https://x"}"#),
+            ("--use-default", ""),
+            ("--save-current", ""),
+            ("--discard-live", ""),
         ] {
             assert!(
                 validate_args(

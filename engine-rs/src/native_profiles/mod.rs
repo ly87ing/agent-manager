@@ -8,13 +8,11 @@
 //! 逐助手分配天然适用于实例，不另造一套分配模型。
 
 pub(crate) mod apply;
-pub(crate) mod config_file;
 pub(crate) mod model;
 pub(crate) mod persistence;
 pub(crate) mod preview_seed;
 pub(crate) mod seed;
 pub(crate) mod shared;
-pub(crate) mod shared_preview;
 pub(crate) mod status;
 
 pub(crate) use apply::preflight_apply;
@@ -37,14 +35,12 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             }
             status::build_status(ctx)
         }
-        "profiles:config-file" => config_file::read(ctx, req),
         "profiles:preview" => apply::preview(ctx, req),
         // apply：用实例定义写实例文件（取锁）；adopt：用实际文件更新实例定义（只写库）
         "profiles:apply" | "profiles:apply-definition" | "profiles:adopt" => apply::apply(ctx, req),
         // seed：把默认环境的权限、状态栏、hooks、规则与 MCP 一次性带进实例（取锁）
         "profiles:seed" => seed::seed(ctx, req),
         "profiles:shared-status" => shared::status(ctx, req),
-        "profiles:shared-preview" => shared_preview::preview(ctx, req),
         "profiles:shared-apply" => shared::apply(ctx, req),
         _ => bail!("profiles 域不支持命令 '{}'", req.command),
     }

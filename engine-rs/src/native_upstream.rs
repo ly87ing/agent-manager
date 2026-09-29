@@ -347,17 +347,6 @@ fn spawn_capture_reader(
     rx
 }
 
-/// 同 crate 内复用这套外部命令基础设施（超时、进程组隔离、输出上限）。
-pub(crate) fn run_capture_public(
-    program: &str,
-    args: &[&str],
-    cwd: Option<&Path>,
-    ctx: &Context,
-    timeout: Duration,
-) -> Option<String> {
-    run_capture(program, args, cwd, ctx, timeout)
-}
-
 /// 以参数数组直接执行（不经 shell），exit 0 → Some(stdout)；超时/非 0/启动
 /// 失败 → None。stdin 关闭，HOME 注入 ctx.home_dir（探测不继承调用方 HOME）。
 fn run_capture(

@@ -1163,17 +1163,6 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       base: "e".repeat(64),
     },
   };
-  const readConfigFile = (args: string[]): Envelope => {
-    const element = argOf(args, "--only") ?? "";
-    const file = configFiles[element];
-    if (!file) {
-      return makeEnvelope({}, { command: "agents.config-file", ok: false, errors: [{ code: "AGENT_ERROR", element, message: "这个助手没有可直接编辑的配置文件" }] });
-    }
-    return makeEnvelope(
-      { domain: "agents", element, ...file, exists: true, blocked_reason: null },
-      { command: "agents.config-file" },
-    );
-  };
   const previewRuntime = (args: string[]): Envelope => {
     const element = argOf(args, "--only") ?? "";
     const file = configFiles[element];
@@ -1236,45 +1225,6 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       domain: "agents", element, path: observed.current_config?.target ?? file.path,
       exists: true, file_base: "f".repeat(64), content,
     }, { command: "agents.preview-runtime" });
-  };
-  const previewDefault = (args: string[]): Envelope => {
-    const element = argOf(args, "--only") ?? "";
-    const file = configFiles[element];
-    const agents = (routes["agents:status"].data as {
-      elements: Array<{ id: string; observed: { current_config?: { base?: string; target?: string } } }>;
-    }).elements;
-    const observed = agents.find((item) => item.id === element)?.observed.current_config;
-    if (!file || !observed || argOf(args, "--base") !== observed.base) {
-      return makeEnvelope({}, { command: "agents.preview-default", ok: false,
-        errors: [{ code: "AGENT_CONFIG_CHANGED", element, message: "配置文件已在外部修改，请刷新后重新预览" }] });
-    }
-    let content: string;
-    if (file.format === "json") {
-      const root = JSON.parse(file.content) as Record<string, unknown>;
-      const env = root.env as Record<string, unknown> | undefined;
-      if (env) {
-        for (const key of ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY",
-          "ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
-          "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL", "API_TIMEOUT_MS"]) delete env[key];
-        if (Object.keys(env).length === 0) delete root.env;
-      }
-      content = `${JSON.stringify(root, null, 2)}\n`;
-    } else {
-      content = `${file.content.split("\n").filter((line) => !/^(model_provider|model)\s*=/.test(line)).join("\n").trimEnd()}\n`;
-    }
-    return makeEnvelope({ domain: "agents", element, path: observed.target ?? file.path,
-      exists: true, file_base: "f".repeat(64), will_write: content !== file.content, content }, { command: "agents.preview-default" });
-  };
-  const editConfigFile = (args: string[], runId: string): Envelope => {
-    const element = argOf(args, "--only") ?? "";
-    const file = configFiles[element];
-    if (!file || argOf(args, "--file-base") !== file.base) {
-      return makeEnvelope({}, { command: "agents.edit-config", ok: false, errors: [{ code: "AGENT_CONFIG_CHANGED", element, message: `${file?.path ?? element} 已在外部修改` }] });
-    }
-    file.content = argOf(args, "--value") ?? file.content;
-    file.base = (parseInt(file.base.slice(0, 8), 16) + 1).toString(16).padStart(64, "0");
-    recordRun(runId, "agents.edit-config");
-    return makeEnvelope({ domain: "agents", element, path: file.path, changed: [], base: file.base }, { command: "agents.edit-config", run_id: runId });
   };
 
   let baseSeed = 100;
@@ -1517,41 +1467,11 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       }
       if (command === "agents:configure") return configureAgent(args, runId);
       if (command === "agents:preview-runtime") return previewRuntime(args);
-      if (command === "agents:preview-default") return previewDefault(args);
-      if (command === "agents:config-file") return readConfigFile(args);
-      if (command === "agents:edit-config") return editConfigFile(args, runId);
       if (command === "agents:auth-status") {
         const only = args[args.indexOf("--only") + 1] ?? "";
         return makeEnvelope(
           { element: only, state: "logged-out", logged_in: false, method: null, third_party: only.startsWith("profiles:"), mixed: false, reason: null },
           { command: "agents.auth-status" },
-        );
-      }
-      if (command === "agents:check") {
-        return makeEnvelope(
-          { ok: true, detail: "模拟连接正常", latency_ms: 128 },
-          { command: "agents.check" },
-        );
-      }
-      if (command === "agents:models") {
-        const rawDraft = argOf(args, "--draft");
-        if (rawDraft) {
-          const variable = (JSON.parse(rawDraft) as { token_var?: string }).token_var?.trim() ?? "";
-          const source = (routes["secrets:status"].data as {
-            elements: Array<{ observed: { source?: { names?: string[] } } }>;
-          }).elements[0]?.observed.source;
-          if (!variable || (!(source?.names ?? []).includes(variable) && !externallyResolvedSecrets.has(variable))) {
-            return makeEnvelope({}, {
-              command: "agents.models", ok: false,
-              errors: [{ code: "AGENT_ERROR", element: null, message: variable
-                ? `环境变量 ${variable} 还没有取值：先在密钥页填上（或保存接入时一并填写），再获取模型列表`
-                : "先填凭据变量名" }],
-            });
-          }
-        }
-        return makeEnvelope(
-          { endpoint: "https://api.example.com/v1/models", count: 3, models: ["mock-model-large", "mock-model-fast", "mock-model-mini"] },
-          { command: "agents.models" },
         );
       }
       if (command === "mcp:preview") {

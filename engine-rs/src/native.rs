@@ -175,7 +175,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     // 这里只负责取锁。
     let is_agent_configure = matches!(
         request.command.replace('.', ":").as_str(),
-        "agents:configure" | "agents:edit-config"
+        "agents:configure"
     );
     let is_secret_write = matches!(
         request.command.replace('.', ":").as_str(),
@@ -504,16 +504,6 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("usage", "status" | "scan" | "clear") => {
             crate::native_usage::handle(ctx, request).map(|d| (d, vec![]))
         }
-        // 接入配置可用性检查：唯一会主动联网的助手侧命令，只在调用方点它时才发请求
-        ("agents", "check") => crate::native_agent_check::handle(ctx, request).map(|d| (d, vec![])),
-        // 列模型：同样只在调用方点它时才联网，给表单挑模型名用
-        ("agents", "models") => {
-            crate::native_agent_check::handle_models(ctx, request).map(|d| (d, vec![]))
-        }
-        // 查余额：只对有官方余额接口的厂商，只在调用方点它时才联网
-        ("agents", "balance") => {
-            crate::native_agent_check::handle_balance(ctx, request).map(|d| (d, vec![]))
-        }
         // 运行参数落到助手自己的配置文件；与装卸升级分开，那条走 shell 命令，这条写文件
         ("agents", "configure") => {
             crate::native_agent_settings::apply(ctx, request).map(|data| (data, vec![]))
@@ -521,20 +511,10 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("agents", "preview-runtime") => {
             crate::native_agent_settings::preview_runtime(ctx, request).map(|data| (data, vec![]))
         }
-        ("agents", "preview-default") => {
-            crate::native_agent_settings::preview_default(ctx, request).map(|data| (data, vec![]))
-        }
         // 官方账号登录状态：用官方命令查一次，只读零写；一次要一两秒，只在界面上点它时才调
         ("agents", "auth-status") => crate::native_auth::status_command(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
-        // 配置文件原文：读只读零写；写整文件按基准比对（取锁）
-        ("agents", "config-file") => crate::native_agent_config_file::read(ctx, request)
-            .map(|data| (data, vec![]))
-            .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
-        ("agents", "edit-config") => {
-            crate::native_agent_config_file::write(ctx, request).map(|data| (data, vec![]))
-        }
         ("skills", "status" | "apply") => crate::native_skills::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("SKILL_ERROR", format!("{err:#}"))),
@@ -561,8 +541,8 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         }
         (
             "profiles",
-            "status" | "config-file" | "preview" | "apply" | "apply-definition" | "adopt" | "seed"
-            | "shared-status" | "shared-preview" | "shared-apply",
+            "status" | "preview" | "apply" | "apply-definition" | "adopt" | "seed"
+            | "shared-status" | "shared-apply",
         ) => crate::native_profiles::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("PROFILE_ERROR", format!("{err:#}"))),

@@ -1118,160 +1118,6 @@ fn provider_exact_candidate_preview_binds_file_and_secret_without_saving_draft_k
 }
 
 #[test]
-fn config_file_reads_only_the_selected_profile_and_refreshes_external_edits() {
-    let (root, ctx) = temp_ctx("config-file-readback");
-    assert!(save_definition(
-        &ctx,
-        "cc-ly",
-        &claude_profile("AM_TEST_CONFIG_FILE")
-    ));
-    let target = ctx.home_dir.join(".claude-ly/settings.json");
-    let default = ctx.home_dir.join(".claude/settings.json");
-    std::fs::create_dir_all(default.parent().unwrap()).unwrap();
-    std::fs::write(&default, "{\"default\":true}\n").unwrap();
-    let args = ["--only", "profiles:cc-ly"];
-    let missing = execute(&ctx, &request("profiles:config-file", &args));
-    assert!(missing.ok, "{:?}", missing.errors);
-    assert_eq!(missing.data["exists"], false);
-    assert!(
-        !target.parent().unwrap().exists(),
-        "只读操作不得创建实例目录"
-    );
-
-    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-    std::fs::write(
-        &target,
-        "{\"model\":\"one\",\"env\":{\"TOKEN\":\"secret\"}}\n",
-    )
-    .unwrap();
-    let first = execute(&ctx, &request("profiles:config-file", &args));
-    assert_eq!(first.data["path"], "~/.claude-ly/settings.json");
-    assert!(first.data["content"].as_str().unwrap().contains("\"one\""));
-    std::fs::write(&target, "{\"model\":\"two\"}\n").unwrap();
-    let second = execute(&ctx, &request("profiles:config-file", &args));
-    assert_eq!(second.data["content"], "{\"model\":\"two\"}\n");
-    let mcp = target.parent().unwrap().join(".claude.json");
-    std::fs::write(&mcp, "{\"mcpServers\":{\"demo\":{}}}\n").unwrap();
-    let rules = target.parent().unwrap().join("CLAUDE.md");
-    std::fs::write(&rules, "# 环境规则\n").unwrap();
-    for (file, path, content) in [
-        (
-            "mcp",
-            "~/.claude-ly/.claude.json",
-            "{\"mcpServers\":{\"demo\":{}}}\n",
-        ),
-        ("rules", "~/.claude-ly/CLAUDE.md", "# 环境规则\n"),
-    ] {
-        let read = execute(
-            &ctx,
-            &request(
-                "profiles:config-file",
-                &["--only", "profiles:cc-ly", "--file", file],
-            ),
-        );
-        assert!(read.ok, "{file}: {:?}", read.errors);
-        assert_eq!(read.data["path"], path);
-        assert_eq!(read.data["content"], content);
-    }
-    assert_eq!(
-        std::fs::read_to_string(&default).unwrap(),
-        "{\"default\":true}\n"
-    );
-
-    assert!(save_definition(
-        &ctx,
-        "cx-show",
-        r#"{"display_name":"Codex Show","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-show","model":"gpt-demo"},"_replace":true}"#
-    ));
-    let codex_target = ctx.home_dir.join(".codex-show/config.toml");
-    std::fs::create_dir_all(codex_target.parent().unwrap()).unwrap();
-    std::fs::write(&codex_target, "model = \"gpt-demo\"\n").unwrap();
-    let codex = execute(
-        &ctx,
-        &request("profiles:config-file", &["--only", "profiles:cx-show"]),
-    );
-    assert!(codex.ok, "{:?}", codex.errors);
-    assert_eq!(codex.data["path"], "~/.codex-show/config.toml");
-    assert_eq!(codex.data["format"], "toml");
-    assert_eq!(codex.data["content"], "model = \"gpt-demo\"\n");
-    let hooks = codex_target.parent().unwrap().join("hooks.json");
-    std::fs::write(&hooks, "{\"hooks\":{}}\n").unwrap();
-    std::fs::write(
-        codex_target.parent().unwrap().join("AGENTS.md"),
-        "# Codex 规则\n",
-    )
-    .unwrap();
-    for (file, path, content) in [
-        ("hooks", "~/.codex-show/hooks.json", "{\"hooks\":{}}\n"),
-        ("rules", "~/.codex-show/AGENTS.md", "# Codex 规则\n"),
-    ] {
-        let read = execute(
-            &ctx,
-            &request(
-                "profiles:config-file",
-                &["--only", "profiles:cx-show", "--file", file],
-            ),
-        );
-        assert!(read.ok, "{file}: {:?}", read.errors);
-        assert_eq!(read.data["path"], path);
-        assert_eq!(read.data["content"], content);
-    }
-    assert!(
-        !execute(
-            &ctx,
-            &request(
-                "profiles:config-file",
-                &["--only", "profiles:cx-show", "--file", "mcp"]
-            )
-        )
-        .ok
-    );
-    assert!(
-        !execute(
-            &ctx,
-            &request(
-                "profiles:config-file",
-                &[
-                    "--only",
-                    "profiles:cc-ly",
-                    "--file",
-                    "../.claude/.credentials.json"
-                ]
-            )
-        )
-        .ok
-    );
-
-    let auth = ctx.home_dir.join(".claude/.credentials.json");
-    std::fs::write(&auth, "dummy-auth-must-not-leak").unwrap();
-    std::fs::remove_file(&target).unwrap();
-    std::os::unix::fs::symlink(&auth, &target).unwrap();
-    let blocked = execute(&ctx, &request("profiles:config-file", &args));
-    assert!(!blocked.ok, "认证文件不能作为实例配置原文读出");
-    assert!(!format!("{:?}", blocked).contains("dummy-auth-must-not-leak"));
-    std::fs::remove_file(&mcp).unwrap();
-    std::os::unix::fs::symlink(&auth, &mcp).unwrap();
-    let blocked_mcp = execute(
-        &ctx,
-        &request(
-            "profiles:config-file",
-            &["--only", "profiles:cc-ly", "--file", "mcp"],
-        ),
-    );
-    assert!(!blocked_mcp.ok, "认证文件不能通过 MCP 文件入口读出");
-    assert!(!format!("{:?}", blocked_mcp).contains("dummy-auth-must-not-leak"));
-
-    for bad in [
-        vec!["--only", "profiles:../.claude"],
-        vec!["--only", "agents:claude-code"],
-        vec!["--only", "profiles:cc-ly", "--value", "x"],
-    ] {
-        assert!(!execute(&ctx, &request("profiles:config-file", &bad)).ok);
-    }
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
 fn claude_profile_writes_isolated_settings_without_touching_global() {
     let (root, ctx) = temp_ctx("claude-write");
     // 主实例配置：全程不得被改
@@ -2311,116 +2157,6 @@ fn 主助手的登录状态不设配置目录变量_登录记录在_home_的_cla
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// 独立环境也能测一下：按实例定义的地址、凭据变量与模型发最小请求，不写实例文件；官方账号
-/// 环境不代为发请求；凭据变量没取值时不发请求。
-#[test]
-fn 独立环境可检查可用性_只读_官方账号环境不代为检查() {
-    let (root, ctx) = temp_ctx("profile-check");
-    // 端口 1 立即拒绝：要的是「按实例定义拼出了端点、没写任何东西」，不是真去连
-    assert!(save_definition(
-        &ctx,
-        "cc-relay",
-        r#"{"display_name":"relay","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-relay","model":"glm-5.3","env":{"ANTHROPIC_BASE_URL":"https://127.0.0.1:1/api/anthropic","ANTHROPIC_API_KEY":"${AM_TEST_PROFILE_CHECK_KEY}"}},"_delete":false,"_replace":true}"#
-    ));
-    assert!(save_definition(
-        &ctx,
-        "cx-relay",
-        r#"{"display_name":"cx","bin":"codex","profile":{"base_agent":"codex","config_dir":"~/.codex-relay","base_url":"https://127.0.0.1:1/v1","env_key":"AM_TEST_PROFILE_CHECK_KEY","model":"m1"},"_delete":false,"_replace":true}"#
-    ));
-    assert!(save_definition(
-        &ctx,
-        "cc-home",
-        r#"{"display_name":"home","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-home"},"_delete":false,"_replace":true}"#
-    ));
-    let check = |id: &str| execute(&ctx, &request("agents:check", &["--only", id]));
-
-    let unset = check("profiles:cc-relay");
-    assert!(!unset.ok);
-    assert!(
-        unset.errors[0]
-            .message
-            .contains("AM_TEST_PROFILE_CHECK_KEY"),
-        "{:?}",
-        unset.errors
-    );
-
-    std::env::set_var("AM_TEST_PROFILE_CHECK_KEY", "check-secret-value");
-    let claude = check("profiles:cc-relay");
-    assert!(claude.ok, "{:?}", claude.errors);
-    assert_eq!(claude.data["element"], "profiles:cc-relay");
-    assert_eq!(
-        claude.data["endpoint"],
-        "https://127.0.0.1:1/api/anthropic/v1/messages"
-    );
-    assert_eq!(claude.data["model"], "glm-5.3");
-    assert_eq!(claude.data["ok"], false, "端口 1 连不上");
-    let codex = check("profiles:cx-relay");
-    assert!(codex.ok, "{:?}", codex.errors);
-    assert_eq!(codex.data["endpoint"], "https://127.0.0.1:1/v1/responses");
-    let text = format!("{:?}{:?}", claude.data, codex.data);
-    assert!(!text.contains("check-secret-value"), "结果不含取值");
-
-    let official = check("profiles:cc-home");
-    assert!(!official.ok);
-    assert!(
-        official.errors[0].message.contains("官方账号"),
-        "{:?}",
-        official.errors
-    );
-    let missing = check("profiles:nope");
-    assert!(!missing.ok);
-
-    // 只读：实例目录一个都没建
-    for dir in [".claude-relay", ".codex-relay", ".claude-home"] {
-        assert!(!ctx.home_dir.join(dir).exists(), "{dir}");
-    }
-    std::env::remove_var("AM_TEST_PROFILE_CHECK_KEY");
-    let _ = std::fs::remove_dir_all(root);
-}
-
-/// 查余额只对有官方余额接口的厂商；变量没取值时在发请求前拒绝。
-#[test]
-fn 查余额只对有官方接口的厂商_没取值不发请求() {
-    let (root, ctx) = temp_ctx("profile-balance");
-    assert!(save_definition(
-        &ctx,
-        "cc-glm",
-        r#"{"display_name":"glm","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-glm","env":{"ANTHROPIC_BASE_URL":"https://open.bigmodel.cn/api/anthropic","ANTHROPIC_AUTH_TOKEN":"${AM_TEST_BALANCE_GLM}"}},"_delete":false,"_replace":true}"#
-    ));
-    assert!(save_definition(
-        &ctx,
-        "cc-ds",
-        r#"{"display_name":"ds","bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-ds","env":{"ANTHROPIC_BASE_URL":"https://api.deepseek.com/anthropic","ANTHROPIC_AUTH_TOKEN":"${AM_TEST_BALANCE_UNSET}"}},"_delete":false,"_replace":true}"#
-    ));
-    let glm = execute(
-        &ctx,
-        &request("agents:balance", &["--only", "profiles:cc-glm"]),
-    );
-    assert!(!glm.ok);
-    assert!(
-        glm.errors[0].message.contains("没有公开的余额查询接口"),
-        "{:?}",
-        glm.errors
-    );
-    let ds = execute(
-        &ctx,
-        &request("agents:balance", &["--only", "profiles:cc-ds"]),
-    );
-    assert!(!ds.ok);
-    assert!(
-        ds.errors[0].message.contains("AM_TEST_BALANCE_UNSET"),
-        "{:?}",
-        ds.errors
-    );
-    // 状态里 Claude 实例也给出地址，界面据此决定给不给「查余额」
-    let status = status(&ctx);
-    assert_eq!(
-        element(&status, "cc-ds")["spec"]["base_url"],
-        "https://api.deepseek.com/anthropic"
-    );
-    let _ = std::fs::remove_dir_all(root);
-}
-
 fn seed(ctx: &Context, id: &str, items: &str) -> agent_manager_engine::Envelope {
     execute(
         ctx,
@@ -2474,32 +2210,8 @@ fn apply_shared(
     )
 }
 
-fn preview_shared(ctx: &Context, id: &str, items: &[&str]) -> agent_manager_engine::Envelope {
-    let status = shared_status(ctx, id);
-    assert!(status.ok, "{:?}", status.errors);
-    let selection: Vec<_> = items
-        .iter()
-        .map(|name| {
-            let item = shared_item(&status, name);
-            serde_json::json!({
-                "item": name,
-                "source_base": item["source_base"],
-                "target_base": item["target_base"],
-            })
-        })
-        .collect();
-    let value = serde_json::to_string(&selection).unwrap();
-    execute(
-        ctx,
-        &request(
-            "profiles:shared-preview",
-            &["--only", &format!("profiles:{id}"), "--selection", &value],
-        ),
-    )
-}
-
 #[test]
-fn 已建环境多项预览与逐项写入完全一致且预览零写() {
+fn 已建环境逐项写入共用设置_来源被外部改过就拒绝_含明文密钥的服务不同步() {
     let (root, ctx) = temp_ctx("shared-preview-all");
     std::env::set_var("AM_TEST_SHARED_PREVIEW", "YOUR_TEST_TOKEN");
     let main_dir = ctx.home_dir.join(".claude");
@@ -2541,43 +2253,15 @@ fn 已建环境多项预览与逐项写入完全一致且预览零写() {
     let items = ["permissions", "statusline", "hooks", "rules", "mcp:fs"];
     let before = snapshot_dir(&dir);
     let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
-    let preview = preview_shared(&ctx, "cc-ly", &items);
-    assert!(preview.ok, "{:?}", preview.errors);
-    assert!(
-        preview.data["results"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|row| row["state"] == "ready"),
-        "{}",
-        preview.data
-    );
-    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), db_before);
-    assert_eq!(snapshot_dir(&dir), before);
-    let files = preview.data["files"].as_array().unwrap();
-    assert_eq!(files.len(), 3, "{}", preview.data);
     let status = shared_status(&ctx, "cc-ly");
-    let old_line = shared_item(&status, "statusline");
-    let selection = serde_json::json!([{
-        "item": "statusline",
-        "source_base": old_line["source_base"],
-        "target_base": old_line["target_base"],
-    }])
-    .to_string();
+    // 读取状态后来源被外部改过：旧基准写入被拒，目录与库都不动
     let source_path = main_dir.join("settings.json");
     let original_source = std::fs::read(&source_path).unwrap();
     let mut changed_source: serde_json::Value = serde_json::from_slice(&original_source).unwrap();
     changed_source["statusLine"]["command"] = serde_json::json!("echo changed outside");
     std::fs::write(&source_path, serde_json::to_vec(&changed_source).unwrap()).unwrap();
-    let stale = execute(
-        &ctx,
-        &request(
-            "profiles:shared-preview",
-            &["--only", "profiles:cc-ly", "--selection", &selection],
-        ),
-    );
+    let stale = apply_shared(&ctx, "cc-ly", &shared_item(&status, "statusline"));
     assert!(!stale.ok);
-    assert!(stale.errors[0].message.contains("已变化"));
     assert_eq!(snapshot_dir(&dir), before);
     assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), db_before);
     std::fs::write(&source_path, original_source).unwrap();
@@ -2585,15 +2269,26 @@ fn 已建环境多项预览与逐项写入完全一致且预览零写() {
         let result = apply_shared(&ctx, "cc-ly", &shared_item(&status, name));
         assert!(result.ok, "{name}: {:?}", result.errors);
     }
-    for file in files {
-        assert_eq!(
-            std::fs::read(file["path"].as_str().unwrap()).unwrap(),
-            file["content"].as_str().unwrap().as_bytes()
-        );
-    }
-    let blocked = preview_shared(&ctx, "cc-ly", &["mcp:private"]);
-    assert!(!blocked.ok);
-    assert!(!blocked.data.to_string().contains("YOUR_LITERAL_TEST_KEY"));
+    let after: serde_json::Value = serde_json::from_slice(&std::fs::read(&main).unwrap()).unwrap();
+    assert_eq!(
+        after["permissions"],
+        serde_json::json!({"allow": ["Bash(ls:*)"]})
+    );
+    assert_eq!(after["statusLine"]["command"], "echo source");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap(),
+        "# 来源规则\n"
+    );
+    // 含明文密钥的 MCP 条目不能同步，状态里也不出现取值
+    let status_after = shared_status(&ctx, "cc-ly");
+    assert_eq!(
+        shared_item(&status_after, "mcp:private")["state"],
+        "blocked"
+    );
+    assert!(!status_after
+        .data
+        .to_string()
+        .contains("YOUR_LITERAL_TEST_KEY"));
     std::env::remove_var("AM_TEST_SHARED_PREVIEW");
     let _ = std::fs::remove_dir_all(root);
 }
@@ -2826,39 +2521,11 @@ fn 已建_codex_环境更新审批状态栏_保留接入和官方登录() {
         .unwrap();
     assert_eq!(status_line["source"], "2 项（内容隐藏）");
     assert_eq!(status_line["target"], "1 项（内容隐藏）");
-    let original_bytes = std::fs::read(&target).unwrap();
-    let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
-    let selected = preview_shared(
-        &ctx,
-        "cx-work",
-        &["statusline", "permissions", "hooks", "rules", "mcp:fs"],
-    );
-    assert!(selected.ok, "{:?}", selected.errors);
-    assert!(
-        selected.data["results"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|row| row["state"] == "ready"),
-        "{}",
-        selected.data
-    );
-    assert_eq!(selected.data["files"].as_array().unwrap().len(), 3);
-    assert_eq!(std::fs::read(&target).unwrap(), original_bytes);
-    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), db_before);
     assert!(apply_shared(&ctx, "cx-work", &shared_item(&preview, "permissions")).ok);
     assert!(apply_shared(&ctx, "cx-work", &shared_item(&preview, "statusline")).ok);
     for item in ["hooks", "rules", "mcp:fs"] {
         let result = apply_shared(&ctx, "cx-work", &shared_item(&preview, item));
         assert!(result.ok, "{item}: {:?}", result.errors);
-    }
-    for file in selected.data["files"].as_array().unwrap() {
-        assert_eq!(
-            std::fs::read(file["path"].as_str().unwrap()).unwrap(),
-            file["content"].as_str().unwrap().as_bytes(),
-            "{}",
-            file["path"]
-        );
     }
     let after: toml::Value = std::fs::read_to_string(&target).unwrap().parse().unwrap();
     assert_eq!(after["approval_policy"].as_str(), Some("on-request"));
