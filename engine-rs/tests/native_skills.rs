@@ -4080,6 +4080,15 @@ fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
         .unwrap()["spec"]
         .clone();
     std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o555)).unwrap();
+    // 以 root 运行（如容器里）时只读目录照样写得进去，造不出「写不进去」，这一步跳过
+    let probe = codex.join(".am-write-probe");
+    if std::fs::write(&probe, "x").is_ok() {
+        let _ = std::fs::remove_file(&probe);
+        std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+        eprintln!("以特权用户运行，跳过「中途写不进去」这一步");
+        let _ = std::fs::remove_dir_all(&root);
+        return;
+    }
     let failed = adopt(&arg_refs);
     std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(!failed.ok);

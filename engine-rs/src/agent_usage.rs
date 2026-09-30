@@ -336,7 +336,12 @@ fn newest_rollout(sessions_dir: &Path) -> Option<PathBuf> {
             let Ok(modified) = meta.modified() else {
                 continue;
             };
-            if newest.as_ref().is_none_or(|(best, _)| modified > *best) {
+            // 修改时间一样（时间戳精度粗的文件系统上紧挨着写的两个会话）时按文件名比：
+            // 文件名里带会话开始时间（rollout-2026-09-17T09-00-00-…），大的更新；不看遍历顺序
+            let newer = newest.as_ref().is_none_or(|(best, best_path)| {
+                modified > *best || (modified == *best && path.file_name() > best_path.file_name())
+            });
+            if newer {
                 newest = Some((modified, path));
             }
         }
@@ -375,6 +380,40 @@ fn find_key<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
         }
         Value::Array(items) => items.iter().find_map(|item| find_key(item, key)),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod newest_tests {
+    use super::*;
+
+    #[test]
+    fn 修改时间相同时按文件名取新会话_不看遍历顺序() {
+        let dir = std::env::temp_dir().join(format!("am-newest-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let day = dir.join("2026/09/17");
+        fs::create_dir_all(&day).unwrap();
+        let same =
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_789_000_000);
+        for name in [
+            "rollout-2026-09-17T09-00-00-new.jsonl",
+            "rollout-2026-09-17T01-00-00-old.jsonl",
+        ] {
+            let path = day.join(name);
+            fs::write(&path, "{}\n").unwrap();
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(same)
+                .unwrap();
+        }
+        let picked = newest_rollout(&dir).unwrap();
+        assert!(
+            picked.ends_with("rollout-2026-09-17T09-00-00-new.jsonl"),
+            "{picked:?}"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }
 
