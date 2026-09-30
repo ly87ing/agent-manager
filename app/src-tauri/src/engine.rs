@@ -77,6 +77,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("skills", "versions") => true,
         // 换版本前的文件变化预览：只取目标提交进本工具的镜像缓存，不动账号目录、不写库
         ("skills", "preview") => true,
+        // 纳入管理：预览只读；执行会移动账号目录里的内容并建链接（引擎内取排他锁、先备份、可撤回）
+        ("skills", "adopt-preview" | "adopt") => true,
         (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
     };
@@ -262,6 +264,21 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("skills", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--ref", ArgValueKind::GitRef));
+        }
+        ("skills", "adopt-preview") => {
+            specs.push(("--name", ArgValueKind::ElementId));
+            specs.push(("--collection", ArgValueKind::ElementId));
+        }
+        ("skills", "adopt") => {
+            specs.push(("--name", ArgValueKind::ElementId));
+            specs.push(("--collection", ArgValueKind::ElementId));
+            specs.push(("--digest", ArgValueKind::Digest));
+            specs.push(("--ref", ArgValueKind::GitRef));
+            // 技能在来源仓库里的相对位置：与版本名同一套字符规则
+            specs.push(("--path", ArgValueKind::GitRef));
+            specs.push(("--keep-local", ArgValueKind::Flag));
+            specs.push(("--accept-source", ArgValueKind::Flag));
+            specs.push(("--undo", ArgValueKind::RunId));
         }
         (_, "apply") | ("mcp", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -1996,5 +2013,39 @@ mod tests {
         for bad in ["--upload-pack=x", "", "a..b", "v1 ; rm", "v*"] {
             assert!(update(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn skills_adopt_commands_are_allowed_and_validated() {
+        assert!(validate_command("skills:adopt-preview").is_ok());
+        assert!(validate_command("skills:adopt").is_ok());
+        assert!(
+            validate_args("skills:adopt-preview", &["--name".into(), "archify".into()]).is_ok()
+        );
+        let digest = "a".repeat(64);
+        assert!(validate_args(
+            "skills:adopt",
+            &[
+                "--name".into(),
+                "archify".into(),
+                "--digest".into(),
+                digest.clone(),
+                "--ref".into(),
+                "v3.0.1".into(),
+                "--path".into(),
+                "skills/archify".into(),
+                "--accept-source".into()
+            ],
+        )
+        .is_ok());
+        assert!(validate_args(
+            "skills:adopt",
+            &["--undo".into(), "20260929T101010123-archify".into()]
+        )
+        .is_ok());
+        assert!(validate_args("skills:adopt", &["--digest".into(), "xyz".into()]).is_err());
+        assert!(validate_args("skills:adopt", &["--path".into(), "../etc".into()]).is_err());
+        assert!(validate_args("skills:adopt", &["--undo".into(), "../x".into()]).is_err());
+        assert!(validate_args("skills:adopt", &["--force".into()]).is_err());
     }
 }

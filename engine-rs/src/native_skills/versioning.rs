@@ -164,7 +164,7 @@ pub(crate) fn recorded_available(repo_dir: &Path) -> Option<Vec<(String, String)
 
 /// 目标提交里所有 `SKILL.md` 所在目录（与 `available_repo_skills` 同一规则：
 /// 目录名为技能名，重名取先出现的，隐藏目录与依赖目录跳过）。
-fn available_at(repo_dir: &Path, rev: &str, coll_name: &str) -> Result<Vec<Value>> {
+pub(crate) fn available_at(repo_dir: &Path, rev: &str, coll_name: &str) -> Result<Vec<Value>> {
     let listing = git_in(repo_dir, &["ls-tree", "-r", "--name-only", rev], coll_name)?;
     let mut out: Vec<Value> = Vec::new();
     let mut names: Vec<String> = Vec::new();
@@ -228,10 +228,19 @@ fn resolve_target(
             coll.name
         )
     })?;
-    match reference {
-        Some(reference) => track::resolve_ref(reference, &refs),
-        None => track::resolve(&track_of(coll)?, &refs),
-    }
+    let target = match reference {
+        Some(reference) => track::resolve_ref(reference, &refs)?,
+        None => track::resolve(&track_of(coll)?, &refs)?,
+    };
+    // 按提交指定时，有标签指着它就显示标签名
+    Ok(match (target.kind, refs.tag_at(&target.commit)) {
+        ("commit", Some(tag)) if target.commit.len() == 40 => Target {
+            kind: "tag",
+            name: tag,
+            commit: target.commit,
+        },
+        _ => target,
+    })
 }
 
 /// `skills:preview`：换到目标版本前，列出这个来源下各技能改了哪些文件、规则与其他目录变了什么。

@@ -3678,3 +3678,384 @@ fn git_source_tracks_versions_downloads_only_listed_dirs_and_switches() {
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+// ---------- 纳入管理：只留一份源，可撤回 ----------
+
+fn tree_digest(dir: &std::path::Path) -> String {
+    agent_manager_engine::native_skills::hash_skill_dir(dir).unwrap()
+}
+
+#[test]
+fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
+    let (root, ctx) = temp_ctx("skills-adopt");
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .expect("git 可执行");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let write = |path: std::path::PathBuf, text: &str| {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    // 远端：skills/archy 有 v1.0.0 与 v1.1.0；skills/other 用来测「本地改过」
+    let work = root.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main"]);
+    write(work.join("skills/archy/SKILL.md"), "# archy 1.0");
+    write(work.join("skills/other/SKILL.md"), "# other");
+    git(&work, &["add", "-A"]);
+    git(&work, &["commit", "-qm", "1.0"]);
+    git(&work, &["tag", "v1.0.0"]);
+    write(work.join("skills/archy/SKILL.md"), "# archy 1.1");
+    git(&work, &["commit", "-qam", "1.1"]);
+    git(&work, &["tag", "v1.1.0"]);
+    let bare = root.join("origin.git");
+    git(
+        &root,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            &work.to_string_lossy(),
+            &bare.to_string_lossy(),
+        ],
+    );
+    git(&bare, &["config", "uploadpack.allowFilter", "true"]);
+    let url = format!("file://{}", bare.to_string_lossy());
+
+    let home = ctx.home_dir.clone();
+    let claude = home.join(".claude/skills");
+    let codex = home.join(".codex/skills");
+    let shared = home.join(".agents/skills");
+    // npx skills 装的 archy（旧版本 1.0.0）：Claude 与共用目录各一份
+    for dir in [claude.join("archy"), shared.join("archy")] {
+        write(dir.join("SKILL.md"), "# archy 1.0");
+        write(dir.join("skill-release.json"), r#"{"version":"1.0.0"}"#);
+    }
+    // 真实目录里多了 skill-release.json，来源里没有：比对时要算不一致 → 这份先去掉，让它与 v1.0.0 一致
+    std::fs::remove_file(claude.join("archy/skill-release.json")).unwrap();
+    std::fs::remove_file(shared.join("archy/skill-release.json")).unwrap();
+    write(claude.join("edited/SKILL.md"), "# other (我改过)");
+    write(claude.join("mine/SKILL.md"), "# 我自己写的");
+    std::fs::create_dir_all(claude.join("synced/bucket")).unwrap();
+    write(
+        home.join(".agents/.skill-lock.json"),
+        &format!(
+            r#"{{"version":3,"skills":{{
+                "archy":{{"sourceUrl":"{url}","skillPath":"skills/archy/SKILL.md"}},
+                "edited":{{"sourceUrl":"{url}","skillPath":"skills/other/SKILL.md"}}}}}}"#
+        ),
+    );
+    // 已管理的 dup：本机来源链接到 codex，共用目录里还有一份链接
+    let local_src = home.join("tools/skills");
+    write(local_src.join("dup/SKILL.md"), "# dup");
+    let set = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "skills.repositories.loc",
+                "--value",
+                &format!(r#"{{"source_path":"{}"}}"#, local_src.to_string_lossy()),
+            ],
+        ),
+    );
+    assert!(set.ok, "{:?}", set.errors);
+    let add = execute(
+        &ctx,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:loc/dup",
+                "--action",
+                "add",
+                "--agent",
+                "codex",
+            ],
+        ),
+    );
+    assert!(add.ok, "{:?}", add.errors);
+    std::os::unix::fs::symlink(local_src.join("dup"), shared.join("dup")).unwrap();
+    let lock_before = std::fs::read(home.join(".agents/.skill-lock.json")).unwrap();
+    let claude_archy_digest = tree_digest(&claude.join("archy"));
+
+    let preview = |name: &str| execute(&ctx, &request("skills:adopt-preview", &["--name", name]));
+    let adopt = |args: &[&str]| execute(&ctx, &request("skills:adopt", args));
+
+    // 1. 预览 archy：本地是 v1.0.0 → 按 v1.0.0 纳入；全程零写
+    let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
+    let p = preview("archy");
+    assert!(p.ok, "{:?}", p.errors);
+    let check = &p.data["source_check"];
+    assert_eq!(check["same"], true, "{check}");
+    assert_eq!(check["adopt_at"]["name"], "v1.0.0");
+    assert_eq!(check["latest"]["name"], "v1.1.0");
+    assert_eq!(check["ref"], "v1.0.0");
+    assert_eq!(
+        check["accounts"],
+        serde_json::json!(["claude-code", "codex"])
+    );
+    assert_eq!(p.data["collection"]["name"], "origin");
+    assert_eq!(
+        p.data["removes"],
+        serde_json::json!(["~/.claude/skills/archy", "~/.agents/skills/archy"])
+    );
+    assert_eq!(
+        std::fs::read(store::db_path(&ctx)).unwrap(),
+        db_before,
+        "预览不写库"
+    );
+    assert!(
+        claude.join("archy/SKILL.md").is_file() && shared.join("archy").is_dir(),
+        "预览不动目录"
+    );
+    assert!(
+        !ctx.data_dir.join("repositories/origin").exists(),
+        "预览不在数据目录里下载"
+    );
+
+    // 2. 过期指纹被拒，什么都不动
+    let stale = adopt(&[
+        "--name",
+        "archy",
+        "--digest",
+        "0000",
+        "--ref",
+        "v1.0.0",
+        "--path",
+        "skills/archy",
+    ]);
+    assert!(!stale.ok);
+    assert!(claude.join("archy").is_dir() && !claude.join("archy").is_symlink());
+
+    // 3. 纳入 archy：只留一份源，两个账号都链接上，共用目录那份清掉
+    let digest = check["digest"].as_str().unwrap();
+    let done = adopt(&[
+        "--name",
+        "archy",
+        "--digest",
+        digest,
+        "--ref",
+        "v1.0.0",
+        "--path",
+        "skills/archy",
+    ]);
+    assert!(done.ok, "{:?}", done.errors);
+    let backup = done.data["backup"].as_str().unwrap().to_string();
+    assert!(claude.join("archy").is_symlink() && codex.join("archy").is_symlink());
+    assert_eq!(
+        std::fs::read_to_string(codex.join("archy/SKILL.md")).unwrap(),
+        "# archy 1.0"
+    );
+    assert!(
+        std::fs::symlink_metadata(shared.join("archy")).is_err(),
+        "共用目录的副本要清掉"
+    );
+    let status = execute(&ctx, &request("skills:status", &[]));
+    let coll = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "skill:origin")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        coll["spec"]["skill_paths"],
+        serde_json::json!(["skills/archy"])
+    );
+    assert_eq!(coll["observed"]["version"]["current"]["label"], "v1.0.0");
+    assert!(status.data["unmanaged"]["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|s| s["name"] != "archy"));
+    assert_eq!(
+        std::fs::read(home.join(".agents/.skill-lock.json")).unwrap(),
+        lock_before,
+        "不改 npx skills 的锁文件"
+    );
+
+    // 4. 撤回：链接与登记撤掉，原目录原样放回；不能撤两次
+    let undo = adopt(&["--undo", &backup]);
+    assert!(undo.ok, "{:?}", undo.errors);
+    assert!(claude.join("archy").is_dir() && !claude.join("archy").is_symlink());
+    assert_eq!(tree_digest(&claude.join("archy")), claude_archy_digest);
+    assert!(shared.join("archy/SKILL.md").is_file());
+    assert!(std::fs::symlink_metadata(codex.join("archy")).is_err());
+    let status = execute(&ctx, &request("skills:status", &[]));
+    assert!(status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|e| e["id"] != "skill:origin"));
+    assert!(!adopt(&["--undo", &backup]).ok, "不能撤两次");
+
+    // 5. 本地改过：不选「用来源的版本」就拒绝；选了才覆盖（原内容在备份里）
+    let p = preview("edited");
+    let check = &p.data["source_check"];
+    assert_eq!(check["same"], false);
+    assert_eq!(
+        check["locations"][0]["files"],
+        serde_json::json!([{"status": "modified", "file": "SKILL.md"}])
+    );
+    assert_eq!(
+        p.data["collection"]["linked_as"], "other",
+        "本地换过名字：按来源里的名字链接"
+    );
+    let digest = check["digest"].as_str().unwrap();
+    let no = adopt(&[
+        "--name",
+        "edited",
+        "--digest",
+        digest,
+        "--path",
+        "skills/other",
+    ]);
+    assert!(!no.ok);
+    assert!(claude.join("edited").is_dir() && !claude.join("edited").is_symlink());
+    let yes = adopt(&[
+        "--name",
+        "edited",
+        "--digest",
+        digest,
+        "--path",
+        "skills/other",
+        "--accept-source",
+    ]);
+    assert!(yes.ok, "{:?}", yes.errors);
+    assert_eq!(
+        std::fs::read_to_string(claude.join("other/SKILL.md")).unwrap(),
+        "# other"
+    );
+    assert!(
+        std::fs::symlink_metadata(claude.join("edited")).is_err(),
+        "原名字的目录已移进备份"
+    );
+
+    // 6. 已管理的 dup：只清掉共用目录那份，codex 上的受管链接不动；可撤回
+    let p = preview("dup");
+    assert_eq!(p.data["kind"], "dedupe");
+    let d = adopt(&[
+        "--name",
+        "dup",
+        "--digest",
+        p.data["digest"].as_str().unwrap(),
+    ]);
+    assert!(d.ok, "{:?}", d.errors);
+    assert!(std::fs::symlink_metadata(shared.join("dup")).is_err());
+    assert!(codex.join("dup").is_symlink());
+    assert!(adopt(&["--undo", d.data["backup"].as_str().unwrap()]).ok);
+    assert_eq!(
+        std::fs::read_link(shared.join("dup")).unwrap(),
+        local_src.join("dup")
+    );
+
+    // 7. 认不出来源的 mine：保留本地内容，放进 ~/my-skills 作为本机来源；可撤回
+    let p = preview("mine");
+    assert!(p.data["source_check"]["error"].is_string());
+    let local = &p.data["local"];
+    assert_eq!(local["dest"], "~/my-skills/mine");
+    let m = adopt(&[
+        "--name",
+        "mine",
+        "--digest",
+        local["digest"].as_str().unwrap(),
+        "--keep-local",
+    ]);
+    assert!(m.ok, "{:?}", m.errors);
+    assert_eq!(
+        std::fs::read_to_string(home.join("my-skills/mine/SKILL.md")).unwrap(),
+        "# 我自己写的"
+    );
+    assert!(claude.join("mine").is_symlink() && codex.join("mine").is_symlink());
+    assert!(adopt(&["--undo", m.data["backup"].as_str().unwrap()]).ok);
+    assert!(!home.join("my-skills/mine").exists());
+    assert_eq!(
+        std::fs::read_to_string(claude.join("mine/SKILL.md")).unwrap(),
+        "# 我自己写的"
+    );
+
+    // 8. 中途失败（Codex 目录写不进去）：已移走的原目录、登记全部恢复，不留备份
+    use std::os::unix::fs::PermissionsExt;
+    // 同一仓库已登记为 origin（第 5 步）：并进它、沿用它现在的版本，参数一律取预览给出的
+    let p = preview("archy");
+    let check = p.data["source_check"].clone();
+    assert_eq!(p.data["collection"]["exists"], true);
+    let mut args: Vec<String> = [
+        "--name",
+        "archy",
+        "--digest",
+        check["digest"].as_str().unwrap(),
+        "--path",
+        check["path"].as_str().unwrap(),
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    if let Some(reference) = check["ref"].as_str() {
+        args.extend(["--ref".to_string(), reference.to_string()]);
+    }
+    if check["same"] == false {
+        args.push("--accept-source".into());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let origin_before = execute(&ctx, &request("skills:status", &[])).data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "skill:origin")
+        .unwrap()["spec"]
+        .clone();
+    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let failed = adopt(&arg_refs);
+    std::fs::set_permissions(&codex, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(!failed.ok);
+    assert!(
+        failed.errors[0].message.contains("已恢复原样"),
+        "{:?}",
+        failed.errors
+    );
+    assert_eq!(tree_digest(&claude.join("archy")), claude_archy_digest);
+    assert!(!claude.join("archy").is_symlink() && shared.join("archy/SKILL.md").is_file());
+    let status = execute(&ctx, &request("skills:status", &[]));
+    let origin_after = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "skill:origin")
+        .unwrap()["spec"]
+        .clone();
+    assert_eq!(
+        origin_after, origin_before,
+        "并进已有来源失败时，来源定义还原"
+    );
+    let leftovers: Vec<_> = std::fs::read_dir(ctx.data_dir.join("adopt-backups"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            std::fs::read_to_string(e.path().join("manifest.json"))
+                .is_ok_and(|m| m.contains("in-progress"))
+        })
+        .collect();
+    assert!(leftovers.is_empty(), "失败并恢复后不留进行中的备份");
+
+    // 9. Claude 自己同步的目录不能纳入
+    assert!(!preview("synced").ok);
+    let _ = std::fs::remove_dir_all(root);
+}

@@ -20,8 +20,8 @@ use super::CollectionDef;
 use crate::native::{Context, Request};
 use crate::store;
 
-const DEFAULT_DEST: &str = "~/my-skills";
-const DEFAULT_COLLECTION: &str = "my-skills";
+pub(super) const DEFAULT_DEST: &str = "~/my-skills";
+pub(super) const DEFAULT_COLLECTION: &str = "my-skills";
 
 fn valid_name(name: &str) -> bool {
     !name.is_empty()

@@ -6,6 +6,7 @@
 //! - apply：执行单 Skill 或集合动作，通过内容快照与安全软连接落地，支持回滚与操作审计。
 //!   plan 与 --dry-run 已退役：apply 一律真实执行，经 preflight 后由调用方恒取全局锁。
 
+mod adopt;
 mod apply;
 mod discover;
 mod fork;
@@ -104,6 +105,8 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         "skills:fork" | "skills.fork" => fork::fork(ctx, req),
         "skills:versions" | "skills.versions" => versions_command(ctx, req),
         "skills:preview" | "skills.preview" => preview_command(ctx, req),
+        "skills:adopt-preview" | "skills.adopt-preview" => adopt::preview(ctx, req),
+        "skills:adopt" | "skills.adopt" => adopt::apply(ctx, req),
         other => bail!("native_skills 不支持命令 '{}'", other),
     }
 }

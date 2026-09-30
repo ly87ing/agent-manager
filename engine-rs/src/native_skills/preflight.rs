@@ -16,6 +16,9 @@ use crate::native::{Context, Request};
 /// Ok(()) 表示合法 apply（execute 稍后必须取得全局 apply lock）；参数无效或
 /// 状态阻塞即 Err。无效/阻塞预检不创建 data/home/DB/表/文件。
 pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
+    if req.command.replace('.', ":") == "skills:adopt" {
+        return super::adopt::preflight(ctx, req);
+    }
     if req.flag("--dry-run") {
         bail!("skills:apply 已退役 --dry-run，拒绝该参数（执行前请以 skills:status 确认状态）");
     }

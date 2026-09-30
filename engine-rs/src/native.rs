@@ -160,7 +160,11 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         return envelope;
     }
     let is_agent_apply = request.command.replace('.', ":") == "agents:apply";
-    let is_skill_apply = request.command.replace('.', ":") == "skills:apply";
+    // 纳入管理会移动账号目录里的内容并建链接：与 skills:apply 同样取排他锁
+    let is_skill_apply = matches!(
+        request.command.replace('.', ":").as_str(),
+        "skills:apply" | "skills:adopt"
+    );
     let is_mcp_apply = request.command.replace('.', ":") == "mcp:apply";
     let is_rule_apply = request.command.replace('.', ":") == "rules:apply";
     let is_alias_apply = request.command.replace('.', ":") == "aliases:apply";
@@ -491,11 +495,12 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("agents", "auth-status") => crate::native_auth::status_command(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
-        ("skills", "status" | "apply" | "fork" | "versions" | "preview") => {
-            crate::native_skills::handle(ctx, request)
-                .map(|data| (data, vec![]))
-                .map_err(|err| DispatchError::new("SKILL_ERROR", format!("{err:#}")))
-        }
+        (
+            "skills",
+            "status" | "apply" | "fork" | "versions" | "preview" | "adopt-preview" | "adopt",
+        ) => crate::native_skills::handle(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("SKILL_ERROR", format!("{err:#}"))),
         ("mcp", "status" | "preview" | "apply") => crate::native_mcp::dispatch(ctx, request)
             .map(|(data, notes)| {
                 let warnings = notes
