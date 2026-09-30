@@ -607,6 +607,75 @@ function demoEnvelopes(): Record<string, Envelope> {
     "usage:status": usageStatus,
     "usage:scan": makeEnvelope({ domain: "usage", action: "scan", files: 3, bytes: 24_576 }, { command: "usage.scan" }),
     "aliases:status": makeEnvelope({ domain: "aliases", elements: [] }, { command: "aliases.status" }),
+    // 程序：与本机实测同形（2026-09-30）——npm 全局的 wecom-cli、npx 固定版本、uvx 跟分支、应用自带、没声明的候选
+    "programs:status": makeEnvelope(
+      {
+        domain: "programs",
+        elements: [
+          {
+            id: "programs:npm:@wecom/cli", program: "npm:@wecom/cli", kind: "npm", name: "@wecom/cli", bins: ["wecom-cli"], all_bins: ["wecom-cli"],
+            mode: "delegated", owner: "npm-global", version: "1.3.4",
+            installs: [{ path: "~/.npm-global/bin/wecom-cli", real: "~/.npm-global/lib/node_modules/@wecom/cli/bin/wecom.js", owner: "npm-global", program: "npm:@wecom/cli", version: "1.3.4", app: null, package_dir: "~/.npm-global/lib/node_modules/@wecom/cli" }],
+            install: [], runners: [],
+            dependents: ["wecomcli-doc", "wecomcli-message", "wecomcli-smartsheet"].map((name) => ({ kind: "skill", name, agents: ["claude-code", "codex"], source: "declared", bins: ["wecom-cli"], any: false })),
+            problems: [], commands: { install: "npm install -g @wecom/cli", upgrade: "npm install -g @wecom/cli@latest", uninstall: "npm uninstall -g @wecom/cli" },
+            managed_versions: [], managed_current: null,
+            freshness: { state: "behind", current: "1.3.4", upstream: "1.3.5", checked_at: new Date().toISOString(), probe: "npm-view", cache_age_sec: 60 },
+          },
+          {
+            id: "programs:npm:chrome-devtools-mcp", program: "npm:chrome-devtools-mcp", kind: "npm", name: "chrome-devtools-mcp", bins: [], all_bins: [],
+            mode: "runner", owner: null, version: null, installs: [], install: [],
+            runners: [{ server: "chrome-devtools", agent: "claude-code", runner: "npx", version: "1.9.0", pinned: true }],
+            dependents: [{ kind: "mcp", name: "chrome-devtools", agents: ["claude-code", "codex"], source: "mcp", bins: [], any: false }],
+            problems: [], commands: {}, managed_versions: [], managed_current: null,
+            freshness: { state: "behind", current: "1.9.0", upstream: "1.10.1", checked_at: new Date().toISOString(), probe: "npm-view", cache_age_sec: 60 },
+          },
+          {
+            id: "programs:git:github.com/oraios/serena", program: "git:github.com/oraios/serena", kind: "git", name: "github.com/oraios/serena", bins: [], all_bins: [],
+            mode: "runner", owner: null, version: null, installs: [], install: [],
+            runners: [{ server: "serena", agent: "codex", runner: "uvx", version: "main", pinned: false }],
+            dependents: [{ kind: "mcp", name: "serena", agents: ["claude-code", "codex"], source: "mcp", bins: [], any: false }],
+            problems: [{ code: "unpinned", server: "serena", agent: "codex", version: "main" }], commands: {}, managed_versions: [], managed_current: null,
+            freshness: { state: "unknown", current: "main", upstream: "7a2968335f2198b966864de1ce3655c8e485a653", checked_at: new Date().toISOString(), probe: "git-ls-remote", cache_age_sec: 60 },
+          },
+          {
+            id: "programs:npm:json", program: "npm:json", kind: "npm", name: "json", bins: ["json"], all_bins: ["json"],
+            mode: "missing", owner: null, version: null, installs: [], install: [{ kind: "node", package: "json", bins: ["json"] }], runners: [],
+            dependents: [{ kind: "skill", name: "jsontool", agents: ["claude-code"], source: "declared", bins: ["json"], any: false }],
+            problems: [{ code: "missing", bins: ["json"] }], commands: { install: "npm install -g json" }, managed_versions: [], managed_current: null,
+            freshness: { state: "unknown", current: null, upstream: null, checked_at: null, probe: null, cache_age_sec: null },
+          },
+          {
+            id: "programs:path:/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl", program: "path:/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl", kind: "path",
+            name: "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl", bins: ["node_repl"], all_bins: ["node_repl"], mode: "observed", owner: "app", version: null,
+            installs: [{ path: "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl", real: "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl", owner: "app", program: null, version: null, app: "ChatGPT", package_dir: null }],
+            install: [], runners: [], dependents: [{ kind: "mcp", name: "node_repl", agents: ["codex"], source: "mcp", bins: ["node_repl"], any: false }],
+            problems: [{ code: "version-unknown" }], commands: {}, managed_versions: [], managed_current: null,
+            freshness: { state: "unknown", current: null, upstream: null, checked_at: null, probe: null, cache_age_sec: null },
+          },
+        ],
+        suggestions: [{ skill: "xiaoyu-bug-loop", bin: "playwright-cli", program: null, line: "| `PLAYWRIGHT_CLI` | `command -v playwright-cli` |", found: true }],
+        user_path: { dirs: ["~/.local/bin", "~/.npm-global/bin", "/usr/local/bin"], entry_candidates: ["~/.local/bin", "~/.npm-global/bin"], error: null },
+        entry_dir: null,
+        allow_scripts: [],
+        links: {},
+        backups: [],
+      },
+      { command: "programs.status" },
+    ),
+    "programs:preview": makeEnvelope(
+      {
+        program: "npm:@wecom/cli", action: "upgrade", target_version: "1.3.5",
+        steps: [
+          { kind: "move", from: "~/.npm-global/lib/node_modules/@wecom/cli", to: "~/Library/Application Support/io.github.ly87ing.agent-manager/programs/backups/demo/package" },
+          { kind: "exec", command: "npm install -g --prefix ~/.npm-global --no-fund --no-audit --ignore-scripts @wecom/cli@1.3.5" },
+        ],
+        notes: ["改动前把 ~/.npm-global/lib/node_modules/@wecom/cli 整个移到备份，失败或回退时原样移回"],
+        scripts_ignored: true, backup: "demo",
+        manual: ["npm install -g --prefix ~/.npm-global --no-fund --no-audit --ignore-scripts @wecom/cli@1.3.5"],
+      },
+      { command: "programs.preview" },
+    ),
     "system:refresh-upstream": makeEnvelope(
       {
         domain: "system",

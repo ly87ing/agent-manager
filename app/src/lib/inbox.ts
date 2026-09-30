@@ -14,6 +14,7 @@ import type {
 } from "./observed";
 import { ignoreKey, useIgnored } from "./inboxIgnore";
 import { useEngineQuery } from "./queries";
+import { displayName, type ProgramElement, type ProgramsData } from "./programs";
 import { rulesFillRows, type RulesFillRow } from "./rulesFill";
 import { isCollection } from "./skillCollections";
 import { addToAllRows, fillRows, versionUpdateRows } from "./skillFill";
@@ -24,7 +25,7 @@ import type { BatchApplyRow } from "./useBatchApply";
  * 每条只对应一个处理动作；动作经写入管线执行、回读后状态回到正常，这一条就从待处理里消失。
  * 导航角标、待处理页都只从这里算，页面里不再各算各的。数据全部来自只读的 status 查询。
  */
-export type InboxState = "broken" | "drifted" | "missing" | "update" | "unmanaged";
+export type InboxState = "broken" | "drifted" | "missing" | "update" | "unmanaged" | "cleanup";
 
 export const INBOX_STATES: { state: InboxState; label: string; hint: string }[] = [
   { state: "broken", label: "损坏", hint: "链接断了、格式无效、找不到命令或读不了" },
@@ -32,6 +33,7 @@ export const INBOX_STATES: { state: InboxState; label: string; hint: string }[] 
   { state: "missing", label: "缺失", hint: "同类账号在用，这些账号还没有" },
   { state: "update", label: "有新版本", hint: "来源有新内容" },
   { state: "unmanaged", label: "未纳管", hint: "在账号里，但不来自任何来源" },
+  { state: "cleanup", label: "可清理", hint: "本工具装的程序已经没人用了" },
 ];
 
 /** 处理一条待处理项的唯一动作：能直接执行的直接执行，需要看差异或选择的跳到负责的页面。 */
@@ -41,7 +43,7 @@ export type InboxFix =
   | { kind: "rules-fill"; label: string; rows: RulesFillRow[] }
   | { kind: "open"; label: string; target: string };
 
-export type InboxPage = "accounts" | "skills" | "mcp" | "rules" | "commands" | "sources";
+export type InboxPage = "accounts" | "skills" | "mcp" | "rules" | "commands" | "sources" | "programs";
 
 export interface InboxItem {
   id: string;
@@ -65,6 +67,7 @@ export interface InboxInput {
   agents: EngineElement[];
   profiles: EngineElement[];
   aliases: EngineElement[];
+  programs?: ProgramElement[];
   nameOf?: (agent: string) => string;
 }
 
@@ -75,6 +78,7 @@ const PAGE_LABEL: Record<InboxPage, string> = {
   rules: "规则",
   commands: "命令",
   sources: "来源",
+  programs: "程序",
 };
 
 export function pageLabel(page: InboxPage): string {
@@ -268,6 +272,44 @@ function accountItems(agents: EngineElement[], profiles: EngineElement[], aliase
  * 启动命令：只比较已经有受管区块的文件。~/.zprofile 没有区块时本工具不新建它，只在 ~/.zshrc 里的
  * 命令不算「缺一处」。
  */
+/**
+ * 程序：缺失的去安装（或补安装方式）、按需拉取却没固定版本的去固定、有新版本的去升级、同名多份算已偏离、
+ * 运行器（npx / uvx）不在算损坏、本工具装了却没人用的算可清理。都到程序页处理（要看计划、选入口目录）。
+ */
+function programItems(programs: ProgramElement[]): InboxItem[] {
+  return programs.flatMap((program): InboxItem[] => {
+    const open = (label: string) => ({ kind: "open" as const, label, target: `programs:${program.program}` });
+    const base = { page: "programs" as const, subject: program.program, title: displayName(program) };
+    const out: InboxItem[] = [];
+    for (const problem of program.problems) {
+      switch (problem.code) {
+        case "missing":
+          out.push({ ...base, id: `program:${program.program}:missing`, state: "missing", detail: `缺 ${(problem.bins ?? []).join("、")}`, fix: open("去安装") });
+          break;
+        case "missing-no-install":
+          out.push({ ...base, id: `program:${program.program}:missing`, state: "missing", detail: `缺 ${(problem.bins ?? []).join("、")}，不知道怎么装`, fix: open("补充安装方式") });
+          break;
+        case "runner-missing":
+          out.push({ ...base, id: `program:${program.program}:runner`, state: "broken", detail: `找不到 ${problem.bin}，MCP 服务起不来`, fix: open("去查看") });
+          break;
+        case "multiple":
+          out.push({ ...base, id: `program:${program.program}:multiple:${problem.bin}`, state: "drifted", detail: `${problem.bin} 在 PATH 上有 ${problem.paths?.length ?? 2} 份`, fix: open("去查看") });
+          break;
+        case "unused":
+          out.push({ ...base, id: `program:${program.program}:unused`, state: "cleanup", detail: "没有技能或 MCP 再需要它", fix: open("去清理") });
+          break;
+      }
+    }
+    const unpinned = program.problems.filter((problem) => problem.code === "unpinned");
+    if (unpinned.length) {
+      out.push({ ...base, id: `program:${program.program}:unpinned`, state: "update", detail: `MCP ${[...new Set(unpinned.map((p) => p.server))].join("、")} 没固定版本，一发布新版本就会被换掉`, fix: open("去固定") });
+    } else if (program.freshness?.state === "behind") {
+      out.push({ ...base, id: `program:${program.program}:behind`, state: "update", detail: `${program.freshness.current ?? ""} → ${program.freshness.upstream ?? ""}`, fix: open("去升级") });
+    }
+    return out;
+  });
+}
+
 function commandItems(targets: EngineElement[]): InboxItem[] {
   const managed = targets
     .map((target) => target.observed as unknown as AliasesObserved)
@@ -299,6 +341,7 @@ export function buildInbox(input: InboxInput): InboxItem[] {
     ...ruleItems(input.rules),
     ...accountItems(input.agents, input.profiles, input.aliases),
     ...commandItems(input.aliases),
+    ...programItems(input.programs ?? []),
   ];
 }
 
@@ -323,6 +366,7 @@ export function useInbox(nameOf?: (agent: string) => string): { items: InboxItem
   const agents = useEngineQuery<StatusData>("agents:status");
   const profiles = useEngineQuery<StatusData>("profiles:status");
   const aliases = useEngineQuery<StatusData>("aliases:status");
+  const programs = useEngineQuery<ProgramsData>("programs:status");
   const elementsOf = (query: { data?: { ok: boolean; data: StatusData } }) => (query.data?.ok ? query.data.data.elements ?? [] : []);
   const items = buildInbox({
     skills: elementsOf(skills),
@@ -333,6 +377,7 @@ export function useInbox(nameOf?: (agent: string) => string): { items: InboxItem
     agents: elementsOf(agents),
     profiles: elementsOf(profiles),
     aliases: elementsOf(aliases),
+    programs: programs.data?.ok ? programs.data.data.elements : [],
     nameOf,
   });
   const loading = [skills, mcp, rules, agents, profiles, aliases].some((query) => query.isPending);

@@ -32,6 +32,7 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
   { key: "runs", label: "操作记录", keywords: "runs 任务 日志 记录" },
   { key: "settings:secrets", label: "密钥", keywords: "secrets 密钥 变量 token api key 凭据" },
   { key: "commands", label: "命令", keywords: "aliases alias 别名 启动命令 终端快捷命令 时区" },
+  { key: "programs", label: "程序", keywords: "programs 程序 cli 命令行 依赖 npm npx uvx 安装 升级 版本" },
   { key: "sources", label: "来源", keywords: "sources 来源 集合 仓库 规则来源 添加 更新 版本 停用 移除 未纳管 纳入 接管 扫描 agent-skills" },
 ];
 

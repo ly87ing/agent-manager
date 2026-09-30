@@ -1,4 +1,4 @@
-import { Inbox, Library, ScrollText, Server, Settings, Sparkles, SquareTerminal, Users, Wallet } from "lucide-react";
+import { Inbox, Library, Package, ScrollText, Server, Settings, Sparkles, SquareTerminal, Users, Wallet } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
@@ -21,6 +21,7 @@ const UsagePage = lazy(() => import("./pages/UsagePage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SourcesPage = lazy(() => import("./pages/SourcesPage"));
 const InboxPage = lazy(() => import("./pages/InboxPage"));
+const ProgramsPage = lazy(() => import("./pages/ProgramsPage"));
 
 // 管理体系（docs/MULTI-ACCOUNT-DESIGN.md）：待处理是闭环的入口；账号管在哪生效，技能 / MCP / 规则 / 命令管分配，
 // 来源管内容从哪来、用哪个版本；密钥、操作记录等工具本身的事在设置里。
@@ -32,6 +33,7 @@ const NAV: NavItem[] = [
   { key: "rules", label: "规则", icon: ScrollText },
   { key: "commands", label: "命令", icon: SquareTerminal },
   { key: "sources", label: "来源", icon: Library },
+  { key: "programs", label: "程序", icon: Package },
 ];
 const SECONDARY_NAV: NavItem[] = [
   { key: "usage", label: "用量", icon: Wallet, iconOnly: true },
@@ -67,6 +69,8 @@ export default function App() {
   const [sourceFocus, setSourceFocus] = useState<string | null>(null);
   /** 跳到 MCP 页时直接搜到的服务。 */
   const [mcpSearch, setMcpSearch] = useState<string | null>(null);
+  /** 跳到程序页时定位的程序（程序标识，如 npm:@wecom/cli）。 */
+  const [programFocus, setProgramFocus] = useState<string | null>(null);
   /** 从分享链接导入：对话框里的链接文字（null = 没打开），以及确认后交给页面预填的内容。 */
   const [importText, setImportText] = useState<string | null>(null);
   const [importPayload, setImportPayload] = useState<SharePayload | null>(null);
@@ -140,6 +144,11 @@ export default function App() {
       setActivePage("sources");
       return;
     }
+    if (page.startsWith("programs:")) {
+      setProgramFocus(page.slice("programs:".length));
+      setActivePage("programs");
+      return;
+    }
     if (page.startsWith("mcp:")) {
       setMcpSearch(page.slice("mcp:".length));
       setActivePage("mcp");
@@ -151,6 +160,7 @@ export default function App() {
     }
     if (page === "sources") setSourceFocus(null);
     if (page === "mcp") setMcpSearch(null);
+    if (page === "programs") setProgramFocus(null);
     setActivePage(page);
   };
 
@@ -170,8 +180,9 @@ export default function App() {
     >
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
       <Suspense fallback={<PageLoading text="正在打开页面…" />}>
-        <div key={`${activePage}:${activePage === "sources" ? sourceFocus ?? "" : activePage === "mcp" ? mcpSearch ?? "" : ""}`} className="animate-page-in">
+        <div key={`${activePage}:${activePage === "sources" ? sourceFocus ?? "" : activePage === "mcp" ? mcpSearch ?? "" : activePage === "programs" ? programFocus ?? "" : ""}`} className="animate-page-in">
           {activePage === "inbox" && <InboxPage onOpen={handleNavigate} />}
+          {activePage === "programs" && <ProgramsPage focus={programFocus} onOpen={handleNavigate} />}
           {activePage === "accounts" && (
             <AccountsPage
               onManageSkills={(accountId) => {
@@ -185,13 +196,14 @@ export default function App() {
           {activePage === "skills" && (
             <SkillsPage
               onOpenSource={(name) => handleNavigate(name ? `sources:${name}` : "sources")}
+              onOpenProgram={(program) => handleNavigate(`programs:${program}`)}
               initialAgent={selectedSkillAgent}
               initialSearch={skillSearch}
               onResetAgent={() => setSelectedSkillAgent(null)}
             />
           )}
           {activePage === "mcp" && (
-            <McpPage importPayload={importPayload?.kind === "mcp" ? importPayload : null} onImportConsumed={() => setImportPayload(null)} initialSearch={mcpSearch} />
+            <McpPage importPayload={importPayload?.kind === "mcp" ? importPayload : null} onImportConsumed={() => setImportPayload(null)} initialSearch={mcpSearch} onOpenProgram={(program) => handleNavigate(`programs:${program}`)} />
           )}
           {activePage === "commands" && <AliasesPage onOpenSkills={() => handleNavigate("skills")} />}
           {activePage === "sources" && (

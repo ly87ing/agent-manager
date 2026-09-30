@@ -137,6 +137,22 @@ async function openCreate() {
 }
 
 describe("账号页", () => {
+
+  it("智能体本身只检测：显示装的版本与有没有新版本，「检查新版本」只查不装", async () => {
+    const r = routes();
+    const status = r["agents:status"] as Envelope<{ elements: ReturnType<typeof makeElement>[] }>;
+    status.data.elements[0].observed = { ...status.data.elements[0].observed, version: "2.1.285" };
+    status.data.elements[0].freshness = { state: "behind", current: "2.1.285", upstream: "2.1.300", checked_at: null, probe: "npm-view", cache_age_sec: null };
+    r["system:refresh-upstream"] = makeEnvelope({ elements: [{ id: "agents:claude-code", upstream: "2.1.300" }], summary: { probed: 1, current: 0, behind: 1, ahead: 0, unknown: 0 } }, { command: "system.refresh-upstream" });
+    const { calls } = renderWithEngine(<AccountsPage />, r);
+    const version = await screen.findByTestId("agent-version-claude-code");
+    expect(version).toHaveTextContent("2.1.285");
+    expect(version).toHaveTextContent("有新版本 2.1.300");
+    await userEvent.click(screen.getByTestId("agent-check-claude-code"));
+    await waitFor(() => expect(calls.some((call) => call.command === "system:refresh-upstream")).toBe(true));
+    expect(calls.find((call) => call.command === "system:refresh-upstream")!.args).toEqual(["--only", "agents:claude-code"]);
+    expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
+  });
   it("主账号与独立账号并列，一行一个，复制的是启动命令", async () => {
     renderWithEngine(<AccountsPage />, routes());
     const main = await screen.findByTestId("account-row-agents:claude-code");

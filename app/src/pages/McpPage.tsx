@@ -22,6 +22,8 @@ import { useExecutions } from "../lib/execution";
 import { mcpFillArgs, mcpFillRows } from "../lib/mcpFill";
 import { useInbox } from "../lib/inbox";
 import { AttentionOnlyToggle } from "../components/StateBadge";
+import { dependenciesOf } from "../components/DependencyChips";
+import type { ProgramsData } from "../lib/programs";
 import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
 import { encodeShareLink, type SharePayload } from "../lib/shareLink";
 
@@ -49,9 +51,12 @@ export default function McpPage({
   importPayload,
   onImportConsumed,
   initialSearch,
+  onOpenProgram,
 }: {
   /** 从待处理进来时直接搜到那个服务。 */
   initialSearch?: string | null;
+  /** 依赖标签点过去：程序页的那一行（程序标识）。 */
+  onOpenProgram?: (program: string) => void;
   /** 从分享链接导入的服务：打开预填好的「新增」表单，用户检查后保存。 */
   importPayload?: Extract<SharePayload, { kind: "mcp" }> | null;
   onImportConsumed?: () => void;
@@ -65,6 +70,8 @@ export default function McpPage({
   /** 「只看待处理」与待处理页同一份判断。 */
   const attentionSubjects = new Set(useInbox(nameOfAgent).items.filter((item) => item.page === "mcp").map((item) => item.subject));
   const [attentionOnly, setAttentionOnly] = useState(false);
+  const programsQuery = useEngineQuery<ProgramsData>("programs:status");
+  const programs = programsQuery.data?.ok ? programsQuery.data.data.elements : [];
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [filling, setFilling] = useState(false);
   const [form, setForm] = useState<McpFormMode | null>(null);
@@ -447,6 +454,8 @@ export default function McpPage({
               <McpServerCard
                 key={element.id}
                 element={element}
+                dependencies={dependenciesOf(programs, "mcp", nameOf(element))}
+                onOpenProgram={onOpenProgram}
                 groups={groups}
                 writable={writableAgents}
                 busy={busy}

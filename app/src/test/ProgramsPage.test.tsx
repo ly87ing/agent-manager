@@ -1,0 +1,199 @@
+import { describe, expect, it, vi } from "vitest";
+import { waitFor } from "@testing-library/react";
+import ProgramsPage from "../pages/ProgramsPage";
+import type { Envelope } from "../lib/contract";
+import type { ProgramElement, ProgramsData } from "../lib/programs";
+import { makeElement, makeEnvelope } from "./fixtures";
+import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+
+const unknown = { state: "unknown", current: null, upstream: null, checked_at: null, probe: null, cache_age_sec: null } as const;
+
+function program(overrides: Partial<ProgramElement>): ProgramElement {
+  return {
+    id: `programs:${overrides.program}`,
+    program: "npm:x",
+    kind: "npm",
+    name: "x",
+    bins: [],
+    all_bins: [],
+    mode: "delegated",
+    owner: null,
+    version: null,
+    installs: [],
+    install: [],
+    runners: [],
+    dependents: [],
+    problems: [],
+    commands: {},
+    managed_versions: [],
+    managed_current: null,
+    freshness: unknown,
+    ...overrides,
+  } as ProgramElement;
+}
+
+function data(): ProgramsData {
+  return {
+    domain: "programs",
+    elements: [
+      program({
+        program: "npm:@wecom/cli",
+        name: "@wecom/cli",
+        bins: ["wecom-cli"],
+        all_bins: ["wecom-cli"],
+        mode: "delegated",
+        owner: "npm-global",
+        version: "1.3.4",
+        installs: [{ path: "~/.npm-global/bin/wecom-cli", real: "~/.npm-global/lib/node_modules/@wecom/cli/bin/wecom.js", owner: "npm-global", program: "npm:@wecom/cli", version: "1.3.4", app: null, package_dir: "~/.npm-global/lib/node_modules/@wecom/cli" }],
+        dependents: [{ kind: "skill", name: "wecomcli-doc", agents: ["claude-code"], source: "declared", bins: ["wecom-cli"], any: false }],
+        commands: { upgrade: "npm install -g @wecom/cli@latest" },
+        freshness: { ...unknown, state: "behind", current: "1.3.4", upstream: "1.3.5" },
+      }),
+      program({
+        program: "npm:json",
+        name: "json",
+        bins: ["json"],
+        mode: "missing",
+        dependents: [{ kind: "skill", name: "jsontool", agents: ["claude-code"], source: "declared", bins: ["json"], any: false }],
+        problems: [{ code: "missing", bins: ["json"] }],
+      }),
+      program({
+        program: "git:github.com/oraios/serena",
+        kind: "git",
+        name: "github.com/oraios/serena",
+        mode: "runner",
+        runners: [{ server: "serena", agent: "codex", runner: "uvx", version: "main", pinned: false }],
+        dependents: [{ kind: "mcp", name: "serena", agents: ["codex"], source: "mcp", bins: [], any: false }],
+        problems: [{ code: "unpinned", server: "serena", agent: "codex", version: "main" }],
+        freshness: { ...unknown, upstream: "7a2968335f2198b966864de1ce3655c8e485a653" },
+      }),
+    ],
+    suggestions: [{ skill: "xiaoyu-bug-loop", bin: "playwright-cli", program: null, line: "command -v playwright-cli", found: true }],
+    user_path: { dirs: ["~/.local/bin", "~/.npm-global/bin"], entry_candidates: ["~/.local/bin", "~/.npm-global/bin"], error: null },
+    entry_dir: null,
+    allow_scripts: [],
+    links: {},
+    backups: [{ id: "20260930T010101000-npm__wecom_cli", program: "npm:@wecom/cli", version: "1.3.3", reason: "upgrade", created_at: "2026-09-30T01:01:01Z" }],
+  };
+}
+
+const PLAN = {
+  program: "npm:@wecom/cli",
+  action: "upgrade",
+  target_version: "1.3.5",
+  steps: [
+    { kind: "move", from: "~/.npm-global/lib/node_modules/@wecom/cli", to: "/data/programs/backups/x/package" },
+    { kind: "exec", command: "npm install -g --prefix ~/.npm-global --ignore-scripts @wecom/cli@1.3.5" },
+  ],
+  notes: ["改动前把 ~/.npm-global/lib/node_modules/@wecom/cli 整个移到备份，失败或回退时原样移回"],
+  scripts_ignored: true,
+  backup: "x",
+  manual: ["npm install -g --prefix ~/.npm-global --ignore-scripts @wecom/cli@1.3.5"],
+};
+
+function routes(): Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> {
+  return {
+    "programs:status": makeEnvelope(data(), { command: "programs.status" }),
+    "programs:preview": async (args) => makeEnvelope({ ...PLAN, action: args[args.indexOf("--action") + 1] }, { command: "programs.preview" }),
+    "programs:apply": makeEnvelope({ ...PLAN, scripts_skipped: [] }, { command: "programs.apply" }),
+    "programs:declare": makeEnvelope({ declared: "xiaoyu-bug-loop" }, { command: "programs.declare" }),
+    "mcp:status": makeEnvelope({
+      domain: "mcp",
+      targets: [],
+      elements: [makeElement({
+        id: "mcp:serena",
+        domain: "mcp",
+        observed: { agents: { codex: { state: "enabled", source: "file", base: "b".repeat(64), actions: ["edit"], entry: { command: "uvx", args: ["--from", "git+https://github.com/oraios/serena@main", "serena", "start"], env: { K: "${K}" } } } } },
+      })],
+    }, { command: "mcp.status" }),
+    "mcp:preview": makeEnvelope({ files: [{ path: "~/.codex/config.toml", exists: true, original: "args = [\"@main\"]\n", content: "args = [\"@7a29683\"]\n" }] }, { command: "mcp.preview" }),
+    "mcp:apply": makeEnvelope({ domain: "mcp", steps: [], skipped: [] }, { command: "mcp.apply" }),
+  };
+}
+
+describe("程序页：谁需要、装在哪、什么版本；动作先看计划，也能自己执行", () => {
+  it("一行一个程序：管理方式、位置与版本、依赖方、统一状态标签；问题多的排前面", async () => {
+    renderWithEngine(<ProgramsPage />, routes());
+    const rows = await screen.findAllByTestId(/^program-row-/);
+    expect(rows.map((row) => row.getAttribute("data-testid"))).toEqual([
+      "program-row-npm:json",
+      "program-row-npm:@wecom/cli",
+      "program-row-git:github.com/oraios/serena",
+    ]);
+    const wecom = screen.getByTestId("program-row-npm:@wecom/cli");
+    expect(wecom).toHaveTextContent("代管");
+    expect(wecom).toHaveTextContent("npm 全局 · ~/.npm-global/bin/wecom-cli");
+    expect(wecom).toHaveTextContent("可更新到 1.3.5");
+    expect(wecom).toHaveTextContent("技能 wecomcli-doc");
+    expect(screen.getByTestId("program-row-npm:json")).toHaveTextContent("缺 json");
+    expect(screen.getByTestId("program-row-git:github.com/oraios/serena")).toHaveTextContent("没固定版本");
+  });
+
+  it("代管升级：打开后先要计划（不写），列出步骤与自己执行的命令；确认后才执行", async () => {
+    const { calls } = renderWithEngine(<ProgramsPage />, routes());
+    await userEvent.click(await screen.findByTestId("program-upgrade-npm:@wecom/cli"));
+    const dialog = await screen.findByTestId("program-action-dialog");
+    await within(dialog).findByTestId("program-plan-steps");
+    expect(calls.find((call) => call.command === "programs:preview")!.args).toEqual(["--program", "npm:@wecom/cli", "--action", "upgrade", "--version", "1.3.5"]);
+    expect(within(dialog).getByTestId("program-manual")).toHaveTextContent("npm install -g --prefix ~/.npm-global --ignore-scripts @wecom/cli@1.3.5");
+    expect(within(dialog).queryByTestId("program-entry-dir")).toBeNull();
+    expect(calls.some((call) => call.command === "programs:apply")).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "升级" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "programs:apply")).toBe(true));
+    expect(calls.find((call) => call.command === "programs:apply")!.args).toEqual(["--program", "npm:@wecom/cli", "--action", "upgrade", "--version", "1.3.5"]);
+  });
+
+  it("安装原本没有的程序：选入口目录（默认 ~/.local/bin），安装脚本默认不执行、勾选后重新算计划", async () => {
+    const { calls } = renderWithEngine(<ProgramsPage />, routes());
+    await userEvent.click(await screen.findByTestId("program-install-npm:json"));
+    const dialog = await screen.findByTestId("program-action-dialog");
+    expect(within(dialog).getByTestId("program-entry-dir")).toHaveValue("~/.local/bin");
+    await waitFor(() => expect(calls.filter((call) => call.command === "programs:preview")).toHaveLength(1));
+    expect(calls.find((call) => call.command === "programs:preview")!.args).toEqual(["--program", "npm:json", "--action", "install", "--entry-dir", "~/.local/bin"]);
+    await userEvent.click(within(dialog).getByTestId("program-allow-scripts"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "programs:preview")).toHaveLength(2));
+    expect(calls.filter((call) => call.command === "programs:preview")[1].args).toContain("--allow-scripts");
+  });
+
+  it("回退在更多操作里，按备份选版本", async () => {
+    const { calls } = renderWithEngine(<ProgramsPage />, routes());
+    await userEvent.click(await screen.findByRole("button", { name: "@wecom/cli 的更多操作" }));
+    await userEvent.click(await screen.findByTestId("program-restore-20260930T010101000-npm__wecom_cli"));
+    await screen.findByTestId("program-action-dialog");
+    await waitFor(() => expect(calls.some((call) => call.command === "programs:preview")).toBe(true));
+    expect(calls.find((call) => call.command === "programs:preview")!.args).toEqual(["--program", "npm:@wecom/cli", "--action", "restore", "--backup", "20260930T010101000-npm__wecom_cli"]);
+  });
+
+  it("按需拉取的 MCP：固定版本改的是条目参数里版本那一段，env 原样；先预览改动，确认后逐个账号写入", async () => {
+    const { calls } = renderWithEngine(<ProgramsPage />, routes());
+    await userEvent.click(await screen.findByTestId("program-pin-git:github.com/oraios/serena"));
+    const dialog = await screen.findByTestId("program-pin-dialog");
+    expect(within(dialog).getByTestId("program-pin-version")).toHaveValue("7a2968335f2198b966864de1ce3655c8e485a653");
+    await waitFor(() => expect(calls.some((call) => call.command === "mcp:preview")).toBe(true));
+    const preview = calls.find((call) => call.command === "mcp:preview")!;
+    const spec = JSON.parse(preview.args[preview.args.indexOf("--spec") + 1]);
+    expect(spec).toEqual({ command: "uvx", args: ["--from", "git+https://github.com/oraios/serena@7a2968335f2198b966864de1ce3655c8e485a653", "serena", "start"], env: { K: "${K}" } });
+    expect(preview.args.slice(0, 8)).toEqual(["--only", "mcp:serena", "--agent", "codex", "--action", "edit", "--base", "b".repeat(64)]);
+    expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
+    await userEvent.click(await screen.findByRole("button", { name: "写入" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
+  });
+
+  it("没声明的命令作为候选；确认后记为这个技能的依赖（只写本工具的库）", async () => {
+    const { calls } = renderWithEngine(<ProgramsPage />, routes());
+    const row = await screen.findByTestId("program-suggestion-xiaoyu-bug-loop-playwright-cli");
+    expect(row).toHaveTextContent("command -v playwright-cli");
+    await userEvent.click(within(row).getByRole("button", { name: "确认是依赖" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "programs:declare")).toBe(true));
+    expect(calls.find((call) => call.command === "programs:declare")!.args).toEqual(["--skill", "xiaoyu-bug-loop", "--bins", "[\"playwright-cli\"]"]);
+  });
+
+  it("依赖方点过去：技能与 MCP 各到自己的页面", async () => {
+    const onOpen = vi.fn();
+    renderWithEngine(<ProgramsPage onOpen={onOpen} />, routes());
+    await userEvent.click(await screen.findByTestId("program-dependent-npm:@wecom/cli-wecomcli-doc"));
+    expect(onOpen).toHaveBeenLastCalledWith("skills:wecomcli-doc");
+    await userEvent.click(screen.getByTestId("program-dependent-git:github.com/oraios/serena-serena"));
+    expect(onOpen).toHaveBeenLastCalledWith("mcp:serena");
+  });
+});

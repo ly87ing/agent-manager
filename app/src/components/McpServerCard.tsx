@@ -7,6 +7,7 @@ import { mcpBrief, mcpEntrySummary } from "./McpAssignmentRow";
 import { missingVariables } from "../lib/mcpVariables";
 import { cn } from "../lib/utils";
 import { STATE_TONE, StateBadge } from "./StateBadge";
+import { DependencyChips, type DependencyChip } from "./DependencyChips";
 
 function savedSummary(spec: McpSpec): string {
   const def = spec.saved?.definition ?? {};
@@ -67,7 +68,12 @@ export function McpServerCard({
   onAddFromSaved,
   onForget,
   onConfigureSecrets,
+  dependencies = [],
+  onOpenProgram,
 }: {
+  /** 这个服务依赖的程序（npx / uvx 包、命令），点一下到程序页。 */
+  dependencies?: DependencyChip[];
+  onOpenProgram?: (program: string) => void;
   element: EngineElement;
   groups: AccountGroup[];
   /** 配置文件读写正常的账号。 */
@@ -104,6 +110,7 @@ export function McpServerCard({
           <div className="font-mono text-sm font-medium">{name}</div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
             {first && <span className="truncate" title={mcpEntrySummary(first)}>{mcpBrief(first)}</span>}
+            <DependencyChips chips={dependencies} onOpen={onOpenProgram} />
             {/* 统一状态（lib/inbox.ts）：与待处理页同一套标签 */}
             {summaries.size > 1 && <StateBadge state="drifted" title="保存编辑时会统一成一份">各账号内容不同</StateBadge>}
             {commandMissing && <StateBadge state="broken">有账号找不到它要执行的命令</StateBadge>}

@@ -9,6 +9,7 @@ export const STATE_TONE: Record<InboxState, string> = {
   missing: "bg-primary/10 text-primary",
   update: "bg-info/10 text-info",
   unmanaged: "bg-muted text-muted-foreground",
+  cleanup: "bg-muted text-muted-foreground",
 };
 
 /** 统一状态标签；不给文字时用状态名（损坏、已偏离…）。 */

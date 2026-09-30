@@ -20,7 +20,7 @@ import type { SharedStatus } from "../lib/profileShared";
 import { useAccountOps } from "../lib/useAccountOps";
 import type { AgentUsage, OfficialAuthStatus } from "../lib/observed";
 import { authTerminalCommand, parseProfileDefinition } from "../lib/profileDefinition";
-import { engineKeys, useEngineQuery } from "../lib/queries";
+import { engineKeys, useEngineQuery, useRefreshUpstream } from "../lib/queries";
 import { isCollection } from "../lib/skillCollections";
 import { cn } from "../lib/utils";
 
@@ -221,6 +221,7 @@ export default function AccountsPage({
   onOpenSources?: () => void;
 }) {
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
+  const refreshUpstream = useRefreshUpstream();
   const skillsQuery = useEngineQuery<StatusData>("skills:status");
   const profilesQuery = useEngineQuery<StatusData>("profiles:status");
   const secretsQuery = useEngineQuery<StatusData>("secrets:status");
@@ -379,6 +380,34 @@ export default function AccountsPage({
             </button>
           ))}
         </div>
+        {(() => {
+          // 智能体本身只检测：装了哪个版本、有没有新版本；安装与升级用它自己的方式
+          const agent = agentElements.find((element) => element.id === `agents:${group.agentId}`);
+          const version = (agent?.observed as { version?: string | null } | undefined)?.version ?? agent?.freshness.current ?? null;
+          if (!agent || !version) return null;
+          const behind = agent.freshness.state === "behind" && agent.freshness.upstream;
+          return (
+            <span data-testid={`agent-version-${group.agentId}`} className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span>
+                {group.label} <span className="font-mono text-foreground">{version}</span>
+              </span>
+              {behind && (
+                <span className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info" title="用它自己的更新方式升级（本工具不管理智能体的安装）">
+                  有新版本 {agent.freshness.upstream}
+                </span>
+              )}
+              <button
+                type="button"
+                data-testid={`agent-check-${group.agentId}`}
+                disabled={refreshUpstream.isPending}
+                onClick={() => refreshUpstream.mutate(agent.id)}
+                className="rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground disabled:opacity-40"
+              >
+                检查新版本
+              </button>
+            </span>
+          );
+        })()}
         <button
           type="button"
           data-testid="accounts-add"

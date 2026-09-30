@@ -12,6 +12,8 @@ import { skillChip, skillNeedsUpdate } from "../lib/skillChip";
 import { SkillInstalledView } from "../components/SkillInstalledView";
 import { AttentionOnlyToggle, StateBadge } from "../components/StateBadge";
 import { shortRef, useInbox } from "../lib/inbox";
+import { DependencyChips, dependenciesOf } from "../components/DependencyChips";
+import type { ProgramsData } from "../lib/programs";
 import type { InboxState } from "../lib/inbox";
 import { describeTrack, versionLabel } from "../lib/skillTrack";
 import type { EngineElement, StatusData } from "../lib/contract";
@@ -82,7 +84,10 @@ export default function SkillsPage({
   initialSearch,
   onResetAgent,
   onOpenSource,
+  onOpenProgram,
 }: {
+  /** 依赖标签点过去：程序页的那一行（程序标识）。 */
+  onOpenProgram?: (program: string) => void;
   /** 来源的添加、更新、换版本、纳入都在来源页：点「可更新」「尚未下载」等跳过去（名称；`unmanaged` 为未纳管）。 */
   onOpenSource?: (name: string | null) => void;
   /** 从账号页进来：只看这个账号。 */
@@ -109,6 +114,8 @@ export default function SkillsPage({
   /** 「只看待处理」与待处理页同一份判断。 */
   const attentionSubjects = new Set(useInbox(nameOf).items.filter((item) => item.page === "skills").map((item) => item.subject));
   const [attentionOnly, setAttentionOnly] = useState(false);
+  const programsQuery = useEngineQuery<ProgramsData>("programs:status");
+  const programs = programsQuery.data?.ok ? programsQuery.data.data.elements : [];
   const { execute } = useExecutions();
   const queryClient = useQueryClient();
 
@@ -496,6 +503,7 @@ export default function SkillsPage({
                               基于 {forkedFrom.collection}
                             </span>
                           )}
+                          <DependencyChips chips={dependenciesOf(programs, "skill", skillName)} onOpen={onOpenProgram} />
                           {forkedFrom?.upstream_changed && (
                             <span data-testid={`upstream-changed-${skill.id}`} className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info" title={`${forkedFrom.collection} 里的这个技能在你复制之后更新过；要不要合进来由你决定`}>
                               原版有更新
