@@ -81,6 +81,9 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("skills", "preview") => true,
         // 纳入管理：预览只读；执行会移动账号目录里的内容并建链接（引擎内取排他锁、先备份、可撤回）
         ("skills", "adopt-preview" | "adopt") => true,
+        // 程序：技能与 MCP 依赖的程序。status 只读；preview 只算计划；apply 在引擎内取排他锁、改动前备份；
+        // declare 只写库（补充声明、安装方式、允许安装脚本）
+        ("programs", "status" | "preview" | "apply" | "declare") => true,
         (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
     };
@@ -139,6 +142,10 @@ enum ArgValueKind {
     GitRef,
     /// 逗号分隔的账号 id：每个只含字母数字与 `-_.`，至少一个。
     AgentList,
+    /// 程序动作：install / upgrade / switch / restore / remove / adopt / unadopt / link / unlink。
+    ProgramAction,
+    /// true / false
+    BoolText,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -156,6 +163,22 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--create", ArgValueKind::Flag));
         }
         ("system", "refresh-upstream") => specs.push(("--only", ArgValueKind::ElementId)),
+        ("programs", "status") => specs.push(("--rescan", ArgValueKind::Flag)),
+        ("programs", "preview" | "apply") => {
+            specs.push(("--program", ArgValueKind::ElementId));
+            specs.push(("--action", ArgValueKind::ProgramAction));
+            specs.push(("--version", ArgValueKind::GitRef));
+            specs.push(("--backup", ArgValueKind::GitRef));
+            specs.push(("--entry-dir", ArgValueKind::FilePath));
+            specs.push(("--allow-scripts", ArgValueKind::BoolText));
+        }
+        ("programs", "declare") => {
+            specs.push(("--skill", ArgValueKind::GitRef));
+            specs.push(("--bins", ArgValueKind::JsonValue));
+            specs.push(("--bin", ArgValueKind::GitRef));
+            specs.push(("--program", ArgValueKind::ElementId));
+            specs.push(("--allow-scripts", ArgValueKind::BoolText));
+        }
         // 规则以实际文件为准：写一个目标，base 做 CAS；新内容四选一（引擎再强制恰好一个）
         ("rules", "apply") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -413,6 +436,30 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
             }
         }
         ArgValueKind::RunId => validate_run_id(value),
+        ArgValueKind::ProgramAction => {
+            const ACTIONS: &[&str] = &[
+                "install", "upgrade", "switch", "restore", "remove", "adopt", "unadopt", "link",
+                "unlink",
+            ];
+            if ACTIONS.contains(&value) {
+                Ok(())
+            } else {
+                Err(EngineError::new(
+                    "invalid_args",
+                    format!("非法程序动作 '{value}'"),
+                ))
+            }
+        }
+        ArgValueKind::BoolText => {
+            if value == "true" || value == "false" {
+                Ok(())
+            } else {
+                Err(EngineError::new(
+                    "invalid_args",
+                    format!("只能是 true 或 false，不是 '{value}'"),
+                ))
+            }
+        }
         ArgValueKind::PolicyLayer => {
             if value == "local" {
                 Ok(())
@@ -2080,5 +2127,100 @@ mod tests {
         assert!(validate_command("runs:progress").is_ok());
         assert!(validate_args("runs:progress", &["--run".into(), "gui-abc_1".into()]).is_ok());
         assert!(validate_args("runs:progress", &["--run".into(), "../x".into()]).is_err());
+    }
+
+    #[test]
+    fn programs_commands_are_whitelisted_with_typed_args() {
+        for command in [
+            "programs:status",
+            "programs:preview",
+            "programs:apply",
+            "programs:declare",
+        ] {
+            assert!(validate_command(command).is_ok(), "{command}");
+        }
+        assert!(validate_command("programs:exec").is_err());
+        let ok = |command: &str, a: &[&str]| {
+            validate_args(
+                command,
+                &a.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            )
+            .is_ok()
+        };
+        assert!(ok("programs:status", &["--rescan"]));
+        assert!(ok(
+            "programs:apply",
+            &[
+                "--program",
+                "npm:@wecom/cli",
+                "--action",
+                "upgrade",
+                "--version",
+                "1.3.5"
+            ]
+        ));
+        assert!(ok(
+            "programs:apply",
+            &[
+                "--program",
+                "npm:semver",
+                "--action",
+                "adopt",
+                "--entry-dir",
+                "~/.local/bin",
+                "--allow-scripts",
+                "false"
+            ]
+        ));
+        assert!(ok(
+            "programs:apply",
+            &[
+                "--program",
+                "npm:semver",
+                "--action",
+                "restore",
+                "--backup",
+                "20260930T091207893-npm_semver"
+            ]
+        ));
+        assert!(ok(
+            "programs:declare",
+            &[
+                "--skill",
+                "xiaoyu-bug-loop",
+                "--bins",
+                "[\"playwright-cli\"]"
+            ]
+        ));
+        assert!(
+            !ok(
+                "programs:apply",
+                &["--program", "npm:x", "--action", "rm -rf"]
+            ),
+            "动作只能是已知几种"
+        );
+        assert!(
+            !ok(
+                "programs:apply",
+                &[
+                    "--program",
+                    "npm:x",
+                    "--action",
+                    "install",
+                    "--version",
+                    "-g"
+                ]
+            ),
+            "版本不能像参数"
+        );
+        assert!(!ok(
+            "programs:apply",
+            &["--program", "npm:x", "--allow-scripts", "yes"]
+        ));
+        assert!(!ok(
+            "programs:apply",
+            &["--program", "npm:x;rm", "--action", "install"]
+        ));
+        assert!(!ok("programs:status", &["--program", "npm:x"]));
     }
 }

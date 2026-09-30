@@ -46,6 +46,8 @@ const REFS_CAPTURE_LIMIT: usize = 16 * 1024 * 1024;
 
 const PROBE_NPM_VIEW: &str = "npm-view";
 const PROBE_GIT_LS_REMOTE: &str = "git-ls-remote";
+const PROBE_PYPI_JSON: &str = "pypi-json";
+const ERR_PYPI_FAILED: &str = "pypi-failed";
 
 /// 固定错误类别（缓存只存类别，不存底层错误正文/URL/命令）。
 const ERR_NPM_VIEW_FAILED: &str = "npm-view-failed";
@@ -184,6 +186,13 @@ pub(crate) fn agent_probe_package(def: &AgentDef) -> Option<String> {
     if let Some(explicit) = def.upstream_npm() {
         return Some(explicit.to_string());
     }
+    // 旧版本存下的定义没有这个字段：按助手 id 回落到内置定义里的包名（只用于查新版本，不安装）
+    if let Some(builtin) = store::builtin_policy()
+        .pointer(&format!("/agents/definitions/{}/upstream_npm", def.id))
+        .and_then(Value::as_str)
+    {
+        return Some(builtin.to_string());
+    }
     let (install, _) = def.commands.install.as_ref()?;
     extract_npm_package_name(install)
 }
@@ -230,6 +239,12 @@ enum ProbeKind {
     McpUvxGit {
         repo: String,
         branch: String,
+    },
+    /// 技能与 MCP 依赖的程序（代管、托管）：本地版本由程序域读出，上游问 npm / PyPI
+    Program {
+        registry: &'static str,
+        package: String,
+        current: Option<String>,
     },
     SkillGit {
         repo_dir: PathBuf,
@@ -283,6 +298,47 @@ fn collect_targets(ctx: &Context) -> Result<Vec<ProbeTarget>> {
             id: format!("mcp:{}", server),
             kind,
         });
+    }
+
+    // 程序：代管与托管的 npm、PyPI 包（经 npx / uvx 运行的沿用上面 MCP 的探测）
+    if let Ok(programs) = crate::native_programs::status::status(ctx, false) {
+        for element in programs
+            .get("elements")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            let mode = element
+                .get("mode")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if !matches!(mode, "delegated" | "managed") {
+                continue;
+            }
+            let (Some(kind), Some(name), Some(id)) = (
+                element.get("kind").and_then(Value::as_str),
+                element.get("name").and_then(Value::as_str),
+                element.get("id").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
+            let registry = match kind {
+                "npm" => "npm",
+                "pypi" => "pypi",
+                _ => continue,
+            };
+            targets.push(ProbeTarget {
+                id: id.to_string(),
+                kind: ProbeKind::Program {
+                    registry,
+                    package: name.to_string(),
+                    current: element
+                        .get("version")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                },
+            });
+        }
     }
 
     let policy = store::effective_policy(ctx)?;
@@ -458,6 +514,30 @@ fn npm_view(ctx: &Context, package: &str) -> Option<String> {
     out.lines()
         .map(str::trim)
         .find(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+/// PyPI 上一个包的最新版本（JSON 接口）。
+fn pypi_latest(ctx: &Context, package: &str) -> Option<String> {
+    if package.is_empty()
+        || !package
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return None;
+    }
+    let url = format!("https://pypi.org/pypi/{package}/json");
+    let out = run_capture(
+        "curl",
+        &["-fsSL", "--max-time", "25", &url],
+        None,
+        ctx,
+        NETWORK_PROBE_TIMEOUT,
+    )?;
+    let value: Value = serde_json::from_str(&out).ok()?;
+    value
+        .pointer("/info/version")
+        .and_then(Value::as_str)
         .map(str::to_string)
 }
 
@@ -707,6 +787,24 @@ fn probe_target(ctx: &Context, target: &ProbeTarget) -> ProbeRecord {
                         None
                     };
                     (PROBE_NPM_VIEW, state, current, Some(upstream), error)
+                }
+            }
+        }
+        ProbeKind::Program {
+            registry,
+            package,
+            current,
+        } => {
+            let (probe, upstream, err) = match *registry {
+                "npm" => (PROBE_NPM_VIEW, npm_view(ctx, package), ERR_NPM_VIEW_FAILED),
+                _ => (PROBE_PYPI_JSON, pypi_latest(ctx, package), ERR_PYPI_FAILED),
+            };
+            match upstream {
+                None => (probe, "unknown", current.clone(), None, Some(err)),
+                Some(upstream) => {
+                    let state = compare_freshness(current.as_deref(), Some(&upstream));
+                    let error = (state == "unknown").then_some(ERR_LOCAL_VERSION_MISSING);
+                    (probe, state, current.clone(), Some(upstream), error)
                 }
             }
         }

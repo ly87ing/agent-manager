@@ -63,7 +63,7 @@ impl Request {
 
 const KNOWN_DOMAINS: &[&str] = &[
     "usage", "agents", "mcp", "skills", "rules", "aliases", "profiles", "secrets", "profile",
-    "policy", "system", "runs", "db", "logs", "config",
+    "programs", "policy", "system", "runs", "db", "logs", "config",
 ];
 
 fn mode_of(request: &Request) -> Mode {
@@ -180,6 +180,8 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         request.command.replace('.', ":").as_str(),
         "agents:configure"
     );
+    // 程序：安装、升级、回退、纳入会动数据目录与用户的全局安装，取排他锁
+    let is_program_apply = request.command.replace('.', ":") == "programs:apply";
     let is_secret_write = matches!(
         request.command.replace('.', ":").as_str(),
         "secrets:set" | "secrets:source" | "secrets:migrate-legacy"
@@ -354,6 +356,8 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         (true, "Agent", "AGENT_ERROR")
     } else if is_secret_write {
         (true, "Secrets", "SECRET_ERROR")
+    } else if is_program_apply {
+        (true, "Programs", "PROGRAM_ERROR")
     } else {
         (false, "", "")
     };
@@ -535,6 +539,12 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
             crate::native_secrets::handle(ctx, request)
                 .map(|data| (data, vec![]))
                 .map_err(|err| DispatchError::new("SECRET_ERROR", format!("{err:#}")))
+        }
+        // 程序：技能与 MCP 依赖的程序（智能体本身不管）；status 只读零写零网络
+        ("programs", "status" | "preview" | "apply" | "declare") => {
+            crate::native_programs::handle(ctx, request)
+                .map(|data| (data, vec![]))
+                .map_err(|err| DispatchError::new("PROGRAM_ERROR", format!("{err:#}")))
         }
         ("policy", "get") => policy_get(ctx),
         ("policy", "set") => policy_set(ctx, request),

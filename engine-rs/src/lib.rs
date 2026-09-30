@@ -22,6 +22,7 @@ pub(crate) mod native_config;
 pub(crate) mod native_discover;
 pub mod native_mcp;
 pub(crate) mod native_profiles;
+pub(crate) mod native_programs;
 pub(crate) mod native_rules;
 pub(crate) mod native_runs;
 pub(crate) mod native_secrets;

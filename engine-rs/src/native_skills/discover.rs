@@ -217,6 +217,52 @@ fn scan_all(meta: &DomainMetadata, bindings: &Bindings) -> Vec<(RawEntry, Option
     out
 }
 
+/// 各账号实际在用的技能：各助手技能目录与 Codex 共用目录里、内容目录下有 SKILL.md 的条目，
+/// 按内容目录（链接解析后的真实位置）去重，记下用到它的账号（共用目录记 `codex-shared`）。
+/// 供程序域读取技能声明的依赖；只读零写。
+pub(crate) struct SkillInUse {
+    pub name: String,
+    pub dir: PathBuf,
+    pub agents: Vec<String>,
+}
+
+pub(crate) fn skills_in_use(ctx: &Context) -> Result<Vec<SkillInUse>> {
+    let meta = load_metadata(ctx)?;
+    let bindings = load_bindings_readonly(ctx)?;
+    let mut entries: Vec<RawEntry> = scan_all(&meta, &bindings)
+        .into_iter()
+        .map(|(entry, _)| entry)
+        .collect();
+    entries.extend(scan_agent_dir(
+        CODEX_SHARED_ID,
+        &codex_shared_dir(&ctx.home_dir),
+    ));
+    let mut by_dir: BTreeMap<PathBuf, SkillInUse> = BTreeMap::new();
+    for entry in entries {
+        let dir = if entry.is_link {
+            match entry.target.filter(|_| entry.target_exists) {
+                Some(target) => target,
+                None => continue,
+            }
+        } else {
+            entry.link_path.clone()
+        };
+        if !dir.join("SKILL.md").is_file() {
+            continue;
+        }
+        let dir = dir.canonicalize().unwrap_or(dir);
+        let slot = by_dir.entry(dir.clone()).or_insert_with(|| SkillInUse {
+            name: entry.name.clone(),
+            dir,
+            agents: Vec::new(),
+        });
+        if !slot.agents.contains(&entry.agent) {
+            slot.agents.push(entry.agent);
+        }
+    }
+    Ok(by_dir.into_values().collect())
+}
+
 /// skills:status 的 `installed`：各助手技能目录里的实际条目（「当前」视图），与 discover
 /// 同一扫描与分类。本工具链接（origin=managed）= 有 assigned binding、链接目标存在且落在
 /// 受管基准内（自管基目录或已登记的本地来源）；其余沿用 discover 的分类。只展示、不产生

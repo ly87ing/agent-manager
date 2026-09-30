@@ -23,3 +23,4 @@ toml = "0.8"
 # Codex config.toml 的 MCP 条目原位编辑（保留注释、未建模字段与其他表）。
 # 取 0.20：app/src-tauri 的依赖树把 toml_datetime 钉在 0.6.3，0.22 需要 0.6.11 解不出来。
 toml_edit = "0.20"
+serde_norway = "0.9"

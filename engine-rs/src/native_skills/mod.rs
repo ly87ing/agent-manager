@@ -82,6 +82,7 @@ pub(crate) use status::load_metadata;
 
 // 供只读 system:discover 复用同一份元数据/binding 视图扫描未纳管条目（零写）
 pub(crate) use discover::discover as discover_unmanaged;
+pub(crate) use discover::skills_in_use;
 
 // 供集成测试使用的最小公开发行接口
 pub use snapshot::hash_skill_dir;
