@@ -176,7 +176,7 @@ export default function McpPage({
   const removePreview = async (element: EngineElement, agent: string, cell: McpAgentCell): Promise<McpRemovePreview> => {
     const args = ["--only", element.id, "--agent", agent, "--action", "remove", "--base", cell.base];
     try {
-      const envelope = await runEngine<{ files: { path: string; exists: boolean; content: string }[] }>("mcp:preview", args);
+      const envelope = await runEngine<{ files: { path: string; exists: boolean; content: string; original?: string | null }[] }>("mcp:preview", args);
       return envelope.ok
         ? { files: envelope.data.files, warnings: envelope.warnings.map((warning) => warning.message) }
         : envelope.errors[0]?.message ?? "预览失败";

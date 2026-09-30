@@ -125,6 +125,7 @@ fn preview_matches_add_and_edit_without_writing_and_rejects_stale_entry() {
         assert_eq!(files.len(), 1);
         assert_eq!(files[0]["path"], path.to_string_lossy().as_ref());
         assert_eq!(files[0]["exists"], false);
+        assert_eq!(files[0]["original"], serde_json::Value::Null, "新文件没有原文");
         let expected = files[0]["content"].as_str().unwrap();
         assert!(!path.exists(), "预览不得创建目标文件");
         assert_eq!(db_bytes(&ctx), before_db, "预览不得写库");
@@ -150,6 +151,11 @@ fn preview_matches_add_and_edit_without_writing_and_rejects_stale_entry() {
     let preview = run(&ctx, "mcp:preview", &args);
     assert!(preview.ok, "{}", errors(&preview));
     let expected = preview.data["files"][0]["content"].as_str().unwrap();
+    assert_eq!(
+        preview.data["files"][0]["original"].as_str().unwrap(),
+        original,
+        "预览带上写入前的原文，界面据此只显示变化的部分"
+    );
     assert_eq!(read(&codex_path(&ctx)), original);
     apply_ok(&ctx, &args);
     assert_eq!(read(&codex_path(&ctx)), expected);

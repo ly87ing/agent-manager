@@ -272,9 +272,10 @@ describe("RulesPage：实际文件为准", () => {
     ]);
     await userEvent.selectOptions(sourceSelect, "template:tpl-team");
     const diff = within(dialog).getByTestId("rules-diff");
-    const linesOf = (kind: string) => Array.from(diff.querySelectorAll(`[data-kind="${kind}"]`)).map((line) => line.textContent);
-    expect(linesOf("del")).toEqual(["- - Use Chinese (Simplified).", "- - Prefer the simplest local change."]);
-    expect(linesOf("add")).toEqual(["+ # Claude 规则", "+ - 回答用简体中文。"]);
+    // 每行是「行号 · 标记 · 正文」三格，只比正文
+    const linesOf = (kind: string) => Array.from(diff.querySelectorAll(`[data-kind="${kind}"]`)).map((line) => line.lastElementChild?.textContent);
+    expect(linesOf("del")).toEqual(["- Use Chinese (Simplified).", "- Prefer the simplest local change."]);
+    expect(linesOf("add")).toEqual(["# Claude 规则", "- 回答用简体中文。"]);
     expect(within(dialog).getByText(/会先另存为备份模板/)).toBeInTheDocument();
 
     await userEvent.click(within(dialog).getByRole("button", { name: "写入" }));

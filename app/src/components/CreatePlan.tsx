@@ -2,6 +2,7 @@ import { ChevronRight } from "lucide-react";
 import { useState } from "react";
 import type { CreatePreview } from "../lib/useAccountOps";
 import { cn } from "../lib/utils";
+import { FileDiff } from "./FileDiff";
 
 /**
  * 新建账号前逐条说清点「创建」会做什么：建哪个目录、每个文件写什么、终端里加哪条命令、
@@ -28,7 +29,20 @@ const SEED_TEXT: Record<string, string> = {
   statusline: "状态栏",
 };
 
-function FileStep({ title, path, content, children }: { title: string; path: string; content: string; children?: React.ReactNode }) {
+function FileStep({
+  title,
+  path,
+  content,
+  original,
+  children,
+}: {
+  title: string;
+  path: string;
+  content: string;
+  /** 写入前的原文；新文件为 null。 */
+  original?: string | null;
+  children?: React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <li className="space-y-1">
@@ -47,7 +61,7 @@ function FileStep({ title, path, content, children }: { title: string; path: str
           {open ? "收起" : "看内容"}
         </button>
       </div>
-      {open && <pre className="max-h-48 overflow-auto rounded bg-muted p-2 font-mono text-[11px]">{content}</pre>}
+      {open && <FileDiff original={original ?? null} content={content} maxHeight="max-h-48" />}
     </li>
   );
 }
@@ -79,7 +93,7 @@ export function CreatePlan({ preview, facts }: { preview: CreatePreview; facts: 
           新建目录 <code className="font-mono text-[11px]">{facts.configDir}</code>
           <span className="block text-muted-foreground">这个账号的登录、会话和设置都只放在这里。</span>
         </li>
-        <FileStep title="写入" path={preview.config.path} content={preview.config.content}>
+        <FileStep title="写入" path={preview.config.path} content={preview.config.content} original={preview.config.exists ? preview.config.original : null}>
           {[
             facts.api ? `接口 ${facts.api.baseUrl}${facts.api.model ? `、模型 ${facts.api.model}` : ""}、API Key（取自 ${facts.api.tokenVar}）` : null,
             carried.length ? `从主账号带上${carried.join("、")}` : null,
@@ -87,10 +101,10 @@ export function CreatePlan({ preview, facts }: { preview: CreatePreview; facts: 
           ].filter(Boolean).join("；")}
         </FileStep>
         {rulesFile && (
-          <FileStep title="复制主账号的规则到" path={rulesFile.path} content={rulesFile.content} />
+          <FileStep title="复制主账号的规则到" path={rulesFile.path} content={rulesFile.content} original={rulesFile.exists ? rulesFile.original : null} />
         )}
         {mcpFile && (
-          <FileStep title="写入 MCP 服务" path={mcpFile.path} content={mcpFile.content}>
+          <FileStep title="写入 MCP 服务" path={mcpFile.path} content={mcpFile.content} original={mcpFile.exists ? mcpFile.original : null}>
             {mcpDetail}
           </FileStep>
         )}

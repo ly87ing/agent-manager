@@ -34,13 +34,14 @@ fn read_optional(path: &Path) -> Result<Option<Vec<u8>>> {
     seed::read_target(path).map(|(_, bytes)| bytes)
 }
 
-fn file(path: String, before: bool, bytes: Vec<u8>) -> Result<Value> {
+fn file(path: String, original: Option<&[u8]>, bytes: Vec<u8>) -> Result<Value> {
     if bytes.len() > 4 * 1024 * 1024 {
         bail!("配置文件超过安全读取上限");
     }
     Ok(json!({
         "path": path,
-        "exists": before,
+        "exists": original.is_some(),
+        "original": crate::native_mcp::original_text(original),
         "content": String::from_utf8(bytes).map_err(|_| anyhow!("预览结果不是 UTF-8 文本"))?,
     }))
 }
@@ -91,7 +92,7 @@ fn rules(
     let display = format!("{}/{name}", def.config_dir_raw.trim_end_matches('/'));
     Ok((
         result("rules", state, detail),
-        Some(file(display, previous.is_some(), bytes)?),
+        Some(file(display, previous.as_deref(), bytes)?),
     ))
 }
 
@@ -168,9 +169,10 @@ fn mcp(
         ProfileKind::Claude => read_optional(&target_path)?,
         ProfileKind::Codex => Some(main.clone()),
     };
-    let existed = match def.kind {
-        ProfileKind::Claude => previous.is_some(),
-        ProfileKind::Codex => read_optional(&target_path)?.is_some(),
+    // 写入前的 .claude.json 原文（Claude 的 MCP 另写这个文件）：界面据此只显示变化的部分
+    let claude_original = match def.kind {
+        ProfileKind::Claude => previous.clone(),
+        ProfileKind::Codex => None,
     };
     let target_scan = mcp_scan(def, &target_path, previous)?;
     inv.scans.retain(|scan| scan.target.agent != def.id);
@@ -257,7 +259,7 @@ fn mcp(
             .map(|bytes| {
                 file(
                     format!("{}/.claude.json", def.config_dir_raw.trim_end_matches('/')),
-                    existed,
+                    claude_original.as_deref(),
                     bytes,
                 )
             })

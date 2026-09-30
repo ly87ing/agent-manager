@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { cn } from "../lib/utils";
+import { FileDiff } from "./FileDiff";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { hasPresetArgs, presetsForCommand, togglePresetArgs } from "../lib/agentPresets";
 import {
@@ -429,8 +430,8 @@ export function AliasEditorDialog({
           </div>
 
           <section className="space-y-2 rounded border p-3 text-xs" data-testid="alias-file-preview">
-            <p className="font-medium">终端配置文件写入后</p>
-            {!canPreview && <p className="text-muted-foreground">填写有效名称和命令后显示完整文件。</p>}
+            <p className="font-medium">终端配置文件的改动</p>
+            {!canPreview && <p className="text-muted-foreground">填写有效名称和命令后显示要改的地方。</p>}
             {canPreview && currentFilePreview === null && <p className="text-muted-foreground">正在读取实际文件并计算…</p>}
             {typeof currentFilePreview === "string" && <>
               <p role="alert" className="text-destructive">{currentFilePreview}</p>
@@ -438,12 +439,18 @@ export function AliasEditorDialog({
             </>}
             {currentFilePreview && typeof currentFilePreview !== "string" && <>
               {currentFilePreview.files.length === 0 && <p className="text-muted-foreground">配置文件不变。</p>}
-              {currentFilePreview.files.map((file) => <div key={file.target} className="space-y-1">
-                <p className="break-all font-mono">{file.path}{file.exists ? "（已有文件）" : "（将新建）"}</p>
-                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono" data-testid={`alias-file-preview-${file.target}`}>{file.content}</pre>
-              </div>)}
+              {currentFilePreview.files.map((file) => (
+                <FileDiff
+                  key={file.target}
+                  path={file.path}
+                  original={file.exists ? file.original : null}
+                  content={file.content}
+                  testId={`alias-file-preview-${file.target}`}
+                  maxHeight="max-h-48"
+                />
+              ))}
             </>}
-            <p className="text-muted-foreground">只读预览；原文可能含敏感值，仅在本机查看。</p>
+            <p className="text-muted-foreground">只读预览，只显示变化的部分。</p>
           </section>
 
           <button

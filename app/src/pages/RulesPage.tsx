@@ -17,6 +17,7 @@ import { engineErrorMessage, runEngine } from "../lib/engine";
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import { newRunId } from "../lib/runId";
 import { diffLines, hasChanges } from "../lib/textDiff";
+import { FileDiff } from "../components/FileDiff";
 import { type RulesFillRow, rulesFillArgs, rulesFillRows } from "../lib/rulesFill";
 import { useAccountNames } from "../lib/useAccountNames";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -759,20 +760,8 @@ function DiffView({ current, after }: { current: string | null; after: string })
       </p>
     );
   }
-  return (
-    <pre data-testid="rules-diff" className="max-h-80 overflow-auto rounded border p-2 font-mono text-xs whitespace-pre-wrap">
-      {lines.map((line, index) => (
-        <div
-          key={index}
-          data-kind={line.kind}
-          className={cn(line.kind === "add" && "bg-success/10 text-success", line.kind === "del" && "bg-destructive/10 text-destructive")}
-        >
-          {line.kind === "add" ? "+ " : line.kind === "del" ? "- " : "  "}
-          {line.text}
-        </div>
-      ))}
-    </pre>
-  );
+  // 只显示变化的行与前后几行，没变的折叠（与 MCP、快捷命令等预览同一写法）
+  return <FileDiff original={current ?? null} content={after} testId="rules-diff" maxHeight="max-h-80" />;
 }
 
 function ApplyContentDialog({

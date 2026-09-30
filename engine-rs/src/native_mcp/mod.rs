@@ -73,6 +73,8 @@ pub fn dispatch(ctx: &Context, req: &Request) -> Result<(Value, Vec<String>)> {
                     Ok(json!({
                         "path": write.path,
                         "exists": write.old_bytes.is_some(),
+                        // 写入前的原文：界面据此只显示变化的部分
+                        "original": original_text(write.old_bytes.as_deref()),
                         "content": std::str::from_utf8(&write.new_bytes)?,
                     }))
                 })
@@ -82,6 +84,14 @@ pub fn dispatch(ctx: &Context, req: &Request) -> Result<(Value, Vec<String>)> {
         "mcp:apply" => apply::apply(ctx, req),
         _ => bail!("mcp 域不支持命令 '{}'", req.command),
     }
+}
+
+/// 预览里写入前的原文：不存在为 null；不是 UTF-8 时也为 null（界面退回只显示新内容）。
+pub(crate) fn original_text(bytes: Option<&[u8]>) -> Value {
+    bytes
+        .and_then(|b| std::str::from_utf8(b).ok())
+        .map(|s| Value::String(s.to_string()))
+        .unwrap_or(Value::Null)
 }
 
 /// 只要 data 的调用方（system:audit）。

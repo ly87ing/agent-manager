@@ -211,6 +211,7 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
                 "target": write.target_id,
                 "path": write.abs,
                 "exists": write.old_bytes.is_some(),
+                "original": crate::native_mcp::original_text(write.old_bytes.as_deref()),
                 "content": std::str::from_utf8(&write.new_bytes)?,
             }))
         })

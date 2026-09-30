@@ -18,12 +18,14 @@ export interface ProfileDraftPreview {
   path: string;
   content: string;
   exists: boolean;
+  /** 写入前的原文；文件不存在为 null。界面据此只显示变化的部分。 */
+  original?: string | null;
   file_base?: string;
   content_base?: string;
   will_write?: boolean;
   existing_profile_skipped?: boolean;
   seed_results?: { item: string; state: string; detail: string }[];
-  files?: { path: string; content: string; exists: boolean }[];
+  files?: { path: string; content: string; exists: boolean; original?: string | null }[];
 }
 
 export type ProfilePreviewRequest =

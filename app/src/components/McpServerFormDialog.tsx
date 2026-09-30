@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import type { McpTarget } from "../lib/contract";
 import type { McpAgentCell, McpSavedDefinition } from "../lib/observed";
 import { useDialogFocus } from "../lib/dialogFocus";
+import { FileDiff } from "./FileDiff";
 import { parsePastedServer } from "../lib/mcpPaste";
 
 type McpTransport = "stdio" | "remote";
@@ -45,7 +46,7 @@ export interface McpFormPayload {
 
 export interface McpFilePreview {
   agent: string;
-  files: { path: string; exists: boolean; content: string }[];
+  files: { path: string; exists: boolean; content: string; original?: string | null }[];
   error?: string;
 }
 
@@ -480,8 +481,8 @@ export function McpServerFormDialog({
             </p>
           )}
           <section className="space-y-2 rounded-lg border p-3 text-xs lg:col-span-2" data-testid="mcp-file-preview">
-            <h4 className="font-medium text-foreground">目标配置文件预览</h4>
-            <p className="text-muted-foreground">填写有效内容后按当前实际文件计算；仅在本机显示完整原文，可能含凭据。保存时会重新读取并校验。</p>
+            <h4 className="font-medium text-foreground">将要改动的配置</h4>
+            <p className="text-muted-foreground">按当前实际文件计算，只显示变化的部分；保存时会重新读取并校验。</p>
             {typeof draft === "string" && <p className="text-muted-foreground">{draft}</p>}
             {typeof draft !== "string" && (previewBusy || preview?.key !== previewKey) && <p className="text-muted-foreground">正在计算…</p>}
             {preview?.key === previewKey && typeof preview.result === "string" && <p role="alert" className="text-destructive">{preview.result}</p>}
@@ -491,10 +492,13 @@ export function McpServerFormDialog({
                 {item.error && <p role="alert" className="text-destructive">{item.error}</p>}
                 {!item.error && item.files.length === 0 && <p className="text-muted-foreground">文件内容不变。</p>}
                 {item.files.map((file) => (
-                  <div key={file.path} className="space-y-1">
-                    <p className="break-all font-mono text-muted-foreground">{file.path} · {file.exists ? "更新现有文件" : "新建文件"}</p>
-                    <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-xs" data-testid={`mcp-preview-content-${item.agent}`}>{file.content}</pre>
-                  </div>
+                  <FileDiff
+                    key={file.path}
+                    path={file.path}
+                    original={file.exists ? file.original : null}
+                    content={file.content}
+                    testId={`mcp-preview-content-${item.agent}`}
+                  />
                 ))}
               </div>
             ))}

@@ -257,6 +257,7 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
             "path": format!("{}/{}", plan.def.config_dir_raw, plan.file),
             "format": if plan.def.kind.as_str() == "codex" { "toml" } else { "json" },
             "exists": plan.previous.is_some(),
+            "original": crate::native_mcp::original_text(plan.previous.as_deref()),
             "file_base": file_base(plan.previous.as_deref()),
             "content_base": crate::native_mcp::model::sha256_hex_bytes(&plan.content),
             "content": String::from_utf8(plan.content).map_err(|_| anyhow!("预览结果不是 UTF-8 文本"))?,
@@ -307,6 +308,7 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
             "path": format!("{}/{}", plan.def.config_dir_raw, plan.file),
             "format": if plan.def.kind.as_str() == "codex" { "toml" } else { "json" },
             "exists": plan.previous.is_some(),
+            "original": crate::native_mcp::original_text(plan.previous.as_deref()),
             "content": String::from_utf8(plan.content).map_err(|_| anyhow!("预览结果不是 UTF-8 文本"))?,
         });
         if let Some(content_base) = content_base {
@@ -388,6 +390,7 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         "path": format!("{}/{}", def.config_dir_raw, file),
         "format": if def.kind.as_str() == "codex" { "toml" } else { "json" },
         "exists": previous.is_some(),
+        "original": crate::native_mcp::original_text(previous.as_deref()),
         "will_write": will_write,
         "existing_profile_skipped": on_save && previous.is_some(),
         "content": String::from_utf8(content).map_err(|_| anyhow!("预览结果不是 UTF-8 文本"))?,

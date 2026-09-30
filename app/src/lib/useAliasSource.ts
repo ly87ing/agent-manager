@@ -46,7 +46,7 @@ export interface AliasSource {
 }
 
 export interface AliasFilePreview {
-  files: { target: string; path: string; exists: boolean; content: string }[];
+  files: { target: string; path: string; exists: boolean; content: string; original?: string | null }[];
   skipped: string[];
 }
 

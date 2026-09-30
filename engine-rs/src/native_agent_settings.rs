@@ -1899,6 +1899,7 @@ pub(crate) fn preview_runtime(ctx: &Context, req: &Request) -> Result<Value, Dis
             || "missing".to_string(),
             crate::native_mcp::model::sha256_hex_bytes,
         ),
+        "original": crate::native_mcp::original_text(existing.as_deref()),
         "content": String::from_utf8(content).map_err(|err| agent_error(err.into()))?,
     }))
 }

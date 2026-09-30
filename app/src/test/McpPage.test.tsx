@@ -144,7 +144,7 @@ describe("McpPage：实际条目为主", () => {
     const dialog = await openRemove("mcp:remote-api");
     expect(applyCalls(calls)).toHaveLength(2);
     expect(await within(dialog).findByTestId("mcp-remove-preview-content")).toHaveTextContent("删除后完整配置");
-    expect(within(dialog).getByText("删除后的 /isolated/codex/config")).toBeInTheDocument();
+    expect(within(dialog).getByText("/isolated/codex/config")).toBeInTheDocument();
     const removePreview = calls.find((call) => call.command === "mcp:preview" && call.args.includes("remove"));
     await userEvent.click(within(dialog).getByRole("button", { name: "从 1 个账号删除" }));
     await waitFor(() => expect(applyCalls(calls)).toHaveLength(3));

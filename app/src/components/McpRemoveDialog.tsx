@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import type { McpAgentCell } from "../lib/observed";
+import { FileDiff } from "./FileDiff";
 import { ConfirmModal } from "./ConfirmModal";
 
-export type McpRemovePreview = { files: { path: string; exists: boolean; content: string }[]; warnings: string[] } | string;
+export type McpRemovePreview = { files: { path: string; exists: boolean; content: string; original?: string | null }[]; warnings: string[] } | string;
 
 /**
  * 删除一个服务：列出有它的账号，默认全选，可以取消某个账号；每个账号给出删除后的配置文件预览。
@@ -80,10 +81,14 @@ export function McpRemoveDialog({
                     <>
                       {preview.files.length === 0 && <p className="text-muted-foreground">配置文件不变。</p>}
                       {preview.files.map((file) => (
-                        <details key={file.path}>
-                          <summary className="cursor-pointer break-all font-mono text-muted-foreground">删除后的 {file.path}</summary>
-                          <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono" data-testid="mcp-remove-preview-content">{file.content}</pre>
-                        </details>
+                        <FileDiff
+                          key={file.path}
+                          path={file.path}
+                          original={file.exists ? file.original : null}
+                          content={file.content}
+                          testId="mcp-remove-preview-content"
+                          maxHeight="max-h-60"
+                        />
                       ))}
                       {preview.warnings.map((warning) => <p key={warning} className="text-warning">{warning}</p>)}
                     </>
