@@ -708,10 +708,13 @@ pub fn render_new(format: &Format, n: &Neutral) -> Result<Map<String, Value>> {
         Transport::Stdio => {
             check_missing(missing)?;
             match format {
+                // 不写原来没有、用户也没填的字段：环境变量为空就不写 env
                 Format::ClaudeJson => {
                     out.insert("command".into(), json!(n.command));
                     out.insert("args".into(), json!(n.args));
-                    out.insert("env".into(), Value::Object(env));
+                    if !env.is_empty() {
+                        out.insert("env".into(), Value::Object(env));
+                    }
                 }
                 Format::CodexToml => {
                     out.insert("command".into(), json!(n.command));
@@ -719,14 +722,18 @@ pub fn render_new(format: &Format, n: &Neutral) -> Result<Map<String, Value>> {
                     if let Some(timeout) = n.startup_timeout_sec {
                         out.insert("startup_timeout_sec".into(), json!(timeout));
                     }
-                    out.insert("env".into(), Value::Object(env));
+                    if !env.is_empty() {
+                        out.insert("env".into(), Value::Object(env));
+                    }
                 }
                 Format::OpenCodeJson => {
                     let mut command = vec![n.command.clone()];
                     command.extend(n.args.iter().cloned());
                     out.insert("type".into(), json!("local"));
                     out.insert("command".into(), json!(command));
-                    out.insert("environment".into(), Value::Object(env));
+                    if !env.is_empty() {
+                        out.insert("environment".into(), Value::Object(env));
+                    }
                 }
                 Format::Unsupported(fmt) => bail!("不支持的 MCP 配置格式: {fmt}"),
             }
@@ -973,7 +980,12 @@ pub fn apply_enabled(
 ) -> Map<String, Value> {
     let mut new = old.clone();
     strip_marker(&mut new, container_env_key(format));
-    new.insert("enabled".into(), Value::Bool(enabled));
+    if enabled {
+        // 启用就是回到默认：去掉 enabled，而不是写一个原来没有的 enabled = true
+        new.remove("enabled");
+    } else {
+        new.insert("enabled".into(), Value::Bool(false));
+    }
     new
 }
 

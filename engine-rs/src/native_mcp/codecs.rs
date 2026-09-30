@@ -96,6 +96,9 @@ pub fn render_entry_toml(server: &str, entry: &Entry) -> String {
     if let Some(Value::Number(timeout)) = entry.extra.get("startup_timeout_sec") {
         out.push_str(&format!("startup_timeout_sec = {}\n", timeout));
     }
+    if entry.env.is_empty() {
+        return out;
+    }
     out.push_str(&format!("[mcp_servers.{}.env]\n", toml_key(server)));
     let mut keys: Vec<&String> = entry.env.keys().collect();
     keys.sort();

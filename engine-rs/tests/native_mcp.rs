@@ -996,9 +996,11 @@ fn codex_disable_uses_official_enabled_field_and_keeps_entry() {
             &base(&ctx, "github", "codex"),
         ],
     );
-    assert_eq!(
-        codex_doc(&ctx)["mcp_servers"]["github"]["enabled"].as_bool(),
-        Some(true)
+    assert!(
+        codex_doc(&ctx)["mcp_servers"]["github"]
+            .get("enabled")
+            .is_none(),
+        "启用是去掉 enabled = false，不写原来没有的 enabled = true"
     );
     assert_eq!(cell(&ctx, "github", "codex")["state"], "enabled");
     let _ = std::fs::remove_dir_all(root);

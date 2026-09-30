@@ -32,7 +32,7 @@ MCP 以各助手配置文件里的实际条目为准：Claude Code 的 `~/.claud
 
 ## 启停
 
-- **Codex、OpenCode**：官方字段 `enabled`。停用写 `enabled = false`，条目留在文件里；启用写 `enabled = true`。
+- **Codex、OpenCode**：官方字段 `enabled`。停用写 `enabled = false`，条目留在文件里；启用去掉 `enabled`（回到默认），不写原来没有的 `enabled = true`。新增条目只写用户填了的字段：没有环境变量就不写 `env` 表，没填启动超时就不写 `startup_timeout_sec`。
 - **Claude Code**：官方只有按项目记录的停用列表（`/mcp` 面板），没有全局的逐条字段。停用 = 把条目移出 `~/.claude.json`，存成本工具里的停用快照；启用 = 按快照写回（目标里已有同名条目则拒绝）。快照里不留疑似凭据：命中疑似凭据检测的 env 字面量与全部 header 字面量转存到「密钥」页选择的外部文件、快照里改为 `${VAR}`，写回时解析成原值；没选可用文件时拒绝停用。未命中检测的普通 env 取值（如 `NODE_ENV=production`）原样保存在快照里。
 
 ## 旧库迁移
