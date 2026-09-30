@@ -256,7 +256,25 @@ fn preflight_coll_action(
     if req.value("--agent").is_some() {
         bail!("集合动作不接受 --agent");
     }
+    if let Some(reference) = req.value("--ref") {
+        if action != "update" || is_local_source(coll) {
+            bail!("--ref 只用于 git 来源的更新（切换到指定版本）");
+        }
+        if req.flag("--offline") {
+            bail!("--ref 需要联网取远端版本，不能与 --offline 同用");
+        }
+        if !super::track::valid_ref_name(reference) || reference.contains('*') {
+            bail!("--ref 不合法：{reference}");
+        }
+    } else if req.flag("--ref") {
+        bail!("--ref 缺少取值");
+    }
     if action == "update" {
+        // 跟踪方式写错要在动手前报出来
+        if !is_local_source(coll) {
+            super::versioning::track_of(coll)?;
+            super::versioning::sparse_patterns(coll)?;
+        }
         if is_local_source(coll) {
             // 本地来源集合无远端可拉，只校验登记源目录仍然安全可用。
             validate_local_source(ctx, coll, agent_targets)?;

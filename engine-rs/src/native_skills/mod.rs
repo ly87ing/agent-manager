@@ -15,6 +15,8 @@ mod preflight;
 mod recommend;
 mod snapshot;
 mod status;
+pub(crate) mod track;
+pub(crate) mod versioning;
 
 use anyhow::{bail, Result};
 use serde_json::{Map, Value};
@@ -100,6 +102,35 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         "skills:status" | "skills.status" => status::build_status(ctx),
         "skills:apply" | "skills.apply" => apply::apply(ctx, req),
         "skills:fork" | "skills.fork" => fork::fork(ctx, req),
+        "skills:versions" | "skills.versions" => versions_command(ctx, req),
         other => bail!("native_skills 不支持命令 '{}'", other),
     }
+}
+
+/// `skills:versions --only skill:<来源>`：列出 git 来源可选的版本（标签、分支）、按跟踪方式
+/// 解析出的最新版本与镜像当前所在版本。只读网络：不写库、不动镜像，也不取 apply 锁。
+fn versions_command(ctx: &Context, req: &Request) -> Result<Value> {
+    let mut iter = req.args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--only" => {
+                iter.next();
+            }
+            other => bail!("skills:versions 只接受 --only，收到 {other}"),
+        }
+    }
+    let only = req
+        .value("--only")
+        .ok_or_else(|| anyhow::anyhow!("skills:versions 需要 --only skill:<来源>"))?;
+    let target = paths::parse_only(only)?;
+    if target.skill.is_some() {
+        bail!("skills:versions 只接受来源（skill:<来源>），不接受单个技能");
+    }
+    let meta = status::load_metadata(ctx)?;
+    let coll = meta
+        .collections
+        .get(&target.collection)
+        .filter(|coll| !coll.deleted)
+        .ok_or_else(|| anyhow::anyhow!("没有这个来源：{}", target.collection))?;
+    versioning::versions(ctx, coll, &paths::collection_source_root(ctx, coll))
 }

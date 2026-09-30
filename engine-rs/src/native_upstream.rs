@@ -41,6 +41,8 @@ const NETWORK_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
 const LOCAL_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 /// 单路输出有界捕获上限（版本/哈希行远低于此）。
 const CAPTURE_LIMIT: usize = 4096;
+/// 远端引用清单的捕获上限：大仓库（上百个分支与标签）的 ls-remote 输出可达数百 KB。
+const REFS_CAPTURE_LIMIT: usize = 16 * 1024 * 1024;
 
 const PROBE_NPM_VIEW: &str = "npm-view";
 const PROBE_GIT_LS_REMOTE: &str = "git-ls-remote";
@@ -51,6 +53,8 @@ const ERR_GIT_LS_REMOTE_FAILED: &str = "git-ls-remote-failed";
 const ERR_LOCAL_VERSION_MISSING: &str = "local-version-missing";
 const ERR_LOCAL_HEAD_MISSING: &str = "local-head-missing";
 const ERR_UVX_LOCAL_UNAVAILABLE: &str = "uvx-local-unavailable";
+/// 技能来源的跟踪方式解析不出目标（写错，或远端没有匹配的标签 / 分支）。
+const ERR_TRACK_UNRESOLVED: &str = "track-unresolved";
 
 // ---------------------------------------------------------------------------
 // 缓存读写
@@ -216,10 +220,23 @@ pub(crate) fn classify_mcp_probe(definition: &Value) -> Option<McpProbeSpec> {
 }
 
 enum ProbeKind {
-    AgentNpm { bin: String, package: String },
-    McpNpx { package: String },
-    McpUvxGit { repo: String, branch: String },
-    SkillGit { repo_dir: PathBuf, url: String },
+    AgentNpm {
+        bin: String,
+        package: String,
+    },
+    McpNpx {
+        package: String,
+    },
+    McpUvxGit {
+        repo: String,
+        branch: String,
+    },
+    SkillGit {
+        repo_dir: PathBuf,
+        url: String,
+        /// 来源定义里的跟踪方式（原样）；缺省为自动
+        track: Option<Value>,
+    },
 }
 
 struct ProbeTarget {
@@ -297,6 +314,7 @@ fn collect_targets(ctx: &Context) -> Result<Vec<ProbeTarget>> {
                 kind: ProbeKind::SkillGit {
                     repo_dir: crate::native_skills::repo_base_dir(ctx).join(name),
                     url: url.to_string(),
+                    track: raw.get("track").cloned(),
                 },
             });
         }
@@ -370,9 +388,15 @@ fn run_capture(
 
 /// 执行调用方配好参数与环境的命令：stdin 关闭、独立进程组、输出有界，超时终止进程组。
 /// 正常退出 → Some((退出码, stdout, stderr 前 256 字节))；超时、被信号终止或启动失败 → None。
-pub(crate) fn capture_exit(
+pub(crate) fn capture_exit(command: Command, timeout: Duration) -> Option<(i32, Vec<u8>, Vec<u8>)> {
+    capture_exit_limited(command, timeout, CAPTURE_LIMIT)
+}
+
+/// 同 `capture_exit`，stdout 上限由调用方给出。
+fn capture_exit_limited(
     mut command: Command,
     timeout: Duration,
+    limit: usize,
 ) -> Option<(i32, Vec<u8>, Vec<u8>)> {
     command
         .stdin(Stdio::null())
@@ -384,7 +408,7 @@ pub(crate) fn capture_exit(
         command.process_group(0);
     }
     let mut child = command.spawn().ok()?;
-    let stdout_rx = spawn_capture_reader(child.stdout.take()?, CAPTURE_LIMIT);
+    let stdout_rx = spawn_capture_reader(child.stdout.take()?, limit);
     let stderr_rx = spawn_capture_reader(child.stderr.take()?, 256);
     let start = Instant::now();
     loop {
@@ -456,6 +480,38 @@ fn git_ls_remote(ctx: &Context, repo: &str, git_ref: &str) -> Option<String> {
         return None;
     }
     Some(hash.to_string())
+}
+
+/// 远端的分支、标签与默认分支：`git ls-remote --symref <url> HEAD refs/heads/* refs/tags/*`。
+/// 只读网络；不交互（凭据失效时直接失败）；错误只给固定类别，不回显 URL 与命令输出。
+pub(crate) fn git_remote_refs(
+    ctx: &Context,
+    url: &str,
+) -> std::result::Result<crate::native_skills::track::RemoteRefs, &'static str> {
+    if url.is_empty() || url.starts_with('-') {
+        return Err(ERR_GIT_LS_REMOTE_FAILED);
+    }
+    let mut command = Command::new("git");
+    command
+        .args([
+            "ls-remote",
+            "--symref",
+            "--",
+            url,
+            "HEAD",
+            "refs/heads/*",
+            "refs/tags/*",
+        ])
+        .env("HOME", &ctx.home_dir)
+        .env("GIT_TERMINAL_PROMPT", "0");
+    let (code, stdout, _) =
+        capture_exit_limited(command, NETWORK_PROBE_TIMEOUT * 2, REFS_CAPTURE_LIMIT)
+            .ok_or(ERR_GIT_LS_REMOTE_FAILED)?;
+    if code != 0 || stdout.len() >= REFS_CAPTURE_LIMIT {
+        return Err(ERR_GIT_LS_REMOTE_FAILED);
+    }
+    let text = String::from_utf8(stdout).map_err(|_| ERR_GIT_LS_REMOTE_FAILED)?;
+    Ok(crate::native_skills::track::RemoteRefs::parse(&text))
 }
 
 fn git_local_head(ctx: &Context, repo_dir: &Path) -> Option<String> {
@@ -671,25 +727,68 @@ fn probe_target(ctx: &Context, target: &ProbeTarget) -> ProbeRecord {
                 Some(ERR_UVX_LOCAL_UNAVAILABLE),
             ),
         },
-        ProbeKind::SkillGit { repo_dir, url } => {
-            let current = git_local_head(ctx, repo_dir);
-            match git_ls_remote(ctx, url, "HEAD") {
-                None => (
+        ProbeKind::SkillGit {
+            repo_dir,
+            url,
+            track,
+        } => {
+            // 本地：镜像所在提交与名字（检出时记下的标签 / 分支名；旧镜像退回 git rev-parse）
+            let local = crate::native_skills::versioning::local_version(repo_dir);
+            let local_commit = local
+                .get("commit")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| git_local_head(ctx, repo_dir));
+            let track = crate::native_skills::track::Track::parse(track.as_ref());
+            match (crate::native_upstream::git_remote_refs(ctx, url), track) {
+                (Ok(refs), Ok(track)) => {
+                    let current = local_commit.as_ref().map(|commit| {
+                        match local.get("kind").and_then(Value::as_str) {
+                            Some("tag") => local["label"].as_str().unwrap_or_default().to_string(),
+                            _ => refs
+                                .tag_at(commit)
+                                .unwrap_or_else(|| commit.chars().take(7).collect()),
+                        }
+                    });
+                    match crate::native_skills::track::resolve(&track, &refs) {
+                        Ok(target) => {
+                            let state = match &local_commit {
+                                None => "unknown",
+                                Some(commit) if *commit == target.commit => "current",
+                                Some(_) => "behind",
+                            };
+                            let error = local_commit.is_none().then_some(ERR_LOCAL_HEAD_MISSING);
+                            // 标签显示标签名；分支与提交显示前 7 位提交，与本地一侧同一写法
+                            let upstream = if target.kind == "tag" {
+                                target.name.clone()
+                            } else {
+                                target.commit.chars().take(7).collect()
+                            };
+                            (PROBE_GIT_LS_REMOTE, state, current, Some(upstream), error)
+                        }
+                        Err(_) => (
+                            PROBE_GIT_LS_REMOTE,
+                            "unknown",
+                            current,
+                            None,
+                            Some(ERR_TRACK_UNRESOLVED),
+                        ),
+                    }
+                }
+                (Ok(_), Err(_)) => (
                     PROBE_GIT_LS_REMOTE,
                     "unknown",
-                    current,
+                    local_commit,
+                    None,
+                    Some(ERR_TRACK_UNRESOLVED),
+                ),
+                (Err(_), _) => (
+                    PROBE_GIT_LS_REMOTE,
+                    "unknown",
+                    local_commit,
                     None,
                     Some(ERR_GIT_LS_REMOTE_FAILED),
                 ),
-                Some(upstream) => {
-                    let state = compare_freshness(current.as_deref(), Some(&upstream));
-                    let error = if state == "unknown" {
-                        Some(ERR_LOCAL_HEAD_MISSING)
-                    } else {
-                        None
-                    };
-                    (PROBE_GIT_LS_REMOTE, state, current, Some(upstream), error)
-                }
             }
         }
     };

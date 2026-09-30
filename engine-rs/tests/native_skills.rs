@@ -3385,3 +3385,264 @@ fn unmanaged_view_detects_sources_shared_dir_and_duplicates_with_zero_writes() {
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+// ---------- git 来源：版本跟踪、只下载指定目录、切换与回滚 ----------
+
+/// 真实 git 仓库夹具：v1.0.0 → v1.1.0 → main 上再一个提交（打 v2.0.0-rc.1 预发布标签）。
+/// skills/alpha 是要用的技能；skills/beta 与 big/ 不在 skill_paths 里，不应被下载。
+#[test]
+fn git_source_tracks_versions_downloads_only_listed_dirs_and_switches() {
+    let (root, ctx) = temp_ctx("skills-versioning");
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .expect("git 可执行");
+        assert!(
+            out.status.success(),
+            "git {args:?} 失败: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let work = root.join("work");
+    let write = |rel: &str, text: &str| {
+        let path = work.join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    };
+    std::fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main"]);
+    write("skills/alpha/SKILL.md", "# alpha v1.0");
+    write("skills/beta/SKILL.md", "# beta");
+    write("big/blob.txt", "not a skill");
+    write("rules/team.md", "# team rule");
+    git(&work, &["add", "-A"]);
+    git(&work, &["commit", "-qm", "v1.0"]);
+    git(&work, &["tag", "v1.0.0"]);
+    let c1 = git(&work, &["rev-parse", "HEAD"]);
+    write("skills/alpha/SKILL.md", "# alpha v1.1");
+    git(&work, &["commit", "-qam", "v1.1"]);
+    git(&work, &["tag", "-a", "v1.1.0", "-m", "release 1.1"]);
+    let c2 = git(&work, &["rev-parse", "HEAD"]);
+    write("skills/alpha/SKILL.md", "# alpha next");
+    git(&work, &["commit", "-qam", "next"]);
+    git(&work, &["tag", "v2.0.0-rc.1"]);
+    let c3 = git(&work, &["rev-parse", "HEAD"]);
+    // 裸仓库做远端，并允许部分克隆（file:// 才会走过滤）
+    let bare = root.join("origin.git");
+    git(
+        &root,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            &work.to_string_lossy(),
+            &bare.to_string_lossy(),
+        ],
+    );
+    git(&bare, &["config", "uploadpack.allowFilter", "true"]);
+    let url = format!("file://{}", bare.to_string_lossy());
+
+    let define = |extra: &str| {
+        let set = execute(
+            &ctx,
+            &request(
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    "skills.repositories.src",
+                    "--value",
+                    &format!(r#"{{"url":"{url}","skill_paths":["skills/alpha"]{extra}}}"#),
+                ],
+            ),
+        );
+        assert!(set.ok, "{:?}", set.errors);
+    };
+    define("");
+    let update = |args: &[&str]| {
+        let mut all = vec!["--only", "skill:src", "--action", "update"];
+        all.extend_from_slice(args);
+        execute(&ctx, &request("skills:apply", &all))
+    };
+    let repo = ctx.data_dir.join("repositories").join("src");
+    let head = || git(&repo, &["rev-parse", "HEAD"]);
+    let collection = || {
+        let status = execute(&ctx, &request("skills:status", &[]));
+        assert!(status.ok, "{:?}", status.errors);
+        status.data["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == "skill:src")
+            .cloned()
+            .unwrap()
+    };
+
+    // 1. 自动：有版本号标签 → 最新正式版 v1.1.0（预发布不算）；只下载 skills/alpha 与 rules
+    let env = update(&[]);
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(head(), c2);
+    assert_eq!(
+        std::fs::read_to_string(repo.join("skills/alpha/SKILL.md")).unwrap(),
+        "# alpha v1.1"
+    );
+    assert!(repo.join("rules/team.md").is_file(), "规则目录要一起取回");
+    assert!(!repo.join("skills/beta").exists(), "没列出的技能目录不下载");
+    assert!(!repo.join("big").exists(), "其他目录不下载");
+    assert_eq!(
+        git(
+            &repo,
+            &["config", "--get", "remote.origin.partialclonefilter"]
+        ),
+        "tree:0"
+    );
+    let coll = collection();
+    assert_eq!(coll["observed"]["version"]["current"]["label"], "v1.1.0");
+    assert_eq!(coll["observed"]["version"]["current"]["kind"], "tag");
+    let available: Vec<&str> = coll["observed"]["available"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        available,
+        ["alpha", "beta"],
+        "没下载的技能也能在编辑来源时勾选"
+    );
+
+    // 2. 版本清单：只读网络，不写库、不动镜像
+    let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
+    let versions = execute(&ctx, &request("skills:versions", &["--only", "skill:src"]));
+    assert!(versions.ok, "{:?}", versions.errors);
+    let tags: Vec<&str> = versions.data["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(tags, ["v2.0.0-rc.1", "v1.1.0", "v1.0.0"]);
+    assert_eq!(versions.data["tags"][0]["prerelease"], true);
+    assert_eq!(versions.data["latest"]["name"], "v1.1.0");
+    assert_eq!(versions.data["auto_resolved"], "tag");
+    assert_eq!(versions.data["current"]["label"], "v1.1.0");
+    assert_eq!(versions.data["default_branch"], "main");
+    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), db_before);
+    assert_eq!(head(), c2);
+    let wrong = execute(
+        &ctx,
+        &request("skills:versions", &["--only", "skill:src/alpha"]),
+    );
+    assert!(!wrong.ok);
+
+    // 3. 技能链接到 codex，再回滚到 v1.0.0：镜像回到 v1.0，技能按既有语义换版本
+    let add = execute(
+        &ctx,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:src/alpha",
+                "--action",
+                "add",
+                "--agent",
+                "codex",
+            ],
+        ),
+    );
+    assert!(add.ok, "{:?}", add.errors);
+    let link = ctx.home_dir.join(".codex/skills/alpha/SKILL.md");
+    assert_eq!(std::fs::read_to_string(&link).unwrap(), "# alpha v1.1");
+    let env = update(&["--ref", "v1.0.0"]);
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(head(), c1);
+    assert_eq!(
+        collection()["observed"]["version"]["current"]["label"],
+        "v1.0.0"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&link).unwrap(),
+        "# alpha v1.1",
+        "镜像换了版本，账号链接要等技能更新才换"
+    );
+    let relink = execute(
+        &ctx,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:src/alpha",
+                "--action",
+                "update",
+                "--agent",
+                "codex",
+            ],
+        ),
+    );
+    assert!(relink.ok, "{:?}", relink.errors);
+    assert_eq!(std::fs::read_to_string(&link).unwrap(), "# alpha v1.0");
+
+    // 4. 检查更新（真实 git，file:// 远端）：自动跟踪下落后于 v1.1.0
+    let probe = execute(
+        &ctx,
+        &request("system:refresh-upstream", &["--only", "skill:src"]),
+    );
+    assert!(probe.ok, "{:?}", probe.errors);
+    let freshness = collection()["freshness"].clone();
+    assert_eq!(freshness["state"], "behind");
+    assert_eq!(freshness["current"], "v1.0.0");
+    assert_eq!(freshness["upstream"], "v1.1.0");
+
+    // 5. 改跟踪方式：主分支 → main 的最新提交；固定 → 不再跟最新
+    define(r#","track":{"mode":"default"}"#);
+    assert!(update(&[]).ok);
+    assert_eq!(head(), c3);
+    assert_eq!(
+        collection()["observed"]["version"]["current"]["label"],
+        "main"
+    );
+    define(r#","track":{"mode":"pinned","ref":"v1.0.0"}"#);
+    assert!(update(&[]).ok);
+    assert_eq!(head(), c1);
+    define(r#","track":{"mode":"tag","prerelease":true}"#);
+    assert!(update(&[]).ok);
+    assert_eq!(head(), c3, "允许预发布时跟到 v2.0.0-rc.1");
+
+    // 6. 拒绝：不合法的版本名、不存在的版本（镜像不动）、写错的跟踪方式
+    let bad = update(&["--ref", "--upload-pack=touch /tmp/x"]);
+    assert!(!bad.ok);
+    let missing = update(&["--ref", "v9.9.9"]);
+    assert!(!missing.ok);
+    assert_eq!(head(), c3, "解析不出目标时镜像不动");
+    define(r#","track":{"mode":"nightly"}"#);
+    let broken = update(&[]);
+    assert!(!broken.ok);
+    assert!(collection()["observed"]["version"]["track_error"]
+        .as_str()
+        .unwrap()
+        .contains("nightly"));
+    assert_eq!(head(), c3);
+
+    // 7. 操作记录带上从哪个提交到哪个版本
+    let conn = store::open_readonly(&ctx).unwrap().unwrap();
+    let detail: String = conn
+        .query_row(
+            "SELECT detail_json FROM operation_logs WHERE operation_type = 'skills:update' AND detail_json LIKE '%\"to\"%' ORDER BY rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        detail.contains("v2.0.0-rc.1") && detail.contains(&c3),
+        "{detail}"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}

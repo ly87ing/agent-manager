@@ -597,6 +597,8 @@ fn build_collection_element(
             "source_path": coll.source_path,
             "skill_paths": coll.skill_paths,
             "agents": coll.agents,
+            // 跟踪方式（原样）；缺省即自动：有版本号标签跟版本，否则跟主分支
+            "track": coll.raw.get("track").cloned().unwrap_or(Value::Null),
         },
         "policy": {
             "enabled": coll.enabled,
@@ -613,6 +615,15 @@ fn build_collection_element(
                 .collect::<Vec<_>>(),
             "discovery_error": discovery_error.cloned().unwrap_or(Value::Null),
             "discovery_inbox": inbox_skills,
+            // git 来源镜像当前所在版本；跟踪方式写错时给出原因（更新会被拒绝）
+            "version": if coll.url.is_some() {
+                json!({
+                    "current": super::versioning::local_version(repo_dir),
+                    "track_error": super::versioning::track_of(coll).err().map(|e| e.to_string()),
+                })
+            } else {
+                Value::Null
+            },
             "extra_links": [],
             "actions": coll_actions,
             "blocked_reason": blocked_reason.map(Value::String).unwrap_or(Value::Null),
@@ -685,7 +696,9 @@ pub fn build_status(ctx: &Context) -> Result<Value> {
             owner_marked,
             &discovered_names,
             &if repo_cached {
-                super::snapshot::available_repo_skills(&repo_dir)
+                // 只下载了指定目录的镜像：全仓库的技能清单来自检出时的记录
+                super::versioning::recorded_available(&repo_dir)
+                    .unwrap_or_else(|| super::snapshot::available_repo_skills(&repo_dir))
             } else {
                 Vec::new()
             },

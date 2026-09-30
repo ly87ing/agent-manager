@@ -73,6 +73,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("usage", "status" | "scan" | "clear") => true,
         // 「改成我的版本」：把技能复制到用户目录并登记为用户的本机集合
         ("skills", "fork") => true,
+        // 列出 git 来源可选的版本：只读网络，不写库、不动镜像
+        ("skills", "versions") => true,
         (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
     };
@@ -127,6 +129,8 @@ enum ArgValueKind {
     Revision,
     /// profiles:seed 要带的项：逗号分隔，只能是引擎认得的几项（引擎再校验一次）。
     SeedItems,
+    /// 技能来源要切换到的版本：标签、分支或提交（字母数字与 `._/+-`，不以 `-` 开头）。
+    GitRef,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -250,6 +254,9 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--base", ArgValueKind::Digest));
             specs.push(("--runtime", ArgValueKind::JsonValue));
         }
+        ("skills", "versions") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+        }
         (_, "apply") | ("mcp", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
             if domain == "skills" {
@@ -261,6 +268,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--allow-takeover", ArgValueKind::Flag));
                 // 移除集合时一并清理下载的仓库与没人再用的快照
                 specs.push(("--purge", ArgValueKind::Flag));
+                // 更新 git 来源到指定版本（切换 / 回滚）
+                specs.push(("--ref", ArgValueKind::GitRef));
             }
             // MCP 逐条写入：条目内容（--spec，JSON）、写入基准摘要（--base，
             // 复制覆盖同名时另带目标的 --to-base）、复制目标助手（--to）。
@@ -337,6 +346,23 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
                 Err(EngineError::new(
                     "invalid_args",
                     format!("非法的带入项 '{value}'（只能从 {} 里选）", ITEMS.join("、")),
+                ))
+            }
+        }
+        ArgValueKind::GitRef => {
+            let ok = !value.is_empty()
+                && value.len() <= 200
+                && !value.starts_with('-')
+                && !value.contains("..")
+                && value
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '+'));
+            if ok {
+                Ok(())
+            } else {
+                Err(EngineError::new(
+                    "invalid_args",
+                    format!("非法的版本 '{value}'"),
                 ))
             }
         }
@@ -1928,5 +1954,41 @@ mod tests {
         assert!(serialized["stderr"].is_null());
         assert_eq!(serialized.as_object().unwrap().len(), 4);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn skills_versions_and_ref_are_allowed_and_validated() {
+        assert!(validate_command("skills:versions").is_ok());
+        assert!(validate_args(
+            "skills:versions",
+            &["--only".into(), "skill:archify".into()]
+        )
+        .is_ok());
+        assert!(validate_args("skills:versions", &["--ref".into(), "v1".into()]).is_err());
+        let update = |reference: &str| {
+            validate_args(
+                "skills:apply",
+                &[
+                    "--only".into(),
+                    "skill:archify".into(),
+                    "--action".into(),
+                    "update".into(),
+                    "--ref".into(),
+                    reference.into(),
+                ],
+            )
+        };
+        for ok in [
+            "v3.0.1",
+            "release/2.x",
+            "main",
+            "a1b2c3d",
+            "v1.0.0-rc.1+build.5",
+        ] {
+            assert!(update(ok).is_ok(), "{ok}");
+        }
+        for bad in ["--upload-pack=x", "", "a..b", "v1 ; rm", "v*"] {
+            assert!(update(bad).is_err(), "{bad}");
+        }
     }
 }

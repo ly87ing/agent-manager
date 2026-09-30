@@ -164,10 +164,13 @@ case "$1" in
       *) exit 1 ;;
     esac ;;
   ls-remote)
-    case "$2" in
-      https://example.invalid/skills-equal.git) echo "{HASH_EQUAL}	HEAD" ;;
-      https://example.invalid/skills-stale.git) echo "{HASH_STALE_REMOTE}	HEAD" ;;
-      https://example.invalid/skills-norepo.git) echo "{HASH_NOREPO_REMOTE}	HEAD" ;;
+    # 技能来源：`ls-remote --symref -- <url> HEAD refs/heads/* refs/tags/*`；uvx：`ls-remote <url> <branch>`
+    if [ "$2" = "--symref" ]; then url="$4"; else url="$2"; fi
+    head() {{ printf 'ref: refs/heads/main\tHEAD\n%s\tHEAD\n%s\trefs/heads/main\n' "$1" "$1"; }}
+    case "$url" in
+      https://example.invalid/skills-equal.git) head "{HASH_EQUAL}" ;;
+      https://example.invalid/skills-stale.git) head "{HASH_STALE_REMOTE}" ;;
+      https://example.invalid/skills-norepo.git) head "{HASH_NOREPO_REMOTE}" ;;
       https://example.invalid/uvx.git) echo "{HASH_UVX_REMOTE}	main" ;;
       *) exit 1 ;;
     esac ;;
@@ -535,22 +538,22 @@ fn probe_state_matrix_and_summary() {
     case(
         "skill:coll-equal",
         "current",
-        Some(HASH_EQUAL),
-        Some(HASH_EQUAL),
+        Some(&HASH_EQUAL[..7]),
+        Some(&HASH_EQUAL[..7]),
         None,
     );
     case(
         "skill:coll-stale",
         "behind",
-        Some(HASH_STALE_LOCAL),
-        Some(HASH_STALE_REMOTE),
+        Some(&HASH_STALE_LOCAL[..7]),
+        Some(&HASH_STALE_REMOTE[..7]),
         None,
     );
     case(
         "skill:coll-norepo",
         "unknown",
         None,
-        Some(HASH_NOREPO_REMOTE),
+        Some(&HASH_NOREPO_REMOTE[..7]),
         Some("local-head-missing"),
     );
 
@@ -588,7 +591,7 @@ fn probe_state_matrix_and_summary() {
     // 缓存落库可回读（含 error 类别），checked_at 已写入
     let (state, upstream, checked_at) = cached_row(&ctx, "skill:coll-stale").unwrap();
     assert_eq!(state, "behind");
-    assert_eq!(upstream.as_deref(), Some(HASH_STALE_REMOTE));
+    assert_eq!(upstream.as_deref(), Some(&HASH_STALE_REMOTE[..7]));
     assert!(
         checked_at.ends_with('Z') || checked_at.contains('+'),
         "{checked_at}"
@@ -630,8 +633,8 @@ fn status_reflects_cache_after_refresh() {
 
     let freshness = status_element_freshness(&ctx, "skills:status", "skill:coll-stale");
     assert_eq!(freshness["state"], "behind");
-    assert_eq!(freshness["current"], HASH_STALE_LOCAL);
-    assert_eq!(freshness["upstream"], HASH_STALE_REMOTE);
+    assert_eq!(freshness["current"], &HASH_STALE_LOCAL[..7]);
+    assert_eq!(freshness["upstream"], &HASH_STALE_REMOTE[..7]);
 
     // 不可探测/不参与元素回填不变
     let freshness = status_element_freshness(&ctx, "mcp:status", "mcp:plain-node");

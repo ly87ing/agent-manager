@@ -775,62 +775,6 @@ fn apply_local_coll_update(
 
 /// 跑一条 git 子命令，失败时把 git 自己的 stderr 带进错误——只说"git pull 失败"
 /// 等于没说，用户在界面上看不出到底卡在哪。
-fn git_in(repo_dir: &Path, args: &[&str], coll_name: &str) -> Result<()> {
-    let out = std::process::Command::new("git")
-        .args(args)
-        .current_dir(repo_dir)
-        .output()
-        .with_context(|| format!("git {} 启动失败: {}", args[0], repo_dir.display()))?;
-    if !out.status.success() {
-        let detail = String::from_utf8_lossy(&out.stderr);
-        let detail = detail.trim();
-        bail!(
-            "[{}] git {} 失败{}",
-            coll_name,
-            args[0],
-            if detail.is_empty() {
-                String::new()
-            } else {
-                format!("：{detail}")
-            }
-        );
-    }
-    Ok(())
-}
-
-/// 要对齐到的远端 ref：优先当前分支的上游，退到 origin/HEAD。
-fn remote_ref(repo_dir: &Path) -> Result<String> {
-    for args in [
-        [
-            "rev-parse",
-            "--abbrev-ref",
-            "--symbolic-full-name",
-            "@{upstream}",
-        ]
-        .as_slice(),
-        ["rev-parse", "--abbrev-ref", "origin/HEAD"].as_slice(),
-    ] {
-        let Ok(out) = std::process::Command::new("git")
-            .args(args)
-            .current_dir(repo_dir)
-            .output()
-        else {
-            continue;
-        };
-        if !out.status.success() {
-            continue;
-        }
-        let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !name.is_empty() {
-            return Ok(name);
-        }
-    }
-    bail!(
-        "仓库 {} 没有可对齐的远端分支（既无上游也无 origin/HEAD）",
-        repo_dir.display()
-    )
-}
-
 fn apply_coll_update(
     ctx: &Context,
     req: &Request,
@@ -841,36 +785,20 @@ fn apply_coll_update(
         .url
         .as_deref()
         .ok_or_else(|| anyhow!("[{}] 集合定义缺少 url", coll.name))?;
-    let offline = req.flag("--offline");
-    if repo_dir.join(".git").is_dir() {
-        if !offline {
-            git_in(repo_dir, &["fetch", "--tags", "origin"], &coll.name)?;
-            // 这份仓库是工具自己 clone 的只读镜像，本地不产生提交，远端就是唯一真相。
-            // 原先用 pull --ff-only：上游一旦改写历史（force push / rebase），同一批提交
-            // 换了 SHA，本地与远端永久分叉，"更新资源库"就再也不可能成功。硬对齐远端。
-            let target = remote_ref(repo_dir)?;
-            git_in(repo_dir, &["reset", "--hard", &target], &coll.name)?;
-        }
-    } else {
-        if offline {
+    let detail = if req.flag("--offline") {
+        if !repo_dir.join(".git").is_dir() {
             bail!("[{}] 离线模式且本地仓库缺失，无法下载", coll.name);
         }
-        std::fs::create_dir_all(repo_base_dir(ctx))?;
-        let st = std::process::Command::new("git")
-            .args(["clone", url, &repo_dir.to_string_lossy()])
-            .status()
-            .with_context(|| "git clone 启动失败")?;
-        if !st.success() {
-            bail!("[{}] git clone 失败", coll.name);
-        }
-        let _ = std::fs::write(
-            repo_dir.join(".agent-manager-owned"),
-            serde_json::to_string_pretty(&json!({
-                "managed_by": "agent-manager",
-                "repository": coll.name
-            }))? + "\n",
-        );
-    }
+        json!({"action": "update", "offline": true})
+    } else {
+        let moved = super::versioning::update_repo(ctx, coll, url, repo_dir, req.value("--ref"))?;
+        json!({
+            "action": "update",
+            "from": moved["from"]["commit"],
+            "to": moved["to"]["commit"],
+            "ref": moved["to"]["label"],
+        })
+    };
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     store::record_operation(
@@ -878,7 +806,7 @@ fn apply_coll_update(
         Some(&req.run_id),
         "skills:update",
         Some(&coll.name),
-        Some(&json!({"action": "update"})),
+        Some(&detail),
     )?;
     tx.commit()?;
     Ok(())
