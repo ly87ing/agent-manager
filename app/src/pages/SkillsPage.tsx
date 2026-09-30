@@ -11,6 +11,7 @@ import { AccountCells, AccountHeader, AccountSwitch, ActionMenu, IconAction, Row
 import { skillChip, skillNeedsUpdate } from "../lib/skillChip";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import { SkillInstalledView } from "../components/SkillInstalledView";
+import { SkillOtherSources } from "../components/SkillOtherSources";
 import type { EngineElement, PolicyData, SkillRecommendation, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import {
@@ -145,11 +146,19 @@ export default function SkillsPage({
   const elements = query.data.data.elements ?? [];
   const recommendations = query.data.data.recommendations ?? [];
   const installed = query.data.data.installed ?? [];
+  const unmanaged = query.data.data.unmanaged ?? null;
   const collections = elements.filter(isCollection);
   const skills = elements.filter((element) => !isCollection(element));
   const layers = policyQuery.data?.data.layers ?? null;
 
-  const agentOptions = Array.from(new Set(skills.flatMap((skill) => Object.keys(agentCellsOf(skill))))).sort();
+  // 其他来源里出现的账号也要有列，否则只装了别处技能的账号看不到
+  const agentOptions = Array.from(
+    new Set([
+      ...skills.flatMap((skill) => Object.keys(agentCellsOf(skill))),
+      ...(unmanaged?.skills ?? []).flatMap((skill) => skill.locations.flatMap((location) => (location.agent ? [location.agent] : []))),
+      ...(unmanaged?.duplicates ?? []).map((dup) => dup.agent),
+    ]),
+  ).sort();
 
   const collName = (collection: EngineElement) => collection.id.replace(/^skill:/, "");
   const collectionMatches = (collection: EngineElement) => {
@@ -735,6 +744,8 @@ export default function SkillsPage({
           })}
         </div>
       )}
+
+      {unmanaged && <SkillOtherSources view={unmanaged} groups={groups} search={search} agentFilter={agentFilter} />}
 
       <details className="rounded-lg border bg-card">
         <summary className="cursor-pointer px-4 py-2 text-sm text-muted-foreground">各账号技能目录里的实际内容</summary>

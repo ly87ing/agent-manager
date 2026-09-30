@@ -102,6 +102,8 @@ export interface StatusData {
   recommendations?: SkillRecommendation[];
   /** 仅 skills 域：各助手技能目录里的实际条目（当前视图，只展示）。 */
   installed?: SkillInstalledEntry[];
+  /** 仅 skills 域：本工具没管理的技能（其他来源）、Codex 共用目录与重名。只读。 */
+  unmanaged?: SkillUnmanagedView;
   /** 仅 rules 域：本机库里已保存的规则模板（含旧版来源即时推导出的模板）。 */
   templates?: RuleTemplate[];
   /** 仅 rules 域：技能来源里的规则模板（集合根下 rules/*.md，README 除外）。只读，不入库。 */
@@ -213,6 +215,37 @@ export interface SkillInstalledEntry {
   origin: SkillInstalledOrigin | string;
   /** 本工具链接所属集合，或同名的已定义集合（collection-extra-link）。 */
   collection: string | null;
+}
+
+/** 本工具没管理的一个技能名：在哪些账号目录或共用目录里、识别出的来源、能不能纳入。 */
+export interface SkillUnmanaged {
+  name: string;
+  locations: {
+    /** 账号（助手 id 或实例 id）；共用目录里的为 null。 */
+    agent: string | null;
+    /** 共用目录 id（codex-shared）；账号目录里的为 null。 */
+    shared: string | null;
+    path: string;
+    target: string | null;
+    origin: "native-dir" | "external-link";
+  }[];
+  source: {
+    repository: string | null;
+    path: string | null;
+    version: string | null;
+    installer: "npx-skills" | null;
+    evidence: ("skill-lock" | "skill-release" | "git")[];
+  } | null;
+  adoptable: boolean;
+  blocked_reason: "claude-synced" | "no-skill-md" | null;
+}
+
+export interface SkillUnmanagedView {
+  skills: SkillUnmanaged[];
+  /** 对多个账号生效的共用目录；目前只有 Codex 的 ~/.agents/skills。 */
+  shared_dirs: { id: string; kind: "codex"; path: string; exists: boolean }[];
+  /** 同一个技能名既在某个 Codex 账号目录里、又在共用目录里：Codex 会加载两份。 */
+  duplicates: { name: string; agent: string; paths: string[] }[];
 }
 
 // ---------- mcp:status targets ----------

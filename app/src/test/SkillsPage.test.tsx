@@ -1242,3 +1242,68 @@ describe("SkillsPage 来源里已删除的技能", () => {
     expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(0);
   });
 });
+
+function otherSourceRoutes() {
+  const base = skillsRoutes();
+  const status = base["skills:status"].data as { elements: ReturnType<typeof makeElement>[] };
+  return {
+    ...base,
+    "skills:status": makeEnvelope(
+      {
+        domain: "skills",
+        elements: status.elements,
+        unmanaged: {
+          skills: [
+            {
+              name: "archify",
+              locations: [
+                { agent: "claude-code", shared: null, path: "~/.claude/skills/archify", target: null, origin: "native-dir" },
+                { agent: null, shared: "codex-shared", path: "~/.agents/skills/archify", target: null, origin: "native-dir" },
+              ],
+              source: { repository: "https://github.com/tt-a1i/archify.git", path: "archify", version: "3.0.1", installer: "npx-skills", evidence: ["skill-lock", "skill-release"] },
+              adoptable: true,
+              blocked_reason: null,
+            },
+            {
+              name: "synced",
+              locations: [{ agent: "claude-code", shared: null, path: "~/.claude/skills/synced", target: null, origin: "native-dir" }],
+              source: null,
+              adoptable: false,
+              blocked_reason: "claude-synced",
+            },
+          ],
+          shared_dirs: [{ id: "codex-shared", kind: "codex", path: "~/.agents/skills", exists: true }],
+          duplicates: [{ name: "xiaoyu-bug-loop", agent: "codex", paths: ["~/.codex/skills/xiaoyu-bug-loop", "~/.agents/skills/xiaoyu-bug-loop"] }],
+        },
+      },
+      { command: "skills.status" },
+    ),
+  };
+}
+
+describe("SkillsPage 其他来源", () => {
+  it("列出没管理的技能、识别出的来源、Codex 共用与重名，只显示不写", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, otherSourceRoutes());
+    const block = await screen.findByTestId("skills-other-sources");
+    expect(block).toHaveTextContent("其他来源 · 2");
+    expect(within(block).getByTestId("other-source-archify")).toHaveTextContent("tt-a1i/archify · v3.0.1 · npx skills 安装");
+    expect(within(block).getByTestId("other-shared-archify")).toHaveTextContent("Codex 共用");
+    expect(within(block).getByTestId("other-present-archify-claude-code")).toBeInTheDocument();
+    expect(within(block).queryByTestId("other-present-archify-codex")).toBeNull();
+    expect(within(block).getByTestId("other-source-synced")).toHaveTextContent("来源不明");
+    expect(within(block).getByTestId("other-blocked-synced")).toHaveTextContent("Claude 自己同步的");
+    expect(within(block).getByTestId("duplicate-xiaoyu-bug-loop-codex")).toHaveTextContent("Codex 会加载两份");
+    expect(within(block).queryAllByRole("button")).toHaveLength(0);
+    expect(calls.every((call) => call.command.endsWith(":status") || call.command === "policy:get")).toBe(true);
+  });
+
+  it("搜索与账号筛选同样作用于其他来源", async () => {
+    renderWithEngine(<SkillsPage />, otherSourceRoutes());
+    await screen.findByTestId("skills-other-sources");
+    await userEvent.type(screen.getByTestId("skills-search"), "archify");
+    const block = screen.getByTestId("skills-other-sources");
+    expect(within(block).getByTestId("other-skill-archify")).toBeInTheDocument();
+    expect(within(block).queryByTestId("other-skill-synced")).toBeNull();
+    expect(within(block).queryByTestId("duplicate-xiaoyu-bug-loop-codex")).toBeNull();
+  });
+});
