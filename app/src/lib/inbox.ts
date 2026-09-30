@@ -12,6 +12,7 @@ import type {
   SkillObserved,
   SkillSpec,
 } from "./observed";
+import { ignoreKey, useIgnored } from "./inboxIgnore";
 import { useEngineQuery } from "./queries";
 import { rulesFillRows, type RulesFillRow } from "./rulesFill";
 import { isCollection } from "./skillCollections";
@@ -51,6 +52,8 @@ export interface InboxItem {
   title: string;
   detail: string;
   fix: InboxFix;
+  /** 同一原因、同一来源的项合成一行（例如某个来源里还没用的技能），点开看明细。 */
+  group?: { key: string; title: string; open: string };
 }
 
 export interface InboxInput {
@@ -169,8 +172,9 @@ function skillItems(elements: EngineElement[], nameOf: (agent: string) => string
         page: "skills",
         state: "update",
         title: `${name}`,
-        detail: `来源 ${spec.collection} 新增的技能`,
+        detail: `来源 ${spec.collection} 里有、还没用的技能`,
         fix: rows.length ? { kind: "skills", label: "添加到全部账号", rows } : open("去查看"),
+        group: { key: `new:${spec.collection}`, title: `${spec.collection} 里还没用的技能`, open: `skills:${spec.collection}` },
       });
     }
     return out;
@@ -189,6 +193,7 @@ function unmanagedItems(view: StatusData["unmanaged"] | null | undefined): Inbox
       title: `${skill.name}`,
       detail: skill.source?.repository ? `装自 ${skill.source.repository}，不来自任何来源` : "不来自任何来源",
       fix: open,
+      group: { key: "unmanaged", title: "不来自任何来源的技能", open: "sources:unmanaged" },
     })),
     ...view.duplicates.map((dup): InboxItem => ({
       id: `duplicate:${dup.agent}:${dup.name}`,
@@ -309,8 +314,9 @@ export function countByPage(items: InboxItem[]): Record<string, number> {
   return counts;
 }
 
-/** 全应用的待处理项；查询还没回来的领域按没有。 */
-export function useInbox(nameOf?: (agent: string) => string): { items: InboxItem[]; loading: boolean } {
+/** 全应用的待处理项（已去掉用户忽略的，另给忽略的）；查询还没回来的领域按没有。 */
+export function useInbox(nameOf?: (agent: string) => string): { items: InboxItem[]; ignored: InboxItem[]; loading: boolean } {
+  const ignoredKeys = useIgnored();
   const skills = useEngineQuery<StatusData>("skills:status");
   const mcp = useEngineQuery<StatusData>("mcp:status");
   const rules = useEngineQuery<StatusData>("rules:status");
@@ -330,5 +336,9 @@ export function useInbox(nameOf?: (agent: string) => string): { items: InboxItem
     nameOf,
   });
   const loading = [skills, mcp, rules, agents, profiles, aliases].some((query) => query.isPending);
-  return { items, loading };
+  return {
+    items: items.filter((item) => !ignoredKeys.has(ignoreKey(item))),
+    ignored: items.filter((item) => ignoredKeys.has(ignoreKey(item))),
+    loading,
+  };
 }

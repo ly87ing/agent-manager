@@ -253,9 +253,10 @@ export default function SkillsPage({
 
   const cellsIn = (skill: EngineElement) =>
     Object.entries((skill.observed as SkillObserved).agents ?? {}).filter(([agent]) => agentFilter === "all" || agent === agentFilter);
-  /** 需要处理：有黄色开关（损坏、占用、来源已删、外部链接）或新发现待添加。 */
+  /** 需要处理：待处理里有它（用户忽略的不算），且在所选账号上有黄色开关或是新发现。 */
   const needsAttention = (skill: EngineElement) =>
-    (skill.observed as SkillObserved).discovery_inbox === true || cellsIn(skill).some(([, cell]) => skillChip(cell).tone === "warn");
+    attentionSubjects.has(skill.id)
+    && ((skill.observed as SkillObserved).discovery_inbox === true || cellsIn(skill).some(([, cell]) => skillChip(cell).tone === "warn"));
   /** 搜索或只看一个集合时展开命中的；否则按用户上次的选择，没选过的有待处理或还没有技能时才展开。 */
   const isOpen = (name: string, rows: EngineElement[]) =>
     Boolean(search.trim()) || attentionOnly || collectionFilter === name || (expanded[name] ?? (rows.length === 0 || rows.some(needsAttention)));

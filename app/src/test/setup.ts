@@ -5,6 +5,7 @@ process.env.TZ = "UTC";
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
+import { resetIgnoredForTest } from "../lib/inboxIgnore";
 
 // 每个用例从空的本机存储开始（主题、集合展开状态等不跨用例残留）
 afterEach(() => {
@@ -13,6 +14,7 @@ afterEach(() => {
   } catch {
     // 非 jsdom 环境没有 localStorage
   }
+  resetIgnoredForTest();
 });
 import { setEngineClient } from "../lib/engine";
 import { setSettingsClient, type SettingsClient } from "../lib/settings";
