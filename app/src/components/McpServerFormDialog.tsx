@@ -125,7 +125,8 @@ export function McpServerFormDialog({
   const [url, setUrl] = useState(editEntry?.url ?? initial?.url ?? "");
   const [headersText, setHeadersText] = useState(lines(editEntry?.headers ?? initial?.headers, hints?.headers));
   const [timeoutText, setTimeoutText] = useState(
-    String(editEntry?.startup_timeout_sec ?? initial?.startup_timeout_sec ?? (mode.kind === "add" ? 120 : "")),
+    // 不替用户加原来没配的字段：新增时也留空（用 Codex 自己的默认），填了才写
+    String(editEntry?.startup_timeout_sec ?? initial?.startup_timeout_sec ?? ""),
   );
   const [error, setError] = useState<string | null>(null);
   /** 粘贴配置：null = 收起；notes 是填入后给用户的说明。 */

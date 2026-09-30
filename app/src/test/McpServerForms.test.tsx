@@ -88,14 +88,15 @@ describe("McpServerFormDialog", () => {
     await userEvent.click(within(dialog).getByTestId("server-agent-claude-code"));
     expect(within(dialog).queryByTestId("server-timeout-input")).toBeNull();
     await userEvent.click(within(dialog).getByTestId("server-agent-codex"));
-    expect(within(dialog).getByTestId("server-timeout-input")).toHaveValue("120");
+    // 不替用户加没配的字段：超时默认留空（用 Codex 自己的默认）
+    expect(within(dialog).getByTestId("server-timeout-input")).toHaveValue("");
     await userEvent.type(within(dialog).getByTestId("server-command-input"), "npx");
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
     expect(onSubmit).toHaveBeenCalledWith({
       name: "srv",
       agents: ["claude-code", "codex"],
       spec: { command: "npx", args: [], env: {} },
-      startupTimeoutSec: 120,
+      startupTimeoutSec: null,
     });
   });
 

@@ -222,6 +222,8 @@ describe("McpPage：实际条目为主", () => {
     expect(within(dialog).getByRole("alert")).toHaveTextContent("没有可保留的原值");
     await userEvent.clear(env);
     await userEvent.type(env, "KEY=${{NEW_KEY}{enter}NODE_ENV=production");
+    // 超时只在用户自己填了时才写
+    await userEvent.type(within(dialog).getByTestId("server-timeout-input"), "30");
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
 
     await waitFor(() => expect(applyCalls(calls)).toHaveLength(2));
@@ -229,7 +231,7 @@ describe("McpPage：实际条目为主", () => {
     expect(first.args.slice(0, 6)).toEqual(["--only", "mcp:new-srv", "--agent", "claude-code", "--action", "add"]);
     expect(specOf(first.args)).toEqual({ command: "npx", args: ["-y", "new-pkg"], env: { KEY: "${NEW_KEY}", NODE_ENV: "production" } });
     expect(second.args.slice(0, 6)).toEqual(["--only", "mcp:new-srv", "--agent", "codex", "--action", "add"]);
-    expect(specOf(second.args)).toMatchObject({ startup_timeout_sec: 120 });
+    expect(specOf(second.args)).toMatchObject({ startup_timeout_sec: 30 });
   });
 
   it("已保存的定义：添加到助手时预填（按助手追加旧版附加参数）；删除保存项需确认", async () => {
