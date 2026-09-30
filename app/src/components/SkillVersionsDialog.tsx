@@ -61,7 +61,11 @@ export function SkillVersionsDialog({
   const [reload, setReload] = useState(0);
   /** 确认前的预览：要换到哪个版本、各技能改了什么、哪些账号跟着换。 */
   const [pending, setPending] = useState<{ ref: string | null; label: string; data: PreviewData | null; error: string | null } | null>(null);
-  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
+  // 切换中（镜像已在换、账号链接在跟着换）不能安全停下：不响应 Esc、遮罩与关闭
+  const close = () => {
+    if (!busy) onClose();
+  };
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: close });
 
   useEffect(() => {
     let alive = true;
@@ -114,13 +118,15 @@ export function SkillVersionsDialog({
   const total = data ? (tab === "tags" ? data.tags_total : data.branches_total) : 0;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in" onClick={(e) => e.target === e.currentTarget && close()}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`${name} 的版本`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border bg-card shadow-xl animate-zoom-in-95">
         <div className="flex items-center justify-between border-b px-5 py-3">
           <h3 className="text-base font-semibold text-foreground">{name} 的版本</h3>
-          <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">
-            <X className="h-4 w-4" aria-hidden />
-          </button>
+          {!busy && (
+            <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          )}
         </div>
 
         <div className="space-y-2 border-b px-5 py-3 text-sm">
@@ -202,10 +208,16 @@ export function SkillVersionsDialog({
                 )}
               </>
             )}
-            <div className="flex justify-end gap-2 pt-1">
-              <button type="button" onClick={() => setPending(null)} className="rounded-md border px-3 py-1 text-xs text-muted-foreground hover:bg-accent">
-                返回
-              </button>
+            <div className="flex items-center justify-end gap-2 pt-1">
+              {busy ? (
+                <span data-testid="versions-switching-note" className="mr-auto text-muted-foreground">
+                  正在下载并把在用的技能换过去，完成前不能取消
+                </span>
+              ) : (
+                <button type="button" onClick={() => setPending(null)} className="rounded-md border px-3 py-1 text-xs text-muted-foreground hover:bg-accent">
+                  返回
+                </button>
+              )}
               <button
                 type="button"
                 data-testid="versions-preview-confirm"

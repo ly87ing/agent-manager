@@ -39,6 +39,8 @@ export interface ExecuteRequest {
   silent?: boolean;
   /** 可逆的写入：成功提示上给「撤销」，点了执行反向操作。只给能干净回到原状的动作。 */
   undo?: () => void;
+  /** 调用方预先生成的运行编号：长操作据此轮询进度（runs:progress）。缺省自动生成。 */
+  runId?: string;
 }
 
 const ExecutionContext = createContext<ExecutionContextValue | null>(null);
@@ -49,7 +51,7 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
 
   const execute = useCallback(
     async (request: ExecuteRequest): Promise<Envelope | null> => {
-      const runId = newRunId();
+      const runId = request.runId ?? newRunId();
       const record: ExecutionRecord = {
         runId,
         command: request.command,

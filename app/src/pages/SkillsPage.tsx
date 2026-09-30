@@ -224,15 +224,16 @@ export default function SkillsPage({
   };
 
   /** 纳入管理：执行后提示里给「撤销」（按备份清单放回原目录）。 */
-  const runAdopt = async (args: string[], label: string): Promise<boolean> => {
-    const envelope = await execute({ command: "skills:adopt", label, args, silent: true });
+  const runAdopt = async (name: string, args: string[], label: string, runId: string): Promise<boolean> => {
+    const envelope = await execute({ command: "skills:adopt", label, args, silent: true, runId });
     await queryClient.invalidateQueries({ queryKey: engineKeys.all });
     if (!envelope?.ok) {
       toast.error(`没有完成：${envelope?.errors[0]?.message ?? "详见任务记录"}`);
       return false;
     }
     const data = envelope.data as { backup?: string; collection?: string; removed?: string[]; linked?: string[] };
-    setAdopting(null);
+    // 用户可能已「在后台继续」并打开了别的纳入：只关这一个
+    setAdopting((current) => (current === name ? null : current));
     toast.success(`${label}：完成`, {
       description: `移走 ${data.removed?.length ?? 0} 处${data.linked?.length ? `，链接到 ${data.linked.map(nameOf).join("、")}` : ""}`,
       action: data.backup
@@ -846,7 +847,12 @@ export default function SkillsPage({
         <SkillOtherSources view={unmanaged} groups={groups} search={search} agentFilter={agentFilter} onAdopt={setAdopting} />
       )}
       {adopting && (
-        <SkillAdoptDialog name={adopting} nameOf={nameOf} onConfirm={runAdopt} onClose={() => setAdopting(null)} />
+        <SkillAdoptDialog
+          name={adopting}
+          nameOf={nameOf}
+          onConfirm={(args, label, runId) => runAdopt(adopting, args, label, runId)}
+          onClose={() => setAdopting(null)}
+        />
       )}
 
       <details className="rounded-lg border bg-card">

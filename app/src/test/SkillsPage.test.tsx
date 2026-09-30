@@ -1514,7 +1514,7 @@ describe("SkillsPage 纳入管理", () => {
     expect(calls.some((call) => call.command === "skills:adopt")).toBe(false);
     await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
     await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", DIGEST, "--path", "archify", "--ref", "v3.0.0"]);
+    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", DIGEST, "--path", "archify", "--ref", "v3.0.0", "--agents", "claude-code,codex"]);
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "纳入管理 archify" })).toBeNull());
   });
 
@@ -1534,7 +1534,7 @@ describe("SkillsPage 纳入管理", () => {
     expect(await within(dialog).findByTestId("adopt-compare")).toHaveTextContent("改过 SKILL.md");
     await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
     await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", DIGEST, "--path", "archify", "--accept-source"]);
+    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", DIGEST, "--path", "archify", "--accept-source", "--agents", "claude-code,codex"]);
   });
 
   it("认不出来源：只能保留本地内容；Codex 重名只做清理", async () => {
@@ -1546,7 +1546,7 @@ describe("SkillsPage 纳入管理", () => {
     expect(within(dialog).getByTestId("adopt-plan")).toHaveTextContent("复制到 ~/my-skills/archify");
     await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
     await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", "l".repeat(64), "--keep-local"]);
+    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", "l".repeat(64), "--keep-local", "--agents", "claude-code,codex"]);
   });
 
   it("重名清理：写明已由哪个来源管理，只移走共用目录那份", async () => {
@@ -1560,5 +1560,75 @@ describe("SkillsPage 纳入管理", () => {
     await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
     await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
     expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "xiaoyu-bug-loop", "--digest", DIGEST]);
+  });
+});
+
+describe("SkillsPage 纳入管理：账号与执行中", () => {
+  const same = {
+    ...ADOPT_BASE,
+    current_accounts: ["codex"],
+    source_check: {
+      same: true, path: "archify",
+      adopt_at: { name: "v3.0.1", label: "v3.0.1", commit: "4".repeat(40) },
+      latest: { name: "v3.0.1", label: "v3.0.1", commit: "4".repeat(40) },
+      ref: null, locations: [{ same: true, files: [] }, { same: true, files: [] }], accounts: ["claude-code", "codex"], digest: DIGEST,
+    },
+  };
+
+  it("可选账号：默认全选并标出原来就有的；取消勾选后只链接选中的；一个不选不能确认", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, adoptRoutes(same));
+    await userEvent.click(await screen.findByTestId("adopt-archify"));
+    const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
+    const accounts = await within(dialog).findByTestId("adopt-accounts");
+    expect(within(accounts).getByTestId("adopt-account-claude-code")).toBeChecked();
+    expect(within(accounts).getByTestId("adopt-account-codex")).toBeChecked();
+    expect(within(accounts).getAllByText("原来就有")).toHaveLength(1);
+    await userEvent.click(within(accounts).getByTestId("adopt-account-claude-code"));
+    await userEvent.click(within(accounts).getByTestId("adopt-account-codex"));
+    expect(within(dialog).getByTestId("adopt-confirm")).toBeDisabled();
+    expect(within(accounts).getByText("至少选一个账号")).toBeInTheDocument();
+    await userEvent.click(within(accounts).getByTestId("adopt-account-codex"));
+    await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:adopt")!.args.slice(-2)).toEqual(["--agents", "codex"]);
+  });
+
+  it("执行中：显示进度步骤，不给取消、Esc 关不掉，可以在后台继续", async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    const pending = new Promise((resolve) => {
+      finish = resolve;
+    });
+    const routes = {
+      ...adoptRoutes(same),
+      "skills:adopt": async () => {
+        await pending;
+        return makeEnvelope({ domain: "skills", action: "adopt", name: "archify", backup: "b1", removed: [], linked: ["claude-code"] });
+      },
+      "runs:progress": makeEnvelope({
+        progress: {
+          started_at: 0,
+          steps: [
+            { key: "check", label: "核对预览后有没有变化", state: "done", detail: null },
+            { key: "backup", label: "备份并移走原来的目录", state: "active", detail: "1/2：~/.claude/skills/archify" },
+            { key: "link", label: "链接到账号", state: "pending", detail: null },
+          ],
+        },
+      }),
+    };
+    renderWithEngine(<SkillsPage />, routes);
+    await userEvent.click(await screen.findByTestId("adopt-archify"));
+    const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
+    await userEvent.click(await within(dialog).findByTestId("adopt-confirm"));
+    const steps = await within(dialog).findByTestId("adopt-progress");
+    await waitFor(() => expect(within(steps).getByTestId("adopt-progress-backup")).toHaveAttribute("data-state", "active"));
+    expect(within(steps).getByTestId("adopt-progress-backup")).toHaveTextContent("1/2：~/.claude/skills/archify");
+    expect(within(dialog).queryByTestId("adopt-cancel")).toBeNull();
+    expect(within(dialog).queryByRole("button", { name: "关闭" })).toBeNull();
+    expect(within(dialog).getByTestId("adopt-running-note")).toHaveTextContent("执行中不能取消");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "纳入管理 archify" })).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByTestId("adopt-background"));
+    expect(screen.queryByRole("dialog", { name: "纳入管理 archify" })).toBeNull();
+    finish(null);
   });
 });
