@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { fireEvent, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { waitFor } from "@testing-library/react";
 import SkillsPage from "../pages/SkillsPage";
 import type { Envelope } from "../lib/contract";
 import { makeApplyResult, makeElement, makeEnvelope, makePolicyData } from "./fixtures";
@@ -134,159 +134,6 @@ function skillsRoutes() {
 }
 
 describe("SkillsPage 三级视图", () => {
-  it("编辑集合：以 sqlite 完整定义整条替换保存，全选并自动包含写成技能所在目录，未展示字段不丢，不预览/同步", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
-    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
-    // 名称不能改：只在标题里显示
-    expect(screen.queryByTestId("collection-name-input")).toBeNull();
-    expect(screen.getByRole("heading", { name: "编辑来源 agent-skills" })).toBeInTheDocument();
-    expect(screen.getByTestId("collection-url-input")).toHaveValue("https://github.com/example/agent-skills.git");
-    await userEvent.click(screen.getByTestId("collection-paths-select-all"));
-    await userEvent.click(screen.getByTestId("collection-auto-include"));
-    await userEvent.click(screen.getByTestId("collection-form-submit"));
-
-    // 唯一一次 policy:set，完整定义整条替换；无需迁移（sqlite 定义已在）
-    const setCalls = calls.filter((call) => call.command === "policy:set");
-    expect(setCalls).toHaveLength(1);
-    expect(calls.some((call) => call.command === "db:migrate")).toBe(false);
-    const write = setCalls[0];
-    expect(write.args[write.args.indexOf("--key") + 1]).toBe("skills.repositories.agent-skills");
-    const definition = JSON.parse(write.args[write.args.indexOf("--value") + 1]);
-    expect(definition).toMatchObject({
-      url: "https://github.com/example/agent-skills.git",
-      skill_paths: ["skills"],
-      agents: ["claude-code", "codex"],
-      _delete: false,
-      _replace: true,
-    });
-    // 反例断言：完整原定义里的自定义字段 branch 必须保留，不能只验证新 payload
-    expect(definition.branch).toBe("release");
-    // 不写启用键、不 apply/preflight
-    expect(calls.some((call) => call.command === "policy:set" && call.args[3] === "skills.agent-skills.enabled")).toBe(false);
-    expect(calls.some((call) => call.command === "skills:plan")).toBe(false);
-    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
-    expect(screen.queryByRole("dialog", { name: /将要执行的操作/ })).toBeNull();
-  });
-
-  it("编辑集合（无 DB 旧存储）：迁移后仍取不到完整定义则停止保存，零写入", async () => {
-    const legacyRoutes: Record<string, Envelope> = {
-      ...skillsRoutes(),
-      "db:migrate": makeEnvelope({ migrated: true }, { command: "db.migrate" }),
-    };
-    // 旧存储：policy:get 始终返回无 sqlite 的 JSON 层，迁移后仍取不到完整定义
-    legacyRoutes["policy:get"] = makeEnvelope(
-      makePolicyData({
-        layers: {
-          sqlite: null,
-        },
-      }),
-      { command: "policy.get" },
-    );
-    const { calls } = renderWithEngine(<SkillsPage />, legacyRoutes);
-    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
-    await userEvent.click(screen.getByTestId("collection-form-submit"));
-
-    await screen.findByText(/已停止保存/);
-    expect(calls.filter((call) => call.command === "db:migrate")).toHaveLength(1);
-    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
-  });
-
-  it("新增集合表单点取消：零写入且绝不迁移", async () => {
-    const cancelRoutes = { ...skillsRoutes(), "db:migrate": makeEnvelope({ migrated: true }, { command: "db.migrate" }) };
-    const { calls } = renderWithEngine(<SkillsPage />, cancelRoutes);
-    await userEvent.click(await screen.findByTestId("add-collection-button"));
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.change(within(dialog).getByTestId("collection-name-input"), { target: { value: "my-skills" } });
-    fireEvent.change(within(dialog).getByTestId("collection-url-input"), { target: { value: "https://github.com/example/my-skills.git" } });
-    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
-    expect(calls.filter((call) => call.command === "db:migrate")).toHaveLength(0);
-  });
-
-  it("本机位置可以直接选某个技能的 SKILL.md：存成它所在的技能文件夹；规则位置可改指", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
-    await userEvent.click(await screen.findByTestId("add-collection-button"));
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.change(within(dialog).getByTestId("collection-name-input"), { target: { value: "review" } });
-    await userEvent.click(within(dialog).getByTestId("collection-source-local"));
-    fireEvent.change(within(dialog).getByTestId("collection-source-path-input"), { target: { value: "~/my-skills/review/SKILL.md" } });
-    fireEvent.change(within(dialog).getByTestId("collection-rules-path-input"), { target: { value: "docs/CLAUDE.md" } });
-    await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
-    const write = calls.find((call) => call.command === "policy:set")!;
-    expect(JSON.parse(write.args[write.args.indexOf("--value") + 1])).toMatchObject({
-      source_path: "~/my-skills/review",
-      rules_path: "docs/CLAUDE.md",
-      url: null,
-    });
-  });
-
-  it("新增集合可选本机目录来源：只写 source_path 并清空 url", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
-    await userEvent.click(await screen.findByTestId("add-collection-button"));
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.change(within(dialog).getByTestId("collection-name-input"), { target: { value: "vendor-tool" } });
-    await userEvent.click(within(dialog).getByTestId("collection-source-local"));
-    // 切到本机目录后不再要求 git 地址
-    expect(within(dialog).queryByTestId("collection-url-input")).toBeNull();
-    fireEvent.change(within(dialog).getByTestId("collection-source-path-input"), { target: { value: "~/.vendor-tool/skills" } });
-    // 新建时来源还没扫过、列不出候选，直接填写
-    fireEvent.change(within(dialog).getByTestId("collection-paths-input"), { target: { value: "ones" } });
-    await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
-
-    const setCalls = calls.filter((call) => call.command === "policy:set");
-    expect(setCalls).toHaveLength(1);
-    const write = setCalls[0];
-    expect(write.args[write.args.indexOf("--key") + 1]).toBe("skills.repositories.vendor-tool");
-    expect(JSON.parse(write.args[write.args.indexOf("--value") + 1])).toMatchObject({
-      source_path: "~/.vendor-tool/skills",
-      url: null,
-      skill_paths: ["ones"],
-      _replace: true,
-    });
-    // 保存定义不触发任何执行
-    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
-  });
-
-  it("本机目录来源填写非法路径时停在表单，不写入", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
-    await userEvent.click(await screen.findByTestId("add-collection-button"));
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.change(within(dialog).getByTestId("collection-name-input"), { target: { value: "vendor-tool" } });
-    await userEvent.click(within(dialog).getByTestId("collection-source-local"));
-    fireEvent.change(within(dialog).getByTestId("collection-source-path-input"), { target: { value: "relative/skills" } });
-    await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
-
-    expect(await within(dialog).findByText(/绝对路径或以 ~\/ 开头/)).toBeInTheDocument();
-    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
-  });
-
-  it("更新集合：有新版本时行上常驻「更新」，先预览要换的内容，确认后才 skills:apply（限定所选集合、带 run_id、不取 plan）", async () => {
-    const routes = {
-      ...skillsRoutes(),
-      "skills:preview": makeEnvelope({
-        from: { commit: "1".repeat(40), kind: "branch", name: "main", label: "main" },
-        to: { commit: "2".repeat(40), kind: "branch", name: "main", label: "main" },
-        downloaded: true, same: false, skills: [{ name: "alpha", path: "skills/alpha", files: [{ status: "modified", file: "SKILL.md" }], accounts: ["claude-code"] }], rules: [], other: [],
-      }),
-      "skills:versions": makeEnvelope({ collection: "agent-skills", track: { mode: "auto" }, auto_resolved: "default", latest: { commit: "2".repeat(40), kind: "branch", name: "main", label: "main" }, current: { commit: "1".repeat(40), kind: "branch", name: "main", label: "main" }, default_branch: "main", tags: [], tags_total: 0, branches: [{ name: "main", commit: "2".repeat(40) }], branches_total: 1 }),
-    };
-    const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
-    status.data.elements[0].freshness = { ...status.data.elements[0].freshness, state: "behind" };
-    const { calls } = renderWithEngine(<SkillsPage />, routes);
-    await userEvent.click(await screen.findByTestId("update-collection-agent-skills"));
-    const dialog = await screen.findByRole("dialog", { name: "agent-skills 的版本" });
-    await within(dialog).findByTestId("preview-skill-alpha");
-    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
-    await userEvent.click(within(dialog).getByTestId("versions-preview-confirm"));
-    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
-
-    const applyCalls = calls.filter((call) => call.command === "skills:apply");
-    expect(applyCalls[0].args).toEqual(["--only", "skill:agent-skills", "--action", "update"]);
-    expect(applyCalls[0].args).not.toContain("--dry-run");
-    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
-    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
-  });
 
   it("集合标题行：只提示异常与新发现数量，不展示来源猜测徽标", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());
@@ -340,23 +187,6 @@ describe("SkillsPage 三级视图", () => {
     expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual(["--only", "skill:agent-skills/alpha", "--action", "add", "--agent", "work"]);
   });
 
-  it("全部更新：先逐个取回集合，再把在用、已有新版本的技能换到新版本；新发现的不加，停用的不动", async () => {
-    const routes: Record<string, Envelope> = {
-      ...skillsRoutes(),
-      "system:refresh-upstream": makeEnvelope({}, { command: "system.refresh-upstream" }),
-    };
-    const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
-    const alpha = status.data.elements.find((element) => element.id === "skill:agent-skills/alpha")!;
-    Object.assign((alpha.observed as { agents: Record<string, Record<string, unknown>> }).agents["claude-code"], { version: "v1", available_version: "v2", actions: ["update", "disable", "remove"] });
-    const { calls } = renderWithEngine(<SkillsPage />, routes);
-    await userEvent.click(await screen.findByTestId("skills-update-all"));
-    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
-    const applies = calls.filter((call) => call.command === "skills:apply").map((call) => call.args);
-    expect(applies[0]).toEqual(["--only", "skill:agent-skills", "--action", "update"]);
-    expect(applies[1]).toEqual(["--only", "skill:agent-skills/alpha", "--action", "update", "--agent", "claude-code"]);
-    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
-  });
-
   it("启用 / 停用后提示条上可以撤销：停用的撤销是重新启用，同一账号", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
     await expandAll();
@@ -395,60 +225,6 @@ describe("SkillsPage 三级视图", () => {
     // 引擎未报告 cell 时不伪造可执行操作
     expect(screen.getAllByText("inbox-one").length).toBeGreaterThan(0);
     expect(screen.queryByTestId("action-add-skill:agent-skills/inbox-one-claude-code")).toBeNull();
-  });
-
-  it("移除集合：点击先打开 ConfirmModal，取消时零 apply/零 policy:set", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
-    const removeBtn = await screen.findByTestId("remove-collection-agent-skills");
-    await userEvent.click(removeBtn);
-
-    const dialog = await screen.findByRole("dialog", { name: "移除来源 agent-skills" });
-    // 说清会发生什么：技能链接移除、自己的目录不动、规则文件保留、启动命令不动
-    expect(dialog).toHaveTextContent("你自己放进账号的同名技能目录不动");
-    expect(dialog).toHaveTextContent("规则文件内容保留");
-    expect(screen.getByTestId("confirm-modal-input")).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole("button", { name: "取消" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-
-    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
-    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
-    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
-  });
-
-  it("移除集合：输入集合名确认后 skills:apply 携带 --only skill:<name> --action remove，git 集合默认一并清理（--purge），无 plan、零 policy:set", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
-    const removeBtn = await screen.findByTestId("remove-collection-agent-skills");
-    await userEvent.click(removeBtn);
-
-    await screen.findByRole("dialog", { name: "移除来源 agent-skills" });
-    expect(screen.getByTestId("remove-collection-purge")).toBeChecked();
-    await userEvent.type(screen.getByTestId("confirm-modal-input"), "agent-skills");
-    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-
-    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
-    const applyCalls = calls.filter((call) => call.command === "skills:apply");
-    expect(applyCalls).toHaveLength(1);
-    expect(applyCalls[0].args).toEqual(["--only", "skill:agent-skills", "--action", "remove", "--purge"]);
-    expect(applyCalls[0].args).not.toContain("--dry-run");
-    expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
-    expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
-    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("移除集合时取消勾选清理：只移除，下载的仓库留着；推荐来源之后不再推荐", async () => {
-    const routes = recommendationRoutes();
-    const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[]; recommendations: { name: string }[] }>;
-    status.data.recommendations[0].name = "agent-skills";
-    const { calls } = renderWithEngine(<SkillsPage />, routes);
-    await userEvent.click(await screen.findByTestId("remove-collection-agent-skills"));
-    await userEvent.click(screen.getByTestId("remove-collection-purge"));
-    await userEvent.type(screen.getByTestId("confirm-modal-input"), "agent-skills");
-    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual(["--only", "skill:agent-skills", "--action", "remove"]);
-    expect(JSON.parse(localStorage.getItem("agent-manager:dismissed-recommendations") ?? "[]")).toContain("agent-skills");
   });
 
   it("已分配技能：软链接模式只显示可逆的停用，不暴露与其重复的删除分配", async () => {
@@ -613,6 +389,7 @@ function collapseRoutes() {
 }
 
 describe("SkillsPage 集合展开与收起", () => {
+
   it("没有待处理的集合默认收起，标题行给出技能数与各账号启用数；有待处理的默认展开", async () => {
     renderWithEngine(<SkillsPage />, collapseRoutes());
     const healthy = await screen.findByTestId("collection-card-healthy");
@@ -653,6 +430,7 @@ describe("SkillsPage 集合展开与收起", () => {
 });
 
 describe("改成我的版本", () => {
+
   it("从行尾菜单打开，确认前不写；确认后先复制登记，再把用着它的账号逐个换过去", async () => {
     const routes: Record<string, Envelope> = {
       ...skillsRoutes(),
@@ -702,20 +480,8 @@ describe("改成我的版本", () => {
   });
 });
 
-describe("技能集合的分享链接", () => {
-  it("从分享链接导入：打开预填好的新增集合表单，名称可改，保存前不写", async () => {
-    const { calls } = renderWithEngine(
-      <SkillsPage importPayload={{ kind: "skills", name: "team-skills", definition: { url: "https://github.com/example/team.git", skill_paths: ["skills"], rules_path: null } }} />,
-      skillsRoutes(),
-    );
-    const dialog = await screen.findByRole("dialog", { name: "添加来源" });
-    expect(within(dialog).getByTestId("collection-name-input")).toHaveValue("team-skills");
-    expect(within(dialog).getByTestId("collection-url-input")).toHaveValue("https://github.com/example/team.git");
-    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
-  });
-});
-
 describe("SkillsPage 空态引导与发现失败呈现", () => {
+
   it("集合还没下载：标题行标「尚未下载」，就地给「更新」", async () => {
     const routes = {
       "skills:status": makeEnvelope(
@@ -744,11 +510,15 @@ describe("SkillsPage 空态引导与发现失败呈现", () => {
         { command: "skills.status" },
       ),
     };
-    renderWithEngine(<SkillsPage />, routes);
+    const onOpenSource = vi.fn();
+    const { calls } = renderWithEngine(<SkillsPage onOpenSource={onOpenSource} />, routes);
     const card = await screen.findByTestId("collection-card-agent-skills");
-    expect(card).toHaveTextContent("尚未下载");
-    expect(card).toHaveTextContent("点「更新」取回后技能会出现在这里");
-    expect(within(card).getByTestId("update-collection-agent-skills")).toBeInTheDocument();
+    expect(card).toHaveTextContent("到来源页点「更新」取回后，技能会出现在这里");
+    // 取回在来源页做：技能页的「尚未下载」点过去，自己不发更新
+    await userEvent.click(within(card).getByTestId("collection-uncached-agent-skills"));
+    expect(onOpenSource).toHaveBeenCalledWith("agent-skills");
+    expect(within(card).queryByTestId("update-collection-agent-skills")).toBeNull();
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
   });
 
   it("集合已取回但没有技能：说「没有找到技能」，发现失败以警告呈现", async () => {
@@ -953,94 +723,6 @@ describe("SkillsPage 计划外链接（extra-link）接管与取消链接", () =
   });
 });
 
-/** 编辑 agent-skills 时按给定 skill_paths 打开对话框。 */
-function editWith(skillPaths: string[] | null) {
-  const routes = skillsRoutes();
-  const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
-  (status.data.elements[0].spec as { skill_paths: string[] | null }).skill_paths = skillPaths;
-  return routes;
-}
-
-function savedSkillPaths(calls: { command: string; args: string[] }[]) {
-  const writes = calls.filter((call) => call.command === "policy:set");
-  const write = writes[writes.length - 1];
-  return JSON.parse(write.args[write.args.indexOf("--value") + 1]).skill_paths;
-}
-
-describe("集合的「用哪些技能」改成勾选", () => {
-  it("勾选反映实际在用的技能：逐个列出的勾上，其余不勾", async () => {
-    renderWithEngine(<SkillsPage />, skillsRoutes());
-    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
-    expect(screen.getByTestId("collection-path-alpha")).toBeChecked();
-    expect(screen.getByTestId("collection-path-beta")).toBeChecked();
-    expect(screen.getByTestId("collection-path-inbox-one")).not.toBeChecked();
-    expect(screen.getByTestId("collection-paths-count")).toHaveTextContent("已选 2 / 4");
-  });
-
-  it("配置是装技能的目录（skills）：全部勾上并自动包含，不把目录当成找不到的技能；原样保存不改配置", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, editWith(["skills"]));
-    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
-    for (const name of ["alpha", "beta", "inbox-one", "inbox-two"]) {
-      expect(screen.getByTestId(`collection-path-${name}`)).toBeChecked();
-    }
-    expect(screen.getByTestId("collection-auto-include")).toBeChecked();
-    expect(screen.queryByTestId("collection-paths-missing")).toBeNull();
-    await userEvent.click(screen.getByTestId("collection-form-submit"));
-    expect(savedSkillPaths(calls)).toEqual(["skills"]);
-  });
-
-  it("从目录模式取消一个：改存剩下技能的实际路径", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, editWith(["skills"]));
-    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
-    await userEvent.click(screen.getByTestId("collection-path-beta"));
-    expect(screen.queryByTestId("collection-auto-include")).toBeNull();
-    await userEvent.click(screen.getByTestId("collection-form-submit"));
-    expect(savedSkillPaths(calls)).toEqual(["skills/alpha", "skills/inbox-one", "skills/inbox-two"]);
-  });
-
-  it("加勾一个：原有写法保留，新勾的用实际路径", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
-    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
-    await userEvent.click(screen.getByTestId("collection-path-inbox-one"));
-    await userEvent.click(screen.getByTestId("collection-form-submit"));
-    expect(savedSkillPaths(calls)).toEqual(["alpha", "beta", "skills/inbox-one"]);
-  });
-
-  it("配置里有来源里找不到的项：单独提示，默认保留，取消勾选才去掉", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, editWith(["alpha", "gone"]));
-    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
-    expect(screen.getByTestId("collection-paths-missing")).toHaveTextContent("gone");
-    await userEvent.click(screen.getByTestId("collection-path-missing-gone"));
-    await userEvent.click(screen.getByTestId("collection-form-submit"));
-    expect(savedSkillPaths(calls)).toEqual(["alpha"]);
-  });
-
-  it("一个都没勾：拦下来并说清怎么办，不写库", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
-    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
-    await userEvent.click(screen.getByTestId("collection-paths-clear"));
-    await userEvent.click(screen.getByTestId("collection-form-submit"));
-
-    expect(await screen.findByText(/至少勾一个技能/)).toBeInTheDocument();
-    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
-  });
-
-  it("仓库还没取下来时说清为什么列不出来，并把现有配置放在文本框里可改", async () => {
-    const routes = skillsRoutes();
-    const status = JSON.parse(JSON.stringify(routes["skills:status"]));
-    status.data.elements[0].observed.repo_cached = false;
-    status.data.elements[0].observed.discovered = [];
-    status.data.elements[0].observed.available = [];
-    routes["skills:status"] = status;
-    const { calls } = renderWithEngine(<SkillsPage />, routes);
-    await userEvent.click(await screen.findByTestId("edit-collection-agent-skills"));
-    expect(screen.getByTestId("collection-paths-empty")).toHaveTextContent("仓库还没取到本地");
-    expect(screen.getByTestId("collection-paths-input")).toHaveValue("alpha\nbeta");
-    await userEvent.click(screen.getByTestId("collection-form-submit"));
-    expect(savedSkillPaths(calls)).toEqual(["alpha", "beta"]);
-  });
-});
-
 const RECOMMENDED_PATHS = ["skills"];
 
 function recommendationRoutes(opts: { added?: boolean; collections?: boolean } = {}) {
@@ -1074,78 +756,8 @@ function recommendationRoutes(opts: { added?: boolean; collections?: boolean } =
   };
 }
 
-describe("首次使用：推荐启用 agent-skills，可以不用", () => {
-  it("没添加过就在顶部推荐；「不用了」之后不再出现，也不写任何东西", async () => {
-    const first = renderWithEngine(<SkillsPage />, recommendationRoutes());
-    const banner = await screen.findByTestId("recommend-banner-agent-skills-rec");
-    expect(banner).toHaveTextContent("推荐启用 agent-skills-rec");
-    await userEvent.click(within(banner).getByTestId("recommend-dismiss-agent-skills-rec"));
-    expect(screen.queryByTestId("recommend-banner-agent-skills-rec")).toBeNull();
-    expect(first.calls.some((call) => /:(apply|set|seed|configure)$/.test(call.command))).toBe(false);
-    first.unmount();
-
-    renderWithEngine(<SkillsPage />, recommendationRoutes());
-    await screen.findByTestId("add-collection-button");
-    expect(screen.queryByTestId("recommend-banner-agent-skills-rec")).toBeNull();
-  });
-
-  it("已添加过就不推荐", async () => {
-    renderWithEngine(<SkillsPage />, recommendationRoutes({ added: true }));
-    await screen.findByTestId("add-collection-button");
-    expect(screen.queryByTestId("recommend-banner-agent-skills-rec")).toBeNull();
-  });
-
-  it("启用：先确认，确认后依次登记、下载、把技能链接到能加的账号；已有同名内容的账号跳过", async () => {
-    const base = recommendationRoutes({ collections: false });
-    let saved = false;
-    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
-      ...base,
-      "policy:set": async () => {
-        saved = true;
-        return (base["policy:set"] as Envelope);
-      },
-      "skills:status": async () => {
-        const data = JSON.parse(JSON.stringify((base["skills:status"] as Envelope).data));
-        if (saved) {
-          data.recommendations[0].added = true;
-          data.elements = [
-            makeElement({ id: "skill:agent-skills-rec", domain: "skills", spec: { url: "https://github.com/ly87ing/agent-skills.git" }, observed: { repo_cached: true, actions: ["update"] } }),
-            makeElement({
-              id: "skill:agent-skills-rec/verification",
-              domain: "skills",
-              spec: { collection: "agent-skills-rec", name: "verification" },
-              observed: {
-                discovery_inbox: true,
-                agents: {
-                  "claude-code": { state: "not-assigned", assigned: false, enabled: false, actions: ["add"] },
-                  // 账号里已有同名的外部内容：引擎不给 add，不覆盖
-                  codex: { state: "extra-link", assigned: false, enabled: false, actions: [] },
-                },
-              },
-            }),
-          ];
-        }
-        return makeEnvelope(data, { command: "skills.status" });
-      },
-    };
-    const { calls } = renderWithEngine(<SkillsPage />, routes);
-    await userEvent.click(await screen.findByTestId("recommend-enable-agent-skills-rec"));
-    const dialog = await screen.findByRole("dialog", { name: "启用 agent-skills-rec" });
-    expect(within(dialog).getByTestId("recommend-enable-steps")).toHaveTextContent("不覆盖");
-    expect(within(dialog).getByTestId("recommend-enable-steps")).toHaveTextContent("规则、MCP、启动命令都不动");
-    expect(calls.some((call) => call.command === "policy:set" || call.command === "skills:apply")).toBe(false);
-    await userEvent.click(within(dialog).getByRole("button", { name: "启用" }));
-
-    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
-    const writes = calls.filter((call) => call.command === "policy:set" || call.command === "skills:apply");
-    expect(writes[0].command).toBe("policy:set");
-    expect(writes[1].args).toEqual(["--only", "skill:agent-skills-rec", "--action", "update"]);
-    expect(writes[2].args).toEqual(["--only", "skill:agent-skills-rec/verification", "--action", "add", "--agent", "claude-code"]);
-    expect(calls.some((call) => call.command.startsWith("rules:") || call.command.startsWith("mcp:apply") || call.command.startsWith("aliases:apply"))).toBe(false);
-  });
-});
-
 describe("SkillsPage 推荐来源与当前安装", () => {
+
   it("当前安装：按助手列出实际条目并分类，只展示不给操作", async () => {
     renderWithEngine(<SkillsPage />, recommendationRoutes());
     const section = await screen.findByTestId("skills-installed");
@@ -1163,10 +775,14 @@ describe("SkillsPage 推荐来源与当前安装", () => {
     expect(within(section).queryAllByRole("button")).toHaveLength(0);
   });
 
-  it("还没有任何集合时给出空态，推荐来源仍可启用", async () => {
-    renderWithEngine(<SkillsPage />, recommendationRoutes({ collections: false }));
+  it("还没有任何集合时给出空态，引导到来源页添加；技能页不再有添加来源、推荐横幅", async () => {
+    const onOpenSource = vi.fn();
+    renderWithEngine(<SkillsPage onOpenSource={onOpenSource} />, recommendationRoutes({ collections: false }));
     expect(await screen.findByTestId("skills-collections-empty")).toHaveTextContent("还没有技能来源");
-    expect(screen.getByTestId("recommend-enable-agent-skills-rec")).toBeInTheDocument();
+    expect(screen.queryByTestId("recommend-enable-agent-skills-rec")).toBeNull();
+    expect(screen.queryByTestId("add-collection-button")).toBeNull();
+    await userEvent.click(screen.getByTestId("skills-open-sources"));
+    expect(onOpenSource).toHaveBeenCalledWith(null);
   });
 });
 
@@ -1213,6 +829,7 @@ function droppedRoutes() {
 }
 
 describe("SkillsPage 来源里已删除的技能", () => {
+
   it("从总览定位进来：直接在全部技能里搜到它，只给「移除」，确认后按助手移除", async () => {
     const { calls } = renderWithEngine(<SkillsPage initialSearch="gone" />, droppedRoutes());
     const search = await screen.findByTestId("skills-search");
@@ -1253,382 +870,42 @@ describe("SkillsPage 来源里已删除的技能", () => {
   });
 });
 
-function otherSourceRoutes() {
-  const base = skillsRoutes();
-  const status = base["skills:status"].data as { elements: ReturnType<typeof makeElement>[] };
-  return {
-    ...base,
-    "skills:status": makeEnvelope(
-      {
+
+describe("技能页只管分配：来源的事跳到来源页，待处理与待处理页同一份判断", () => {
+  it("来源可更新时标题行的标记点过去，技能页不直接更新；未纳管的技能给一条去来源页的入口", async () => {
+    const routes = skillsRoutes();
+    const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[]; unmanaged?: unknown }>;
+    status.data.elements[0].freshness = { ...status.data.elements[0].freshness, state: "behind", upstream: "v2" };
+    status.data.unmanaged = { skills: [{ name: "archify", locations: [], source: null, blocked_reason: null }], shared_dirs: [], duplicates: [] };
+    const onOpenSource = vi.fn();
+    const { calls } = renderWithEngine(<SkillsPage onOpenSource={onOpenSource} />, routes);
+    await userEvent.click(await screen.findByTestId("collection-behind-agent-skills"));
+    expect(onOpenSource).toHaveBeenLastCalledWith("agent-skills");
+    await userEvent.click(screen.getByTestId("skills-unmanaged-link"));
+    expect(onOpenSource).toHaveBeenLastCalledWith("unmanaged");
+    for (const id of ["add-collection-button", "skills-update-all", "update-collection-agent-skills", "versions-collection-agent-skills", "remove-collection-agent-skills"]) {
+      expect(screen.queryByTestId(id)).toBeNull();
+    }
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
+  });
+
+  it("只看待处理：只留有待处理项的技能，正常的隐藏", async () => {
+    const routes = skillsRoutes();
+    const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
+    status.data.elements.push(
+      makeElement({
+        id: "skill:agent-skills/gamma",
         domain: "skills",
-        elements: status.elements,
-        unmanaged: {
-          skills: [
-            {
-              name: "archify",
-              locations: [
-                { agent: "claude-code", shared: null, path: "~/.claude/skills/archify", target: null, origin: "native-dir" },
-                { agent: null, shared: "codex-shared", path: "~/.agents/skills/archify", target: null, origin: "native-dir" },
-              ],
-              source: { repository: "https://github.com/tt-a1i/archify.git", path: "archify", version: "3.0.1", installer: "npx-skills", evidence: ["skill-lock", "skill-release"] },
-              adoptable: true,
-              blocked_reason: null,
-            },
-            {
-              name: "synced",
-              locations: [{ agent: "claude-code", shared: null, path: "~/.claude/skills/synced", target: null, origin: "native-dir" }],
-              source: null,
-              adoptable: false,
-              blocked_reason: "claude-synced",
-            },
-          ],
-          shared_dirs: [{ id: "codex-shared", kind: "codex", path: "~/.agents/skills", exists: true }],
-          duplicates: [{ name: "xiaoyu-bug-loop", agent: "codex", paths: ["~/.codex/skills/xiaoyu-bug-loop", "~/.agents/skills/xiaoyu-bug-loop"] }],
-        },
-      },
-      { command: "skills.status" },
-    ),
-  };
-}
-
-describe("SkillsPage 其他来源", () => {
-  it("列出没管理的技能、识别出的来源、Codex 共用与重名，只显示不写", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, otherSourceRoutes());
-    const block = await screen.findByTestId("skills-other-sources");
-    expect(block).toHaveTextContent("其他来源 · 2");
-    expect(within(block).getByTestId("other-source-archify")).toHaveTextContent("tt-a1i/archify · v3.0.1 · npx skills 安装");
-    expect(within(block).getByTestId("other-shared-archify")).toHaveTextContent("Codex 共用");
-    expect(within(block).getByTestId("other-present-archify-claude-code")).toBeInTheDocument();
-    expect(within(block).queryByTestId("other-present-archify-codex")).toBeNull();
-    expect(within(block).getByTestId("other-source-synced")).toHaveTextContent("来源不明");
-    expect(within(block).getByTestId("other-blocked-synced")).toHaveTextContent("Claude 自己同步的");
-    expect(within(block).getByTestId("duplicate-xiaoyu-bug-loop-codex")).toHaveTextContent("Codex 会加载两份");
-    expect(within(block).getByTestId("adopt-archify")).toHaveTextContent("纳入管理");
-    expect(within(block).queryByTestId("adopt-synced")).toBeNull();
-    expect(within(block).getByTestId("dedupe-xiaoyu-bug-loop-codex")).toHaveTextContent("清理多余");
-    expect(calls.every((call) => call.command.endsWith(":status") || call.command === "policy:get")).toBe(true);
-  });
-
-  it("搜索与账号筛选同样作用于其他来源", async () => {
-    renderWithEngine(<SkillsPage />, otherSourceRoutes());
-    await screen.findByTestId("skills-other-sources");
-    await userEvent.type(screen.getByTestId("skills-search"), "archify");
-    const block = screen.getByTestId("skills-other-sources");
-    expect(within(block).getByTestId("other-skill-archify")).toBeInTheDocument();
-    expect(within(block).queryByTestId("other-skill-synced")).toBeNull();
-    expect(within(block).queryByTestId("duplicate-xiaoyu-bug-loop-codex")).toBeNull();
-  });
-});
-
-const V300 = "3".repeat(40);
-const V301 = "4".repeat(40);
-
-function versionRoutes() {
-  const collection = (name: string, extra: Record<string, unknown> = {}) =>
-    makeElement({
-      id: `skill:${name}`,
-      domain: "skills",
-      spec: { url: `https://github.com/example/${name}.git`, skill_paths: [name], track: null },
-      observed: {
-        repo_cached: true,
-        discovered: [name],
-        available: [{ name, path: name }],
-        actions: ["update", "disable", "remove"],
-        version: { current: { commit: V300, kind: "tag", name: "v3.0.0", label: "v3.0.0" }, track_error: null },
-        ...extra,
-      },
-      freshness: { state: "behind", current: "v3.0.0", upstream: "v3.0.1", checked_at: "2026-09-29T00:00:00Z", probe: "git-ls-remote", cache_age_sec: 1 },
-    });
-  const skill = (coll: string) =>
-    makeElement({
-      id: `skill:${coll}/${coll}`,
-      domain: "skills",
-      spec: { collection: coll, name: coll },
-      policy: { enabled: true },
-      observed: {
-        agents: { "claude-code": { state: "linked", assigned: true, enabled: true, version: "old", available_version: "new", actions: ["update", "disable", "remove"] } },
-        discovery_inbox: false,
-      },
-    });
-  const status = makeEnvelope(
-    { domain: "skills", elements: [collection("archify"), skill("archify"), collection("other"), skill("other")] },
-    { command: "skills.status" },
-  );
-  return {
-    ...skillsRoutes(),
-    "skills:status": status,
-    "skills:versions": makeEnvelope({
-      collection: "archify",
-      track: { mode: "auto" },
-      auto_resolved: "tag",
-      latest: { commit: V301, kind: "tag", name: "v3.0.1", label: "v3.0.1" },
-      current: { commit: V300, kind: "tag", name: "v3.0.0", label: "v3.0.0" },
-      default_branch: "main",
-      tags: [
-        { name: "v3.1.0-rc.1", commit: "5".repeat(40), version: true, prerelease: true },
-        { name: "v3.0.1", commit: V301, version: true, prerelease: false },
-        { name: "v3.0.0", commit: V300, version: true, prerelease: false },
-      ],
-      tags_total: 3,
-      branches: [{ name: "main", commit: "6".repeat(40) }],
-      branches_total: 1,
-    }),
-    "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" })),
-    "system:refresh-upstream": makeEnvelope({}),
-    "skills:preview": makeEnvelope({
-      collection: "archify",
-      from: { commit: V300, kind: "tag", name: "v3.0.0", label: "v3.0.0" },
-      to: { commit: V301, kind: "tag", name: "v3.0.1", label: "v3.0.1" },
-      downloaded: true,
-      same: false,
-      skills: [{ name: "archify", path: "archify", files: [{ status: "modified", file: "SKILL.md" }, { status: "added", file: "references/new.md" }], accounts: ["claude-code"] }],
-      rules: [{ status: "modified", file: "rules/team.md" }],
-      other: [],
-    }),
-    "policy:get": makeEnvelope(
-      makePolicyData({
-        layers: { sqlite: { skills: { repositories: { archify: { url: "https://github.com/example/archify.git", skill_paths: ["archify"] } } } } },
-      }),
-      { command: "policy.get" },
-    ),
-  };
-}
-
-describe("SkillsPage 来源版本", () => {
-  it("来源行显示当前版本与可更新到的版本", async () => {
-    renderWithEngine(<SkillsPage />, versionRoutes());
-    expect(await screen.findByTestId("collection-version-archify")).toHaveTextContent("v3.0.0");
-    expect(screen.getByTestId("collection-behind-archify")).toHaveTextContent("可更新到 v3.0.1");
-  });
-
-  it("版本对话框：列出版本，切换到旧版本后只把这个来源在用的技能换过去", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, versionRoutes());
-    await userEvent.click(await screen.findByTestId("versions-collection-archify"));
-    const dialog = await screen.findByRole("dialog", { name: "archify 的版本" });
-    expect(await within(dialog).findByTestId("versions-summary")).toHaveTextContent("跟踪：自动（按版本） · 当前 v3.0.0 · 最新 v3.0.1");
-    expect(within(dialog).getByTestId("version-v3.1.0-rc.1")).toHaveTextContent("预发布");
-    expect(within(dialog).getByTestId("version-v3.0.0")).toHaveTextContent("当前");
-    expect(within(dialog).queryByTestId("version-switch-v3.0.0")).toBeNull();
-    expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(0);
-
-    await userEvent.click(within(dialog).getByTestId("version-switch-v3.1.0-rc.1"));
-    // 先预览：列出会变的文件与跟着换的账号，确认前不写
-    const preview = await within(dialog).findByTestId("preview-skill-archify");
-    expect(preview).toHaveTextContent("跟着换：");
-    expect(preview).toHaveTextContent("修改 SKILL.md");
-    expect(preview).toHaveTextContent("新增 references/new.md");
-    expect(within(dialog).getByTestId("preview-rules")).toHaveTextContent("规则变化 1 处");
-    expect(calls.find((call) => call.command === "skills:preview")?.args).toEqual(["--only", "skill:archify", "--ref", "v3.1.0-rc.1"]);
-    expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(0);
-    await userEvent.click(within(dialog).getByTestId("versions-preview-confirm"));
-    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
-    const applies = calls.filter((call) => call.command === "skills:apply");
-    expect(applies[0].args).toEqual(["--only", "skill:archify", "--action", "update", "--ref", "v3.1.0-rc.1"]);
-    expect(applies[1].args).toEqual(["--only", "skill:archify/archify", "--action", "update", "--agent", "claude-code"]);
-    expect(applies.some((call) => call.args.includes("skill:other/other"))).toBe(false);
-  });
-
-  it("更新到最新与来源行的更新按钮都按跟踪方式走、不带 --ref", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, versionRoutes());
-    await userEvent.click(await screen.findByTestId("update-collection-archify"));
-    const dialog = await screen.findByRole("dialog", { name: "archify 的版本" });
-    await within(dialog).findByTestId("preview-skill-archify");
-    expect(calls.find((call) => call.command === "skills:preview")?.args).toEqual(["--only", "skill:archify"]);
-    expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(0);
-    await userEvent.click(within(dialog).getByTestId("versions-preview-confirm"));
-    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
-    expect(calls.filter((call) => call.command === "skills:apply")[0].args).toEqual(["--only", "skill:archify", "--action", "update"]);
-  });
-
-  it("编辑来源：跟踪方式存进定义，自动存为 null", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, versionRoutes());
-    await userEvent.click(await screen.findByTestId("edit-collection-archify"));
-    const dialog = await screen.findByRole("dialog", { name: "编辑来源" });
-    await userEvent.selectOptions(within(dialog).getByTestId("collection-track-mode"), "tag");
-    await userEvent.type(within(dialog).getByTestId("collection-track-value"), "v*");
-    await userEvent.click(within(dialog).getByTestId("collection-track-prerelease"));
-    await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
-    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
-    const saved = JSON.parse(calls.find((call) => call.command === "policy:set")!.args.slice(-1)[0] ?? "{}");
-    expect(saved.track).toEqual({ mode: "tag", pattern: "v*", prerelease: true });
-  });
-
-  it("跟踪方式写错时来源行给出提示；分支名为空不能保存", async () => {
-    const routes = versionRoutes();
-    const data = routes["skills:status"].data as { elements: ReturnType<typeof makeElement>[] };
-    (data.elements[0].observed as { version: { track_error: string } }).version.track_error = "[archify] 不认识的跟踪方式：nightly";
-    renderWithEngine(<SkillsPage />, routes);
-    expect(await screen.findByTestId("collection-track-error-archify")).toHaveTextContent("跟踪方式有误");
-    await userEvent.click(screen.getByTestId("edit-collection-archify"));
-    const dialog = await screen.findByRole("dialog", { name: "编辑来源" });
-    await userEvent.selectOptions(within(dialog).getByTestId("collection-track-mode"), "branch");
-    await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
-    expect(await within(dialog).findByText("填分支名，例如 stable")).toBeInTheDocument();
-  });
-});
-
-
-function adoptRoutes(preview: Record<string, unknown>) {
-  const base = otherSourceRoutes();
-  return {
-    ...base,
-    "skills:adopt-preview": makeEnvelope(preview),
-    "skills:adopt": makeEnvelope({ domain: "skills", action: "adopt", name: "archify", backup: "20260929T101010000-archify", removed: ["~/.claude/skills/archify"], linked: ["claude-code", "codex"] }),
-  };
-}
-
-const ADOPT_BASE = {
-  name: "archify",
-  kind: "adopt",
-  locations: [
-    { agent: "claude-code", shared: null, path: "~/.claude/skills/archify", origin: "native-dir" },
-    { agent: null, shared: "codex-shared", path: "~/.agents/skills/archify", origin: "native-dir" },
-  ],
-  removes: ["~/.claude/skills/archify", "~/.agents/skills/archify"],
-  source: { repository: "https://github.com/tt-a1i/archify.git", path: "archify", version: "3.0.0", installer: "npx-skills" },
-  collection: { name: "archify", exists: false, url: "https://github.com/tt-a1i/archify.git", path: "archify", linked_as: "archify" },
-  local: { dest: "~/my-skills/archify", dest_exists: false, collection: "my-skills", digest: "l".repeat(64), accounts: ["claude-code", "codex"], from: "~/.claude/skills/archify", variants: 1 },
-};
-const DIGEST = "d".repeat(64);
-
-describe("SkillsPage 纳入管理", () => {
-  it("内容一致：预览写明版本与会做的事，确认后按预览给的参数纳入，提示里可撤销", async () => {
-    const { calls } = renderWithEngine(
-      <SkillsPage />,
-      adoptRoutes({
-        ...ADOPT_BASE,
-        source_check: {
-          same: true, path: "archify",
-          adopt_at: { name: "v3.0.0", label: "v3.0.0", commit: "3".repeat(40) },
-          latest: { name: "v3.0.1", label: "v3.0.1", commit: "4".repeat(40) },
-          ref: "v3.0.0", locations: [{ same: true, files: [] }, { same: true, files: [] }], accounts: ["claude-code", "codex"], digest: DIGEST,
-        },
+        spec: { collection: "agent-skills", name: "gamma" },
+        observed: { agents: { "claude-code": { state: "linked", actions: ["disable"] }, codex: { state: "linked", actions: ["disable"] } }, discovery_inbox: false },
       }),
     );
-    await userEvent.click(await screen.findByTestId("adopt-archify"));
-    const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
-    expect(await within(dialog).findByTestId("adopt-version")).toHaveTextContent("纳入到来源 archify（新建），版本 v3.0.0，之后可更新到 v3.0.1");
-    expect(within(dialog).getByTestId("adopt-compare")).toHaveTextContent("完全一致");
-    expect(within(dialog).getByTestId("adopt-plan")).toHaveTextContent("备份并移走 ~/.agents/skills/archify");
-    expect(within(dialog).queryByTestId("adopt-choice-source")).toBeNull();
-    expect(calls.some((call) => call.command === "skills:adopt")).toBe(false);
-    await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
-    await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", DIGEST, "--path", "archify", "--ref", "v3.0.0", "--agents", "claude-code,codex"]);
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "纳入管理 archify" })).toBeNull());
-  });
-
-  it("本地改过：列出差异；选用来源版本带 --accept-source，选保留走 --keep-local", async () => {
-    const differs = {
-      ...ADOPT_BASE,
-      source_check: {
-        same: false, path: "archify",
-        adopt_at: { name: "v3.0.1", label: "v3.0.1", commit: "4".repeat(40) },
-        latest: { name: "v3.0.1", label: "v3.0.1", commit: "4".repeat(40) },
-        ref: null, locations: [{ same: false, files: [{ status: "modified", file: "SKILL.md" }] }, { same: true, files: [] }], accounts: ["claude-code", "codex"], digest: DIGEST,
-      },
-    };
-    const { calls } = renderWithEngine(<SkillsPage />, adoptRoutes(differs));
-    await userEvent.click(await screen.findByTestId("adopt-archify"));
-    const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
-    expect(await within(dialog).findByTestId("adopt-compare")).toHaveTextContent("改过 SKILL.md");
-    await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
-    await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", DIGEST, "--path", "archify", "--accept-source", "--agents", "claude-code,codex"]);
-  });
-
-  it("认不出来源：只能保留本地内容；Codex 重名只做清理", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, adoptRoutes({ ...ADOPT_BASE, source: null, collection: undefined, source_check: { error: "认不出来源仓库，只能作为本机来源纳入" } }));
-    await userEvent.click(await screen.findByTestId("adopt-archify"));
-    const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
-    expect(await within(dialog).findByTestId("adopt-source-error")).toHaveTextContent("只能作为本机来源纳入");
-    expect(within(dialog).getByTestId("adopt-choice-source")).toBeDisabled();
-    expect(within(dialog).getByTestId("adopt-plan")).toHaveTextContent("复制到 ~/my-skills/archify");
-    await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
-    await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", "l".repeat(64), "--keep-local", "--agents", "claude-code,codex"]);
-  });
-
-  it("重名清理：写明已由哪个来源管理，只移走共用目录那份", async () => {
-    const { calls } = renderWithEngine(
-      <SkillsPage />,
-      adoptRoutes({ name: "xiaoyu-bug-loop", kind: "dedupe", locations: [], removes: ["~/.agents/skills/xiaoyu-bug-loop"], source: null, collection: { name: "xiaoyu-dev", exists: true }, digest: DIGEST }),
-    );
-    await userEvent.click(await screen.findByTestId("dedupe-xiaoyu-bug-loop-codex"));
-    const dialog = await screen.findByRole("dialog", { name: "纳入管理 xiaoyu-bug-loop" });
-    expect(await within(dialog).findByTestId("adopt-dedupe")).toHaveTextContent("已由来源 xiaoyu-dev 管理");
-    await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
-    await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "xiaoyu-bug-loop", "--digest", DIGEST]);
-  });
-});
-
-describe("SkillsPage 纳入管理：账号与执行中", () => {
-  const same = {
-    ...ADOPT_BASE,
-    current_accounts: ["codex"],
-    source_check: {
-      same: true, path: "archify",
-      adopt_at: { name: "v3.0.1", label: "v3.0.1", commit: "4".repeat(40) },
-      latest: { name: "v3.0.1", label: "v3.0.1", commit: "4".repeat(40) },
-      ref: null, locations: [{ same: true, files: [] }, { same: true, files: [] }], accounts: ["claude-code", "codex"], digest: DIGEST,
-    },
-  };
-
-  it("可选账号：默认全选并标出原来就有的；取消勾选后只链接选中的；一个不选不能确认", async () => {
-    const { calls } = renderWithEngine(<SkillsPage />, adoptRoutes(same));
-    await userEvent.click(await screen.findByTestId("adopt-archify"));
-    const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
-    const accounts = await within(dialog).findByTestId("adopt-accounts");
-    expect(within(accounts).getByTestId("adopt-account-claude-code")).toBeChecked();
-    expect(within(accounts).getByTestId("adopt-account-codex")).toBeChecked();
-    expect(within(accounts).getAllByText("原来就有")).toHaveLength(1);
-    await userEvent.click(within(accounts).getByTestId("adopt-account-claude-code"));
-    await userEvent.click(within(accounts).getByTestId("adopt-account-codex"));
-    expect(within(dialog).getByTestId("adopt-confirm")).toBeDisabled();
-    expect(within(accounts).getByText("至少选一个账号")).toBeInTheDocument();
-    await userEvent.click(within(accounts).getByTestId("adopt-account-codex"));
-    await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
-    await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:adopt")!.args.slice(-2)).toEqual(["--agents", "codex"]);
-  });
-
-  it("执行中：显示进度步骤，不给取消、Esc 关不掉，可以在后台继续", async () => {
-    let finish: (value: unknown) => void = () => undefined;
-    const pending = new Promise((resolve) => {
-      finish = resolve;
-    });
-    const routes = {
-      ...adoptRoutes(same),
-      "skills:adopt": async () => {
-        await pending;
-        return makeEnvelope({ domain: "skills", action: "adopt", name: "archify", backup: "b1", removed: [], linked: ["claude-code"] });
-      },
-      "runs:progress": makeEnvelope({
-        progress: {
-          started_at: 0,
-          steps: [
-            { key: "check", label: "核对预览后有没有变化", state: "done", detail: null },
-            { key: "backup", label: "备份并移走原来的目录", state: "active", detail: "1/2：~/.claude/skills/archify" },
-            { key: "link", label: "链接到账号", state: "pending", detail: null },
-          ],
-        },
-      }),
-    };
     renderWithEngine(<SkillsPage />, routes);
-    await userEvent.click(await screen.findByTestId("adopt-archify"));
-    const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
-    await userEvent.click(await within(dialog).findByTestId("adopt-confirm"));
-    const steps = await within(dialog).findByTestId("adopt-progress");
-    await waitFor(() => expect(within(steps).getByTestId("adopt-progress-backup")).toHaveAttribute("data-state", "active"));
-    expect(within(steps).getByTestId("adopt-progress-backup")).toHaveTextContent("1/2：~/.claude/skills/archify");
-    expect(within(dialog).queryByTestId("adopt-cancel")).toBeNull();
-    expect(within(dialog).queryByRole("button", { name: "关闭" })).toBeNull();
-    expect(within(dialog).getByTestId("adopt-running-note")).toHaveTextContent("执行中不能取消");
-    await userEvent.keyboard("{Escape}");
-    expect(screen.getByRole("dialog", { name: "纳入管理 archify" })).toBeInTheDocument();
-    await userEvent.click(within(dialog).getByTestId("adopt-background"));
-    expect(screen.queryByRole("dialog", { name: "纳入管理 archify" })).toBeNull();
-    finish(null);
+    await expandAll();
+    expect(screen.getByTestId("skill-row-skill:agent-skills/gamma")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("attention-only"));
+    expect(screen.getByTestId("attention-only")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByTestId("skill-row-skill:agent-skills/gamma")).toBeNull();
+    expect(screen.getByTestId("skill-row-skill:agent-skills/alpha")).toBeInTheDocument();
   });
 });

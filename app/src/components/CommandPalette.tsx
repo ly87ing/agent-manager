@@ -21,6 +21,7 @@ export interface CommandItem {
 }
 
 const PAGES: { key: string; label: string; keywords: string }[] = [
+  { key: "inbox", label: "待处理", keywords: "inbox 待处理 需要处理 损坏 缺失 更新 偏离 未纳管" },
   { key: "accounts", label: "账号", keywords: "accounts 账号 claude codex 启动命令 额度" },
   { key: "skills", label: "技能", keywords: "skills 技能" },
   { key: "mcp", label: "MCP", keywords: "mcp 服务器" },
@@ -28,11 +29,10 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
   { key: "usage", label: "用量", keywords: "usage 用量 token 花费 成本" },
   { key: "settings", label: "设置", keywords: "settings 偏好" },
   // 设置里的二级页面也要搜得到
-  { key: "takeover", label: "导入现有配置", keywords: "takeover 接管 发现 导入 扫描" },
   { key: "runs", label: "操作记录", keywords: "runs 任务 日志 记录" },
   { key: "settings:secrets", label: "密钥", keywords: "secrets 密钥 变量 token api key 凭据" },
   { key: "commands", label: "命令", keywords: "aliases alias 别名 启动命令 终端快捷命令 时区" },
-  { key: "sources", label: "来源", keywords: "sources 来源 集合 仓库 规则来源 添加 停用 移除 agent-skills" },
+  { key: "sources", label: "来源", keywords: "sources 来源 集合 仓库 规则来源 添加 更新 版本 停用 移除 未纳管 纳入 接管 扫描 agent-skills" },
 ];
 
 /**

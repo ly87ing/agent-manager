@@ -1,9 +1,8 @@
 import { useMemo, useState } from "react";
 import { Bot, FolderSymlink, Link2Off, PackageCheck, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
-import { ConfirmModal } from "../components/ConfirmModal";
-import { EmptyState } from "../components/EmptyState";
-import { PageError, PageHeader, PageLoading } from "../components/PageState";
-import { ErrorPanel } from "../components/ErrorPanel";
+import { ConfirmModal } from "./ConfirmModal";
+import { PageError } from "./PageState";
+import { ErrorPanel } from "./ErrorPanel";
 import type {
   DiscoverAgentCandidate,
   DiscoverData,
@@ -81,14 +80,12 @@ function SelectableRow({
 }
 
 /**
- * 接管中心：一次看清本机已有的助手与技能资源，按来源分类后批量纳入管理。
- * MCP 条目以各助手配置文件为准，直接在 MCP 页查看与编辑，不经这里导入。
- *
- * 分类即处理方式：官方路径与原生安装方案（Claude 同步目录、Homebrew、官方安装器等）
- * 只标识、继续用它们各自的原生管理方式；其余外部资源用软链接方案纳管
- * （技能登记为本地来源集合后直链源目录，内容仍归外部所有）。
+ * 扫描本机已有、还没管理的内容并批量纳入（system:discover，只读扫描）。按管理体系分在两处
+ * （docs/MULTI-ACCOUNT-DESIGN.md「管理体系」）：`agents` 是未登记的助手，放在账号页；`skills` 是外部技能
+ * 目录（登记为本机目录来源后直链源目录）、已有来源的计划外链接与残留链接，放在来源页「未纳管」。
+ * 没有可处理的内容时整块不显示。原生安装的技能目录只标识、不接管。MCP 条目直接在 MCP 页查看与编辑。
  */
-export default function TakeoverPage() {
+export function DiscoverPanel({ scope }: { scope: "agents" | "skills" }) {
   const query = useEngineQuery<DiscoverData>("system:discover");
   const takeover = useTakeover();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -105,7 +102,7 @@ export default function TakeoverPage() {
 
   const tasks = useMemo<Map<string, TakeoverTask>>(() => {
     const map = new Map<string, TakeoverTask>();
-    for (const agent of agents) {
+    for (const agent of scope === "agents" ? agents : []) {
       map.set(`agent:${agent.id}`, {
         key: `agent:${agent.id}`,
         label: `助手 ${agent.display_name}`,
@@ -115,7 +112,7 @@ export default function TakeoverPage() {
         ],
       });
     }
-    for (const group of skillGroups) {
+    for (const group of scope === "skills" ? skillGroups : []) {
       const steps: TakeoverTask["steps"] = [];
       if (!group.existing_collection) {
         steps.push({
@@ -135,7 +132,7 @@ export default function TakeoverPage() {
       }
       map.set(`skill-group:${group.name}`, { key: `skill-group:${group.name}`, label: `技能来源 ${group.name}`, steps });
     }
-    for (const item of extraLinks) {
+    for (const item of scope === "skills" ? extraLinks : []) {
       if (!item.collection) continue;
       const key = `skill-extra:${item.collection}/${item.name}@${item.agent}`;
       map.set(key, {
@@ -151,7 +148,7 @@ export default function TakeoverPage() {
         ],
       });
     }
-    for (const item of deadLinks) {
+    for (const item of scope === "skills" ? deadLinks : []) {
       const key = `skill-cleanup:${item.name}@${item.agent}`;
       map.set(key, {
         key,
@@ -167,7 +164,7 @@ export default function TakeoverPage() {
       });
     }
     return map;
-  }, [agents, skillGroups, extraLinks, deadLinks]);
+  }, [scope, agents, skillGroups, extraLinks, deadLinks]);
 
   const toggle = (key: string) => {
     setSelected((prev) => {
@@ -187,8 +184,10 @@ export default function TakeoverPage() {
   ).length;
   /** 选中的清理项数量：确认文案要分开说，它删的是链接而不是纳管。 */
   const cleanupCount = selectedKeys.filter((key) => key.startsWith("skill-cleanup:")).length;
-  if (query.isPending) return <PageLoading text="正在扫描本机资源…" />;
-  if (query.isError) return <PageError title="扫描失败" error={query.error} />;
+  // 嵌在账号页、来源页里：扫描中或没有可处理的内容时不占地方
+  if (query.isPending) return null;
+  if (query.isError) return <PageError title="扫描本机已有内容失败" error={query.error} />;
+  if (tasks.size === 0 && query.data?.ok) return null;
 
   const runTakeover = async () => {
     const list = selectedKeys.map((key) => tasks.get(key)).filter((task): task is TakeoverTask => Boolean(task));
@@ -201,12 +200,16 @@ export default function TakeoverPage() {
   };
 
   return (
-    <div className="space-y-4">
+    <div data-testid={`discover-${scope}`} className="space-y-3 rounded-lg border bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <PageHeader
-          title="导入现有配置"
-          description="扫描本机已有的助手与技能。先选择要导入的项目，再查看影响并确认；官方安装的软件仍由原安装渠道维护。MCP 条目直接在 MCP 页查看和编辑，不需要导入。"
-        />
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold">{scope === "agents" ? "未登记的助手" : "外部技能目录与残留链接"}</h2>
+          <p className="text-xs text-muted-foreground">
+            {scope === "agents"
+              ? "本机已安装、但还没有登记的助手。登记只保存识别所需的定义，软件继续由原安装渠道维护。"
+              : "各账号技能目录里本工具之外的链接：外部目录可登记为本机目录来源，计划外链接并回已有来源，残留链接可以清理。"}
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -266,16 +269,9 @@ export default function TakeoverPage() {
 
       {query.data && !query.data.ok && <ErrorPanel title="扫描被拒绝" errors={query.data.errors} />}
 
-      <SectionCard
-        icon={Bot}
-        testId="takeover-agents"
-        title="助手"
-        description="本机已安装、但还没有登记的助手 CLI。登记只保存识别与配置所需的定义，不执行安装、升级或卸载；客户端软件继续由原安装渠道维护。"
-      >
-        {agents.length === 0 ? (
-          <EmptyState compact title="没有发现未登记的助手" description="已安装的助手都已登记。" testId="takeover-agents-empty" />
-        ) : (
-          agents.map((agent: DiscoverAgentCandidate) => (
+      {scope === "agents" && (
+        <div data-testid="takeover-agents" className="space-y-2">
+          {agents.map((agent: DiscoverAgentCandidate) => (
             <SelectableRow
               key={agent.id}
               testId={`takeover-agent-${agent.id}`}
@@ -290,20 +286,18 @@ export default function TakeoverPage() {
               </div>
               <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{agent.bin_path}</p>
             </SelectableRow>
-          ))
-        )}
-      </SectionCard>
+          ))}
+        </div>
+      )}
 
-      <SectionCard
-        icon={FolderSymlink}
-        testId="takeover-skill-groups"
-        title="技能：外部目录（软链接接管）"
-        description="来自第三方工具或自建目录的技能。接管会登记为本地来源集合，助手目录里的链接直接指向源目录——内容仍由原处维护并随其更新，停用只删链接。"
-      >
-        {skillGroups.length === 0 ? (
-          <EmptyState compact title="没有发现可接管的外部技能" testId="takeover-skill-groups-empty" />
-        ) : (
-          skillGroups.map((group: DiscoverSkillGroup) => (
+      {scope === "skills" && skillGroups.length > 0 && (
+        <SectionCard
+          icon={FolderSymlink}
+          testId="takeover-skill-groups"
+          title="技能：外部目录（软链接接管）"
+          description="来自第三方工具或自建目录的技能。接管会登记为本地来源集合，助手目录里的链接直接指向源目录——内容仍由原处维护并随其更新，停用只删链接。"
+        >
+          {skillGroups.map((group: DiscoverSkillGroup) => (
             <SelectableRow
               key={group.name}
               testId={`takeover-skill-group-${group.name}`}
@@ -322,20 +316,18 @@ export default function TakeoverPage() {
                 {group.skills.map((skill) => skill.name).join("、")}
               </p>
             </SelectableRow>
-          ))
-        )}
-      </SectionCard>
+          ))}
+        </SectionCard>
+      )}
 
-      <SectionCard
-        icon={Sparkles}
-        testId="takeover-skill-extras"
-        title="技能：已定义集合的计划外链接"
-        description="链接名命中已有集合，但没有分配记录。接管走集合通道：纳入管理后由集合统一维护版本。"
-      >
-        {extraLinks.length === 0 ? (
-          <EmptyState compact title="没有计划外链接" testId="takeover-skill-extras-empty" />
-        ) : (
-          extraLinks.map((item: DiscoverSkillItem) => {
+      {scope === "skills" && extraLinks.length > 0 && (
+        <SectionCard
+          icon={Sparkles}
+          testId="takeover-skill-extras"
+          title="技能：已定义集合的计划外链接"
+          description="链接名命中已有集合，但没有分配记录。接管走集合通道：纳入管理后由集合统一维护版本。"
+        >
+          {extraLinks.map((item: DiscoverSkillItem) => {
             const key = `skill-extra:${item.collection}/${item.name}@${item.agent}`;
             return (
               <SelectableRow key={key} testId={`takeover-skill-extra-${item.name}-${item.agent}`} checked={selected.has(key)} onToggle={() => toggle(key)}>
@@ -348,20 +340,18 @@ export default function TakeoverPage() {
                 <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.link_path}</p>
               </SelectableRow>
             );
-          })
-        )}
-      </SectionCard>
+          })}
+        </SectionCard>
+      )}
 
-      <SectionCard
-        icon={ShieldCheck}
-        testId="takeover-native"
-        title="原生管理（只标识，不接管）"
-        description="位于助手官方技能目录内的真实目录，由助手自身或其安装方案维护。本工具不接管、不覆盖，升级与卸载继续走它们原来的方式。"
-      >
-        {nativeItems.length === 0 ? (
-          <EmptyState compact title="没有原生安装的技能目录" testId="takeover-native-empty" />
-        ) : (
-          nativeItems.map((item) => (
+      {scope === "skills" && nativeItems.length > 0 && (
+        <SectionCard
+          icon={ShieldCheck}
+          testId="takeover-native"
+          title="原生管理（只标识，不接管）"
+          description="位于助手官方技能目录内的真实目录，由助手自身或其安装方案维护。本工具不接管、不覆盖，升级与卸载继续走它们原来的方式。"
+        >
+          {nativeItems.map((item) => (
             <div key={`${item.agent}:${item.name}`} data-testid={`takeover-native-${item.name}-${item.agent}`} className="rounded-md border px-3 py-2">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="font-mono text-xs font-semibold text-foreground">{item.name}</span>
@@ -370,11 +360,11 @@ export default function TakeoverPage() {
               </div>
               <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.link_path}</p>
             </div>
-          ))
-        )}
-      </SectionCard>
+          ))}
+        </SectionCard>
+      )}
 
-      {deadLinks.length > 0 && (
+      {scope === "skills" && deadLinks.length > 0 && (
         <SectionCard
           icon={Link2Off}
           testId="takeover-dead-links"

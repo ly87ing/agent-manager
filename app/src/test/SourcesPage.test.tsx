@@ -68,6 +68,36 @@ describe("来源页", () => {
     expect(await screen.findByRole("dialog", { name: "添加规则来源" })).toBeInTheDocument();
   });
 
+  it("添加规则来源：直接指定一个文件或目录，只登记位置，不改任何规则文件；与技能来源同名会撞规则 id，拦下", async () => {
+    const r = routes();
+    r["policy:get"] = makeEnvelope(makePolicyData({ effective: { skills: { repositories: { "agent-skills": {} } } } }), { command: "policy.get" });
+    const { calls } = renderWithEngine(<SourcesPage />, r);
+    await userEvent.click(await screen.findByTestId("source-add-rule"));
+    await userEvent.type(screen.getByTestId("rule-source-name"), "agent-skills");
+    await userEvent.type(screen.getByTestId("rule-source-path"), "~/notes/CLAUDE.md");
+    expect(screen.getByTestId("rule-source-save")).toBeDisabled();
+    await userEvent.clear(screen.getByTestId("rule-source-name"));
+    await userEvent.type(screen.getByTestId("rule-source-name"), "my-rules");
+    await userEvent.click(screen.getByTestId("rule-source-save"));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const set = calls.find((call) => call.command === "policy:set")!;
+    expect(set.args.slice(0, 4)).toEqual(["--layer", "local", "--key", "rules.sources.my-rules"]);
+    expect(JSON.parse(set.args[set.args.indexOf("--value") + 1])).toEqual({ path: "~/notes/CLAUDE.md", _delete: false, _replace: true });
+    expect(calls.some((call) => call.command === "rules:apply" || call.command === "skills:apply")).toBe(false);
+  });
+
+  it("移除规则来源先确认，只删登记，不改任何规则文件", async () => {
+    const { calls } = renderWithEngine(<SourcesPage />, routes());
+    await userEvent.click(await screen.findByTestId("source-remove-notes"));
+    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+    await userEvent.click(await screen.findByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const set = calls.find((call) => call.command === "policy:set")!;
+    expect(set.args.slice(0, 4)).toEqual(["--layer", "local", "--key", "rules.sources.notes"]);
+    expect(JSON.parse(set.args[set.args.indexOf("--value") + 1])).toEqual({ _delete: true });
+    expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
+  });
+
   it("推荐来源在表里：「添加…」打开预填好的表单，保存前不写；「不用了」就不再出现", async () => {
     localStorage.clear();
     const r = routes();
@@ -86,7 +116,8 @@ describe("来源页", () => {
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
     await userEvent.click(within(screen.getByTestId("source-suggest-team-skills")).getByRole("button", { name: "不用了" }));
     expect(screen.queryByTestId("source-suggest-team-skills")).toBeNull();
-    expect(calls.filter((call) => call.command !== "skills:status" && call.command !== "rules:status" && call.command !== "policy:get")).toEqual([]);
+    // 只有只读查询（各 status、policy:get、本机扫描），没有任何写入
+    expect(calls.filter((call) => !call.command.endsWith(":status") && call.command !== "policy:get" && call.command !== "system:discover")).toEqual([]);
   });
 
   it("添加推荐来源只保存定义（不限账号、不分配），不下载", async () => {

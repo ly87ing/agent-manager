@@ -1,4 +1,4 @@
-import { Library, ScrollText, Server, Settings, Sparkles, SquareTerminal, Users, Wallet } from "lucide-react";
+import { Inbox, Library, ScrollText, Server, Settings, Sparkles, SquareTerminal, Users, Wallet } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
@@ -7,7 +7,8 @@ import { subscribeImportLinks, type SharePayload } from "./lib/shareLink";
 import { useSettings } from "./lib/settings";
 import { subscribeTrayActions } from "./lib/trayActions";
 import { useUpdateCheck } from "./lib/update-check";
-import { useAttentionCounts } from "./lib/attention";
+import { countByPage, useInbox } from "./lib/inbox";
+import { useAccountNames } from "./lib/useAccountNames";
 import { PageError, PageLoading } from "./components/PageState";
 
 const AccountsPage = lazy(() => import("./pages/AccountsPage"));
@@ -17,12 +18,14 @@ const RunsPage = lazy(() => import("./pages/RunsPage"));
 const SkillsPage = lazy(() => import("./pages/SkillsPage"));
 const AliasesPage = lazy(() => import("./pages/AliasesPage"));
 const UsagePage = lazy(() => import("./pages/UsagePage"));
-const TakeoverPage = lazy(() => import("./pages/TakeoverPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SourcesPage = lazy(() => import("./pages/SourcesPage"));
+const InboxPage = lazy(() => import("./pages/InboxPage"));
 
-// 多账号设计（docs/MULTI-ACCOUNT-DESIGN.md）：主入口是账号与共享资源；导入现有配置与操作记录从设置进入。
+// 管理体系（docs/MULTI-ACCOUNT-DESIGN.md）：待处理是闭环的入口；账号管在哪生效，技能 / MCP / 规则 / 命令管分配，
+// 来源管内容从哪来、用哪个版本；密钥、操作记录等工具本身的事在设置里。
 const NAV: NavItem[] = [
+  { key: "inbox", label: "待处理", icon: Inbox },
   { key: "accounts", label: "账号", icon: Users },
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
@@ -59,7 +62,11 @@ export default function App() {
   const [paletteScope, setPaletteScope] = useState<"all" | "quick">("all");
   const [paletteTarget, setPaletteTarget] = useState<{ keyword: string; itemId: string } | null>(null);
   const update = useUpdateCheck();
-  const attention = useAttentionCounts();
+  const attention = countByPage(useInbox(useAccountNames()).items);
+  /** 跳到来源页时定位的来源（名称；`unmanaged` 为未纳管）。 */
+  const [sourceFocus, setSourceFocus] = useState<string | null>(null);
+  /** 跳到 MCP 页时直接搜到的服务。 */
+  const [mcpSearch, setMcpSearch] = useState<string | null>(null);
   /** 从分享链接导入：对话框里的链接文字（null = 没打开），以及确认后交给页面预填的内容。 */
   const [importText, setImportText] = useState<string | null>(null);
   const [importPayload, setImportPayload] = useState<SharePayload | null>(null);
@@ -128,10 +135,22 @@ export default function App() {
       setActivePage("skills");
       return;
     }
+    if (page.startsWith("sources:")) {
+      setSourceFocus(page.slice("sources:".length));
+      setActivePage("sources");
+      return;
+    }
+    if (page.startsWith("mcp:")) {
+      setMcpSearch(page.slice("mcp:".length));
+      setActivePage("mcp");
+      return;
+    }
     if (page === "skills") {
       setSelectedSkillAgent(null);
       setSkillSearch(null);
     }
+    if (page === "sources") setSourceFocus(null);
+    if (page === "mcp") setMcpSearch(null);
     setActivePage(page);
   };
 
@@ -139,7 +158,7 @@ export default function App() {
     <AppLayout
       nav={NAV.map((item) => ({ ...item, badge: attention[item.key] }))}
       secondaryNav={SECONDARY_NAV}
-      active={activePage === "runs" || activePage === "takeover" ? "settings" : activePage}
+      active={activePage === "runs" ? "settings" : activePage}
       onNavigate={handleNavigate}
       updateVersion={update.availableVersion}
       onDismissUpdate={update.dismiss}
@@ -151,7 +170,8 @@ export default function App() {
     >
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
       <Suspense fallback={<PageLoading text="正在打开页面…" />}>
-        <div key={activePage} className="animate-page-in">
+        <div key={`${activePage}:${activePage === "sources" ? sourceFocus ?? "" : activePage === "mcp" ? mcpSearch ?? "" : ""}`} className="animate-page-in">
+          {activePage === "inbox" && <InboxPage onOpen={handleNavigate} />}
           {activePage === "accounts" && (
             <AccountsPage
               onManageSkills={(accountId) => {
@@ -164,20 +184,25 @@ export default function App() {
           )}
           {activePage === "skills" && (
             <SkillsPage
-              importPayload={importPayload?.kind === "skills" ? importPayload : null}
-              onImportConsumed={() => setImportPayload(null)}
+              onOpenSource={(name) => handleNavigate(name ? `sources:${name}` : "sources")}
               initialAgent={selectedSkillAgent}
               initialSearch={skillSearch}
               onResetAgent={() => setSelectedSkillAgent(null)}
             />
           )}
           {activePage === "mcp" && (
-            <McpPage importPayload={importPayload?.kind === "mcp" ? importPayload : null} onImportConsumed={() => setImportPayload(null)} />
+            <McpPage importPayload={importPayload?.kind === "mcp" ? importPayload : null} onImportConsumed={() => setImportPayload(null)} initialSearch={mcpSearch} />
           )}
           {activePage === "commands" && <AliasesPage onOpenSkills={() => handleNavigate("skills")} />}
-          {activePage === "sources" && <SourcesPage />}
-          {activePage === "rules" && <RulesPage onOpenSkills={() => handleNavigate("skills")} />}
-          {activePage === "takeover" && <TakeoverPage />}
+          {activePage === "sources" && (
+            <SourcesPage
+              focus={sourceFocus}
+              onImportLink={() => setImportText("")}
+              importPayload={importPayload?.kind === "skills" ? importPayload : null}
+              onImportConsumed={() => setImportPayload(null)}
+            />
+          )}
+          {activePage === "rules" && <RulesPage onOpenSource={(name) => handleNavigate(name ? `sources:${name}` : "sources")} />}
           {activePage === "usage" && <UsagePage />}
           {activePage === "runs" && <RunsPage />}
           {activePage.startsWith("settings") && (
@@ -199,17 +224,7 @@ export default function App() {
           setPaletteScope("all");
           setPaletteTarget(null);
         }}
-        onNavigate={(page) => {
-          if (page === "import-link") {
-            setImportText("");
-            return;
-          }
-          if (page === "skills") {
-            setSelectedSkillAgent(null);
-            setSkillSearch(null);
-          }
-          setActivePage(page);
-        }}
+        onNavigate={handleNavigate}
         onOpenAgentSkills={(agentId) => {
           setSelectedSkillAgent(agentId);
           setSkillSearch(null);
@@ -223,7 +238,7 @@ export default function App() {
           onContinue={(payload) => {
             setImportText(null);
             setImportPayload(payload);
-            setActivePage(payload.kind === "mcp" ? "mcp" : "skills");
+            setActivePage(payload.kind === "mcp" ? "mcp" : "sources");
           }}
         />
       )}

@@ -375,3 +375,13 @@ describe("McpPage：实际条目为主", () => {
     expect(calls.find((call) => call.command === "secrets:set")?.args.slice(0, 2)).toEqual(["--var", "FS_API_KEY"]);
   });
 });
+
+describe("MCP 页的待处理", () => {
+  it("只看待处理：只留缺变量、无法识别等需要处理的服务；标签与待处理页同一套状态", async () => {
+    renderWithEngine(<McpPage />, routes());
+    expect(await screen.findByTestId("mcp-card-mcp:remote-api")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("attention-only"));
+    expect(screen.getByTestId("mcp-card-mcp:fs")).toBeInTheDocument();
+    expect(screen.queryByTestId("mcp-card-mcp:remote-api")).toBeNull();
+  });
+});

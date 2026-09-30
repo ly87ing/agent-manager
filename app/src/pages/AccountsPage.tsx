@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { AccountDrawer, type DrawerMode } from "../components/AccountDrawer";
 import { ActionMenu, type MenuAction } from "../components/AccountGrid";
 import { AccountReadiness } from "../components/AccountReadiness";
+import { DiscoverPanel } from "../components/DiscoverPanel";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { GettingStarted, type StartStep } from "../components/GettingStarted";
 import { LaunchCommandsDrawer } from "../components/LaunchCommandsDrawer";
@@ -497,6 +498,7 @@ export default function AccountsPage({
           onClose={() => setRemoving(null)}
         />
       )}
+      <DiscoverPanel scope="agents" />
     </div>
   );
 }

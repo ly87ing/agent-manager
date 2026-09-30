@@ -20,6 +20,8 @@ import { useEngineQuery } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
 import { useExecutions } from "../lib/execution";
 import { mcpFillArgs, mcpFillRows } from "../lib/mcpFill";
+import { useInbox } from "../lib/inbox";
+import { AttentionOnlyToggle } from "../components/StateBadge";
 import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
 import { encodeShareLink, type SharePayload } from "../lib/shareLink";
 
@@ -46,7 +48,10 @@ function showNotices(envelope: Envelope | null) {
 export default function McpPage({
   importPayload,
   onImportConsumed,
+  initialSearch,
 }: {
+  /** 从待处理进来时直接搜到那个服务。 */
+  initialSearch?: string | null;
   /** 从分享链接导入的服务：打开预填好的「新增」表单，用户检查后保存。 */
   importPayload?: Extract<SharePayload, { kind: "mcp" }> | null;
   onImportConsumed?: () => void;
@@ -56,7 +61,10 @@ export default function McpPage({
   const { execute } = useExecutions();
   const nameOfAgent = useAccountNames();
   const groupsOf = useAccountGroups();
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch ?? "");
+  /** 「只看待处理」与待处理页同一份判断。 */
+  const attentionSubjects = new Set(useInbox(nameOfAgent).items.filter((item) => item.page === "mcp").map((item) => item.subject));
+  const [attentionOnly, setAttentionOnly] = useState(false);
   const [agentFilter, setAgentFilter] = useState<string>("all");
   const [filling, setFilling] = useState(false);
   const [form, setForm] = useState<McpFormMode | null>(null);
@@ -289,7 +297,9 @@ export default function McpPage({
   const writableAgents = targets.filter((target) => target.error === null && target.agent_enabled).map((target) => target.agent);
   const groups = groupsOf(agentFilter === "all" ? agentColumns : agentColumns.filter((agent) => agent === agentFilter));
   const enabledOn = (agent: string) => elements.filter((element) => cellsOf(element)[agent]?.state === "enabled").length;
-  const shown = agentFilter === "all" ? filtered : filtered.filter((element) => cellsOf(element)[agentFilter]);
+  const shown = (agentFilter === "all" ? filtered : filtered.filter((element) => cellsOf(element)[agentFilter])).filter(
+    (element) => !attentionOnly || attentionSubjects.has(element.id),
+  );
   /** 补齐一个账号：把在用的服务从同类账号逐条复制过来，单条失败不影响其余；每条仍由引擎带 base 锁内核对。 */
   /** 不给账号时补齐所有账号。 */
   const runFill = async (agent?: string) => {
@@ -342,6 +352,7 @@ export default function McpPage({
             <option key={agent} value={agent}>{nameOfAgent(agent)}</option>
           ))}
         </select>
+        <AttentionOnlyToggle checked={attentionOnly} count={attentionSubjects.size} onChange={setAttentionOnly} />
         <div className="ml-auto flex items-center gap-2">
           {fillAllCount > 0 && (
             <button
@@ -376,7 +387,7 @@ export default function McpPage({
           title="各账号的配置里还没有 MCP 服务"
           description={<p>点击右上角「{OVERLAY_COPY.addServer}」写入第一个服务；在助手里直接加的条目也会出现在这里。</p>}
         />
-      ) : (search_ || agentFilter !== "all") && shown.length === 0 ? (
+      ) : (search_ || agentFilter !== "all" || attentionOnly) && shown.length === 0 ? (
         <EmptyState
           icon={SearchX}
           testId="mcp-search-empty"

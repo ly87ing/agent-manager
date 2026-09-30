@@ -6,7 +6,7 @@ import { cn } from "../lib/utils";
 
 /**
  * 当前安装：各助手技能目录里实际有什么（引擎 skills:status 的 installed）。
- * 只展示、不给操作——外部链接与真实目录不是待处理项；要纳入管理去「导入现有配置」。
+ * 只展示、不给操作——外部链接与真实目录不是待处理项；要纳入管理去来源页「未纳管」。
  */
 
 const ORIGIN_VIEW: Record<string, { label: string; className: string }> = {

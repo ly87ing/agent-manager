@@ -81,61 +81,32 @@ describe("RulesPage：规则来源与补齐", () => {
     ]);
   });
 
-  it("添加规则来源：直接指定一个文件或目录，只登记位置，不改任何规则文件", async () => {
-    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
-      ...rulesRoutes(),
-      "policy:get": makeEnvelope({ layers: null, effective: { skills: { repositories: { "agent-skills": {} } } }, attribution: null, layer: null, key: null, value: null, path: null }, { command: "policy.get" }),
-      "policy:set": makeEnvelope({}, { command: "policy.set" }),
-    };
-    const { calls } = renderWithEngine(<RulesPage />, routes);
+  it("来源的添加、更新、移除都在来源页：规则库表头与各行的来源名跳过去，规则页不直接改来源", async () => {
+    const onOpenSource = vi.fn();
+    const { calls } = renderWithEngine(<RulesPage onOpenSource={onOpenSource} />, rulesRoutes());
     await userEvent.click(await screen.findByTestId("rule-source-add"));
-    await userEvent.type(screen.getByTestId("rule-source-name"), "agent-skills");
-    await userEvent.type(screen.getByTestId("rule-source-path"), "~/notes/CLAUDE.md");
-    // 与技能集合同名会撞规则 id：拦下
-    expect(screen.getByTestId("rule-source-save")).toBeDisabled();
-    await userEvent.clear(screen.getByTestId("rule-source-name"));
-    await userEvent.type(screen.getByTestId("rule-source-name"), "my-rules");
-    await userEvent.click(screen.getByTestId("rule-source-save"));
-    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
-    const set = calls.find((call) => call.command === "policy:set")!;
-    expect(set.args.slice(0, 4)).toEqual(["--layer", "local", "--key", "rules.sources.my-rules"]);
-    expect(JSON.parse(set.args[set.args.indexOf("--value") + 1])).toEqual({ path: "~/notes/CLAUDE.md", _delete: false, _replace: true });
-    expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
+    expect(onOpenSource).toHaveBeenLastCalledWith(null);
+    await userEvent.click(screen.getByTestId("rules-open-source-agent-skills/core"));
+    expect(onOpenSource).toHaveBeenLastCalledWith("agent-skills");
+    expect(screen.queryByTestId("rules-fetch-source-agent-skills")).toBeNull();
+    expect(screen.queryByTestId("rules-remove-collection-agent-skills/core")).toBeNull();
+    expect(calls.some((call) => call.command === "skills:apply" || call.command === "policy:set")).toBe(false);
   });
 
-  it("规则库里来自技能集合的规则可以「移除来源」：同一个确认框，输入名称后移除这个集合并清理下载", async () => {
-    const { calls } = renderWithEngine(<RulesPage />, {
-      ...rulesRoutes(),
-      "skills:apply": makeEnvelope({ domain: "skills", steps: [], skipped: [] }, { command: "skills.apply" }),
-    });
-    await userEvent.click(await screen.findByTestId("rules-remove-collection-agent-skills/core"));
-    const dialog = await screen.findByRole("dialog", { name: "移除来源 agent-skills" });
-    expect(dialog).toHaveTextContent("规则文件内容保留");
-    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
-    await userEvent.type(within(dialog).getByTestId("confirm-modal-input"), "agent-skills");
-    await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
-    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual(["--only", "skill:agent-skills", "--action", "remove", "--purge"]);
-  });
 
-  it("我的规则来源在规则库里：没读到规则的也列出来；移除先确认，只删登记，不改任何规则文件", async () => {
+  it("我的规则来源在规则库里：没读到规则的也列出来，点过去到来源页管理，不改任何规则文件", async () => {
     const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
       ...rulesRoutes(),
       "policy:get": makeEnvelope({ layers: null, effective: { rules: { sources: { "my-rules": { path: "~/notes/rules" } } } }, attribution: null, layer: null, key: null, value: null, path: null }, { command: "policy.get" }),
-      "policy:set": makeEnvelope({}, { command: "policy.set" }),
     };
-    const { calls } = renderWithEngine(<RulesPage />, routes);
+    const onOpenSource = vi.fn();
+    const { calls } = renderWithEngine(<RulesPage onOpenSource={onOpenSource} />, routes);
     const row = await screen.findByTestId("rule-source-my-rules");
     expect(row).toHaveTextContent("没读到规则");
     expect(row).toHaveTextContent("规则文件 · ~/notes/rules");
-    await userEvent.click(within(row).getByRole("button", { name: "移除规则来源 my-rules" }));
-    expect(calls.some((call) => call.command === "policy:set")).toBe(false);
-    await userEvent.click(await screen.findByTestId("confirm-modal-confirm"));
-    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
-    const set = calls.find((call) => call.command === "policy:set")!;
-    expect(set.args.slice(0, 4)).toEqual(["--layer", "local", "--key", "rules.sources.my-rules"]);
-    expect(JSON.parse(set.args[set.args.indexOf("--value") + 1])).toEqual({ _delete: true });
-    expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
+    await userEvent.click(within(row).getByRole("button", { name: "到来源页管理 my-rules" }));
+    expect(onOpenSource).toHaveBeenCalledWith("my-rules");
+    expect(calls.some((call) => call.command === "policy:set" || call.command === "rules:apply")).toBe(false);
   });
 
   it("规则文件可展开查看实际全文，只读展示、不发起任何写入或 plan", async () => {
@@ -386,43 +357,29 @@ describe("RulesPage：实际文件为准", () => {
     expect(screen.getByTestId("rules-update-from-source-rules:codex_global")).toHaveTextContent("查看新版本");
   });
 
-  it("git 来源可在规则页直接「更新来源」，发出与技能页相同的更新动作", async () => {
-    const { calls } = renderWithEngine(<RulesPage />, {
-      ...rulesRoutes(),
-      "skills:apply": makeEnvelope({ domain: "skills", steps: [], skipped: [] }, { command: "skills.apply" }),
-    });
-    await userEvent.click(await screen.findByTestId("rules-fetch-source-agent-skills"));
-    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual([
-      "--only", "skill:agent-skills", "--action", "update",
-    ]);
-  });
 
-  it("还没有来源规则：已登记的推荐来源给「取回」，没登记的引导去技能页添加", async () => {
+  it("还没有来源规则：推荐来源给「到来源页取回 / 添加」，规则页自己不取回", async () => {
     const routes = rulesRoutes();
     const data = routes["rules:status"].data as Record<string, unknown>;
     data.source_rules = [];
     data.suggested_sources = [
       { name: "agent-skills", description: "作者维护的技能与常驻规则", url: "https://github.com/ly87ing/agent-skills.git", collection: null },
     ];
-    const onOpenSkills = vi.fn();
-    const first = renderWithEngine(<RulesPage onOpenSkills={onOpenSkills} />, routes);
+    const onOpenSource = vi.fn();
+    const first = renderWithEngine(<RulesPage onOpenSource={onOpenSource} />, routes);
     const empty = await screen.findByTestId("rules-no-source");
-    expect(empty).toHaveTextContent("添加规则文件，或添加带规则的仓库");
-    await userEvent.click(within(empty).getByRole("button", { name: "技能页" }));
-    expect(onOpenSkills).toHaveBeenCalled();
+    expect(empty).toHaveTextContent("添加规则文件，或带规则的仓库");
+    await userEvent.click(within(empty).getByRole("button", { name: "来源页" }));
+    expect(onOpenSource).toHaveBeenLastCalledWith(null);
+    await userEvent.click(within(empty).getByRole("button", { name: "到来源页添加 agent-skills" }));
+    expect(onOpenSource).toHaveBeenLastCalledWith(null);
     first.unmount();
 
     (data.suggested_sources as Array<Record<string, unknown>>)[0].collection = "agent-skills";
-    const { calls } = renderWithEngine(<RulesPage />, {
-      ...routes,
-      "skills:apply": makeEnvelope({ domain: "skills", steps: [], skipped: [] }, { command: "skills.apply" }),
-    });
-    await userEvent.click(await screen.findByRole("button", { name: "取回 agent-skills" }));
-    await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:apply")!.args).toEqual([
-      "--only", "skill:agent-skills", "--action", "update",
-    ]);
+    const { calls } = renderWithEngine(<RulesPage onOpenSource={onOpenSource} />, routes);
+    await userEvent.click(await screen.findByRole("button", { name: "到来源页取回 agent-skills" }));
+    expect(onOpenSource).toHaveBeenLastCalledWith("agent-skills");
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
   });
 
   it("复制到另一目标：目的方用它自己的 base，来源用 --from", async () => {

@@ -402,10 +402,12 @@ describe("SettingsPage", () => {
     expect(general.compareDocumentPosition(tools) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
 
     const expectedKeys = [
-      "takeover",
       "runs",
       "secrets",
     ];
+    // 扫描本机已有内容拆进账号页与来源页；分享链接导入在来源页
+    expect(screen.queryByTestId("advanced-entry-takeover")).toBeNull();
+    expect(screen.queryByTestId("advanced-entry-import-link")).toBeNull();
 
     for (const key of expectedKeys) {
       expect(screen.getByTestId(`advanced-entry-${key}`)).toBeInTheDocument();

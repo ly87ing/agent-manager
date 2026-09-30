@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, History, PackageOpen, Pencil, Power, PowerOff, Plus, RefreshCw, SearchX, Share2, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Library, PackageOpen, SearchX } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -7,16 +7,14 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
-import { AccountCells, AccountHeader, AccountSwitch, ActionMenu, IconAction, RowActions } from "../components/AccountGrid";
+import { AccountCells, AccountHeader, AccountSwitch, ActionMenu, RowActions } from "../components/AccountGrid";
 import { skillChip, skillNeedsUpdate } from "../lib/skillChip";
-import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import { SkillInstalledView } from "../components/SkillInstalledView";
-import { SkillOtherSources } from "../components/SkillOtherSources";
-import { SkillVersionsDialog } from "../components/SkillVersionsDialog";
-import { SkillAdoptDialog } from "../components/SkillAdoptDialog";
+import { AttentionOnlyToggle, StateBadge } from "../components/StateBadge";
+import { shortRef, useInbox } from "../lib/inbox";
+import type { InboxState } from "../lib/inbox";
 import { describeTrack, versionLabel } from "../lib/skillTrack";
-import type { EngineElement, PolicyData, SkillRecommendation, StatusData } from "../lib/contract";
-import { runEngine } from "../lib/engine";
+import type { EngineElement, StatusData } from "../lib/contract";
 import {
   agentCellsOf,
   type SkillAgentCell,
@@ -26,37 +24,29 @@ import {
   type SkillSpec,
 } from "../lib/observed";
 import { engineKeys, useEngineQuery } from "../lib/queries";
-import { addToAllRows, fillRows, versionUpdateRows } from "../lib/skillFill";
+import { addToAllRows, fillRows } from "../lib/skillFill";
 import { useExecutions } from "../lib/execution";
-import { encodeShareLink, type SharePayload } from "../lib/shareLink";
-import { availableSkills, fullSkillDefinition, isCollection } from "../lib/skillCollections";
-import { dismissRecommendation as dismissRecommendationFor, loadDismissed } from "../lib/recommendDismiss";
-import { RemoveCollectionDialog } from "../components/RemoveCollectionDialog";
+import { isCollection } from "../lib/skillCollections";
 import { ForkSkillDialog } from "../components/ForkSkillDialog";
 import { useBatchApply } from "../lib/useBatchApply";
 import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
-import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
 
 const ACTIVE = new Set(["linked", "missing-link", "dead-link", "drifted"]);
-const TONE = {
-  ok: "text-muted-foreground",
-  warn: "bg-warning/15 text-warning",
-  info: "bg-info/10 text-info",
-} as const;
 
 /** 一个技能在各账号上的情况，压成一行：全部账号 / 某某除外 / 新发现，外加需要处理的标签。 */
 function summarize(skill: EngineElement, cells: Record<string, SkillAgentCell>, nameOf: (agent: string) => string) {
   const entries = Object.entries(cells);
   const off = entries.filter(([, cell]) => !ACTIVE.has(cell.state) && cell.state !== "extra-link").map(([agent]) => nameOf(agent));
   const anyActive = entries.some(([, cell]) => ACTIVE.has(cell.state));
-  const badges: { text: string; tone: keyof typeof TONE }[] = [];
-  if (entries.some(([, cell]) => cell.source_missing)) badges.push({ text: "来源里已删除", tone: "warn" });
-  if (entries.some(([, cell]) => cell.state === "missing-link" || cell.state === "dead-link")) badges.push({ text: "链接损坏", tone: "warn" });
-  if (entries.some(([, cell]) => cell.state === "drifted")) badges.push({ text: "入口被外部内容占用", tone: "warn" });
-  if (entries.some(([, cell]) => cell.state === "extra-link")) badges.push({ text: "有外部链接", tone: "info" });
-  if (entries.some(([, cell]) => skillNeedsUpdate(cell))) badges.push({ text: "有新版本", tone: "info" });
+  // 统一状态（lib/inbox.ts）：损坏 / 已偏离 / 未纳管 / 有新版本，与待处理页同一套标签
+  const badges: { text: string; state: InboxState }[] = [];
+  if (entries.some(([, cell]) => cell.source_missing)) badges.push({ text: "来源里已删除", state: "broken" });
+  if (entries.some(([, cell]) => cell.state === "missing-link" || cell.state === "dead-link")) badges.push({ text: "链接损坏", state: "broken" });
+  if (entries.some(([, cell]) => cell.state === "drifted")) badges.push({ text: "入口被外部内容占用", state: "drifted" });
+  if (entries.some(([, cell]) => cell.state === "extra-link")) badges.push({ text: "有外部链接", state: "unmanaged" });
+  if (entries.some(([, cell]) => skillNeedsUpdate(cell))) badges.push({ text: "有新版本", state: "update" });
   const inbox = (skill.observed as SkillObserved).discovery_inbox === true;
   const text = inbox
     ? "新发现"
@@ -91,12 +81,10 @@ export default function SkillsPage({
   initialAgent,
   initialSearch,
   onResetAgent,
-  importPayload,
-  onImportConsumed,
+  onOpenSource,
 }: {
-  /** 从分享链接导入的技能集合：打开预填好的「新增集合」表单，用户检查后保存。 */
-  importPayload?: Extract<SharePayload, { kind: "skills" }> | null;
-  onImportConsumed?: () => void;
+  /** 来源的添加、更新、换版本、纳入都在来源页：点「可更新」「尚未下载」等跳过去（名称；`unmanaged` 为未纳管）。 */
+  onOpenSource?: (name: string | null) => void;
   /** 从账号页进来：只看这个账号。 */
   initialAgent?: string | null;
   /** 从总览「去处理」进来时直接搜到那个技能。 */
@@ -106,18 +94,10 @@ export default function SkillsPage({
   const query = useEngineQuery<StatusData>("skills:status");
   const nameOf = useAccountNames();
   const groupsOf = useAccountGroups();
-  const policyQuery = useEngineQuery<PolicyData>("policy:get");
   const [collectionFilter, setCollectionFilter] = useState<string>("all");
   const [agentFilter, setAgentFilter] = useState<string>(() => initialAgent ?? "all");
   const [search, setSearch] = useState(initialSearch ?? "");
   const [expanded, setExpanded] = useState<Record<string, boolean>>(loadExpanded);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [editing, setEditing] = useState<EngineElement | null>(null);
-  const [pendingRemove, setPendingRemove] = useState<EngineElement | null>(null);
-  /** 推荐卡片上的「启用…」：确认后一次做完登记、下载、链接到全部账号。 */
-  const [enabling, setEnabling] = useState<SkillRecommendation | null>(null);
-  const [enablingBusy, setEnablingBusy] = useState(false);
-  const [dismissed, setDismissed] = useState<string[]>(loadDismissed);
   const [pendingTakeover, setPendingTakeover] = useState<{ element: EngineElement; agent: string; action: "add" | "remove" } | null>(null);
   /** 正在「改成我的版本」的技能。 */
   const [forking, setForking] = useState<EngineElement | null>(null);
@@ -126,38 +106,26 @@ export default function SkillsPage({
 
   const directApply = useDirectApply();
   const batchApply = useBatchApply();
+  /** 「只看待处理」与待处理页同一份判断。 */
+  const attentionSubjects = new Set(useInbox(nameOf).items.filter((item) => item.page === "skills").map((item) => item.subject));
+  const [attentionOnly, setAttentionOnly] = useState(false);
   const { execute } = useExecutions();
-  const [updatingAll, setUpdatingAll] = useState(false);
-  /** 正在看版本的 git 来源；switching 为真时正在切换。 */
-  const [versionsOf, setVersionsOf] = useState<{ collection: EngineElement; openLatest: boolean } | null>(null);
-  const [switching, setSwitching] = useState(false);
-  /** 正在纳入 / 清理的技能名（「其他来源」里的一项）。 */
-  const [adopting, setAdopting] = useState<string | null>(null);
   const queryClient = useQueryClient();
-  const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
 
   useEffect(() => {
     setAgentFilter(initialAgent ?? "all");
   }, [initialAgent]);
 
-  const [importDraft, setImportDraft] = useState<{ name: string; definition: Record<string, unknown> } | null>(null);
-  useEffect(() => {
-    if (!importPayload) return;
-    setImportDraft({ name: importPayload.name, definition: importPayload.definition });
-    setShowAddForm(true);
-    onImportConsumed?.();
-  }, [importPayload]);
 
   if (query.isPending) return <PageLoading />;
   if (query.isError) return <PageError title="技能状态读取失败" error={query.error} />;
 
   const elements = query.data.data.elements ?? [];
-  const recommendations = query.data.data.recommendations ?? [];
   const installed = query.data.data.installed ?? [];
   const unmanaged = query.data.data.unmanaged ?? null;
+  const unmanagedCount = (unmanaged?.skills.length ?? 0) + (unmanaged?.duplicates.length ?? 0);
   const collections = elements.filter(isCollection);
   const skills = elements.filter((element) => !isCollection(element));
-  const layers = policyQuery.data?.data.layers ?? null;
 
   // 其他来源里出现的账号也要有列，否则只装了别处技能的账号看不到
   const agentOptions = Array.from(
@@ -177,153 +145,16 @@ export default function SkillsPage({
   const skillsOf = (collection: EngineElement) =>
     skills.filter((skill) => {
       const spec = skill.spec as SkillSpec;
-      return spec.collection === collName(collection) && (collectionMatches(collection) || matchesKeyword(search, [spec.name, skill.id]));
+      return (
+        spec.collection === collName(collection)
+        && (!attentionOnly || attentionSubjects.has(skill.id))
+        && (collectionMatches(collection) || matchesKeyword(search, [spec.name, skill.id]))
+      );
     });
   const visibleCollections = collections.filter((collection) =>
     (collectionFilter === "all" || collName(collection) === collectionFilter)
-    && (!search.trim() || collectionMatches(collection) || skillsOf(collection).length > 0));
+    && ((!search.trim() && !attentionOnly) || (collectionMatches(collection) && !attentionOnly) || skillsOf(collection).length > 0));
   const pendingFill = fillRows(elements, agentFilter === "all" ? undefined : [agentFilter]);
-
-  const refreshUpstream = (collection: EngineElement) =>
-    runEngine("system:refresh-upstream", ["--only", collection.id])
-      .catch(() => undefined)
-      .finally(() => void queryClient.invalidateQueries({ queryKey: engineKeys.all }));
-
-  /**
-   * 把 git 来源换到某个版本（ref 为 null 时按跟踪方式到最新），再把各账号在用、内容有变化的
-   * 这个来源的技能换过去；停用的不动。镜像切换失败时账号一个都不动。
-   */
-  const switchVersion = async (collection: EngineElement, ref: string | null, label: string): Promise<boolean> => {
-    const name = collName(collection);
-    setSwitching(true);
-    try {
-      const envelope = await execute({
-        command: "skills:apply",
-        label: ref ? `把 ${name} 切换到 ${label}` : `更新 ${name}`,
-        args: ["--only", collection.id, "--action", "update", ...(ref ? ["--ref", ref] : [])],
-        silent: true,
-      });
-      if (!envelope?.ok) {
-        toast.error(`没有切换：${envelope?.errors[0]?.message ?? "详见任务记录"}`);
-        return false;
-      }
-      await runEngine("system:refresh-upstream", ["--only", collection.id]).catch(() => undefined);
-      const fresh = await runEngine<StatusData>("skills:status", []);
-      const rows = fresh.ok
-        ? versionUpdateRows(fresh.data.elements ?? []).filter((row) => row.elementId.startsWith(`${collection.id}/`))
-        : [];
-      await batchApply.applyBatch({ actionLabel: "更新", rows });
-      toast.success(`${name} 已${ref ? "切换" : "更新"}到 ${label}`, {
-        description: rows.length ? `${rows.length} 处技能换到了这个版本` : "各账号在用的技能内容没有变化",
-      });
-      return true;
-    } finally {
-      setSwitching(false);
-      await queryClient.invalidateQueries({ queryKey: engineKeys.all });
-    }
-  };
-
-  /** 纳入管理：执行后提示里给「撤销」（按备份清单放回原目录）。 */
-  const runAdopt = async (name: string, args: string[], label: string, runId: string): Promise<boolean> => {
-    const envelope = await execute({ command: "skills:adopt", label, args, silent: true, runId });
-    await queryClient.invalidateQueries({ queryKey: engineKeys.all });
-    if (!envelope?.ok) {
-      toast.error(`没有完成：${envelope?.errors[0]?.message ?? "详见任务记录"}`);
-      return false;
-    }
-    const data = envelope.data as { backup?: string; collection?: string; removed?: string[]; linked?: string[] };
-    // 用户可能已「在后台继续」并打开了别的纳入：只关这一个
-    setAdopting((current) => (current === name ? null : current));
-    toast.success(`${label}：完成`, {
-      description: `移走 ${data.removed?.length ?? 0} 处${data.linked?.length ? `，链接到 ${data.linked.map(nameOf).join("、")}` : ""}`,
-      action: data.backup
-        ? {
-            label: "撤销",
-            onClick: () =>
-              void execute({ command: "skills:adopt", label: `撤回：${label}`, args: ["--undo", data.backup!] }).then(() =>
-                queryClient.invalidateQueries({ queryKey: engineKeys.all }),
-              ),
-          }
-        : undefined,
-    });
-    return true;
-  };
-
-  const runCollectionAction = (collection: EngineElement, action: "update" | "enable" | "disable", title: string) => {
-    if (action === "update" && (collection.spec as SkillCollectionSpec).url) {
-      // git 来源：先预览要换的内容，确认后才换
-      return setVersionsOf({ collection, openLatest: true });
-    }
-    if (action === "disable") dismissIfRecommended(collection);
-    return void directApply
-      .apply({ command: "skills:apply", label: title, args: ["--only", collection.id, "--action", action] })
-      .then((envelope) => {
-        // 拉完代码顺手重查一次最新提交，否则还挂着「可更新」
-        if (action === "update" && envelope?.ok) return refreshUpstream(collection);
-      });
-  };
-
-  /**
-   * 全部更新：逐个取回启用中的集合（git 拉到最新、本机目录重新扫描），再把各账号在用、
-   * 已有新版本的技能换到新版本。新发现的技能不自动添加，账号上停用的不动；单个失败不拦其余。
-   */
-  const updateAll = async () => {
-    if (updatingAll) return;
-    setUpdatingAll(true);
-    let fetched = 0;
-    let failed = 0;
-    try {
-      const targets = collections.filter(
-        (collection) =>
-          (collection.policy as { enabled?: boolean }).enabled !== false &&
-          ((collection.observed as SkillCollectionObserved).actions ?? []).includes("update"),
-      );
-      for (const collection of targets) {
-        const envelope = await execute({
-          command: "skills:apply",
-          label: `更新集合 ${collName(collection)}`,
-          args: ["--only", collection.id, "--action", "update"],
-          silent: true,
-        });
-        if (envelope?.ok) {
-          fetched += 1;
-          await runEngine("system:refresh-upstream", ["--only", collection.id]).catch(() => undefined);
-        } else {
-          failed += 1;
-        }
-      }
-      // 取回之后按最新状态算哪些技能有新版本
-      const fresh = await runEngine<StatusData>("skills:status", []);
-      const rows = fresh.ok ? versionUpdateRows(fresh.data.elements ?? []) : [];
-      (failed ? toast.error : toast.success)(
-        `已取回 ${fetched} 个集合${failed ? `，${failed} 个失败（详见任务记录）` : ""}；${rows.length ? `${rows.length} 处技能换到新版本` : "各账号的技能都已是最新"}`,
-      );
-      await batchApply.applyBatch({ actionLabel: "更新", rows });
-    } finally {
-      setUpdatingAll(false);
-      await queryClient.invalidateQueries({ queryKey: engineKeys.all });
-    }
-  };
-
-  /** 复制技能集合的分享链接：只含 git 地址与技能、规则位置，不含本机路径。 */
-  const shareCollection = async (name: string, spec: SkillCollectionSpec) => {
-    try {
-      const link = encodeShareLink({
-        kind: "skills",
-        name,
-        definition: {
-          url: spec.url as string,
-          skill_paths: spec.skill_paths ?? null,
-          rules_path: (spec as { rules_path?: string | null }).rules_path ?? null,
-          ...(spec.track ? { track: spec.track } : {}),
-        },
-      });
-      await navigator.clipboard.writeText(link);
-      toast.success(`已复制 ${name} 的分享链接`);
-    } catch (reason) {
-      toast.error(`没能复制：${reason instanceof Error ? reason.message : String(reason)}`);
-    }
-  };
 
   /**
    * 改成我的版本：先复制并登记（skills:fork），成功后把勾选的账号逐个换过去——
@@ -396,52 +227,6 @@ export default function SkillsPage({
     });
   };
 
-  const confirmRemove = (purge: boolean) => {
-    if (!pendingRemove) return;
-    dismissIfRecommended(pendingRemove);
-    void directApply.apply({
-      command: "skills:apply",
-      label: `移除来源 ${collName(pendingRemove)}`,
-      args: ["--only", pendingRemove.id, "--action", "remove", ...(purge ? ["--purge"] : [])],
-    });
-    setPendingRemove(null);
-  };
-
-  /**
-   * 启用推荐来源：保存集合定义 → 下载 → 把其中的技能链接到全部账号。账号里已有同名技能目录或链接的，
-   * 引擎不给 add，跳过、不覆盖；规则不在这里写。任何一步失败就停在那一步，已做的如实保留。
-   */
-  const enableRecommended = async (item: SkillRecommendation) => {
-    setEnablingBusy(true);
-    try {
-      if (!(await definitionOps.saveDefinition({ name: item.name, definition: item.definition, isNew: true }))) return;
-      const fetched = await execute({ command: "skills:apply", label: `下载 ${item.name}`, args: ["--only", `skill:${item.name}`, "--action", "update"], silent: true });
-      if (!fetched?.ok) {
-        toast.error(`${item.name} 已登记，但下载失败：${fetched?.errors[0]?.message ?? "详见任务记录"}。稍后在集合上点「更新」重试`);
-        return;
-      }
-      const fresh = await runEngine<StatusData>("skills:status", []);
-      const rows = (fresh.ok ? fresh.data.elements ?? [] : [])
-        .filter((element) => (element.spec as SkillSpec).collection === item.name)
-        .flatMap(addToAllRows);
-      await batchApply.applyBatch({ actionLabel: "添加", rows });
-      toast.info(`${item.name} 已启用。规则没有改动：想用它的规则，到规则页看过差异再应用。`);
-    } finally {
-      setEnablingBusy(false);
-      setEnabling(null);
-      await queryClient.invalidateQueries({ queryKey: engineKeys.all });
-    }
-  };
-
-  const dismissRecommendation = (name: string) => setDismissed(dismissRecommendationFor(name));
-  /** 停用或移除的是推荐来源（同名或同地址）：视为不想用了，不再推荐。 */
-  const dismissIfRecommended = (collection: EngineElement) => {
-    const spec = collection.spec as SkillCollectionSpec;
-    const match = recommendations.find((item) => item.name === collName(collection) || (spec.url && item.url === spec.url));
-    if (match) dismissRecommendation(match.name);
-  };
-  const featured = recommendations.find((item) => !item.added && !dismissed.includes(item.name));
-
   const confirmDropped = () => {
     if (!pendingDropped) return;
     const { element, agent, cell } = pendingDropped;
@@ -473,7 +258,7 @@ export default function SkillsPage({
     (skill.observed as SkillObserved).discovery_inbox === true || cellsIn(skill).some(([, cell]) => skillChip(cell).tone === "warn");
   /** 搜索或只看一个集合时展开命中的；否则按用户上次的选择，没选过的有待处理或还没有技能时才展开。 */
   const isOpen = (name: string, rows: EngineElement[]) =>
-    Boolean(search.trim()) || collectionFilter === name || (expanded[name] ?? (rows.length === 0 || rows.some(needsAttention)));
+    Boolean(search.trim()) || attentionOnly || collectionFilter === name || (expanded[name] ?? (rows.length === 0 || rows.some(needsAttention)));
   const setOpen = (next: Record<string, boolean>) => {
     const merged = { ...expanded, ...next };
     setExpanded(merged);
@@ -489,32 +274,6 @@ export default function SkillsPage({
     <div className="space-y-3">
       <h1 className="sr-only">技能</h1>
       {query.data.errors.length > 0 && <ErrorPanel title="技能状态读取失败" errors={query.data.errors} />}
-
-      {featured && (
-        <div data-testid={`recommend-banner-${featured.name}`} className="flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
-          <Sparkles className="h-5 w-5 shrink-0 text-primary" aria-hidden />
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">推荐启用 {featured.name}</p>
-            <p className="text-xs text-muted-foreground">{featured.description}</p>
-          </div>
-          <button
-            type="button"
-            data-testid={`recommend-dismiss-${featured.name}`}
-            onClick={() => dismissRecommendation(featured.name)}
-            className="shrink-0 rounded-md px-3 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            不用了
-          </button>
-          <button
-            type="button"
-            data-testid={`recommend-enable-${featured.name}`}
-            onClick={() => setEnabling(featured)}
-            className="shrink-0 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
-          >
-            启用…
-          </button>
-        </div>
-      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <SearchInput value={search} onChange={setSearch} placeholder="搜索技能…" testId="skills-search" />
@@ -545,24 +304,13 @@ export default function SkillsPage({
             <option key={agent} value={agent}>{nameOf(agent)}</option>
           ))}
         </select>
+        <AttentionOnlyToggle checked={attentionOnly} count={attentionSubjects.size} onChange={setAttentionOnly} />
         <div className="ml-auto flex items-center gap-2">
-          {collections.length > 0 && (
-            <button
-              type="button"
-              data-testid="skills-update-all"
-              disabled={updatingAll || batchApply.executing}
-              title="取回所有集合的新版本，并把各账号在用的技能换到新版本；新发现的技能不会自动添加，账号上停用的不动"
-              onClick={() => void updateAll()}
-              className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40"
-            >
-              <RefreshCw className={cn("h-4 w-4", updatingAll && "animate-spin")} aria-hidden /> {updatingAll ? "正在更新…" : "全部更新"}
-            </button>
-          )}
           {agentFilter === "all" && pendingFill.length > 0 && (
             <button
               type="button"
               data-testid="skills-fill-all"
-              disabled={updatingAll || batchApply.executing}
+              disabled={batchApply.executing}
               title="把在用的技能加到所有还缺它的账号；账号上停用的不动"
               onClick={() => void batchApply.applyBatch({ actionLabel: "补齐", rows: pendingFill })}
               className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/15 disabled:opacity-40"
@@ -581,14 +329,6 @@ export default function SkillsPage({
               {allOpen ? "全部收起" : "全部展开"}
             </button>
           )}
-          <button
-            type="button"
-            data-testid="add-collection-button"
-            onClick={() => setShowAddForm(true)}
-            className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90"
-          >
-            <Plus className="h-4 w-4" aria-hidden /> 添加来源
-          </button>
         </div>
       </div>
 
@@ -597,9 +337,14 @@ export default function SkillsPage({
           icon={PackageOpen}
           testId="skills-collections-empty"
           title="还没有技能来源"
-          description="点右上角「添加来源」，添加一个 git 仓库或本机目录。"
+          description="技能来自 git 仓库或本机目录，在来源页添加。"
+          actions={
+            <button type="button" data-testid="skills-open-sources" onClick={() => onOpenSource?.(null)} className="rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
+              去来源页添加
+            </button>
+          }
         />
-      ) : search.trim() && shownSkillCount === 0 ? (
+      ) : (search.trim() || attentionOnly) && shownSkillCount === 0 ? (
         <EmptyState
           icon={SearchX}
           testId="skills-empty-state"
@@ -636,7 +381,6 @@ export default function SkillsPage({
             const name = collName(collection);
             const spec = collection.spec as SkillCollectionSpec;
             const observed = collection.observed as SkillCollectionObserved;
-            const actions = observed.actions ?? [];
             const enabled = (collection.policy as { enabled?: boolean }).enabled !== false;
             const inboxCount = observed.discovery_inbox?.length ?? 0;
             const rows = skillsOf(collection);
@@ -670,9 +414,9 @@ export default function SkillsPage({
                   </span>
                   {!enabled && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">已停用</span>}
                   {!observed.repo_cached && (
-                    <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning">
+                    <button type="button" data-testid={`collection-uncached-${name}`} onClick={() => onOpenSource?.(name)} title="到来源页处理" className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning hover:underline">
                       {spec.source_path ? "本机目录不存在" : "尚未下载"}
-                    </span>
+                    </button>
                   )}
                   {spec.url && observed.version?.current && (
                     <span
@@ -684,14 +428,14 @@ export default function SkillsPage({
                     </span>
                   )}
                   {collection.freshness.state === "behind" && (
-                    <span data-testid={`collection-behind-${name}`} className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">
-                      {collection.freshness.upstream ? `可更新到 ${collection.freshness.upstream}` : "可更新"}
-                    </span>
+                    <button type="button" data-testid={`collection-behind-${name}`} onClick={() => onOpenSource?.(name)} title="到来源页预览并更新" className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info hover:underline">
+                      {collection.freshness.upstream ? `可更新到 ${shortRef(collection.freshness.upstream)}` : "可更新"}
+                    </button>
                   )}
                   {observed.version?.track_error && (
-                    <span data-testid={`collection-track-error-${name}`} className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning" title={observed.version.track_error}>
+                    <button type="button" data-testid={`collection-track-error-${name}`} onClick={() => onOpenSource?.(name)} className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning hover:underline" title={observed.version.track_error}>
                       跟踪方式有误
-                    </span>
+                    </button>
                   )}
                   {inboxCount > 0 && (
                     <span data-testid={`inbox-count-${name}`} className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">
@@ -707,46 +451,6 @@ export default function SkillsPage({
                       </span>
                     )}
                   />
-                  {/* 集合（来源）的操作常驻显示：移除来源等要一眼找得到 */}
-                  <RowActions
-                    always={
-                      <>
-                    {actions.includes("update") && (collection.freshness.state === "behind" || !observed.repo_cached) && (
-                        <IconAction tone="primary" label={`更新集合 ${name}`} testId={`update-collection-${name}`} onClick={() => runCollectionAction(collection, "update", `更新集合 ${name}`)}>
-                          <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-                        </IconAction>
-                    )}
-                    {spec.url && (
-                      <IconAction label={`${name} 的版本`} testId={`versions-collection-${name}`} onClick={() => setVersionsOf({ collection, openLatest: false })}>
-                        <History className="h-3.5 w-3.5" aria-hidden />
-                      </IconAction>
-                    )}
-                    {spec.url && (
-                      <IconAction label={`复制 ${name} 的分享链接`} testId={`share-collection-${name}`} onClick={() => void shareCollection(name, spec)}>
-                        <Share2 className="h-3.5 w-3.5" aria-hidden />
-                      </IconAction>
-                    )}
-                    <IconAction label={`编辑集合 ${name}`} testId={`edit-collection-${name}`} onClick={() => setEditing(collection)}>
-                      <Pencil className="h-3.5 w-3.5" aria-hidden />
-                    </IconAction>
-                    {actions.includes("enable") && !enabled && (
-                      <IconAction label={`启用集合 ${name}`} testId={`enable-collection-${name}`} onClick={() => runCollectionAction(collection, "enable", `启用集合 ${name}`)}>
-                        <Power className="h-3.5 w-3.5" aria-hidden />
-                      </IconAction>
-                    )}
-                    {actions.includes("disable") && enabled && (
-                      <IconAction label={`停用集合 ${name}`} testId={`disable-collection-${name}`} onClick={() => runCollectionAction(collection, "disable", `停用集合 ${name}`)}>
-                        <PowerOff className="h-3.5 w-3.5" aria-hidden />
-                      </IconAction>
-                    )}
-                    {actions.includes("remove") && (
-                      <IconAction danger label={`移除来源 ${name}`} testId={`remove-collection-${name}`} onClick={() => setPendingRemove(collection)}>
-                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                      </IconAction>
-                    )}
-                      </>
-                    }
-                  />
                 </header>
                 {observed.discovery_error && (
                   <p data-testid={`discovery-error-${name}`} className="bg-warning/10 px-4 py-1.5 text-xs text-warning">
@@ -756,7 +460,7 @@ export default function SkillsPage({
                 {observed.blocked_reason && <p className="bg-warning/10 px-4 py-1.5 text-xs text-warning">{observed.blocked_reason}</p>}
                 {open && rows.length === 0 && !search.trim() && (
                   <p className="px-4 py-2 text-xs text-muted-foreground">
-                    {observed.repo_cached ? "没有找到技能" : "点「更新」取回后技能会出现在这里"}
+                    {observed.repo_cached ? "没有找到技能" : "到来源页点「更新」取回后，技能会出现在这里"}
                   </p>
                 )}
                 {open && (
@@ -797,7 +501,7 @@ export default function SkillsPage({
                             </span>
                           )}
                           {summary.badges.map((badge) => (
-                            <span key={badge.text} className={cn("rounded px-1.5 py-0.5 text-[11px]", TONE[badge.tone])}>{badge.text}</span>
+                            <StateBadge key={badge.text} state={badge.state}>{badge.text}</StateBadge>
                           ))}
                           {addRows.length > 0 && (
                             <button
@@ -843,16 +547,17 @@ export default function SkillsPage({
         </div>
       )}
 
-      {unmanaged && (
-        <SkillOtherSources view={unmanaged} groups={groups} search={search} agentFilter={agentFilter} onAdopt={setAdopting} />
-      )}
-      {adopting && (
-        <SkillAdoptDialog
-          name={adopting}
-          nameOf={nameOf}
-          onConfirm={(args, label, runId) => runAdopt(adopting, args, label, runId)}
-          onClose={() => setAdopting(null)}
-        />
+
+      {unmanagedCount > 0 && (
+        <button
+          type="button"
+          data-testid="skills-unmanaged-link"
+          onClick={() => onOpenSource?.("unmanaged")}
+          className="flex w-full items-center gap-2 rounded-lg border border-info/30 bg-info/5 px-4 py-2 text-left text-sm text-info hover:bg-info/10"
+        >
+          <Library className="h-4 w-4 shrink-0" aria-hidden />
+          各账号里有 {unmanagedCount} 个技能不来自任何来源，到来源页「未纳管」决定是否纳入
+        </button>
       )}
 
       <details className="rounded-lg border bg-card">
@@ -862,71 +567,6 @@ export default function SkillsPage({
         </div>
       </details>
 
-      {versionsOf && (
-        <SkillVersionsDialog
-          collectionId={versionsOf.collection.id}
-          name={collName(versionsOf.collection)}
-          busy={switching || batchApply.executing}
-          openLatest={versionsOf.openLatest}
-          nameOf={nameOf}
-          onSwitch={(ref, label) => switchVersion(versionsOf.collection, ref, label)}
-          onClose={() => setVersionsOf(null)}
-        />
-      )}
-
-      {(showAddForm || editing) && (
-        <SkillCollectionFormDialog
-          agentIds={agentOptions}
-          initial={editing ? { name: collName(editing), definition: editing.spec } : undefined}
-          draft={editing ? undefined : importDraft ?? undefined}
-          fullDefinition={editing ? fullSkillDefinition(layers, collName(editing)) : null}
-          available={editing ? availableSkills(editing.observed as SkillCollectionObserved) : undefined}
-          repoCached={editing ? (editing.observed as SkillCollectionObserved).repo_cached : undefined}
-          onClose={() => {
-            setShowAddForm(false);
-            setEditing(null);
-            setImportDraft(null);
-          }}
-          onSubmit={(name, definition, complete) => {
-            setShowAddForm(false);
-            setEditing(null);
-            setImportDraft(null);
-            const isNew = !editing;
-            void definitionOps.saveDefinition({ name, definition, isNew, complete }).then(() => {
-              if (isNew) toast.info(`集合 ${name} 已保存，点「更新」取回技能。`);
-            });
-          }}
-        />
-      )}
-      {definitionOps.modals}
-      {pendingRemove && (
-        <RemoveCollectionDialog
-          name={collName(pendingRemove)}
-          local={Boolean((pendingRemove.spec as SkillCollectionSpec).source_path)}
-          executing={directApply.executing}
-          onConfirm={confirmRemove}
-          onClose={() => setPendingRemove(null)}
-        />
-      )}
-      {enabling && (
-        <ConfirmModal
-          title={`启用 ${enabling.name}`}
-          description="确认后依次执行，只做下面这些，不改动其他任何配置："
-          risk="write-local"
-          confirmLabel="启用"
-          executing={enablingBusy}
-          onConfirm={() => void enableRecommended(enabling)}
-          onClose={() => !enablingBusy && setEnabling(null)}
-        >
-          <ol data-testid="recommend-enable-steps" className="mt-3 list-decimal space-y-1.5 pl-5 text-sm">
-            <li>登记来源 {enabling.name}（{enabling.url}）</li>
-            <li>把仓库下载到本工具的数据目录</li>
-            <li>把其中的技能链接到全部账号；账号里已有同名技能目录或链接的跳过，不覆盖</li>
-            <li className="text-muted-foreground">规则、MCP、启动命令都不动；它带的规则可以到规则页看过差异再决定</li>
-          </ol>
-          <p className="mt-2 text-xs text-muted-foreground">以后不想用了：在集合上停用或删除，账号里的链接随之移除。</p>
-        </ConfirmModal>
-      )}
       {forking && (
         <ForkSkillDialog
           skill={(forking.spec as SkillSpec).name ?? forking.id}

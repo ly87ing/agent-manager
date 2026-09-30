@@ -1,13 +1,12 @@
 import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowUpDown, Copy, Eye, Info, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowUpDown, Copy, Eye, Info, Library, Pencil, Plus, Trash2 } from "lucide-react";
 import { AgentIcon } from "../components/AgentIcon";
-import { RemoveCollectionDialog } from "../components/RemoveCollectionDialog";
-import { dismissRecommendation } from "../lib/recommendDismiss";
+import { StateBadge } from "../components/StateBadge";
 import { COL_ACTION, COL_ICONS, COL_MIDDLE, COL_NARROW, PILL, PILL_HOVER, ROW, RowIcon, TableHeader } from "../components/DataTable";
 import { ConfirmModal } from "../components/ConfirmModal";
-import { AddSourceDialog, RemoveSourceDialog, type UserSource, useRuleSources } from "../components/RuleSources";
+import { useRuleSources } from "../components/RuleSources";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import type { EngineElement, RuleSourceRule, SuggestedSource, RuleTemplate, StatusData } from "../lib/contract";
@@ -83,7 +82,12 @@ function sourceRuleLabel(rule: RuleSourceRule): string {
   return `规则「${rule.name}」（来自 ${rule.collection}）`;
 }
 
-export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void } = {}) {
+export default function RulesPage({
+  onOpenSource,
+}: {
+  /** 来源的添加、更新、移除都在来源页（名称；null 打开来源页）。 */
+  onOpenSource?: (name: string | null) => void;
+} = {}) {
   const query = useEngineQuery<StatusData>("rules:status");
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const directApply = useDirectApply();
@@ -151,15 +155,6 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
     return `${account} · ${spec.kind === "codex" ? "AGENTS.md" : "CLAUDE.md"}`;
   };
 
-  /** git 来源：取回仓库新版本（与技能页的「更新资源库」同一个动作）。 */
-  const fetchSource = (collection: string) => {
-    void directApply.apply({
-      command: "skills:apply",
-      label: `更新来源 ${collection}`,
-      args: ["--only", `skill:${collection}`, "--action", "update"],
-    });
-  };
-
   const followerCount = (match: (observed: RulesObserved) => boolean) => elements.filter((element) => match(observedOf(element))).length;
 
   return (
@@ -224,7 +219,6 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
         sourceRules={sourceRules}
         templates={templates}
         suggested={suggested}
-        busy={directApply.executing}
         usage={{
           rule: (rule) => followerCount((observed) => (observed.source_follow?.rule ?? observed.matched_source_rule?.id) === rule.id),
           template: (template) => followerCount((observed) => !observed.source_follow && observed.matched_template?.id === template.id),
@@ -242,18 +236,7 @@ export default function RulesPage({ onOpenSkills }: { onOpenSkills?: () => void 
         onNewTemplate={() => setDialog({ kind: "template", template: null })}
         onEditTemplate={(template) => setDialog({ kind: "template", template })}
         onDeleteTemplate={(template) => setDialog({ kind: "delete-template", template })}
-        onFetch={fetchSource}
-        onOpenSkills={onOpenSkills}
-        onRemoveCollection={(collection, local, purge) => {
-          // 移除的来源若是推荐来源，之后不再推荐
-          dismissRecommendation(collection);
-          void directApply.apply({
-            command: "skills:apply",
-            label: `移除来源 ${collection}`,
-            args: ["--only", `skill:${collection}`, "--action", "remove", ...(purge && !local ? ["--purge"] : [])],
-          });
-        }}
-        collectionBusy={directApply.executing}
+        onOpenSource={onOpenSource}
       />
 
       {dialog?.kind === "edit" && <EditDialog element={dialog.element} onClose={() => setDialog(null)} />}
@@ -278,8 +261,9 @@ function ruleStatus(element: EngineElement, sourceRules: RuleSourceRule[]) {
     const name = rule?.name ?? follow.rule.split("/").pop();
     const source = rule?.collection ?? follow.rule.split("/")[0];
     const changedSinceFollow = !follow.file_unchanged && Boolean(follow.current_revision) && follow.current_revision !== follow.applied_revision;
-    if (follow.update_available) return { name, source, tone: "warn" as const, note: "有新版本", testId: "rules-update-available" };
-    if (changedSinceFollow) return { name, source, tone: "warn" as const, note: "被改过，来源有新版", testId: "rules-changed-since-follow" };
+    // 统一状态（lib/inbox.ts）：与待处理页同一套标签
+    if (follow.update_available) return { name, source, tone: "warn" as const, state: "update" as const, note: "有新版本", testId: "rules-update-available" };
+    if (changedSinceFollow) return { name, source, tone: "warn" as const, state: "drifted" as const, note: "被改过，来源有新版", testId: "rules-changed-since-follow" };
     if (follow.current_revision === null) return { name, source, tone: "muted" as const, note: "来源已不在" };
     if (!follow.file_unchanged) return { name, source, tone: "muted" as const, note: "改过" };
     return { name, source, tone: "ok" as const, note: "最新" };
@@ -332,7 +316,7 @@ function TargetRow({
   const action = !writable
     ? null
     : fill
-      ? { testId: `rules-fill-${element.id}`, label: "从主号补齐", title: "从同一助手的主号复制规则文件过来", run: () => onFill(fill) }
+      ? { testId: `rules-fill-${element.id}`, label: "补齐", title: "还没有规则文件：从同一助手的主号复制过来", run: () => onFill(fill) }
       : followedRule && status.testId
         ? {
             testId: `rules-update-from-source-${element.id}`,
@@ -358,12 +342,11 @@ function TargetRow({
             <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", DOT[status.tone])} aria-hidden />
             {status.name && <span className="font-medium">{status.name}</span>}
             {status.source && <span className="truncate text-muted-foreground">· {status.source}</span>}
-            <span
-              data-testid={status.testId ? `${status.testId}-${element.id}` : undefined}
-              className={cn("shrink-0", status.tone === "warn" ? "text-warning" : "text-muted-foreground")}
-            >
-              {status.name ? `· ${status.note}` : status.note}
-            </span>
+            {"state" in status && status.state ? (
+              <StateBadge state={status.state} testId={status.testId ? `${status.testId}-${element.id}` : undefined}>{status.note}</StateBadge>
+            ) : (
+              <span className="shrink-0 text-muted-foreground">{status.name ? `· ${status.note}` : status.note}</span>
+            )}
           </div>
           {status.detail && <p className="truncate text-xs text-warning" title={status.detail}>{status.detail}</p>}
         </div>
@@ -414,38 +397,27 @@ function RuleLibrary({
   sourceRules,
   templates,
   suggested,
-  busy,
   usage,
   onApplyRule,
   onApplyTemplate,
   onNewTemplate,
   onEditTemplate,
   onDeleteTemplate,
-  onFetch,
-  onOpenSkills,
-  onRemoveCollection,
-  collectionBusy,
+  onOpenSource,
 }: {
-  /** 移除规则所在的技能集合（来源）：技能链接、跟随一并处理，见确认框说明。 */
-  onRemoveCollection: (collection: string, local: boolean, purge: boolean) => void;
-  collectionBusy: boolean;
   sourceRules: RuleSourceRule[];
   templates: RuleTemplate[];
   suggested: SuggestedSource[];
-  busy: boolean;
   usage: { rule: (rule: RuleSourceRule) => number; template: (template: RuleTemplate) => number };
   onApplyRule?: (rule: RuleSourceRule) => void;
   onApplyTemplate?: (template: RuleTemplate) => void;
   onNewTemplate: () => void;
   onEditTemplate: (template: RuleTemplate) => void;
   onDeleteTemplate: (template: RuleTemplate) => void;
-  onFetch: (collection: string) => void;
-  onOpenSkills?: () => void;
+  /** 来源的更新、移除在来源页：行上的来源名点过去。 */
+  onOpenSource?: (name: string | null) => void;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [removing, setRemoving] = useState<UserSource | null>(null);
-  const [removingCollection, setRemovingCollection] = useState<{ name: string; local: boolean } | null>(null);
   const userSources = useRuleSources();
   const userSourceOf = (collection: string) => userSources.sources.find((source) => source.name === collection);
   const emptySources = userSources.sources.filter((source) => !sourceRules.some((rule) => rule.collection === source.name));
@@ -461,8 +433,8 @@ function RuleLibrary({
   return (
     <section className="overflow-clip rounded-lg border bg-card" aria-label="规则库">
       <TableHeader title={`规则库 · ${count}`} middle="来源" narrow="行数">
-        <button type="button" data-testid="rule-source-add" onClick={() => setAdding(true)} className="inline-flex items-center gap-1 text-primary hover:underline">
-          <Plus className="h-3.5 w-3.5" aria-hidden /> 添加规则来源
+        <button type="button" data-testid="rule-source-add" onClick={() => onOpenSource?.(null)} className="inline-flex items-center gap-1 text-primary hover:underline">
+          <Library className="h-3.5 w-3.5" aria-hidden /> 管理来源
         </button>
         <button type="button" onClick={onNewTemplate} className="inline-flex items-center gap-1 text-primary hover:underline">
           <Plus className="h-3.5 w-3.5" aria-hidden /> 新建模板
@@ -478,9 +450,15 @@ function RuleLibrary({
                   <div className="truncate text-sm font-medium">{rule.name}</div>
                   <div className="text-xs text-muted-foreground">{used(usage.rule(rule))}</div>
                 </div>
-                <div className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")} title={mine?.path}>
+                <button
+                  type="button"
+                  data-testid={`rules-open-source-${rule.id}`}
+                  onClick={() => onOpenSource?.(rule.collection)}
+                  className={cn(COL_MIDDLE, "truncate text-left text-sm text-muted-foreground hover:text-primary hover:underline")}
+                  title={`到来源页管理 ${rule.collection}${mine ? `（${mine.path}）` : ""}`}
+                >
                   {mine ? `规则文件 · ${mine.path}` : `${rule.collection} · ${rule.local ? "本机目录" : "git 仓库"}`}
-                </div>
+                </button>
                 <span className={cn(COL_NARROW, "text-xs text-muted-foreground")}>{lineCount(rule.body)} 行</span>
                 <div className={COL_ACTION}>
                   {onApplyRule && (
@@ -495,28 +473,9 @@ function RuleLibrary({
                   )}
                 </div>
                 <div className={COL_ICONS}>
-                  {!rule.local && (
-                    <RowIcon label={`更新来源 ${rule.collection}`} testId={`rules-fetch-source-${rule.collection}`} disabled={busy} onClick={() => onFetch(rule.collection)}>
-                      <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-                    </RowIcon>
-                  )}
                   <RowIcon label={openId === rule.id ? `收起 ${rule.name}` : `查看 ${rule.name}`} onClick={() => setOpenId(openId === rule.id ? null : rule.id)}>
                     <Eye className="h-3.5 w-3.5" aria-hidden />
                   </RowIcon>
-                  {mine ? (
-                    <RowIcon danger label={`移除规则来源 ${mine.name}`} onClick={() => setRemoving(mine)}>
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                    </RowIcon>
-                  ) : (
-                    <RowIcon
-                      danger
-                      label={`移除来源 ${rule.collection}`}
-                      testId={`rules-remove-collection-${rule.id}`}
-                      onClick={() => setRemovingCollection({ name: rule.collection, local: rule.local })}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                    </RowIcon>
-                  )}
                 </div>
               </div>
               {body(rule.id, rule.body, `rules-source-body-${rule.id}`)}
@@ -533,8 +492,8 @@ function RuleLibrary({
             <span className={COL_NARROW} />
             <div className={COL_ACTION} />
             <div className={COL_ICONS}>
-              <RowIcon danger label={`移除规则来源 ${source.name}`} onClick={() => setRemoving(source)}>
-                <Trash2 className="h-3.5 w-3.5" aria-hidden />
+              <RowIcon label={`到来源页管理 ${source.name}`} onClick={() => onOpenSource?.(source.name)}>
+                <Library className="h-3.5 w-3.5" aria-hidden />
               </RowIcon>
             </div>
           </li>
@@ -576,66 +535,31 @@ function RuleLibrary({
         ))}
         {sourceRules.length === 0 && (
           <li data-testid="rules-no-source" className="space-y-2 px-4 py-3 text-xs text-muted-foreground">
-            <p>还没有来源提供规则：添加规则文件，或添加带规则的仓库（如 agent-skills）。</p>
+            <p>
+              还没有来源提供规则：到
+              <button type="button" data-testid="rules-open-sources" onClick={() => onOpenSource?.(null)} className="mx-1 text-primary underline-offset-2 hover:underline">
+                来源页
+              </button>
+              添加规则文件，或带规则的仓库（如 agent-skills）。
+            </p>
             {suggested.map((item) => (
               <div key={item.name} className="flex items-center justify-between gap-3">
                 <span className="min-w-0">
                   <span className="font-medium text-foreground">{item.name}</span> · {item.description}
                 </span>
-                {item.collection ? (
-                  <button type="button" data-testid={`rules-fetch-source-${item.collection}`} disabled={busy} onClick={() => onFetch(item.collection as string)} className={PILL}>
-                    取回 {item.collection}
-                  </button>
-                ) : (
-                  <span className="shrink-0">
-                    到
-                    {onOpenSkills ? (
-                      <button type="button" onClick={onOpenSkills} className="mx-1 text-primary underline-offset-2 hover:underline">
-                        技能页
-                      </button>
-                    ) : (
-                      "技能页"
-                    )}
-                    添加推荐来源 {item.name}，再回来取回
-                  </span>
-                )}
+                <button
+                  type="button"
+                  data-testid={`rules-open-source-${item.collection ?? item.name}`}
+                  onClick={() => onOpenSource?.(item.collection ?? null)}
+                  className={PILL}
+                >
+                  {item.collection ? `到来源页取回 ${item.collection}` : `到来源页添加 ${item.name}`}
+                </button>
               </div>
             ))}
           </li>
         )}
       </ul>
-      {adding && (
-        <AddSourceDialog
-          taken={userSources.taken}
-          busy={userSources.busy}
-          onClose={() => setAdding(false)}
-          onSubmit={async (name, path) => {
-            if (await userSources.add(name, path)) setAdding(false);
-          }}
-        />
-      )}
-      {removingCollection && (
-        <RemoveCollectionDialog
-          name={removingCollection.name}
-          local={removingCollection.local}
-          executing={collectionBusy}
-          onConfirm={(purge) => {
-            onRemoveCollection(removingCollection.name, removingCollection.local, purge);
-            setRemovingCollection(null);
-          }}
-          onClose={() => setRemovingCollection(null)}
-        />
-      )}
-      {removing && (
-        <RemoveSourceDialog
-          source={removing}
-          busy={userSources.busy}
-          onConfirm={async () => {
-            if (await userSources.remove(removing)) setRemoving(null);
-          }}
-          onClose={() => setRemoving(null)}
-        />
-      )}
     </section>
   );
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
-import TakeoverPage from "../pages/TakeoverPage";
+import { DiscoverPanel } from "../components/DiscoverPanel";
 import type { DiscoverData } from "../lib/contract";
 import { makeApplyResult, makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
@@ -103,9 +103,15 @@ function routes(data: DiscoverData = discoverData()) {
   };
 }
 
-describe("接管中心", () => {
+describe("扫描本机已有内容：账号页的未登记助手、来源页的外部技能目录", () => {
   it("按来源分类展示，原生安装项只标识不可勾选", async () => {
-    renderWithEngine(<TakeoverPage />, routes());
+    renderWithEngine(
+      <>
+        <DiscoverPanel scope="agents" />
+        <DiscoverPanel scope="skills" />
+      </>,
+      routes(),
+    );
     await waitFor(() => expect(screen.getByTestId("takeover-agents")).toBeInTheDocument());
 
     // 可接管项带勾选框
@@ -124,7 +130,7 @@ describe("接管中心", () => {
   });
 
   it("外部技能组接管：先登记本地来源集合定义，再逐助手 add（不带接管旗标）", async () => {
-    const { calls } = renderWithEngine(<TakeoverPage />, routes());
+    const { calls } = renderWithEngine(<DiscoverPanel scope="skills" />, routes());
     await waitFor(() => expect(screen.getByTestId("takeover-skill-group-vendor")).toBeInTheDocument());
 
     await userEvent.click(screen.getByTestId("takeover-skill-group-vendor").querySelector("input[type=checkbox]")!);
@@ -148,7 +154,7 @@ describe("接管中心", () => {
   });
 
   it("已定义集合的计划外链接走既有接管通道（带 --allow-takeover）", async () => {
-    const { calls } = renderWithEngine(<TakeoverPage />, routes());
+    const { calls } = renderWithEngine(<DiscoverPanel scope="skills" />, routes());
     await waitFor(() => expect(screen.getByTestId("takeover-skill-extra-safe-merge-review-claude-code")).toBeInTheDocument());
 
     await userEvent.click(
@@ -171,7 +177,7 @@ describe("接管中心", () => {
   });
 
   it("助手登记只写定义，不执行任何 agents:apply", async () => {
-    const { calls } = renderWithEngine(<TakeoverPage />, routes());
+    const { calls } = renderWithEngine(<DiscoverPanel scope="agents" />, routes());
     await waitFor(() => expect(screen.getByTestId("takeover-agent-opencode")).toBeInTheDocument());
 
     await userEvent.click(screen.getByTestId("takeover-agent-opencode").querySelector("input[type=checkbox]")!);
@@ -184,7 +190,7 @@ describe("接管中心", () => {
   });
 
   it("残留链接可勾选清理：只删链接本身，确认文案分开说明", async () => {
-    const { calls } = renderWithEngine(<TakeoverPage />, {
+    const { calls } = renderWithEngine(<DiscoverPanel scope="skills" />, {
       ...routes(),
       "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
     });
@@ -212,39 +218,46 @@ describe("接管中心", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    renderWithEngine(<TakeoverPage />, {
+    renderWithEngine(<DiscoverPanel scope="skills" />, {
       ...routes(),
       "policy:set": async () => {
         await gate;
         return makeEnvelope({ layers: null, effective: {} }, { command: "policy.set" });
       },
     });
-    await waitFor(() => expect(screen.getByTestId("takeover-agent-opencode")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("takeover-skill-group-vendor")).toBeInTheDocument());
 
-    // 两项：助手登记 + 技能集合，总数因此是 2（原先第二项是已退役的 MCP 接管）
-    await userEvent.click(screen.getByTestId("takeover-agent-opencode").querySelector("input[type=checkbox]")!);
+    // 两项：技能集合 + 残留链接清理
     await userEvent.click(screen.getByTestId("takeover-skill-group-vendor").querySelector("input[type=checkbox]")!);
+    await userEvent.click(screen.getByTestId("takeover-dead-ghost-codex").querySelector("input[type=checkbox]")!);
     await userEvent.click(screen.getByTestId("takeover-run"));
     await userEvent.click(await screen.findByRole("button", { name: "开始接管" }));
 
     const progress = await screen.findByTestId("takeover-progress");
-    expect(progress).toHaveTextContent("正在处理第 1 / 2 项：助手 OpenCode");
+    expect(progress).toHaveTextContent("正在处理第 1 / 2 项：技能来源 vendor");
     expect(screen.getByTestId("takeover-run")).toHaveTextContent("正在接管 1/2…");
 
     release!();
     await waitFor(() => expect(screen.queryByTestId("takeover-progress")).toBeNull());
   });
 
-  it("没有可接管项时按钮禁用且空态可见", async () => {
+  it("没有可处理的内容时两处都不显示，也不占地方", async () => {
     const empty: DiscoverData = {
       domain: "discover",
       agents: [],
       skills: { items: [], groups: [] },
       summary: {},
     };
-    renderWithEngine(<TakeoverPage />, routes(empty));
-    await waitFor(() => expect(screen.getByTestId("takeover-agents-empty")).toBeInTheDocument());
-    expect(screen.getByTestId("takeover-skill-groups-empty")).toBeInTheDocument();
-    expect(screen.getByTestId("takeover-run")).toBeDisabled();
+    const { calls } = renderWithEngine(
+      <>
+        <DiscoverPanel scope="agents" />
+        <DiscoverPanel scope="skills" />
+      </>,
+      routes(empty),
+    );
+    await waitFor(() => expect(calls.some((call) => call.command === "system:discover")).toBe(true));
+    await waitFor(() => expect(screen.queryByTestId("discover-agents")).toBeNull());
+    expect(screen.queryByTestId("discover-skills")).toBeNull();
+    expect(screen.queryByTestId("takeover-run")).toBeNull();
   });
 });

@@ -6,6 +6,7 @@ import { AccountCells, AccountSwitch, RowActions, type CellTone } from "./Accoun
 import { mcpBrief, mcpEntrySummary } from "./McpAssignmentRow";
 import { missingVariables } from "../lib/mcpVariables";
 import { cn } from "../lib/utils";
+import { STATE_TONE, StateBadge } from "./StateBadge";
 
 function savedSummary(spec: McpSpec): string {
   const def = spec.saved?.definition ?? {};
@@ -103,17 +104,18 @@ export function McpServerCard({
           <div className="font-mono text-sm font-medium">{name}</div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
             {first && <span className="truncate" title={mcpEntrySummary(first)}>{mcpBrief(first)}</span>}
-            {summaries.size > 1 && <span className="text-warning" title="保存编辑时会统一成一份">⚠ 各账号内容不同</span>}
-            {commandMissing && <span className="text-warning">⚠ 有账号找不到它要执行的命令</span>}
-            {invalid && <span className="text-warning" title="只能删除或在配置文件里修正">⚠ 有账号的条目无法识别</span>}
+            {/* 统一状态（lib/inbox.ts）：与待处理页同一套标签 */}
+            {summaries.size > 1 && <StateBadge state="drifted" title="保存编辑时会统一成一份">各账号内容不同</StateBadge>}
+            {commandMissing && <StateBadge state="broken">有账号找不到它要执行的命令</StateBadge>}
+            {invalid && <StateBadge state="broken" title="只能删除或在配置文件里修正">有账号的条目无法识别</StateBadge>}
             {missing.length > 0 && onConfigureSecrets && (
               <button
                 type="button"
                 data-testid={`configure-secrets-${element.id}`}
                 onClick={() => onConfigureSecrets(missing[0])}
-                className="text-warning underline-offset-2 hover:underline"
+                className={cn("rounded px-1.5 py-0.5 text-[11px] underline-offset-2 hover:underline", STATE_TONE.broken)}
               >
-                ⚠ {missing.length} 个变量没有取值 · 填写
+                {missing.length} 个变量没有取值 · 填写
               </button>
             )}
           </div>

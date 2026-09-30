@@ -26,7 +26,7 @@ const BLOCKED: Record<string, string> = {
 };
 
 /**
- * 技能页的「其他来源」：各账号目录与 Codex 共用目录里、本工具没管理的技能，以及 Codex
+ * 来源页的「未纳管」：各账号目录与 Codex 共用目录里、本工具没管理的技能，以及 Codex
  * 会加载两份的重名。每项可「纳入管理」或「清理多余」，具体做什么先在对话框里预览。
  */
 export function SkillOtherSources({
@@ -60,7 +60,7 @@ export function SkillOtherSources({
         groups={groups}
         left={
           <span className="font-medium text-foreground" title="用别的方式装进账号目录的技能：纳入管理后只留一份源，可撤回">
-            其他来源 · {skills.length}
+            未纳管 · {skills.length}
           </span>
         }
       />

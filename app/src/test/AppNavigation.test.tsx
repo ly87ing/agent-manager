@@ -33,7 +33,7 @@ function routes() {
 }
 
 describe("App 顶层导航", () => {
-  it("顶栏是账号、共享资源与启动命令入口，默认渲染账号页；导入现有配置从设置进入", async () => {
+  it("顶栏：待处理、账号、四类资源与来源，默认渲染账号页；扫描本机已有内容不再单独占设置入口", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -46,6 +46,7 @@ describe("App 顶层导航", () => {
 
     // 用量、设置只显示图标，按无障碍名称核对
     expect(navButtons.map((b) => b.getAttribute("aria-label") ?? b.textContent?.trim())).toEqual([
+      "待处理",
       "账号",
       "技能",
       "MCP",
@@ -74,8 +75,12 @@ describe("App 顶层导航", () => {
     expect(settingsNav).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
 
-    await userEvent.click(screen.getByTestId("advanced-entry-takeover"));
-    expect(await screen.findByRole("heading", { name: "导入现有配置" })).toBeInTheDocument();
+    expect(screen.queryByTestId("advanced-entry-takeover")).toBeNull();
+    expect(screen.queryByTestId("advanced-entry-import-link")).toBeNull();
+
+    // 待处理：什么都生效时是空态
+    await userEvent.click(within(nav).getByRole("button", { name: "待处理" }));
+    expect(await screen.findByTestId("inbox-empty")).toHaveTextContent("没有需要处理的");
 
     const rulesNav = within(nav).getByRole("button", { name: "规则" });
     await userEvent.click(rulesNav);
@@ -103,12 +108,12 @@ describe("App 顶层导航", () => {
     expect(within(nav).queryByTestId("nav-badge-mcp")).toBeNull();
   });
 
-  it("从分享链接导入：设置里打开，带明文取值的链接拦下，合法的跳到 MCP 页并预填新增表单", async () => {
+  it("从分享链接导入：来源页打开，带明文取值的链接拦下，合法的跳到 MCP 页并预填新增表单", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
     const nav = await screen.findByRole("navigation");
-    await userEvent.click(within(nav).getByRole("button", { name: "设置" }));
-    await userEvent.click(await screen.findByTestId("advanced-entry-import-link"));
+    await userEvent.click(within(nav).getByRole("button", { name: "来源" }));
+    await userEvent.click(await screen.findByTestId("source-import-link"));
     const dialog = await screen.findByRole("dialog", { name: "从分享链接导入" });
     const input = within(dialog).getByTestId("import-link-input");
     fireEvent.change(input, { target: { value: SHARE_PREFIX + btoa(JSON.stringify({ v: 1, kind: "mcp", name: "x", spec: { command: "npx", env: { T: "sk-SECRET" } } })) } });
