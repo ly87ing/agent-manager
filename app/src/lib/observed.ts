@@ -170,7 +170,10 @@ export interface AgentUsage {
 /** 服务 × 助手 单元格状态：enabled / disabled（官方字段停用或已保存未生效的快照）/ invalid（结构无法识别）。 */
 export type McpCellState = "enabled" | "disabled" | "invalid";
 
-/** 脱敏后的已建模字段：env/headers 引用显示 ${VAR}，字面量一律 <literal>。 */
+/**
+ * 脱敏后的已建模字段：env/headers 引用显示 ${VAR}；env 里不像凭据的字面量照原值显示；
+ * 像凭据的 env 字面量与全部 header 字面量为 <literal>（提示见单元格的 literal_hints）。
+ */
 export interface McpEntryView {
   command?: string;
   args?: string[];
@@ -197,6 +200,8 @@ export interface McpAgentCell {
   target_exists?: boolean;
   transport?: "stdio" | "remote";
   entry?: McpEntryView;
+  /** 显示成 <literal> 的原值各自的提示（像凭据的只露头尾，如 sk-…6789；普通请求头给完整值）。 */
+  literal_hints?: { env?: Record<string, string>; headers?: Record<string, string> };
   /** 本工具不建模、写入时原样保留的官方字段（非凭据类原样，其余 <hidden>）。 */
   extra?: Record<string, unknown>;
   vars?: Record<string, McpVarResolution>;

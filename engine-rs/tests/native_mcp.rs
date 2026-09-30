@@ -125,7 +125,11 @@ fn preview_matches_add_and_edit_without_writing_and_rejects_stale_entry() {
         assert_eq!(files.len(), 1);
         assert_eq!(files[0]["path"], path.to_string_lossy().as_ref());
         assert_eq!(files[0]["exists"], false);
-        assert_eq!(files[0]["original"], serde_json::Value::Null, "新文件没有原文");
+        assert_eq!(
+            files[0]["original"],
+            serde_json::Value::Null,
+            "新文件没有原文"
+        );
         let expected = files[0]["content"].as_str().unwrap();
         assert!(!path.exists(), "预览不得创建目标文件");
         assert_eq!(db_bytes(&ctx), before_db, "预览不得写库");
@@ -1096,7 +1100,8 @@ fn claude_disable_snapshots_entry_transfers_secrets_and_enable_restores_identica
     assert_eq!(c["state"], "disabled");
     assert_eq!(c["source"], "saved");
     assert_eq!(c["entry"]["env"]["AM_T4_API_KEY"], "${AM_T4_API_KEY}");
-    assert_eq!(c["entry"]["env"]["NODE_ENV"], "<literal>");
+    // 不像凭据的字面量照原值显示，界面说得出原值是什么
+    assert_eq!(c["entry"]["env"]["NODE_ENV"], "production");
     assert_eq!(c["actions"], json!(["enable", "copy", "remove"]));
     assert_eq!(element(&status(&ctx), "fs")["state"], "disabled");
 
@@ -1724,8 +1729,8 @@ fn legacy_markers_are_reported_and_cleared_on_edit() {
     assert!(c["notice"].as_str().unwrap().contains("旧版"));
     assert_eq!(
         c["entry"]["env"],
-        json!({"K": "<literal>"}),
-        "标记不进入 env"
+        json!({"K": "v"}),
+        "标记不进入 env；不像凭据的字面量照原值显示"
     );
     assert_eq!(read(&codex_path(&ctx)), text, "读取不改写");
     apply_ok(
@@ -2386,4 +2391,41 @@ fn json_rewrite_keeps_unrelated_floats_byte_identical() {
     let text = "[13.220812500000001,0.0013390000000000001,3.6376911999999995,1.1291944000000003,1.1282134000000001,0.1,1e-7,123456789012345680]";
     let value: serde_json::Value = serde_json::from_str(text).unwrap();
     assert_eq!(serde_json::to_string(&value).unwrap(), text);
+}
+
+/// 「（保留原值）」看不出原值：不像凭据的 env 字面量照原值显示（保存时原样写回）；像凭据的仍不交明文，
+/// 只给头尾提示；远程请求头的字面量（写入只接受引用或保留原值）给提示：普通值给完整值，像凭据的给头尾。
+#[test]
+fn literal_values_show_plain_or_hint_without_leaking_secrets() {
+    let (root, ctx) = temp_ctx("literal-hints");
+    let secret = "sk-proj-abcdefghijklmnopqrstuvwxyz0123456789";
+    write_claude(
+        &ctx,
+        json!({"mcpServers": {
+            "s": {"command": "npx", "args": ["-y", "x"], "env": {"NODE_ENV": "production", "OPENAI_API_KEY": secret, "SHORT_TOKEN": "abc123", "REF": "${REF}"}},
+            "r": {"type": "http", "url": "https://mcp.example.com/mcp", "headers": {"X-Region": "cn-east", "Authorization": format!("Bearer {secret}")}}
+        }}),
+    );
+    let c = cell(&ctx, "s", "claude-code");
+    assert_eq!(
+        c["entry"]["env"],
+        json!({"NODE_ENV": "production", "OPENAI_API_KEY": "<literal>", "SHORT_TOKEN": "<literal>", "REF": "${REF}"})
+    );
+    assert_eq!(
+        c["literal_hints"]["env"],
+        json!({"OPENAI_API_KEY": "sk-…6789", "SHORT_TOKEN": "已隐藏，6 位"})
+    );
+    let r = cell(&ctx, "r", "claude-code");
+    assert_eq!(
+        r["entry"]["headers"],
+        json!({"X-Region": "<literal>", "Authorization": "<literal>"})
+    );
+    assert_eq!(
+        r["literal_hints"]["headers"],
+        json!({"X-Region": "cn-east", "Authorization": "Bea…6789"})
+    );
+    let all = serde_json::to_string(&status(&ctx)).unwrap();
+    assert!(!all.contains("abcdefghijklmnop"), "明文密钥不进状态");
+    assert!(!all.contains("abc123"), "短密钥也不进状态");
+    let _ = std::fs::remove_dir_all(root);
 }

@@ -117,6 +117,7 @@ fn file_cell(
                 }),
             );
             cell.insert("entry".into(), masked_entry(format, view));
+            cell.insert("literal_hints".into(), entry::literal_hints(format, view));
             cell.insert("extra".into(), masked_extra(view));
             cell.insert("vars".into(), vars_block(format, view));
             cell.insert("legacy_marker".into(), json!(view.legacy_marker));
@@ -193,6 +194,7 @@ fn snapshot_cell(scan: Option<&TargetScan>, row: &SavedRow) -> Value {
                 }),
             );
             cell.insert("entry".into(), masked_entry(format, view));
+            cell.insert("literal_hints".into(), entry::literal_hints(format, view));
             cell.insert("extra".into(), masked_extra(view));
             cell.insert("vars".into(), vars_block(format, view));
             cell.insert("legacy_marker".into(), json!(false));

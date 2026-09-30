@@ -158,6 +158,22 @@ describe("McpServerFormDialog", () => {
     });
   });
 
+  it("原值看得出：普通值照原样显示；像凭据的显示「保留原值：头尾提示」，保存时仍按保留原值提交", async () => {
+    const cell = mcpCell({
+      entry: { command: "npx", args: ["-y", "fs"], env: { NODE_ENV: "production", OPENAI_API_KEY: "<literal>" } },
+      literal_hints: { env: { OPENAI_API_KEY: "sk-…6789" } },
+    });
+    const { onSubmit, dialog } = renderForm({ kind: "edit", name: "fs", agent: "claude-code", cell, format: "claude-json", targets: [{ agent: "claude-code", cell, format: "claude-json" }], differs: false });
+    expect(within(dialog).getByTestId("server-env-input")).toHaveValue("NODE_ENV=production\nOPENAI_API_KEY=（保留原值：sk-…6789）");
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+    expect(onSubmit).toHaveBeenCalledWith({
+      name: "fs",
+      agents: ["claude-code"],
+      spec: { command: "npx", args: ["-y", "fs"], env: { NODE_ENV: "production", OPENAI_API_KEY: "<literal>" } },
+      startupTimeoutSec: null,
+    });
+  });
+
   it("不可写的助手（文件出错或在本工具中停用）不出现在新增选项里", () => {
     const { dialog } = renderForm({
       kind: "add",

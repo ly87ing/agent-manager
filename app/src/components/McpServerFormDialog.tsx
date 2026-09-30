@@ -24,13 +24,17 @@ const HEADER_NAME_RE = /^[!#$%&'*+.^_`|~A-Za-z0-9-]+$/;
 const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const PLACEHOLDER_RE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
 const KEEP = "<literal>";
-/** 表单里显示「保留原值」的写法；保存时换回引擎约定的 <literal>，两种写法都认。 */
+/**
+ * 表单里「保留原值」的写法；保存时换回引擎约定的 <literal>。引擎不交出像凭据的明文，
+ * 但给一个认得出的提示（如 sk-…6789），写成「（保留原值：sk-…6789）」；提示只用来看，不会写进文件。
+ */
 const KEEP_LABEL = "（保留原值）";
-const isKeep = (value: string) => value === KEEP || value === KEEP_LABEL;
+const KEEP_RE = /^（保留原值(：.*)?）$/;
+const isKeep = (value: string) => value === KEEP || KEEP_RE.test(value);
 
-function lines(map: Record<string, string> | undefined): string {
+function lines(map: Record<string, string> | undefined, hints?: Record<string, string>): string {
   return Object.entries(map ?? {})
-    .map(([key, value]) => `${key}=${value === KEEP ? KEEP_LABEL : value}`)
+    .map(([key, value]) => `${key}=${value === KEEP ? (hints?.[key] ? `（保留原值：${hints[key]}）` : KEEP_LABEL) : value}`)
     .join("\n");
 }
 
@@ -116,9 +120,10 @@ export function McpServerFormDialog({
   );
   const [command, setCommand] = useState(editEntry?.command ?? initial?.command ?? "");
   const [argsText, setArgsText] = useState((editEntry?.args ?? initial?.args ?? []).join("\n"));
-  const [envText, setEnvText] = useState(lines(editEntry?.env ?? initial?.env));
+  const hints = mode.kind === "edit" ? mode.cell.literal_hints : undefined;
+  const [envText, setEnvText] = useState(lines(editEntry?.env ?? initial?.env, hints?.env));
   const [url, setUrl] = useState(editEntry?.url ?? initial?.url ?? "");
-  const [headersText, setHeadersText] = useState(lines(editEntry?.headers ?? initial?.headers));
+  const [headersText, setHeadersText] = useState(lines(editEntry?.headers ?? initial?.headers, hints?.headers));
   const [timeoutText, setTimeoutText] = useState(
     String(editEntry?.startup_timeout_sec ?? initial?.startup_timeout_sec ?? (mode.kind === "add" ? 120 : "")),
   );

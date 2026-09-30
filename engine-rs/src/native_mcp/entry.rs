@@ -263,11 +263,50 @@ const EXTRA_SHOWN: &[&str] = &[
     "experimental_environment",
 ];
 
-fn mask_env_value(format: &Format, raw: &str) -> String {
+/// env 的显示值：引用显示 `${VAR}`；不像凭据的字面量照原值显示（保存时原样写回，
+/// 与 `reject_secret_literal` 同一判定）；像凭据的一律 `<literal>`（界面拿不到明文，保存时保留原值）。
+fn mask_env_value(format: &Format, key: &str, raw: &str) -> String {
     match env_ref(format, raw) {
         Some(var) => format!("${{{var}}}"),
+        None if reject_secret_literal(key, raw).is_ok() => raw.to_string(),
         None => LITERAL_MASK.to_string(),
     }
+}
+
+/// 被隐藏的原值给一个认得出的提示：够长的只露前 3 位与后 4 位，短的只说几位。
+fn secret_hint(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() >= 12 {
+        let head: String = chars[..3].iter().collect();
+        let tail: String = chars[chars.len() - 4..].iter().collect();
+        format!("{head}…{tail}")
+    } else {
+        format!("已隐藏，{} 位", chars.len())
+    }
+}
+
+/// 显示成 `<literal>` 的那些值各自的提示，让界面说得出「原值是什么」而不交出明文：
+/// env 里像凭据的字面量给头尾提示；headers 的字面量（写入只接受引用或保留原值）不像凭据时给完整值，
+/// 像凭据时给头尾提示。
+pub fn literal_hints(format: &Format, view: &View) -> Value {
+    let mut env = Map::new();
+    for (key, raw) in &view.env {
+        if env_ref(format, raw).is_none() && reject_secret_literal(key, raw).is_err() {
+            env.insert(key.clone(), json!(secret_hint(raw)));
+        }
+    }
+    let mut headers = Map::new();
+    for (name, value) in &view.headers {
+        if let HeaderVal::Lit(raw) = value {
+            let hint = if reject_secret_literal(name, raw).is_ok() {
+                raw.clone()
+            } else {
+                secret_hint(raw)
+            };
+            headers.insert(name.clone(), json!(hint));
+        }
+    }
+    json!({"env": env, "headers": headers})
 }
 
 fn mask_header(value: &HeaderVal) -> String {
@@ -287,7 +326,7 @@ pub fn masked_entry(format: &Format, view: &View) -> Value {
             let env: Map<String, Value> = view
                 .env
                 .iter()
-                .map(|(k, v)| (k.clone(), Value::String(mask_env_value(format, v))))
+                .map(|(k, v)| (k.clone(), Value::String(mask_env_value(format, k, v))))
                 .collect();
             out.insert("env".into(), Value::Object(env));
             if let Some(timeout) = view.startup_timeout_sec {
