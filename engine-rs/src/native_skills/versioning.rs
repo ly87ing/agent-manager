@@ -60,7 +60,13 @@ pub(crate) fn sparse_patterns(coll: &CollectionDef) -> Result<Option<Vec<String>
         .filter(|v| !v.is_empty())
         .unwrap_or("rules");
     let mut out: Vec<String> = Vec::new();
-    for raw in paths.iter().map(String::as_str).chain([rules, "aliases"]) {
+    let skill_count = paths.len();
+    for (index, raw) in paths
+        .iter()
+        .map(String::as_str)
+        .chain([rules, "aliases"])
+        .enumerate()
+    {
         let rel = raw.trim().trim_matches('/');
         if rel.is_empty() || rel == "." {
             // 指向仓库根：整个仓库都要
@@ -74,9 +80,16 @@ pub(crate) fn sparse_patterns(coll: &CollectionDef) -> Result<Option<Vec<String>
         {
             bail!("[{}] 目录 {raw} 不合法", coll.name);
         }
-        let pattern = format!("/{rel}/");
-        if !out.contains(&pattern) {
-            out.push(pattern);
+        // 不带结尾斜杠：目录（连同其下全部内容）与单个文件（如规则位置 docs/CLAUDE.md）都能匹配
+        let mut wanted = vec![format!("/{rel}")];
+        // 与技能发现一致：单段技能名在顶层找不到时按 skills/<名> 找
+        if index < skill_count && !rel.contains('/') && rel != "skills" {
+            wanted.push(format!("/skills/{rel}"));
+        }
+        for pattern in wanted {
+            if !out.contains(&pattern) {
+                out.push(pattern);
+            }
         }
     }
     Ok(Some(out))
@@ -341,4 +354,64 @@ pub(crate) fn versions(ctx: &Context, coll: &CollectionDef, repo_dir: &Path) -> 
     );
     obj.insert("current".into(), local_version(repo_dir));
     Ok(listing)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn coll(raw: serde_json::Value) -> CollectionDef {
+        let raw = raw.as_object().cloned().unwrap_or_default();
+        CollectionDef {
+            name: "src".into(),
+            url: Some("https://example.invalid/x.git".into()),
+            source_path: None,
+            skill_paths: raw
+                .get("skill_paths")
+                .and_then(|v| serde_json::from_value(v.clone()).ok()),
+            agents: None,
+            disabled: None,
+            enabled: true,
+            deleted: false,
+            raw,
+        }
+    }
+
+    #[test]
+    fn 稀疏目录_技能目录加规则与快捷命令_单段名兼顾_skills_下() {
+        let got = sparse_patterns(&coll(
+            json!({"skill_paths": ["skills/alpha", "beta/"], "rules_path": "docs/CLAUDE.md"}),
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            got,
+            [
+                "/skills/alpha",
+                "/beta",
+                "/skills/beta",
+                "/docs/CLAUDE.md",
+                "/aliases"
+            ]
+        );
+        let default_rules = sparse_patterns(&coll(json!({"skill_paths": ["skills"]})))
+            .unwrap()
+            .unwrap();
+        assert_eq!(default_rules, ["/skills", "/rules", "/aliases"]);
+    }
+
+    #[test]
+    fn 稀疏目录_没列技能目录或指向仓库根时整仓检出_坏路径报错() {
+        assert_eq!(sparse_patterns(&coll(json!({}))).unwrap(), None);
+        assert_eq!(
+            sparse_patterns(&coll(json!({"skill_paths": ["."]}))).unwrap(),
+            None
+        );
+        for bad in ["../x", "a/../b", "-x", "a*", "a//b"] {
+            assert!(
+                sparse_patterns(&coll(json!({"skill_paths": [bad]}))).is_err(),
+                "{bad}"
+            );
+        }
+    }
 }
