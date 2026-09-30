@@ -1,5 +1,6 @@
 import { MoreHorizontal } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { AccountColumn, AccountGroup } from "../lib/accounts";
 import { cn } from "../lib/utils";
 import { AgentIcon } from "./AgentIcon";
@@ -218,46 +219,99 @@ export interface MenuAction {
 /** 行尾「⋯」：放不常用、按账号区分的动作（更新到新版本、取消外部链接…）。 */
 export function ActionMenu({ label, items }: { label: string; items: MenuAction[] }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  /** 菜单的固定定位：渲染到页面最外层，不被表格等容器的 overflow 裁掉。 */
+  const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open || !buttonRef.current) return;
+    const button = buttonRef.current.getBoundingClientRect();
+    const height = menuRef.current?.offsetHeight ?? 0;
+    const width = menuRef.current?.offsetWidth ?? 0;
+    const gap = 4;
+    const margin = 8;
+    // 下方放不下就向上展开；左右不超出窗口
+    const below = button.bottom + gap;
+    const top = height && below + height > window.innerHeight - margin ? Math.max(margin, button.top - gap - height) : below;
+    const right = Math.min(Math.max(margin, window.innerWidth - button.right), Math.max(margin, window.innerWidth - width - margin));
+    setPosition((prev) => (prev && prev.top === top && prev.right === right ? prev : { top, right }));
+  }, [open, position]);
+
   useEffect(() => {
     if (!open) return;
-    const close = (event: MouseEvent) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    const inside = (target: EventTarget | null) =>
+      Boolean(target instanceof Node && (buttonRef.current?.contains(target) || menuRef.current?.contains(target)));
+    const onMouseDown = (event: MouseEvent) => {
+      if (!inside(event.target)) setOpen(false);
     };
-    window.addEventListener("mousedown", close);
-    return () => window.removeEventListener("mousedown", close);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        buttonRef.current?.focus();
+      }
+    };
+    // 固定定位不跟着内容滚：页面滚动或窗口变化时直接关掉，免得菜单与按钮错位
+    const onScroll = (event: Event) => {
+      if (!inside(event.target)) setOpen(false);
+    };
+    const onResize = () => setOpen(false);
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
   }, [open]);
+
   if (items.length === 0) return null;
   return (
-    <div ref={ref} className="relative shrink-0">
+    <div className="relative shrink-0">
       <button
+        ref={buttonRef}
         type="button"
         aria-label={label}
+        aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          setPosition(null);
+          setOpen((value) => !value);
+        }}
         className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
       >
         <MoreHorizontal className="h-4 w-4" aria-hidden />
       </button>
-      {open && (
-        <div role="menu" className="absolute right-0 z-20 mt-1 min-w-44 rounded-md border bg-popover p-1 shadow-lg">
-          {items.map((item) => (
-            <button
-              key={item.testId}
-              type="button"
-              role="menuitem"
-              data-testid={item.testId}
-              onClick={() => {
-                setOpen(false);
-                item.onSelect();
-              }}
-              className={cn("block w-full rounded px-2.5 py-1.5 text-left text-sm hover:bg-accent", item.danger && "text-destructive")}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            aria-label={label}
+            style={{ position: "fixed", top: position?.top ?? 0, right: position?.right ?? 0, visibility: position ? "visible" : "hidden" }}
+            className="z-[60] min-w-44 rounded-md border bg-popover p-1 shadow-lg"
+          >
+            {items.map((item) => (
+              <button
+                key={item.testId}
+                type="button"
+                role="menuitem"
+                data-testid={item.testId}
+                onClick={() => {
+                  setOpen(false);
+                  item.onSelect();
+                }}
+                className={cn("block w-full rounded px-2.5 py-1.5 text-left text-sm hover:bg-accent", item.danger && "text-destructive")}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

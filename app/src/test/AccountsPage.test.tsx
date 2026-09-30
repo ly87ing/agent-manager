@@ -256,7 +256,7 @@ describe("账号页", () => {
     const { calls } = renderWithEngine(<AccountsPage />, routes());
     const row = await screen.findByTestId("account-row-profiles:ds");
     await userEvent.click(within(row).getByRole("button", { name: "更多操作" }));
-    await userEvent.click(within(row).getByRole("menuitem", { name: "编辑" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
     const drawer = await screen.findByTestId("account-drawer");
     const model = within(drawer).getByTestId("account-model");
     await userEvent.clear(model);
@@ -275,7 +275,7 @@ describe("账号页", () => {
     const { calls } = renderWithEngine(<AccountsPage />, routes());
     const row = await screen.findByTestId("account-row-profiles:ds");
     await userEvent.click(within(row).getByRole("button", { name: "更多操作" }));
-    await userEvent.click(within(row).getByRole("menuitem", { name: "移除" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "移除" }));
     await userEvent.click(await screen.findByRole("button", { name: "移除" }));
     await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
 
@@ -316,7 +316,7 @@ describe("账号页", () => {
     renderWithEngine(<AccountsPage />, r);
     const main = await screen.findByTestId("account-row-agents:claude-code");
     await userEvent.click(within(main).getByRole("button", { name: "更多操作" }));
-    await userEvent.click(within(main).getByRole("menuitem", { name: "启动命令" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "启动命令" }));
     let drawer = await screen.findByTestId("launch-commands-drawer");
     expect(within(drawer).getByTestId("launch-command-cc")).toBeInTheDocument();
     expect(within(drawer).getByTestId("launch-command-claude")).toHaveTextContent("你自己写的，只读");
@@ -326,7 +326,7 @@ describe("账号页", () => {
 
     const ds = screen.getByTestId("account-row-profiles:ds");
     await userEvent.click(within(ds).getByRole("button", { name: "更多操作" }));
-    await userEvent.click(within(ds).getByRole("menuitem", { name: "启动命令" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "启动命令" }));
     drawer = await screen.findByTestId("launch-commands-drawer");
     expect(within(drawer).getByTestId("launch-command-ds")).toBeInTheDocument();
     expect(within(drawer).getByTestId("launch-command-ds-yolo")).toBeInTheDocument();
@@ -337,7 +337,7 @@ describe("账号页", () => {
     const { calls } = renderWithEngine(<AccountsPage />, routes());
     const ds = await screen.findByTestId("account-row-profiles:ds");
     await userEvent.click(within(ds).getByRole("button", { name: "更多操作" }));
-    await userEvent.click(within(ds).getByRole("menuitem", { name: "启动命令" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "启动命令" }));
     const drawer = await screen.findByTestId("launch-commands-drawer");
     await userEvent.click(within(drawer).getByTestId("launch-remove-ds"));
     const confirm = await screen.findByRole("button", { name: "确认删除" });

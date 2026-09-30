@@ -1,8 +1,9 @@
 import { useQueries, useQueryClient } from "@tanstack/react-query";
-import { Activity, Copy, LogIn, MoreHorizontal, Plus } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Activity, Copy, LogIn, Plus } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { AccountDrawer, type DrawerMode } from "../components/AccountDrawer";
+import { ActionMenu, type MenuAction } from "../components/AccountGrid";
 import { AccountReadiness } from "../components/AccountReadiness";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { GettingStarted, type StartStep } from "../components/GettingStarted";
@@ -67,49 +68,9 @@ function QuotaCells({ usage, testId }: { usage: AgentUsage | null; testId: strin
   );
 }
 
-function RowMenu({ items }: { items: { label: string; onSelect: () => void; testId: string }[] }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false);
-    };
-    window.addEventListener("mousedown", close);
-    return () => window.removeEventListener("mousedown", close);
-  }, [open]);
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        aria-label="更多操作"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-        className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-      >
-        <MoreHorizontal className="h-4 w-4" aria-hidden />
-      </button>
-      {open && (
-        <div role="menu" className="absolute right-0 z-20 mt-1 min-w-40 rounded-md border bg-popover p-1 shadow-lg">
-          {items.map((item) => (
-            <button
-              key={item.testId}
-              type="button"
-              role="menuitem"
-              data-testid={item.testId}
-              onClick={() => {
-                setOpen(false);
-                item.onSelect();
-              }}
-              className="block w-full rounded px-2.5 py-1.5 text-left text-sm hover:bg-accent"
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+/** 账号行尾「⋯」：与技能、MCP 等页同一个菜单（渲染在页面最外层，不被表格裁掉）。 */
+function RowMenu({ items }: { items: MenuAction[] }) {
+  return <ActionMenu label="更多操作" items={items} />;
 }
 
 interface RowActions {

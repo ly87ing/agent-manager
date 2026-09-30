@@ -229,7 +229,7 @@ describe("App 顶层导航", () => {
     // 账号行的「技能」直达技能页，并预选这个账号
     const row = await screen.findByTestId("account-row-profiles:cc-work");
     await userEvent.click(within(row).getByRole("button", { name: "更多操作" }));
-    await userEvent.click(within(row).getByRole("menuitem", { name: "技能" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "技能" }));
 
     // 跳转到技能页，并且助手筛选预选为 cc-work
     const nav = screen.getByRole("navigation");
