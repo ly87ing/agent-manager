@@ -91,6 +91,12 @@ export function ProgramPinDialog({ program, initialVersion, onClose }: { program
       }
       (failed ? toast.error : toast.success)(failed ? `${failed} 处没改成，详见操作记录` : `已固定到 ${shortVersion(version.trim())}`);
       if (!failed) onClose();
+      // 条目里的版本变了：重新检查这些 MCP 服务，显示的版本跟实际一致
+      for (const server of new Set(targets.map((item) => item.server))) {
+        void runEngine("system:refresh-upstream", ["--only", `mcp:${server}`])
+          .catch(() => undefined)
+          .finally(() => void queryClient.invalidateQueries({ queryKey: engineKeys.all }));
+      }
     } finally {
       setExecuting(false);
       await queryClient.invalidateQueries({ queryKey: engineKeys.all });

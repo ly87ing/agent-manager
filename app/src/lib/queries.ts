@@ -1,4 +1,4 @@
-import { QueryClient, useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { QueryClient, useIsMutating, useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { engineErrorMessage, runEngine } from "./engine";
 import type { Envelope, RefreshUpstreamData } from "./contract";
@@ -39,9 +39,18 @@ export function useEngineQuery<T>(
  * 「检查更新」——刷新各组件的官方最新版本（system:refresh-upstream，需要联网，
  * 只更新本地检查记录，不改配置）。传 only 时只重新检查一个元素（--only <元素id>）。
  */
+export const REFRESH_UPSTREAM_KEY = ["refresh-upstream"] as const;
+
+/** 是否有「检查新版本」正在进行（任何页面、命令面板发起的都算）。 */
+export function useCheckingUpdates(): boolean {
+  return useIsMutating({ mutationKey: REFRESH_UPSTREAM_KEY }) > 0;
+}
+
 export function useRefreshUpstream() {
   const queryClient = useQueryClient();
   return useMutation({
+    // 带键：别处（如程序页）据此知道「正在检查新版本」，检查完成前先不让升级
+    mutationKey: REFRESH_UPSTREAM_KEY,
     mutationFn: (only?: string) =>
       runEngine<RefreshUpstreamData>("system:refresh-upstream", only ? ["--only", only] : []),
     onSuccess: (envelope, only) => {

@@ -196,4 +196,37 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     await userEvent.click(screen.getByTestId("program-dependent-git:github.com/oraios/serena-serena"));
     expect(onOpen).toHaveBeenLastCalledWith("mcp:serena");
   });
+
+  it("检查新版本进行中：升级、安装、固定版本都先不能点，结束后恢复", async () => {
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const r = routes();
+    r["system:refresh-upstream"] = async () => {
+      await gate;
+      return makeEnvelope({ elements: [], summary: { probed: 0, current: 0, behind: 0, ahead: 0, unknown: 0 } }, { command: "system.refresh-upstream" });
+    };
+    renderWithEngine(<ProgramsPage />, r);
+    await userEvent.click(await screen.findByTestId("programs-check-updates"));
+    expect(await screen.findByTestId("programs-checking")).toBeInTheDocument();
+    expect(screen.getByTestId("program-upgrade-npm:@wecom/cli")).toBeDisabled();
+    expect(screen.getByTestId("program-install-npm:json")).toBeDisabled();
+    expect(screen.getByTestId("program-pin-git:github.com/oraios/serena")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "@wecom/cli 的更多操作" })).toBeNull();
+    release!();
+    await waitFor(() => expect(screen.queryByTestId("programs-checking")).toBeNull());
+    expect(screen.getByTestId("program-upgrade-npm:@wecom/cli")).toBeEnabled();
+  });
+
+  it("升级完成后只重新检查这一项，显示的版本与实际一致", async () => {
+    const r = routes();
+    r["system:refresh-upstream"] = makeEnvelope({ elements: [], summary: { probed: 1, current: 1, behind: 0, ahead: 0, unknown: 0 } }, { command: "system.refresh-upstream" });
+    const { calls } = renderWithEngine(<ProgramsPage />, r);
+    await userEvent.click(await screen.findByTestId("program-upgrade-npm:@wecom/cli"));
+    await within(await screen.findByTestId("program-action-dialog")).findByTestId("program-plan-steps");
+    await userEvent.click(screen.getByRole("button", { name: "升级" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "system:refresh-upstream")).toBe(true));
+    expect(calls.find((call) => call.command === "system:refresh-upstream")!.args).toEqual(["--only", "programs:npm:@wecom/cli"]);
+  });
 });

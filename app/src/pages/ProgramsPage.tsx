@@ -12,7 +12,7 @@ import { runEngine } from "../lib/engine";
 import { useExecutions } from "../lib/execution";
 import type { InboxState } from "../lib/inbox";
 import { MODE_HINT, MODE_LABEL, displayName, ownerLabel, shortVersion, upgradeTarget, type ProgramElement, type ProgramsData } from "../lib/programs";
-import { engineKeys, useEngineQuery, useRefreshUpstream } from "../lib/queries";
+import { engineKeys, useCheckingUpdates, useEngineQuery, useRefreshUpstream } from "../lib/queries";
 import { cn } from "../lib/utils";
 
 const TEXT_BUTTON = "rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40";
@@ -58,6 +58,8 @@ async function copy(text: string, what: string) {
 export default function ProgramsPage({ focus, onOpen }: { focus?: string | null; onOpen?: (target: string) => void } = {}) {
   const query = useEngineQuery<ProgramsData>("programs:status");
   const refresh = useRefreshUpstream();
+  // 检查新版本进行中（本页或命令面板发起）：可升级到的版本还没定，先不让改动
+  const checking = useCheckingUpdates();
   const { execute } = useExecutions();
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<{ program: ProgramElement; action: ProgramActionKind; version?: string; backup?: string } | null>(null);
@@ -152,10 +154,16 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
         <button type="button" data-testid="programs-rescan" disabled={rescanning} onClick={() => void rescan()} className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40">
           <ScanSearch className="h-4 w-4" aria-hidden /> 重新扫描
         </button>
-        <button type="button" data-testid="programs-check-updates" disabled={refresh.isPending} onClick={() => refresh.mutate(undefined)} className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40">
-          <RefreshCw className={cn("h-4 w-4", refresh.isPending && "animate-spin")} aria-hidden /> 检查新版本
+        <button type="button" data-testid="programs-check-updates" disabled={checking} onClick={() => refresh.mutate(undefined)} className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40">
+          <RefreshCw className={cn("h-4 w-4", checking && "animate-spin")} aria-hidden /> {checking ? "正在检查…" : "检查新版本"}
         </button>
       </div>
+
+      {checking && (
+        <p data-testid="programs-checking" className="rounded-md border border-info/30 bg-info/5 px-3 py-2 text-xs text-info">
+          正在检查新版本：完成前先不能升级、安装或改版本，免得按旧的检查结果操作。
+        </p>
+      )}
 
       {programs.length === 0 ? (
         <EmptyState testId="programs-empty" title="技能和 MCP 都没有声明要用的程序" description="技能在 SKILL.md 里声明了要用的命令、或 MCP 用 npx / uvx 启动时，会出现在这里。" />
@@ -227,11 +235,18 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
                     </div>
                     <div className="flex items-center gap-1">
                       {primary && (
-                        <button type="button" data-testid={primary.testId} onClick={primary.run} className={PRIMARY}>
+                        <button
+                          type="button"
+                          data-testid={primary.testId}
+                          disabled={checking}
+                          title={checking ? "正在检查新版本，完成后再操作" : undefined}
+                          onClick={primary.run}
+                          className={PRIMARY}
+                        >
                           {primary.label}
                         </button>
                       )}
-                      {menu.length > 0 && <ActionMenu label={`${displayName(program)} 的更多操作`} items={menu} />}
+                      {menu.length > 0 && !checking && <ActionMenu label={`${displayName(program)} 的更多操作`} items={menu} />}
                     </div>
                   </div>
                 </li>

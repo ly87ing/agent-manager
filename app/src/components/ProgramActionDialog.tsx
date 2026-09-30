@@ -121,6 +121,10 @@ export function ProgramActionDialog({
           description: skipped.length ? `这些包的安装脚本没执行：${skipped.join("、")}。程序用不了时可以允许后重装。` : undefined,
         });
         onClose();
+        // 版本变了：只重新检查这一项，显示的「当前 → 最新」跟实际一致
+        void runEngine("system:refresh-upstream", ["--only", program.id])
+          .catch(() => undefined)
+          .finally(() => void queryClient.invalidateQueries({ queryKey: engineKeys.all }));
       } else {
         setFailed(envelope?.errors[0]?.message ?? "没有完成，详见操作记录");
       }

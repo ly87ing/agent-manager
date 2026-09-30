@@ -63,9 +63,10 @@ export function ConfirmModal({
         aria-label={title}
         tabIndex={-1}
         onKeyDown={onDialogKeyDown}
-        className="w-full max-w-lg rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95"
+        className="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95"
       >
-        <div className="flex items-start justify-between gap-3">
+        {/* 标题与按钮固定在上下，内容长了只滚中间：不用拖动就能点确认或取消 */}
+        <div className="flex shrink-0 items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <h3 className="text-base font-semibold text-foreground">{title}</h3>
             <RiskBadge risk={risk} label={riskLabel} />
@@ -75,24 +76,26 @@ export function ConfirmModal({
           </button>
         </div>
 
-        <p className="mt-3 text-sm text-muted-foreground">{description}</p>
-        {children}
+        <div data-testid="confirm-modal-body" className="-mx-5 mt-3 min-h-0 flex-1 overflow-y-auto px-5">
+          <p className="text-sm text-muted-foreground">{description}</p>
+          {children}
 
-        {needsText && (
-          <input
-            type="text"
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            disabled={executing}
-            placeholder={`请输入 ${requireText} 以确认`}
-            data-testid="confirm-modal-input"
-            className="mt-3 w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
-          />
-        )}
+          {needsText && (
+            <input
+              type="text"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              disabled={executing}
+              placeholder={`请输入 ${requireText} 以确认`}
+              data-testid="confirm-modal-input"
+              className="mt-3 w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
+            />
+          )}
 
-        {resultErrors && resultErrors.length > 0 && <div className="mt-3"><ErrorPanel title="执行失败" errors={resultErrors} /></div>}
+          {resultErrors && resultErrors.length > 0 && <div className="mt-3"><ErrorPanel title="执行失败" errors={resultErrors} /></div>}
+        </div>
 
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="mt-4 flex shrink-0 justify-end gap-2">
           {secondaryLabel && onSecondary && (
             <button type="button" data-testid="confirm-modal-secondary" onClick={onSecondary} disabled={executing} className="rounded-md border border-primary/30 px-4 py-2 text-sm text-primary hover:bg-primary/10 disabled:opacity-40">
               {secondaryLabel}
