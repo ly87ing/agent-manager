@@ -114,7 +114,8 @@ describe("终端快捷命令页", () => {
     // 写进文件的是字面量，不再有 {timezone}/{lang} 占位
     expect(valueOf(args, "--value")).toBe('TZ="Asia/Shanghai" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" codex --full-auto');
     expect(args).not.toContain("--rename-from");
-    expect(calls.find((call) => call.command === "aliases:preview")?.args).toEqual(args);
+    // 放行保存的是最后一次预览；负载高时防抖可能先按输入到一半的内容预览过一次
+    expect(calls.filter((call) => call.command === "aliases:preview").at(-1)?.args).toEqual(args);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), slow);
   }, 15000);
 
