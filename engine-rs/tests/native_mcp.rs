@@ -2377,3 +2377,13 @@ fn removed_account_is_not_a_target_and_cannot_receive_copies() {
     );
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 回归（2026-09-30 真机预览发现）：往 ~/.claude.json 写一个 MCP 服务时，文件里无关的浮点数被改写
+/// （`13.220812500000001 → 13.2208125`、`1.1291944000000003 → 1.1291944000000005`）。
+/// 读入再写回必须与 Claude Code（Node JSON.stringify）写出的数字逐字一致。
+#[test]
+fn json_rewrite_keeps_unrelated_floats_byte_identical() {
+    let text = "[13.220812500000001,0.0013390000000000001,3.6376911999999995,1.1291944000000003,1.1282134000000001,0.1,1e-7,123456789012345680]";
+    let value: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(serde_json::to_string(&value).unwrap(), text);
+}
