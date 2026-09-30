@@ -1307,3 +1307,126 @@ describe("SkillsPage 其他来源", () => {
     expect(within(block).queryByTestId("duplicate-xiaoyu-bug-loop-codex")).toBeNull();
   });
 });
+
+const V300 = "3".repeat(40);
+const V301 = "4".repeat(40);
+
+function versionRoutes() {
+  const collection = (name: string, extra: Record<string, unknown> = {}) =>
+    makeElement({
+      id: `skill:${name}`,
+      domain: "skills",
+      spec: { url: `https://github.com/example/${name}.git`, skill_paths: [name], track: null },
+      observed: {
+        repo_cached: true,
+        discovered: [name],
+        available: [{ name, path: name }],
+        actions: ["update", "disable", "remove"],
+        version: { current: { commit: V300, kind: "tag", name: "v3.0.0", label: "v3.0.0" }, track_error: null },
+        ...extra,
+      },
+      freshness: { state: "behind", current: "v3.0.0", upstream: "v3.0.1", checked_at: "2026-09-29T00:00:00Z", probe: "git-ls-remote", cache_age_sec: 1 },
+    });
+  const skill = (coll: string) =>
+    makeElement({
+      id: `skill:${coll}/${coll}`,
+      domain: "skills",
+      spec: { collection: coll, name: coll },
+      policy: { enabled: true },
+      observed: {
+        agents: { "claude-code": { state: "linked", assigned: true, enabled: true, version: "old", available_version: "new", actions: ["update", "disable", "remove"] } },
+        discovery_inbox: false,
+      },
+    });
+  const status = makeEnvelope(
+    { domain: "skills", elements: [collection("archify"), skill("archify"), collection("other"), skill("other")] },
+    { command: "skills.status" },
+  );
+  return {
+    ...skillsRoutes(),
+    "skills:status": status,
+    "skills:versions": makeEnvelope({
+      collection: "archify",
+      track: { mode: "auto" },
+      auto_resolved: "tag",
+      latest: { commit: V301, kind: "tag", name: "v3.0.1", label: "v3.0.1" },
+      current: { commit: V300, kind: "tag", name: "v3.0.0", label: "v3.0.0" },
+      default_branch: "main",
+      tags: [
+        { name: "v3.1.0-rc.1", commit: "5".repeat(40), version: true, prerelease: true },
+        { name: "v3.0.1", commit: V301, version: true, prerelease: false },
+        { name: "v3.0.0", commit: V300, version: true, prerelease: false },
+      ],
+      tags_total: 3,
+      branches: [{ name: "main", commit: "6".repeat(40) }],
+      branches_total: 1,
+    }),
+    "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" })),
+    "system:refresh-upstream": makeEnvelope({}),
+    "policy:get": makeEnvelope(
+      makePolicyData({
+        layers: { sqlite: { skills: { repositories: { archify: { url: "https://github.com/example/archify.git", skill_paths: ["archify"] } } } } },
+      }),
+      { command: "policy.get" },
+    ),
+  };
+}
+
+describe("SkillsPage 来源版本", () => {
+  it("来源行显示当前版本与可更新到的版本", async () => {
+    renderWithEngine(<SkillsPage />, versionRoutes());
+    expect(await screen.findByTestId("collection-version-archify")).toHaveTextContent("v3.0.0");
+    expect(screen.getByTestId("collection-behind-archify")).toHaveTextContent("可更新到 v3.0.1");
+  });
+
+  it("版本对话框：列出版本，切换到旧版本后只把这个来源在用的技能换过去", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, versionRoutes());
+    await userEvent.click(await screen.findByTestId("versions-collection-archify"));
+    const dialog = await screen.findByRole("dialog", { name: "archify 的版本" });
+    expect(await within(dialog).findByTestId("versions-summary")).toHaveTextContent("跟踪：自动（按版本） · 当前 v3.0.0 · 最新 v3.0.1");
+    expect(within(dialog).getByTestId("version-v3.1.0-rc.1")).toHaveTextContent("预发布");
+    expect(within(dialog).getByTestId("version-v3.0.0")).toHaveTextContent("当前");
+    expect(within(dialog).queryByTestId("version-switch-v3.0.0")).toBeNull();
+    expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(0);
+
+    await userEvent.click(within(dialog).getByTestId("version-switch-v3.1.0-rc.1"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
+    const applies = calls.filter((call) => call.command === "skills:apply");
+    expect(applies[0].args).toEqual(["--only", "skill:archify", "--action", "update", "--ref", "v3.1.0-rc.1"]);
+    expect(applies[1].args).toEqual(["--only", "skill:archify/archify", "--action", "update", "--agent", "claude-code"]);
+    expect(applies.some((call) => call.args.includes("skill:other/other"))).toBe(false);
+  });
+
+  it("更新到最新与来源行的更新按钮都按跟踪方式走、不带 --ref", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, versionRoutes());
+    await userEvent.click(await screen.findByTestId("update-collection-archify"));
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
+    expect(calls.filter((call) => call.command === "skills:apply")[0].args).toEqual(["--only", "skill:archify", "--action", "update"]);
+  });
+
+  it("编辑来源：跟踪方式存进定义，自动存为 null", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, versionRoutes());
+    await userEvent.click(await screen.findByTestId("edit-collection-archify"));
+    const dialog = await screen.findByRole("dialog", { name: "编辑来源" });
+    await userEvent.selectOptions(within(dialog).getByTestId("collection-track-mode"), "tag");
+    await userEvent.type(within(dialog).getByTestId("collection-track-value"), "v*");
+    await userEvent.click(within(dialog).getByTestId("collection-track-prerelease"));
+    await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    const saved = JSON.parse(calls.find((call) => call.command === "policy:set")!.args.slice(-1)[0] ?? "{}");
+    expect(saved.track).toEqual({ mode: "tag", pattern: "v*", prerelease: true });
+  });
+
+  it("跟踪方式写错时来源行给出提示；分支名为空不能保存", async () => {
+    const routes = versionRoutes();
+    const data = routes["skills:status"].data as { elements: ReturnType<typeof makeElement>[] };
+    (data.elements[0].observed as { version: { track_error: string } }).version.track_error = "[archify] 不认识的跟踪方式：nightly";
+    renderWithEngine(<SkillsPage />, routes);
+    expect(await screen.findByTestId("collection-track-error-archify")).toHaveTextContent("跟踪方式有误");
+    await userEvent.click(screen.getByTestId("edit-collection-archify"));
+    const dialog = await screen.findByRole("dialog", { name: "编辑来源" });
+    await userEvent.selectOptions(within(dialog).getByTestId("collection-track-mode"), "branch");
+    await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
+    expect(await within(dialog).findByText("填分支名，例如 stable")).toBeInTheDocument();
+  });
+});

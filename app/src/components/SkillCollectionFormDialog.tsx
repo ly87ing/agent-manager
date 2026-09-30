@@ -3,6 +3,7 @@ import { ChevronRight, X } from "lucide-react";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { type AvailableSkill, canAutoInclude, readScope, toSkillPaths } from "../lib/skillScope";
 import { cn } from "../lib/utils";
+import { TRACK_OPTIONS, trackFromForm, trackToForm, type TrackMode, type TrackSpec } from "../lib/skillTrack";
 
 const AGENT_LABEL: Record<string, string> = { "claude-code": "Claude", codex: "Codex" };
 
@@ -56,6 +57,8 @@ export function SkillCollectionFormDialog({
   /** 列不出候选（仓库没取回、新建）时直接填：每行一项，空着表示来源里全部技能。 */
   const [manualText, setManualText] = useState((initialPaths ?? []).join("\n"));
   const [selectedAgents, setSelectedAgents] = useState<string[]>((initial?.definition.agents as string[] | undefined) ?? []);
+  /** git 来源的跟踪方式：自动 / 版本 / 主分支 / 指定分支 / 匹配分支 / 固定。 */
+  const [track, setTrack] = useState(() => trackToForm(seed?.definition.track as TrackSpec | null | undefined));
   const [error, setError] = useState<string | null>(null);
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
 
@@ -82,6 +85,11 @@ export function SkillCollectionFormDialog({
       setError("规则位置填集合里的相对路径，例如 rules 或 docs/CLAUDE.md");
       return;
     }
+    const trackResult = sourceKind === "git" ? trackFromForm(track) : { track: null };
+    if ("error" in trackResult) {
+      setError(trackResult.error);
+      return;
+    }
     // 直接选了某个技能的 SKILL.md：来源就是它所在的那个技能文件夹
     const localPath = sourcePath.trim().replace(/\/SKILL\.md$/i, "");
     let skillPaths: string[] | null;
@@ -106,6 +114,7 @@ export function SkillCollectionFormDialog({
       rules_path: rulesRel || null,
       skill_paths: skillPaths,
       agents: selectedAgents.length ? selectedAgents : null,
+      track: trackResult.track,
     };
     const complete = !initial || fullDefinition != null;
     const definition = initial && fullDefinition ? { ...fullDefinition, ...owned } : owned;
@@ -162,7 +171,39 @@ export function SkillCollectionFormDialog({
               </div>
             </div>
             {sourceKind === "git" ? (
-              <input value={url} onChange={(e) => setUrl(e.target.value)} data-testid="collection-url-input" aria-label="仓库地址" className={inputClass} placeholder="https://github.com/example/skills.git" />
+              <>
+                <input value={url} onChange={(e) => setUrl(e.target.value)} data-testid="collection-url-input" aria-label="仓库地址" className={inputClass} placeholder="https://github.com/example/skills.git" />
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <label htmlFor="collection-track-mode" className="text-xs text-muted-foreground">跟踪</label>
+                  <select
+                    id="collection-track-mode"
+                    data-testid="collection-track-mode"
+                    value={track.mode}
+                    onChange={(e) => setTrack({ mode: e.target.value as TrackMode, value: "", prerelease: false })}
+                    className="rounded-md border bg-background px-2 py-1 text-xs"
+                  >
+                    {TRACK_OPTIONS.map((option) => (
+                      <option key={option.mode} value={option.mode}>{option.label}</option>
+                    ))}
+                  </select>
+                  {(track.mode === "tag" || track.mode === "branch" || track.mode === "branch-pattern" || track.mode === "pinned") && (
+                    <input
+                      data-testid="collection-track-value"
+                      aria-label="跟踪的版本、分支或规则"
+                      value={track.value}
+                      onChange={(e) => setTrack({ ...track, value: e.target.value })}
+                      className="w-40 rounded-md border border-input bg-background px-2 py-1 font-mono text-xs"
+                      placeholder={{ tag: "v*（可空）", branch: "stable", "branch-pattern": "release/*", pinned: "v3.0.1" }[track.mode]}
+                    />
+                  )}
+                  {track.mode === "tag" && (
+                    <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <input type="checkbox" data-testid="collection-track-prerelease" checked={track.prerelease} onChange={(e) => setTrack({ ...track, prerelease: e.target.checked })} />
+                      含预发布（-rc、-beta）
+                    </label>
+                  )}
+                </div>
+              </>
             ) : (
               <>
                 <input value={sourcePath} onChange={(e) => setSourcePath(e.target.value)} data-testid="collection-source-path-input" aria-label="本机位置" className={inputClass} placeholder="~/.some-tool/skills 或 ~/my-skills/review" />
@@ -178,6 +219,9 @@ export function SkillCollectionFormDialog({
               <>
                 <div className="mb-1.5 flex items-center gap-2">
                   <span className="text-xs font-medium text-muted-foreground">用哪些技能</span>
+                  {sourceKind === "git" && (
+                    <span className="text-[11px] text-muted-foreground" title="规则目录与 aliases/ 也会一起取回">只下载勾选的目录</span>
+                  )}
                   <span data-testid="collection-paths-count" className="text-xs text-muted-foreground">已选 {selected.length} / {skills.length}</span>
                   <div className="ml-auto flex gap-1">
                     <button type="button" data-testid="collection-paths-select-all" onClick={() => setSelected(skills.map((skill) => skill.name))} className="rounded px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10">全选</button>

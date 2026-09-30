@@ -1,3 +1,4 @@
+import { TRACK_OPTIONS, trackFromForm, trackToForm, type TrackSpec } from "./skillTrack";
 /**
  * 分享链接：把一个 MCP 服务或技能集合的定义装进 `agentmanager://import?data=…`，
  * 别人粘贴或点开后，用现有的「新增」表单预填、自己检查后保存——链接本身从不直接写入。
@@ -18,7 +19,7 @@ export type SharePayload =
   | {
       kind: "skills";
       name: string;
-      definition: { url: string; skill_paths?: string[] | null; rules_path?: string | null };
+      definition: { url: string; skill_paths?: string[] | null; rules_path?: string | null; track?: TrackSpec | null };
     };
 
 const NAME_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -95,7 +96,15 @@ function validate(payload: SharePayload): SharePayload | string {
     }
     const rules = def.rules_path ?? null;
     if (rules !== null && (typeof rules !== "string" || rules.includes("..") || rules.startsWith("/"))) return "规则位置格式不对";
-    return { kind: "skills", name: payload.name, definition: { url: def.url, skill_paths: paths, rules_path: rules } };
+    // 跟踪方式按表单同一套规则校验，写错就拒绝，不静默丢掉
+    let track: TrackSpec | null = null;
+    if (def.track != null) {
+      if (typeof def.track !== "object") return "跟踪方式格式不对";
+      const checked = trackFromForm(trackToForm(def.track));
+      if ("error" in checked || !TRACK_OPTIONS.some((option) => option.mode === def.track!.mode)) return "跟踪方式格式不对";
+      track = checked.track;
+    }
+    return { kind: "skills", name: payload.name, definition: { url: def.url, skill_paths: paths, rules_path: rules, ...(track ? { track } : {}) } };
   }
   return "只支持分享 MCP 服务与技能来源";
 }

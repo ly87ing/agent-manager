@@ -297,6 +297,8 @@ export interface SkillCollectionSpec {
   agents?: string[] | null;
   matrix_mode?: boolean;
   new_skill_default?: string;
+  /** git 来源的跟踪方式；缺省（null）为自动：有版本号标签跟最新版本，否则跟主分支。 */
+  track?: import("./skillTrack").TrackSpec | null;
 }
 
 /** 集合发现失败的固定语义块（引擎 skills:status observed.discovery_error）。 */
@@ -319,6 +321,11 @@ export interface SkillCollectionObserved {
   extra_links?: string[];
   actions?: string[];
   blocked_reason?: string | null;
+  /** git 来源：镜像当前所在版本；跟踪方式写错时的原因。本机目录来源为 null。 */
+  version?: {
+    current: import("./skillTrack").VersionRef | null;
+    track_error: string | null;
+  } | null;
 }
 
 export interface SkillSpec {

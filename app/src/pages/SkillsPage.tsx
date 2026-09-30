@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, PackageOpen, Pencil, Power, PowerOff, Plus, RefreshCw, SearchX, Share2, Sparkles, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, History, PackageOpen, Pencil, Power, PowerOff, Plus, RefreshCw, SearchX, Share2, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../components/ConfirmModal";
@@ -12,6 +12,8 @@ import { skillChip, skillNeedsUpdate } from "../lib/skillChip";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import { SkillInstalledView } from "../components/SkillInstalledView";
 import { SkillOtherSources } from "../components/SkillOtherSources";
+import { SkillVersionsDialog } from "../components/SkillVersionsDialog";
+import { describeTrack, versionLabel } from "../lib/skillTrack";
 import type { EngineElement, PolicyData, SkillRecommendation, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import {
@@ -125,6 +127,9 @@ export default function SkillsPage({
   const batchApply = useBatchApply();
   const { execute } = useExecutions();
   const [updatingAll, setUpdatingAll] = useState(false);
+  /** 正在看版本的 git 来源；switching 为真时正在切换。 */
+  const [versionsOf, setVersionsOf] = useState<EngineElement | null>(null);
+  const [switching, setSwitching] = useState(false);
   const queryClient = useQueryClient();
   const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
 
@@ -181,7 +186,44 @@ export default function SkillsPage({
       .catch(() => undefined)
       .finally(() => void queryClient.invalidateQueries({ queryKey: engineKeys.all }));
 
+  /**
+   * 把 git 来源换到某个版本（ref 为 null 时按跟踪方式到最新），再把各账号在用、内容有变化的
+   * 这个来源的技能换过去；停用的不动。镜像切换失败时账号一个都不动。
+   */
+  const switchVersion = async (collection: EngineElement, ref: string | null, label: string): Promise<boolean> => {
+    const name = collName(collection);
+    setSwitching(true);
+    try {
+      const envelope = await execute({
+        command: "skills:apply",
+        label: ref ? `把 ${name} 切换到 ${label}` : `更新 ${name}`,
+        args: ["--only", collection.id, "--action", "update", ...(ref ? ["--ref", ref] : [])],
+        silent: true,
+      });
+      if (!envelope?.ok) {
+        toast.error(`没有切换：${envelope?.errors[0]?.message ?? "详见任务记录"}`);
+        return false;
+      }
+      await runEngine("system:refresh-upstream", ["--only", collection.id]).catch(() => undefined);
+      const fresh = await runEngine<StatusData>("skills:status", []);
+      const rows = fresh.ok
+        ? versionUpdateRows(fresh.data.elements ?? []).filter((row) => row.elementId.startsWith(`${collection.id}/`))
+        : [];
+      await batchApply.applyBatch({ actionLabel: "更新", rows });
+      toast.success(`${name} 已${ref ? "切换" : "更新"}到 ${label}`, {
+        description: rows.length ? `${rows.length} 处技能换到了这个版本` : "各账号在用的技能内容没有变化",
+      });
+      return true;
+    } finally {
+      setSwitching(false);
+      await queryClient.invalidateQueries({ queryKey: engineKeys.all });
+    }
+  };
+
   const runCollectionAction = (collection: EngineElement, action: "update" | "enable" | "disable", title: string) => {
+    if (action === "update" && (collection.spec as SkillCollectionSpec).url) {
+      return void switchVersion(collection, null, collection.freshness.upstream ?? "最新");
+    }
     if (action === "disable") dismissIfRecommended(collection);
     return void directApply
       .apply({ command: "skills:apply", label: title, args: ["--only", collection.id, "--action", action] })
@@ -239,7 +281,12 @@ export default function SkillsPage({
       const link = encodeShareLink({
         kind: "skills",
         name,
-        definition: { url: spec.url as string, skill_paths: spec.skill_paths ?? null, rules_path: (spec as { rules_path?: string | null }).rules_path ?? null },
+        definition: {
+          url: spec.url as string,
+          skill_paths: spec.skill_paths ?? null,
+          rules_path: (spec as { rules_path?: string | null }).rules_path ?? null,
+          ...(spec.track ? { track: spec.track } : {}),
+        },
       });
       await navigator.clipboard.writeText(link);
       toast.success(`已复制 ${name} 的分享链接`);
@@ -597,8 +644,24 @@ export default function SkillsPage({
                       {spec.source_path ? "本机目录不存在" : "尚未下载"}
                     </span>
                   )}
+                  {spec.url && observed.version?.current && (
+                    <span
+                      data-testid={`collection-version-${name}`}
+                      className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                      title={`跟踪：${describeTrack(spec.track)}`}
+                    >
+                      {versionLabel(observed.version.current)}
+                    </span>
+                  )}
                   {collection.freshness.state === "behind" && (
-                    <span className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">可更新</span>
+                    <span data-testid={`collection-behind-${name}`} className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">
+                      {collection.freshness.upstream ? `可更新到 ${collection.freshness.upstream}` : "可更新"}
+                    </span>
+                  )}
+                  {observed.version?.track_error && (
+                    <span data-testid={`collection-track-error-${name}`} className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning" title={observed.version.track_error}>
+                      跟踪方式有误
+                    </span>
                   )}
                   {inboxCount > 0 && (
                     <span data-testid={`inbox-count-${name}`} className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">
@@ -622,6 +685,11 @@ export default function SkillsPage({
                         <IconAction tone="primary" label={`更新集合 ${name}`} testId={`update-collection-${name}`} onClick={() => runCollectionAction(collection, "update", `更新集合 ${name}`)}>
                           <RefreshCw className="h-3.5 w-3.5" aria-hidden />
                         </IconAction>
+                    )}
+                    {spec.url && (
+                      <IconAction label={`${name} 的版本`} testId={`versions-collection-${name}`} onClick={() => setVersionsOf(collection)}>
+                        <History className="h-3.5 w-3.5" aria-hidden />
+                      </IconAction>
                     )}
                     {spec.url && (
                       <IconAction label={`复制 ${name} 的分享链接`} testId={`share-collection-${name}`} onClick={() => void shareCollection(name, spec)}>
@@ -753,6 +821,16 @@ export default function SkillsPage({
           <SkillInstalledView entries={installed} agents={agentOptions} />
         </div>
       </details>
+
+      {versionsOf && (
+        <SkillVersionsDialog
+          collectionId={versionsOf.id}
+          name={collName(versionsOf)}
+          busy={switching || batchApply.executing}
+          onSwitch={(ref, label) => switchVersion(versionsOf, ref, label)}
+          onClose={() => setVersionsOf(null)}
+        />
+      )}
 
       {(showAddForm || editing) && (
         <SkillCollectionFormDialog

@@ -7,6 +7,10 @@ describe("分享链接", () => {
     expect(decodeShareLink(encodeShareLink(mcp))).toEqual(mcp);
     const skills = { kind: "skills" as const, name: "agent-skills", definition: { url: "https://github.com/example/agent-skills.git", skill_paths: ["skills"], rules_path: null } };
     expect(decodeShareLink(encodeShareLink(skills))).toEqual(skills);
+    const tracked = { ...skills, definition: { ...skills.definition, track: { mode: "tag" as const, pattern: "v*" } } };
+    expect(decodeShareLink(encodeShareLink(tracked))).toEqual(tracked);
+    const badTrack = SHARE_PREFIX + btoa(JSON.stringify({ v: 1, kind: "skills", name: "x", definition: { url: "https://e.x/r.git", track: { mode: "branch", branch: "--upload-pack=x" } } }));
+    expect(decodeShareLink(badTrack)).toBe("跟踪方式格式不对");
   });
 
   it("带明文取值的拒收：环境变量和 header 只接受 ${变量}", () => {
