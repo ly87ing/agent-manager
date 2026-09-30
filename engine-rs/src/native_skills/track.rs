@@ -199,8 +199,12 @@ pub(crate) struct Version {
 
 impl Version {
     pub(crate) fn parse(name: &str) -> Option<Version> {
-        let re = regex::Regex::new(r"(\d+(?:\.\d+)+)(?:-([0-9A-Za-z][0-9A-Za-z.-]*))?")
-            .expect("静态正则合法");
+        // 大仓库有上千个标签：正则只编译一次
+        static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let re = RE.get_or_init(|| {
+            regex::Regex::new(r"(\d+(?:\.\d+)+)(?:-([0-9A-Za-z][0-9A-Za-z.-]*))?")
+                .expect("静态正则合法")
+        });
         let caps = re.captures(name)?;
         let mut numbers = Vec::new();
         for part in caps.get(1)?.as_str().split('.') {
@@ -276,11 +280,9 @@ fn compare_pre(a: &str, b: &str) -> Ordering {
 }
 
 /// 只支持 `*` 通配（匹配任意字符，含 `/`）。
-pub(crate) fn glob_match(pattern: &str, name: &str) -> bool {
+fn glob(pattern: &str) -> Option<regex::Regex> {
     let escaped: Vec<String> = pattern.split('*').map(regex::escape).collect();
-    regex::Regex::new(&format!("^{}$", escaped.join(".*")))
-        .map(|re| re.is_match(name))
-        .unwrap_or(false)
+    regex::Regex::new(&format!("^{}$", escaped.join(".*"))).ok()
 }
 
 /// 版本号最大的匹配项（预发布按需排除）。
@@ -289,8 +291,9 @@ fn highest<'a>(
     pattern: &str,
     prerelease: bool,
 ) -> Option<(String, String)> {
+    let re = glob(pattern)?;
     names
-        .filter(|(name, _)| glob_match(pattern, name))
+        .filter(|(name, _)| re.is_match(name))
         .filter_map(|(name, sha)| Version::parse(name).map(|v| (v, name, sha)))
         .filter(|(v, _, _)| prerelease || !v.is_prerelease())
         .max_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(a.1)))

@@ -453,6 +453,16 @@ fn check_source(
                 .take(RECENT_VERSIONS)
                 .map(|(_, name)| name.clone()),
         );
+        // 先比目录树指纹（只要目录结构，不下载文件内容），对上了再取那一个版本逐文件确认
+        let local_trees: Vec<Option<String>> = plan
+            .locations
+            .iter()
+            .map(|loc| {
+                loc.content
+                    .as_deref()
+                    .and_then(|dir| local_tree_id(&tmp, dir))
+            })
+            .collect();
         let mut tried: Vec<String> = Vec::new();
         for tag in candidates {
             let Some(commit) = refs.tags.get(&tag) else {
@@ -462,6 +472,21 @@ fn check_source(
                 continue;
             }
             tried.push(commit.clone());
+            let theirs = git(&[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("{commit}:{path}"),
+            ])
+            .ok()
+            .map(|out| out.trim().to_string());
+            if theirs.is_none()
+                || local_trees
+                    .iter()
+                    .any(|ours| ours.as_ref() != theirs.as_ref())
+            {
+                continue;
+            }
             let target = track::Target {
                 kind: "tag",
                 name: tag.clone(),
@@ -488,6 +513,35 @@ fn check_source(
     })();
     let _ = std::fs::remove_dir_all(&tmp);
     result
+}
+
+/// 本地目录按 git 的方式算出的目录树 ID（对象写进临时仓库，不访问网络）；算不出时为 None。
+fn local_tree_id(tmp_repo: &Path, dir: &Path) -> Option<String> {
+    let index = tmp_repo.join(".git").join(format!("am-index-{:x}", {
+        let mut h = Sha256::new();
+        h.update(dir.to_string_lossy().as_bytes());
+        h.finalize()[0]
+    }));
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            // 临时仓库开着稀疏检出，会拒绝加入范围外的路径；这里只是算树 ID，关掉它
+            .args(["-c", "core.sparseCheckout=false", "--git-dir"])
+            .arg(tmp_repo.join(".git"))
+            .arg("--work-tree")
+            .arg(dir)
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_INDEX_FILE", &index)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+    };
+    git(&["add", "--all", "--force", "."])?;
+    let out = git(&["write-tree"])?;
+    let _ = std::fs::remove_file(&index);
+    let tree = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    track::is_sha(&tree).then_some(tree)
 }
 
 /// 来源一侧参与指纹的内容：仓库、路径、指定的版本、目标提交，以及是否覆盖本地改动。
