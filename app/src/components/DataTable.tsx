@@ -24,13 +24,13 @@ export function DataTable({ label, children, testId }: { label: string; children
   );
 }
 
-/** 表头：标题（「XX · 数量」）、中间列与窄列的列名，右边放「新增」等入口。 */
+/** 表头：标题（「XX · 数量」）、中间列与窄列的列名，右边放「新增」等入口。不给 `narrow` 就没有窄列（行里也不放）。 */
 export function TableHeader({ title, middle, narrow, children }: { title: string; middle: string; narrow?: string; children?: ReactNode }) {
   return (
     <div className="flex items-center gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
       <span className="min-w-0 flex-1 font-medium text-foreground">{title}</span>
       <span className={COL_MIDDLE}>{middle}</span>
-      <span className={COL_NARROW}>{narrow}</span>
+      {narrow !== undefined && <span className={COL_NARROW}>{narrow}</span>}
       <span className="flex w-60 shrink-0 items-center justify-end gap-3">{children}</span>
     </div>
   );

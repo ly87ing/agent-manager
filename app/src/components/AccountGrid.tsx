@@ -213,6 +213,9 @@ export interface MenuAction {
   label: string;
   testId: string;
   danger?: boolean;
+  /** 正在执行别的操作时不能点（说明放在 title 里）。 */
+  disabled?: boolean;
+  title?: string;
   onSelect: () => void;
 }
 
@@ -300,11 +303,13 @@ export function ActionMenu({ label, items }: { label: string; items: MenuAction[
                 type="button"
                 role="menuitem"
                 data-testid={item.testId}
+                disabled={item.disabled}
+                title={item.title}
                 onClick={() => {
                   setOpen(false);
                   item.onSelect();
                 }}
-                className={cn("block w-full rounded px-2.5 py-1.5 text-left text-sm hover:bg-accent", item.danger && "text-destructive")}
+                className={cn("block w-full rounded px-2.5 py-1.5 text-left text-sm hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent", item.danger && "text-destructive")}
               >
                 {item.label}
               </button>

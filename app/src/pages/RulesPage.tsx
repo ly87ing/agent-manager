@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowUpDown, Copy, Eye, Info, Library, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowUpDown, Copy, Eye, Library, Pencil, Plus, Trash2 } from "lucide-react";
 import { AgentIcon } from "../components/AgentIcon";
 import { StateBadge } from "../components/StateBadge";
-import { COL_ACTION, COL_ICONS, COL_MIDDLE, COL_NARROW, PILL, PILL_HOVER, ROW, RowIcon, TableHeader } from "../components/DataTable";
+import { COL_ACTION, COL_ICONS, COL_MIDDLE, PILL, PILL_HOVER, ROW, RowIcon, TableHeader } from "../components/DataTable";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { useRuleSources } from "../components/RuleSources";
 import { ErrorPanel } from "../components/ErrorPanel";
@@ -163,11 +163,7 @@ export default function RulesPage({
       {query.data.errors.length > 0 && <ErrorPanel title="规则状态读取失败" errors={query.data.errors} />}
 
       <section className="overflow-clip rounded-lg border bg-card" aria-label="规则文件">
-        <TableHeader title={`规则文件 · ${elements.length}`} middle="使用的规则" narrow="行数">
-          <span className="text-muted-foreground" title={PAGE_NOTE}>
-            <Info className="inline h-3.5 w-3.5 align-[-2px]" aria-hidden /> 说明
-          </span>
-        </TableHeader>
+        <TableHeader title={`规则文件 · ${elements.length}`} middle="使用的规则" />
         {elements.length === 0 && <p className="px-4 py-3 text-xs text-muted-foreground">没有可显示的规则文件。</p>}
         <ul className="divide-y">
           {elements.map((element) => {
@@ -214,6 +210,7 @@ export default function RulesPage({
           })}
         </ul>
       </section>
+      <p className="px-1 text-xs text-muted-foreground">{PAGE_NOTE}</p>
 
       <RuleLibrary
         sourceRules={sourceRules}
@@ -335,7 +332,10 @@ function TargetRow({
             <AgentIcon kind={spec.kind === "codex" ? "codex" : "claude"} />
             <span className="truncate">{label}</span>
           </div>
-          <div className="truncate font-mono text-xs text-muted-foreground">{spec.target ?? observed.target}</div>
+          <div className="truncate font-mono text-xs text-muted-foreground" title={spec.target ?? observed.target}>
+            {spec.target ?? observed.target}
+            {typeof content === "string" && <span className="font-sans"> · {lineCount(content)} 行</span>}
+          </div>
         </div>
         <div className={cn(COL_MIDDLE, "min-w-0 text-sm")}>
           <div className="flex items-center gap-1.5">
@@ -350,7 +350,6 @@ function TargetRow({
           </div>
           {status.detail && <p className="truncate text-xs text-warning" title={status.detail}>{status.detail}</p>}
         </div>
-        <span className={cn(COL_NARROW, "text-xs text-muted-foreground")}>{typeof content === "string" ? `${lineCount(content)} 行` : ""}</span>
         <div className={COL_ACTION}>
           {action && (
             <button type="button" data-testid={action.testId} disabled={busy} title={action.title} onClick={action.run} className={PILL}>
@@ -432,7 +431,7 @@ function RuleLibrary({
 
   return (
     <section className="overflow-clip rounded-lg border bg-card" aria-label="规则库">
-      <TableHeader title={`规则库 · ${count}`} middle="来源" narrow="行数">
+      <TableHeader title={`规则库 · ${count}`} middle="来源">
         <button type="button" data-testid="rule-source-add" onClick={() => onOpenSource?.(null)} className="inline-flex items-center gap-1 text-primary hover:underline">
           <Library className="h-3.5 w-3.5" aria-hidden /> 管理来源
         </button>
@@ -448,7 +447,7 @@ function RuleLibrary({
               <div className={ROW}>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{rule.name}</div>
-                  <div className="text-xs text-muted-foreground">{used(usage.rule(rule))}</div>
+                  <div className="text-xs text-muted-foreground">{used(usage.rule(rule))} · {lineCount(rule.body)} 行</div>
                 </div>
                 <button
                   type="button"
@@ -459,7 +458,6 @@ function RuleLibrary({
                 >
                   {mine ? `规则文件 · ${mine.path}` : `${rule.collection} · ${rule.local ? "本机目录" : "git 仓库"}`}
                 </button>
-                <span className={cn(COL_NARROW, "text-xs text-muted-foreground")}>{lineCount(rule.body)} 行</span>
                 <div className={COL_ACTION}>
                   {onApplyRule && (
                     <button
@@ -489,7 +487,6 @@ function RuleLibrary({
               <div className="text-xs text-warning">没读到规则</div>
             </div>
             <div className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")} title={source.path}>规则文件 · {source.path}</div>
-            <span className={COL_NARROW} />
             <div className={COL_ACTION} />
             <div className={COL_ICONS}>
               <RowIcon label={`到来源页管理 ${source.name}`} onClick={() => onOpenSource?.(source.name)}>
@@ -503,10 +500,9 @@ function RuleLibrary({
             <div className={ROW}>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{template.name}</div>
-                <div className="text-xs text-muted-foreground">{used(usage.template(template))}</div>
+                <div className="text-xs text-muted-foreground">{used(usage.template(template))} · {lineCount(template.body)} 行</div>
               </div>
               <div className={cn(COL_MIDDLE, "text-sm text-muted-foreground")}>本机模板 · {ORIGIN_LABEL[template.origin] ?? template.origin}</div>
-              <span className={cn(COL_NARROW, "text-xs text-muted-foreground")}>{lineCount(template.body)} 行</span>
               <div className={COL_ACTION}>
                 {onApplyTemplate && (
                   <button

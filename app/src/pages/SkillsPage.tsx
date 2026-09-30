@@ -7,7 +7,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
-import { AccountCells, AccountHeader, AccountSwitch, ActionMenu, RowActions } from "../components/AccountGrid";
+import { AccountCells, AccountHeader, AccountSwitch, ActionMenu, RowActions, TRAILING } from "../components/AccountGrid";
 import { skillChip, skillNeedsUpdate } from "../lib/skillChip";
 import { SkillInstalledView } from "../components/SkillInstalledView";
 import { AttentionOnlyToggle, StateBadge } from "../components/StateBadge";
@@ -459,6 +459,8 @@ export default function SkillsPage({
                       </span>
                     )}
                   />
+                  {/* 与表头、技能行的行尾操作列同宽，账号列才对得齐 */}
+                  <div className={TRAILING} />
                 </header>
                 {observed.discovery_error && (
                   <p data-testid={`discovery-error-${name}`} className="bg-warning/10 px-4 py-1.5 text-xs text-warning">

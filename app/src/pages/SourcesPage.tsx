@@ -3,7 +3,8 @@ import { Link2, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../components/ConfirmModal";
-import { COL_MIDDLE, COL_NARROW, DataTable, ROW, TableHeader } from "../components/DataTable";
+import { ActionMenu } from "../components/AccountGrid";
+import { COL_NARROW, DataTable, PILL, ROW } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { PageError, PageLoading } from "../components/PageState";
 import { RemoveCollectionDialog } from "../components/RemoveCollectionDialog";
@@ -17,7 +18,7 @@ import type { EngineElement, PolicyData, SkillRecommendation, StatusData } from 
 import { runEngine } from "../lib/engine";
 import { useExecutions } from "../lib/execution";
 import { agentCellsOf, type SkillCollectionObserved, type SkillCollectionSpec, type SkillSpec } from "../lib/observed";
-import { engineKeys, useEngineQuery } from "../lib/queries";
+import { engineKeys, useCheckingUpdates, useEngineQuery } from "../lib/queries";
 import { dismissRecommendation, loadDismissed } from "../lib/recommendDismiss";
 import { encodeShareLink, type SharePayload } from "../lib/shareLink";
 import { availableSkills, fullSkillDefinition, isCollection } from "../lib/skillCollections";
@@ -31,6 +32,9 @@ import { updatableSources, useSourceUpdate } from "../lib/useSourceUpdate";
 import { shortRef } from "../lib/inbox";
 import { cn } from "../lib/utils";
 
+/** 来源表的列：「提供」只写几个技能几条规则，收窄；操作列放一个主按钮和「⋯」。 */
+const COL_PROVIDES = "w-40 shrink-0";
+const ACTIONS = "flex w-32 shrink-0 items-center justify-end gap-1";
 const TEXT_BUTTON = "rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40";
 const TONE = { ok: "text-success", warn: "text-warning", muted: "text-muted-foreground", info: "text-info" } as const;
 
@@ -67,6 +71,9 @@ export default function SourcesPage({
   const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
   const [adding, setAdding] = useState<"collection" | "rule" | null>(null);
   const [editing, setEditing] = useState<EngineElement | null>(null);
+  // 检查新版本进行中（任何页面或命令面板发起）：先不更新、不换版本，免得检查按更新前的版本记下「可更新」
+  const checking = useCheckingUpdates();
+  const CHECKING_TITLE = "正在检查新版本，完成后再更新";
   const [draft, setDraft] = useState<{ name: string; definition: Record<string, unknown> } | null>(null);
   const [removingCollection, setRemovingCollection] = useState<EngineElement | null>(null);
   const [removingSource, setRemovingSource] = useState<UserSource | null>(null);
@@ -278,8 +285,8 @@ export default function SourcesPage({
           <button
             type="button"
             data-testid="sources-update-all"
-            disabled={busy}
-            title="逐个取回来源的新内容，并把各账号在用的技能换到新版本；新发现的技能不会自动添加，账号上停用的不动"
+            disabled={busy || checking}
+            title={checking ? CHECKING_TITLE : "逐个取回来源的新内容，并把各账号在用的技能换到新版本；新发现的技能不会自动添加，账号上停用的不动"}
             onClick={() => void sourceUpdate.update(updatable)}
             className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40"
           >
@@ -298,8 +305,18 @@ export default function SourcesPage({
           </button>
         )}
       </div>
+      {checking && (
+        <p data-testid="sources-checking" className="rounded-md border border-info/30 bg-info/5 px-3 py-2 text-xs text-info">
+          正在检查新版本：完成前先不能更新或换版本，免得按旧的检查结果操作。
+        </p>
+      )}
       <DataTable label="来源" testId="sources-page">
-        <TableHeader title={`来源 · ${total}`} middle="提供" narrow="状态" />
+        <div className="flex items-center gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
+          <span className="min-w-0 flex-1 font-medium text-foreground">来源 · {total}</span>
+          <span className={COL_PROVIDES}>提供</span>
+          <span className={COL_NARROW}>状态</span>
+          <span className={ACTIONS} />
+        </div>
         {suggested.map((item) => (
           <div key={item.name} data-testid={`source-suggest-${item.name}`} className={cn(ROW, "border-b bg-primary/5")}>
             <div className="min-w-0 flex-1">
@@ -309,16 +326,17 @@ export default function SourcesPage({
               </div>
               <div className="truncate text-xs text-muted-foreground">{item.description}</div>
             </div>
-            <div className="flex shrink-0 items-center justify-end gap-1">
-              <button type="button" data-testid={`source-suggest-dismiss-${item.name}`} onClick={() => setDismissed(dismissRecommendation(item.name))} className={TEXT_BUTTON}>
-                不用了
-              </button>
-              <button type="button" data-testid={`source-suggest-add-${item.name}`} onClick={() => setDraft({ name: item.name, definition: item.definition })} className={TEXT_BUTTON}>
-                添加…
-              </button>
+            <div className={ACTIONS}>
               <button type="button" data-testid={`source-suggest-enable-${item.name}`} onClick={() => setEnabling(item)} className="rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:bg-primary/90">
                 启用…
               </button>
+              <ActionMenu
+                label={`${item.name} 的更多操作`}
+                items={[
+                  { label: "只登记，不下载…", testId: `source-suggest-add-${item.name}`, onSelect: () => setDraft({ name: item.name, definition: item.definition }) },
+                  { label: "不用了", testId: `source-suggest-dismiss-${item.name}`, onSelect: () => setDismissed(dismissRecommendation(item.name)) },
+                ]}
+              />
             </div>
           </div>
         ))}
@@ -354,48 +372,43 @@ export default function SourcesPage({
                       </div>
                     )}
                   </div>
-                  <span className={cn(COL_MIDDLE, "text-sm text-muted-foreground")}>
+                  <span className={cn(COL_PROVIDES, "text-sm text-muted-foreground")}>
                     {skillCount(name)} 个技能 · {ruleCount(name)} 条规则
                   </span>
                   <span className={cn(COL_NARROW, "text-xs", TONE[status.tone])} title={collection.freshness.upstream ? `可更新到 ${shortRef(collection.freshness.upstream)}` : undefined}>
                     {status.text}
                   </span>
-                  <div className="flex shrink-0 items-center justify-end gap-1">
+                  {/* 一个主操作常驻，其余收进「⋯」（设计规则：每行一个主操作） */}
+                  <div className={ACTIONS}>
                     {actions.includes("update") && enabled && (
-                      <button type="button" data-testid={`source-update-${name}`} disabled={busy} onClick={() => updateOne(collection)} className={cn(TEXT_BUTTON, attention && "text-primary")}>
+                      <button type="button" data-testid={`source-update-${name}`} disabled={busy || checking} title={checking ? CHECKING_TITLE : undefined} onClick={() => updateOne(collection)} className={attention ? PILL : TEXT_BUTTON}>
                         {spec.source_path ? "重新扫描" : "更新"}
                       </button>
                     )}
-                    {spec.url && (
-                      <button type="button" data-testid={`source-versions-${name}`} disabled={busy} onClick={() => setVersionsOf({ collection, openLatest: false })} className={TEXT_BUTTON}>
-                        版本
-                      </button>
-                    )}
-                    {spec.url && (
-                      <button type="button" data-testid={`source-share-${name}`} onClick={() => void share(name, spec)} className={TEXT_BUTTON}>
-                        分享
-                      </button>
-                    )}
-                    <button type="button" data-testid={`source-edit-${name}`} onClick={() => setEditing(collection)} className={TEXT_BUTTON}>
-                      编辑
-                    </button>
-                    {actions.includes(enabled ? "disable" : "enable") && (
-                      <button
-                        type="button"
-                        data-testid={`source-toggle-${name}`}
-                        disabled={busy}
-                        onClick={() => toggle(collection, !enabled)}
-                        title={enabled ? "停用：各账号里它的技能链接先移除，规则暂不出现；重新启用即恢复" : "启用：按之前的分配重新链接"}
-                        className={TEXT_BUTTON}
-                      >
-                        {enabled ? "停用" : "启用"}
-                      </button>
-                    )}
-                    {actions.includes("remove") && (
-                      <button type="button" data-testid={`source-remove-${name}`} onClick={() => setRemovingCollection(collection)} className={cn(TEXT_BUTTON, "hover:bg-destructive/10 hover:text-destructive")}>
-                        移除
-                      </button>
-                    )}
+                    <ActionMenu
+                      label={`${name} 的更多操作`}
+                      items={[
+                        ...(spec.url
+                          ? [
+                              { label: "换版本…", testId: `source-versions-${name}`, disabled: busy || checking, title: checking ? CHECKING_TITLE : undefined, onSelect: () => setVersionsOf({ collection, openLatest: false }) },
+                              { label: "复制分享链接", testId: `source-share-${name}`, onSelect: () => void share(name, spec) },
+                            ]
+                          : []),
+                        { label: "编辑…", testId: `source-edit-${name}`, onSelect: () => setEditing(collection) },
+                        ...(actions.includes(enabled ? "disable" : "enable")
+                          ? [
+                              {
+                                label: enabled ? "停用" : "启用",
+                                testId: `source-toggle-${name}`,
+                                disabled: busy,
+                                title: enabled ? "停用：各账号里它的技能链接先移除，规则暂不出现；重新启用即恢复" : "启用：按之前的分配重新链接",
+                                onSelect: () => toggle(collection, !enabled),
+                              },
+                            ]
+                          : []),
+                        ...(actions.includes("remove") ? [{ label: "移除…", testId: `source-remove-${name}`, danger: true, disabled: busy, onSelect: () => setRemovingCollection(collection) }] : []),
+                      ]}
+                    />
                   </div>
                 </li>
               );
@@ -408,24 +421,24 @@ export default function SourcesPage({
                     <div className="text-sm font-medium">{source.name}</div>
                     <div className="truncate font-mono text-xs text-muted-foreground" title={source.path}>规则 · {source.path}</div>
                   </div>
-                  <span className={cn(COL_MIDDLE, "text-sm text-muted-foreground")}>{source.enabled ? `${count} 条规则` : "—"}</span>
+                  <span className={cn(COL_PROVIDES, "text-sm text-muted-foreground")}>{source.enabled ? `${count} 条规则` : "—"}</span>
                   <span className={cn(COL_NARROW, "text-xs", !source.enabled ? TONE.muted : count ? TONE.ok : TONE.warn)}>
                     {!source.enabled ? "已停用" : count ? "正常" : "没读到"}
                   </span>
-                  <div className="flex shrink-0 items-center justify-end gap-1">
-                    <button
-                      type="button"
-                      data-testid={`source-toggle-${source.name}`}
-                      disabled={userSources.busy}
-                      onClick={() => void userSources.setEnabled(source, !source.enabled)}
-                      title={source.enabled ? "停用：它的规则暂不出现，已写进账号的规则文件不动" : "启用"}
-                      className={TEXT_BUTTON}
-                    >
-                      {source.enabled ? "停用" : "启用"}
-                    </button>
-                    <button type="button" data-testid={`source-remove-${source.name}`} onClick={() => setRemovingSource(source)} className={cn(TEXT_BUTTON, "hover:bg-destructive/10 hover:text-destructive")}>
-                      移除
-                    </button>
+                  <div className={ACTIONS}>
+                    <ActionMenu
+                      label={`${source.name} 的更多操作`}
+                      items={[
+                        {
+                          label: source.enabled ? "停用" : "启用",
+                          testId: `source-toggle-${source.name}`,
+                          disabled: userSources.busy,
+                          title: source.enabled ? "停用：它的规则暂不出现，已写进账号的规则文件不动" : "启用",
+                          onSelect: () => void userSources.setEnabled(source, !source.enabled),
+                        },
+                        { label: "移除…", testId: `source-remove-${source.name}`, danger: true, disabled: userSources.busy, onSelect: () => setRemovingSource(source) },
+                      ]}
+                    />
                   </div>
                 </li>
               );

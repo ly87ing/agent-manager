@@ -5,6 +5,15 @@ import type { Envelope } from "../lib/contract";
 import { makeApplyResult, makeElement, makeEnvelope, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
+/** 来源行的次要操作在「⋯」里：先打开这一行的菜单再取菜单项。 */
+async function menuItem(testId: string) {
+  const suggest = testId.startsWith("source-suggest-");
+  const name = testId.replace(/^source-(versions|share|edit|toggle|remove|suggest-add|suggest-dismiss)-/, "");
+  const row = await screen.findByTestId(suggest ? `source-suggest-${name}` : `source-row-${name}`);
+  await userEvent.click(within(row).getByRole("button", { name: `${name} 的更多操作` }));
+  return screen.getByTestId(testId);
+}
+
 function skillsRoutes() {
   return {
     "skills:status": makeEnvelope(
@@ -115,7 +124,7 @@ describe("来源页：添加、编辑、更新、移除", () => {
 
   it("编辑集合：以 sqlite 完整定义整条替换保存，全选并自动包含写成技能所在目录，未展示字段不丢，不预览/同步", async () => {
     const { calls } = renderWithEngine(<SourcesPage />, skillsRoutes());
-    await userEvent.click(await screen.findByTestId("source-edit-agent-skills"));
+    await userEvent.click(await menuItem("source-edit-agent-skills"));
     // 名称不能改：只在标题里显示
     expect(screen.queryByTestId("collection-name-input")).toBeNull();
     expect(screen.getByRole("heading", { name: "编辑来源 agent-skills" })).toBeInTheDocument();
@@ -162,7 +171,7 @@ describe("来源页：添加、编辑、更新、移除", () => {
       { command: "policy.get" },
     );
     const { calls } = renderWithEngine(<SourcesPage />, legacyRoutes);
-    await userEvent.click(await screen.findByTestId("source-edit-agent-skills"));
+    await userEvent.click(await menuItem("source-edit-agent-skills"));
     await userEvent.click(screen.getByTestId("collection-form-submit"));
 
     await screen.findByText(/已停止保存/);
@@ -286,7 +295,7 @@ describe("来源页：添加、编辑、更新、移除", () => {
 
   it("移除集合：点击先打开 ConfirmModal，取消时零 apply/零 policy:set", async () => {
     const { calls } = renderWithEngine(<SourcesPage />, skillsRoutes());
-    const removeBtn = await screen.findByTestId("source-remove-agent-skills");
+    const removeBtn = await menuItem("source-remove-agent-skills");
     await userEvent.click(removeBtn);
 
     const dialog = await screen.findByRole("dialog", { name: "移除来源 agent-skills" });
@@ -305,7 +314,7 @@ describe("来源页：添加、编辑、更新、移除", () => {
 
   it("移除集合：输入集合名确认后 skills:apply 携带 --only skill:<name> --action remove，git 集合默认一并清理（--purge），无 plan、零 policy:set", async () => {
     const { calls } = renderWithEngine(<SourcesPage />, skillsRoutes());
-    const removeBtn = await screen.findByTestId("source-remove-agent-skills");
+    const removeBtn = await menuItem("source-remove-agent-skills");
     await userEvent.click(removeBtn);
 
     await screen.findByRole("dialog", { name: "移除来源 agent-skills" });
@@ -329,7 +338,7 @@ describe("来源页：添加、编辑、更新、移除", () => {
     const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[]; recommendations: { name: string }[] }>;
     status.data.recommendations[0].name = "agent-skills";
     const { calls } = renderWithEngine(<SourcesPage />, routes);
-    await userEvent.click(await screen.findByTestId("source-remove-agent-skills"));
+    await userEvent.click(await menuItem("source-remove-agent-skills"));
     await userEvent.click(screen.getByTestId("remove-collection-purge"));
     await userEvent.type(screen.getByTestId("confirm-modal-input"), "agent-skills");
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
@@ -370,7 +379,7 @@ describe("集合的「用哪些技能」改成勾选", () => {
 
   it("勾选反映实际在用的技能：逐个列出的勾上，其余不勾", async () => {
     renderWithEngine(<SourcesPage />, skillsRoutes());
-    await userEvent.click(await screen.findByTestId("source-edit-agent-skills"));
+    await userEvent.click(await menuItem("source-edit-agent-skills"));
     expect(screen.getByTestId("collection-path-alpha")).toBeChecked();
     expect(screen.getByTestId("collection-path-beta")).toBeChecked();
     expect(screen.getByTestId("collection-path-inbox-one")).not.toBeChecked();
@@ -379,7 +388,7 @@ describe("集合的「用哪些技能」改成勾选", () => {
 
   it("配置是装技能的目录（skills）：全部勾上并自动包含，不把目录当成找不到的技能；原样保存不改配置", async () => {
     const { calls } = renderWithEngine(<SourcesPage />, editWith(["skills"]));
-    await userEvent.click(await screen.findByTestId("source-edit-agent-skills"));
+    await userEvent.click(await menuItem("source-edit-agent-skills"));
     for (const name of ["alpha", "beta", "inbox-one", "inbox-two"]) {
       expect(screen.getByTestId(`collection-path-${name}`)).toBeChecked();
     }
@@ -391,7 +400,7 @@ describe("集合的「用哪些技能」改成勾选", () => {
 
   it("从目录模式取消一个：改存剩下技能的实际路径", async () => {
     const { calls } = renderWithEngine(<SourcesPage />, editWith(["skills"]));
-    await userEvent.click(await screen.findByTestId("source-edit-agent-skills"));
+    await userEvent.click(await menuItem("source-edit-agent-skills"));
     await userEvent.click(screen.getByTestId("collection-path-beta"));
     expect(screen.queryByTestId("collection-auto-include")).toBeNull();
     await userEvent.click(screen.getByTestId("collection-form-submit"));
@@ -400,7 +409,7 @@ describe("集合的「用哪些技能」改成勾选", () => {
 
   it("加勾一个：原有写法保留，新勾的用实际路径", async () => {
     const { calls } = renderWithEngine(<SourcesPage />, skillsRoutes());
-    await userEvent.click(await screen.findByTestId("source-edit-agent-skills"));
+    await userEvent.click(await menuItem("source-edit-agent-skills"));
     await userEvent.click(screen.getByTestId("collection-path-inbox-one"));
     await userEvent.click(screen.getByTestId("collection-form-submit"));
     expect(savedSkillPaths(calls)).toEqual(["alpha", "beta", "skills/inbox-one"]);
@@ -408,7 +417,7 @@ describe("集合的「用哪些技能」改成勾选", () => {
 
   it("配置里有来源里找不到的项：单独提示，默认保留，取消勾选才去掉", async () => {
     const { calls } = renderWithEngine(<SourcesPage />, editWith(["alpha", "gone"]));
-    await userEvent.click(await screen.findByTestId("source-edit-agent-skills"));
+    await userEvent.click(await menuItem("source-edit-agent-skills"));
     expect(screen.getByTestId("collection-paths-missing")).toHaveTextContent("gone");
     await userEvent.click(screen.getByTestId("collection-path-missing-gone"));
     await userEvent.click(screen.getByTestId("collection-form-submit"));
@@ -417,7 +426,7 @@ describe("集合的「用哪些技能」改成勾选", () => {
 
   it("一个都没勾：拦下来并说清怎么办，不写库", async () => {
     const { calls } = renderWithEngine(<SourcesPage />, skillsRoutes());
-    await userEvent.click(await screen.findByTestId("source-edit-agent-skills"));
+    await userEvent.click(await menuItem("source-edit-agent-skills"));
     await userEvent.click(screen.getByTestId("collection-paths-clear"));
     await userEvent.click(screen.getByTestId("collection-form-submit"));
 
@@ -433,7 +442,7 @@ describe("集合的「用哪些技能」改成勾选", () => {
     status.data.elements[0].observed.available = [];
     routes["skills:status"] = status;
     const { calls } = renderWithEngine(<SourcesPage />, routes);
-    await userEvent.click(await screen.findByTestId("source-edit-agent-skills"));
+    await userEvent.click(await menuItem("source-edit-agent-skills"));
     expect(screen.getByTestId("collection-paths-empty")).toHaveTextContent("仓库还没取到本地");
     expect(screen.getByTestId("collection-paths-input")).toHaveValue("alpha\nbeta");
     await userEvent.click(screen.getByTestId("collection-form-submit"));
@@ -480,7 +489,7 @@ describe("首次使用：推荐启用 agent-skills，可以不用", () => {
     const first = renderWithEngine(<SourcesPage />, recommendationRoutes());
     const banner = await screen.findByTestId("source-suggest-agent-skills-rec");
     expect(banner).toHaveTextContent("agent-skills-rec推荐");
-    await userEvent.click(within(banner).getByTestId("source-suggest-dismiss-agent-skills-rec"));
+    await userEvent.click(await menuItem("source-suggest-dismiss-agent-skills-rec"));
     expect(screen.queryByTestId("source-suggest-agent-skills-rec")).toBeNull();
     expect(first.calls.some((call) => /:(apply|set|seed|configure)$/.test(call.command))).toBe(false);
     first.unmount();
@@ -690,7 +699,7 @@ describe("来源页：版本", () => {
 
   it("版本对话框：列出版本，切换到旧版本后只把这个来源在用的技能换过去", async () => {
     const { calls } = renderWithEngine(<SourcesPage />, versionRoutes());
-    await userEvent.click(await screen.findByTestId("source-versions-archify"));
+    await userEvent.click(await menuItem("source-versions-archify"));
     const dialog = await screen.findByRole("dialog", { name: "archify 的版本" });
     expect(await within(dialog).findByTestId("versions-summary")).toHaveTextContent("跟踪：自动（按版本） · 当前 v3.0.0 · 最新 v3.0.1");
     expect(within(dialog).getByTestId("version-v3.1.0-rc.1")).toHaveTextContent("预发布");
@@ -729,7 +738,7 @@ describe("来源页：版本", () => {
 
   it("编辑来源：跟踪方式存进定义，自动存为 null", async () => {
     const { calls } = renderWithEngine(<SourcesPage />, versionRoutes());
-    await userEvent.click(await screen.findByTestId("source-edit-archify"));
+    await userEvent.click(await menuItem("source-edit-archify"));
     const dialog = await screen.findByRole("dialog", { name: "编辑来源" });
     await userEvent.selectOptions(within(dialog).getByTestId("collection-track-mode"), "tag");
     await userEvent.type(within(dialog).getByTestId("collection-track-value"), "v*");
@@ -747,7 +756,7 @@ describe("来源页：版本", () => {
     renderWithEngine(<SourcesPage />, routes);
     expect(await screen.findByTestId("source-row-archify")).toHaveTextContent("跟踪方式有误");
     expect(screen.getByTestId("source-problem-archify")).toHaveTextContent("不认识的跟踪方式：nightly");
-    await userEvent.click(screen.getByTestId("source-edit-archify"));
+    await userEvent.click(await menuItem("source-edit-archify"));
     const dialog = await screen.findByRole("dialog", { name: "编辑来源" });
     await userEvent.selectOptions(within(dialog).getByTestId("collection-track-mode"), "branch");
     await userEvent.click(within(dialog).getByTestId("collection-form-submit"));

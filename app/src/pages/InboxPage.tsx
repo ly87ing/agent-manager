@@ -185,36 +185,39 @@ export default function InboxPage({ onOpen }: { onOpen: (target: string) => void
               <span className="block truncate text-xs text-muted-foreground" title={entry.detail}>{entry.detail}</span>
             </span>
           </button>
-          {mode === "active" ? (
-            <>
-              <button
-                type="button"
-                data-testid={`inbox-ignore-${entry.key}`}
-                onClick={() => ignoreItems(entry.members)}
-                title="不想处理：不再计入待处理，底部「已忽略」里可以恢复；状态变了会重新提示"
-                className="shrink-0 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-              >
-                忽略
-              </button>
+          {/* 处理按钮宽度不一：放在固定宽的列里右对齐，「忽略」固定在最右，与分组上的「全部忽略」对齐 */}
+          <div className="flex w-36 shrink-0 justify-end">
+            {mode === "active" && (
               <button
                 type="button"
                 data-testid={`inbox-fix-${entry.key}`}
                 disabled={busy && entry.fix.kind !== "open"}
                 onClick={() => void run(entry.key, entry.fix)}
                 className={cn(
-                  "shrink-0 rounded-md px-2.5 py-1 text-xs disabled:opacity-40",
+                  "max-w-full truncate rounded-md px-2.5 py-1 text-xs disabled:opacity-40",
                   entry.fix.kind === "open" ? "border hover:bg-accent" : "bg-primary text-primary-foreground hover:bg-primary/90",
                 )}
               >
                 {running === entry.key ? "正在处理…" : entry.fix.label}
               </button>
-            </>
+            )}
+          </div>
+          {mode === "active" ? (
+            <button
+              type="button"
+              data-testid={`inbox-ignore-${entry.key}`}
+              onClick={() => ignoreItems(entry.members)}
+              title="不想处理：不再计入待处理，底部「已忽略」里可以恢复；状态变了会重新提示"
+              className="w-12 shrink-0 rounded-md py-1 text-center text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              忽略
+            </button>
           ) : (
             <button
               type="button"
               data-testid={`inbox-restore-${entry.key}`}
               onClick={() => restoreItems(entry.members)}
-              className="shrink-0 rounded-md border px-2.5 py-1 text-xs hover:bg-accent"
+              className="w-12 shrink-0 rounded-md border py-1 text-center text-xs hover:bg-accent"
             >
               恢复
             </button>
