@@ -40,6 +40,7 @@ fn write_temp_and_replace(
         bail!("回滚目标父目录不存在，拒绝恢复: {}", parent.display());
     }
 
+    #[cfg_attr(not(unix), allow(unused_variables))]
     let existing_meta = check_symlink_metadata(path)?;
     #[cfg(unix)]
     let mode = {

@@ -168,7 +168,7 @@ fn validate_base_url(url: &str) -> Result<()> {
 /// 展开 `~/` 前缀；其余原样。
 pub(crate) fn expand_home(path: &str, home_dir: &Path) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
-        return home_dir.join(rest);
+        return crate::platform::join_slash(home_dir, rest);
     }
     if path == "~" {
         return home_dir.to_path_buf();
@@ -1244,7 +1244,8 @@ mod tests {
 
     #[test]
     fn config_dir_guards() {
-        let home = PathBuf::from("/home/u");
+        // 各平台都是绝对路径（Windows 上 `/home/u` 不算绝对路径）
+        let home = std::env::temp_dir().join("am-home-u");
         let data = home.join("Library/Application Support/agent-manager");
         let mk = |dir: &str| ProfileDef {
             id: "cc-ly".into(),

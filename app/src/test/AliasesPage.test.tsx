@@ -539,3 +539,35 @@ describe("终端快捷命令页", () => {
     expect(args).not.toContain("--zprofile-base");
   });
 });
+
+describe("Windows：命令脚本目录", () => {
+  it("目录不在 PATH 上：给出自己执行的命令与手动做法，不调用任何写入；保存带 --cmd-base", async () => {
+    const status = makeAliasStatus({ claude: CLAUDE });
+    const element = {
+      ...status.elements[0],
+      id: "aliases:cmd",
+      spec: { name: "命令脚本", target: "~/.agent-manager/bin", base_flag: "--cmd-base", kind: "cmd-dir" },
+      observed: {
+        ...(status.elements[0].observed as object),
+        target: "C:\\Users\\u\\.agent-manager\\bin",
+        on_path: false,
+        path_command: "$d='C:\\Users\\u\\.agent-manager\\bin'; ...",
+        path_manual: "按 Win+R……",
+      },
+    };
+    const routes = aliasRoutes();
+    routes["aliases:status"] = makeEnvelope({ ...status, elements: [element] }, { command: "aliases.status" });
+    const { calls } = renderWithEngine(<AliasesPage />, routes);
+    const hint = await screen.findByTestId("aliases-path-hint");
+    expect(hint).toHaveTextContent("~/.agent-manager/bin 还不在 PATH 上");
+    expect(hint).toHaveTextContent("本工具不改注册表");
+    expect(hint).toHaveTextContent("$d='C:\\Users\\u\\.agent-manager\\bin'");
+    expect(hint).toHaveTextContent("不想执行命令：按 Win+R");
+    expect(screen.getByText(/Windows 上每条命令是/)).toBeInTheDocument();
+    expect(calls.some((call) => call.command !== "aliases:status" && !call.command.endsWith(":status"))).toBe(false);
+
+    await userEvent.click(screen.getByTestId("remove-alias-claude"));
+    await userEvent.click(await screen.findByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(applyArgs(calls)).toContain("--cmd-base"));
+  });
+});

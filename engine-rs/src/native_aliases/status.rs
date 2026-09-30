@@ -124,11 +124,42 @@ impl View {
     }
 }
 
-/// 观察两个固定目标。
+/// Windows 命令脚本目录：本工具的脚本还原成虚拟区块（见 cmd.rs）。
+fn observe_cmd(ctx: &Context, spec: TargetSpec) -> View {
+    let abs = ctx.home_dir.join(spec.target);
+    let probe = match super::cmd::scan(&abs) {
+        Ok(scan) if scan.ours.is_empty() && scan.others.is_empty() => Probe::Missing,
+        Ok(scan) => {
+            let split = super::cmd::virtual_split(&scan);
+            let bytes = split
+                .block
+                .clone()
+                .unwrap_or_default()
+                .join("\n")
+                .into_bytes();
+            Probe::Present { bytes, split }
+        }
+        Err(err) => Probe::Blocked {
+            exists: Some(true),
+            reason: format!("{err:#}"),
+        },
+    };
+    View {
+        spec,
+        real: abs.clone(),
+        abs,
+        probe,
+    }
+}
+
+/// 观察各固定目标。
 pub(crate) fn observe(ctx: &Context) -> Vec<View> {
     model::targets()
         .into_iter()
         .map(|spec| {
+            if spec.target_id == model::TARGET_CMD.target_id {
+                return observe_cmd(ctx, spec);
+            }
             let abs = ctx.home_dir.join(spec.target);
             // 与接入配置一致：链接解析到最终普通文件后读写；断链、指向目录等拒绝
             let (real, probe) = match crate::native_agent_settings::resolve_write_target(&abs) {
@@ -226,7 +257,7 @@ fn merged(views: &[View]) -> Vec<Value> {
         .collect()
 }
 
-fn element(view: &View) -> Value {
+fn element(view: &View, on_path: Option<bool>) -> Value {
     let (state, exists, block_present, base, blocked_reason) = match &view.probe {
         Probe::Missing => (
             "missing",
@@ -267,6 +298,7 @@ fn element(view: &View) -> Value {
             "target": format!("~/{}", view.spec.target),
             "marker": "agent-manager shell aliases",
             "base_flag": view.spec.base_flag,
+            "kind": if view.spec.target_id == model::TARGET_CMD.target_id { "cmd-dir" } else { "rc-file" },
         },
         "policy": { "enabled": true },
         "observed": {
@@ -277,6 +309,11 @@ fn element(view: &View) -> Value {
             "entries": view.entries().iter().map(line_json).collect::<Vec<_>>(),
             "external": view.external().iter().map(line_json).collect::<Vec<_>>(),
             "blocked_reason": blocked_reason,
+            // 命令脚本目录是否已在用户 PATH 上（只对 Windows 的命令脚本目录有意义）。本工具不写
+            // 注册表：不在时给出让用户自己执行的命令与手动做法
+            "on_path": on_path,
+            "path_command": (on_path == Some(false)).then(|| path_command(&view.abs)),
+            "path_manual": (on_path == Some(false)).then(|| PATH_MANUAL.to_string()),
         },
         "state": state,
         "freshness": {
@@ -289,6 +326,35 @@ fn element(view: &View) -> Value {
         },
         "actions": actions,
     })
+}
+
+/// 手动把命令目录加进 PATH 的做法（不想执行命令时）。
+const PATH_MANUAL: &str = "按 Win+R，运行 rundll32 sysdm.cpl,EditEnvironmentVariables，在「用户变量」里编辑 Path，新建一项填这个目录，确定后重新打开终端";
+
+/// 让用户自己在 PowerShell 里执行的命令：把命令目录追加到用户 PATH 末尾，已有时不动。
+/// 按原始值读写（不展开已有条目里的 %VAR%），设、删一个临时变量让系统通知新开的终端。
+fn path_command(dir: &Path) -> String {
+    let dir = dir.to_string_lossy().replace('/', "\\").replace('\'', "''");
+    format!(
+        "$d='{dir}'; $p=(Get-Item HKCU:\\Environment).GetValue('Path','','DoNotExpandEnvironmentNames'); \
+if(($p -split ';') -notcontains $d){{ Set-ItemProperty HKCU:\\Environment Path (($p.TrimEnd(';')+';'+$d).TrimStart(';')) -Type ExpandString; \
+[Environment]::SetEnvironmentVariable('AM_PATH_REFRESH','1','User'); [Environment]::SetEnvironmentVariable('AM_PATH_REFRESH',$null,'User') }}"
+    )
+}
+
+/// 命令脚本目录在不在用户 PATH 上（注册表里的，新开的终端用的就是它）。
+pub(crate) fn cmd_dir_on_path(ctx: &Context, dir: &Path) -> bool {
+    let normalize = |p: &Path| {
+        p.to_string_lossy()
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_ascii_lowercase()
+    };
+    let wanted = normalize(dir);
+    crate::native_programs::locate::user_path(ctx, false)
+        .dirs
+        .iter()
+        .any(|p| normalize(p) == wanted)
 }
 
 pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
@@ -333,7 +399,14 @@ pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
         .collect();
     Ok(json!({
         "domain": "aliases",
-        "elements": views.iter().map(element).collect::<Vec<_>>(),
+        "elements": views
+            .iter()
+            .map(|view| {
+                let on_path = (view.spec.target_id == model::TARGET_CMD.target_id)
+                    .then(|| cmd_dir_on_path(ctx, &view.abs));
+                element(view, on_path)
+            })
+            .collect::<Vec<_>>(),
         "aliases": merged,
         "alias_recommendations": recommended,
         "alias_suggested_sources": suggested,

@@ -24,3 +24,11 @@ toml = "0.8"
 # 取 0.20：app/src-tauri 的依赖树把 toml_datetime 钉在 0.6.3，0.22 需要 0.6.11 解不出来。
 toml_edit = "0.20"
 serde_norway = "0.9"
+# Windows 上 canonicalize 不带 `\\?\` 前缀（能安全去掉时），与普通路径可比较；Unix 上同标准库。
+dunce = "1"
+
+[target.'cfg(windows)'.dependencies]
+# Windows 普通用户建不了符号链接时，目录链接改用联接（junction）。
+junction = "1"
+# 只读注册表里的系统与用户 PATH，判断命令在不在 PATH 上；不写注册表。
+winreg = "0.55"

@@ -1,7 +1,17 @@
+// 部分辅助只给 Unix 专属的用例用
+#![cfg_attr(not(unix), allow(dead_code))]
 use agent_manager_engine::{execute, store, Context, Request};
 use fs2::FileExt;
 use std::fs::OpenOptions;
 use std::path::PathBuf;
+
+/// 建目录链接（Windows 上没有符号链接权限时是联接），与引擎用的同一个函数。
+fn link_dir(
+    target: impl AsRef<std::path::Path>,
+    link: impl AsRef<std::path::Path>,
+) -> std::io::Result<()> {
+    agent_manager_engine::platform::link_dir(target.as_ref(), link.as_ref())
+}
 
 fn temp_ctx(tag: &str) -> (PathBuf, Context) {
     let base = std::env::temp_dir().join(format!("am-native-test-{}-{}", std::process::id(), tag));
@@ -643,7 +653,7 @@ fn skills_collection_external_conflict_aborts_with_zero_changes() {
     assert!(link_2.exists());
 
     // 人工替换 skill-2 目标为普通目录及用户文件（模拟外部非受管冲突）
-    std::fs::remove_file(&link_2).unwrap();
+    agent_manager_engine::platform::remove_link(&link_2).unwrap();
     std::fs::create_dir_all(&link_2).unwrap();
     std::fs::write(link_2.join("user-file.txt"), "important").unwrap();
 
@@ -942,7 +952,7 @@ fn skills_snapshot_rejects_external_symlinks() {
     assert!(hash_err.unwrap_err().to_string().contains("绝对路径"));
 
     // 2. 逃逸出技能根目录的相对软链接：必须被拒绝
-    std::fs::remove_file(skill_dir.join("abs-link")).unwrap();
+    agent_manager_engine::platform::remove_link(skill_dir.join("abs-link")).unwrap();
     #[cfg(unix)]
     std::os::unix::fs::symlink("../../outside-secret.txt", skill_dir.join("rel-escape")).unwrap();
     #[cfg(windows)]
@@ -957,7 +967,7 @@ fn skills_snapshot_rejects_external_symlinks() {
         .contains("逃逸出技能根目录"));
 
     // 3. 安全的技能内部相对软链接：必须被允许
-    std::fs::remove_file(skill_dir.join("rel-escape")).unwrap();
+    agent_manager_engine::platform::remove_link(skill_dir.join("rel-escape")).unwrap();
     std::fs::create_dir_all(skill_dir.join("subdir")).unwrap();
     #[cfg(unix)]
     std::os::unix::fs::symlink(
@@ -1354,7 +1364,7 @@ fn skill_dropped_by_its_source_can_only_be_removed_and_leaves_no_record() {
 
     // 上游删掉 beta；codex 那条链接也已经没了，claude 的还指着旧快照
     std::fs::remove_dir_all(repo_dir.join("skills").join("beta")).unwrap();
-    std::fs::remove_file(&codex_link).unwrap();
+    agent_manager_engine::platform::remove_link(&codex_link).unwrap();
     for (agent, state) in [("claude-code", "linked"), ("codex", "missing-link")] {
         let cell = skill_cell(&context, "skill:drop-skills/beta", agent).unwrap();
         assert_eq!(cell["state"], state, "{agent}: {cell}");
@@ -1906,7 +1916,7 @@ fn local_source_collection_links_directly_to_external_source() {
     // 接管前就已经存在的外部链接（旧体系/手工建立）
     let claude_skills = context.home_dir.join(".claude").join("skills");
     std::fs::create_dir_all(&claude_skills).unwrap();
-    std::os::unix::fs::symlink(vendor.join("alpha"), claude_skills.join("alpha")).unwrap();
+    link_dir(vendor.join("alpha"), claude_skills.join("alpha")).unwrap();
 
     let set_res = execute(
         &context,
@@ -2075,7 +2085,7 @@ fn local_source_rejects_unsafe_definitions() {
     std::fs::create_dir_all(context.home_dir.join(".claude").join("skills")).unwrap();
     // 指向源目录的符号链接（不允许作为 source_path 根）
     let linked_root = context.home_dir.join("linked-skills");
-    std::os::unix::fs::symlink(&vendor, &linked_root).unwrap();
+    link_dir(&vendor, &linked_root).unwrap();
 
     let cases: Vec<(&str, String)> = vec![
         (
@@ -2182,8 +2192,8 @@ fn local_source_detects_drifted_link() {
 
     // 外部把链接改指到别处
     let link = claude_skills.join("alpha");
-    std::fs::remove_file(&link).unwrap();
-    std::os::unix::fs::symlink(&other, &link).unwrap();
+    agent_manager_engine::platform::remove_link(&link).unwrap();
+    link_dir(&other, &link).unwrap();
 
     let status = execute(&context, &request("skills:status", &[]));
     assert!(status.ok, "{:?}", status.errors);
@@ -2197,7 +2207,7 @@ fn local_source_detects_drifted_link() {
     assert_eq!(cell, "drifted", "改指到登记源之外必须报漂移");
 
     // 真实目录占位时 fail-closed：不接管、不覆盖
-    std::fs::remove_file(&link).unwrap();
+    agent_manager_engine::platform::remove_link(&link).unwrap();
     std::fs::create_dir_all(link.join("inner")).unwrap();
     let enable = execute(
         &context,
@@ -2228,7 +2238,7 @@ fn remove_link_cleans_orphans_and_refuses_the_rest() {
     std::fs::create_dir_all(&claude_skills).unwrap();
 
     // 1) 断链
-    std::os::unix::fs::symlink(
+    link_dir(
         context.home_dir.join("gone/ghost"),
         claude_skills.join("ghost"),
     )
@@ -2237,7 +2247,7 @@ fn remove_link_cleans_orphans_and_refuses_the_rest() {
     let vendor = context.home_dir.join(".vendor-tool").join("skills");
     std::fs::create_dir_all(vendor.join("alpha")).unwrap();
     std::fs::write(vendor.join("alpha").join("SKILL.md"), "# Alpha").unwrap();
-    std::os::unix::fs::symlink(vendor.join("alpha"), claude_skills.join("alpha")).unwrap();
+    link_dir(vendor.join("alpha"), claude_skills.join("alpha")).unwrap();
     // 3) 真实目录（不是链接）
     std::fs::create_dir_all(claude_skills.join("synced")).unwrap();
 
@@ -2296,7 +2306,7 @@ fn remove_link_cleans_orphans_and_refuses_the_rest() {
     )
     .unwrap();
     drop(conn);
-    std::os::unix::fs::symlink(vendor.join("alpha"), claude_skills.join("bound")).unwrap();
+    link_dir(vendor.join("alpha"), claude_skills.join("bound")).unwrap();
     let bound = remove("bound");
     assert!(!bound.ok, "有分配记录的条目要走集合 remove");
     assert!(
@@ -2391,10 +2401,13 @@ fn 上游改写历史后更新资源库仍然成功() {
                 "--key",
                 "skills.repositories.forced",
                 "--value",
-                &format!(
-                    "{{\"url\":\"{}\",\"skill_paths\":[\"alpha\"],\"agents\":[\"codex\"]}}",
-                    origin.to_string_lossy()
-                ),
+                // 用 json! 拼：Windows 路径里的反斜杠要转义
+                &serde_json::json!({
+                    "url": origin.to_string_lossy(),
+                    "skill_paths": ["alpha"],
+                    "agents": ["codex"],
+                })
+                .to_string(),
             ],
         ),
     );
@@ -2520,7 +2533,7 @@ fn legacy_builtin_without_bindings_is_recommendation_and_retired_on_write() {
     std::fs::write(vendor.join("verification").join("SKILL.md"), "# v").unwrap();
     let claude_skills = ctx.home_dir.join(".claude").join("skills");
     std::fs::create_dir_all(&claude_skills).unwrap();
-    std::os::unix::fs::symlink(
+    link_dir(
         vendor.join("verification"),
         claude_skills.join("verification"),
     )
@@ -2780,7 +2793,7 @@ fn installed_view_classifies_real_entries_with_zero_writes() {
     std::fs::write(claude_skills.join("synced").join("SKILL.md"), "# s").unwrap();
     let vendor = ctx.home_dir.join(".vendor").join("skills");
     std::fs::create_dir_all(vendor.join("beta")).unwrap();
-    std::os::unix::fs::symlink(vendor.join("beta"), claude_skills.join("beta")).unwrap();
+    link_dir(vendor.join("beta"), claude_skills.join("beta")).unwrap();
 
     let db = store::db_path(&ctx);
     let db_before = std::fs::read(&db).unwrap();
@@ -3270,9 +3283,9 @@ fn unmanaged_view_detects_sources_shared_dir_and_duplicates_with_zero_writes() {
     .unwrap();
     std::fs::create_dir_all(git_repo.join("skills/gitty")).unwrap();
     std::fs::write(git_repo.join("skills/gitty/SKILL.md"), "# gitty").unwrap();
-    std::os::unix::fs::symlink(git_repo.join("skills/gitty"), shared.join("gitty")).unwrap();
+    link_dir(git_repo.join("skills/gitty"), shared.join("gitty")).unwrap();
     // 与 Codex 上受管的 alpha 同名：Codex 会加载两份
-    std::os::unix::fs::symlink(repo_dir.join("alpha"), shared.join("alpha")).unwrap();
+    link_dir(repo_dir.join("alpha"), shared.join("alpha")).unwrap();
 
     let db = store::db_path(&ctx);
     let db_before = std::fs::read(&db).unwrap();
@@ -3460,7 +3473,10 @@ fn git_source_tracks_versions_downloads_only_listed_dirs_and_switches() {
                     "--key",
                     "skills.repositories.src",
                     "--value",
-                    &format!(r#"{{"url":"{url}","skill_paths":["skills/alpha"]{extra}}}"#),
+                    &format!(
+                        r#"{{"url":{},"skill_paths":["skills/alpha"]{extra}}}"#,
+                        serde_json::to_string(&url).unwrap()
+                    ),
                 ],
             ),
         );
@@ -3686,6 +3702,7 @@ fn tree_digest(dir: &std::path::Path) -> String {
 }
 
 #[test]
+#[cfg(unix)] // 用到 Unix 权限位
 fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
     let (root, ctx) = temp_ctx("skills-adopt");
     let git = |dir: &std::path::Path, args: &[&str]| {
@@ -3745,8 +3762,8 @@ fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
         write(dir.join("skill-release.json"), r#"{"version":"1.0.0"}"#);
     }
     // 真实目录里多了 skill-release.json，来源里没有：比对时要算不一致 → 这份先去掉，让它与 v1.0.0 一致
-    std::fs::remove_file(claude.join("archy/skill-release.json")).unwrap();
-    std::fs::remove_file(shared.join("archy/skill-release.json")).unwrap();
+    agent_manager_engine::platform::remove_link(claude.join("archy/skill-release.json")).unwrap();
+    agent_manager_engine::platform::remove_link(shared.join("archy/skill-release.json")).unwrap();
     write(claude.join("edited/SKILL.md"), "# other (我改过)");
     write(claude.join("mine/SKILL.md"), "# 我自己写的");
     std::fs::create_dir_all(claude.join("synced/bucket")).unwrap();
@@ -3791,7 +3808,7 @@ fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
         ),
     );
     assert!(add.ok, "{:?}", add.errors);
-    std::os::unix::fs::symlink(local_src.join("dup"), shared.join("dup")).unwrap();
+    link_dir(local_src.join("dup"), shared.join("dup")).unwrap();
     let lock_before = std::fs::read(home.join(".agents/.skill-lock.json")).unwrap();
     let claude_archy_digest = tree_digest(&claude.join("archy"));
 

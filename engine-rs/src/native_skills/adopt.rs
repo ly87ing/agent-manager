@@ -69,7 +69,7 @@ struct LocalPlan {
 
 fn tilde(path: &Path, home: &Path) -> String {
     match path.strip_prefix(home) {
-        Ok(rel) => format!("~/{}", rel.to_string_lossy()),
+        Ok(rel) => format!("~/{}", crate::platform::slash(&rel)),
         Err(_) => path.to_string_lossy().to_string(),
     }
 }
@@ -146,7 +146,7 @@ fn local_plan(ctx: &Context, name: &str) -> Result<LocalPlan> {
             let target = meta
                 .file_type()
                 .is_symlink()
-                .then(|| std::fs::read_link(&shared_path).ok())
+                .then(|| crate::platform::read_link(&shared_path).ok())
                 .flatten()
                 .map(|t| resolve_loose(&shared_path.parent().unwrap_or(home).join(t)));
             let origin = if meta.file_type().is_symlink() {
@@ -221,7 +221,7 @@ fn diff_dirs(ours: &Path, theirs: &Path) -> Vec<Value> {
                     }
                 } else if let Ok(rel) = path.strip_prefix(root) {
                     let bytes = if meta.file_type().is_symlink() {
-                        std::fs::read_link(&path)
+                        crate::platform::read_link(&path)
                             .map(|t| t.to_string_lossy().as_bytes().to_vec())
                             .unwrap_or_default()
                     } else {
@@ -378,7 +378,7 @@ fn check_source(
     let tmp = temp_dir();
     progress.start("fetch", Some("只取这一个目录；仓库很大时要久一些".into()));
     let result = (|| -> Result<SourceCheck> {
-        let status = std::process::Command::new("git")
+        let status = crate::platform::git_command()
             .args([
                 "clone",
                 "--quiet",
@@ -543,7 +543,7 @@ fn local_tree_id(tmp_repo: &Path, dir: &Path) -> Option<String> {
         h.finalize()[0]
     }));
     let git = |args: &[&str]| {
-        std::process::Command::new("git")
+        crate::platform::git_command()
             // 临时仓库开着稀疏检出，会拒绝加入范围外的路径；这里只是算树 ID，关掉它
             .args(["-c", "core.sparseCheckout=false", "--git-dir"])
             .arg(tmp_repo.join(".git"))
@@ -791,6 +791,8 @@ pub(crate) fn preflight(ctx: &Context, req: &Request) -> Result<()> {
     if let Some(path) = req.value("--path") {
         if path.starts_with('-')
             || path.starts_with('/')
+            || std::path::Path::new(path).is_absolute()
+            || path.contains('\\')
             || path.split('/').any(|p| p == ".." || p.is_empty())
         {
             bail!("--path 不合法：{path}");
@@ -906,8 +908,8 @@ fn move_away(journal: &mut Journal, index: usize, path: &Path) -> Result<()> {
     let meta =
         std::fs::symlink_metadata(path).with_context(|| format!("读不到 {}", path.display()))?;
     if meta.file_type().is_symlink() {
-        let target = std::fs::read_link(path)?;
-        std::fs::remove_file(path)?;
+        let target = crate::platform::read_link(path)?;
+        crate::platform::remove_link(path)?;
         journal.moved.push((path.to_path_buf(), None, Some(target)));
         return Ok(());
     }
@@ -1044,7 +1046,7 @@ fn rewind(ctx: &Context, run_id: &str, journal: &Journal) -> Result<Vec<String>>
         }
         let restored = match (backup, link_target) {
             (_, Some(target)) => {
-                std::os::unix::fs::symlink(target, orig).map_err(anyhow::Error::from)
+                crate::platform::link_dir(target, orig).map_err(anyhow::Error::from)
             }
             (Some(backup), None) => std::fs::rename(backup, orig).or_else(|_| {
                 copy_dir_recursive(backup, orig)?;

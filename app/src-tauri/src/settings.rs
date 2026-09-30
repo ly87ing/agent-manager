@@ -91,9 +91,8 @@ fn updater_configured(app: &tauri::AppHandle) -> bool {
             .unwrap_or(false)
 }
 pub(crate) fn current_preferences(app: &tauri::AppHandle) -> Result<SettingsPreferences, String> {
-    let home = std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .ok_or("HOME 未设置")?;
+    let home = agent_manager_engine::platform::home_dir()
+        .ok_or("找不到用户主目录（HOME / USERPROFILE 都没设置）")?;
     read_preferences_data_dir(&data_root(app)?, &home)
 }
 pub(crate) fn settings_data(app: &tauri::AppHandle) -> Result<SettingsData, String> {
@@ -117,9 +116,8 @@ pub(crate) fn save_preferences(
     preferences: SettingsPreferences,
 ) -> Result<SettingsData, String> {
     let data = data_root(app)?;
-    let home = std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .ok_or("HOME 未设置")?;
+    let home = agent_manager_engine::platform::home_dir()
+        .ok_or("找不到用户主目录（HOME / USERPROFILE 都没设置）")?;
     save_preferences_data_dir(&data, &home, preferences).map_err(|e| e.to_string())?;
     settings_data(app)
 }

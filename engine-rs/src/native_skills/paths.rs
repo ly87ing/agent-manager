@@ -1,3 +1,4 @@
+use crate::platform::Canon;
 use anyhow::{anyhow, bail, Context as _, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -48,7 +49,7 @@ pub fn is_sha256_hex(s: &str) -> bool {
 
 pub fn expand_home(path: &str, home_dir: &Path) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
-        return home_dir.join(rest);
+        return crate::platform::join_slash(home_dir, rest);
     }
     if path == "~" {
         return home_dir.to_path_buf();
@@ -57,7 +58,7 @@ pub fn expand_home(path: &str, home_dir: &Path) -> PathBuf {
 }
 
 pub fn resolve_loose(path: &Path) -> PathBuf {
-    if let Ok(canon) = path.canonicalize() {
+    if let Ok(canon) = path.canon() {
         return canon;
     }
     let mut out = PathBuf::new();
@@ -231,7 +232,7 @@ pub fn is_link_entry(path: &Path) -> bool {
 }
 
 pub fn resolve_link_target(link_path: &Path) -> Result<PathBuf> {
-    let raw = std::fs::read_link(link_path)
+    let raw = crate::platform::read_link(link_path)
         .with_context(|| format!("读取符号链接失败: {}", link_path.display()))?;
     let resolved = if raw.is_absolute() {
         raw
@@ -329,15 +330,11 @@ pub fn atomic_create_or_replace_link(source: &Path, link_path: &Path) -> Result<
         .ok_or_else(|| anyhow!("链接路径无文件名: {}", link_path.display()))?
         .to_string_lossy();
     let tmp = parent.join(format!(".{}.tmp-{}", file_name, store::uuid_v4()));
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&source, &tmp)
-        .with_context(|| format!("创建临时符号链接失败: {}", tmp.display()))?;
-    #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(&source, &tmp)
+    crate::platform::link_dir(&source, &tmp)
         .with_context(|| format!("创建临时符号链接失败: {}", tmp.display()))?;
 
-    if let Err(err) = std::fs::rename(&tmp, link_path) {
-        let _ = std::fs::remove_file(&tmp);
+    if let Err(err) = crate::platform::replace_link(&tmp, link_path) {
+        let _ = crate::platform::remove_link(&tmp);
         return Err(err).with_context(|| format!("原子替换链接失败: {}", link_path.display()));
     }
     Ok(())
@@ -359,7 +356,7 @@ pub fn safe_remove_link_with_takeover(
     }
     check_not_external_conflict_with_takeover(link_path, bases, allow_takeover)?;
     if is_link_entry(link_path) {
-        std::fs::remove_file(link_path)
+        crate::platform::remove_link(link_path)
             .with_context(|| format!("删除符号链接失败: {}", link_path.display()))?;
     }
     Ok(())
@@ -393,7 +390,7 @@ pub fn restore_link_guarded(
                 }
                 None => {
                     if is_link_entry(link_path) {
-                        std::fs::remove_file(link_path).with_context(|| {
+                        crate::platform::remove_link(link_path).with_context(|| {
                             format!("回滚删除软链接失败: {}", link_path.display())
                         })?;
                     }
@@ -564,7 +561,7 @@ mod tests {
         );
 
         // 2. 外部将软链接替换为普通文件：回滚必须报错且保留外部文件，绝不覆盖
-        let _ = std::fs::remove_file(&link_path);
+        let _ = crate::platform::remove_link(&link_path);
         atomic_create_or_replace_link(&target1, &link_path).unwrap();
         let mut guard2 = RollbackGuard::new();
         guard2.record_mutation(
@@ -572,7 +569,7 @@ mod tests {
             Some(resolve_loose(&target2)),
             ExpectedLinkState::Present(resolve_loose(&target1)),
         );
-        let _ = std::fs::remove_file(&link_path);
+        let _ = crate::platform::remove_link(&link_path);
         std::fs::write(&link_path, "external file content").unwrap();
         assert!(
             guard2.rollback().is_err(),
@@ -585,7 +582,7 @@ mod tests {
         );
 
         // 3. 删除操作后外部重新创建文件：回滚必须报错且保留外部文件，绝不覆盖
-        let _ = std::fs::remove_file(&link_path);
+        let _ = crate::platform::remove_link(&link_path);
         let mut guard3 = RollbackGuard::new();
         guard3.record_mutation(
             &link_path,

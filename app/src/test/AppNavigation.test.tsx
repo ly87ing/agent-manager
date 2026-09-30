@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import App from "../App";
+import { MOD } from "../lib/platform";
 import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import { setSettingsClient } from "../lib/settings";
@@ -54,7 +55,7 @@ describe("App 顶层导航", () => {
       "命令",
       "来源",
       "程序",
-      "搜索（⌘K）",
+      `搜索（${MOD}K）`,
       "切换到深色",
       "用量",
       "设置",

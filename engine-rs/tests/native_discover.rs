@@ -56,7 +56,11 @@ impl Drop for PathGuard {
 }
 
 fn link(source: &Path, link_path: &Path) {
-    std::os::unix::fs::symlink(source, link_path).unwrap();
+    if source.is_dir() {
+        agent_manager_engine::platform::link_dir(source, link_path).unwrap();
+    } else {
+        agent_manager_engine::platform::link_file(source, link_path).unwrap();
+    }
 }
 
 fn make_skill(dir: &Path, name: &str) -> PathBuf {

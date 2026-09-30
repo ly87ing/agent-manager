@@ -20,7 +20,7 @@ const STATE_LIMIT: u64 = 4 * 1024 * 1024;
 
 /// 在镜像目录里执行 git；不交互，失败时带上 git 的错误输出。
 pub(crate) fn git_in(repo_dir: &Path, args: &[&str], coll_name: &str) -> Result<String> {
-    let out = std::process::Command::new("git")
+    let out = crate::platform::git_command()
         .args(args)
         .current_dir(repo_dir)
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -437,7 +437,7 @@ pub(crate) fn update_repo(
 
     if !repo_dir.join(".git").is_dir() {
         std::fs::create_dir_all(super::repo_base_dir(ctx))?;
-        let status = std::process::Command::new("git")
+        let status = crate::platform::git_command()
             .args([
                 "clone",
                 "--quiet",

@@ -78,16 +78,14 @@ const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 /// 官方 CLI：先找 `<HOME>/.local/bin`（官方安装器的落点），再找 PATH，最后是其他常见
 /// 安装目录（桌面应用的 PATH 里没有 Homebrew、npm 全局目录）。
 fn resolve_cli(home_dir: &Path, bin: &str) -> Option<std::path::PathBuf> {
-    let local = home_dir.join(".local").join("bin").join(bin);
-    if local.is_file() {
-        return Some(local);
-    }
-    std::env::var_os("PATH")
-        .map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
-        .unwrap_or_default()
-        .into_iter()
+    std::iter::once(home_dir.join(".local").join("bin"))
+        .chain(
+            std::env::var_os("PATH")
+                .map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+                .unwrap_or_default(),
+        )
         .chain(crate::native_agents::fallback_bin_dirs(home_dir))
-        .map(|dir| dir.join(bin))
+        .flat_map(|dir| crate::platform::command_candidates(&dir, bin))
         .find(|path| path.is_file())
 }
 
@@ -1136,7 +1134,8 @@ mod tests {
             .collect();
         let managed_main = managed.join("managed-settings.json").display().to_string();
         let managed_drop = managed
-            .join("managed-settings.d/10-helper.json")
+            .join("managed-settings.d")
+            .join("10-helper.json")
             .display()
             .to_string();
         for expected in [
@@ -1418,10 +1417,13 @@ mod tests {
                 (user, "forced_chatgpt_workspace_id".to_string()),
                 // 主配置没写 model_provider：系统 config.toml 的生效；地址与登录限定被主配置自己的压住
                 (system, "model_provider".to_string()),
-                (managed, "openai_base_url".to_string()),
-                // 强制成 openai 对主配置的官方账号无碍，不提示；空数组不算设了
-                (requirements, "allowed_login_methods".to_string()),
             ]
+            .into_iter()
+            // managed_config.toml 只在 Unix 上生效（Codex 本身如此）
+            .chain(cfg!(unix).then(|| (managed, "openai_base_url".to_string())))
+            // 强制成 openai 对主配置的官方账号无碍，不提示；空数组不算设了
+            .chain([(requirements, "allowed_login_methods".to_string())])
+            .collect::<Vec<_>>()
         );
         let text = format!("{codex:?}");
         for value in [
@@ -1544,6 +1546,7 @@ mod tests {
     /// 桌面应用的 PATH 里没有 npm 全局目录：命令装在那里也要找得到，且它要靠同目录的
     /// 解释器（npm 装的助手是 node 脚本）才能跑起来。
     #[test]
+    #[cfg(unix)]
     fn npm_全局目录里的命令也能找到_并能用同目录的解释器运行() {
         use std::os::unix::fs::PermissionsExt;
         let home = std::env::temp_dir().join(format!("am-auth-npm-{}", std::process::id()));

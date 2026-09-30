@@ -1,3 +1,6 @@
+// 整个文件只在 Unix 上跑：用 shell 脚本做假的 npm / npx / uv。
+#![cfg(unix)]
+
 //! 程序域：技能与 MCP 依赖的程序（docs/PROGRAM-LIFECYCLE.md）。
 //!
 //! 每个用例一个隔离 HOME 与数据目录，经 CLI 子进程执行（用户 PATH 由 AGENT_MANAGER_USER_PATH

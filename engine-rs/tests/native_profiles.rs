@@ -2,6 +2,8 @@
 //!
 //! 核心保证：全局 ~/.claude 与 ~/.codex 全程不被触碰；鉴权取值只以引用形式入库，
 //! 实例目录里的目标文件写解析后的值（助手不展开引用，启动时也不依赖 shell 导出变量）。
+// 部分辅助只给 Unix 专属的用例用
+#![cfg_attr(not(unix), allow(dead_code))]
 
 use agent_manager_engine::{execute, store, Context, Request};
 use std::path::PathBuf;
@@ -44,6 +46,53 @@ echo 'Not logged in' >&2
 exit 1
 "#;
 
+/// Windows 上的同一对替身（.cmd）：主目录按替身自己所在位置推出（`<HOME>\.local\bin` 往上两级），
+/// `if defined` 区分「没设」与「设成空」，与 shell 版的 `${VAR-unset}` 一致。
+#[cfg(windows)]
+const FAKE_CLAUDE_CMD: &str = "@echo off\r\n\
+setlocal\r\n\
+set \"home=%~dp0..\\..\"\r\n\
+set \"settings=none\"\r\n\
+if \"%~1\"==\"--settings\" (\r\n\
+  set \"settings=%~2\"\r\n\
+  shift\r\n\
+  shift\r\n\
+)\r\n\
+if not \"%~1\"==\"auth\" exit /b 64\r\n\
+if not \"%~2\"==\"status\" exit /b 64\r\n\
+if defined CLAUDE_CODE_OAUTH_TOKEN (set \"tok=%CLAUDE_CODE_OAUTH_TOKEN%\") else (set \"tok=unset\")\r\n\
+>>\"%home%\\.probe-log\" echo claude^|%CLAUDE_CONFIG_DIR%^|%tok%\r\n\
+if defined ANTHROPIC_CONFIG_DIR (set \"acd=%ANTHROPIC_CONFIG_DIR%\") else (set \"acd=unset\")\r\n\
+if defined ANTHROPIC_PROFILE (set \"ap=%ANTHROPIC_PROFILE%\") else (set \"ap=unset\")\r\n\
+>>\"%home%\\.probe-args\" echo %settings%^|%acd%^|%ap%\r\n\
+if exist \"%home%\\.fake-garbage\" (echo not json& exit /b 0)\r\n\
+if exist \"%CLAUDE_CONFIG_DIR%\\.fake-logged-in\" (echo {\"loggedIn\":true,\"authMethod\":\"claude.ai\"}& exit /b 0)\r\n\
+if exist \"%CLAUDE_CONFIG_DIR%\\.fake-console\" (echo {\"loggedIn\":true,\"authMethod\":\"oauth_token\",\"apiKeySource\":\"/login managed key\"}& exit /b 0)\r\n\
+if exist \"%CLAUDE_CONFIG_DIR%\\.fake-helper\" (echo {\"loggedIn\":true,\"authMethod\":\"api_key_helper\",\"apiKeySource\":\"apiKeyHelper\"}& exit /b 0)\r\n\
+echo {\"loggedIn\":false,\"authMethod\":\"none\"}\r\n\
+exit /b 1\r\n";
+
+#[cfg(windows)]
+const FAKE_CODEX_CMD: &str = "@echo off\r\n\
+setlocal\r\n\
+set \"home=%~dp0..\\..\"\r\n\
+if not \"%~1\"==\"login\" exit /b 64\r\n\
+if not \"%~2\"==\"status\" exit /b 64\r\n\
+if defined CODEX_API_KEY (set \"key=%CODEX_API_KEY%\") else (set \"key=unset\")\r\n\
+>>\"%home%\\.probe-log\" echo codex^|%CODEX_HOME%^|%key%\r\n\
+if exist \"%CODEX_HOME%\\.fake-logged-in\" (echo Logged in using ChatGPT 1>&2& exit /b 0)\r\n\
+echo Not logged in 1>&2\r\n\
+exit /b 1\r\n";
+
+#[cfg(windows)]
+fn install_fake_clis(ctx: &Context) {
+    let bin = ctx.home_dir.join(".local").join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(bin.join("claude.cmd"), FAKE_CLAUDE_CMD).unwrap();
+    std::fs::write(bin.join("codex.cmd"), FAKE_CODEX_CMD).unwrap();
+}
+
+#[cfg(unix)]
 fn install_fake_clis(ctx: &Context) {
     use std::os::unix::fs::PermissionsExt;
     let bin = ctx.home_dir.join(".local/bin");
@@ -56,7 +105,10 @@ fn install_fake_clis(ctx: &Context) {
 }
 
 fn probe_log(ctx: &Context) -> String {
-    std::fs::read_to_string(ctx.home_dir.join(".probe-log")).unwrap_or_default()
+    // Windows 的 .cmd 替身写 CRLF
+    std::fs::read_to_string(ctx.home_dir.join(".probe-log"))
+        .unwrap_or_default()
+        .replace("\r\n", "\n")
 }
 
 fn request(command: &str, args: &[&str]) -> Request {
@@ -1245,6 +1297,8 @@ fn codex_实例把凭据写进自己的_config_toml_保留_mcp_条目_库里只�
         !dir.join("agent-manager.config.toml").exists(),
         "不再写 -p 叠加文件"
     );
+    // Unix 权限位（Windows 用 ACL，没有 0600 / 0700）
+    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(dir.join("config.toml"))
@@ -1900,6 +1954,7 @@ fn console_登录也算官方账号登录_拒绝写入第三方凭据() {
 /// 指到不存在的位置，进程环境里的档案与联合身份变量不带给官方命令。托管设置给的 apiKeyHelper、
 /// 只存 MCP 登录的 `.credentials.json` 都不是官方账号登录。
 #[test]
+#[cfg(unix)] // .cmd 替身用 %~2 取参数，拿不到原样的 --settings JSON
 fn 探测取消目录声明的凭据_不看共享档案_不把托管凭据当成官方登录() {
     let (root, ctx) = temp_ctx("probe-isolation");
     std::env::set_var("AM_TEST_TOKEN_PROBE", "probe-token");
@@ -2723,7 +2778,10 @@ fn 默认环境的设置可一次性带进_claude_独立环境_只补没有的_�
         std::fs::read(dir.join(".claude.json")).unwrap()
     );
     let servers = instance_json["mcpServers"].as_object().unwrap();
-    assert_eq!(servers["fs"]["command"], "npx");
+    assert_eq!(
+        servers["fs"]["command"],
+        if cfg!(windows) { "cmd" } else { "npx" }
+    ); // Windows 上新写的 npx 条目包 cmd /c
     assert_eq!(servers["dup"]["command"], "instance-own", "同名条目不动");
     assert!(!servers.contains_key("gh"), "含明文凭据的条目不带");
     assert!(
@@ -2841,7 +2899,10 @@ env = { GITHUB_TOKEN = "literal-token-value" }
         Some(true)
     );
     assert_eq!(doc["tui"]["status_line"].as_array().map(Vec::len), Some(2));
-    assert_eq!(doc["mcp_servers"]["fs"]["command"].as_str(), Some("npx"));
+    assert_eq!(
+        doc["mcp_servers"]["fs"]["command"].as_str(),
+        Some(if cfg!(windows) { "cmd" } else { "npx" })
+    ); // Windows 上新写的 npx 条目包 cmd /c
     assert!(
         doc["mcp_servers"].get("gh").is_none(),
         "含明文凭据的条目不带"
@@ -2903,6 +2964,8 @@ fn 带设置的前提不满足时拒绝且零写_各项失败互不牵连() {
     let env = seed(&ctx, "cc-work", "rules");
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(seed_states(&env), states(&[("rules", "copied")]));
+    // Unix 权限位（Windows 用 ACL，没有 0600 / 0700）
+    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;

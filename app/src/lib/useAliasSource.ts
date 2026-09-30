@@ -8,7 +8,8 @@ import { useEngineQuery } from "./queries";
 
 /**
  * 终端快捷命令：以 ~/.zshrc 与 ~/.zprofile 里本工具那一段（受管区块）的实际行为准；写入只写 ~/.zshrc，
- * ~/.zprofile 已有这一段时同步改它，没有就不新建。
+ * ~/.zprofile 已有这一段时同步改它，没有就不新建。Windows 上是命令脚本目录（每条命令一个 .cmd），
+ * 引擎按同样的方式读写，这里只有文案与「加进 PATH」提示不同。
  *
  * 读取走 aliases:status；每次改动都是一次 aliases:apply，按名改写一条并直接写回文件，
  * 带上打开时读到的各文件基准（base），文件在此期间被别处改过即被拒绝，不覆盖。
@@ -31,6 +32,11 @@ export interface AliasTarget {
   entries: AliasLine[];
   /** 区块外用户自己的别名：只读。 */
   external: AliasLine[];
+  /** Windows 命令脚本目录：每条命令一个 .cmd。 */
+  cmdDir: boolean;
+  /** 命令脚本目录不在 PATH 上时：自己执行的命令与手动做法（本工具不写注册表）。 */
+  pathCommand: string | null;
+  pathManual: string | null;
 }
 
 export interface AliasSource {
@@ -47,7 +53,8 @@ export interface AliasSource {
 }
 
 export interface AliasFilePreview {
-  files: { target: string; path: string; exists: boolean; content: string; original?: string | null }[];
+  /** Windows 命令脚本目录：一次改动可能涉及多个脚本，删除的 deleted 为真、content 为空。 */
+  files: { target: string; path: string; exists: boolean; content: string; original?: string | null; deleted?: boolean }[];
   skipped: string[];
 }
 
@@ -64,7 +71,15 @@ function targetOf(element: EngineElement): AliasTarget {
     blockedReason: observed.blocked_reason ?? null,
     entries: observed.entries ?? [],
     external: observed.external ?? [],
+    cmdDir: spec.kind === "cmd-dir",
+    pathCommand: observed.path_command ?? null,
+    pathManual: observed.path_manual ?? null,
   };
+}
+
+/** 目标的统称，用于「都不能写」一类提示：~/.zshrc 与 ~/.zprofile，或 Windows 的命令脚本目录。 */
+export function targetsLabel(targets: AliasTarget[]): string {
+  return targets.length ? targets.map((target) => target.target).join(" 与 ") : "终端配置";
 }
 
 function toSource(data: StatusData): AliasSource {
@@ -114,7 +129,7 @@ export function useAliasSource() {
     const current = latest.current;
     const bases = (current?.targets ?? []).flatMap((target) => (target.base ? [target.baseFlag, target.base] : []));
     if (bases.length === 0) {
-      toast.error(`${label} 失败：~/.zshrc 与 ~/.zprofile 当前都不能写，原因见「终端快捷命令」页`);
+      toast.error(`${label} 失败：${targetsLabel(current?.targets ?? [])} 当前不能写，原因见「命令」页`);
       return false;
     }
     return run("aliases:apply", [...bases, ...op], label, options);
@@ -122,7 +137,7 @@ export function useAliasSource() {
 
   const previewApply = useCallback(async (op: string[]): Promise<AliasFilePreview | string> => {
     const bases = (latest.current?.targets ?? []).flatMap((target) => (target.base ? [target.baseFlag, target.base] : []));
-    if (bases.length === 0) return "~/.zshrc 与 ~/.zprofile 当前都不能写，原因见「终端快捷命令」页";
+    if (bases.length === 0) return `${targetsLabel(latest.current?.targets ?? [])} 当前不能写，原因见「命令」页`;
     try {
       const envelope = await runEngine<AliasFilePreview>("aliases:preview", [...bases, ...op]);
       return envelope.ok ? envelope.data : envelope.errors[0]?.message ?? "无法预览终端配置文件";

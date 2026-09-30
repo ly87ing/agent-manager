@@ -2383,16 +2383,19 @@ mod tests {
             Some(StatuslineForm::Legacy)
         );
         assert_eq!(builtin_statusline_form("/x/other.sh", path), None);
-        // 真让 shell 解一遍：得回原路径且只有一个词
-        let echoed = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(format!("printf '%s\\n' {command}"))
-            .output()
-            .unwrap();
-        assert_eq!(
-            String::from_utf8(echoed.stdout).unwrap(),
-            format!("{}\n", path.display())
-        );
+        // 真让 shell 解一遍：得回原路径且只有一个词（Windows 上 Claude Code 也经 Git Bash 执行）
+        #[cfg(unix)]
+        {
+            let echoed = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(format!("printf '%s\\n' {command}"))
+                .output()
+                .unwrap();
+            assert_eq!(
+                String::from_utf8(echoed.stdout).unwrap(),
+                format!("{}\n", path.display())
+            );
+        }
     }
 
     #[cfg(unix)]

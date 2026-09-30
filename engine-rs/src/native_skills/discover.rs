@@ -16,6 +16,7 @@
 //! 全程只读：仅 `read_dir`/`symlink_metadata`/`read_link` 与目标存在性判断，不创建
 //! data_dir/DB/目录，不跟随链接递归扫描。
 
+use crate::platform::Canon;
 use anyhow::Result;
 use serde_json::{json, Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -36,13 +37,13 @@ type Bindings = BTreeMap<(String, String, String), BindingEntry>;
 /// 绝对路径转 `~/...` 展示/持久化形式；不在 home 下时原样返回。
 fn tildify(path: &Path, home_dir: &Path) -> String {
     if let Ok(rel) = path.strip_prefix(home_dir) {
-        return format!("~/{}", rel.to_string_lossy());
+        return format!("~/{}", crate::platform::slash(&rel));
     }
     // 链接目标经 canonicalize 后可能落在 home 的真实路径上（如 macOS /var → /private/var），
     // 两种写法都归一到 ~，避免输出里混入解析后的绝对路径。
-    if let Ok(canonical_home) = home_dir.canonicalize() {
+    if let Ok(canonical_home) = home_dir.canon() {
         if let Ok(rel) = path.strip_prefix(&canonical_home) {
-            return format!("~/{}", rel.to_string_lossy());
+            return format!("~/{}", crate::platform::slash(&rel));
         }
     }
     path.to_string_lossy().to_string()
@@ -250,7 +251,7 @@ pub(crate) fn skills_in_use(ctx: &Context) -> Result<Vec<SkillInUse>> {
         if !dir.join("SKILL.md").is_file() {
             continue;
         }
-        let dir = dir.canonicalize().unwrap_or(dir);
+        let dir = dir.canon().unwrap_or(dir);
         let slot = by_dir.entry(dir.clone()).or_insert_with(|| SkillInUse {
             name: entry.name.clone(),
             dir,
@@ -364,7 +365,8 @@ fn git_source(dir: &Path, home_dir: &Path) -> Option<(String, String)> {
             let url = origin_url(&git.join("config"))?;
             let rel = dir
                 .strip_prefix(&current)
-                .map(|rel| rel.to_string_lossy().to_string())
+                // 仓库内路径一律用 `/`（之后作为 --path 传给纳入）
+                .map(crate::platform::slash)
                 .unwrap_or_default();
             return Some((url, rel));
         }

@@ -10,6 +10,7 @@
 
 pub(crate) mod apply;
 pub(crate) mod args;
+pub(crate) mod cmd;
 pub(crate) mod legacy;
 pub(crate) mod model;
 pub(crate) mod sources;

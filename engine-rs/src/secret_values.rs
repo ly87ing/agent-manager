@@ -3,6 +3,7 @@
 //! `native-manager.db` 只保存外部文件路径，不保存凭据值。外部文件优先于进程环境，
 //! 这样从 Dock / Finder 启动时也能稳定解析，同时仍保留终端注入作为回退。
 
+use crate::platform::Canon;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
@@ -78,10 +79,8 @@ fn validated_source_path(ctx: &Context) -> Result<(String, PathBuf)> {
         bail!("外部密钥文件必须是普通文件，不能是目录或符号链接");
     }
     validate_permissions(&path)?;
-    let canonical = path
-        .canonicalize()
-        .with_context(|| "无法解析外部密钥文件路径")?;
-    if let Ok(data_dir) = ctx.data_dir.canonicalize() {
+    let canonical = path.canon().with_context(|| "无法解析外部密钥文件路径")?;
+    if let Ok(data_dir) = ctx.data_dir.canon() {
         if canonical.starts_with(data_dir) {
             bail!("外部密钥文件不能放在 Agent Manager 数据目录中");
         }
@@ -154,10 +153,8 @@ pub fn validate_source(ctx: &Context, raw: &str) -> Result<()> {
         bail!("外部密钥文件必须是普通文件，不能是目录或符号链接");
     }
     validate_permissions(&path)?;
-    let canonical = path
-        .canonicalize()
-        .with_context(|| "无法解析外部密钥文件路径")?;
-    if let Ok(data_dir) = ctx.data_dir.canonicalize() {
+    let canonical = path.canon().with_context(|| "无法解析外部密钥文件路径")?;
+    if let Ok(data_dir) = ctx.data_dir.canon() {
         if canonical.starts_with(data_dir) {
             bail!("外部密钥文件不能放在 Agent Manager 数据目录中");
         }

@@ -7,17 +7,22 @@
 //! 只读：不执行被检测的程序，版本从包的元数据读；只启动用户 shell 打印 PATH（不带终端、
 //! stdin 为空、有超时）。
 
+use crate::platform::Canon;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+#[cfg(not(windows))]
 use std::io::Read;
 use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::native::Context;
 
+#[cfg(not(windows))]
 const PATH_MARKER: &str = "__AGENT_MANAGER_PATH__";
+#[cfg(not(windows))]
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const CACHE_TTL: Duration = Duration::from_secs(300);
 
@@ -31,6 +36,7 @@ pub struct UserPath {
     pub error: Option<String>,
 }
 
+#[cfg(not(windows))]
 fn shell_path(shell: &str, flag: &str, home: &Path) -> Result<Vec<PathBuf>, String> {
     let mut child = Command::new(shell)
         .arg(flag)
@@ -69,6 +75,26 @@ fn shell_path(shell: &str, flag: &str, home: &Path) -> Result<Vec<PathBuf>, Stri
         .collect())
 }
 
+/// Windows：没有登录 shell 这回事，新开终端拿到的 PATH 就是注册表里的系统 + 用户 PATH。
+#[cfg(windows)]
+fn probe_user_path(_home: &Path) -> UserPath {
+    match crate::platform::registry_path_dirs() {
+        Ok(dirs) => UserPath {
+            stable: dirs.clone(),
+            dirs,
+            error: None,
+        },
+        Err(error) => UserPath {
+            dirs: std::env::var_os("PATH")
+                .map(|p| std::env::split_paths(&p).collect())
+                .unwrap_or_default(),
+            stable: Vec::new(),
+            error: Some(error),
+        },
+    }
+}
+
+#[cfg(not(windows))]
 fn probe_user_path(home: &Path) -> UserPath {
     let shell = std::env::var("SHELL")
         .ok()
@@ -150,8 +176,14 @@ pub fn user_path(ctx: &Context, refresh: bool) -> UserPath {
 pub fn find_all(path: &UserPath, bin: &str) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     for dir in &path.dirs {
-        let candidate = dir.join(bin);
-        if is_executable(&candidate) && !out.iter().any(|p| same_file(p, &candidate)) {
+        // Windows 上 `wecom-cli` 实际是 `wecom-cli.cmd` 等，按 PATHEXT 取这个目录里第一个
+        let Some(candidate) = crate::platform::command_candidates(dir, bin)
+            .into_iter()
+            .find(|p| is_executable(p))
+        else {
+            continue;
+        };
+        if !out.iter().any(|p| same_file(p, &candidate)) {
             out.push(candidate);
         }
     }
@@ -159,14 +191,11 @@ pub fn find_all(path: &UserPath, bin: &str) -> Vec<PathBuf> {
 }
 
 fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path)
-        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
+    crate::platform::is_executable(path)
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {
-    match (a.canonicalize(), b.canonicalize()) {
+    match (a.canon(), b.canon()) {
         (Ok(x), Ok(y)) => x == y,
         _ => a == b,
     }
@@ -204,7 +233,9 @@ fn agent_owned(real: &Path, home: &Path) -> bool {
 }
 
 pub fn classify(ctx: &Context, path: &Path) -> Located {
-    let real = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    // Windows 上命令常是转发脚本（npm 的 cmd-shim、本工具的入口）：顺着它找到真正的程序
+    let followed = crate::platform::cmd_shim_target(path).unwrap_or_else(|| path.to_path_buf());
+    let real = followed.canon().unwrap_or(followed);
     let base = Located {
         path: path.to_path_buf(),
         real: real.clone(),
@@ -214,9 +245,10 @@ pub fn classify(ctx: &Context, path: &Path) -> Located {
         package_dir: None,
         app: None,
     };
-    let text = real.to_string_lossy().to_string();
+    // 统一用 `/` 匹配下面的目录特征（Windows 路径用 `\`）
+    let text = real.to_string_lossy().replace('\\', "/");
     let root = ctx.data_dir.join("programs");
-    let root = root.canonicalize().unwrap_or(root);
+    let root = root.canon().unwrap_or(root);
     if let Ok(rest) = real.strip_prefix(&root) {
         // programs/<类别>/<名>/<版本>/...：认回包标识与版本
         let parts: Vec<String> = rest
@@ -245,8 +277,14 @@ pub fn classify(ctx: &Context, path: &Path) -> Located {
             ..base
         };
     }
-    if let Some(pos) = text.find("/lib/node_modules/") {
-        let rest = &text[pos + "/lib/node_modules/".len()..];
+    // npm 全局：Unix 在 <prefix>/lib/node_modules，Windows 在 <prefix>\node_modules（默认 %APPDATA%\npm）
+    let npm_global = if cfg!(windows) {
+        "/node_modules/"
+    } else {
+        "/lib/node_modules/"
+    };
+    if let Some(pos) = text.find(npm_global) {
+        let rest = &text[pos + npm_global.len()..];
         let mut parts = rest.split('/');
         let first = parts.next().unwrap_or_default();
         let name = if first.starts_with('@') {
@@ -254,7 +292,7 @@ pub fn classify(ctx: &Context, path: &Path) -> Located {
         } else {
             first.to_string()
         };
-        let dir = PathBuf::from(&text[..pos + "/lib/node_modules/".len()]).join(&name);
+        let dir = PathBuf::from(&text[..pos + npm_global.len()]).join(&name);
         let version = read_json(&dir.join("package.json"))
             .and_then(|v| v.get("version").and_then(Value::as_str).map(str::to_string));
         return Located {
@@ -362,7 +400,7 @@ pub fn npm_bins(package_dir: &Path) -> Vec<String> {
 impl Located {
     pub fn to_json(&self, home: &Path) -> Value {
         let tilde = |p: &Path| match p.strip_prefix(home) {
-            Ok(rest) => format!("~/{}", rest.to_string_lossy()),
+            Ok(rest) => format!("~/{}", crate::platform::slash(&rest)),
             Err(_) => p.to_string_lossy().to_string(),
         };
         json!({

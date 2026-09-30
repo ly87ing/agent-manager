@@ -135,7 +135,7 @@ pub(crate) fn parse_apply_args(req: &Request) -> Result<ApplyArgs> {
     }
     if bases.is_empty() {
         return Err(usage(
-            "参数错误: 需要 --zshrc-base 或 --zprofile-base（取自 aliases:status 的 observed.base）",
+            "参数错误: 需要写入基准（--zshrc-base / --zprofile-base，Windows 为 --cmd-base；取自 aliases:status 的 observed.base）",
         ));
     }
 
@@ -223,6 +223,16 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
+    fn windows_用命令脚本目录的基准_不认_rc_文件的() {
+        let args = parse_apply_args(&req(&["--cmd-base", "missing", "--remove", "ll"])).unwrap();
+        assert_eq!(args.bases.len(), 1);
+        assert_eq!(args.bases[0].0.target_id, "aliases:cmd");
+        assert!(parse_apply_args(&req(&["--zshrc-base", "missing", "--remove", "ll"])).is_err());
+    }
+
+    #[test]
+    #[cfg(unix)] // zshrc / zprofile 两个文件的参数
     fn apply_accepts_each_single_operation() {
         let base = "a".repeat(64);
         let args = parse_apply_args(&req(&[

@@ -30,6 +30,7 @@ pub mod native_skills;
 pub(crate) mod native_system;
 pub(crate) mod native_upstream;
 pub(crate) mod native_usage;
+pub mod platform;
 pub(crate) mod progress;
 pub mod sanitize;
 pub(crate) mod secret_values;

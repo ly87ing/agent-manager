@@ -17,11 +17,17 @@ fn temp_ctx(tag: &str) -> (PathBuf, Context) {
 
 /// 状态栏脚本存额度的位置：`<数据目录>/usage/<配置目录按 % -> %25、/ -> %2F 编码>.json`。
 fn snapshot_path(ctx: &Context, config_dir: &std::path::Path) -> PathBuf {
-    let key = config_dir
-        .display()
-        .to_string()
-        .replace('%', "%25")
-        .replace('/', "%2F");
+    // 与引擎、状态栏脚本同一规则：Windows 先统一成小写的 c:/…，`:` 也转义
+    let dir = config_dir.display().to_string();
+    let dir = if cfg!(windows) {
+        dir.replace('\\', "/").to_lowercase()
+    } else {
+        dir
+    };
+    let mut key = dir.replace('%', "%25").replace('/', "%2F");
+    if cfg!(windows) {
+        key = key.replace(':', "%3A");
+    }
     ctx.data_dir.join("usage").join(format!("{key}.json"))
 }
 
@@ -151,7 +157,12 @@ fn codex_取最新会话文件的最后一条额度_并能从大文件尾部读�
     let usage = usage_of(&ctx, "codex");
     assert_eq!(
         usage["source"],
-        json!(ctx.home_dir.join(".codex/sessions").display().to_string())
+        json!(ctx
+            .home_dir
+            .join(".codex")
+            .join("sessions")
+            .display()
+            .to_string())
     );
     assert_eq!(usage["plan"], json!("prolite"));
     assert_eq!(usage["credits"], json!("2443.02"));

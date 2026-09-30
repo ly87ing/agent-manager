@@ -97,7 +97,17 @@ enum McpNeed {
 }
 
 fn mcp_need(server: &str, agent: &str, command: &str, args: &[String]) -> Option<McpNeed> {
-    let base = command.rsplit('/').next().unwrap_or(command);
+    // 绝对路径取文件名（Windows 路径用 `\`），去掉 Windows 的可执行扩展名（`npx.cmd` → `npx`）
+    let file = command.rsplit(['/', '\\']).next().unwrap_or(command);
+    let base = [".cmd", ".exe", ".bat"]
+        .iter()
+        .find_map(|ext| {
+            file.len()
+                .checked_sub(ext.len())
+                .filter(|&at| file[at..].eq_ignore_ascii_case(ext))
+                .map(|at| &file[..at])
+        })
+        .unwrap_or(file);
     let positional = |skip_values: &[&str]| -> Vec<String> {
         let mut out = Vec::new();
         let mut iter = args.iter();
@@ -193,7 +203,9 @@ fn mcp_need(server: &str, agent: &str, command: &str, args: &[String]) -> Option
                 },
             ))
         }
-        _ if command.starts_with('/') => Some(McpNeed::Path(command.to_string())),
+        _ if command.starts_with('/') || Path::new(command).is_absolute() => {
+            Some(McpNeed::Path(command.to_string()))
+        }
         _ if declare::valid_bin(command) => Some(McpNeed::Bin(command.to_string())),
         _ => None,
     }
@@ -232,7 +244,7 @@ fn managed_versions(dir: &Path) -> (Vec<String>, Option<String>) {
                 .collect()
         })
         .unwrap_or_default();
-    let current = std::fs::read_link(dir.join("current"))
+    let current = crate::platform::read_link(dir.join("current"))
         .ok()
         .map(|p| p.to_string_lossy().to_string());
     (versions, current)
@@ -268,7 +280,7 @@ pub(crate) fn managed_dir(ctx: &Context, id: &str) -> Option<std::path::PathBuf>
 
 fn tilde(path: &Path, home: &Path) -> String {
     match path.strip_prefix(home) {
-        Ok(rest) => format!("~/{}", rest.to_string_lossy()),
+        Ok(rest) => format!("~/{}", crate::platform::slash(&rest)),
         Err(_) => path.to_string_lossy().to_string(),
     }
 }
@@ -796,6 +808,14 @@ mod tests {
             McpNeed::Bin(bin) => Some((format!("bin:{bin}"), None, false)),
             McpNeed::Path(p) => Some((format!("path:{p}"), None, false)),
         }
+    }
+
+    #[test]
+    fn windows_路径与扩展名也认得出运行方式() {
+        assert_eq!(
+            need(r"C:\Program Files\nodejs\npx.CMD", &["-y", "srv@1.0.0"]),
+            Some(("npm:srv".into(), Some("1.0.0".into()), true))
+        );
     }
 
     #[test]

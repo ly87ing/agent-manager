@@ -80,7 +80,7 @@
       "items": {"$ref": "#/$defs/suggested_source"}
     },
     "aliases": {
-      "description": "Aliases domain only: the aliases actually present in the managed blocks of ~/.zshrc and ~/.zprofile, merged by name. This is the current configuration; nothing here comes from the database. Read-only, zero-write.",
+      "description": "Aliases domain only: the aliases actually present in the managed blocks of ~/.zshrc and ~/.zprofile (on Windows: the agent-manager .cmd scripts in ~/.agent-manager/bin), merged by name. This is the current configuration; nothing here comes from the database. Read-only, zero-write.",
       "type": "array",
       "items": {"$ref": "#/$defs/alias_current"}
     },

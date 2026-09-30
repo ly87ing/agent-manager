@@ -414,6 +414,7 @@ fn provider_key_variables_list_their_connections_and_instances() {
 }
 
 #[test]
+#[cfg(unix)] // 用到 Unix 权限位
 fn 密钥文件可以就地新建_仅本人可读_已有的不覆盖_不能建在数据目录() {
     use std::os::unix::fs::PermissionsExt;
     let (base, ctx) = temp_ctx("create-source");

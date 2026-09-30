@@ -140,7 +140,7 @@ fn apply_remove_link(ctx: &Context, req: &Request) -> Result<()> {
     }
 
     let old_target = resolve_link_target(&link_path).ok();
-    std::fs::remove_file(&link_path)
+    crate::platform::remove_link(&link_path)
         .with_context(|| format!("[{}@{}] 删除链接失败", link, agent))?;
 
     let mut conn = store::open_write(ctx)?;
@@ -161,7 +161,7 @@ fn apply_remove_link(ctx: &Context, req: &Request) -> Result<()> {
     if let Err(err) = res {
         // 审计写不进去就把链接放回原样，不留下「删了但没记录」的状态
         if let Some(target) = old_target {
-            let _ = std::os::unix::fs::symlink(&target, &link_path);
+            let _ = crate::platform::link_dir(&target, &link_path);
         }
         return Err(err);
     }
@@ -970,7 +970,7 @@ fn purge_collection_leftovers(
             continue;
         };
         for entry in entries.flatten() {
-            if let Ok(target) = std::fs::read_link(entry.path()) {
+            if let Ok(target) = crate::platform::read_link(entry.path()) {
                 if let Ok(rest) = target.strip_prefix(&versions_dir) {
                     if let Some(first) = rest.components().next() {
                         in_use.insert(first.as_os_str().to_string_lossy().to_string());

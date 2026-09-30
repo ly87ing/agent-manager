@@ -64,8 +64,8 @@ export function AliasApplyConfirm({
           {result.files.length === 0 && <p className="text-muted-foreground">配置文件不变。</p>}
           {result.files.map((file) => (
             <FileDiff
-              key={file.target}
-              path={file.path}
+              key={file.path}
+              path={file.deleted ? `${file.path}（删除）` : file.path}
               original={file.exists ? file.original : null}
               content={file.content}
               testId={`alias-confirm-file-${file.target}`}

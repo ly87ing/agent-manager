@@ -654,6 +654,7 @@ fn retired_domains_and_verbs_are_rejected_clearly() {
 }
 
 #[test]
+#[cfg(unix)] // 用 shell 脚本冒充助手与安装动作（Windows 上智能体只检测，不安装）
 fn agents_native_apply_dry_run_rejection_and_audit() {
     let (base, ctx) = temp_ctx("agents-native");
     set_agent(&ctx, "local-agent", "agent-test-bin", "mkdir -p \"$HOME/.local/bin\"; printf '#!/bin/sh\\n' > \"$HOME/.local/bin/agent-test-bin\"; chmod +x \"$HOME/.local/bin/agent-test-bin\"");
@@ -887,6 +888,7 @@ fn agent_apply_dry_run_is_rejected_without_lock_db_or_target() {
 }
 
 #[test]
+#[cfg(unix)] // 用 shell 脚本冒充助手与安装动作（Windows 上智能体只检测，不安装）
 fn agent_status_classifies_unsupported_install_and_skips_tombstones() {
     let (base, ctx) = temp_ctx("agents-source");
     let brew_bin = base

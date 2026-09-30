@@ -85,10 +85,22 @@ if [[ -n $five || -n $week ]]; then
   # 与 Agent Manager 读取时展开后的路径对得上
   [[ $am_dir == "~" ]] && am_dir=$HOME
   [[ $am_dir == "~/"* ]] && am_dir=$HOME/${am_dir#"~/"}
+  # Windows（Git Bash）：/c/Users/... 与 C:\Users\... 统一成 c:/users/...，与 Agent Manager 一致
+  am_win=
+  if [[ $am_dir =~ ^/([a-zA-Z])/(.*)$ ]]; then
+    case $(uname -s 2>/dev/null) in MINGW*|MSYS*|CYGWIN*) am_dir="${BASH_REMATCH[1]}:/${BASH_REMATCH[2]}" ;; esac
+  fi
+  if [[ $am_dir =~ ^[a-zA-Z]: ]]; then
+    am_win=1
+    am_dir=${am_dir//\\//}
+    am_dir=${am_dir,,}
+  fi
   am_pct='%'
   am_key=${am_dir//$am_pct/%25}
   am_key=${am_key//\//%2F}
+  [[ -n $am_win ]] && am_key=${am_key//:/%3A}
   am_self=${BASH_SOURCE[0]}
+  am_self=${am_self//\\//}
   if [[ $am_self == */* ]]; then am_usage=${am_self%/*}/usage; else am_usage=usage; fi
   [[ -d $am_usage ]] || mkdir -p "$am_usage" 2>/dev/null
   am_file=$am_usage/$am_key.json

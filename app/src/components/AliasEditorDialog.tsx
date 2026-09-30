@@ -14,6 +14,7 @@ import {
   renderAliasPreview,
 } from "../lib/aliasCommand";
 import type { AliasFilePreview } from "../lib/useAliasSource";
+import { LAUNCH_COMMANDS_HOME } from "../lib/platform";
 
 /** 下拉里的「自定义…」哨兵值：选中后切到可输入状态。 */
 const CUSTOM_OPTION = "__custom__";
@@ -470,7 +471,7 @@ export function AliasEditorDialog({
         </div>
 
         <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-5 flex items-center justify-end gap-2">
-          <span className="mr-auto text-xs text-muted-foreground">保存即写入 ~/.zshrc 里由本工具管理的那几行</span>
+          <span className="mr-auto text-xs text-muted-foreground">保存即写入 {LAUNCH_COMMANDS_HOME}</span>
           <button type="button" onClick={onClose} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent">
             取消
           </button>

@@ -1,6 +1,7 @@
 import { ChevronDown, Moon, Search, Sun, X, type LucideIcon } from "lucide-react";
 import { useTheme } from "../lib/theme";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { MOD } from "../lib/platform";
 import { cn } from "../lib/utils";
 
 export interface NavItem {
@@ -228,14 +229,14 @@ export function AppLayout({
               <button
                 type="button"
                 data-testid="open-search"
-                aria-label="搜索（⌘K）"
+                aria-label={`搜索（${MOD}K）`}
                 onClick={onSearch}
-                title="搜索账号、技能、MCP、规则和操作（⌘K）"
+                title={`搜索账号、技能、MCP、规则和操作（${MOD}K）`}
                 className="mr-1 flex shrink-0 items-center gap-2 rounded-md border bg-background px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
               >
                 <Search className="h-3.5 w-3.5" aria-hidden />
                 <span className="hidden xl:inline">搜索</span>
-                <kbd className="hidden rounded border bg-muted px-1 font-sans text-[10px] xl:inline">⌘K</kbd>
+                <kbd className="hidden rounded border bg-muted px-1 font-sans text-[10px] xl:inline">{MOD}K</kbd>
               </button>
             )}
             <button

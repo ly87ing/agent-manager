@@ -44,6 +44,41 @@ pub struct View {
     pub legacy_marker: bool,
     /// 本工具不建模、写入时原样保留的官方字段。
     pub extra: Map<String, Value>,
+    /// 文件里写的是 `cmd /c <命令> …`（Windows 上运行 npx 这类 .cmd 的写法）：`command`/`args`
+    /// 已去掉这层包装，写回时再包上。
+    pub cmd_wrapped: bool,
+}
+
+/// Windows 上实际是 `.cmd` 批处理、要经 `cmd /c` 才能被 MCP 客户端启动的命令
+/// （Claude Code `/doctor` 会对裸 `npx` 报警；cc-switch 同样处理）。
+const CMD_WRAP_COMMANDS: &[&str] = &["npx", "npm", "pnpm", "yarn", "node", "bun", "bunx", "deno"];
+
+fn needs_cmd_wrap(command: &str) -> bool {
+    CMD_WRAP_COMMANDS
+        .iter()
+        .any(|c| command.eq_ignore_ascii_case(c))
+}
+
+/// 去掉 `cmd /c` 包装：返回里面的命令与参数；不是这种写法时为 None。
+fn unwrap_cmd(command: &str, args: &[String]) -> Option<(String, Vec<String>)> {
+    let is_cmd = command.eq_ignore_ascii_case("cmd") || command.eq_ignore_ascii_case("cmd.exe");
+    if is_cmd && args.len() >= 2 && args[0].eq_ignore_ascii_case("/c") && !args[1].trim().is_empty()
+    {
+        Some((args[1].clone(), args[2..].to_vec()))
+    } else {
+        None
+    }
+}
+
+/// 写入时的命令与参数：要包的包成 `cmd`, `["/c", 命令, …]`。
+fn wrapped_command(wrap: bool, command: &str, args: &[String]) -> (String, Vec<String>) {
+    if wrap {
+        let mut full = vec!["/c".to_string(), command.to_string()];
+        full.extend(args.iter().cloned());
+        ("cmd".to_string(), full)
+    } else {
+        (command.to_string(), args.to_vec())
+    }
 }
 
 fn container_env_key(format: &Format) -> &'static str {
@@ -149,6 +184,7 @@ pub fn parse(format: &Format, raw: &Value) -> std::result::Result<View, String> 
         enabled,
         legacy_marker,
         extra: Map::new(),
+        cmd_wrapped: false,
     };
     let mut modeled: Vec<&str> = vec![MARKER_KEY];
     if matches!(format, Format::CodexToml | Format::OpenCodeJson) {
@@ -222,6 +258,11 @@ pub fn parse(format: &Format, raw: &Value) -> std::result::Result<View, String> 
             modeled.push("args");
         }
         modeled.push("command");
+        if let Some((command, args)) = unwrap_cmd(&view.command, &view.args) {
+            view.command = command;
+            view.args = args;
+            view.cmd_wrapped = true;
+        }
         view.env = string_map(obj, env_key, env_key)?;
         modeled.push(env_key);
         if *format == Format::CodexToml {
@@ -707,18 +748,24 @@ pub fn render_new(format: &Format, n: &Neutral) -> Result<Map<String, Value>> {
     match n.transport {
         Transport::Stdio => {
             check_missing(missing)?;
+            // Windows 上新增的 npx 一类命令包成 `cmd /c`
+            let (command, args) = wrapped_command(
+                cfg!(windows) && needs_cmd_wrap(&n.command),
+                &n.command,
+                &n.args,
+            );
             match format {
                 // 不写原来没有、用户也没填的字段：环境变量为空就不写 env
                 Format::ClaudeJson => {
-                    out.insert("command".into(), json!(n.command));
-                    out.insert("args".into(), json!(n.args));
+                    out.insert("command".into(), json!(command));
+                    out.insert("args".into(), json!(args));
                     if !env.is_empty() {
                         out.insert("env".into(), Value::Object(env));
                     }
                 }
                 Format::CodexToml => {
-                    out.insert("command".into(), json!(n.command));
-                    out.insert("args".into(), json!(n.args));
+                    out.insert("command".into(), json!(command));
+                    out.insert("args".into(), json!(args));
                     if let Some(timeout) = n.startup_timeout_sec {
                         out.insert("startup_timeout_sec".into(), json!(timeout));
                     }
@@ -727,8 +774,8 @@ pub fn render_new(format: &Format, n: &Neutral) -> Result<Map<String, Value>> {
                     }
                 }
                 Format::OpenCodeJson => {
-                    let mut command = vec![n.command.clone()];
-                    command.extend(n.args.iter().cloned());
+                    let mut command = vec![command];
+                    command.extend(args);
                     out.insert("type".into(), json!("local"));
                     out.insert("command".into(), json!(command));
                     if !env.is_empty() {
@@ -889,14 +936,18 @@ pub fn apply_edit(
             }
             check_missing(missing)?;
             let env_map = rebuild_map(old.get(env_key), env);
+            // 原来包着 `cmd /c` 的照样包；Windows 上用户改成 npx 一类命令时包上。没改命令的不动
+            let wrap = view.cmd_wrapped
+                || (cfg!(windows) && spec.command != view.command && needs_cmd_wrap(&spec.command));
+            let (command, args) = wrapped_command(wrap, &spec.command, &spec.args);
             if *format == Format::OpenCodeJson {
-                let mut command = vec![spec.command.clone()];
-                command.extend(spec.args.iter().cloned());
-                new.insert("command".into(), json!(command));
+                let mut full = vec![command];
+                full.extend(args);
+                new.insert("command".into(), json!(full));
             } else {
-                new.insert("command".into(), json!(spec.command));
-                if !spec.args.is_empty() || new.contains_key("args") {
-                    new.insert("args".into(), json!(spec.args));
+                new.insert("command".into(), json!(command));
+                if !args.is_empty() || new.contains_key("args") {
+                    new.insert("args".into(), json!(args));
                 }
             }
             set_or_drop(&mut new, env_key, env_map);
@@ -1033,4 +1084,50 @@ pub fn dropped_on_copy(view: &View, to: &Format) -> Vec<String> {
     }
     out.sort();
     out
+}
+
+#[cfg(test)]
+mod cmd_wrap_tests {
+    use super::*;
+
+    #[test]
+    fn cmd_c_包装读成里面的命令_编辑后照样包着_没改命令的不动() {
+        let raw = json!({"command": "cmd", "args": ["/c", "npx", "-y", "srv@1.0.0"]});
+        let view = parse(&Format::ClaudeJson, &raw).unwrap();
+        assert_eq!(view.command, "npx");
+        assert_eq!(view.args, vec!["-y", "srv@1.0.0"]);
+        assert!(view.cmd_wrapped);
+
+        // 改版本号：照样包着 cmd /c
+        let spec = parse_spec(r#"{"command":"npx","args":["-y","srv@2.0.0"]}"#).unwrap();
+        let old = raw.as_object().unwrap().clone();
+        let new = apply_edit(&Format::ClaudeJson, &old, &view, &spec).unwrap();
+        assert_eq!(new["command"], "cmd");
+        assert_eq!(new["args"], json!(["/c", "npx", "-y", "srv@2.0.0"]));
+
+        // 没包装的条目，命令没改：不加包装（只动用户改了的）
+        let raw = json!({"command": "npx", "args": ["-y", "srv"]});
+        let view = parse(&Format::ClaudeJson, &raw).unwrap();
+        assert!(!view.cmd_wrapped);
+        let spec = parse_spec(r#"{"command":"npx","args":["-y","srv@2.0.0"]}"#).unwrap();
+        let new = apply_edit(&Format::ClaudeJson, raw.as_object().unwrap(), &view, &spec).unwrap();
+        assert_eq!(new["command"], "npx");
+    }
+
+    #[test]
+    fn 新增的_npx_只在_windows_上包_cmd_c() {
+        let spec = parse_spec(r#"{"command":"npx","args":["-y","srv"]}"#).unwrap();
+        let neutral = neutral_from_spec(&spec).unwrap();
+        let out = render_new(&Format::CodexToml, &neutral).unwrap();
+        if cfg!(windows) {
+            assert_eq!(out["command"], "cmd");
+            assert_eq!(out["args"], json!(["/c", "npx", "-y", "srv"]));
+        } else {
+            assert_eq!(out["command"], "npx");
+        }
+        // uvx 在 Windows 上是 .exe，不用包
+        let spec = parse_spec(r#"{"command":"uvx","args":["srv"]}"#).unwrap();
+        let out = render_new(&Format::ClaudeJson, &neutral_from_spec(&spec).unwrap()).unwrap();
+        assert_eq!(out["command"], "uvx");
+    }
 }

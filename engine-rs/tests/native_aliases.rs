@@ -1,3 +1,6 @@
+// Unix 的 rc 文件（~/.zshrc / ~/.zprofile）；Windows 的命令脚本见 native_aliases_windows.rs。
+#![cfg(unix)]
+
 //! aliases 域：~/.zshrc 与 ~/.zprofile 受管区块里的实际行为准 + 内置推荐 + 旧版本保存的别名。
 //!
 //! status 输出区块内的实际别名（按名合并，标出在哪些文件）、区块外用户自己的别名（只读）与

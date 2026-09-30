@@ -32,6 +32,7 @@ fn valid_name(name: &str) -> bool {
 }
 
 /// 复制出来的文件要能改：快照里的文件是只读的。
+#[cfg_attr(not(unix), allow(unused_variables))]
 fn make_writable(dir: &Path) -> Result<()> {
     #[cfg(unix)]
     {
@@ -69,7 +70,7 @@ pub(crate) fn fork(ctx: &Context, req: &Request) -> Result<Value> {
         bail!("要放进另一个集合，不能是 {coll_name} 自己");
     }
     let dest_raw = req.value("--dest").unwrap_or(DEFAULT_DEST);
-    if !(dest_raw.starts_with('/') || dest_raw.starts_with("~/")) {
+    if !(std::path::Path::new(dest_raw).is_absolute() || dest_raw.starts_with("~/")) {
         bail!("目录要写绝对路径或以 ~/ 开头: {dest_raw}");
     }
     let dest_root = resolve_loose(&expand_home(dest_raw, &ctx.home_dir));

@@ -83,8 +83,21 @@ fn snapshot_path(data_dir: &Path, config_dir: &Path) -> PathBuf {
 
 /// 配置目录编进文件名：先 `%` -> `%25`，再 `/` -> `%2F`。与状态栏脚本逐字一致，
 /// 不同目录编出来不会相同。
+///
+/// Windows：状态栏脚本在 Git Bash 里拿到的目录可能是 `/c/Users/u/.claude` 或 `C:\Users\u\.claude`，
+/// 两边先统一成 `c:/users/u/.claude`（`\` 换 `/`、不分大小写），`:` 也转义成 `%3A`。
 fn usage_key(config_dir: &str) -> String {
-    config_dir.replace('%', "%25").replace('/', "%2F")
+    let dir = if cfg!(windows) {
+        config_dir.replace('\\', "/").to_lowercase()
+    } else {
+        config_dir.to_string()
+    };
+    let key = dir.replace('%', "%25").replace('/', "%2F");
+    if cfg!(windows) {
+        key.replace(':', "%3A")
+    } else {
+        key
+    }
 }
 
 enum Kind {

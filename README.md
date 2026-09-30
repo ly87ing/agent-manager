@@ -43,7 +43,7 @@ pnpm --dir app install --frozen-lockfile
 pnpm --dir app run build:macos
 ```
 
-产物位于 `app/src-tauri/target/release/bundle/dmg/`。独立包验收：`pnpm --dir app run verify:macos`。Linux 与 Windows 安装包由 [.github/workflows/gui-release.yml](.github/workflows/gui-release.yml) 构建；本地构建脚本目前仅面向 macOS。
+产物位于 `app/src-tauri/target/release/bundle/dmg/`。独立包验收：`pnpm --dir app run verify:macos`。Linux 与 Windows 安装包由 [.github/workflows/gui-release.yml](.github/workflows/gui-release.yml) 构建；本地构建脚本目前仅面向 macOS。Windows 上启动命令写成 `~/.agent-manager/bin` 里的 `.cmd` 脚本，本工具不改注册表；支持范围与验证情况见 [平台状态](docs/GUI-PLATFORM-STATUS.md#windows-支持2026-09-30)。
 
 ## 快速上手
 

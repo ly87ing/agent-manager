@@ -1,6 +1,8 @@
 //! 助手运行参数落到助手自己的配置文件：实际文件为准。status 给出实际值、写入基准与当前接入；
 //! 写入只动本次涉及的那组键，基准对不上就拒绝，切换前把还没保存的实际接入回填进库，
 //! YOLO 少了显式确认标志一律拒绝。
+// 部分辅助只给 Unix 专属的用例用
+#![cfg_attr(not(unix), allow(dead_code))]
 
 use serde_json::{json, Value};
 use std::fs;

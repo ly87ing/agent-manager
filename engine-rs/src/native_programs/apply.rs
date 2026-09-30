@@ -9,6 +9,7 @@
 //!
 //! 安装脚本默认不执行（与 pnpm 10、Bun、Deno、npm 12 一致），用户对某个程序允许后才执行。
 
+use crate::platform::Canon;
 use anyhow::{anyhow, bail, Context as _, Result};
 use rusqlite::TransactionBehavior;
 use serde_json::{json, Map, Value};
@@ -54,7 +55,7 @@ fn program_dir(ctx: &Context, id: &str) -> Result<PathBuf> {
 
 fn tilde(path: &Path, home: &Path) -> String {
     match path.strip_prefix(home) {
-        Ok(rest) => format!("~/{}", rest.to_string_lossy()),
+        Ok(rest) => format!("~/{}", crate::platform::slash(&rest)),
         Err(_) => path.to_string_lossy().to_string(),
     }
 }
@@ -444,16 +445,28 @@ fn managed_cleanup_bins(ctx: &Context, id: &str, element: Option<&Value>) -> Vec
     bins
 }
 
+/// npm 全局命令所在目录：Unix 为 `<prefix>/bin`，Windows 直接在 `<prefix>` 下（`%APPDATA%\npm\x.cmd`）。
+fn npm_bin_dir(prefix: &Path) -> PathBuf {
+    if cfg!(windows) {
+        prefix.to_path_buf()
+    } else {
+        prefix.join("bin")
+    }
+}
+
 /// 包目录下指向它的命令链接（npm 全局的 `<prefix>/bin/<命令>`、uv tool 的 `~/.local/bin/<命令>`）。
 fn bin_links_into(bin_dir: &Path, package_dir: &Path, bins: &[String]) -> Vec<PathBuf> {
     let real_pkg = package_dir
-        .canonicalize()
+        .canon()
         .unwrap_or_else(|_| package_dir.to_path_buf());
     bins.iter()
-        .map(|b| bin_dir.join(b))
+        .map(|b| bin_dir.join(crate::platform::command_link_name(b)))
         .filter(|p| p.symlink_metadata().is_ok())
         .filter(|p| {
-            p.canonicalize()
+            // Windows 上是 npm 的 cmd-shim：顺着脚本里记的位置判断
+            let followed = crate::platform::cmd_shim_target(p).unwrap_or_else(|| p.clone());
+            followed
+                .canon()
                 .map(|r| r.starts_with(&real_pkg))
                 .unwrap_or(false)
         })
@@ -554,7 +567,7 @@ fn plan_delegated(
                     .map(Path::to_path_buf)
                     .ok_or_else(|| anyhow!("npm 全局目录结构认不出来"))?;
             }
-            let links = bin_links_into(&prefix.join("bin"), &package_dir, &bins);
+            let links = bin_links_into(&npm_bin_dir(&prefix), &package_dir, &bins);
             let allow = args.allow_scripts || scripts_allowed(status, id);
             let mut steps = backup_steps(
                 &backup,
@@ -884,10 +897,21 @@ fn managed_install_steps(
 
 /// 托管版本目录里命令的真实位置。
 fn managed_bin_target(vdir_or_current: &Path, scheme: &str, bin: &str) -> PathBuf {
-    match scheme {
-        "npm" => vdir_or_current.join("node_modules/.bin").join(bin),
-        _ => vdir_or_current.join("bin").join(bin),
+    // Windows：npm 在 .bin 下生成 `<命令>.cmd`，uv 在 bin 下放 `<命令>.exe`
+    match (scheme, cfg!(windows)) {
+        ("npm", false) => vdir_or_current.join("node_modules/.bin").join(bin),
+        ("npm", true) => vdir_or_current
+            .join("node_modules")
+            .join(".bin")
+            .join(format!("{bin}.cmd")),
+        (_, false) => vdir_or_current.join("bin").join(bin),
+        (_, true) => vdir_or_current.join("bin").join(format!("{bin}.exe")),
     }
+}
+
+/// 入口指向哪里：符号链接，或 Windows 的转发脚本。
+fn link_target(path: &Path) -> Option<PathBuf> {
+    crate::platform::command_link_target(path)
 }
 
 fn entry_links(
@@ -902,13 +926,14 @@ fn entry_links(
     let mut steps = Vec::new();
     let mut verify = Vec::new();
     for bin in bins {
-        let shim = bin_root.join(bin);
+        let name = crate::platform::command_link_name(bin);
+        let shim = bin_root.join(&name);
         steps.push(Step::Link {
             path: shim.clone(),
             target: managed_bin_target(&pdir.join("current"), scheme, bin),
             register: false,
         });
-        let entry = entry_dir.join(bin);
+        let entry = entry_dir.join(&name);
         steps.push(Step::Link {
             path: entry.clone(),
             target: shim,
@@ -1044,12 +1069,14 @@ fn plan_managed(
             }
             for bin in &bins {
                 steps.push(Step::Unlink {
-                    path: programs_root(ctx).join("bin").join(bin),
+                    path: programs_root(ctx)
+                        .join("bin")
+                        .join(crate::platform::command_link_name(bin)),
                 });
             }
             if let Some(version) = args.version.clone() {
                 // 只删一个版本：不能删当前版本
-                let current = std::fs::read_link(pdir.join("current"))
+                let current = crate::platform::read_link(pdir.join("current"))
                     .ok()
                     .map(|p| p.to_string_lossy().to_string());
                 if current.as_deref() == Some(version.as_str()) {
@@ -1177,7 +1204,7 @@ fn plan_adopt(
             .map(Path::to_path_buf)
             .ok_or_else(|| anyhow!("npm 全局目录结构认不出来"))?;
     }
-    let global_links = bin_links_into(&prefix.join("bin"), &package_dir, &bins);
+    let global_links = bin_links_into(&npm_bin_dir(&prefix), &package_dir, &bins);
     let backup = new_backup_dir(ctx, id);
     steps.extend(backup_steps(
         &backup,
@@ -1225,7 +1252,9 @@ fn plan_unadopt(ctx: &Context, status: &Value, args: &Args) -> Result<Plan> {
     }
     for bin in &bins {
         restore.steps.push(Step::Unlink {
-            path: programs_root(ctx).join("bin").join(bin),
+            path: programs_root(ctx)
+                .join("bin")
+                .join(crate::platform::command_link_name(bin)),
         });
     }
     restore.steps.push(Step::RemoveDir {
@@ -1409,14 +1438,11 @@ impl Plan {
 
 /// 入口链接只能放在「不存在」或「本工具登记过、仍指向本工具目录」的位置。
 fn check_link_slot(ctx: &Context, path: &Path, registered: &[(String, String)]) -> Result<()> {
-    let Ok(meta) = path.symlink_metadata() else {
+    if path.symlink_metadata().is_err() {
         return Ok(());
-    };
+    }
     let key = tilde(path, &ctx.home_dir);
-    let ours = meta.file_type().is_symlink()
-        && std::fs::read_link(path)
-            .map(|t| t.starts_with(programs_root(ctx)))
-            .unwrap_or(false)
+    let ours = link_target(path).is_some_and(|t| t.starts_with(programs_root(ctx)))
         && (path.starts_with(programs_root(ctx)) || registered.iter().any(|(p, _)| *p == key));
     if !ours {
         bail!("{key} 已经有别的文件，没有覆盖（换一个入口目录，或自己处理这个文件）");
@@ -1432,9 +1458,15 @@ fn symlink(target: &Path, path: &Path) -> Result<()> {
         ".{}.am-tmp",
         path.file_name().unwrap_or_default().to_string_lossy()
     ));
-    let _ = std::fs::remove_file(&tmp);
-    std::os::unix::fs::symlink(target, &tmp)?;
-    std::fs::rename(&tmp, path)?;
+    let _ = crate::platform::remove_link(&tmp);
+    // 相对目标（`current` → 版本号）按链接所在目录解析，判断是目录还是文件
+    let resolved = path.parent().unwrap_or(Path::new(".")).join(target);
+    if resolved.is_dir() {
+        crate::platform::link_dir(target, &tmp)?;
+    } else {
+        crate::platform::link_file(target, &tmp)?;
+    }
+    crate::platform::replace_link(&tmp, path)?;
     Ok(())
 }
 
@@ -1533,18 +1565,25 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                     target,
                     register,
                 } => {
-                    symlink(target, path)?;
+                    // 指向命令文件的入口：Windows 上写转发脚本（npm 的 .cmd 不能链接到别处）
+                    if cfg!(windows) && !path.ends_with("current") {
+                        if let Some(parent) = path.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        crate::platform::write_cmd_shim(target, path)?;
+                    } else {
+                        symlink(target, path)?;
+                    }
                     if *register {
                         new_links.push((tilde(path, &ctx.home_dir), tilde(target, &ctx.home_dir)));
                     }
                 }
                 Step::Unlink { path } => {
-                    if let Ok(meta) = path.symlink_metadata() {
-                        let points_here = std::fs::read_link(path)
-                            .map(|t| t.starts_with(programs_root(ctx)))
-                            .unwrap_or(false);
-                        if meta.file_type().is_symlink() && points_here {
-                            std::fs::remove_file(path)?;
+                    if path.symlink_metadata().is_ok() {
+                        let points_here =
+                            link_target(path).is_some_and(|t| t.starts_with(programs_root(ctx)));
+                        if points_here {
+                            crate::platform::remove_link(path)?;
                             removed_links.push(tilde(path, &ctx.home_dir));
                         }
                     }
@@ -1610,7 +1649,7 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                             .map(|m| m.file_type().is_symlink())
                             .unwrap_or(false)
                         {
-                            let _ = std::fs::remove_file(from);
+                            let _ = crate::platform::remove_link(from);
                         } else {
                             let _ = std::fs::remove_dir_all(from);
                         }
@@ -1618,7 +1657,7 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                     let _ = std::fs::rename(to, from);
                 }
                 Step::Link { path, .. } => {
-                    let _ = std::fs::remove_file(path);
+                    let _ = crate::platform::remove_link(path);
                 }
                 _ => {}
             }
@@ -1640,9 +1679,7 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
     // 登记新放的入口链接、去掉删掉的；已经不指向本工具目录的旧登记一并去掉
     for (path, _) in &registered {
         let abs = expand(path, &ctx.home_dir);
-        let ours = std::fs::read_link(&abs)
-            .map(|t| t.starts_with(programs_root(ctx)))
-            .unwrap_or(false);
+        let ours = link_target(&abs).is_some_and(|t| t.starts_with(programs_root(ctx)));
         if !ours && !removed_links.contains(path) {
             removed_links.push(path.clone());
         }

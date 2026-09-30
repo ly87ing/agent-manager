@@ -756,7 +756,7 @@ fn adopt(ctx: &Context, req: &Request) -> Result<Value> {
     }))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

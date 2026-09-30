@@ -8,6 +8,7 @@
 //! - apply 输出为 {domain, steps, skipped}；
 //!   命令 exit 0 后必须探测到安装/卸载结果，否则报错而非谎报成功。
 
+use crate::platform::Canon;
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Map, Value};
 use std::io::Read;
@@ -249,6 +250,23 @@ pub(crate) fn load_definitions(ctx: &Context) -> Result<Vec<AgentDef>> {
 /// 桌面应用从访达启动时 PATH 只有系统目录，不补这些就找不到用户装好的助手
 /// （CC Switch 等同类工具查的也是这一组）。
 pub(crate) fn fallback_bin_dirs(home_dir: &Path) -> Vec<PathBuf> {
+    if cfg!(windows) {
+        // Windows：官方安装器（~\.local\bin\claude.exe）、npm 全局（%APPDATA%\npm）、
+        // Volta、Bun 与 Scoop 的命令目录
+        let appdata = std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home_dir.join("AppData").join("Roaming"));
+        let local = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home_dir.join("AppData").join("Local"));
+        return vec![
+            home_dir.join(".local").join("bin"),
+            appdata.join("npm"),
+            local.join("Volta").join("bin"),
+            home_dir.join(".bun").join("bin"),
+            home_dir.join("scoop").join("shims"),
+        ];
+    }
     vec![
         home_dir.join(".local").join("bin"),
         home_dir.join(".npm-global").join("bin"),
@@ -282,8 +300,9 @@ pub(crate) fn resolve_bin(home_dir: &Path, bin: &str) -> Option<PathBuf> {
         .map(|paths| std::env::split_paths(&paths).collect())
         .unwrap_or_default();
     dirs.extend(fallback_bin_dirs(home_dir));
+    // Windows 上按 PATHEXT 补扩展名（claude → claude.cmd / claude.exe）
     dirs.into_iter()
-        .map(|dir| dir.join(bin))
+        .flat_map(|dir| crate::platform::command_candidates(&dir, bin))
         .find(|p| p.is_file())
 }
 
@@ -291,6 +310,7 @@ struct CmdOutput {
     exit_code: i32,
 }
 
+#[cfg(unix)]
 /// 持续读出管道且不保存内容，防大输出撑爆管道或把命令输出带入 envelope。
 /// 读完经 channel 交还；shell 已退出但孙进程占用管道时主流程 recv_timeout 兜底，不无限 join。
 fn spawn_drain_reader(mut pipe: impl Read + Send + 'static) -> std::sync::mpsc::Receiver<()> {
@@ -327,6 +347,7 @@ fn spawn_capture_reader(
     rx
 }
 
+#[cfg(unix)]
 /// 等待子进程并并发有界读取输出；读取端 recv_timeout 兜底（孙进程持管道不阻塞主流程）。
 fn wait_bounded(
     mut child: std::process::Child,
@@ -491,9 +512,7 @@ fn command_sources(commands: &CommandSet) -> Value {
 /// 入口常是指向 ~/.local/share、~/.codex 等版本目录的符号链接，先整体 canonicalize 比
 /// 目录会误判 system；普通路径兜底 system，fail-closed。
 pub(crate) fn detected_provider(home_dir: &Path, bin_path: &Path) -> &'static str {
-    let canonical = bin_path
-        .canonicalize()
-        .unwrap_or_else(|_| bin_path.to_path_buf());
+    let canonical = bin_path.canon().unwrap_or_else(|_| bin_path.to_path_buf());
     let path = canonical.to_string_lossy();
     if canonical
         .components()
@@ -504,14 +523,14 @@ pub(crate) fn detected_provider(home_dir: &Path, bin_path: &Path) -> &'static st
         return "brew";
     }
     let native_dir = home_dir
-        .canonicalize()
+        .canon()
         .unwrap_or_else(|_| home_dir.to_path_buf())
         .join(".local")
         .join("bin");
     // 只 canonicalize launcher 的父目录，保留最终符号链接不展开
     let launcher_dir = bin_path
         .parent()
-        .map(|dir| dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()));
+        .map(|dir| dir.canon().unwrap_or_else(|_| dir.to_path_buf()));
     if launcher_dir
         .as_deref()
         .is_some_and(|dir| dir.starts_with(&native_dir))
@@ -920,7 +939,7 @@ const KNOWN_AGENT_BINS: &[(&str, &str, &str)] = &[
 /// 从全局 bin 链接反查 npm 包名：`.../lib/node_modules/<pkg>/bin/x`（scope 包取两段）。
 /// 解析失败或路径不含 node_modules 即 None，不猜测。
 fn npm_package_of(bin_path: &Path) -> Option<String> {
-    let resolved = bin_path.canonicalize().ok()?;
+    let resolved = bin_path.canon().ok()?;
     let comps: Vec<String> = resolved
         .components()
         .map(|c| c.as_os_str().to_string_lossy().to_string())
@@ -936,13 +955,13 @@ fn npm_package_of(bin_path: &Path) -> Option<String> {
 
 fn tildify(path: &Path, home_dir: &Path) -> String {
     if let Ok(rel) = path.strip_prefix(home_dir) {
-        return format!("~/{}", rel.to_string_lossy());
+        return format!("~/{}", crate::platform::slash(&rel));
     }
     // 链接目标经 canonicalize 后可能落在 home 的真实路径上（如 macOS /var → /private/var），
     // 两种写法都归一到 ~，避免输出里混入解析后的绝对路径。
-    if let Ok(canonical_home) = home_dir.canonicalize() {
+    if let Ok(canonical_home) = home_dir.canon() {
         if let Ok(rel) = path.strip_prefix(&canonical_home) {
-            return format!("~/{}", rel.to_string_lossy());
+            return format!("~/{}", crate::platform::slash(&rel));
         }
     }
     path.to_string_lossy().to_string()

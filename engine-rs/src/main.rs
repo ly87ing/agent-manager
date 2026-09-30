@@ -2,9 +2,7 @@ use agent_manager_engine::{execute, Context, Request};
 use std::path::PathBuf;
 
 fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
+    agent_manager_engine::platform::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 fn data_dir() -> PathBuf {
     if let Some(path) = std::env::var_os("AGENT_MANAGER_DATA_DIR") {
@@ -14,7 +12,14 @@ fn data_dir() -> PathBuf {
     {
         home_dir().join("Library/Application Support/agent-manager")
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home_dir().join("AppData").join("Roaming"))
+            .join("agent-manager")
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
         std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)

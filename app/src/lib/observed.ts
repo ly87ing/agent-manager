@@ -261,6 +261,12 @@ export interface AliasesObserved {
   /** 区块外用户自己的别名：只读，不由本工具写入。 */
   external: AliasLine[];
   blocked_reason: string | null;
+  /** Windows 命令脚本目录是否在用户 PATH 上（rc 文件为 null）。 */
+  on_path?: boolean | null;
+  /** 不在 PATH 上时，让用户自己在 PowerShell 里执行的命令（本工具不写注册表）。 */
+  path_command?: string | null;
+  /** 不在 PATH 上时的手动做法。 */
+  path_manual?: string | null;
 }
 
 export interface AliasesSpec {
@@ -268,6 +274,8 @@ export interface AliasesSpec {
   target: string;
   /** aliases:apply 里给出这个文件写入基准的参数。 */
   base_flag: string;
+  /** rc-file：~/.zshrc 一类；cmd-dir：Windows 的命令脚本目录（每条命令一个 .cmd）。 */
+  kind?: "rc-file" | "cmd-dir";
 }
 
 // ---------- skills ----------

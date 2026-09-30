@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import { ChevronRight, Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import { AgentIcon } from "../components/AgentIcon";
 import { COL_ACTION, COL_ICONS, COL_MIDDLE, COL_NARROW, DataTable, PILL, ROW, RowIcon, TableHeader } from "../components/DataTable";
@@ -11,10 +12,13 @@ import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { useCommandAccounts } from "../lib/useAccountNames";
 import type { AliasCurrent, AliasLegacySuggestion, AliasRecommendation } from "../lib/contract";
 import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource, type AliasTarget } from "../lib/useAliasSource";
+import { LAUNCH_COMMANDS_HOME } from "../lib/platform";
 import { cn } from "../lib/utils";
 
 const PAGE_NOTE =
   "这里就是 ~/.zshrc 里由本工具管理的那几行：保存写入 ~/.zshrc（~/.zprofile 已有这几行时一并同步，没有就不新建），新开终端窗口生效。你自己另写的 alias 只读列出、不会改动；文件被别处改过时保存会被拒绝，不会覆盖。";
+const PAGE_NOTE_CMD =
+  "Windows 上每条命令是 ~/.agent-manager/bin 里的一个 .cmd 脚本：保存即写入这个目录，这个目录在 PATH 上时，cmd 与 PowerShell 里直接敲名字就能用（Git Bash 里敲「名字.cmd」）。你自己放进这个目录的 .cmd 只读列出、不会改动；文件被别处改过时保存会被拒绝，不会覆盖。";
 /** 启动命令表的列：命令占满剩余宽度并完整换行显示，账号列与图标列收窄。 */
 const COL_ACCOUNT = "w-40 shrink-0";
 const COL_ROW_ICONS = "flex w-24 shrink-0 items-center justify-end gap-0.5";
@@ -66,6 +70,8 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
   const external = source.targets.flatMap((target) => target.external.map((line) => ({ target, line })));
   /** 有文件读写不了：终端配置文件直接摊开，不藏在「更多」里。 */
   const problem = source.targets.some((target) => target.blockedReason);
+  // Windows：命令脚本目录不在 PATH 上时，新开的终端里找不到这些命令
+  const pathTarget = source.targets.find((target) => target.cmdDir && target.pathCommand);
   const close = () => setDialog(null);
   const refreshCurrent = () => {
     close();
@@ -105,6 +111,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
   return (
     <div className="space-y-3">
       <h1 className="sr-only">终端快捷命令</h1>
+      {pathTarget && <PathHint target={pathTarget} />}
 
       <DataTable label="启动命令" testId="aliases-current">
         <div className={HEAD}>
@@ -172,7 +179,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
           </ul>
         )}
       </DataTable>
-      <p className="px-1 text-xs text-muted-foreground">{PAGE_NOTE}</p>
+      <p className="px-1 text-xs text-muted-foreground">{source.targets.some((target) => target.cmdDir) ? PAGE_NOTE_CMD : PAGE_NOTE}</p>
 
       {source.recommendations.length > 0 && (
         <DataTable label="推荐" testId="alias-recommendations">
@@ -366,7 +373,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
       {dialog?.kind === "recommend" && (
         <AliasApplyConfirm
           title={`添加推荐的 ${dialog.item.name}`}
-          description="把这一行写进 ~/.zshrc 里由本工具管理的那几行；写入前重读文件，被别处改过就不写。"
+          description={`把这一行写进 ${LAUNCH_COMMANDS_HOME}；写入前重读文件，被别处改过就不写。`}
           confirmLabel="添加"
           previewBase={previewBase}
           op={["--recommended", dialog.item.name]}
@@ -432,4 +439,33 @@ function LineCell({ name, line, value, file, children }: { name: string; line: s
 
 function AliasLineBox({ line }: { line: string }) {
   return <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded border bg-muted/40 p-2 font-mono text-[11px]">{line}</pre>;
+}
+
+/**
+ * Windows：命令脚本目录还不在 PATH 上。本工具不改注册表，给出让用户自己在 PowerShell 里执行的命令
+ * （只把这个目录追加到用户 PATH 末尾，已有条目原样保留）和手动做法；加好后新开终端生效。
+ */
+function PathHint({ target }: { target: AliasTarget }) {
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(target.pathCommand ?? "");
+      toast.success("已复制命令");
+    } catch (reason) {
+      toast.error(`没能复制：${reason instanceof Error ? reason.message : String(reason)}`);
+    }
+  };
+  return (
+    <section data-testid="aliases-path-hint" className="space-y-2 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm">
+      <p>
+        命令目录 <span className="font-mono">{target.target}</span> 还不在 PATH 上，新开的终端里找不到这些命令。本工具不改注册表，请在 PowerShell 里执行下面这条命令（只把这个目录加到用户 PATH 末尾），然后重新打开终端。
+      </p>
+      <div className="flex items-start gap-2">
+        <pre className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-[11px]">{target.pathCommand}</pre>
+        <button type="button" data-testid="aliases-path-copy" onClick={() => void copy()} className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground">
+          <Copy className="h-3 w-3" aria-hidden /> 复制
+        </button>
+      </div>
+      {target.pathManual && <p className="text-xs text-muted-foreground">不想执行命令：{target.pathManual}。</p>}
+    </section>
+  );
 }

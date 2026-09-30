@@ -48,9 +48,22 @@ pub(crate) const TARGET_ZPROFILE: TargetSpec = TargetSpec {
     base_flag: "--zprofile-base",
 };
 
-/// 固定目标列表，稳定顺序：zshrc 在前，zprofile 在后。
-pub(crate) fn targets() -> [TargetSpec; 2] {
-    [TARGET_ZSHRC, TARGET_ZPROFILE]
+/// Windows 的命令脚本目录（见 cmd.rs）：每条命令一个 `.cmd`。
+pub(crate) const TARGET_CMD: TargetSpec = TargetSpec {
+    target_id: "aliases:cmd",
+    name: "命令脚本",
+    target: super::cmd::BIN_DIR,
+    base_flag: "--cmd-base",
+};
+
+/// 固定目标列表，第一个是主目标（没有受管内容时新增写到这里）。
+/// Unix：zshrc 在前，zprofile 在后；Windows：命令脚本目录。
+pub(crate) fn targets() -> Vec<TargetSpec> {
+    if cfg!(windows) {
+        vec![TARGET_CMD]
+    } else {
+        vec![TARGET_ZSHRC, TARGET_ZPROFILE]
+    }
 }
 
 pub(crate) fn valid_alias_name(name: &str) -> bool {

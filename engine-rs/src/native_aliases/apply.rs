@@ -32,6 +32,8 @@ struct Write {
     new_bytes: Vec<u8>,
     before_base: String,
     after_base: String,
+    /// Windows 命令脚本目录：逐个脚本的改动（此时不按整文件写 `abs`）。
+    cmd_changes: Option<Vec<super::cmd::Change>>,
 }
 
 /// 解析好、可以写的一次操作。
@@ -160,13 +162,40 @@ fn prepare(
     let mut writes = Vec::new();
     let mut skipped = Vec::new();
     for (view, old_bytes, split) in selected {
-        // 只写本工具已经在用的文件：~/.zprofile 没有受管区块时不新建、不追加，别名只写 ~/.zshrc。
-        if split.block.is_none() && view.spec.target_id != model::TARGET_ZSHRC.target_id {
+        // 只写本工具已经在用的文件：~/.zprofile 没有受管区块时不新建、不追加，别名只写主目标
+        // （Unix 为 ~/.zshrc，Windows 为命令脚本目录）。
+        if split.block.is_none() && view.spec.target_id != model::targets()[0].target_id {
             skipped.push(view.spec.target_id);
             continue;
         }
         let lines = split.block.clone().unwrap_or_default();
         let new_lines = model::edit_lines(&lines, &edit);
+        if view.spec.target_id == model::TARGET_CMD.target_id {
+            let scan = super::cmd::scan(&view.abs)?;
+            let changes = super::cmd::plan(&view.abs, &scan, &new_lines)?;
+            if changes.is_empty() {
+                skipped.push(view.spec.target_id);
+                continue;
+            }
+            // 与 status 一致：虚拟区块按名排序
+            let mut sorted = new_lines.clone();
+            sorted.sort();
+            let after = model::Split {
+                block: (!sorted.is_empty()).then_some(sorted),
+                outside: split.outside.clone(),
+            };
+            present.extend(pairs(&after));
+            writes.push(Write {
+                target_id: view.spec.target_id,
+                abs: view.abs.clone(),
+                old_bytes: None,
+                new_bytes: Vec::new(),
+                before_base: split.base(),
+                after_base: after.base(),
+                cmd_changes: Some(changes),
+            });
+            continue;
+        }
         let inner = model::block_inner(&new_lines);
         let Some(new_bytes) =
             model::converge_content(old_bytes.as_deref().unwrap_or_default(), &inner)?
@@ -183,6 +212,7 @@ fn prepare(
             new_bytes,
             before_base: split.base(),
             after_base: after.base(),
+            cmd_changes: None,
         });
     }
     Ok(Prepared {
@@ -208,19 +238,30 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
     let parsed = args::parse_apply_args(req)?;
     let row = legacy::read_row_readonly(ctx)?;
     let prep = prepare(ctx, row.as_ref(), &parsed)?;
-    let files = prep
-        .writes
-        .iter()
-        .map(|write| -> Result<Value> {
-            Ok(json!({
-                "target": write.target_id,
-                "path": write.abs,
-                "exists": write.old_bytes.is_some(),
-                "original": crate::native_mcp::original_text(write.old_bytes.as_deref()),
-                "content": std::str::from_utf8(&write.new_bytes)?,
-            }))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mut files = Vec::new();
+    for write in &prep.writes {
+        if let Some(changes) = &write.cmd_changes {
+            // 命令脚本目录：每个要改的脚本一项；删除的 content 为空、deleted 为真
+            for change in changes {
+                files.push(json!({
+                    "target": write.target_id,
+                    "path": change.path,
+                    "exists": change.old.is_some(),
+                    "original": crate::native_mcp::original_text(change.old.as_deref()),
+                    "content": change.new.as_deref().map(std::str::from_utf8).transpose()?.unwrap_or(""),
+                    "deleted": change.new.is_none(),
+                }));
+            }
+            continue;
+        }
+        files.push(json!({
+            "target": write.target_id,
+            "path": write.abs,
+            "exists": write.old_bytes.is_some(),
+            "original": crate::native_mcp::original_text(write.old_bytes.as_deref()),
+            "content": std::str::from_utf8(&write.new_bytes)?,
+        }));
+    }
     Ok(json!({
         "files": files,
         "skipped": prep.skipped,
@@ -260,9 +301,19 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     }
 
     let mut guard = RollbackGuard::new();
+    let mut cmd_done: Vec<super::cmd::Change> = Vec::new();
     let run = (|| -> Result<Vec<Value>> {
         let mut steps = Vec::new();
         for write in &prep.writes {
+            if let Some(changes) = &write.cmd_changes {
+                super::cmd::execute(changes, &mut cmd_done)?;
+                steps.push(json!({
+                    "name": format!("aliases:write {}", write.target_id),
+                    "ok": true,
+                    "exit_code": 0,
+                }));
+                continue;
+            }
             // CAS 比对的是读到时的文件字节：锁内重读之后若又被改过，这里拒绝替换。
             atomic_write_bytes_checked(&write.abs, &write.new_bytes, write.old_bytes.as_deref())?;
             guard.record_written(&write.abs, write.old_bytes.clone(), write.new_bytes.clone());
@@ -307,6 +358,11 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         Ok(steps) => steps,
         Err(err) => {
             drop(tx);
+            if let Err(rb_err) = super::cmd::undo(&cmd_done) {
+                return Err(anyhow!(
+                    "执行失败: {err:#}；命令脚本恢复同时失败: {rb_err:#}"
+                ));
+            }
             if let Err(rb_err) = guard.rollback() {
                 return Err(anyhow!(
                     "执行失败: {err:#}；终端配置文件恢复同时失败: {rb_err:#}"
@@ -316,6 +372,11 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         }
     };
     if let Err(err) = tx.commit() {
+        if let Err(rb_err) = super::cmd::undo(&cmd_done) {
+            return Err(anyhow!(
+                "提交失败: {err:#}；命令脚本恢复同时失败: {rb_err:#}"
+            ));
+        }
         if let Err(rb_err) = guard.rollback() {
             return Err(anyhow!(
                 "提交失败: {err:#}；终端配置文件恢复同时失败: {rb_err:#}"

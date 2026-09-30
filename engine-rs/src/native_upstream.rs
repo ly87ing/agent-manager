@@ -571,7 +571,7 @@ pub(crate) fn git_remote_refs(
     if url.is_empty() || url.starts_with('-') {
         return Err(ERR_GIT_LS_REMOTE_FAILED);
     }
-    let mut command = Command::new("git");
+    let mut command = crate::platform::git_command();
     command
         .args([
             "ls-remote",
@@ -641,7 +641,17 @@ fn npx_cached_version(home_dir: &Path, package: &str) -> Option<String> {
     if !valid_npm_package(package) {
         return None;
     }
-    let cache_base = home_dir.join(".npm").join("_npx");
+    // npm 缓存默认位置（npm 文档 config#cache）：Posix 为 ~/.npm，Windows 为 %LocalAppData%\npm-cache；
+    // Windows 按主目录下的 AppData\Local 取（与 %LocalAppData% 的默认值一致，也便于隔离测试）
+    let cache_base = if cfg!(windows) {
+        home_dir
+            .join("AppData")
+            .join("Local")
+            .join("npm-cache")
+            .join("_npx")
+    } else {
+        home_dir.join(".npm").join("_npx")
+    };
     let entries: Vec<PathBuf> = std::fs::read_dir(&cache_base)
         .ok()?
         .flatten()

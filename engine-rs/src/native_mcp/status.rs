@@ -16,14 +16,17 @@ use crate::native::Context;
 /// 这是配完之后最容易踩的坑——命令没装，助手启动时才报错。只做存在性判断，
 /// 不执行它，也不对远程服务做网络探测。
 fn command_resolvable(command: &str, home_dir: &std::path::Path) -> bool {
-    if command.contains('/') {
+    if command.contains('/') || (cfg!(windows) && command.contains('\\')) {
         return std::path::Path::new(command).is_file();
     }
     let mut dirs: Vec<std::path::PathBuf> = std::env::var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).collect())
         .unwrap_or_default();
     dirs.extend(crate::native_agents::fallback_bin_dirs(home_dir));
-    dirs.into_iter().any(|dir| dir.join(command).is_file())
+    // Windows 上按 PATHEXT 补扩展名（npx → npx.cmd）
+    dirs.into_iter()
+        .flat_map(|dir| crate::platform::command_candidates(&dir, command))
+        .any(|path| path.is_file())
 }
 
 fn command_available(view: &View, home_dir: &std::path::Path) -> Value {

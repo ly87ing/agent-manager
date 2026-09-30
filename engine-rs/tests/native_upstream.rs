@@ -3,6 +3,8 @@
 //! 网络探测绝不打真实网络：npm/git 一律经 PATH shim（本文件进程内串行，由
 //! PATH_LOCK 保证）。agent bin 探测经 home_dir/.local/bin 假 bin（resolve_bin
 //! 的既有测试替身路径），不改 PATH 的测试与改 PATH 的测试不会互相污染。
+// 部分辅助只给 Unix 专属的用例用
+#![cfg_attr(not(unix), allow(dead_code))]
 
 use agent_manager_engine::{execute, store, Context, Request};
 use serde_json::{json, Value};
@@ -421,6 +423,7 @@ fn offline_is_rejected_and_cache_untouched() {
 // 3. 全状态矩阵：相等→current、落后→behind、本地新→ahead、hash 不同→behind、
 //    探测失败→unknown+error 类别且不拖垮整批；summary 计数正确。
 #[test]
+#[cfg(unix)] // 用 shell 脚本冒充 npm / git 探测新版本
 fn probe_state_matrix_and_summary() {
     let (base, ctx) = temp_ctx("matrix");
     let shim_dir = install_shims(&base);
@@ -602,6 +605,7 @@ fn probe_state_matrix_and_summary() {
 
 // 4. refresh 后重读三域 status：freshness 反映缓存；再次 refresh 更新 checked_at。
 #[test]
+#[cfg(unix)] // 用 shell 脚本冒充 npm / git 探测新版本
 fn status_reflects_cache_after_refresh() {
     let (base, ctx) = temp_ctx("readback");
     let shim_dir = install_shims(&base);
@@ -655,6 +659,7 @@ fn status_reflects_cache_after_refresh() {
 
 // 5. --only：已知元素只探测该项；未知元素 USAGE_ERROR 且零写。
 #[test]
+#[cfg(unix)] // 用 shell 脚本冒充 npm / git 探测新版本
 fn only_filters_probe_universe() {
     let (base, ctx) = temp_ctx("only");
     let shim_dir = install_shims(&base);
@@ -758,7 +763,13 @@ fn npx类mcp的本机版本取缓存最高版_钉死版本则以定义为准() {
     for (dir, version) in [("aaaa", "1.2.0"), ("mmmm", "1.8.0"), ("zzzz", "1.4.0")] {
         let pkg_dir = ctx
             .home_dir
-            .join(format!(".npm/_npx/{dir}/node_modules/multi-cache-pkg"));
+            // npm 缓存默认位置：Posix ~/.npm，Windows %LocalAppData%\npm-cache
+            .join(if cfg!(windows) {
+                "AppData/Local/npm-cache"
+            } else {
+                ".npm"
+            })
+            .join(format!("_npx/{dir}/node_modules/multi-cache-pkg"));
         std::fs::create_dir_all(&pkg_dir).unwrap();
         std::fs::write(
             pkg_dir.join("package.json"),
@@ -772,17 +783,19 @@ fn npx类mcp的本机版本取缓存最高版_钉死版本则以定义为准() {
 
     let multi = status_element_freshness(&ctx, "mcp:status", "mcp:multi");
     assert_eq!(multi["current"], "1.8.0", "要取缓存里最高的那份：{multi}");
-    assert_eq!(multi["upstream"], "1.9.0");
-    assert_eq!(multi["state"], "behind");
-
     // 钉死版本：本机没有任何缓存目录，版本仍应来自定义本身
     let pinned = status_element_freshness(&ctx, "mcp:status", "mcp:pinned");
     assert_eq!(pinned["current"], "1.0.0", "钉死的版本就是会跑的版本");
-    assert_eq!(
-        pinned["upstream"], "1.9.0",
-        "上游要问 latest，不是问钉死的那个"
-    );
-    assert_eq!(pinned["state"], "behind");
+    // 上游版本来自 shell 脚本冒充的 npm，只在 Unix 上核对
+    if cfg!(unix) {
+        assert_eq!(multi["upstream"], "1.9.0");
+        assert_eq!(multi["state"], "behind");
+        assert_eq!(
+            pinned["upstream"], "1.9.0",
+            "上游要问 latest，不是问钉死的那个"
+        );
+        assert_eq!(pinned["state"], "behind");
+    }
 
     let _ = std::fs::remove_dir_all(base);
 }

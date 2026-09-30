@@ -322,6 +322,7 @@ pub fn open_write(ctx: &Context) -> Result<Connection> {
         bail!("数据库路径不是普通文件，拒绝访问: {}", path.display());
     }
     let existing = path.is_file();
+    #[cfg(unix)]
     let data_dir_existed = ctx.data_dir.exists();
     std::fs::create_dir_all(&ctx.data_dir)
         .with_context(|| format!("无法创建数据目录 {}", ctx.data_dir.display()))?;

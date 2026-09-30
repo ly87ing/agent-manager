@@ -35,7 +35,7 @@ pub fn hash_skill_dir(dir: &Path) -> Result<String> {
                     stack.push(child);
                 }
             } else if meta.file_type().is_symlink() {
-                let target = std::fs::read_link(&child)?;
+                let target = crate::platform::read_link(&child)?;
                 validate_symlink_internal(dir, &child, &target)?;
                 let mut h = Sha256::new();
                 h.update(b"symlink:");
@@ -88,12 +88,15 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
                 std::fs::create_dir_all(&out)?;
                 stack.push(child);
             } else if meta.file_type().is_symlink() {
-                let target = std::fs::read_link(&child)?;
+                let target = crate::platform::read_link(&child)?;
                 validate_symlink_internal(src, &child, &target)?;
-                #[cfg(unix)]
-                std::os::unix::fs::symlink(&target, &out)?;
-                #[cfg(windows)]
-                std::os::windows::fs::symlink_file(&target, &out)?;
+                // 相对目标按链接所在目录解析，判断指向的是目录还是文件（Windows 两种链接不同）
+                let resolved = child.parent().unwrap_or(src).join(&target);
+                if resolved.is_dir() {
+                    crate::platform::link_dir(&target, &out)?;
+                } else {
+                    crate::platform::link_file(&target, &out)?;
+                }
             } else if meta.is_file() {
                 std::fs::copy(&child, &out)?;
                 #[cfg(unix)]

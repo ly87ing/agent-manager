@@ -710,6 +710,7 @@ mod tests {
             enabled: true,
             legacy_marker: false,
             extra: Map::new(),
+            cmd_wrapped: false,
         }
     }
 

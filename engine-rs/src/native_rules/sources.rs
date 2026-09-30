@@ -264,7 +264,7 @@ pub(crate) fn source_commit(rule: &SourceRule) -> Option<String> {
     if rule.local {
         return None;
     }
-    let output = std::process::Command::new("git")
+    let output = crate::platform::git_command()
         .arg("-C")
         .arg(&rule.root)
         .args(["rev-parse", "HEAD"])

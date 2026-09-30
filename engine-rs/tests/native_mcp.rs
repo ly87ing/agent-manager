@@ -213,7 +213,7 @@ fn claude_path(ctx: &Context) -> PathBuf {
 }
 
 fn codex_path(ctx: &Context) -> PathBuf {
-    ctx.home_dir.join(".codex/config.toml")
+    ctx.home_dir.join(".codex").join("config.toml")
 }
 
 fn write_claude(ctx: &Context, doc: Value) {
@@ -581,7 +581,13 @@ fn status_reports_whether_the_stdio_command_exists() {
     let (root, ctx) = temp_ctx("command-availability");
     let bin_dir = ctx.home_dir.join(".local/bin");
     std::fs::create_dir_all(&bin_dir).unwrap();
-    std::fs::write(bin_dir.join("present-tool"), "#!/bin/sh\n").unwrap();
+    // Windows 上可执行的是 .cmd / .exe
+    let file = if cfg!(windows) {
+        "present-tool.cmd"
+    } else {
+        "present-tool"
+    };
+    std::fs::write(bin_dir.join(file), "#!/bin/sh\n").unwrap();
     write_claude(
         &ctx,
         json!({"mcpServers": {
@@ -1411,7 +1417,13 @@ fn add_writes_official_fields_only_for_all_clients() {
         Some("AM_T11_HDR")
     );
     let oc: Value = serde_json::from_str(&opencode).unwrap();
-    assert_eq!(oc["mcp"]["stdio1"]["command"], json!(["npx", "-y", "pkg"]));
+    // Windows 上新增的 npx 条目包成 cmd /c（Claude Code /doctor 的要求）
+    let expected = if cfg!(windows) {
+        json!(["cmd", "/c", "npx", "-y", "pkg"])
+    } else {
+        json!(["npx", "-y", "pkg"])
+    };
+    assert_eq!(oc["mcp"]["stdio1"]["command"], expected);
     assert_eq!(
         oc["mcp"]["remote1"]["headers"]["Authorization"],
         "{env:AM_T11_HDR}"
@@ -1534,7 +1546,10 @@ fn copy_claude_to_codex_converts_fields_and_guards_existing_target() {
     );
     let doc = codex_doc(&ctx);
     let fs = &doc["mcp_servers"]["fs"];
-    assert_eq!(fs["command"].as_str(), Some("npx"));
+    assert_eq!(
+        fs["command"].as_str(),
+        Some(if cfg!(windows) { "cmd" } else { "npx" })
+    );
     assert_eq!(fs["env"]["LIT"].as_str(), Some("literal-value"));
     assert_eq!(
         fs["env"]["REF"].as_str(),

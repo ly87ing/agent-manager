@@ -202,6 +202,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("aliases", "apply" | "preview") => {
             specs.push(("--zshrc-base", ArgValueKind::RuleBase));
             specs.push(("--zprofile-base", ArgValueKind::RuleBase));
+            // Windows：命令脚本目录的写入基准
+            specs.push(("--cmd-base", ArgValueKind::RuleBase));
             specs.push(("--set", ArgValueKind::ElementId));
             specs.push(("--value", ArgValueKind::RuleText));
             specs.push(("--rename-from", ArgValueKind::ElementId));
@@ -741,9 +743,12 @@ pub async fn engine_invoke(
         .map(std::path::PathBuf::from)
         .or_else(|| app.path().app_data_dir().ok())
         .ok_or_else(|| EngineError::new("data_dir_unavailable", "无法定位应用数据目录"))?;
-    let home_dir = std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .ok_or_else(|| EngineError::new("home_unavailable", "HOME 未设置"))?;
+    let home_dir = agent_manager_engine::platform::home_dir().ok_or_else(|| {
+        EngineError::new(
+            "home_unavailable",
+            "找不到用户主目录（HOME / USERPROFILE 都没设置）",
+        )
+    })?;
     tauri::async_runtime::spawn_blocking(move || {
         dispatch_native(
             agent_manager_engine::Context { data_dir, home_dir },
@@ -1900,6 +1905,11 @@ mod tests {
                 "aliases:apply",
                 args(&["--zprofile-base", "missing", "--remove", "ll"]),
             ),
+            // Windows：命令脚本目录的写入基准
+            (
+                "aliases:apply",
+                args(&["--cmd-base", &base, "--remove", "ll"]),
+            ),
             (
                 "aliases:apply",
                 args(&["--zshrc-base", &base, "--recommended", "claude"]),
@@ -1923,6 +1933,7 @@ mod tests {
             ("aliases:apply", args(&["--only", "aliases:zshrc"])),
             ("aliases:apply", args(&["--zshrc-base", "nothex"])),
             ("aliases:preview", args(&["--zshrc-base", "nothex"])),
+            ("aliases:apply", args(&["--cmd-base", "nothex"])),
             (
                 "aliases:apply",
                 args(&["--zshrc-base", "missing", "--zshrc-base", "missing"]),

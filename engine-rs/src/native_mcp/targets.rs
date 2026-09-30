@@ -51,7 +51,7 @@ pub fn expand_home(path: &str, home_dir: &Path) -> PathBuf {
         return home_dir.to_path_buf();
     }
     if let Some(rest) = path.strip_prefix("~/") {
-        return home_dir.join(rest);
+        return crate::platform::join_slash(home_dir, rest);
     }
     PathBuf::from(path)
 }
