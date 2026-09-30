@@ -1256,9 +1256,8 @@ fn codex_实例把凭据写进自己的_config_toml_保留_mcp_条目_库里只�
     let snapshot = status(&ctx);
     let el = element(&snapshot, "cx-work");
     assert_eq!(
-        el["observed"]["launch_value"],
-        "CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"~/.codex-work\" codex",
-        "第三方实例启动时清空 Codex 当作官方凭据读取的变量，不用 -p"
+        el["observed"]["launch_value"], "CODEX_HOME=\"~/.codex-work\" codex",
+        "只指定配置目录，不替用户加清空凭据变量的赋值，不用 -p"
     );
     assert_eq!(el["state"], "managed-ok", "{el}");
     assert!(

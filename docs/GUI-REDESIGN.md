@@ -342,10 +342,11 @@ hooks、MCP 服务），提示注入可借此把令牌带出去。实例表单�
 从输入的 `transcript_path`（`<配置目录>/projects/…`）反推配置目录，实例额度仍记在自己名下。实例表单的接口地址
 与接入配置同一口径：`https://` 或任意主机的 `http://`，后者提示令牌将明文传输。
 
-Codex 实例（第三方与官方账号实例都一样）的启动命令前缀 `CODEX_API_KEY= CODEX_ACCESS_TOKEN=`，清空 Codex
-当作官方凭据读取、优先于目录登录的变量（`rust-v0.156.1` 源码：`CODEX_ACCESS_TOKEN` 所有入口都读，
-`CODEX_API_KEY` 由 `codex exec` 等非交互入口读）；早先保存、缺这段前缀的启动命令在实例卡片上标出，
-「订正」只补前缀（已有的同名赋值换成空值），命令其余部分原样保留。
+Codex 实例的启动命令只写 `CODEX_HOME="<目录>" codex` 与用户给的参数，**不再**替用户加
+`CODEX_API_KEY= CODEX_ACCESS_TOKEN=` 前缀（2026-09-30 用户裁决：原本配置里没有的不随意添加）；已有命令带不带
+这段前缀都原样保留，不再标成要订正。已知取舍：终端里导出的这两个变量会优先于目录里的登录（`rust-v0.156.1`
+源码：`CODEX_ACCESS_TOKEN` 所有入口都读，`CODEX_API_KEY` 由 `codex exec` 等非交互入口读），需要时由用户自己
+在命令里加。
 第三方凭据的取值只写进实例自己的配置文件（0600），库里只存变量名，启动时不依赖 shell 导出变量：
 Claude 写 `settings.json` 的 env；Codex 写实例目录 `config.toml` 里 `[model_providers.agent-manager]`
 的 `experimental_bearer_token`（官方说明其取值作为 `Authorization: Bearer` 发出、供以程序方式配置时

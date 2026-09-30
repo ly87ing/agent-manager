@@ -6,9 +6,7 @@ import {
   buildProfileDefinition,
   connectionToProfileInput,
   defaultConfigDir,
-  fixLaunchCommandCredentialClear,
   fixLaunchCommandTilde,
-  launchCommandNeedsCredentialClear,
   launchCommandNeedsTildeFix,
   launchCommandsForProfile,
   normalizeConfigDir,
@@ -67,13 +65,13 @@ describe("助手实例定义", () => {
     // Codex 环境都清空 Codex 当作官方凭据读取的变量：第三方环境防混用，官方账号环境防别的账号的令牌压过目录登录
     expect(
       profileLaunchValue({ ...claudeInput, kind: "codex", configDir: "~/.codex-work", extraArgs: "" }, "codex"),
-    ).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-work" codex');
+    ).toBe('CODEX_HOME="$HOME/.codex-work" codex');
     expect(
       profileLaunchValue(
         { ...claudeInput, kind: "codex", configDir: "~/.codex-work", extraArgs: "", baseUrl: "", tokenVar: "" },
         "codex",
       ),
-    ).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-work" codex');
+    ).toBe('CODEX_HOME="$HOME/.codex-work" codex');
   });
 
   it("认证命令只生成文本，实例命令严格指向自己的配置目录", () => {
@@ -289,23 +287,18 @@ describe("启动命令里的配置目录", () => {
     ).toBeNull();
   });
 
-  it("Codex 环境的启动命令要清空会压过目录登录的凭据变量：识别缺失并只补前缀，引号里的空白不动", () => {
-    const old = 'CODEX_HOME="$HOME/.codex-w" codex --msg "a  b"';
-    expect(launchCommandNeedsCredentialClear(old)).toBe(true);
-    const fixed = fixLaunchCommandCredentialClear(old);
-    expect(fixed).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex --msg "a  b"');
-    expect(launchCommandNeedsCredentialClear(fixed)).toBe(false);
-    // 带着取值的赋值不算清空：订正时换成空值
-    const valued = 'CODEX_API_KEY=abc CODEX_HOME="$HOME/.codex-w" codex';
-    expect(launchCommandNeedsCredentialClear(valued)).toBe(true);
-    expect(fixLaunchCommandCredentialClear(valued)).toBe('CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex');
-
-    const aliases = { "cx-w": old, "cc-w": 'CLAUDE_CONFIG_DIR="$HOME/.claude-w" claude' };
+  it("只处理本工具自己的变更：已有启动命令不因缺少清空凭据的前缀被标成要订正，带着前缀的也原样不动", () => {
     const parse = (value: string) => Object.fromEntries([...value.matchAll(/(\w+)="([^"]*)"/g)].map((m) => [m[1], m[2]]));
-    // 官方账号环境与第三方环境一样要清空：shell 里给别的账号导出的令牌同样会压过目录里的登录
-    expect(launchCommandsForProfile(aliases, "codex", "~/.codex-w", parse)[0].needsCredentialClear).toBe(true);
-    expect(launchCommandsForProfile({ "cx-w": fixed }, "codex", "~/.codex-w", parse)[0].needsCredentialClear).toBe(false);
-    expect(launchCommandsForProfile(aliases, "claude", "~/.claude-w", parse)[0].needsCredentialClear).toBe(false);
+    const aliases = {
+      "cx-w": 'CODEX_HOME="$HOME/.codex-w" codex',
+      "cx-old": 'CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME="$HOME/.codex-w" codex',
+    };
+    const commands = launchCommandsForProfile(aliases, "codex", "~/.codex-w", parse);
+    expect(commands.map((c) => [c.name, c.value, c.needsTildeFix])).toEqual([
+      ["cx-old", aliases["cx-old"], false],
+      ["cx-w", aliases["cx-w"], false],
+    ]);
+    expect(Object.keys(commands[0]).sort()).toEqual(["name", "needsTildeFix", "value"]);
   });
 });
 

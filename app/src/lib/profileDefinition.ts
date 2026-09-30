@@ -173,13 +173,6 @@ export function shellConfigDir(configDir: string): string {
   return trimmed;
 }
 
-/**
- * Codex 环境启动时清空的变量：Codex 把它们当作官方账号侧的凭据，优先于目录里存的登录，
- * 空值等同未设置。官方账号环境同样清空，否则 shell 里给别的账号导出的令牌会压过这个目录的登录。
- * 与引擎侧保持一致。
- */
-export const CODEX_CLEARED_ENV = ["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"] as const;
-
 /** 用第三方接口的环境：这类环境的配置目录里不能有官方账号登录。 */
 export function isThirdPartyProfile(input: Pick<ProfileFormInput, "baseUrl" | "tokenVar">): boolean {
   return Boolean(input.baseUrl.trim() || input.tokenVar.trim());
@@ -187,10 +180,8 @@ export function isThirdPartyProfile(input: Pick<ProfileFormInput, "baseUrl" | "t
 
 /** 该实例的启动命令取值（与别名域取值格式一致）。 */
 export function profileLaunchValue(input: ProfileFormInput, baseBin: string): string {
+  // 只写本工具自己的变更：不替用户在前面加清空凭据变量的赋值
   const parts: string[] = [];
-  if (input.kind === "codex") {
-    parts.push(...CODEX_CLEARED_ENV.map((name) => `${name}=`));
-  }
   parts.push(`${configEnvOf(input.kind)}="${shellConfigDir(input.configDir)}"`, baseBin);
   const extra = input.extraArgs.trim();
   if (extra) parts.push(extra);
@@ -236,31 +227,11 @@ export function fixLaunchCommandTilde(value: string): string {
   );
 }
 
-/**
- * 第三方 Codex 环境的这条命令有没有把 Codex 当作官方凭据读取的变量清空。
- * 早先保存的命令没有这段前缀，shell 里有这两个变量时 Codex 会优先用它们。
- */
-export function launchCommandNeedsCredentialClear(value: string): boolean {
-  return !CODEX_CLEARED_ENV.every((name) => new RegExp(`(^|\\s)${name}=(\\s|$)`).test(value));
-}
-
-/** 在命令前面补上清空官方凭据变量的赋值；已有的同名赋值先去掉，其余原样。 */
-export function fixLaunchCommandCredentialClear(value: string): string {
-  let rest = value;
-  for (const name of CODEX_CLEARED_ENV) {
-    rest = rest.replace(new RegExp(`(^|\\s)${name}=\\S*`, "g"), "$1");
-  }
-  // 只去掉开头留下的空白：中间的空白可能在引号里，原样保留
-  return [...CODEX_CLEARED_ENV.map((name) => `${name}=`), rest.replace(/^\s+/, "")].join(" ");
-}
-
 export interface ProfileLaunchCommand {
   name: string;
   value: string;
   /** 配置目录写成了不会展开的 `"~/..."`，需要订正。 */
   needsTildeFix: boolean;
-  /** Codex 环境的命令没有清空会压过目录登录的凭据变量，需要订正。 */
-  needsCredentialClear: boolean;
 }
 
 /**
@@ -286,7 +257,6 @@ export function launchCommandsForProfile(
       name,
       value,
       needsTildeFix: launchCommandNeedsTildeFix(value),
-      needsCredentialClear: kind === "codex" && launchCommandNeedsCredentialClear(value),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

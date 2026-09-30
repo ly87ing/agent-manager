@@ -3,7 +3,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { launchCommandsOfAccount, type Account, type AgentAccounts } from "../lib/accounts";
 import { useDialogFocus } from "../lib/dialogFocus";
-import { fixLaunchCommandCredentialClear, fixLaunchCommandTilde } from "../lib/profileDefinition";
+import { fixLaunchCommandTilde } from "../lib/profileDefinition";
 import { DEFAULT_LANG, DEFAULT_TIMEZONE, type useAliasSource } from "../lib/useAliasSource";
 import { AliasApplyConfirm } from "./AliasApplyConfirm";
 import { AliasEditorDialog } from "./AliasEditorDialog";
@@ -48,10 +48,9 @@ export function LaunchCommandsDrawer({
     setEditing({ name: "", value: commands[0]?.value ?? defaultValue, presetName: candidate });
   };
 
-  const fix = async (name: string, value: string, tilde: boolean, credential: boolean) => {
-    let fixed = tilde ? fixLaunchCommandTilde(value) : value;
-    if (credential) fixed = fixLaunchCommandCredentialClear(fixed);
-    await aliasSource.setAlias(name, fixed, { label: `订正启动命令 ${name}` });
+  /** 只订正本工具早先生成错的目录写法（"~/…" 不会展开）；不替用户往命令里加别的东西。 */
+  const fix = async (name: string, value: string) => {
+    await aliasSource.setAlias(name, fixLaunchCommandTilde(value), { label: `订正启动命令 ${name}` });
   };
 
   return (
@@ -104,16 +103,14 @@ export function LaunchCommandsDrawer({
                   </div>
                 </div>
                 <code className="block break-all rounded bg-muted p-1.5 font-mono text-[11px]">{`alias ${command.name}='${command.value}'`}</code>
-                {command.managed && (command.needsTildeFix || command.needsCredentialClear) && (
+                {command.managed && command.needsTildeFix && (
                   <div className="flex items-center gap-2 text-xs text-warning">
-                    <span>
-                      {command.needsTildeFix ? "目录写成了不会展开的 \"~/…\"，助手找不到这个账号的配置。" : "没有清空会顶替目录登录的凭据变量。"}
-                    </span>
+                    <span>目录写成了不会展开的 "~/…"，助手找不到这个账号的配置。</span>
                     <button
                       type="button"
                       data-testid={`launch-fix-${command.name}`}
                       disabled={aliasSource.busy}
-                      onClick={() => void fix(command.name, command.value, command.needsTildeFix, command.needsCredentialClear)}
+                      onClick={() => void fix(command.name, command.value)}
                       className="shrink-0 rounded border border-warning/40 px-2 py-0.5 hover:bg-warning/10"
                     >
                       订正

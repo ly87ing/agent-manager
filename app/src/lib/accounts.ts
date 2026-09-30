@@ -153,7 +153,6 @@ export interface AccountLaunchCommand {
   /** false = 写在 Agent Manager 区块外、你自己维护的 alias：只读。 */
   managed: boolean;
   needsTildeFix: boolean;
-  needsCredentialClear: boolean;
 }
 
 /**
@@ -175,7 +174,7 @@ export function launchCommandsOfAccount(
           const parsed = parseAliasValue(value);
           return (parsed.command.split("/").pop() ?? parsed.command) === binName && parsed.otherEnv[envName] === undefined;
         })
-        .map(([name, value]) => ({ name, value, managed: isManaged, needsTildeFix: false, needsCredentialClear: false }));
+        .map(([name, value]) => ({ name, value, managed: isManaged, needsTildeFix: false }));
     }
     return launchCommandsForProfile(Object.fromEntries(entries), group.kind, account.configDir, (value) => parseAliasValue(value).otherEnv)
       .map((command) => ({ ...command, managed: isManaged }));

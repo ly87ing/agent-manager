@@ -1013,21 +1013,10 @@ fn codex_provider_table(
     Ok(Some(table))
 }
 
-/// Codex 实例启动时清空的变量：Codex 把它们当作官方账号侧的凭据，优先于目录里存的登录
-/// （`rust-v0.156.1` 源码 `login/src/auth/manager.rs`：`CODEX_ACCESS_TOKEN` 所有入口都读，
-/// `CODEX_API_KEY` 由 `codex exec` 等非交互入口读），空值等同未设置。官方账号实例同样清空：
-/// shell 里给别的账号导出的这两个变量会压过这个目录里的登录，多账号隔离就失效了。
-pub(crate) const CODEX_CLEARED_ENV: [&str; 2] = ["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"];
-
 /// 启动命令取值：`<配置目录变量>="<目录>" <命令> <扩展参数>`，与别名域的取值格式一致。
-/// Codex 实例在前面加上清空官方凭据变量的赋值。
+/// 只处理本工具自己的变更：不再替用户在前面加清空凭据变量的赋值（2026-09-30 用户裁决）。
 pub(crate) fn launch_value(def: &ProfileDef, bin: &str, extra_args: &str) -> String {
     let mut out = String::new();
-    if def.kind == ProfileKind::Codex {
-        for name in CODEX_CLEARED_ENV {
-            out.push_str(&format!("{name}= "));
-        }
-    }
     out.push_str(&format!(
         "{}=\"{}\" {}",
         def.kind.config_env(),
@@ -1242,7 +1231,7 @@ mod tests {
         assert_eq!(codex.kind.target_file(), "config.toml");
         assert_eq!(
             launch_value(&codex, "codex", ""),
-            "CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"~/.codex-work\" codex"
+            "CODEX_HOME=\"~/.codex-work\" codex"
         );
     }
 
@@ -1417,8 +1406,9 @@ mod tests {
         );
     }
 
+    /// 只写本工具自己的变更：Codex 启动命令不替用户加清空凭据变量的赋值。
     #[test]
-    fn codex_launch_clears_env_credentials_for_every_instance() {
+    fn codex_launch_adds_nothing_the_user_did_not_configure() {
         let third = def(
             json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-w",
             "base_url": "http://127.0.0.1:11434/v1"}}),
@@ -1426,14 +1416,13 @@ mod tests {
         .unwrap();
         assert_eq!(
             launch_value(&third, "codex", ""),
-            "CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"~/.codex-w\" codex"
+            "CODEX_HOME=\"~/.codex-w\" codex"
         );
         let official =
             def(json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-w"}})).unwrap();
-        // 官方账号实例同样清空：shell 里给别的账号导出的访问令牌会压过这个目录里的登录
         assert_eq!(
-            launch_value(&official, "codex", ""),
-            "CODEX_API_KEY= CODEX_ACCESS_TOKEN= CODEX_HOME=\"~/.codex-w\" codex"
+            launch_value(&official, "codex", "--full-auto"),
+            "CODEX_HOME=\"~/.codex-w\" codex --full-auto"
         );
     }
 
