@@ -49,6 +49,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("system", "audit" | "discover" | "refresh-upstream") => true,
         ("secrets", "status" | "set" | "source" | "migrate-legacy") => true,
         ("runs", "list" | "get" | "clear") => true,
+        // 长操作的进度：只读系统临时目录里的进度文件
+        ("runs", "progress") => true,
         ("policy", "get" | "set" | "delete") => true,
         ("db", "status" | "migrate") => true,
         ("config", "export" | "import") => true,
@@ -135,6 +137,8 @@ enum ArgValueKind {
     SeedItems,
     /// 技能来源要切换到的版本：标签、分支或提交（字母数字与 `._/+-`，不以 `-` 开头）。
     GitRef,
+    /// 逗号分隔的账号 id：每个只含字母数字与 `-_.`，至少一个。
+    AgentList,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -219,7 +223,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--target-base", ArgValueKind::RuleBase));
         }
         ("system", "discover") => specs.push(("--only", ArgValueKind::ElementId)),
-        ("runs", "get") => {
+        ("runs", "get" | "progress") => {
             specs.push(("--run", ArgValueKind::RunId));
         }
         ("policy", "set") => {
@@ -279,6 +283,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--keep-local", ArgValueKind::Flag));
             specs.push(("--accept-source", ArgValueKind::Flag));
             specs.push(("--undo", ArgValueKind::RunId));
+            // 纳入时要链接的账号（逗号分隔；默认全部账号）
+            specs.push(("--agents", ArgValueKind::AgentList));
         }
         (_, "apply") | ("mcp", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -369,6 +375,23 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
                 Err(EngineError::new(
                     "invalid_args",
                     format!("非法的带入项 '{value}'（只能从 {} 里选）", ITEMS.join("、")),
+                ))
+            }
+        }
+        ArgValueKind::AgentList => {
+            let ok = !value.is_empty()
+                && value.split(',').all(|agent| {
+                    !agent.is_empty()
+                        && agent
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+                });
+            if ok {
+                Ok(())
+            } else {
+                Err(EngineError::new(
+                    "invalid_args",
+                    format!("非法的账号列表 '{value}'"),
                 ))
             }
         }
@@ -2047,5 +2070,15 @@ mod tests {
         assert!(validate_args("skills:adopt", &["--path".into(), "../etc".into()]).is_err());
         assert!(validate_args("skills:adopt", &["--undo".into(), "../x".into()]).is_err());
         assert!(validate_args("skills:adopt", &["--force".into()]).is_err());
+        assert!(validate_args(
+            "skills:adopt",
+            &["--agents".into(), "claude-code,codex".into()]
+        )
+        .is_ok());
+        assert!(validate_args("skills:adopt", &["--agents".into(), "a,,b".into()]).is_err());
+        assert!(validate_args("skills:adopt", &["--agents".into(), "a;rm".into()]).is_err());
+        assert!(validate_command("runs:progress").is_ok());
+        assert!(validate_args("runs:progress", &["--run".into(), "gui-abc_1".into()]).is_ok());
+        assert!(validate_args("runs:progress", &["--run".into(), "../x".into()]).is_err());
     }
 }

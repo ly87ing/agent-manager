@@ -26,6 +26,7 @@ use super::track::{self, Track};
 use super::versioning;
 use super::{CollectionDef, EXCLUDED_DIRS};
 use crate::native::{Context, Request};
+use crate::progress::Progress;
 use crate::store;
 
 const BACKUP_DIR: &str = "adopt-backups";
@@ -348,7 +349,9 @@ fn check_source(
     repository: &str,
     track: &Track,
     fixed: Option<&str>,
+    progress: &mut Progress,
 ) -> Result<SourceCheck> {
+    progress.start("resolve", Some(repository.to_string()));
     let refs = crate::native_upstream::git_remote_refs(ctx, repository)
         .map_err(|_| anyhow!("读不到 {repository} 的分支与标签（网络、地址或权限问题）"))?;
     let latest = track::resolve(track, &refs)?;
@@ -363,6 +366,7 @@ fn check_source(
         commit: commit.to_string(),
     });
     let tmp = temp_dir();
+    progress.start("fetch", Some("只取这一个目录；仓库很大时要久一些".into()));
     let result = (|| -> Result<SourceCheck> {
         let status = std::process::Command::new("git")
             .args([
@@ -425,6 +429,7 @@ fn check_source(
                 per_location: at_fixed,
             });
         }
+        progress.start("compare", Some(format!("对照 {}", latest.label())));
         let at_latest = compare(&latest)?;
         if at_latest.iter().all(|(same, _)| *same) {
             return Ok(SourceCheck {
@@ -464,7 +469,12 @@ fn check_source(
             })
             .collect();
         let mut tried: Vec<String> = Vec::new();
-        for tag in candidates {
+        let total = candidates.len();
+        for (index, tag) in candidates.into_iter().enumerate() {
+            progress.detail(
+                "compare",
+                format!("本地可能是旧版本，逐个对照：{}/{total}（{tag}）", index + 1),
+            );
             let Some(commit) = refs.tags.get(&tag) else {
                 continue;
             };
@@ -594,9 +604,27 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         .ok_or_else(|| anyhow!("需要 --name <技能>"))?;
     let plan = local_plan(ctx, name)?;
     let home = &ctx.home_dir;
+    // 原来就有它的账号：它所在的账号目录，以及共用目录对应的全部 Codex 账号
+    let current_accounts: Vec<String> = {
+        let meta = load_metadata(ctx)?;
+        meta.agents
+            .iter()
+            .filter(|(id, info)| {
+                info.enabled
+                    && plan.locations.iter().any(|loc| {
+                        loc.agent.as_deref() == Some(id.as_str())
+                            || (loc.shared.is_some()
+                                && info.kind
+                                    == Some(crate::native_agent_adapters::AdapterKind::Codex))
+                    })
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    };
     let mut out = json!({
         "name": plan.name,
         "kind": plan.kind,
+        "current_accounts": current_accounts,
         "locations": plan.locations.iter().map(|l| l.to_json(home)).collect::<Vec<_>>(),
         "source": plan.source,
         "removes": plan.locations.iter().map(|l| tilde(&l.path, home)).collect::<Vec<_>>(),
@@ -632,7 +660,22 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
     let fixed = existing
         .as_ref()
         .and_then(|coll| versioning::head_commit(&super::paths::collection_source_root(ctx, coll)));
-    match check_source(ctx, &plan, &repository, &track, fixed.as_deref()) {
+    let mut progress = Progress::new(
+        &req.run_id,
+        &[
+            ("resolve", "读取来源的分支与标签"),
+            ("fetch", "取来源里的这个技能"),
+            ("compare", "与现有内容比对"),
+        ],
+    );
+    match check_source(
+        ctx,
+        &plan,
+        &repository,
+        &track,
+        fixed.as_deref(),
+        &mut progress,
+    ) {
         Ok(check) => {
             let all_same = check.per_location.iter().all(|(same, _)| *same);
             // 已登记的来源固定在它现在的提交；新来源只有「本地是旧版本」时才指定版本
@@ -699,6 +742,7 @@ pub(crate) fn preflight(ctx: &Context, req: &Request) -> Result<()> {
             "--ref",
             "--collection",
             "--path",
+            "--agents",
             "--undo",
         ],
         &["--keep-local", "--accept-source"],
@@ -721,6 +765,17 @@ pub(crate) fn preflight(ctx: &Context, req: &Request) -> Result<()> {
     if let Some(reference) = req.value("--ref") {
         if !track::valid_ref_name(reference) || reference.contains('*') {
             bail!("--ref 不合法：{reference}");
+        }
+    }
+    if let Some(agents) = req.value("--agents") {
+        let list: Vec<&str> = agents.split(',').collect();
+        if list.iter().any(|a| {
+            a.is_empty()
+                || !a
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        }) {
+            bail!("--agents 要写成逗号分隔的账号 id，至少一个");
         }
     }
     if let Some(path) = req.value("--path") {
@@ -1002,8 +1057,10 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     let expected = req
         .value("--digest")
         .ok_or_else(|| anyhow!("需要 --digest"))?;
-    let plan = local_plan(ctx, name)?;
     let keep_local = req.flag("--keep-local");
+    let mut progress = Progress::new(&req.run_id, &[("check", "核对预览后有没有变化")]);
+    progress.start("check", None);
+    let plan = local_plan(ctx, name)?;
     let home = ctx.home_dir.clone();
 
     // 重算指纹：本地内容、处理方式、目标版本都要与预览一致
@@ -1093,6 +1150,32 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         .take(40)
         .collect();
     let id = format!("{stamp}-{safe}");
+    let steps: &[(&str, &str)] = match mode {
+        "dedupe" => &[
+            ("check", "核对预览后有没有变化"),
+            ("backup", "备份并移走多余的副本"),
+        ],
+        "local" => &[
+            ("check", "核对预览后有没有变化"),
+            ("copy", "复制到 ~/my-skills"),
+            ("backup", "备份并移走原来的目录"),
+            ("register", "登记来源"),
+            ("link", "链接到账号"),
+        ],
+        _ => &[
+            ("check", "核对预览后有没有变化"),
+            ("backup", "备份并移走原来的目录"),
+            ("register", "登记来源"),
+            ("download", "下载来源里的这个技能"),
+            ("link", "链接到账号"),
+        ],
+    };
+    let mut progress = {
+        drop(progress);
+        let mut next = Progress::new(&req.run_id, steps);
+        next.start("check", None);
+        next
+    };
     let mut journal = Journal {
         id: id.clone(),
         dir: ctx.data_dir.join(BACKUP_DIR).join(&id),
@@ -1101,9 +1184,10 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     std::fs::create_dir_all(&journal.dir)?;
     journal.save(name, mode, false)?;
 
-    let run = |journal: &mut Journal| -> Result<()> {
+    let run = |journal: &mut Journal, progress: &mut Progress| -> Result<()> {
         // 保留本地内容：先复制到 ~/my-skills/<技能>
         if mode == "local" {
+            progress.start("copy", None);
             let from = plan
                 .locations
                 .iter()
@@ -1121,7 +1205,16 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             journal.save(name, mode, false)?;
         }
         // 移走原位置（先移走，账号目录里的同名入口才空得出来）
+        let total = plan.locations.len();
         for (index, loc) in plan.locations.iter().enumerate() {
+            progress.start(
+                "backup",
+                Some(format!(
+                    "{}/{total}：{}",
+                    index + 1,
+                    tilde(&loc.path, &home)
+                )),
+            );
             move_away(journal, index, &loc.path)?;
             journal.save(name, mode, false)?;
         }
@@ -1129,6 +1222,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             return Ok(());
         }
         // 登记来源
+        progress.start("register", Some(collection.clone()));
         let previous = stored_definition(ctx, &collection)?;
         let next = match mode {
             "local" => {
@@ -1173,6 +1267,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             write_definition(ctx, &collection, Some(next))?;
         }
         if mode == "source" {
+            progress.start("download", target_path.clone());
             collection_update(ctx, &req.run_id, &collection, reference.as_deref())?;
         }
         // 来源里的技能名以它在仓库里的目录名为准（本地可能换过名字）
@@ -1180,7 +1275,21 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             (Some(path), "source") => path.rsplit('/').next().unwrap_or(name).to_string(),
             _ => name.to_string(),
         };
-        for agent in link_agents(ctx, restrict.as_ref())? {
+        let mut agents = link_agents(ctx, restrict.as_ref())?;
+        // 用户在纳入时取消勾选的账号不链接（默认全部账号）
+        if let Some(chosen) = req.value("--agents") {
+            let chosen: Vec<&str> = chosen.split(',').filter(|a| !a.is_empty()).collect();
+            if let Some(unknown) = chosen.iter().find(|a| !agents.iter().any(|x| x == *a)) {
+                bail!("账号 {unknown} 不能链接这个技能（不存在、已停用或来源限制了账号）");
+            }
+            agents.retain(|a| chosen.contains(&a.as_str()));
+            if agents.is_empty() {
+                bail!("至少选一个账号");
+            }
+        }
+        let total = agents.len();
+        for (index, agent) in agents.into_iter().enumerate() {
+            progress.start("link", Some(format!("{}/{total}：{agent}", index + 1)));
             skill_action(ctx, &req.run_id, &collection, &linked_name, "add", &agent)?;
             journal
                 .links
@@ -1189,7 +1298,8 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         }
         Ok(())
     };
-    if let Err(err) = run(&mut journal) {
+    if let Err(err) = run(&mut journal, &mut progress) {
+        progress.add_and_start("rollback", "出错了，正在恢复原样");
         let problems = rewind(ctx, &req.run_id, &journal)?;
         let _ = if problems.is_empty() {
             std::fs::remove_dir_all(&journal.dir).map_err(anyhow::Error::from)

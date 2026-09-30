@@ -3804,6 +3804,11 @@ fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
     assert!(p.ok, "{:?}", p.errors);
     let check = &p.data["source_check"];
     assert_eq!(check["same"], true, "{check}");
+    assert_eq!(
+        p.data["current_accounts"],
+        serde_json::json!(["claude-code", "codex"]),
+        "Claude 目录 + 共用目录（对应全部 Codex 账号）"
+    );
     assert_eq!(check["adopt_at"]["name"], "v1.0.0");
     assert_eq!(check["latest"]["name"], "v1.1.0");
     assert_eq!(check["ref"], "v1.0.0");
@@ -3971,19 +3976,54 @@ fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
     assert!(p.data["source_check"]["error"].is_string());
     let local = &p.data["local"];
     assert_eq!(local["dest"], "~/my-skills/mine");
+    // 原来只在 Claude 上：预览标出原来就有的账号；只勾 Claude 时 Codex 不链接
+    assert_eq!(
+        p.data["current_accounts"],
+        serde_json::json!(["claude-code"])
+    );
+    let digest = local["digest"].as_str().unwrap().to_string();
+    let bad_agent = adopt(&[
+        "--name",
+        "mine",
+        "--digest",
+        &digest,
+        "--keep-local",
+        "--agents",
+        "nope",
+    ]);
+    assert!(!bad_agent.ok, "不存在的账号拒绝");
+    assert!(
+        claude.join("mine").is_dir() && !claude.join("mine").is_symlink(),
+        "拒绝后原样恢复"
+    );
+    assert!(
+        !home.join("my-skills/mine").exists(),
+        "拒绝后复制出的目录也撤掉"
+    );
     let m = adopt(&[
         "--name",
         "mine",
         "--digest",
-        local["digest"].as_str().unwrap(),
+        &digest,
         "--keep-local",
+        "--agents",
+        "claude-code",
     ]);
     assert!(m.ok, "{:?}", m.errors);
+    assert_eq!(m.data["linked"], serde_json::json!(["claude-code"]));
     assert_eq!(
         std::fs::read_to_string(home.join("my-skills/mine/SKILL.md")).unwrap(),
         "# 我自己写的"
     );
-    assert!(claude.join("mine").is_symlink() && codex.join("mine").is_symlink());
+    assert!(
+        claude.join("mine").is_symlink() && std::fs::symlink_metadata(codex.join("mine")).is_err()
+    );
+    let progress = execute(&ctx, &request("runs:progress", &["--run", "test-run-1"]));
+    assert_eq!(
+        progress.data["progress"],
+        serde_json::Value::Null,
+        "操作结束后进度文件删掉"
+    );
     assert!(adopt(&["--undo", m.data["backup"].as_str().unwrap()]).ok);
     assert!(!home.join("my-skills/mine").exists());
     assert_eq!(

@@ -543,6 +543,14 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("db", "migrate") => db_migrate(ctx, request),
         ("runs", "list") => crate::native_runs::runs_list(ctx),
         ("runs", "get") => crate::native_runs::runs_get(ctx, request),
+        // 长操作的进度：只读系统临时目录里的进度文件，没有进行中的操作时为 null
+        ("runs", "progress") => match request.value("--run") {
+            Some(run) => Ok((json!({"progress": crate::progress::read(run)}), vec![])),
+            None => Err(DispatchError::new(
+                "USAGE_ERROR",
+                "runs:progress 需要 --run <运行编号>".to_string(),
+            )),
+        },
         ("runs", "clear") => crate::native_runs::runs_clear(ctx),
         ("config", "export" | "import") => crate::native_config::handle(ctx, request)
             .map(|data| (data, vec![]))
