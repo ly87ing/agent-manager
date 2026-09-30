@@ -23,14 +23,14 @@ export function ImportLinkDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={(event) => event.target === event.currentTarget && onClose()}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="从分享链接导入" tabIndex={-1} onKeyDown={onDialogKeyDown} className="w-full max-w-lg rounded-xl border bg-card shadow-xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="从分享链接导入" tabIndex={-1} onKeyDown={onDialogKeyDown} className="flex max-h-[calc(100vh-2rem)] w-full max-w-lg flex-col rounded-xl border bg-card shadow-xl">
         <div className="flex items-center justify-between border-b px-5 py-3">
           <h3 className="text-base font-semibold">从分享链接导入</h3>
           <button type="button" aria-label="关闭" onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-accent">
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
-        <div className="space-y-3 px-5 py-4 text-sm">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4 text-sm">
           <textarea
             data-testid="import-link-input"
             aria-label="分享链接"

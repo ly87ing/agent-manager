@@ -112,7 +112,7 @@ function PriceDialog({
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
       onClick={(event) => event.target === event.currentTarget && onClose()}
     >
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`${model} 的单价`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="w-full max-w-md rounded-xl border bg-card p-5 shadow-xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`${model} 的单价`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border bg-card p-5 shadow-xl">
         <h3 className="text-base font-semibold text-foreground">{model} 的单价</h3>
         <p className="mt-1 text-xs text-muted-foreground">
           美元 / 百万 token，去这家的定价页抄。留空的那项如果真有用量，这个模型就整体不折算——
@@ -133,7 +133,7 @@ function PriceDialog({
             </label>
           ))}
         </div>
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} disabled={saving} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-40">
             取消
           </button>

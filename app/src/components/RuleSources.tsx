@@ -120,7 +120,7 @@ export function AddSourceDialog({
         : null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="添加规则来源" onKeyDown={onDialogKeyDown} className="w-full max-w-md rounded-xl border bg-card p-5 shadow-xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="添加规则来源" onKeyDown={onDialogKeyDown} className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border bg-card p-5 shadow-xl">
         <div className="flex items-center justify-between">
           <h3 className="text-base font-semibold">添加规则来源</h3>
           <button type="button" aria-label="关闭" onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-accent">
@@ -138,7 +138,7 @@ export function AddSourceDialog({
           </label>
           <p className="text-xs text-muted-foreground">只登记位置、原地读取，文件改了这里即时看到；不会复制内容，也不会改任何账号的规则文件。</p>
         </div>
-        <div className="mt-4 flex items-center justify-end gap-2">
+        <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex items-center justify-end gap-2">
           {error && (name || path) && <span className="mr-auto text-xs text-destructive">{error}</span>}
           <button type="button" onClick={onClose} className="rounded border px-3 py-1.5 text-sm hover:bg-accent">取消</button>
           <button

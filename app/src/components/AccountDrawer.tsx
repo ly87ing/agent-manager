@@ -214,7 +214,7 @@ export function AccountDrawer({
             <X className="h-4 w-4" aria-hidden />
           </button>
         </header>
-        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
           {!editing && (
             <div role="radiogroup" aria-label="账号类型" className="grid grid-cols-2 gap-2">
               {(["official", "api"] as const).map((value) => (

@@ -70,7 +70,7 @@ export function LaunchCommandsDrawer({
             <X className="h-4 w-4" aria-hidden />
           </button>
         </header>
-        <div className="flex-1 space-y-3 overflow-y-auto px-5 py-4 text-sm">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4 text-sm">
           <p className="text-xs text-muted-foreground">
             在终端输入命令名启动这个账号（目录 <code className="font-mono">{account.configDir}</code>）。可以有多条，比如日常一条、带额外参数一条。
           </p>

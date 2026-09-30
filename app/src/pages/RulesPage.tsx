@@ -642,7 +642,7 @@ function EditDialog({ element, onClose }: { element: EngineElement; onClose: () 
           {error}
         </p>
       )}
-      <div className="mt-4 flex justify-end gap-2">
+      <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex justify-end gap-2">
         <button type="button" disabled={directApply.executing} onClick={onClose} className="rounded border px-4 py-2 text-sm">
           取消
         </button>
@@ -783,7 +783,7 @@ function ApplyContentDialog({
           {error}
         </p>
       )}
-      <div className="mt-4 flex justify-end gap-2">
+      <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex justify-end gap-2">
         <button type="button" disabled={directApply.executing} onClick={onClose} className="rounded border px-4 py-2 text-sm">
           取消
         </button>
@@ -856,7 +856,7 @@ function TemplateDialog({ template, onClose }: { template: RuleTemplate | null; 
           {error}
         </p>
       )}
-      <div className="mt-4 flex justify-end gap-2">
+      <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex justify-end gap-2">
         <button type="button" disabled={saving} onClick={onClose} className="rounded border px-4 py-2 text-sm">
           取消
         </button>

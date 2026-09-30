@@ -32,7 +32,7 @@ export function SecretValueDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in">
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`填写 ${variable}`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="w-full max-w-md rounded-lg border bg-card p-5 shadow-lg">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`填写 ${variable}`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-lg border bg-card p-5 shadow-lg">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-foreground">填写取值</h3>
@@ -62,7 +62,7 @@ export function SecretValueDialog({
           同步到部分助手时，目标配置本身可能需要明文；保存前请确认你信任该文件位置。
         </p>
 
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex justify-end gap-2">
           {stored && onRequestClear && (
             <button
               type="button"

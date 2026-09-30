@@ -207,7 +207,7 @@ export function SkillVersionsDialog({
                 )}
               </>
             )}
-            <div className="flex items-center justify-end gap-2 pt-1">
+            <div className="sticky -bottom-3 z-10 -mx-5 -mb-3 flex items-center justify-end gap-2 border-t bg-card px-5 py-2">
               {busy ? (
                 <span data-testid="versions-switching-note" className="mr-auto text-muted-foreground">
                   正在下载并把在用的技能换过去，完成前不能取消

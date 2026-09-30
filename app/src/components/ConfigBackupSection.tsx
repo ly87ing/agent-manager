@@ -272,7 +272,7 @@ export function ConfigBackupSection() {
               )}
             </div>
 
-            <div className="mt-5 flex items-center justify-end gap-2">
+            <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-5 flex items-center justify-end gap-2">
               <button
                 type="button"
                 data-testid="config-import-cancel"

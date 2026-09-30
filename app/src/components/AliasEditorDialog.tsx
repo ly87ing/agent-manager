@@ -469,7 +469,7 @@ export function AliasEditorDialog({
           )}
         </div>
 
-        <div className="mt-5 flex items-center justify-end gap-2">
+        <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-5 flex items-center justify-end gap-2">
           <span className="mr-auto text-xs text-muted-foreground">保存即写入 ~/.zshrc 里由本工具管理的那几行</span>
           <button type="button" onClick={onClose} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent">
             取消

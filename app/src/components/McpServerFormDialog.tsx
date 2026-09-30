@@ -512,7 +512,7 @@ export function McpServerFormDialog({
           {error && <p role="alert" className="text-xs text-destructive lg:col-span-2">{error}</p>}
         </div>
 
-        <div className="mt-5 flex items-center justify-end gap-2">
+        <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-5 flex items-center justify-end gap-2 sm:-bottom-6 sm:-mx-6 sm:-mb-6 sm:px-6">
           <span className="mr-auto text-xs text-muted-foreground">
             {isNew ? "直接写入所选账号的配置文件" : "只改这一条，每个账号写入前都会核对是否已被外部修改"}
           </span>
