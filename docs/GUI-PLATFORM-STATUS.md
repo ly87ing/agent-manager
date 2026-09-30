@@ -36,6 +36,8 @@ MCP 支持本地 stdio 与远程 HTTP 两种传输；条目以各助手配置文
 
 多账号版本（2026-09-29）：基于提交 `2e70d14` 的 x86_64 DMG 通过 `verify:macos`（未签名，SHA256 `37c07fb92bf3dca5b3502c86a8db5edee535d9a042764ad5fc04244717f702e5`，8761959 bytes）；并在隔离 HOME 里经界面新建一个 API 账号，逐项回读目录、配置、规则、密钥文件与启动命令，真实 Claude 经新启动命令读到了规则。详见 [任务书](goal-rust-gui.md)「交付回执（2026-09-29，多账号版本）」。
 
+技能来源版本管理与纳入管理（2026-09-29）：基于提交 `6706505` 的 x86_64 DMG 通过 `verify:macos`（构建身份一致、隔离运行 5 秒存活并优雅退出；未签名，SHA256 `882b05237e8279c8cc5a9fb23553b31586994323c83105c0ec262cb931b5bde1`，8891675 bytes）。版本、预览与纳入管理的真实写入在隔离 HOME 用同一引擎 CLI 对真实 GitHub 回读验证；打包应用内的点选流程未做原生窗口验收。
+
 旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（提交、SHA256 与验证结果见 [交付回执](goal-rust-gui.md)）。
 
 验证入口：`cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。macOS 打包与独立包验收使用 `pnpm --dir app run build:macos` 与 `./scripts/verify-macos-dmg.sh <path-to-dmg>`。本机验收允许如实报告未签名状态，不代表 Apple 签名或公证通过，也不替代其他平台和未完成域的 E2E。
