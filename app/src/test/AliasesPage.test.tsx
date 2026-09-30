@@ -69,17 +69,18 @@ describe("终端快捷命令页", () => {
       "profiles:status": makeEnvelope({ domain: "profiles", elements: [] }, { command: "profiles.status" }),
     });
     expect(await screen.findByTestId("alias-row-claude")).toHaveTextContent("Claude · 主号");
-    expect(screen.getByTestId("alias-row-gs")).toHaveTextContent("不是启动助手的命令");
+    expect(within(screen.getByTestId("alias-row-gs")).getByTitle("不是启动助手的命令")).toHaveTextContent("—");
   });
 
-  it("按条列出终端配置文件里实际的那一行，标出在哪些文件里", async () => {
+  it("按条列出终端配置文件里实际的那一行，完整显示不截断；两个文件都有时不占列", async () => {
     renderWithEngine(<AliasesPage />, aliasRoutes());
     const row = await screen.findByTestId("alias-row-claude");
     // 行里显示取值，终端配置文件里完整的那一行在悬停提示里
     expect(row).toHaveTextContent(CLAUDE);
     expect(within(row).getByTitle(`alias claude='${CLAUDE}'`)).toBeInTheDocument();
-    // 两个文件里都有：写「都有」，完整路径在悬停提示里
-    expect(within(row).getByTitle("~/.zshrc、~/.zprofile")).toHaveTextContent("都有");
+    expect(within(row).getByTitle(`alias claude='${CLAUDE}'`)).toHaveClass("whitespace-pre-wrap");
+    // 两个文件里都有是正常情况，不单列；只在缺了某个文件时标出（见「标出缺在哪个文件」）
+    expect(row).not.toHaveTextContent("都有");
     // 没有「立即同步」与全局时区：每次编辑都直接写回文件
     expect(screen.queryByTestId("apply-aliases-button")).toBeNull();
     expect(screen.queryByTestId("global-timezone-select")).toBeNull();
@@ -442,7 +443,7 @@ describe("终端快捷命令页", () => {
     );
     const item = await screen.findByTestId("alias-recommend-grok");
     expect(within(item).getByTitle("alias grok='grok'")).toHaveTextContent("grok");
-    expect(item).toHaveTextContent("来自 agent-skills");
+    expect(item).toHaveTextContent("agent-skills");
     expect(calls.some((call) => call.command === "aliases:apply")).toBe(false);
     await userEvent.click(screen.getByTestId("add-recommended-grok"));
     const modal = await screen.findByRole("dialog");

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ChevronRight, Copy, Info, Pencil, Plus, Trash2 } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { ChevronRight, Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import { AgentIcon } from "../components/AgentIcon";
 import { COL_ACTION, COL_ICONS, COL_MIDDLE, COL_NARROW, DataTable, PILL, ROW, RowIcon, TableHeader } from "../components/DataTable";
 import { AliasApplyConfirm } from "../components/AliasApplyConfirm";
@@ -14,7 +14,11 @@ import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource, type AliasTarget } from
 import { cn } from "../lib/utils";
 
 const PAGE_NOTE =
-  "以 ~/.zshrc 与 ~/.zprofile 里由本工具管理的那几行为准：这里显示并直接编辑实际的快捷命令，保存写入 ~/.zshrc（~/.zprofile 已有这几行时一并同步，没有就不新建），新开终端窗口生效。你自己另写的 alias 只读列出、不会改动；打开后文件若被别处改过，保存会被拒绝，不会覆盖。";
+  "这里就是 ~/.zshrc 里由本工具管理的那几行：保存写入 ~/.zshrc（~/.zprofile 已有这几行时一并同步，没有就不新建），新开终端窗口生效。你自己另写的 alias 只读列出、不会改动；文件被别处改过时保存会被拒绝，不会覆盖。";
+/** 启动命令表的列：命令占满剩余宽度并完整换行显示，账号列与图标列收窄。 */
+const COL_ACCOUNT = "w-40 shrink-0";
+const COL_ROW_ICONS = "flex w-24 shrink-0 items-center justify-end gap-0.5";
+const HEAD = "flex items-center gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground";
 
 function fileLabel(targets: AliasTarget[], id: string): string {
   return targets.find((target) => target.id === id)?.target ?? id;
@@ -82,21 +86,31 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
     setDialog({ kind: "edit", value: item.value ?? undefined, presetName: candidate });
   };
 
-  /** 文件列放不下两个文件名：两个都有写「都有」，只在一个里有写那个文件名，完整路径在悬停提示里。 */
-  const fileNames = (ids: string[]) =>
-    ids.length > 1 && ids.length === source.targets.length
-      ? "都有"
-      : ids.map((id) => fileLabel(source.targets, id).replace(/^~\/\./, "")).join("、");
+  const accountCell = (name: string) => {
+    const account = accountOf(name);
+    return (
+      <div className={cn(COL_ACCOUNT, "flex min-w-0 items-center gap-1.5 text-sm")}>
+        {account ? (
+          <>
+            <AgentIcon kind={account.kind} />
+            <span className="truncate">{account.label}</span>
+          </>
+        ) : (
+          <span className="text-muted-foreground" title="不是启动助手的命令">—</span>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-3">
       <h1 className="sr-only">终端快捷命令</h1>
 
       <DataTable label="启动命令" testId="aliases-current">
-        <TableHeader title={`启动命令 · ${source.current.length}`} middle="启动的账号" narrow="文件">
-          <span className="text-muted-foreground" title={PAGE_NOTE}>
-            <Info className="inline h-3.5 w-3.5 align-[-2px]" aria-hidden /> 说明
-          </span>
+        <div className={HEAD}>
+          <span className="min-w-0 flex-1 font-medium text-foreground">启动命令 · {source.current.length}</span>
+          <span className={COL_ACCOUNT}>启动的账号</span>
+          <span className={cn(COL_ROW_ICONS, "text-xs")}>
           <button
             type="button"
             data-testid="add-alias-button"
@@ -106,7 +120,8 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
           >
             <Plus className="h-3.5 w-3.5" aria-hidden /> 新增
           </button>
-        </TableHeader>
+          </span>
+        </div>
         {source.current.length === 0 ? (
           <EmptyState
             compact
@@ -118,7 +133,6 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
           <ul className="divide-y">
             {source.current.map((item) => {
               const missingIn = source.targets.filter((target) => target.base !== null && !item.targets.includes(target.id));
-              const account = accountOf(item.name);
               return (
                 <li key={item.name} data-testid={`alias-row-${item.name}`} className={ROW}>
                   <div className="min-w-0 flex-1">
@@ -133,24 +147,11 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
                         </span>
                       )}
                     </div>
-                    <div className="truncate font-mono text-xs text-muted-foreground" title={item.line}>{item.value ?? item.line}</div>
+                    <div className="whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground" title={item.line}>{item.value ?? item.line}</div>
                     {item.value === null && <div className="text-xs text-muted-foreground">不是本工具的写法，只能删除，或在文件里手改</div>}
                   </div>
-                  <div className={cn(COL_MIDDLE, "flex min-w-0 items-center gap-1.5 text-sm")}>
-                    {account ? (
-                      <>
-                        <AgentIcon kind={account.kind} />
-                        <span className="truncate">{account.label}</span>
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">不是启动助手的命令</span>
-                    )}
-                  </div>
-                  <span className={cn(COL_NARROW, "text-xs text-muted-foreground")} title={item.targets.map((id) => fileLabel(source.targets, id)).join("、")}>
-                    {fileNames(item.targets)}
-                  </span>
-                  <div className={COL_ACTION} />
-                  <div className={COL_ICONS}>
+                  {accountCell(item.name)}
+                  <div className={COL_ROW_ICONS}>
                     {item.value !== null && (
                       <>
                         <RowIcon label={`编辑 ${item.name}`} testId={`edit-alias-${item.name}`} disabled={busy} onClick={() => setDialog({ kind: "edit", name: item.name, value: item.value ?? undefined })}>
@@ -171,19 +172,21 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
           </ul>
         )}
       </DataTable>
+      <p className="px-1 text-xs text-muted-foreground">{PAGE_NOTE}</p>
 
       {source.recommendations.length > 0 && (
         <DataTable label="推荐" testId="alias-recommendations">
-          <TableHeader title={`推荐 · ${source.recommendations.length}`} middle="来源" narrow="">
-            <span className="text-muted-foreground">逐条确认后才写入</span>
-          </TableHeader>
+          <div className={HEAD}>
+            <span className="min-w-0 flex-1 font-medium text-foreground">推荐 · {source.recommendations.length}<span className="font-normal text-muted-foreground"> · 逐条确认后才写入</span></span>
+            <span className={COL_ACCOUNT}>来源</span>
+            <span className={COL_ROW_ICONS} />
+          </div>
           <ul className="divide-y">
             {source.recommendations.map((item) => (
               <li key={item.name} data-testid={`alias-recommend-${item.name}`} className={ROW}>
                 <LineCell name={item.name} line={item.line} value={item.value} />
-                <span className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")}>来自 {item.source}</span>
-                <span className={COL_NARROW} />
-                <div className={COL_ACTION}>
+                <span className={cn(COL_ACCOUNT, "truncate text-sm text-muted-foreground")}>{item.source}</span>
+                <div className={COL_ROW_ICONS}>
                   <button
                     type="button"
                     data-testid={`add-recommended-${item.name}`}
@@ -194,7 +197,6 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
                     添加
                   </button>
                 </div>
-                <div className={COL_ICONS} />
               </li>
             ))}
           </ul>
@@ -244,18 +246,22 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
 
       {source.legacy.length > 0 && (
         <DataTable label="旧版存着、还没用上的" testId="alias-legacy">
-          <TableHeader title={`旧版存着、还没用上的 · ${source.legacy.length}`} middle="说明" narrow="">
-            <span className="text-muted-foreground">旧版本存在库里、文件里没有</span>
-          </TableHeader>
+          <div className={HEAD}>
+            <span className="min-w-0 flex-1 font-medium text-foreground">
+              旧版存着、还没用上的 · {source.legacy.length}
+              <span className="font-normal text-muted-foreground"> · 旧版本存在库里、文件里没有；加入后写进终端配置</span>
+            </span>
+            <span className={COL_ROW_ICONS} />
+          </div>
           <ul className="divide-y">
             {source.legacy.map((item) => (
               <li key={item.id} data-testid={`alias-legacy-${item.name}`} className={ROW}>
-                <LineCell name={item.name} line={item.line} value={item.value} />
-                <span className={cn(COL_MIDDLE, "truncate text-sm", item.actual ? "text-warning" : "text-muted-foreground")} title={item.actual ?? undefined}>
-                  {item.actual ? `文件里现在是另一条写法，加入会替换它` : "加入后写进两个文件"}
-                </span>
-                <span className={COL_NARROW} />
-                <div className={COL_ACTION}>
+                <LineCell name={item.name} line={item.line} value={item.value}>
+                  {item.actual && (
+                    <div className="text-xs text-warning" title={item.actual}>文件里现在是另一条写法，加入会替换它</div>
+                  )}
+                </LineCell>
+                <div className={COL_ROW_ICONS}>
                   <button
                     type="button"
                     data-testid={`add-legacy-${item.name}`}
@@ -265,8 +271,6 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
                   >
                     加入
                   </button>
-                </div>
-                <div className={COL_ICONS}>
                   <RowIcon danger label={`丢弃 ${item.name}`} testId={`discard-legacy-${item.name}`} disabled={busy} onClick={() => setDialog({ kind: "legacy-discard", item })}>
                     <Trash2 className="h-3.5 w-3.5" aria-hidden />
                   </RowIcon>
@@ -292,28 +296,18 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
 
       {showMore && external.length > 0 && (
         <DataTable label="你自己写的" testId="alias-external">
-          <TableHeader title={`你自己写的 · ${external.length}`} middle="启动的账号" narrow="文件">
-            <span className="text-muted-foreground">你自己另写的，只读</span>
-          </TableHeader>
+          <div className={HEAD}>
+            <span className="min-w-0 flex-1 font-medium text-foreground">你自己写的 · {external.length}<span className="font-normal text-muted-foreground"> · 只读</span></span>
+            <span className={COL_ACCOUNT}>启动的账号</span>
+            <span className={COL_ROW_ICONS} />
+          </div>
           <ul className="divide-y">
             {external.map(({ target, line }) => {
-              const account = accountOf(line.name);
               return (
                 <li key={`${target.id}:${line.name}`} data-testid={`alias-external-${target.id}-${line.name}`} className={ROW}>
-                  <LineCell name={line.name} line={line.line} value={line.value} />
-                  <div className={cn(COL_MIDDLE, "flex min-w-0 items-center gap-1.5 text-sm")}>
-                    {account ? (
-                      <>
-                        <AgentIcon kind={account.kind} />
-                        <span className="truncate">{account.label}</span>
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">不是启动助手的命令</span>
-                    )}
-                  </div>
-                  <span className={cn(COL_NARROW, "text-xs text-muted-foreground")}>{fileNames([target.id])}</span>
-                  <div className={COL_ACTION} />
-                  <div className={COL_ICONS} />
+                  <LineCell name={line.name} line={line.line} value={line.value} file={fileLabel(source.targets, target.id)} />
+                  {accountCell(line.name)}
+                  <div className={COL_ROW_ICONS} />
                 </li>
               );
             })}
@@ -422,12 +416,16 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
   );
 }
 
-/** 名字列：命令名，下面一行是它的取值（完整一行在悬停提示里）。 */
-function LineCell({ name, line, value }: { name: string; line: string; value: string | null }) {
+/** 名字列：命令名（写在哪个文件），下面是它的完整取值，长了换行不截断。 */
+function LineCell({ name, line, value, file, children }: { name: string; line: string; value: string | null; file?: string; children?: ReactNode }) {
   return (
     <div className="min-w-0 flex-1">
-      <div className="font-mono text-sm font-medium">{name}</div>
-      <div className="truncate font-mono text-xs text-muted-foreground" title={line}>{value ?? line}</div>
+      <div className="font-mono text-sm font-medium">
+        {name}
+        {file && <span className="ml-2 font-sans text-xs font-normal text-muted-foreground">{file}</span>}
+      </div>
+      <div className="whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground" title={line}>{value ?? line}</div>
+      {children}
     </div>
   );
 }
