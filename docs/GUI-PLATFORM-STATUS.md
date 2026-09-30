@@ -9,7 +9,7 @@
 | Tauri bridge / React 基础 | 已完成：原生桥接、设置与 policy 页面、主要资源页面布局和直接 apply 交互 |
 | 精品化体验（2026-09-17） | 已完成：设计令牌与浅色/深色/跟随系统主题（同步原生标题栏）；系统托盘驻留、窗口位置尺寸记忆、单实例唤回；页面与弹窗动效、骨架屏、组件化空态；助手/技能/MCP/操作记录搜索、⌘,/⌘F 快捷键、设置入口更新提示角标。验收见 [交付回执](goal-rust-gui.md)；2026-09-21 已在隔离数据目录与 DEV mock 下实点同源 Tauri 原生托盘，验证接入项唤回窗口、目标直达、显式确认及状态刷新。Dock Reopen、关窗驻留与安装包托盘仍未做真机 GUI 验收 |
 | Python 清理 | 已完成：根仓库不再依赖 Python 或 `manage.sh` |
-| Agent 原生域 | 已完成：定义、实际来源、状态、apply、跨进程锁、结果核验和操作记录 |
+| Agent 原生域 | 已完成：主账号只读状态（是否官方账号、登录、额度）与运行参数写入（实时额度状态栏），带跨进程锁、结果核验和操作记录；主配置切换第三方与接入识别已退役 |
 | Skills 原生域 | 已完成：已接入 dispatcher；内置默认只读、写入进 SQLite；集合与单技能支持更新/启停/移除；内容快照与安全软连接；status 只读零写与 apply 排他锁/审计 |
 | Runs 操作记录与清理 | 已完成：列表与详情读取 SQLite `operation_logs`；新增操作记录时按设置（`log_retention_days`，0 为不清理）删除过期记录；提供 `runs:clear` 二次确认手动清空（清空自身零审计且不删库改配置） |
 | 本地结构化诊断日志与清理 | 已退役（2026-09-19 裁决）：JSONL 诊断日志、`logs:clear` 与 envelope `log_file` 一并移除；错误消息出库前仍统一脱敏，排查依赖 `operation_logs` |
@@ -28,11 +28,13 @@
 
 缺库读取不建库，保存才初始化数据库；设置在 `app_settings` 表。policy 持久化来源为 `sqlite`，写入参数固定 `--layer local`。Claude Code 与 Codex 默认均为官方 `native` 命令，brew 仅按实际检测来源处理。
 
-公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝；status/query 只读零写；六域写操作仅通过真实 apply 完成，apply 内部保留 preflight/写前校验、精确 scope、锁、外部修改检测、CAS/条件回滚与审计。
+公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝；status/query 只读零写；各域写操作仅通过真实 apply 完成，apply 内部保留 preflight/写前校验、精确 scope、锁、外部修改检测、CAS/条件回滚与审计。
 
 MCP 支持本地 stdio 与远程 HTTP 两种传输；条目以各助手配置文件为准，新增或修改远程地址时仅允许 `https://` 或本机回环 `http://localhost` / `http://127.0.0.1`，headers 只接受 `${VAR}` 引用或保留原值，以客户端原生引用形式写入。界面按 `mcp:status` 的 `targets` 列出全部配置了 MCP 的助手（含实例与 OpenCode）。
 
 多账号版本（2026-09-28）：基于提交 `beddc6d` 构建的 Darwin x86_64 DMG 通过 `verify:macos` 独立包验收（只读挂载、复制到临时目录、隔离 HOME 与最小 PATH 启动持续存活 5 秒、构建身份一致、路径脱敏、无 Python 残留），未签名，SHA256 `7c3ff59818692484fb76b39e4b5726713a7936e5d0fabe01328c139bbe4d3f39`，8705779 bytes。账号新建 / 编辑 / 移除、技能 / MCP / 规则补齐与实时额度的真实写入在隔离 HOME 用同一引擎 CLI 回读验证；打包应用内的界面点选流程未做自动化验收。
+
+多账号版本（2026-09-29）：基于提交 `2e70d14` 的 x86_64 DMG 通过 `verify:macos`（未签名，SHA256 `37c07fb92bf3dca5b3502c86a8db5edee535d9a042764ad5fc04244717f702e5`，8761959 bytes）；并在隔离 HOME 里经界面新建一个 API 账号，逐项回读目录、配置、规则、密钥文件与启动命令，真实 Claude 经新启动命令读到了规则。详见 [任务书](goal-rust-gui.md)「交付回执（2026-09-29，多账号版本）」。
 
 旧 DMG/旧 GUI E2E 不证明本轮新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（提交、SHA256 与验证结果见 [交付回执](goal-rust-gui.md)）。
 
