@@ -2429,3 +2429,50 @@ fn literal_values_show_plain_or_hint_without_leaking_secrets() {
     assert!(!all.contains("abc123"), "短密钥也不进状态");
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 不误伤原始配置：原条目没有的字段（env、startup_timeout_sec、type 等），编辑时即使界面发来空的 env
+/// 也不能凭空加上；只改用户改了的那一项，条目里其余字段与文件其余部分逐字不变。
+#[test]
+fn edit_never_adds_fields_the_original_entry_did_not_have() {
+    let (root, ctx) = temp_ctx("no-added-fields");
+    write_claude(
+        &ctx,
+        json!({"numStartups": 3, "mcpServers": {"bare": {"command": "npx", "args": ["-y", "bare-mcp"]}}}),
+    );
+    write_codex(&ctx, "# 我的注释\nmodel = \"gpt-5\"\n\n[mcp_servers.bare]\ncommand = \"npx\"\nargs = [\"-y\", \"bare-mcp\"]\n");
+    for agent in ["claude-code", "codex"] {
+        let b = base(&ctx, "bare", agent);
+        // 界面保存时发出的形态：env 为空对象、args 改了一项
+        let spec = r#"{"command":"npx","args":["-y","bare-mcp@2"],"env":{}}"#;
+        apply_ok(
+            &ctx,
+            &[
+                "--only", "mcp:bare", "--agent", agent, "--action", "edit", "--base", &b, "--spec",
+                spec,
+            ],
+        );
+    }
+    let entry = claude_entry(&ctx, "bare");
+    assert_eq!(
+        entry,
+        json!({"command": "npx", "args": ["-y", "bare-mcp@2"]}),
+        "Claude 条目不多出字段"
+    );
+    let doc: serde_json::Value = serde_json::from_str(&read(&claude_path(&ctx))).unwrap();
+    assert_eq!(doc["numStartups"], 3);
+    let codex = read(&codex_path(&ctx));
+    assert!(
+        codex.starts_with("# 我的注释\nmodel = \"gpt-5\"\n"),
+        "Codex 文件其余部分不动：{codex}"
+    );
+    assert!(
+        !codex.contains("[mcp_servers.bare.env]") && !codex.contains("env ="),
+        "Codex 条目不多出 env：{codex}"
+    );
+    assert!(
+        !codex.contains("startup_timeout"),
+        "不加原来没有的超时：{codex}"
+    );
+    assert!(codex.contains("\"bare-mcp@2\""));
+    let _ = std::fs::remove_dir_all(root);
+}
