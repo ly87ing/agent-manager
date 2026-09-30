@@ -259,7 +259,8 @@ fn preview_matches_both_rc_files_and_does_not_write() {
     assert!(preview.ok, "{:?}", preview.errors);
     assert!(!preview.lock.held);
     let files = preview.data["files"].as_array().unwrap();
-    assert_eq!(files.len(), 2);
+    assert_eq!(files.len(), 1, "~/.zprofile 没有受管区块：不新建");
+    assert_eq!(preview.data["skipped"], json!(["aliases:zprofile"]));
     assert_eq!(files[0]["target"], "aliases:zshrc");
     assert_eq!(files[0]["exists"], true);
     assert_eq!(
@@ -269,8 +270,6 @@ fn preview_matches_both_rc_files_and_does_not_write() {
             .to_string_lossy()
             .as_ref()
     );
-    assert_eq!(files[1]["target"], "aliases:zprofile");
-    assert_eq!(files[1]["exists"], false);
     assert!(files[0]["content"]
         .as_str()
         .unwrap()
@@ -282,12 +281,42 @@ fn preview_matches_both_rc_files_and_does_not_write() {
 
     let applied = run(&ctx, "aliases:apply", &args);
     assert!(applied.ok, "{:?}", applied.errors);
-    for (index, rel) in [".zshrc", ".zprofile"].iter().enumerate() {
-        assert_eq!(read(&ctx, rel).as_deref(), files[index]["content"].as_str());
-    }
+    assert_eq!(
+        read(&ctx, ".zshrc").as_deref(),
+        files[0]["content"].as_str()
+    );
+    assert_eq!(read(&ctx, ".zprofile"), None);
     let stale = run(&ctx, "aliases:preview", &args);
     assert!(!stale.ok);
     assert!(stale.errors[0].message.contains("已在外部修改"));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// 只加本工具的那几行：已有 ~/.zshrc 末尾直接接上区块，不另插空行；~/.zprofile 已存在但
+/// 没有受管区块时一个字节都不动。
+#[test]
+fn first_alias_appends_block_only_and_leaves_zprofile_alone() {
+    let (root, ctx) = temp_ctx("append-only");
+    write(&ctx, ".zshrc", "# user\nalias ll=\"ls -l\"\n");
+    write(&ctx, ".zprofile", "export PATH=\"$HOME/bin:$PATH\"\n");
+    let env = apply(
+        &ctx,
+        &both_bases(&status(&ctx)),
+        &["--set", "cc2", "--value", "claude"],
+    );
+    assert!(env.ok, "{:?}", env.errors);
+    assert_eq!(env.data["skipped"], json!(["aliases:zprofile"]));
+    assert_eq!(
+        read(&ctx, ".zshrc").unwrap(),
+        format!(
+            "# user\nalias ll=\"ls -l\"\n{}",
+            block(&["alias cc2='claude'"])
+        )
+    );
+    assert_eq!(
+        read(&ctx, ".zprofile").unwrap(),
+        "export PATH=\"$HOME/bin:$PATH\"\n"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -325,10 +354,10 @@ fn source_aliases_are_recommended_with_their_source() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// 添加一条推荐：两个文件都出现区块（新文件 0600），推荐列表里不再有它；审计不含取值；
-/// 写出的内容能过 zsh 语法检查（本机有 zsh 时）。
+/// 添加一条推荐：只在 ~/.zshrc 出现区块（新文件 0600），不新建 ~/.zprofile；推荐列表里不再有它；
+/// 审计不含取值；写出的内容能过 zsh 语法检查（本机有 zsh 时）。
 #[test]
-fn adding_a_recommendation_writes_both_files_and_passes_zsh_syntax() {
+fn adding_a_recommendation_writes_zshrc_only_and_passes_zsh_syntax() {
     let (root, ctx) = temp_ctx("recommend");
     add_alias_source(&ctx, "mine", &[("aliases.json", ALIAS_SOURCE)]);
     let before = status(&ctx);
@@ -339,25 +368,23 @@ fn adding_a_recommendation_writes_both_files_and_passes_zsh_syntax() {
     let preview = run(&ctx, "aliases:preview", &preview_args);
     assert!(preview.ok, "{:?}", preview.errors);
     assert!(!preview.lock.held);
-    assert_eq!(preview.data["files"].as_array().unwrap().len(), 2);
+    assert_eq!(preview.data["files"].as_array().unwrap().len(), 1);
     assert!(read(&ctx, ".zshrc").is_none());
     assert!(read(&ctx, ".zprofile").is_none());
     assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), db_before);
     let env = apply(&ctx, &both_bases(&before), &["--recommended", "claude"]);
     assert!(env.ok, "{:?}", env.errors);
     assert!(env.lock.held, "真实写入必须持锁");
-    assert_eq!(env.data["steps"].as_array().unwrap().len(), 2);
+    assert_eq!(env.data["steps"].as_array().unwrap().len(), 1);
     let expected = block(&[
         "alias claude='TZ=\"America/Los_Angeles\" LANG=\"en_US.UTF-8\" LC_ALL=\"en_US.UTF-8\" claude'",
     ]);
     assert_eq!(read(&ctx, ".zshrc").unwrap(), expected);
-    assert_eq!(read(&ctx, ".zprofile").unwrap(), expected);
-    for (index, rel) in [".zshrc", ".zprofile"].iter().enumerate() {
-        assert_eq!(
-            read(&ctx, rel).as_deref(),
-            preview.data["files"][index]["content"].as_str()
-        );
-    }
+    assert!(read(&ctx, ".zprofile").is_none(), "不新建 ~/.zprofile");
+    assert_eq!(
+        read(&ctx, ".zshrc").as_deref(),
+        preview.data["files"][0]["content"].as_str()
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -370,18 +397,14 @@ fn adding_a_recommendation_writes_both_files_and_passes_zsh_syntax() {
     }
     let after = status(&ctx);
     assert_eq!(names(&after["aliases"]), ["claude"]);
-    assert_eq!(
-        after["aliases"][0]["targets"],
-        json!(["aliases:zshrc", "aliases:zprofile"])
-    );
+    assert_eq!(after["aliases"][0]["targets"], json!(["aliases:zshrc"]));
     assert_eq!(after["aliases"][0]["consistent"], true);
     assert_eq!(
         names(&after["alias_recommendations"]),
         ["chrome", "codex", "grok"]
     );
-    for id in ["aliases:zshrc", "aliases:zprofile"] {
-        assert_eq!(element(&after, id)["state"], "managed-ok");
-    }
+    assert_eq!(element(&after, "aliases:zshrc")["state"], "managed-ok");
+    assert_eq!(element(&after, "aliases:zprofile")["state"], "missing");
 
     let conn = store::open_readonly(&ctx).unwrap().unwrap();
     let detail: String = conn
@@ -914,7 +937,7 @@ fn legacy_saved_aliases_become_suggestions_that_can_be_added_or_discarded() {
             .to_string()
     };
 
-    // 加入 ll：写进两个文件；写路径把已在区块里的 gs 与刚加入的 ll 从库里删掉
+    // 加入 ll：只写 ~/.zshrc（~/.zprofile 没有受管区块，不新建）；写路径把已在区块里的 gs 与刚加入的 ll 从库里删掉
     let bases = both_bases(&now);
     let legacy_id = id_of("ll");
     let mut preview_args: Vec<&str> = bases.iter().map(String::as_str).collect();
@@ -931,15 +954,11 @@ fn legacy_saved_aliases_become_suggestions_that_can_be_added_or_discarded() {
     let env = apply(&ctx, &bases, &["--legacy", &legacy_id]);
     assert!(env.ok, "{:?}", env.errors);
     assert!(read(&ctx, ".zshrc").unwrap().contains("alias ll='ls -l'"));
-    assert!(read(&ctx, ".zprofile")
-        .unwrap()
-        .contains("alias ll='ls -l'"));
-    for (index, rel) in [".zshrc", ".zprofile"].iter().enumerate() {
-        assert_eq!(
-            read(&ctx, rel).as_deref(),
-            preview.data["files"][index]["content"].as_str()
-        );
-    }
+    assert!(read(&ctx, ".zprofile").is_none());
+    assert_eq!(
+        read(&ctx, ".zshrc").as_deref(),
+        preview.data["files"][0]["content"].as_str()
+    );
     let after = status(&ctx);
     assert_eq!(names(&after["alias_legacy"]), ["claude", "gp"]);
     let stored: String = store::open_readonly(&ctx)

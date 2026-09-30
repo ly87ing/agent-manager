@@ -7,7 +7,8 @@ import { engineErrorMessage, runEngine } from "./engine";
 import { useEngineQuery } from "./queries";
 
 /**
- * 终端快捷命令：以 ~/.zshrc 与 ~/.zprofile 里本工具那一段（受管区块）的实际行为准。
+ * 终端快捷命令：以 ~/.zshrc 与 ~/.zprofile 里本工具那一段（受管区块）的实际行为准；写入只写 ~/.zshrc，
+ * ~/.zprofile 已有这一段时同步改它，没有就不新建。
  *
  * 读取走 aliases:status；每次改动都是一次 aliases:apply，按名改写一条并直接写回文件，
  * 带上打开时读到的各文件基准（base），文件在此期间被别处改过即被拒绝，不覆盖。

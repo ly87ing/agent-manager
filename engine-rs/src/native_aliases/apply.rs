@@ -160,6 +160,11 @@ fn prepare(
     let mut writes = Vec::new();
     let mut skipped = Vec::new();
     for (view, old_bytes, split) in selected {
+        // 只写本工具已经在用的文件：~/.zprofile 没有受管区块时不新建、不追加，别名只写 ~/.zshrc。
+        if split.block.is_none() && view.spec.target_id != model::TARGET_ZSHRC.target_id {
+            skipped.push(view.spec.target_id);
+            continue;
+        }
         let lines = split.block.clone().unwrap_or_default();
         let new_lines = model::edit_lines(&lines, &edit);
         let inner = model::block_inner(&new_lines);

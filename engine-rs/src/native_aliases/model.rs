@@ -366,10 +366,7 @@ pub(crate) fn converge_content(old: &[u8], expected_inner: &str) -> Result<Optio
             return Ok(None);
         }
         out.push_str(&text);
-        if !text.is_empty() {
-            if !text.ends_with('\n') {
-                out.push('\n');
-            }
+        if !text.is_empty() && !text.ends_with('\n') {
             out.push('\n');
         }
         out.push_str(&block_text(expected_inner));
@@ -555,20 +552,28 @@ mod tests {
     }
 
     #[test]
-    fn converge_appends_with_blank_separator_and_removes_empty_block() {
+    fn converge_appends_block_only_and_removes_empty_block() {
         let new = converge_content(b"# user line\n", "alias a='1'")
             .unwrap()
             .unwrap();
         assert_eq!(
             String::from_utf8(new).unwrap(),
-            "# user line\n\n# >>> agent-manager shell aliases >>>\nalias a='1'\n# <<< agent-manager shell aliases <<<\n"
+            "# user line\n# >>> agent-manager shell aliases >>>\nalias a='1'\n# <<< agent-manager shell aliases <<<\n"
         );
         let new = converge_content(b"# user line", "alias a='1'")
             .unwrap()
             .unwrap();
         assert_eq!(
             String::from_utf8(new).unwrap(),
-            "# user line\n\n# >>> agent-manager shell aliases >>>\nalias a='1'\n# <<< agent-manager shell aliases <<<\n"
+            "# user line\n# >>> agent-manager shell aliases >>>\nalias a='1'\n# <<< agent-manager shell aliases <<<\n"
+        );
+        // 只补上缺的那个换行，不另插空行：加上再删掉，原文逐字回来
+        let added = converge_content(b"# user line\n", "alias a='1'")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            converge_content(&added, "").unwrap().unwrap(),
+            b"# user line\n"
         );
         let old = b"pre\n# >>> agent-manager shell aliases >>>\nalias a='1'\n# <<< agent-manager shell aliases <<<\npost\n";
         let new = converge_content(old, "").unwrap().unwrap();

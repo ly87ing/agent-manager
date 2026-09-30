@@ -23,7 +23,7 @@ const CUSTOM_OPTION = "__custom__";
  *
  * 结构化编辑只处理「环境变量在前、命令在后」这一形状；读到的值不是这个形状时（例如包了
  * open/env 等其它命令）自动切到原文编辑，不猜测改写用户已有的写法。
- * 保存即按名写回 ~/.zshrc 与 ~/.zprofile 里本工具维护的那一段。
+ * 保存即按名写回 ~/.zshrc 里本工具维护的那一段（~/.zprofile 已有这一段时同步改）。
  */
 export function AliasEditorDialog({
   initialName,
@@ -470,7 +470,7 @@ export function AliasEditorDialog({
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">
-          <span className="mr-auto text-xs text-muted-foreground">保存即写入 ~/.zshrc 与 ~/.zprofile 里由本工具管理的那几行</span>
+          <span className="mr-auto text-xs text-muted-foreground">保存即写入 ~/.zshrc 里由本工具管理的那几行</span>
           <button type="button" onClick={onClose} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent">
             取消
           </button>

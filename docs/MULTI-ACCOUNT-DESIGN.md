@@ -157,7 +157,7 @@ team-skills    6 个技能                                             [更新] 
 | 模块 | 处理 | 说明 |
 | --- | --- | --- |
 | `native_profiles`（实例） | 复用 | 账号的增删改、共用设置；`seed`、`apply-definition`、`shared-apply` 已有 |
-| `native_aliases` | 复用 | 启动命令写入 `~/.zshrc` / `~/.zprofile` 受管区块 |
+| `native_aliases` | 复用 | 启动命令写入 `~/.zshrc` 受管区块；`~/.zprofile` 已有区块时同步，不新建 |
 | `native_skills` / `native_mcp` / `native_rules` | 复用 + 小改 | 加「默认全部账号」与「新账号补齐分配」 |
 | `agent_usage` + `assets/statusline.sh` | 复用 + 接线 | 经共用设置把状态栏脚本装到各账号，额度变实时（决策 1） |
 | `native_auth` | 复用 | 只读登录状态、生成官方登录命令 |
