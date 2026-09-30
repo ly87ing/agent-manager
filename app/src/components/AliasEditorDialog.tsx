@@ -14,7 +14,6 @@ import {
   renderAliasPreview,
 } from "../lib/aliasCommand";
 import type { AliasFilePreview } from "../lib/useAliasSource";
-import { LAUNCH_COMMANDS_HOME } from "../lib/platform";
 
 /** 下拉里的「自定义…」哨兵值：选中后切到可输入状态。 */
 const CUSTOM_OPTION = "__custom__";
@@ -27,6 +26,7 @@ const CUSTOM_OPTION = "__custom__";
  * 保存即按名写回 ~/.zshrc 里本工具维护的那一段（~/.zprofile 已有这一段时同步改）。
  */
 export function AliasEditorDialog({
+  writesTo,
   initialName,
   initialValue,
   defaultCommand,
@@ -39,6 +39,8 @@ export function AliasEditorDialog({
   onSubmit,
   onClose,
 }: {
+  /** 保存写到哪里（主目标：~/.zshrc、~/.bashrc 或 Windows 的命令脚本目录）。 */
+  writesTo: string;
   /** 编辑既有别名时传入；新增时留空。 */
   initialName?: string;
   initialValue?: string;
@@ -471,7 +473,7 @@ export function AliasEditorDialog({
         </div>
 
         <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-5 flex items-center justify-end gap-2">
-          <span className="mr-auto text-xs text-muted-foreground">保存即写入 {LAUNCH_COMMANDS_HOME}</span>
+          <span className="mr-auto text-xs text-muted-foreground">保存即写入 {writesTo}</span>
           <button type="button" onClick={onClose} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent">
             取消
           </button>

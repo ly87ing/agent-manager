@@ -274,6 +274,8 @@ pub(crate) fn fallback_bin_dirs(home_dir: &Path) -> Vec<PathBuf> {
         home_dir.join(".bun").join("bin"),
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
+        // Linux 上的 Homebrew
+        PathBuf::from("/home/linuxbrew/.linuxbrew/bin"),
     ]
 }
 

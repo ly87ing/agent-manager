@@ -18,6 +18,8 @@ const BEGIN: &str = "# >>> agent-manager shell aliases >>>";
 const END: &str = "# <<< agent-manager shell aliases <<<";
 
 fn temp_ctx(tag: &str) -> (PathBuf, Context) {
+    // 本文件按 zsh 用户断言（主目标 ~/.zshrc）；bash 用户见 native_aliases_bash.rs。各用例设同一个值，并发无妨
+    std::env::set_var("SHELL", "/bin/zsh");
     // 锁状态只由 execute 从 AGENT_MANAGER_LOCK_* 推导，外部环境变量不得污染断言。
     std::env::remove_var("AGENT_MANAGER_LOCK_HELD");
     std::env::remove_var("AGENT_MANAGER_LOCK_PID");
@@ -192,11 +194,14 @@ fn fresh_status_is_zero_write_and_only_suggests_a_source() {
     assert!(!env.lock.held);
     let data = &env.data;
     let elements = data["elements"].as_array().unwrap();
-    assert_eq!(elements.len(), 2);
+    // zsh 用户：~/.zshrc 为主目标，另列 ~/.zprofile 与 ~/.bashrc（有本工具那一段才同步）
+    assert_eq!(elements.len(), 3);
     assert_eq!(elements[0]["id"], "aliases:zshrc");
     assert_eq!(elements[1]["id"], "aliases:zprofile");
+    assert_eq!(elements[2]["id"], "aliases:bashrc");
     assert_eq!(elements[0]["spec"]["target"], "~/.zshrc");
     assert_eq!(elements[1]["spec"]["target"], "~/.zprofile");
+    assert_eq!(elements[2]["spec"]["target"], "~/.bashrc");
     for el in elements {
         assert_eq!(el["state"], "missing");
         assert_eq!(el["observed"]["base"], "missing");

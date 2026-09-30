@@ -326,7 +326,7 @@ function commandItems(targets: EngineElement[]): InboxItem[] {
       page: "commands",
       state: "drifted",
       title: `${name}`,
-      detail: found.length < managed.length ? "只在其中一个终端配置文件里" : "两个终端配置文件里写法不同",
+      detail: found.length < managed.length ? "只在部分终端配置文件里" : "几个终端配置文件里写法不同",
       fix: { kind: "open", label: "去查看", target: "commands" },
     }));
 }

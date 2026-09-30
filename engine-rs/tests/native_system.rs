@@ -67,17 +67,20 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     // aliases 以 rc 文件受管区块为准：fresh 上下文两文件都没有区块 → notice（内置别名只是推荐，
     // 不再是「待生成」的产物）
     let aliases = section(&env, "aliases");
-    // Unix 是两个 rc 文件；Windows 是命令脚本目录
+    // Unix 是三个 rc 文件（顺序随用户的 shell：主目标在前）；Windows 是命令脚本目录
     let ids: &[&str] = if cfg!(windows) {
         &["aliases:cmd"]
     } else {
-        &["aliases:zshrc", "aliases:zprofile"]
+        &["aliases:zshrc", "aliases:zprofile", "aliases:bashrc"]
     };
     assert_eq!(aliases.len(), ids.len());
-    for (idx, id) in ids.iter().enumerate() {
-        assert_eq!(aliases[idx]["name"], *id);
-        assert_eq!(aliases[idx]["status"], "notice");
-        assert!(aliases[idx].get("category").is_none());
+    for id in ids {
+        let item = aliases
+            .iter()
+            .find(|item| item["name"] == *id)
+            .unwrap_or_else(|| panic!("缺 {id}"));
+        assert_eq!(item["status"], "notice");
+        assert!(item.get("category").is_none());
     }
     // secrets 已接线：fresh 上下文无已启用定义 → 单条 ok（managed-ok 映射）
     let secrets = section(&env, "secrets");

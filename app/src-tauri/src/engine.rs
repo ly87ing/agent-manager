@@ -202,6 +202,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("aliases", "apply" | "preview") => {
             specs.push(("--zshrc-base", ArgValueKind::RuleBase));
             specs.push(("--zprofile-base", ArgValueKind::RuleBase));
+            // bash 用户（多数 Linux）的 ~/.bashrc
+            specs.push(("--bashrc-base", ArgValueKind::RuleBase));
             // Windows：命令脚本目录的写入基准
             specs.push(("--cmd-base", ArgValueKind::RuleBase));
             specs.push(("--set", ArgValueKind::ElementId));
@@ -1909,6 +1911,11 @@ mod tests {
             (
                 "aliases:apply",
                 args(&["--cmd-base", &base, "--remove", "ll"]),
+            ),
+            // bash 用户的 ~/.bashrc
+            (
+                "aliases:apply",
+                args(&["--bashrc-base", &base, "--remove", "ll"]),
             ),
             (
                 "aliases:apply",

@@ -571,3 +571,32 @@ describe("Windows：命令脚本目录", () => {
     await waitFor(() => expect(applyArgs(calls)).toContain("--cmd-base"));
   });
 });
+
+describe("bash 用户（多数 Linux）", () => {
+  it("说明写明新命令进 ~/.bashrc；没有本工具那一段的文件不算缺", async () => {
+    const status = makeAliasStatus({ claude: CLAUDE });
+    const [zshrc] = status.elements;
+    // bash 用户：~/.bashrc 为主目标在前，已有本工具那一段；~/.zshrc 没有那一段（基准 missing）
+    const bashrc = {
+      ...zshrc,
+      id: "aliases:bashrc",
+      spec: { ...(zshrc.spec as object), name: "bashrc Aliases", target: "~/.bashrc", base_flag: "--bashrc-base" },
+    };
+    const zshrcMissing = {
+      ...zshrc,
+      observed: { ...(zshrc.observed as object), base: "missing", block_present: false, entries: [] },
+      state: "missing",
+    };
+    const data = {
+      ...status,
+      elements: [bashrc, zshrcMissing],
+      aliases: (status.aliases ?? []).map((item) => ({ ...item, targets: ["aliases:bashrc"] })),
+    };
+    const routes = aliasRoutes();
+    routes["aliases:status"] = makeEnvelope(data, { command: "aliases.status" });
+    renderWithEngine(<AliasesPage />, routes);
+    await screen.findByTestId("alias-row-claude");
+    expect(screen.getByText(/新命令写进 ~\/\.bashrc/)).toBeInTheDocument();
+    expect(screen.queryByTestId("alias-missing-in-claude")).toBeNull();
+  });
+});

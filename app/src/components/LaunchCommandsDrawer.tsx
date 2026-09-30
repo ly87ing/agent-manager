@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { launchCommandsOfAccount, type Account, type AgentAccounts } from "../lib/accounts";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { fixLaunchCommandTilde } from "../lib/profileDefinition";
-import { DEFAULT_LANG, DEFAULT_TIMEZONE, type useAliasSource } from "../lib/useAliasSource";
+import { DEFAULT_LANG, DEFAULT_TIMEZONE, type useAliasSource, launchCommandsHome } from "../lib/useAliasSource";
 import { AliasApplyConfirm } from "./AliasApplyConfirm";
 import { AliasEditorDialog } from "./AliasEditorDialog";
 
@@ -137,6 +137,7 @@ export function LaunchCommandsDrawer({
 
       {editing && (
         <AliasEditorDialog
+          writesTo={launchCommandsHome(source.targets)}
           initialName={editing.value === null || editing.presetName ? undefined : editing.name}
           initialValue={editing.value ?? undefined}
           defaultCommand={group.bin}

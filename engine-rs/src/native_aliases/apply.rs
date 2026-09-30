@@ -2,7 +2,7 @@
 //!
 //! 操作是新增/改写（--set，可带 --rename-from）、删除（--remove）、添加一条内置推荐
 //! （--recommended）或加入一条旧版本保存的别名（--legacy）。要写哪些文件由调用方给出的
-//! 写入基准决定（--zshrc-base / --zprofile-base，取自 status 的 observed.base），每个文件
+//! 写入基准决定（--zshrc-base / --zprofile-base / --bashrc-base，取自 status 的 observed.base），每个文件
 //! 独立比对：任一不一致即整体拒绝（「已在外部修改」），文件与库都不变。只替换或删除定义了
 //! 相关名称的行，区块内其他行与区块外字节原样保留；区块空了连同两行 marker 一起移除。
 //! 锁前预检零写；锁内 Immediate 事务重检、逐文件原子 CAS 写入、旧来源的写路径清理、单条
@@ -164,7 +164,9 @@ fn prepare(
     for (view, old_bytes, split) in selected {
         // 只写本工具已经在用的文件：~/.zprofile 没有受管区块时不新建、不追加，别名只写主目标
         // （Unix 为 ~/.zshrc，Windows 为命令脚本目录）。
-        if split.block.is_none() && view.spec.target_id != model::targets()[0].target_id {
+        if split.block.is_none()
+            && view.spec.target_id != model::targets(&ctx.home_dir)[0].target_id
+        {
             skipped.push(view.spec.target_id);
             continue;
         }

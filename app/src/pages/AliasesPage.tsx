@@ -12,11 +12,19 @@ import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { useCommandAccounts } from "../lib/useAccountNames";
 import type { AliasCurrent, AliasLegacySuggestion, AliasRecommendation } from "../lib/contract";
 import { DEFAULT_LANG, DEFAULT_TIMEZONE, useAliasSource, type AliasTarget } from "../lib/useAliasSource";
-import { LAUNCH_COMMANDS_HOME } from "../lib/platform";
+import { launchCommandsHome } from "../lib/useAliasSource";
 import { cn } from "../lib/utils";
 
 const PAGE_NOTE =
-  "这里就是 ~/.zshrc 里由本工具管理的那几行：保存写入 ~/.zshrc（~/.zprofile 已有这几行时一并同步，没有就不新建），新开终端窗口生效。你自己另写的 alias 只读列出、不会改动；文件被别处改过时保存会被拒绝，不会覆盖。";
+  "这里就是终端配置文件里由本工具管理的那几行：新命令写进你所用 shell 的配置（zsh 为 ~/.zshrc、bash 为 ~/.bashrc），其他配置文件已有这几行时一并同步，没有就不新建；新开终端窗口生效。你自己另写的 alias 只读列出、不会改动；文件被别处改过时保存会被拒绝，不会覆盖。";
+
+/** 说明里点出这台电脑上新命令写到哪个文件。 */
+function pageNote(targets: AliasTarget[]): string {
+  const primary = targets[0];
+  if (!primary) return PAGE_NOTE;
+  if (primary.cmdDir) return PAGE_NOTE_CMD;
+  return `这里就是终端配置文件里由本工具管理的那几行：新命令写进 ${primary.target}（按你所用的 shell），其他配置文件已有这几行时一并同步，没有就不新建；新开终端窗口生效。你自己另写的 alias 只读列出、不会改动；文件被别处改过时保存会被拒绝，不会覆盖。`;
+}
 const PAGE_NOTE_CMD =
   "Windows 上每条命令是 ~/.agent-manager/bin 里的一个 .cmd 脚本：保存即写入这个目录，这个目录在 PATH 上时，cmd 与 PowerShell 里直接敲名字就能用（Git Bash 里敲「名字.cmd」）。你自己放进这个目录的 .cmd 只读列出、不会改动；文件被别处改过时保存会被拒绝，不会覆盖。";
 /** 启动命令表的列：命令占满剩余宽度并完整换行显示，账号列与图标列收窄。 */
@@ -139,7 +147,8 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
         ) : (
           <ul className="divide-y">
             {source.current.map((item) => {
-              const missingIn = source.targets.filter((target) => target.base !== null && !item.targets.includes(target.id));
+              // 只比较已有本工具那一段的文件（与待处理一致）：没有那一段的文件本工具不新建，不算缺
+              const missingIn = source.targets.filter((target) => target.base !== null && target.base !== "missing" && !item.targets.includes(target.id));
               return (
                 <li key={item.name} data-testid={`alias-row-${item.name}`} className={ROW}>
                   <div className="min-w-0 flex-1">
@@ -179,7 +188,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
           </ul>
         )}
       </DataTable>
-      <p className="px-1 text-xs text-muted-foreground">{source.targets.some((target) => target.cmdDir) ? PAGE_NOTE_CMD : PAGE_NOTE}</p>
+      <p className="px-1 text-xs text-muted-foreground">{pageNote(source.targets)}</p>
 
       {source.recommendations.length > 0 && (
         <DataTable label="推荐" testId="alias-recommendations">
@@ -344,6 +353,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
 
       {dialog?.kind === "edit" && (
         <AliasEditorDialog
+          writesTo={launchCommandsHome(source.targets)}
           initialName={dialog.name}
           initialValue={dialog.value}
           presetName={dialog.presetName}
@@ -373,7 +383,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
       {dialog?.kind === "recommend" && (
         <AliasApplyConfirm
           title={`添加推荐的 ${dialog.item.name}`}
-          description={`把这一行写进 ${LAUNCH_COMMANDS_HOME}；写入前重读文件，被别处改过就不写。`}
+          description={`把这一行写进 ${launchCommandsHome(source.targets)}；写入前重读文件，被别处改过就不写。`}
           confirmLabel="添加"
           previewBase={previewBase}
           op={["--recommended", dialog.item.name]}

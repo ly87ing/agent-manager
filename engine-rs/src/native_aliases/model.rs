@@ -56,13 +56,47 @@ pub(crate) const TARGET_CMD: TargetSpec = TargetSpec {
     base_flag: "--cmd-base",
 };
 
-/// 固定目标列表，第一个是主目标（没有受管内容时新增写到这里）。
-/// Unix：zshrc 在前，zprofile 在后；Windows：命令脚本目录。
-pub(crate) fn targets() -> Vec<TargetSpec> {
+pub(crate) const TARGET_BASHRC: TargetSpec = TargetSpec {
+    target_id: "aliases:bashrc",
+    name: "bashrc Aliases",
+    target: ".bashrc",
+    base_flag: "--bashrc-base",
+};
+
+/// 全部可能的目标（解析写入基准参数用，与顺序无关）。
+pub(crate) fn all_targets() -> Vec<TargetSpec> {
     if cfg!(windows) {
         vec![TARGET_CMD]
     } else {
-        vec![TARGET_ZSHRC, TARGET_ZPROFILE]
+        vec![TARGET_ZSHRC, TARGET_ZPROFILE, TARGET_BASHRC]
+    }
+}
+
+/// 用户终端用的是不是 bash：看 `$SHELL`；没设时（少数桌面环境）Linux 上看只有 ~/.bashrc
+/// 没有 ~/.zshrc 就当 bash，macOS 默认 zsh。
+fn login_shell_is_bash(home: &std::path::Path) -> bool {
+    match std::env::var("SHELL") {
+        Ok(shell) if !shell.is_empty() => std::path::Path::new(&shell)
+            .file_name()
+            .is_some_and(|name| name == "bash"),
+        _ => {
+            cfg!(target_os = "linux")
+                && home.join(".bashrc").exists()
+                && !home.join(".zshrc").exists()
+        }
+    }
+}
+
+/// 按主次排好的目标，第一个是主目标（没有受管内容时新增写到这里）。
+/// Unix：按用户的 shell，zsh 为 ~/.zshrc、bash 为 ~/.bashrc，其余已有受管区块的文件同步；
+/// Windows：命令脚本目录。
+pub(crate) fn targets(home: &std::path::Path) -> Vec<TargetSpec> {
+    if cfg!(windows) {
+        vec![TARGET_CMD]
+    } else if login_shell_is_bash(home) {
+        vec![TARGET_BASHRC, TARGET_ZSHRC, TARGET_ZPROFILE]
+    } else {
+        vec![TARGET_ZSHRC, TARGET_ZPROFILE, TARGET_BASHRC]
     }
 }
 

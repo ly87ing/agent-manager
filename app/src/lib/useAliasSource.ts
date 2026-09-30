@@ -77,6 +77,16 @@ function targetOf(element: EngineElement): AliasTarget {
   };
 }
 
+/**
+ * 新命令写到哪里（给「保存即写入…」一类说明用）：主目标是列表第一个——zsh 用户 ~/.zshrc、bash 用户
+ * ~/.bashrc，Windows 为命令脚本目录。
+ */
+export function launchCommandsHome(targets: AliasTarget[]): string {
+  const primary = targets[0];
+  if (!primary) return "终端配置文件";
+  return primary.cmdDir ? `${primary.target} 里的命令脚本` : `${primary.target} 里由本工具管理的那几行`;
+}
+
 /** 目标的统称，用于「都不能写」一类提示：~/.zshrc 与 ~/.zprofile，或 Windows 的命令脚本目录。 */
 export function targetsLabel(targets: AliasTarget[]): string {
   return targets.length ? targets.map((target) => target.target).join(" 与 ") : "终端配置";

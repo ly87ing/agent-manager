@@ -154,7 +154,7 @@ fn observe_cmd(ctx: &Context, spec: TargetSpec) -> View {
 
 /// 观察各固定目标。
 pub(crate) fn observe(ctx: &Context) -> Vec<View> {
-    model::targets()
+    model::targets(&ctx.home_dir)
         .into_iter()
         .map(|spec| {
             if spec.target_id == model::TARGET_CMD.target_id {

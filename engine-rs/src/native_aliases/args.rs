@@ -107,11 +107,11 @@ pub(crate) fn parse_status_args(req: &Request) -> Result<()> {
     Ok(())
 }
 
-/// aliases:apply —— 至少一个文件的写入基准（--zshrc-base / --zprofile-base），外加恰好一种
+/// aliases:apply —— 至少一个文件的写入基准（--zshrc-base / --zprofile-base / --bashrc-base），外加恰好一种
 /// 操作：--set <名称> --value <取值> [--rename-from <旧名>] | --remove <名称> |
 /// --recommended <名称> | --legacy <建议 id>。
 pub(crate) fn parse_apply_args(req: &Request) -> Result<ApplyArgs> {
-    let mut value_flags: Vec<&str> = model::targets().iter().map(|t| t.base_flag).collect();
+    let mut value_flags: Vec<&str> = model::all_targets().iter().map(|t| t.base_flag).collect();
     value_flags.extend([
         "--set",
         "--value",
@@ -123,7 +123,7 @@ pub(crate) fn parse_apply_args(req: &Request) -> Result<ApplyArgs> {
     let parsed = collect(req, &value_flags, &["--offline"])?;
 
     let mut bases = Vec::new();
-    for spec in model::targets() {
+    for spec in model::all_targets() {
         if let Some(base) = get(&parsed, spec.base_flag) {
             if !valid_base(base) {
                 return Err(usage(
@@ -135,7 +135,7 @@ pub(crate) fn parse_apply_args(req: &Request) -> Result<ApplyArgs> {
     }
     if bases.is_empty() {
         return Err(usage(
-            "参数错误: 需要写入基准（--zshrc-base / --zprofile-base，Windows 为 --cmd-base；取自 aliases:status 的 observed.base）",
+            "参数错误: 需要写入基准（--zshrc-base / --zprofile-base / --bashrc-base，Windows 为 --cmd-base；取自 aliases:status 的 observed.base）",
         ));
     }
 
