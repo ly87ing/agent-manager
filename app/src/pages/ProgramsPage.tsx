@@ -3,6 +3,7 @@ import { RefreshCw, ScanSearch } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { ActionMenu } from "../components/AccountGrid";
+import { ROW } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { PageError, PageLoading } from "../components/PageState";
 import { ProgramActionDialog, type ProgramActionKind } from "../components/ProgramActionDialog";
@@ -16,7 +17,12 @@ import { engineKeys, useCheckingUpdates, useEngineQuery, useRefreshUpstream } fr
 import { cn } from "../lib/utils";
 
 const TEXT_BUTTON = "rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40";
-const PRIMARY = "rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-40";
+const PRIMARY = "whitespace-nowrap rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-40";
+/** 列宽固定、表头与各行对齐（与来源页同一版式：一行一项）。 */
+const COL_NEED = "w-52 shrink-0";
+const COL_VERSION = "w-36 shrink-0";
+const COL_STATE = "w-32 shrink-0";
+const COL_ACT = "w-40 shrink-0";
 
 /** 程序的问题 → 统一状态标签。 */
 function problemBadges(program: ProgramElement): { state: InboxState; text: string }[] {
@@ -177,83 +183,81 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
         <section aria-label="程序" data-testid="programs-list" className="overflow-clip rounded-lg border bg-card">
           <div className="flex items-center gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
             <span className="min-w-0 flex-1 font-medium text-foreground">程序 · {programs.length}</span>
-            <span className="w-56 shrink-0">装在哪 · 版本</span>
-            <span className="w-56 shrink-0 text-right">状态与操作</span>
+            <span className={COL_NEED}>被谁需要</span>
+            <span className={COL_VERSION}>版本</span>
+            <span className={COL_STATE}>状态</span>
+            <span className={COL_ACT} />
           </div>
           <ul className="divide-y">
             {programs.map((program) => {
               const { primary, menu } = actionsOf(program);
               const install = program.installs[0];
+              const runners = [...new Set(program.runners.map((runner) => runner.runner))].join(" / ");
+              // 第二行小字：提供的命令与装在哪（按需拉取的写运行方式与完整来源）
+              const where = program.mode === "runner"
+                ? `${runners} · ${program.name}`
+                : [program.all_bins.length ? `命令 ${program.all_bins.join("、")}` : null, install ? `${ownerLabel(install)} · ${install.path}` : null].filter(Boolean).join(" · ");
+              const current = program.mode === "runner"
+                ? [...new Set(program.runners.map((runner) => (runner.version ? shortVersion(runner.version) : "没写版本")))].join("、")
+                : shortVersion(program.version ?? program.managed_current);
+              const newer = program.freshness?.state === "behind" && program.freshness.upstream ? shortVersion(program.freshness.upstream) : null;
               return (
                 <li
                   key={program.program}
                   data-testid={`program-row-${program.program}`}
                   data-program-anchor={program.program}
-                  className={cn("flex items-start gap-4 px-4 py-2 hover:bg-accent/40", focus === program.program && "ring-2 ring-inset ring-primary/40")}
+                  className={cn(ROW, focus === program.program && "ring-2 ring-inset ring-primary/40")}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                      <span className="font-mono">{displayName(program)}</span>
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground" title={MODE_HINT[program.mode]}>{MODE_LABEL[program.mode]}</span>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-sm font-medium" title={program.program}>{displayName(program)}</span>
+                      <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" title={MODE_HINT[program.mode]}>{MODE_LABEL[program.mode]}</span>
                     </div>
-                    {program.all_bins.length > 0 && (
-                      <div className="truncate font-mono text-xs text-muted-foreground" title="这个包提供的全部命令">命令：{program.all_bins.join("、")}</div>
-                    )}
-                    <div className="mt-0.5 flex flex-wrap gap-1 text-[11px]">
-                      {program.dependents.map((dep) => (
+                    <div className="truncate font-mono text-xs text-muted-foreground" title={install?.real ?? where}>{where || "—"}</div>
+                  </div>
+                  <div
+                    className={cn(COL_NEED, "truncate text-xs text-muted-foreground")}
+                    title={program.dependents.map((dep) => `${dep.kind === "skill" ? "技能" : "MCP"} ${dep.name}`).join("\n")}
+                  >
+                    {program.dependents.length === 0 && "没人用"}
+                    {program.dependents.map((dep, index) => (
+                      <span key={`${dep.kind}:${dep.name}`}>
+                        {index > 0 && "、"}
                         <button
-                          key={`${dep.kind}:${dep.name}`}
                           type="button"
                           data-testid={`program-dependent-${program.program}-${dep.name}`}
                           onClick={() => onOpen?.(dep.kind === "skill" ? `skills:${dep.name}` : `mcp:${dep.name}`)}
-                          className="rounded border px-1.5 py-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-                          title={dep.source === "user" ? "你确认的补充声明" : dep.source === "declared" ? "技能自己声明的" : "从 MCP 启动命令看出的"}
+                          className="hover:text-foreground hover:underline"
                         >
-                          {dep.kind === "skill" ? "技能" : "MCP"} {dep.name}
+                          {index === 0 && (dep.kind === "skill" ? "技能 " : "MCP ")}
+                          {dep.name}
                         </button>
-                      ))}
-                    </div>
+                      </span>
+                    ))}
                   </div>
-                  <div className="w-56 shrink-0 text-xs text-muted-foreground">
-                    {program.mode === "runner" ? (
-                      <div>
-                        {[...new Set(program.runners.map((runner) => `${runner.runner} · ${runner.version ? shortVersion(runner.version) : "没写版本"}`))].map((text) => (
-                          <div key={text} className="font-mono">{text}</div>
-                        ))}
-                      </div>
-                    ) : install ? (
-                      <div className="truncate" title={install.real}>
-                        {ownerLabel(install)} · <span className="font-mono">{install.path}</span>
-                      </div>
-                    ) : (
-                      <div>—</div>
-                    )}
-                    {program.version && <div className="font-mono text-foreground">{shortVersion(program.version)}</div>}
-                    {program.mode === "managed" && program.managed_versions.length > 1 && (
-                      <div>已装：{program.managed_versions.join("、")}</div>
-                    )}
+                  <div className={cn(COL_VERSION, "truncate font-mono text-xs")}>
+                    <span className="text-foreground">{current || "—"}</span>
+                    {newer && <span className="text-info"> → {newer}</span>}
                   </div>
-                  <div className="flex w-56 shrink-0 flex-col items-end gap-1">
-                    <div className="flex flex-wrap justify-end gap-1">
-                      {problemBadges(program).map((badge) => (
-                        <StateBadge key={badge.text} state={badge.state}>{badge.text}</StateBadge>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      {primary && (
-                        <button
-                          type="button"
-                          data-testid={primary.testId}
-                          disabled={checking}
-                          title={checking ? "正在检查新版本，完成后再操作" : undefined}
-                          onClick={primary.run}
-                          className={PRIMARY}
-                        >
-                          {primary.label}
-                        </button>
-                      )}
-                      {menu.length > 0 && !checking && <ActionMenu label={`${displayName(program)} 的更多操作`} items={menu} />}
-                    </div>
+                  <div className={cn(COL_STATE, "flex gap-1 overflow-hidden")}>
+                    {problemBadges(program).map((badge) => (
+                      <StateBadge key={badge.text} state={badge.state}>{badge.text}</StateBadge>
+                    ))}
+                  </div>
+                  <div className={cn(COL_ACT, "flex items-center justify-end gap-1")}>
+                    {primary && (
+                      <button
+                        type="button"
+                        data-testid={primary.testId}
+                        disabled={checking}
+                        title={checking ? "正在检查新版本，完成后再操作" : undefined}
+                        onClick={primary.run}
+                        className={PRIMARY}
+                      >
+                        {primary.label}
+                      </button>
+                    )}
+                    {menu.length > 0 && !checking ? <ActionMenu label={`${displayName(program)} 的更多操作`} items={menu} /> : <span className="w-7" />}
                   </div>
                 </li>
               );

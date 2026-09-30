@@ -149,7 +149,10 @@ export function ownerLabel(install: ProgramInstall): string {
 
 /** 显示用的名字：按路径认出的程序只显示命令名，路径放在「装在哪」。 */
 export function displayName(program: { kind: string; name: string; bins: string[] }): string {
-  return program.kind === "path" ? program.bins[0] ?? program.name.split("/").pop() ?? program.name : program.name;
+  if (program.kind === "path") return program.bins[0] ?? program.name.split("/").pop() ?? program.name;
+  // git 源只显示仓库名，完整地址放在第二行小字
+  if (program.kind === "git") return program.name.split("/").pop() ?? program.name;
+  return program.name;
 }
 
 export function isExactVersion(version: string): boolean {
