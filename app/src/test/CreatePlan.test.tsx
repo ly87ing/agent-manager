@@ -23,7 +23,7 @@ const preview = {
 };
 
 describe("创建前的动作清单", () => {
-  it("逐条写出带上的设置、置空的变量、复制的规则与 MCP", () => {
+  it("逐条写出带上的设置、复制的规则与 MCP；不替用户置空任何变量", () => {
     render(
       <CreatePlan
         preview={preview}
@@ -42,7 +42,7 @@ describe("创建前的动作清单", () => {
     const plan = screen.getByTestId("account-create-plan");
     expect(plan).toHaveTextContent("从主账号带上权限规则、状态栏");
     expect(plan).not.toHaveTextContent("Hooks");
-    expect(plan).toHaveTextContent("置空 3 个凭据相关变量");
+    expect(plan).not.toHaveTextContent("置空");
     expect(plan).toHaveTextContent("复制主账号的规则到 ~/.claude-glm/CLAUDE.md");
     expect(plan).toHaveTextContent("写入 MCP 服务 ~/.claude-glm/.claude.json已复制 demo-fs");
     expect(plan).toHaveTextContent("在 ~/.zshrc 里由本工具管理的那几行加一条启动命令");

@@ -70,14 +70,6 @@ export function CreatePlan({ preview, facts }: { preview: CreatePreview; facts: 
   const seeds = preview.config.seed_results ?? [];
   const copied = (item: string) => seeds.some((row) => row.item === item && row.state === "copied");
   const carried = Object.keys(SEED_TEXT).filter(copied).map((item) => SEED_TEXT[item]);
-  const cleared = (() => {
-    try {
-      const env = (JSON.parse(preview.config.content) as { env?: Record<string, string> }).env ?? {};
-      return Object.values(env).filter((value) => value === "").length;
-    } catch {
-      return 0;
-    }
-  })();
   const extraFiles = preview.config.files ?? [];
   const rulesFile = extraFiles.find((file) => /(CLAUDE|AGENTS)\.md$/.test(file.path));
   const mcpFile = extraFiles.find((file) => file.path.endsWith(".claude.json") || file.path.endsWith("config.toml"));
@@ -97,7 +89,6 @@ export function CreatePlan({ preview, facts }: { preview: CreatePreview; facts: 
           {[
             facts.api ? `接口 ${facts.api.baseUrl}${facts.api.model ? `、模型 ${facts.api.model}` : ""}、API Key（取自 ${facts.api.tokenVar}）` : null,
             carried.length ? `从主账号带上${carried.join("、")}` : null,
-            cleared ? `置空 ${cleared} 个凭据相关变量，防止终端里导出的令牌顶替这个账号` : null,
           ].filter(Boolean).join("；")}
         </FileStep>
         {rulesFile && (

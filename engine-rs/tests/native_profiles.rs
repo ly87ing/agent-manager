@@ -284,9 +284,9 @@ fn provider_candidate_updates_one_profile_definition_and_live_file_together() {
     let file: serde_json::Value = serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
     assert_eq!(file["env"]["ANTHROPIC_BASE_URL"], "https://new.example.com");
     assert_eq!(file["env"]["ANTHROPIC_API_KEY"], "candidate-token-value");
-    assert_eq!(
-        file["env"]["ANTHROPIC_AUTH_TOKEN"], "",
-        "旧请求头凭据须置空以隔离 shell 继承"
+    assert!(
+        file["env"].get("ANTHROPIC_AUTH_TOKEN").is_none(),
+        "换了凭据写法：旧的那个是本工具写的、这次改掉了，去掉而不是置空"
     );
     assert_eq!(file["model"], "new-model");
     let policy = execute(&ctx, &request("policy:get", &[]));
@@ -1746,7 +1746,7 @@ fn claude_settings(ctx: &Context, dir: &str) -> serde_json::Value {
 }
 
 #[test]
-fn 第三方实例把未声明的凭据置空_只剩自己声明的那一个() {
+fn 第三方实例只写自己声明的凭据_不加别的变量() {
     let (root, ctx) = temp_ctx("cancel-env");
     std::env::set_var("AM_TEST_TOKEN_CANCEL", "cancel-token");
     assert!(save_definition(
@@ -1758,11 +1758,9 @@ fn 第三方实例把未声明的凭据置空_只剩自己声明的那一个() {
     assert!(apply.ok, "{:?}", apply.errors);
     let env = &claude_settings(&ctx, ".claude-ly")["env"];
     assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], "cancel-token");
-    assert_eq!(
-        env["ANTHROPIC_API_KEY"], "",
-        "没声明的第三方凭据置空，shell 里的同名变量进不来"
-    );
-    assert_eq!(env["CLAUDE_CODE_OAUTH_TOKEN"], "", "官方长期令牌置空");
+    // 只写自己声明的：没声明的第三方凭据与官方令牌一个都不加
+    assert!(env.get("ANTHROPIC_API_KEY").is_none(), "{env}");
+    assert!(env.get("CLAUDE_CODE_OAUTH_TOKEN").is_none(), "{env}");
     assert_eq!(element(&status(&ctx), "cc-ly")["state"], "managed-ok");
     assert_eq!(
         probe_log(&ctx),
@@ -1770,21 +1768,24 @@ fn 第三方实例把未声明的凭据置空_只剩自己声明的那一个() {
         "目录原本不存在，不需要探测，也不调用官方命令"
     );
 
-    // 有人删掉置空项：状态报不一致，再写一次补回
+    // 别人加了无关的变量：不归本工具管，不算不一致
     let path = ctx.home_dir.join(".claude-ly/settings.json");
     let mut live = claude_settings(&ctx, ".claude-ly");
+    live["env"]["MY_OWN"] = serde_json::json!("x");
+    std::fs::write(&path, serde_json::to_vec_pretty(&live).unwrap()).unwrap();
+    assert_eq!(element(&status(&ctx), "cc-ly")["state"], "managed-ok");
+    // 删掉本工具声明的凭据：报不一致，再写一次补回，无关变量原样保留
     live["env"]
         .as_object_mut()
         .unwrap()
-        .remove("CLAUDE_CODE_OAUTH_TOKEN");
+        .remove("ANTHROPIC_AUTH_TOKEN");
     std::fs::write(&path, serde_json::to_vec_pretty(&live).unwrap()).unwrap();
     assert_eq!(element(&status(&ctx), "cc-ly")["state"], "drifted");
     let again = apply_now(&ctx, "cc-ly");
     assert!(again.ok, "{:?}", again.errors);
-    assert_eq!(
-        claude_settings(&ctx, ".claude-ly")["env"]["CLAUDE_CODE_OAUTH_TOKEN"],
-        ""
-    );
+    let env = &claude_settings(&ctx, ".claude-ly")["env"];
+    assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], "cancel-token");
+    assert_eq!(env["MY_OWN"], "x");
     let log = probe_log(&ctx);
     let dir = ctx.home_dir.join(".claude-ly");
     assert!(
@@ -1963,7 +1964,7 @@ fn 无法确认有没有官方登录时拒绝写入() {
 }
 
 #[test]
-fn 官方账号实例不检查登录_只把外部凭据变量置空() {
+fn 官方账号实例不检查登录_只写自己声明的项() {
     let (root, ctx) = temp_ctx("official-instance");
     let dir = ctx.home_dir.join(".claude-work");
     std::fs::create_dir_all(&dir).unwrap();
@@ -1977,31 +1978,14 @@ fn 官方账号实例不检查登录_只把外部凭据变量置空() {
     assert!(apply.ok, "{:?}", apply.errors);
     let settings = claude_settings(&ctx, ".claude-work");
     assert_eq!(settings["model"], "opus");
-    // 官方账号实例只用目录里的登录：shell 里给别的账号或中转导出的凭据、地址、云厂商开关与
-    // 附加请求头一律置空取消继承，不写任何凭据取值
-    let env = settings["env"].as_object().expect("写了取消继承的 env");
-    for name in [
-        "ANTHROPIC_AUTH_TOKEN",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_CUSTOM_HEADERS",
-        "CLAUDE_CODE_OAUTH_TOKEN",
-        "CLAUDE_CODE_USE_BEDROCK",
-        "CLAUDE_CODE_USE_VERTEX",
-        "CLAUDE_CODE_USE_FOUNDRY",
-        "CLAUDE_CODE_USE_ANTHROPIC_AWS",
-        "CLAUDE_CODE_USE_MANTLE",
-    ] {
-        assert_eq!(env[name], "", "{name}");
-    }
-    assert_eq!(env.len(), 10, "{env:?}");
+    // 只处理本工具自己变更的部分：定义只声明了模型，就不替用户写任何 env（不置空凭据等变量）
+    assert!(settings.get("env").is_none(), "{settings}");
     // 官方账号实例不跑登录检查
     assert_eq!(probe_log(&ctx), "");
 
-    // 用户在实例文件里自己设了网关地址（定义没声明）：显示为不同、实际值可见；只剩隔离项不同
-    // 时不提供「以实际配置更新定义」（采纳只搬定义声明的项，改变不了什么）
+    // 用户在实例文件里自己设了网关地址（定义没声明）：不归本工具管，不算不一致，也不列出来
     let mut edited = settings.clone();
-    edited["env"]["ANTHROPIC_BASE_URL"] = serde_json::json!("https://gw.example.com");
+    edited["env"] = serde_json::json!({"ANTHROPIC_BASE_URL": "https://gw.example.com"});
     std::fs::write(
         dir.join("settings.json"),
         serde_json::to_vec_pretty(&edited).unwrap(),
@@ -2009,23 +1993,12 @@ fn 官方账号实例不检查登录_只把外部凭据变量置空() {
     .unwrap();
     let env = status(&ctx);
     let el = element(&env, "cc-work");
-    assert_eq!(el["state"], "drifted");
-    let row = el["observed"]["fields"]
+    assert_eq!(el["state"], "managed-ok");
+    assert!(el["observed"]["fields"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|f| f["field"] == "env.ANTHROPIC_BASE_URL")
-        .unwrap();
-    assert_eq!(row["state"], "differs");
-    assert_eq!(row["live"], "https://gw.example.com");
-    assert_eq!(row["purpose"], "isolation");
-    let actions: Vec<&str> = el["actions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|a| a["id"].as_str().unwrap())
-        .collect();
-    assert_eq!(actions, vec!["apply"]);
+        .all(|f| f["field"] != "env.ANTHROPIC_BASE_URL"));
     let _ = std::fs::remove_dir_all(root);
 }
 

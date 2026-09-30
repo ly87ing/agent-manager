@@ -399,30 +399,21 @@ pub(crate) fn is_third_party(def: &ProfileDef) -> bool {
     }
 }
 
-/// Claude 实例的 settings.json 里要置为空串的变量：会压过实例自己凭据或登录的外部设置，
-/// 实例没声明的一律取消——云厂商开关、两种第三方凭据、官方长期令牌、接口地址与附加请求头。
-///
-/// 官方设置参考（`env` 一节）：settings 的 env 覆盖 shell 里的同名变量，置为 `""` 即取消 shell
-/// 导出，Claude Code 在选择凭据时把空值当作未设置。第三方实例因此只可能用自己声明的那一个
-/// 凭据发往自己的地址；官方账号实例只可能用这个目录里的登录（或它自己声明的长期令牌），shell
-/// 里给别的账号或中转导出的变量进不来。真实 claude 2.1.281 实测：不取消时 shell 的
-/// `CLAUDE_CODE_USE_BEDROCK=1` 把第三方实例改走 Bedrock、shell 的地址与 key 把官方账号实例
-/// 发往中转、shell 的附加请求头随请求发给实例的接口；取消后都不再发生。
-fn claude_cancelled_env(def: &ProfileDef) -> Vec<&'static str> {
-    if def.kind != ProfileKind::Claude {
-        return Vec::new();
-    }
-    CLAUDE_CLOUD_PROVIDER_SWITCHES
-        .into_iter()
-        .chain(CLAUDE_THIRD_PARTY_CREDENTIALS)
-        .chain([
-            CLAUDE_OFFICIAL_TOKEN,
-            CLAUDE_BASE_URL,
-            CLAUDE_CUSTOM_HEADERS,
-        ])
-        .filter(|name| !def.env.contains_key(*name))
-        .collect()
-}
+/// 旧版本为「取消 shell 继承」替账号写过的空串变量（云厂商开关、两种第三方凭据、官方长期令牌、
+/// 接口地址与附加请求头）。现在只处理本次变更的部分，不再写这些空值；已有账号文件里留下的空串
+/// 也不去删它（删也是动没变更的部分）——只在「上次写过、这次定义里没有」的清理里跳过它们。
+const LEGACY_BLANKED_ENV: [&str; 10] = [
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY",
+    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+    "CLAUDE_CODE_USE_MANTLE",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    CLAUDE_OFFICIAL_TOKEN,
+    CLAUDE_BASE_URL,
+    CLAUDE_CUSTOM_HEADERS,
+];
 
 /// 从有效策略里取出全部 profile 定义（带 profile 段的 agent 定义），按 id 排序。
 pub(crate) fn load_definitions(policy: &Value) -> Vec<Result<ProfileDef>> {
@@ -462,9 +453,8 @@ pub(crate) fn load_definition_entries(policy: &Value) -> Vec<(String, Value, Res
 }
 
 /// 实例 settings.json 里与本工具有关的键只有 env / model：`hooks` 与其余根级
-/// 字段是用户自己的（合并写入时原样保留）。env 只写实例定义里声明的那几个变量，外加取消
-/// shell 继承的那组（见 `claude_cancelled_env`，定义没声明的写为空串）；用户自己加的其他 env
-/// 变量原样保留。Codex 实例 config.toml 同理，只动下面这几项。
+/// 字段是用户自己的（合并写入时原样保留）。env 只写实例定义里声明的那几个变量；用户自己加的
+/// 其他 env 变量原样保留（包括旧版本替账号写过的空串，见 `LEGACY_BLANKED_ENV`）。Codex 实例 config.toml 同理，只动下面这几项。
 const CODEX_MODEL_PROVIDER: &str = "model_provider";
 
 fn codex_provider_path() -> String {
@@ -478,13 +468,7 @@ pub(crate) const BASE_MISSING: &str = "missing";
 /// 与库里记下的上次写入路径求并，就是这次写入可能改动的全部位置。
 pub(crate) fn owned_paths(def: &ProfileDef) -> Vec<String> {
     let mut paths: Vec<String> = match def.kind {
-        ProfileKind::Claude => def
-            .env
-            .keys()
-            .map(String::as_str)
-            .chain(claude_cancelled_env(def))
-            .map(|key| format!("env.{key}"))
-            .collect(),
+        ProfileKind::Claude => def.env.keys().map(|key| format!("env.{key}")).collect(),
         ProfileKind::Codex if def.base_url.is_some() => {
             vec![CODEX_MODEL_PROVIDER.to_string(), codex_provider_path()]
         }
@@ -622,21 +606,6 @@ pub(crate) fn compare_fields(
                     field["variable"] = Value::String(var.to_string());
                 }
                 fields.push(field);
-            }
-            for name in claude_cancelled_env(def) {
-                let live = live_env.get(name).and_then(Value::as_str);
-                fields.push(serde_json::json!({
-                    "field": format!("env.{name}"),
-                    "state": match live {
-                        None => "missing",
-                        Some("") => "same",
-                        Some(_) => "differs",
-                    },
-                    "definition": "",
-                    "live": live.map(|v| display_value(name, v)).unwrap_or(Value::Null),
-                    // 取消 shell 继承的隔离项：界面合并成一句说明，不逐条铺开
-                    "purpose": "isolation",
-                }));
             }
             if let Some(model) = &def.model {
                 let live = root.get("model").and_then(Value::as_str);
@@ -892,16 +861,16 @@ pub(crate) fn render_all(
                 .unwrap_or_default();
             for path in recorded {
                 if let Some(name) = path.strip_prefix("env.") {
-                    if !def.env.contains_key(name) {
+                    // 旧版本替账号写的空串不删：只处理本次变更的部分
+                    let legacy_blank = LEGACY_BLANKED_ENV.contains(&name)
+                        && env.get(name).and_then(Value::as_str) == Some("");
+                    if !def.env.contains_key(name) && !legacy_blank {
                         env.remove(name);
                     }
                 }
             }
             for (name, value) in resolved_env(def, resolve)? {
                 env.insert(name, value);
-            }
-            for name in claude_cancelled_env(def) {
-                env.insert(name.to_string(), Value::String(String::new()));
             }
             if env.is_empty() {
                 settings.remove("env");
@@ -1318,11 +1287,15 @@ mod tests {
     /// 密码换成 ***；定义里的地址不许带账号密码。
     #[test]
     fn compare_fields_hide_headers_and_url_userinfo() {
-        let official =
-            def(json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly"}}))
-                .unwrap();
+        let third = def(json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
+            "env": {"ANTHROPIC_BASE_URL": "https://gw.example.com/v1", "ANTHROPIC_AUTH_TOKEN": "${T}"}}}))
+        .unwrap();
         let live = br#"{"env":{"ANTHROPIC_CUSTOM_HEADERS":"Authorization: Bearer relay-secret-123456","ANTHROPIC_BASE_URL":"https://u:p4ss@gw.example.com/v1"}}"#;
-        let fields = compare_fields(&official, Some(live), &|_| None).unwrap();
+        let fields = compare_fields(&third, Some(live), &|_| None).unwrap();
+        // 定义里没有的附加请求头不参与对比，也就不出现在结果里
+        assert!(fields
+            .iter()
+            .all(|f| f["field"] != "env.ANTHROPIC_CUSTOM_HEADERS"));
         let text = serde_json::to_string(&fields).unwrap();
         assert!(!text.contains("relay-secret"), "{text}");
         assert!(!text.contains("p4ss"), "{text}");
@@ -1342,15 +1315,10 @@ mod tests {
 
     /// 实例没声明的凭据、云厂商开关、地址与附加请求头一律置空，取消 shell 继承：第三方实例只用
     /// 自己声明的那一个凭据，官方账号实例只用目录里的登录。
+    /// 只处理本工具自己变更的部分：settings.json 的 env 只写定义里声明的变量，没声明的一个都不加
+    /// （不替用户置空凭据、云厂商开关等）；旧版本替账号写过的空串也不删。
     #[test]
-    fn claude_instances_cancel_every_inherited_credential_they_do_not_declare() {
-        let cloud = [
-            "env.CLAUDE_CODE_USE_ANTHROPIC_AWS",
-            "env.CLAUDE_CODE_USE_BEDROCK",
-            "env.CLAUDE_CODE_USE_FOUNDRY",
-            "env.CLAUDE_CODE_USE_MANTLE",
-            "env.CLAUDE_CODE_USE_VERTEX",
-        ];
+    fn claude_instances_only_manage_env_they_declare() {
         let third = def(
             json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
             "env": {"ANTHROPIC_BASE_URL": "https://a.example.com", "ANTHROPIC_API_KEY": "${K}"}}}),
@@ -1358,44 +1326,23 @@ mod tests {
         .unwrap();
         let mut paths = owned_paths(&third);
         paths.sort();
-        let mut expected = vec![
-            "env.ANTHROPIC_API_KEY",
-            "env.ANTHROPIC_AUTH_TOKEN",
-            "env.ANTHROPIC_BASE_URL",
-            "env.ANTHROPIC_CUSTOM_HEADERS",
-            "env.CLAUDE_CODE_OAUTH_TOKEN",
-        ];
-        expected.extend(cloud);
-        expected.sort();
-        assert_eq!(paths, expected);
+        assert_eq!(paths, ["env.ANTHROPIC_API_KEY", "env.ANTHROPIC_BASE_URL"]);
 
         let official =
             def(json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly"}}))
                 .unwrap();
-        let mut paths = owned_paths(&official);
-        paths.sort();
-        let mut expected = vec![
-            "env.ANTHROPIC_API_KEY",
-            "env.ANTHROPIC_AUTH_TOKEN",
-            "env.ANTHROPIC_BASE_URL",
-            "env.ANTHROPIC_CUSTOM_HEADERS",
-            "env.CLAUDE_CODE_OAUTH_TOKEN",
-        ];
-        expected.extend(cloud);
-        expected.sort();
-        assert_eq!(paths, expected);
+        assert!(owned_paths(&official).is_empty());
         let rendered = render_all(&official, &|_| None, &|_| None, &[]).unwrap();
         let settings: Value = serde_json::from_slice(&rendered[0].content).unwrap();
-        for path in &expected {
-            let name = path.strip_prefix("env.").unwrap();
-            assert_eq!(settings["env"][name], "", "{name} 必须置空取消 shell 继承");
-        }
+        assert!(
+            settings.get("env").is_none(),
+            "没声明就不写 env：{settings}"
+        );
         assert_eq!(
             launch_value(&official, "claude", ""),
             "CLAUDE_CONFIG_DIR=\"~/.claude-ly\" claude"
         );
 
-        // 官方账号实例自己声明的长期令牌照常写取值，不被置空
         let token = def(
             json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
             "env": {"CLAUDE_CODE_OAUTH_TOKEN": "${SETUP_TOKEN}"}}}),
@@ -1409,8 +1356,33 @@ mod tests {
         )
         .unwrap();
         let settings: Value = serde_json::from_slice(&rendered[0].content).unwrap();
-        assert_eq!(settings["env"]["CLAUDE_CODE_OAUTH_TOKEN"], "tok");
-        assert_eq!(settings["env"]["ANTHROPIC_API_KEY"], "");
+        assert_eq!(settings["env"], json!({"CLAUDE_CODE_OAUTH_TOKEN": "tok"}));
+
+        // 已有账号：旧版本写过的空串原样保留；用户从定义里删掉的变量（这里是模型）照常去掉
+        let existing = br#"{"env":{"ANTHROPIC_BASE_URL":"https://a.example.com","ANTHROPIC_API_KEY":"k","CLAUDE_CODE_USE_BEDROCK":"","ANTHROPIC_CUSTOM_HEADERS":"","ANTHROPIC_MODEL":"m1","MY_OWN":"x"},"theme":"dark"}"#;
+        let recorded: Vec<String> = [
+            "env.ANTHROPIC_BASE_URL",
+            "env.ANTHROPIC_API_KEY",
+            "env.CLAUDE_CODE_USE_BEDROCK",
+            "env.ANTHROPIC_CUSTOM_HEADERS",
+            "env.ANTHROPIC_MODEL",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let rendered = render_all(
+            &third,
+            &|file| (file == FILE_CLAUDE_SETTINGS).then(|| existing.to_vec()),
+            &|name| (name == "K").then(|| "k".to_string()),
+            &recorded,
+        )
+        .unwrap();
+        let settings: Value = serde_json::from_slice(&rendered[0].content).unwrap();
+        assert_eq!(
+            settings["env"],
+            json!({"ANTHROPIC_BASE_URL": "https://a.example.com", "ANTHROPIC_API_KEY": "k", "CLAUDE_CODE_USE_BEDROCK": "", "ANTHROPIC_CUSTOM_HEADERS": "", "MY_OWN": "x"})
+        );
+        assert_eq!(settings["theme"], "dark");
     }
 
     /// 第三方实例里打开云厂商开关，Claude 会改走云厂商、不用实例的第三方凭据：定义就拒绝。
@@ -1437,9 +1409,12 @@ mod tests {
         let settings: Value = serde_json::from_slice(&rendered[0].content).unwrap();
         assert_eq!(
             settings["env"]["CLAUDE_CODE_USE_BEDROCK"], "1",
-            "自己声明的开关不被置空"
+            "自己声明的开关照写"
         );
-        assert_eq!(settings["env"]["CLAUDE_CODE_USE_VERTEX"], "");
+        assert!(
+            settings["env"].get("CLAUDE_CODE_USE_VERTEX").is_none(),
+            "没声明的开关不替用户加"
+        );
     }
 
     #[test]
