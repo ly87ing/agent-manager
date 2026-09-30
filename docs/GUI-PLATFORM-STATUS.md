@@ -24,7 +24,8 @@
 | 独立包真实业务 E2E | 主要场景已完成（2026-09-15 主审独立验收，绑定验收提交 `5a110be3`）：Darwin x86_64 DMG verify 脚本 exit 0、包内构建身份 commit/date 与源码精确一致、未签名，SHA256 `076d16b098ede8915802c0bc6dceec42dc06e0dcadddd137e7865681c7e90a68`，7632606 bytes；真实 GUI E2E（旧版 plan→confirm→apply 交互，现已失效，不证明本轮直接 apply 新交互）覆盖 system:audit 缺库零写、Rules 取消零写/应用、Hooks 双目标、Aliases 双目标、MCP stdio+远程 HTTP 的 plan/confirm/apply、Secrets 仅显示变量名与存在性、Runs、外部修改 plan fail-closed；MCP 定义经共用 Rust CLI 写入隔离 SQLite 测试夹具，MCP 新增服务表单因 macOS 自动化输入限制未验收（不以测试夹具结果替代表单通过）；（旧版 dry-run 证据）stdio dry-run 数据库与目标文件哈希不变、日志不落库，远程 header 以环境变量引用写入 Codex 目标、合成值不出现在目标/诊断/操作日志。历史（2026-09-14）：基于 `5ae995b` 的 DMG 曾通过独立包验收（SHA256 `71a386d6ab8e1a7f85ef59c82f379411e9aa1dccaa3c3166309b96b971fce26b`，7632599 bytes，非 HEAD 构建包），当时 GUI 业务 E2E 因宿主 AX/computer-use permission_denied 未启动 |
 | 跨平台发布、签名、更新 | 源码管线已就绪但外部/真实验收未完成：`14e6790` 重构后的 gui-release.yml 采用草稿先行单写者编排——前置 create-release job 统一校验 tag/checkout/版本一致性并创建唯一 draft Release，macOS arm64+x86_64、Linux x86_64、Windows x86_64 四腿矩阵（app/dmg、AppImage/deb、NSIS/MSI）以 releaseId 模式只向该草稿上传产物，收尾 updater-json job 在全矩阵完成后单写 latest.json（任一平台产物或签名缺失即失败，不上传残缺 latest.json）；支持 prerelease tag（由 tag 后缀推导）；每腿生成并上传 SHA256 checksums；engine-rs 与应用版本一致性门禁；verify 脚本在已签名分支补充公证票据如实检查；含 updater 签名、Apple/Windows 签名及 Apple 公证接线，缺密钥/占位符/脏树/来源异常 fail-closed，临时证书清理，Release 固定 draft；`9f56f00` 已将 Windows 引擎与应用升级为阻断 CI（cargo fmt/test/check、engine release build、NSIS/MSI build，无 continue-on-error）。2026-09-15 复测外部状态：GitHub Actions secrets=0、variables=0、本机有效 codesigning identities=0、GitHub Releases=0；GUI CI run 34936884572（该 run 绑定提交 `5a110be3`）六个 jobs 均 steps=[]，因账户付款失败或 spending limit 在启动前失败；arm64 DMG 已交叉构建但仅静态验收（SHA256 `a9540a2690b9d2ede16ef627f310e277ca49130e608c518b876aeaed0bbfd3f8`，7298163 bytes，thin arm64，adhoc linker-signed，未在 arm64 设备运行）；Developer ID 签名、公证、Linux/Windows 真实包、各平台真机运行与安装、updater 真实签名下载安装回读均未验证；未创建 tag、GitHub Release 或对外安装包 |
 
-| Windows 支持 | 代码已补全，本机交叉编译与 Wine 下的引擎测试通过；Windows 真机界面与安装包未验收（2026-09-30，见下「Windows 支持」） |
+| Windows 支持 | 代码已补全，Wine 下引擎测试全过，NSIS 安装包已交叉打出并在 Wine 里装上；Windows 真机界面未验收（2026-09-30，见下「Windows 支持」） |
+| Linux 支持 | 已在 Ubuntu 22.04 容器里验收（2026-09-30，见下「Linux 支持」）：引擎、桌面端、前端测试全过，deb 与 AppImage 打包成功，AppImage 在虚拟显示器里启动并经界面新建启动命令写入 `~/.bashrc`、bash 里实际可用；真实桌面环境（GNOME / KDE 的窗口、托盘、输入法）未验 |
 本轮发布就绪打磨（`d46b85a`、`47702ed`、`14e6790`）：补齐 MIT LICENSE 与公开发布元数据、启用显式 Webview CSP、更新应用图标、Bundle ID 定为 `io.github.ly87ing.agent-manager`；前端增加顶层错误边界、自定义助手安装/升级确认与 MCP 空态引导，并清理退役代码；发布管线重构内容见上表"跨平台发布、签名、更新"行。
 
 缺库读取不建库，保存才初始化数据库；设置在 `app_settings` 表。policy 持久化来源为 `sqlite`，写入参数固定 `--layer local`。Claude Code 与 Codex 默认均为官方 `native` 命令，brew 仅按实际检测来源处理。
@@ -65,4 +66,17 @@ MCP 支持本地 stdio 与远程 HTTP 两种传输；条目以各助手配置文
 - 本机交叉编译：引擎与桌面端对 `x86_64-pc-windows-gnu` 编译通过，无警告。
 - 引擎测试在 Docker 里的 Wine 11 下运行 Windows 版测试程序（Windows 版 git 用 Git for Windows 的 MinGit）：19 个测试程序共 399 项全部通过（程序安装与 rc 文件两组只在 Unix 上跑，Windows 下为 0 项）；同一代码在 macOS 上 439 项全部通过。其中新增的 Windows 专项覆盖：命令脚本的新建、改写、改名、删除、外部修改拒绝、不覆盖用户脚本、PATH 提示；在 Wine 的 `cmd` 里真正运行生成的脚本，环境变量与参数传到程序；npm 全局 cmd-shim 的归属识别。
 - 只在 Unix 上跑的测试：用 shell 脚本冒充 npm / uv / git 做安装与探测的程序安装用例与部分新版本探测，Unix 权限位，智能体安装动作。
-- 未做：Windows 真机（或虚拟机）上运行桌面应用、NSIS / MSI 安装包、真实的 Claude Code / Codex / Git Bash 状态栏与 npm 联网安装；GitHub CI 仍因账户计费无法启动。
+- 安装包：在 Linux 容器里按 Tauri 文档交叉打出 NSIS 安装包（`tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis`，约 6MB，未签名；MSI 只能在 Windows 上打）。在 Wine 里静默安装成功，程序与卸载程序装到当前用户的 `AppData\Local\Agent Manager`；Wine 没有 WebView2（安装时伪造了已安装的注册表项），界面起不来，属预期。
+- 未做：Windows 真机（或虚拟机）上运行桌面应用与安装流程（含 WebView2 下载）、MSI、真实的 Claude Code / Codex / Git Bash 状态栏与 npm 联网安装；GitHub CI 仍因账户计费无法启动。本机做不了 Windows 虚拟机（Docker 虚拟机里没有 KVM，磁盘余量也不够）。
+
+## Linux 支持（2026-09-30）
+
+与 macOS 共用 Unix 代码。Linux 上需要不同处理的只有启动命令：多数发行版默认 shell 是 bash，读 `~/.bashrc` 而不是 `~/.zshrc`。现在按 `$SHELL` 定新命令写到哪里（zsh 为 `~/.zshrc`，bash 为 `~/.bashrc`；没设 `$SHELL` 的 Linux 上只有 `~/.bashrc` 时按 bash），其他配置文件已有本工具那一段时同步，没有不新建。fish 等其他 shell 暂不支持。另外智能体检测补了 Linuxbrew 目录。
+
+验证（Docker 里的 Ubuntu 22.04，Rust 1.88、Node 22，依赖与 `gui-release.yml` 的 Linux 腿一致）：
+
+- 干净检出后：引擎测试以 root 与普通用户各跑一遍，普通用户下 441 项全过；桌面端 23 项、前端 606 项、生产构建通过。
+- `tauri build --bundles deb,appimage` 成功：deb 约 10MB，AppImage 约 88MB。
+- 以普通用户在 Xvfb 里启动 AppImage（隔离数据目录，bash 用户）：账号、命令、程序页正常显示，中文字体正常；命令页说明为「新命令写进 ~/.bashrc」；经界面新建一条启动命令，预览与写入都指向 `~/.bashrc`，原有内容不动，`bash -ic` 里能运行这条命令。
+- 在 Linux 上暴露并修掉一个偶发问题：两个 Codex 会话文件修改时间相同时，额度可能取到旧会话（现在按文件名比较）。
+- 未验：真实桌面环境（GNOME / KDE）的窗口装饰、托盘图标、输入法；arm64 Linux；各发行版的安装包安装。
