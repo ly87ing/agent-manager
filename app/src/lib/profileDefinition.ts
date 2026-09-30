@@ -54,9 +54,6 @@ export interface ProfileFormInput {
   extraEnv: Record<string, string>;
 }
 
-/** 官方设置：子进程（Bash 工具、hooks、MCP 服务）的环境里去掉凭据。第三方环境默认开启。 */
-export const SUBPROCESS_SCRUB_ENV = "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB";
-
 /** 表单自己管理的 Claude env 变量；其余 env 进 extraEnv 原样往返。 */
 const CLAUDE_FORM_ENV = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
 
@@ -110,7 +107,6 @@ export function buildProfileDefinition(input: ProfileFormInput, baseBin: string)
   } else {
     if (input.baseUrl.trim()) profile.base_url = input.baseUrl.trim();
     if (input.tokenVar.trim()) profile.env_key = input.tokenVar.trim();
-    profile.wire_api = "responses";
   }
   if (input.model.trim()) profile.model = input.model.trim();
 
@@ -514,7 +510,7 @@ export function profileConnectionReadbackMatches(
     }
   } else if (typeof candidate.base_url === "string") {
     expected.push(["provider.base_url", candidate.base_url]);
-    expected.push(["provider.wire_api", String(candidate.wire_api ?? "responses")]);
+    if (typeof candidate.wire_api === "string") expected.push(["provider.wire_api", candidate.wire_api]);
     if (typeof candidate.env_key === "string") {
       expected.push(["provider.experimental_bearer_token", `\${${candidate.env_key}}`]);
     }

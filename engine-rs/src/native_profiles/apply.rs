@@ -363,23 +363,10 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         Vec::new()
     };
     let seed_preview = super::preview_seed::preview(ctx, req, &def, &dir, content, &items);
-    let will_write = if on_save {
-        previous
-            .as_ref()
-            .is_some_and(|old| *old != seed_preview.main)
-            || (previous.is_none()
-                && ((def.kind == model::ProfileKind::Claude || model::is_third_party(&def))
-                    || !seed_preview.main.is_empty()))
-    } else {
-        def.kind == model::ProfileKind::Claude
-            || model::is_third_party(&def)
-            || seed_preview.results.iter().any(|item| {
-                item["state"] == "copied"
-                    && matches!(
-                        item["item"].as_str(),
-                        Some("permissions" | "statusline" | "mcp")
-                    )
-            })
+    // 会不会写主配置文件：内容有变化才写；原本没有的文件只在有内容时才新建
+    let will_write = match previous.as_ref() {
+        Some(old) => *old != seed_preview.main,
+        None => !model::is_empty_render(def.kind, &seed_preview.main),
     };
     let content = seed_preview.main;
     if content.len() > MAX_PREVIEW_BYTES {
@@ -605,7 +592,10 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     if current != plan.previous {
         return Err(stale(def, &plan.file));
     }
-    atomic_write(&plan.real, &plan.content)?;
+    // 原本没有这个文件、这次也没有要写的内容：不新建空文件
+    if !(plan.previous.is_none() && model::is_empty_render(def.kind, &plan.content)) {
+        atomic_write(&plan.real, &plan.content)?;
+    }
     let rollback = || match &plan.previous {
         Some(bytes) => {
             let _ = std::fs::write(&plan.real, bytes);

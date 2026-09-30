@@ -1,12 +1,10 @@
 import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Account, AgentAccounts } from "../lib/accounts";
-import { detectSystemPlatform } from "../lib/agentDefinitionForm";
 import { connectionFromPreset, presetsFor } from "../lib/connectionPresets";
 import { useDialogFocus } from "../lib/dialogFocus";
 import {
   PROFILE_ID_RE,
-  SUBPROCESS_SCRUB_ENV,
   connectionToProfileInput,
   defaultConfigDir,
   parseProfileDefinition,
@@ -124,10 +122,6 @@ export function AccountDrawer({
       tokenVar: api ? tokenVar.trim() : "",
       model: api ? model.trim() : input.model,
     };
-    // 第三方凭据写在账号自己的配置里：默认不让子进程（Bash、hooks、MCP）读到它；Linux 上需要 bubblewrap，不默认开
-    if (!editing && api && group.kind === "claude" && detectSystemPlatform() !== "linux") {
-      input.extraEnv[SUBPROCESS_SCRUB_ENV] = "1";
-    }
     return input;
   };
 

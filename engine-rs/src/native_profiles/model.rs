@@ -632,9 +632,12 @@ pub(crate) fn compare_fields(
                     (CODEX_MODEL_PROVIDER, CODEX_PROVIDER_ID),
                     ("provider.name", codex_provider_name(def)),
                     ("provider.base_url", url.as_str()),
-                    ("provider.wire_api", codex_wire_api(def)),
                 ] {
                     expected.push((field.into(), value.into(), Some(value.into())));
+                }
+                // wire_api 只在用户写了时才管（Codex 现在只支持 responses，不写即默认）
+                if let Some(api) = &def.wire_api {
+                    expected.push(("provider.wire_api".into(), api.clone(), Some(api.clone())));
                 }
                 if let Some(var) = &def.env_key {
                     expected.push((
@@ -684,10 +687,6 @@ const CODEX_BEARER_TOKEN: &str = "experimental_bearer_token";
 /// Codex 唯一支持的接入协议。`wire_api = "chat"` 在当前 Codex 里是反序列化错误
 /// （`model-provider-info` 的 `CHAT_WIRE_API_REMOVED_ERROR`），整份 config.toml 都会读不了。
 const CODEX_WIRE_API: &str = "responses";
-
-fn codex_wire_api(def: &ProfileDef) -> &str {
-    def.wire_api.as_deref().unwrap_or(CODEX_WIRE_API)
-}
 
 /// 接入表的 `name`：Codex 要求非空，且把名为 `OpenAI` 的接入方式当成内置 openai
 /// （`model-provider-info` 的 `is_openai()` 按名称判断），这两种情况改用实例名。
@@ -926,7 +925,26 @@ pub(crate) fn render_all(
                                 "实例 config.toml 里的 model_providers 不是普通表，拒绝读写"
                             )
                         })?;
-                    providers.insert(CODEX_PROVIDER_ID, toml_edit::Item::Table(table));
+                    // 只改本工具管的键（name、base_url、令牌、定义里写了的 wire_api）；表里其他键
+                    // （用户手加的、旧版本写的 wire_api）原样保留
+                    match providers
+                        .get_mut(CODEX_PROVIDER_ID)
+                        .and_then(toml_edit::Item::as_table_mut)
+                    {
+                        Some(existing) => {
+                            for key in ["name", "base_url", CODEX_BEARER_TOKEN] {
+                                if !table.contains_key(key) {
+                                    existing.remove(key);
+                                }
+                            }
+                            for (key, item) in table.iter() {
+                                existing[key] = item.clone();
+                            }
+                        }
+                        None => {
+                            providers.insert(CODEX_PROVIDER_ID, toml_edit::Item::Table(table));
+                        }
+                    }
                 }
                 None => {
                     if owned_before(CODEX_MODEL_PROVIDER) {
@@ -952,6 +970,17 @@ pub(crate) fn render_all(
         }
     }
     Ok(out)
+}
+
+/// 渲染结果里什么都没有（Claude 为空对象、Codex 为空文本）：文件原本不存在时不去新建它。
+pub(crate) fn is_empty_render(kind: ProfileKind, content: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(content);
+    match kind {
+        ProfileKind::Claude => serde_json::from_str::<Value>(&text)
+            .map(|v| v.as_object().is_some_and(Map::is_empty))
+            .unwrap_or(false),
+        ProfileKind::Codex => text.trim().is_empty(),
+    }
 }
 
 /// 写盘字节：pretty JSON（2 空格）+ 单个换行。
@@ -1009,7 +1038,9 @@ fn codex_provider_table(
         })?;
         table.insert(CODEX_BEARER_TOKEN, toml_edit::value(token));
     }
-    table.insert("wire_api", toml_edit::value(codex_wire_api(def)));
+    if let Some(api) = &def.wire_api {
+        table.insert("wire_api", toml_edit::value(api.as_str()));
+    }
     Ok(Some(table))
 }
 
@@ -1128,7 +1159,10 @@ mod tests {
             provider["experimental_bearer_token"].as_str(),
             Some("resolved-value")
         );
-        assert_eq!(provider["wire_api"].as_str(), Some("responses"));
+        assert!(
+            provider.get("wire_api").is_none(),
+            "定义没写 wire_api 就不写"
+        );
         assert!(
             provider.get("env_key").is_none(),
             "不再依赖启动时的环境变量"
@@ -1148,6 +1182,26 @@ mod tests {
         assert!(render_all(&codex, &|_| Some(existing.clone()), &|_| None, &[]).is_err());
         // 现有文件不是合法 TOML：拒绝，不当成空文件覆盖
         assert!(render_all(&codex, &|_| Some(b"[[".to_vec()), &token, &[]).is_err());
+
+        // provider 表里已有的其他键（旧版本写的 wire_api、用户手加的键）原样保留，只改本工具管的键
+        let existing = b"model_provider = \"agent-manager\"\n\n[model_providers.agent-manager]\nname = \"old\"\nbase_url = \"https://old.example.com/v1\"\nexperimental_bearer_token = \"old-token\"\nwire_api = \"responses\"\nrequest_max_retries = 3\n"
+            .to_vec();
+        let rendered = render_all(&codex, &|_| Some(existing.clone()), &token, &[]).unwrap();
+        let doc: toml::Table = String::from_utf8(rendered[0].content.clone())
+            .unwrap()
+            .parse()
+            .unwrap();
+        let provider = &doc["model_providers"]["agent-manager"];
+        assert_eq!(
+            provider["base_url"].as_str(),
+            Some("https://api.example.com/v1")
+        );
+        assert_eq!(
+            provider["experimental_bearer_token"].as_str(),
+            Some("resolved-value")
+        );
+        assert_eq!(provider["wire_api"].as_str(), Some("responses"));
+        assert_eq!(provider["request_max_retries"].as_integer(), Some(3));
     }
 
     #[test]

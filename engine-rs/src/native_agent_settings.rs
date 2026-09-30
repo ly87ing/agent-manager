@@ -957,7 +957,6 @@ fn write_claude_runtime(
                     "command".into(),
                     Value::String(statusline_command(statusline_path)),
                 );
-                entry.insert("padding".into(), Value::Number(0.into()));
                 path_set(root, STATUSLINE_PATH, Value::Object(entry));
             }
             ("statusline", RuntimeValue::Statusline(StatusLine::Untouched)) => {

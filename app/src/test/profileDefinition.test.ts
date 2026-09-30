@@ -53,7 +53,7 @@ describe("助手实例定义", () => {
     ) as Record<string, any>;
     expect(def.profile.env_key).toBe("MY_TOKEN");
     expect(def.profile.env).toBeUndefined();
-    expect(def.profile.wire_api).toBe("responses");
+    expect(def.profile).not.toHaveProperty("wire_api");
     expect(def.mcp_config).toEqual({ path: "~/.codex-work/config.toml", format: "toml" });
   });
 
@@ -197,7 +197,8 @@ describe("启动命令里的配置目录", () => {
       },
     };
     const updated = updateProfileDefinition(input, "codex", original);
-    expect(updated.profile).toMatchObject({ wire_api: "responses", future_profile: "keep" });
+    expect(updated.profile).toMatchObject({ future_profile: "keep" });
+    expect(updated.profile).not.toHaveProperty("wire_api");
     expect(updated.profile).not.toHaveProperty("base_url");
     expect(updated.profile).not.toHaveProperty("env_key");
     expect(updated.profile).not.toHaveProperty("model");
@@ -386,14 +387,12 @@ describe("Provider 编辑影响预览", () => {
     }, "codex");
     const update = profileConnectionUpdate("cx-work", definition, old, newer, "codex")!;
     expect(update.candidate).toEqual({
-      source_connection: "relay", base_url: "https://new.example.com", env_key: "NEW_KEY",
-      wire_api: "responses", model: "new-model",
+      source_connection: "relay", base_url: "https://new.example.com", env_key: "NEW_KEY", model: "new-model",
     });
     expect(JSON.stringify(update.candidate)).not.toContain("OLD_KEY_VALUE");
     expect(profileConnectionReadbackMatches("codex", update.candidate, [
       { field: "model", state: "same", definition: "new-model" },
       { field: "provider.base_url", state: "same", definition: "https://new.example.com" },
-      { field: "provider.wire_api", state: "same", definition: "responses" },
       { field: "provider.experimental_bearer_token", state: "same", definition: "${NEW_KEY}" },
     ])).toBe(true);
     expect(profileConnectionReadbackMatches("codex", update.candidate, [
