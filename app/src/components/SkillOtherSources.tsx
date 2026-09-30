@@ -27,18 +27,21 @@ const BLOCKED: Record<string, string> = {
 
 /**
  * 技能页的「其他来源」：各账号目录与 Codex 共用目录里、本工具没管理的技能，以及 Codex
- * 会加载两份的重名。只显示，不提供写操作（纳入管理在后续分期）。
+ * 会加载两份的重名。每项可「纳入管理」或「清理多余」，具体做什么先在对话框里预览。
  */
 export function SkillOtherSources({
   view,
   groups,
   search,
   agentFilter,
+  onAdopt,
 }: {
   view: SkillUnmanagedView;
   groups: AccountGroup[];
   search: string;
   agentFilter: string;
+  /** 打开纳入 / 清理对话框（按技能名）。 */
+  onAdopt: (name: string) => void;
 }) {
   const sharedPath = (id: string) => view.shared_dirs.find((dir) => dir.id === id)?.path ?? id;
   const inAgent = (skill: SkillUnmanaged) =>
@@ -56,7 +59,7 @@ export function SkillOtherSources({
       <AccountHeader
         groups={groups}
         left={
-          <span className="font-medium text-foreground" title="用别的方式装进账号目录的技能：这里只显示，不会改动它们">
+          <span className="font-medium text-foreground" title="用别的方式装进账号目录的技能：纳入管理后只留一份源，可撤回">
             其他来源 · {skills.length}
           </span>
         }
@@ -101,7 +104,20 @@ export function SkillOtherSources({
                   ) : null;
                 }}
               />
-              <RowActions />
+              <RowActions
+                always={
+                  skill.adoptable ? (
+                    <button
+                      type="button"
+                      data-testid={`adopt-${skill.name}`}
+                      onClick={() => onAdopt(skill.name)}
+                      className="rounded-md border px-2 py-0.5 text-xs hover:bg-accent"
+                    >
+                      纳入管理…
+                    </button>
+                  ) : null
+                }
+              />
             </li>
           );
         })}
@@ -120,7 +136,18 @@ export function SkillOtherSources({
                 ) : null
               }
             />
-            <RowActions />
+            <RowActions
+              always={
+                <button
+                  type="button"
+                  data-testid={`dedupe-${dup.name}-${dup.agent}`}
+                  onClick={() => onAdopt(dup.name)}
+                  className="rounded-md border px-2 py-0.5 text-xs hover:bg-accent"
+                >
+                  清理多余…
+                </button>
+              }
+            />
           </li>
         ))}
       </ul>

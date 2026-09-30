@@ -13,6 +13,7 @@ import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDial
 import { SkillInstalledView } from "../components/SkillInstalledView";
 import { SkillOtherSources } from "../components/SkillOtherSources";
 import { SkillVersionsDialog } from "../components/SkillVersionsDialog";
+import { SkillAdoptDialog } from "../components/SkillAdoptDialog";
 import { describeTrack, versionLabel } from "../lib/skillTrack";
 import type { EngineElement, PolicyData, SkillRecommendation, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
@@ -128,8 +129,10 @@ export default function SkillsPage({
   const { execute } = useExecutions();
   const [updatingAll, setUpdatingAll] = useState(false);
   /** 正在看版本的 git 来源；switching 为真时正在切换。 */
-  const [versionsOf, setVersionsOf] = useState<EngineElement | null>(null);
+  const [versionsOf, setVersionsOf] = useState<{ collection: EngineElement; openLatest: boolean } | null>(null);
   const [switching, setSwitching] = useState(false);
+  /** 正在纳入 / 清理的技能名（「其他来源」里的一项）。 */
+  const [adopting, setAdopting] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
 
@@ -220,9 +223,35 @@ export default function SkillsPage({
     }
   };
 
+  /** 纳入管理：执行后提示里给「撤销」（按备份清单放回原目录）。 */
+  const runAdopt = async (args: string[], label: string): Promise<boolean> => {
+    const envelope = await execute({ command: "skills:adopt", label, args, silent: true });
+    await queryClient.invalidateQueries({ queryKey: engineKeys.all });
+    if (!envelope?.ok) {
+      toast.error(`没有完成：${envelope?.errors[0]?.message ?? "详见任务记录"}`);
+      return false;
+    }
+    const data = envelope.data as { backup?: string; collection?: string; removed?: string[]; linked?: string[] };
+    setAdopting(null);
+    toast.success(`${label}：完成`, {
+      description: `移走 ${data.removed?.length ?? 0} 处${data.linked?.length ? `，链接到 ${data.linked.map(nameOf).join("、")}` : ""}`,
+      action: data.backup
+        ? {
+            label: "撤销",
+            onClick: () =>
+              void execute({ command: "skills:adopt", label: `撤回：${label}`, args: ["--undo", data.backup!] }).then(() =>
+                queryClient.invalidateQueries({ queryKey: engineKeys.all }),
+              ),
+          }
+        : undefined,
+    });
+    return true;
+  };
+
   const runCollectionAction = (collection: EngineElement, action: "update" | "enable" | "disable", title: string) => {
     if (action === "update" && (collection.spec as SkillCollectionSpec).url) {
-      return void switchVersion(collection, null, collection.freshness.upstream ?? "最新");
+      // git 来源：先预览要换的内容，确认后才换
+      return setVersionsOf({ collection, openLatest: true });
     }
     if (action === "disable") dismissIfRecommended(collection);
     return void directApply
@@ -687,7 +716,7 @@ export default function SkillsPage({
                         </IconAction>
                     )}
                     {spec.url && (
-                      <IconAction label={`${name} 的版本`} testId={`versions-collection-${name}`} onClick={() => setVersionsOf(collection)}>
+                      <IconAction label={`${name} 的版本`} testId={`versions-collection-${name}`} onClick={() => setVersionsOf({ collection, openLatest: false })}>
                         <History className="h-3.5 w-3.5" aria-hidden />
                       </IconAction>
                     )}
@@ -813,7 +842,12 @@ export default function SkillsPage({
         </div>
       )}
 
-      {unmanaged && <SkillOtherSources view={unmanaged} groups={groups} search={search} agentFilter={agentFilter} />}
+      {unmanaged && (
+        <SkillOtherSources view={unmanaged} groups={groups} search={search} agentFilter={agentFilter} onAdopt={setAdopting} />
+      )}
+      {adopting && (
+        <SkillAdoptDialog name={adopting} nameOf={nameOf} onConfirm={runAdopt} onClose={() => setAdopting(null)} />
+      )}
 
       <details className="rounded-lg border bg-card">
         <summary className="cursor-pointer px-4 py-2 text-sm text-muted-foreground">各账号技能目录里的实际内容</summary>
@@ -824,10 +858,12 @@ export default function SkillsPage({
 
       {versionsOf && (
         <SkillVersionsDialog
-          collectionId={versionsOf.id}
-          name={collName(versionsOf)}
+          collectionId={versionsOf.collection.id}
+          name={collName(versionsOf.collection)}
           busy={switching || batchApply.executing}
-          onSwitch={(ref, label) => switchVersion(versionsOf, ref, label)}
+          openLatest={versionsOf.openLatest}
+          nameOf={nameOf}
+          onSwitch={(ref, label) => switchVersion(versionsOf.collection, ref, label)}
           onClose={() => setVersionsOf(null)}
         />
       )}

@@ -261,21 +261,31 @@ describe("SkillsPage 三级视图", () => {
     expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
   });
 
-  it("更新集合：有新版本时行上常驻「更新」，点击直接 skills:apply 限定在所选集合（带 run_id），不取 plan、不开弹窗", async () => {
-    const routes = skillsRoutes();
+  it("更新集合：有新版本时行上常驻「更新」，先预览要换的内容，确认后才 skills:apply（限定所选集合、带 run_id、不取 plan）", async () => {
+    const routes = {
+      ...skillsRoutes(),
+      "skills:preview": makeEnvelope({
+        from: { commit: "1".repeat(40), kind: "branch", name: "main", label: "main" },
+        to: { commit: "2".repeat(40), kind: "branch", name: "main", label: "main" },
+        downloaded: true, same: false, skills: [{ name: "alpha", path: "skills/alpha", files: [{ status: "modified", file: "SKILL.md" }], accounts: ["claude-code"] }], rules: [], other: [],
+      }),
+      "skills:versions": makeEnvelope({ collection: "agent-skills", track: { mode: "auto" }, auto_resolved: "default", latest: { commit: "2".repeat(40), kind: "branch", name: "main", label: "main" }, current: { commit: "1".repeat(40), kind: "branch", name: "main", label: "main" }, default_branch: "main", tags: [], tags_total: 0, branches: [{ name: "main", commit: "2".repeat(40) }], branches_total: 1 }),
+    };
     const status = routes["skills:status"] as Envelope<{ domain: string; elements: ReturnType<typeof makeElement>[] }>;
     status.data.elements[0].freshness = { ...status.data.elements[0].freshness, state: "behind" };
     const { calls } = renderWithEngine(<SkillsPage />, routes);
     await userEvent.click(await screen.findByTestId("update-collection-agent-skills"));
+    const dialog = await screen.findByRole("dialog", { name: "agent-skills 的版本" });
+    await within(dialog).findByTestId("preview-skill-alpha");
+    expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
+    await userEvent.click(within(dialog).getByTestId("versions-preview-confirm"));
     await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
 
     const applyCalls = calls.filter((call) => call.command === "skills:apply");
-    expect(applyCalls).toHaveLength(1);
     expect(applyCalls[0].args).toEqual(["--only", "skill:agent-skills", "--action", "update"]);
     expect(applyCalls[0].args).not.toContain("--dry-run");
     expect(applyCalls[0].options?.runId).toMatch(/^gui-/);
     expect(calls.some((call) => call.command.endsWith(":plan"))).toBe(false);
-    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("集合标题行：只提示异常与新发现数量，不展示来源猜测徽标", async () => {
@@ -1293,7 +1303,9 @@ describe("SkillsPage 其他来源", () => {
     expect(within(block).getByTestId("other-source-synced")).toHaveTextContent("来源不明");
     expect(within(block).getByTestId("other-blocked-synced")).toHaveTextContent("Claude 自己同步的");
     expect(within(block).getByTestId("duplicate-xiaoyu-bug-loop-codex")).toHaveTextContent("Codex 会加载两份");
-    expect(within(block).queryAllByRole("button")).toHaveLength(0);
+    expect(within(block).getByTestId("adopt-archify")).toHaveTextContent("纳入管理");
+    expect(within(block).queryByTestId("adopt-synced")).toBeNull();
+    expect(within(block).getByTestId("dedupe-xiaoyu-bug-loop-codex")).toHaveTextContent("清理多余");
     expect(calls.every((call) => call.command.endsWith(":status") || call.command === "policy:get")).toBe(true);
   });
 
@@ -1363,6 +1375,16 @@ function versionRoutes() {
     }),
     "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" })),
     "system:refresh-upstream": makeEnvelope({}),
+    "skills:preview": makeEnvelope({
+      collection: "archify",
+      from: { commit: V300, kind: "tag", name: "v3.0.0", label: "v3.0.0" },
+      to: { commit: V301, kind: "tag", name: "v3.0.1", label: "v3.0.1" },
+      downloaded: true,
+      same: false,
+      skills: [{ name: "archify", path: "archify", files: [{ status: "modified", file: "SKILL.md" }, { status: "added", file: "references/new.md" }], accounts: ["claude-code"] }],
+      rules: [{ status: "modified", file: "rules/team.md" }],
+      other: [],
+    }),
     "policy:get": makeEnvelope(
       makePolicyData({
         layers: { sqlite: { skills: { repositories: { archify: { url: "https://github.com/example/archify.git", skill_paths: ["archify"] } } } } },
@@ -1390,6 +1412,15 @@ describe("SkillsPage 来源版本", () => {
     expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(0);
 
     await userEvent.click(within(dialog).getByTestId("version-switch-v3.1.0-rc.1"));
+    // 先预览：列出会变的文件与跟着换的账号，确认前不写
+    const preview = await within(dialog).findByTestId("preview-skill-archify");
+    expect(preview).toHaveTextContent("跟着换：");
+    expect(preview).toHaveTextContent("修改 SKILL.md");
+    expect(preview).toHaveTextContent("新增 references/new.md");
+    expect(within(dialog).getByTestId("preview-rules")).toHaveTextContent("规则变化 1 处");
+    expect(calls.find((call) => call.command === "skills:preview")?.args).toEqual(["--only", "skill:archify", "--ref", "v3.1.0-rc.1"]);
+    expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(0);
+    await userEvent.click(within(dialog).getByTestId("versions-preview-confirm"));
     await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
     const applies = calls.filter((call) => call.command === "skills:apply");
     expect(applies[0].args).toEqual(["--only", "skill:archify", "--action", "update", "--ref", "v3.1.0-rc.1"]);
@@ -1400,6 +1431,11 @@ describe("SkillsPage 来源版本", () => {
   it("更新到最新与来源行的更新按钮都按跟踪方式走、不带 --ref", async () => {
     const { calls } = renderWithEngine(<SkillsPage />, versionRoutes());
     await userEvent.click(await screen.findByTestId("update-collection-archify"));
+    const dialog = await screen.findByRole("dialog", { name: "archify 的版本" });
+    await within(dialog).findByTestId("preview-skill-archify");
+    expect(calls.find((call) => call.command === "skills:preview")?.args).toEqual(["--only", "skill:archify"]);
+    expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(0);
+    await userEvent.click(within(dialog).getByTestId("versions-preview-confirm"));
     await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
     expect(calls.filter((call) => call.command === "skills:apply")[0].args).toEqual(["--only", "skill:archify", "--action", "update"]);
   });
@@ -1428,5 +1464,101 @@ describe("SkillsPage 来源版本", () => {
     await userEvent.selectOptions(within(dialog).getByTestId("collection-track-mode"), "branch");
     await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
     expect(await within(dialog).findByText("填分支名，例如 stable")).toBeInTheDocument();
+  });
+});
+
+
+function adoptRoutes(preview: Record<string, unknown>) {
+  const base = otherSourceRoutes();
+  return {
+    ...base,
+    "skills:adopt-preview": makeEnvelope(preview),
+    "skills:adopt": makeEnvelope({ domain: "skills", action: "adopt", name: "archify", backup: "20260929T101010000-archify", removed: ["~/.claude/skills/archify"], linked: ["claude-code", "codex"] }),
+  };
+}
+
+const ADOPT_BASE = {
+  name: "archify",
+  kind: "adopt",
+  locations: [
+    { agent: "claude-code", shared: null, path: "~/.claude/skills/archify", origin: "native-dir" },
+    { agent: null, shared: "codex-shared", path: "~/.agents/skills/archify", origin: "native-dir" },
+  ],
+  removes: ["~/.claude/skills/archify", "~/.agents/skills/archify"],
+  source: { repository: "https://github.com/tt-a1i/archify.git", path: "archify", version: "3.0.0", installer: "npx-skills" },
+  collection: { name: "archify", exists: false, url: "https://github.com/tt-a1i/archify.git", path: "archify", linked_as: "archify" },
+  local: { dest: "~/my-skills/archify", dest_exists: false, collection: "my-skills", digest: "l".repeat(64), accounts: ["claude-code", "codex"], from: "~/.claude/skills/archify", variants: 1 },
+};
+const DIGEST = "d".repeat(64);
+
+describe("SkillsPage 纳入管理", () => {
+  it("内容一致：预览写明版本与会做的事，确认后按预览给的参数纳入，提示里可撤销", async () => {
+    const { calls } = renderWithEngine(
+      <SkillsPage />,
+      adoptRoutes({
+        ...ADOPT_BASE,
+        source_check: {
+          same: true, path: "archify",
+          adopt_at: { name: "v3.0.0", label: "v3.0.0", commit: "3".repeat(40) },
+          latest: { name: "v3.0.1", label: "v3.0.1", commit: "4".repeat(40) },
+          ref: "v3.0.0", locations: [{ same: true, files: [] }, { same: true, files: [] }], accounts: ["claude-code", "codex"], digest: DIGEST,
+        },
+      }),
+    );
+    await userEvent.click(await screen.findByTestId("adopt-archify"));
+    const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
+    expect(await within(dialog).findByTestId("adopt-version")).toHaveTextContent("纳入到来源 archify（新建），版本 v3.0.0，之后可更新到 v3.0.1");
+    expect(within(dialog).getByTestId("adopt-compare")).toHaveTextContent("完全一致");
+    expect(within(dialog).getByTestId("adopt-plan")).toHaveTextContent("备份并移走 ~/.agents/skills/archify");
+    expect(within(dialog).queryByTestId("adopt-choice-source")).toBeNull();
+    expect(calls.some((call) => call.command === "skills:adopt")).toBe(false);
+    await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", DIGEST, "--path", "archify", "--ref", "v3.0.0"]);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "纳入管理 archify" })).toBeNull());
+  });
+
+  it("本地改过：列出差异；选用来源版本带 --accept-source，选保留走 --keep-local", async () => {
+    const differs = {
+      ...ADOPT_BASE,
+      source_check: {
+        same: false, path: "archify",
+        adopt_at: { name: "v3.0.1", label: "v3.0.1", commit: "4".repeat(40) },
+        latest: { name: "v3.0.1", label: "v3.0.1", commit: "4".repeat(40) },
+        ref: null, locations: [{ same: false, files: [{ status: "modified", file: "SKILL.md" }] }, { same: true, files: [] }], accounts: ["claude-code", "codex"], digest: DIGEST,
+      },
+    };
+    const { calls } = renderWithEngine(<SkillsPage />, adoptRoutes(differs));
+    await userEvent.click(await screen.findByTestId("adopt-archify"));
+    const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
+    expect(await within(dialog).findByTestId("adopt-compare")).toHaveTextContent("改过 SKILL.md");
+    await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", DIGEST, "--path", "archify", "--accept-source"]);
+  });
+
+  it("认不出来源：只能保留本地内容；Codex 重名只做清理", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, adoptRoutes({ ...ADOPT_BASE, source: null, collection: undefined, source_check: { error: "认不出来源仓库，只能作为本机来源纳入" } }));
+    await userEvent.click(await screen.findByTestId("adopt-archify"));
+    const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
+    expect(await within(dialog).findByTestId("adopt-source-error")).toHaveTextContent("只能作为本机来源纳入");
+    expect(within(dialog).getByTestId("adopt-choice-source")).toBeDisabled();
+    expect(within(dialog).getByTestId("adopt-plan")).toHaveTextContent("复制到 ~/my-skills/archify");
+    await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", "l".repeat(64), "--keep-local"]);
+  });
+
+  it("重名清理：写明已由哪个来源管理，只移走共用目录那份", async () => {
+    const { calls } = renderWithEngine(
+      <SkillsPage />,
+      adoptRoutes({ name: "xiaoyu-bug-loop", kind: "dedupe", locations: [], removes: ["~/.agents/skills/xiaoyu-bug-loop"], source: null, collection: { name: "xiaoyu-dev", exists: true }, digest: DIGEST }),
+    );
+    await userEvent.click(await screen.findByTestId("dedupe-xiaoyu-bug-loop-codex"));
+    const dialog = await screen.findByRole("dialog", { name: "纳入管理 xiaoyu-bug-loop" });
+    expect(await within(dialog).findByTestId("adopt-dedupe")).toHaveTextContent("已由来源 xiaoyu-dev 管理");
+    await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "xiaoyu-bug-loop", "--digest", DIGEST]);
   });
 });

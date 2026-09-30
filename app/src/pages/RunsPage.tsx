@@ -96,6 +96,8 @@ function OperationDetail({ data }: { data: RunDetailData }) {
       const { plan } = pending;
       if (plan.kind === "skills") {
         await execute({ command: "skills:apply", label: `撤回：${plan.label}`, args: ["--only", plan.elementId, "--action", plan.action, "--agent", plan.agent] });
+      } else if (plan.kind === "adopt") {
+        await execute({ command: "skills:adopt", label: `撤回：${plan.label}`, args: ["--undo", plan.backup] });
       } else {
         const status = await runEngine<StatusData>("rules:status", []);
         const element = status.ok ? status.data.elements.find((item) => item.id === plan.target) : undefined;
@@ -149,7 +151,9 @@ function OperationDetail({ data }: { data: RunDetailData }) {
           description={
             pending.plan.kind === "skills"
               ? `${pending.plan.label}。只动这一个账号上的这一个技能。`
-              : `${pending.plan.label}（用当时另存的备份模板）。写入前核对文件；现在的内容如果对不上任何已知内容，会先另存一份备份。`
+              : pending.plan.kind === "adopt"
+                ? `${pending.plan.label}。原位置被别的内容占用时不动手。`
+                : `${pending.plan.label}（用当时另存的备份模板）。写入前核对文件；现在的内容如果对不上任何已知内容，会先另存一份备份。`
           }
           risk="write-local"
           confirmLabel="撤回"

@@ -5,6 +5,18 @@ import { useDialogFocus } from "../lib/dialogFocus";
 import { describeTrack, versionLabel, type TrackSpec, type VersionRef } from "../lib/skillTrack";
 import { cn } from "../lib/utils";
 
+interface PreviewData {
+  from: VersionRef | null;
+  to: VersionRef;
+  downloaded: boolean;
+  same: boolean;
+  skills: { name: string; path: string; files: { status: string; file: string }[]; accounts: string[] }[];
+  rules: { status: string; file: string }[];
+  other: { status: string; file: string }[];
+}
+
+const CHANGE: Record<string, string> = { added: "新增", deleted: "删除", modified: "修改" };
+
 interface VersionsData {
   collection: string;
   track: TrackSpec;
@@ -28,12 +40,17 @@ export function SkillVersionsDialog({
   collectionId,
   name,
   busy,
+  openLatest = false,
+  nameOf = (agent: string) => agent,
   onSwitch,
   onClose,
 }: {
   collectionId: string;
   name: string;
   busy: boolean;
+  /** 打开时直接预览「更新到最新」（来源行的更新按钮）。 */
+  openLatest?: boolean;
+  nameOf?: (agent: string) => string;
   /** ref 为 null 表示按跟踪方式更新到最新。 */
   onSwitch: (ref: string | null, label: string) => Promise<boolean>;
   onClose: () => void;
@@ -42,6 +59,8 @@ export function SkillVersionsDialog({
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"tags" | "branches">("tags");
   const [reload, setReload] = useState(0);
+  /** 确认前的预览：要换到哪个版本、各技能改了什么、哪些账号跟着换。 */
+  const [pending, setPending] = useState<{ ref: string | null; label: string; data: PreviewData | null; error: string | null } | null>(null);
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
 
   useEffect(() => {
@@ -66,9 +85,31 @@ export function SkillVersionsDialog({
   const current = data?.current ?? null;
   const latest = data && !("error" in data.latest && data.latest.error) ? (data.latest as VersionRef) : null;
   const behind = Boolean(latest && current && latest.commit !== current.commit);
-  const switchTo = async (ref: string | null, label: string) => {
-    if (await onSwitch(ref, label)) setReload((n) => n + 1);
+  const previewSwitch = (ref: string | null, label: string) => {
+    setPending({ ref, label, data: null, error: null });
+    runEngine<PreviewData>("skills:preview", ["--only", collectionId, ...(ref ? ["--ref", ref] : [])])
+      .then((envelope) =>
+        setPending((prev) =>
+          prev && prev.ref === ref
+            ? envelope.ok
+              ? { ...prev, data: envelope.data }
+              : { ...prev, error: envelope.errors[0]?.message ?? "预览失败" }
+            : prev,
+        ),
+      )
+      .catch((reason) => setPending((prev) => (prev ? { ...prev, error: reason instanceof Error ? reason.message : String(reason) } : prev)));
   };
+  const confirmSwitch = async () => {
+    if (!pending) return;
+    if (await onSwitch(pending.ref, pending.label)) {
+      setPending(null);
+      setReload((n) => n + 1);
+    }
+  };
+  useEffect(() => {
+    // 来源行的「更新」：打开就预览换到最新
+    if (openLatest) previewSwitch(null, "最新");
+  }, []);
   const rows = data ? (tab === "tags" ? data.tags : data.branches) : [];
   const total = data ? (tab === "tags" ? data.tags_total : data.branches_total) : 0;
 
@@ -103,7 +144,7 @@ export function SkillVersionsDialog({
                   type="button"
                   data-testid="versions-update-latest"
                   disabled={busy}
-                  onClick={() => void switchTo(null, versionLabel(latest) ?? "最新")}
+                  onClick={() => previewSwitch(null, versionLabel(latest) ?? "最新")}
                   className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
                 >
                   <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} aria-hidden /> 更新到 {versionLabel(latest)}
@@ -114,7 +155,71 @@ export function SkillVersionsDialog({
           )}
         </div>
 
-        {data && (
+        {pending && (
+          <div data-testid="versions-preview" className="min-h-0 flex-1 space-y-2 overflow-y-auto px-5 py-3 text-xs">
+            {pending.error ? (
+              <p data-testid="versions-preview-error" className="text-destructive">{pending.error}</p>
+            ) : !pending.data ? (
+              <p className="text-muted-foreground">正在取 {pending.label} 并比较…</p>
+            ) : (
+              <>
+                <p className="text-foreground">
+                  {versionLabel(pending.data.from) ?? "未下载"} → <span className="font-mono">{versionLabel(pending.data.to)}</span>
+                </p>
+                {!pending.data.downloaded ? (
+                  <p className="text-muted-foreground">还没下载过，这次是首次下载。</p>
+                ) : pending.data.same ? (
+                  <p data-testid="versions-preview-same" className="text-muted-foreground">已经是这个版本，内容没有变化。</p>
+                ) : (
+                  <>
+                    {pending.data.skills.length === 0 && pending.data.rules.length === 0 && (
+                      <p className="text-muted-foreground">用到的技能与规则都没有变化。</p>
+                    )}
+                    {pending.data.skills.map((skill) => (
+                      <div key={skill.name} data-testid={`preview-skill-${skill.name}`} className="rounded border p-2">
+                        <p className="font-medium text-foreground">
+                          {skill.name}
+                          <span className="ml-2 font-normal text-muted-foreground">
+                            {skill.accounts.length ? `跟着换：${skill.accounts.map(nameOf).join("、")}` : "没有账号在用"}
+                          </span>
+                        </p>
+                        <ul className="mt-1 space-y-0.5 font-mono">
+                          {skill.files.slice(0, 15).map((change) => (
+                            <li key={change.file}>
+                              <span className="text-muted-foreground">{CHANGE[change.status] ?? change.status}</span> {change.file}
+                            </li>
+                          ))}
+                          {skill.files.length > 15 && <li className="text-muted-foreground">另有 {skill.files.length - 15} 处</li>}
+                        </ul>
+                      </div>
+                    ))}
+                    {pending.data.rules.length > 0 && (
+                      <p data-testid="preview-rules" className="text-muted-foreground">
+                        规则变化 {pending.data.rules.length} 处（规则页会提示「来源有新版」，确认后才覆盖）
+                      </p>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" onClick={() => setPending(null)} className="rounded-md border px-3 py-1 text-xs text-muted-foreground hover:bg-accent">
+                返回
+              </button>
+              <button
+                type="button"
+                data-testid="versions-preview-confirm"
+                disabled={busy || !pending.data || pending.data.same}
+                onClick={() => void confirmSwitch()}
+                className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+              >
+                {busy ? "正在切换…" : `确认换到 ${pending.label}`}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {data && !pending && (
           <>
             <div className="flex gap-1 px-5 pt-2 text-xs">
               {(["tags", "branches"] as const).map((key) => (
@@ -146,7 +251,7 @@ export function SkillVersionsDialog({
                         type="button"
                         data-testid={`version-switch-${item.name}`}
                         disabled={busy}
-                        onClick={() => void switchTo(item.name, item.name)}
+                        onClick={() => previewSwitch(item.name, item.name)}
                         className="rounded border px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-40"
                       >
                         切换

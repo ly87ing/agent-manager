@@ -25,3 +25,14 @@ describe("操作记录的撤回", () => {
     }
   });
 });
+
+describe("纳入管理的撤回", () => {
+  it("按记录里的备份编号撤回；没有编号就不能撤回", () => {
+    const base = { id: "op1", run_id: "r", created_at: "2026-09-29T00:00:00Z" } as const;
+    expect(rollbackPlan({ ...base, operation_type: "skills:adopt", target: "archify", detail: { backup: "20260929T101010000-archify" } } as never)).toMatchObject({
+      kind: "adopt",
+      backup: "20260929T101010000-archify",
+    });
+    expect(rollbackPlan({ ...base, operation_type: "skills:adopt", target: "archify", detail: {} } as never).kind).toBe("none");
+  });
+});
