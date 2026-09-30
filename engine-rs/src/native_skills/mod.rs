@@ -103,6 +103,7 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         "skills:apply" | "skills.apply" => apply::apply(ctx, req),
         "skills:fork" | "skills.fork" => fork::fork(ctx, req),
         "skills:versions" | "skills.versions" => versions_command(ctx, req),
+        "skills:preview" | "skills.preview" => preview_command(ctx, req),
         other => bail!("native_skills 不支持命令 '{}'", other),
     }
 }
@@ -133,4 +134,49 @@ fn versions_command(ctx: &Context, req: &Request) -> Result<Value> {
         .filter(|coll| !coll.deleted)
         .ok_or_else(|| anyhow::anyhow!("没有这个来源：{}", target.collection))?;
     versioning::versions(ctx, coll, &paths::collection_source_root(ctx, coll))
+}
+
+/// `skills:preview --only skill:<来源> [--ref <版本>]`：换版本前列出各技能的文件变化与会跟着换的账号。
+/// 只把目标提交取进本工具的镜像缓存；不检出、不动账号目录、不写库、不取 apply 锁。
+fn preview_command(ctx: &Context, req: &Request) -> Result<Value> {
+    let mut iter = req.args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--only" | "--ref" => {
+                iter.next();
+            }
+            other => bail!("skills:preview 只接受 --only 与 --ref，收到 {other}"),
+        }
+    }
+    if let Some(reference) = req.value("--ref") {
+        if !track::valid_ref_name(reference) || reference.contains('*') {
+            bail!("--ref 不合法：{reference}");
+        }
+    }
+    let only = req
+        .value("--only")
+        .ok_or_else(|| anyhow::anyhow!("skills:preview 需要 --only skill:<来源>"))?;
+    let target = paths::parse_only(only)?;
+    if target.skill.is_some() {
+        bail!("skills:preview 只接受来源（skill:<来源>），不接受单个技能");
+    }
+    let meta = status::load_metadata(ctx)?;
+    let coll = meta
+        .collections
+        .get(&target.collection)
+        .filter(|coll| !coll.deleted)
+        .ok_or_else(|| anyhow::anyhow!("没有这个来源：{}", target.collection))?;
+    let mut in_use: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for ((c, skill, agent), binding) in persistence::load_bindings_readonly(ctx)? {
+        if c == coll.name && binding.assigned && binding.enabled {
+            in_use.entry(skill).or_default().push(agent);
+        }
+    }
+    versioning::preview_update(
+        ctx,
+        coll,
+        &paths::collection_source_root(ctx, coll),
+        req.value("--ref"),
+        &in_use,
+    )
 }

@@ -164,12 +164,8 @@ pub(crate) fn recorded_available(repo_dir: &Path) -> Option<Vec<(String, String)
 
 /// 目标提交里所有 `SKILL.md` 所在目录（与 `available_repo_skills` 同一规则：
 /// 目录名为技能名，重名取先出现的，隐藏目录与依赖目录跳过）。
-fn available_at_head(repo_dir: &Path, coll_name: &str) -> Result<Vec<Value>> {
-    let listing = git_in(
-        repo_dir,
-        &["ls-tree", "-r", "--name-only", "HEAD"],
-        coll_name,
-    )?;
+fn available_at(repo_dir: &Path, rev: &str, coll_name: &str) -> Result<Vec<Value>> {
+    let listing = git_in(repo_dir, &["ls-tree", "-r", "--name-only", rev], coll_name)?;
     let mut out: Vec<Value> = Vec::new();
     let mut names: Vec<String> = Vec::new();
     for file in listing.lines() {
@@ -203,6 +199,169 @@ fn available_at_head(repo_dir: &Path, coll_name: &str) -> Result<Vec<Value>> {
     Ok(out)
 }
 
+/// 取目标提交进镜像（不检出、不动工作区）：远端就是唯一真相，历史被改写时照样对齐。
+fn fetch_all(repo_dir: &Path, coll_name: &str) -> Result<()> {
+    git_in(
+        repo_dir,
+        &[
+            "fetch",
+            "--quiet",
+            "--force",
+            "--tags",
+            "origin",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ],
+        coll_name,
+    )?;
+    Ok(())
+}
+
+fn resolve_target(
+    ctx: &Context,
+    coll: &CollectionDef,
+    url: &str,
+    reference: Option<&str>,
+) -> Result<Target> {
+    let refs: RemoteRefs = crate::native_upstream::git_remote_refs(ctx, url).map_err(|_| {
+        anyhow!(
+            "[{}] 读不到远端的分支与标签（网络、地址或权限问题）",
+            coll.name
+        )
+    })?;
+    match reference {
+        Some(reference) => track::resolve_ref(reference, &refs),
+        None => track::resolve(&track_of(coll)?, &refs),
+    }
+}
+
+/// `skills:preview`：换到目标版本前，列出这个来源下各技能改了哪些文件、规则与其他目录变了什么。
+/// 只把目标提交取进镜像（本工具自己的缓存），不检出、不动账号目录、不写库。
+/// `in_use`：技能名 → 在用它的账号（换版本时会跟着换的）。
+pub(crate) fn preview_update(
+    ctx: &Context,
+    coll: &CollectionDef,
+    repo_dir: &Path,
+    reference: Option<&str>,
+    in_use: &std::collections::BTreeMap<String, Vec<String>>,
+) -> Result<Value> {
+    let url = coll
+        .url
+        .as_deref()
+        .filter(|u| !u.is_empty())
+        .ok_or_else(|| anyhow!("[{}] 不是 git 来源，没有版本", coll.name))?;
+    let target = resolve_target(ctx, coll, url, reference)?;
+    let mut out = json!({
+        "collection": coll.name,
+        "from": local_version(repo_dir),
+        "to": target.to_json(),
+        "downloaded": repo_dir.join(".git").is_dir(),
+        "same": false,
+        "skills": [],
+        "rules": [],
+        "other": [],
+    });
+    let Some(from) = head_commit(repo_dir) else {
+        // 还没下载：没有「之前」可比，更新就是首次下载
+        return Ok(out);
+    };
+    fetch_all(repo_dir, &coll.name)?;
+    let to = git_in(
+        repo_dir,
+        &[
+            "rev-parse",
+            "--verify",
+            &format!("{}^{{commit}}", target.commit),
+        ],
+        &coll.name,
+    )?
+    .trim()
+    .to_string();
+    if to == from {
+        out["same"] = json!(true);
+        return Ok(out);
+    }
+    let mut args: Vec<String> = ["diff", "--name-status", "--no-renames", "-z", &from, &to]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    if let Some(patterns) = sparse_patterns(coll)? {
+        args.push("--".into());
+        args.extend(
+            patterns
+                .iter()
+                .map(|p| p.trim_start_matches('/').to_string()),
+        );
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let diff = git_in(repo_dir, &arg_refs, &coll.name)?;
+    // 技能目录：两个版本里所有带 SKILL.md 的目录（路径 → 名字），路径长的先匹配
+    let mut dirs: Vec<(String, String)> = Vec::new();
+    for rev in [from.as_str(), to.as_str()] {
+        for item in available_at(repo_dir, rev, &coll.name)? {
+            let (Some(name), Some(path)) = (item["name"].as_str(), item["path"].as_str()) else {
+                continue;
+            };
+            if !dirs.iter().any(|(p, _)| p == path) {
+                dirs.push((path.to_string(), name.to_string()));
+            }
+        }
+    }
+    dirs.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+    let rules_prefix = coll
+        .raw
+        .get("rules_path")
+        .and_then(Value::as_str)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("rules")
+        .trim_matches('/')
+        .to_string();
+    let mut skills: std::collections::BTreeMap<String, (String, Vec<Value>)> = Default::default();
+    let mut rules: Vec<Value> = Vec::new();
+    let mut other: Vec<Value> = Vec::new();
+    let mut fields = diff.split('\0').filter(|f| !f.is_empty());
+    while let (Some(status), Some(file)) = (fields.next(), fields.next()) {
+        let status = match status.chars().next() {
+            Some('A') => "added",
+            Some('D') => "deleted",
+            _ => "modified",
+        };
+        let under = |prefix: &str| {
+            prefix.is_empty() || file == prefix || file.starts_with(&format!("{prefix}/"))
+        };
+        if let Some((path, name)) = dirs.iter().find(|(path, _)| under(path)) {
+            let rel = file
+                .strip_prefix(path.as_str())
+                .unwrap_or(file)
+                .trim_start_matches('/');
+            skills
+                .entry(name.clone())
+                .or_insert_with(|| (path.clone(), Vec::new()))
+                .1
+                .push(json!({"status": status, "file": rel}));
+        } else if under(&rules_prefix) {
+            rules.push(json!({"status": status, "file": file}));
+        } else {
+            other.push(json!({"status": status, "file": file}));
+        }
+    }
+    out["skills"] = Value::Array(
+        skills
+            .into_iter()
+            .map(|(name, (path, files))| {
+                json!({
+                    "name": name,
+                    "path": path,
+                    "files": files,
+                    "accounts": in_use.get(&name).cloned().unwrap_or_default(),
+                })
+            })
+            .collect(),
+    );
+    out["rules"] = Value::Array(rules);
+    out["other"] = Value::Array(other);
+    Ok(out)
+}
+
 /// 把镜像更新到目标版本：显式 `reference`（标签、分支或提交）优先，否则按跟踪方式。
 /// 返回 `{from, to}`（to 为目标版本）；网络、git 或目录问题一律报错，不静默成功。
 pub(crate) fn update_repo(
@@ -212,16 +371,7 @@ pub(crate) fn update_repo(
     repo_dir: &Path,
     reference: Option<&str>,
 ) -> Result<Value> {
-    let refs: RemoteRefs = crate::native_upstream::git_remote_refs(ctx, url).map_err(|_| {
-        anyhow!(
-            "[{}] 读不到远端的分支与标签（网络、地址或权限问题）",
-            coll.name
-        )
-    })?;
-    let target: Target = match reference {
-        Some(reference) => track::resolve_ref(reference, &refs)?,
-        None => track::resolve(&track_of(coll)?, &refs)?,
-    };
+    let target = resolve_target(ctx, coll, url, reference)?;
     let patterns = sparse_patterns(coll)?;
     let before = local_version(repo_dir);
 
@@ -271,19 +421,7 @@ pub(crate) fn update_repo(
             }
         }
     }
-    // 镜像只读：远端就是唯一真相，历史被改写（force push）时照样对齐
-    git_in(
-        repo_dir,
-        &[
-            "fetch",
-            "--quiet",
-            "--force",
-            "--tags",
-            "origin",
-            "+refs/heads/*:refs/remotes/origin/*",
-        ],
-        &coll.name,
-    )?;
+    fetch_all(repo_dir, &coll.name)?;
     git_in(
         repo_dir,
         &[
@@ -303,7 +441,7 @@ pub(crate) fn update_repo(
         commit: commit.clone(),
         ..target
     };
-    let available = available_at_head(repo_dir, &coll.name)?;
+    let available = available_at(repo_dir, "HEAD", &coll.name)?;
     std::fs::write(
         repo_dir.join(STATE_FILE),
         serde_json::to_string_pretty(&json!({

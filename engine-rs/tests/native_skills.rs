@@ -3590,6 +3590,38 @@ fn git_source_tracks_versions_downloads_only_listed_dirs_and_switches() {
     assert!(relink.ok, "{:?}", relink.errors);
     assert_eq!(std::fs::read_to_string(&link).unwrap(), "# alpha v1.0");
 
+    // 3b. 预览换到最新：列出 alpha 的文件变化与会跟着换的账号；镜像检出与库都不动
+    let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
+    let preview = execute(&ctx, &request("skills:preview", &["--only", "skill:src"]));
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(preview.data["from"]["label"], "v1.0.0");
+    assert_eq!(preview.data["to"]["name"], "v1.1.0");
+    assert_eq!(preview.data["same"], false);
+    assert_eq!(
+        preview.data["skills"],
+        serde_json::json!([{"name": "alpha", "path": "skills/alpha", "files": [{"status": "modified", "file": "SKILL.md"}], "accounts": ["codex"]}])
+    );
+    assert_eq!(preview.data["rules"], serde_json::json!([]));
+    assert_eq!(head(), c1, "预览不检出");
+    assert_eq!(
+        std::fs::read(store::db_path(&ctx)).unwrap(),
+        db_before,
+        "预览不写库"
+    );
+    let same = execute(
+        &ctx,
+        &request(
+            "skills:preview",
+            &["--only", "skill:src", "--ref", "v1.0.0"],
+        ),
+    );
+    assert_eq!(same.data["same"], true);
+    let bad = execute(
+        &ctx,
+        &request("skills:preview", &["--only", "skill:src", "--ref", "-x"]),
+    );
+    assert!(!bad.ok);
+
     // 4. 检查更新（真实 git，file:// 远端）：自动跟踪下落后于 v1.1.0
     let probe = execute(
         &ctx,

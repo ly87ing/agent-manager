@@ -75,6 +75,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ("skills", "fork") => true,
         // 列出 git 来源可选的版本：只读网络，不写库、不动镜像
         ("skills", "versions") => true,
+        // 换版本前的文件变化预览：只取目标提交进本工具的镜像缓存，不动账号目录、不写库
+        ("skills", "preview") => true,
         (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
     };
@@ -256,6 +258,10 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         }
         ("skills", "versions") => {
             specs.push(("--only", ArgValueKind::ElementId));
+        }
+        ("skills", "preview") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--ref", ArgValueKind::GitRef));
         }
         (_, "apply") | ("mcp", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
