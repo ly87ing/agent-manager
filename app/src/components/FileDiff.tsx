@@ -95,3 +95,43 @@ export function FileDiff({
     </div>
   );
 }
+
+/** 一处文件变化：改前 / 改后原文（contents 为 false 时太大、二进制或超出数量，只给文件名）。 */
+export interface FileChange {
+  status: string;
+  file: string;
+  original?: string | null;
+  content?: string | null;
+  contents?: boolean;
+}
+
+/** 文件变化清单里的一行：点开只显示这个文件改动的行（与 FileDiff 同一写法）。 */
+export function ChangedFile({ change, label, testId }: { change: FileChange; label: string; testId?: string }) {
+  const [open, setOpen] = useState(false);
+  const viewable = change.contents === true;
+  return (
+    <li data-testid={testId} className="font-mono">
+      <button
+        type="button"
+        disabled={!viewable}
+        aria-expanded={viewable ? open : undefined}
+        onClick={() => setOpen((value) => !value)}
+        className={cn("inline-flex items-center gap-1 text-left", viewable ? "hover:text-foreground" : "cursor-default")}
+        title={viewable ? "点开看改了什么" : "太大、二进制或文件太多，未显示内容"}
+      >
+        {viewable ? (
+          <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", open && "rotate-90")} aria-hidden />
+        ) : (
+          <span className="w-3" />
+        )}
+        <span className="text-muted-foreground">{label}</span> {change.file}
+        {!viewable && <span className="font-sans text-[10px] text-muted-foreground">（未显示内容）</span>}
+      </button>
+      {open && viewable && (
+        <div className="mt-1 font-sans">
+          <FileDiff original={change.original ?? null} content={change.content ?? ""} maxHeight="max-h-60" />
+        </div>
+      )}
+    </li>
+  );
+}

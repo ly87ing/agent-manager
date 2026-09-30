@@ -199,6 +199,38 @@ pub(crate) fn available_at(repo_dir: &Path, rev: &str, coll_name: &str) -> Resul
     Ok(out)
 }
 
+/// 预览里逐个文件给出改前 / 改后的文本，界面据此只显示改动的行。太大（超过 64 KB）、不是文本
+/// 或超过前 30 个文件的只给文件名（`contents: false`），不拖慢预览。
+pub(crate) const DIFF_FILE_LIMIT: usize = 64 * 1024;
+pub(crate) const DIFF_FILE_COUNT: usize = 30;
+
+pub(crate) fn text_or_none(bytes: Option<Vec<u8>>) -> Result<Option<String>, ()> {
+    match bytes {
+        None => Ok(None),
+        Some(b) if b.len() > DIFF_FILE_LIMIT => Err(()),
+        // 二进制（含 NUL，或经有损解码出现替换字符）不当文本显示
+        Some(b) => String::from_utf8(b).map_err(|_| ()).and_then(|s| {
+            if s.contains('\0') || s.contains('\u{FFFD}') {
+                Err(())
+            } else {
+                Ok(Some(s))
+            }
+        }),
+    }
+}
+
+/// 给一条文件变化补上改前 / 改后原文；取不到或太大时标 `contents: false`。
+pub(crate) fn attach_contents(entry: &mut Value, before: Option<Vec<u8>>, after: Option<Vec<u8>>) {
+    match (text_or_none(before), text_or_none(after)) {
+        (Ok(original), Ok(content)) => {
+            entry["original"] = json!(original);
+            entry["content"] = json!(content);
+            entry["contents"] = json!(true);
+        }
+        _ => entry["contents"] = json!(false),
+    }
+}
+
 /// 取目标提交进镜像（不检出、不动工作区）：远端就是唯一真相，历史被改写时照样对齐。
 fn fetch_all(repo_dir: &Path, coll_name: &str) -> Result<()> {
     git_in(
@@ -328,11 +360,30 @@ pub(crate) fn preview_update(
     let mut rules: Vec<Value> = Vec::new();
     let mut other: Vec<Value> = Vec::new();
     let mut fields = diff.split('\0').filter(|f| !f.is_empty());
+    let mut shown = 0usize;
+    let show = |rev: &str, file: &str| -> Option<Vec<u8>> {
+        git_in(repo_dir, &["show", &format!("{rev}:{file}")], &coll.name)
+            .ok()
+            .map(String::into_bytes)
+    };
     while let (Some(status), Some(file)) = (fields.next(), fields.next()) {
         let status = match status.chars().next() {
             Some('A') => "added",
             Some('D') => "deleted",
             _ => "modified",
+        };
+        // 改前 / 改后原文：只取前 DIFF_FILE_COUNT 个文件（按需从远端取内容）
+        let mut change = |status: &str, rel: &str| -> Value {
+            let mut entry = json!({"status": status, "file": rel});
+            if shown < DIFF_FILE_COUNT {
+                shown += 1;
+                let before = (status != "added").then(|| show(&from, file)).flatten();
+                let after = (status != "deleted").then(|| show(&to, file)).flatten();
+                attach_contents(&mut entry, before, after);
+            } else {
+                entry["contents"] = json!(false);
+            }
+            entry
         };
         let under = |prefix: &str| {
             prefix.is_empty() || file == prefix || file.starts_with(&format!("{prefix}/"))
@@ -346,9 +397,9 @@ pub(crate) fn preview_update(
                 .entry(name.clone())
                 .or_insert_with(|| (path.clone(), Vec::new()))
                 .1
-                .push(json!({"status": status, "file": rel}));
+                .push(change(status, rel));
         } else if under(&rules_prefix) {
-            rules.push(json!({"status": status, "file": file}));
+            rules.push(change(status, file));
         } else {
             other.push(json!({"status": status, "file": file}));
         }

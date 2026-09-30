@@ -236,15 +236,25 @@ fn diff_dirs(ours: &Path, theirs: &Path) -> Vec<Value> {
     let a = files(ours);
     let b = files(theirs);
     let mut out = Vec::new();
+    // 本地内容为改前、来源内容为改后（纳入时按来源的版本）；前 DIFF_FILE_COUNT 个给出原文
+    let mut push = |status: &str, file: &str, local: Option<&Vec<u8>>, source: Option<&Vec<u8>>| {
+        let mut entry = json!({"status": status, "file": file});
+        if out.len() < versioning::DIFF_FILE_COUNT {
+            versioning::attach_contents(&mut entry, local.cloned(), source.cloned());
+        } else {
+            entry["contents"] = json!(false);
+        }
+        out.push(entry);
+    };
     for (file, bytes) in &a {
         match b.get(file) {
-            None => out.push(json!({"status": "only-local", "file": file})),
-            Some(other) if other != bytes => out.push(json!({"status": "modified", "file": file})),
+            None => push("only-local", file, Some(bytes), None),
+            Some(other) if other != bytes => push("modified", file, Some(bytes), Some(other)),
             _ => {}
         }
     }
-    for file in b.keys().filter(|f| !a.contains_key(*f)) {
-        out.push(json!({"status": "only-source", "file": file}));
+    for (file, bytes) in b.iter().filter(|(f, _)| !a.contains_key(*f)) {
+        push("only-source", file, None, Some(bytes));
     }
     out
 }

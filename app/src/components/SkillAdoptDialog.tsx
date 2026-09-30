@@ -7,11 +7,8 @@ import { ProgressSteps } from "./ProgressSteps";
 import { newRunId } from "../lib/runId";
 import { useEngineProgress } from "../lib/useEngineProgress";
 import { cn } from "../lib/utils";
+import { ChangedFile, type FileChange } from "./FileDiff";
 
-interface FileChange {
-  status: "modified" | "only-local" | "only-source" | string;
-  file: string;
-}
 
 interface VersionRefLite {
   name: string;
@@ -214,9 +211,7 @@ export function SkillAdoptDialog({
                             <p className="font-mono text-muted-foreground">{location.path}</p>
                             <ul className="mt-1 space-y-0.5">
                               {files.slice(0, 20).map((change) => (
-                                <li key={change.file} className="font-mono">
-                                  <span className="text-muted-foreground">{FILE_STATUS[change.status] ?? change.status}</span> {change.file}
-                                </li>
+                                <ChangedFile key={change.file} change={change} label={FILE_STATUS[change.status] ?? change.status} />
                               ))}
                               {files.length > 20 && <li className="text-muted-foreground">另有 {files.length - 20} 处</li>}
                             </ul>

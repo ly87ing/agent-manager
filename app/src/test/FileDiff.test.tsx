@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { FileDiff } from "../components/FileDiff";
+import { ChangedFile, FileDiff } from "../components/FileDiff";
 
 /**
  * 回归：预览把几千行的 .claude.json 整份铺开，要拖很久才找到改的地方（2026-09-30 真机截图）。
@@ -46,5 +46,21 @@ describe("FileDiff", () => {
     expect(screen.getByTestId("n-stats")).toHaveTextContent("+2 −0");
     rerender(<FileDiff original={"same"} content={"same"} testId="s" />);
     expect(screen.getByTestId("s")).toHaveTextContent("内容不变");
+  });
+});
+
+describe("ChangedFile", () => {
+  it("点开只看这个文件改了什么；太大或二进制的只给文件名", async () => {
+    render(
+      <ul>
+        <ChangedFile testId="f1" label="修改" change={{ status: "modified", file: "SKILL.md", original: "a\nold\nc", content: "a\nnew\nc", contents: true }} />
+        <ChangedFile testId="f2" label="修改" change={{ status: "modified", file: "logo.png", contents: false }} />
+      </ul>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /SKILL\.md/ }));
+    expect(screen.getByTestId("f1")).toHaveTextContent("old");
+    expect(screen.getByTestId("f1")).toHaveTextContent("new");
+    expect(screen.getByRole("button", { name: /logo\.png/ })).toBeDisabled();
+    expect(screen.getByTestId("f2")).toHaveTextContent("未显示内容");
   });
 });

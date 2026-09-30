@@ -4,14 +4,15 @@ import { runEngine } from "../lib/engine";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { describeTrack, versionLabel, type TrackSpec, type VersionRef } from "../lib/skillTrack";
 import { cn } from "../lib/utils";
+import { ChangedFile, type FileChange } from "./FileDiff";
 
 interface PreviewData {
   from: VersionRef | null;
   to: VersionRef;
   downloaded: boolean;
   same: boolean;
-  skills: { name: string; path: string; files: { status: string; file: string }[]; accounts: string[] }[];
-  rules: { status: string; file: string }[];
+  skills: { name: string; path: string; files: FileChange[]; accounts: string[] }[];
+  rules: FileChange[];
   other: { status: string; file: string }[];
 }
 
@@ -191,9 +192,7 @@ export function SkillVersionsDialog({
                         </p>
                         <ul className="mt-1 space-y-0.5 font-mono">
                           {skill.files.slice(0, 15).map((change) => (
-                            <li key={change.file}>
-                              <span className="text-muted-foreground">{CHANGE[change.status] ?? change.status}</span> {change.file}
-                            </li>
+                            <ChangedFile key={change.file} change={change} label={CHANGE[change.status] ?? change.status} />
                           ))}
                           {skill.files.length > 15 && <li className="text-muted-foreground">另有 {skill.files.length - 15} 处</li>}
                         </ul>

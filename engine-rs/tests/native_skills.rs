@@ -3599,7 +3599,7 @@ fn git_source_tracks_versions_downloads_only_listed_dirs_and_switches() {
     assert_eq!(preview.data["same"], false);
     assert_eq!(
         preview.data["skills"],
-        serde_json::json!([{"name": "alpha", "path": "skills/alpha", "files": [{"status": "modified", "file": "SKILL.md"}], "accounts": ["codex"]}])
+        serde_json::json!([{"name": "alpha", "path": "skills/alpha", "files": [{"status": "modified", "file": "SKILL.md", "original": "# alpha v1.0", "content": "# alpha v1.1", "contents": true}], "accounts": ["codex"]}])
     );
     assert_eq!(preview.data["rules"], serde_json::json!([]));
     assert_eq!(head(), c1, "预览不检出");
@@ -3917,7 +3917,7 @@ fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
     assert_eq!(check["same"], false);
     assert_eq!(
         check["locations"][0]["files"],
-        serde_json::json!([{"status": "modified", "file": "SKILL.md"}])
+        serde_json::json!([{"status": "modified", "file": "SKILL.md", "original": "# other (我改过)", "content": "# other", "contents": true}])
     );
     assert_eq!(
         p.data["collection"]["linked_as"], "other",
