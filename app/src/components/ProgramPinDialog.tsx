@@ -7,7 +7,7 @@ import type { EngineElement, StatusData } from "../lib/contract";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { useExecutions } from "../lib/execution";
 import type { McpAgentCell, McpObserved } from "../lib/observed";
-import { isExactVersion, pinArgs, shortVersion, type ProgramElement } from "../lib/programs";
+import { isExactVersion, pinArgs, shortVersion, unpinArgs, type ProgramElement } from "../lib/programs";
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import { useAccountNames } from "../lib/useAccountNames";
 
@@ -20,16 +20,30 @@ interface Target {
 }
 
 /**
- * 按需拉取（npx / uvx）的 MCP 服务：改条目里写的版本——固定到某个版本或升级到新版本。
+ * 按需拉取（npx / uvx）的 MCP 服务：改条目里写的版本——固定到某个版本、升级到新版本，或取消固定改回跟最新
+ * （`mode="unpin"`：npx 写成 `@latest`，git 源改回分支；同时记下这是用户的选择，不再报「没固定版本」）。
  * 只改启动参数里的版本那一段，其余字段原样（走 MCP 的编辑：写前比对、只动这个条目）。
  * 每个账号的改动先预览（只显示改动的行），确认后逐个写入，一个失败不拦其他。
  */
-export function ProgramPinDialog({ program, initialVersion, onClose }: { program: ProgramElement; initialVersion: string | null; onClose: () => void }) {
+export function ProgramPinDialog({
+  program,
+  initialVersion,
+  mode = "pin",
+  onClose,
+}: {
+  program: ProgramElement;
+  initialVersion: string | null;
+  mode?: "pin" | "unpin";
+  onClose: () => void;
+}) {
+  const unpin = mode === "unpin";
   const mcp = useEngineQuery<StatusData>("mcp:status");
   const nameOf = useAccountNames();
   const { execute } = useExecutions();
   const queryClient = useQueryClient();
-  const [version, setVersion] = useState(initialVersion ?? "");
+  const [version, setVersion] = useState(unpin ? "main" : initialVersion ?? "");
+  // 取消固定时只有 git 源要填分支；npx 与 PyPI 包不用填
+  const needsBranch = !unpin || program.kind === "git";
   const [previews, setPreviews] = useState<Record<string, { path: string; original: string | null; content: string } | string>>({});
   const [executing, setExecuting] = useState(false);
 
@@ -41,11 +55,15 @@ export function ProgramPinDialog({ program, initialVersion, onClose }: { program
     return (dependent?.agents ?? [runner.agent]).flatMap((agent) => {
       const cell = cells[agent];
       if (!cell?.entry || !cell.actions.includes("edit")) return [];
-      const args = version.trim() ? pinArgs(runner.runner, cell.entry.args ?? [], version.trim()) : null;
+      const args = unpin
+        ? unpinArgs(runner.runner, cell.entry.args ?? [], version.trim() || "main")
+        : version.trim()
+          ? pinArgs(runner.runner, cell.entry.args ?? [], version.trim())
+          : null;
       return [{ server: runner.server, agent, cell, runner: runner.runner, args }];
     });
   });
-  const valid = version.trim() !== "" && isExactVersion(version.trim());
+  const valid = unpin ? !needsBranch || /^[A-Za-z0-9._/-]+$/.test(version.trim()) : version.trim() !== "" && isExactVersion(version.trim());
   const specOf = (target: Target) => {
     const entry = target.cell.entry!;
     const spec: Record<string, unknown> = { command: entry.command, args: target.args, env: entry.env ?? {} };
@@ -86,10 +104,24 @@ export function ProgramPinDialog({ program, initialVersion, onClose }: { program
     let failed = 0;
     try {
       for (const target of targets.filter((item) => item.args)) {
-        const envelope = await execute({ command: "mcp:apply", label: `把 ${target.server} @ ${nameOf(target.agent)} 固定到 ${shortVersion(version.trim())}`, args: argsOf(target), silent: true });
+        const label = unpin
+          ? `${target.server} @ ${nameOf(target.agent)} 取消固定、跟最新版本`
+          : `把 ${target.server} @ ${nameOf(target.agent)} 固定到 ${shortVersion(version.trim())}`;
+        const envelope = await execute({ command: "mcp:apply", label, args: argsOf(target), silent: true });
         if (!envelope?.ok) failed += 1;
       }
-      (failed ? toast.error : toast.success)(failed ? `${failed} 处没改成，详见操作记录` : `已固定到 ${shortVersion(version.trim())}`);
+      // 记下这是用户的选择：跟最新的不再报「没固定版本」；重新固定就清掉
+      if (!failed) {
+        for (const server of new Set(targets.map((item) => item.server))) {
+          const following = program.runners.some((runner) => runner.server === server && runner.follow_latest);
+          if (unpin || following) {
+            await execute({ command: "programs:declare", label: `${server} ${unpin ? "跟最新版本" : "改为固定版本"}`, args: ["--server", server, "--follow-latest", unpin ? "true" : "false"], silent: true });
+          }
+        }
+      }
+      (failed ? toast.error : toast.success)(
+        failed ? `${failed} 处没改成，详见操作记录` : unpin ? "已取消固定：以后启动时用最新版本，检查新版本照常提示" : `已固定到 ${shortVersion(version.trim())}`,
+      );
       if (!failed) onClose();
       // 条目里的版本变了：重新检查这些 MCP 服务，显示的版本跟实际一致
       for (const server of new Set(targets.map((item) => item.server))) {
@@ -106,8 +138,12 @@ export function ProgramPinDialog({ program, initialVersion, onClose }: { program
   const ready = valid && targets.length > 0 && targets.every((target) => typeof previews[`${target.server}@${target.agent}`] === "object");
   return (
     <ConfirmModal
-      title={`${program.name}：固定 MCP 用的版本`}
-      description="只改启动参数里的版本号，条目的其他内容不动。固定之后即使发布了新版本也不会被自动换掉，要升级时在这里改。"
+      title={unpin ? `${program.name}：取消固定，跟最新版本` : `${program.name}：固定 MCP 用的版本`}
+      description={
+        unpin
+          ? "只改启动参数里的版本号，条目的其他内容不动。之后每次启动都用最新版本（发布方一更新就会换）；检查新版本照常提示，随时可以再固定。"
+          : "只改启动参数里的版本号，条目的其他内容不动。固定之后即使发布了新版本也不会被自动换掉；检查新版本照常提示，要升级时在这里改，也可以取消固定改回跟最新。"
+      }
       risk="write-local"
       confirmLabel="写入"
       confirmDisabled={!ready}
@@ -116,16 +152,20 @@ export function ProgramPinDialog({ program, initialVersion, onClose }: { program
       onClose={() => !executing && onClose()}
     >
       <div data-testid="program-pin-dialog" className="mt-3 space-y-3 text-sm">
-        <label className="block space-y-1">
-          <span className="text-xs text-muted-foreground">版本（精确版本号，或 git 源的 40 位提交号）</span>
-          <input
-            data-testid="program-pin-version"
-            value={version}
-            onChange={(event) => setVersion(event.target.value)}
-            className="w-full rounded-md border bg-card px-2 py-1.5 font-mono text-xs"
-          />
-          {version.trim() && !valid && <span className="text-xs text-warning">要写精确版本（如 1.10.1）或完整提交号，不能是 latest 或分支名</span>}
-        </label>
+        {needsBranch && (
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">{unpin ? "跟随的分支" : "版本（精确版本号，或 git 源的 40 位提交号）"}</span>
+            <input
+              data-testid="program-pin-version"
+              value={version}
+              onChange={(event) => setVersion(event.target.value)}
+              className="w-full rounded-md border bg-card px-2 py-1.5 font-mono text-xs"
+            />
+            {version.trim() && !valid && (
+              <span className="text-xs text-warning">{unpin ? "分支名只能含字母、数字与 ._/-" : "要写精确版本（如 1.10.1）或完整提交号，不能是 latest 或分支名"}</span>
+            )}
+          </label>
+        )}
         {targets.length === 0 && <p className="text-xs text-muted-foreground">没有可以改的条目（可能已停用或只保存在本工具里）。</p>}
         {targets.map((target) => {
           const preview = previews[`${target.server}@${target.agent}`];

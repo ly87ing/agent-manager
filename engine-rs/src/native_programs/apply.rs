@@ -1725,7 +1725,15 @@ pub fn backups(ctx: &Context) -> Vec<Value> {
 
 /// 保存补充声明、安装方式、允许安装脚本（只写库）。
 pub fn declare(ctx: &Context, req: &Request) -> Result<Value> {
-    let known = ["--skill", "--bins", "--bin", "--program", "--allow-scripts"];
+    let known = [
+        "--skill",
+        "--bins",
+        "--bin",
+        "--program",
+        "--allow-scripts",
+        "--server",
+        "--follow-latest",
+    ];
     let mut iter = req.args.iter();
     while let Some(arg) = iter.next() {
         if arg == "--json" {
@@ -1734,6 +1742,34 @@ pub fn declare(ctx: &Context, req: &Request) -> Result<Value> {
         if !known.contains(&arg.as_str()) || iter.next().is_none() {
             bail!("programs:declare 参数不对：{arg}");
         }
+    }
+    // MCP 服务选择跟最新版本（取消固定）或回到固定：只记在库里，条目的改写走 MCP 编辑
+    if let Some(server) = req.value("--server") {
+        let follow = match req.value("--follow-latest") {
+            Some("true") => true,
+            Some("false") => false,
+            _ => bail!("--server 需要 --follow-latest true|false"),
+        };
+        if server.is_empty()
+            || !server
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        {
+            bail!("服务名不合法");
+        }
+        let server = server.to_string();
+        update_programs_policy(ctx, req, "follow_latest", |p| {
+            let list = p.entry("follow_latest").or_insert_with(|| json!([]));
+            if !list.is_array() {
+                *list = json!([]);
+            }
+            let arr = list.as_array_mut().expect("数组");
+            arr.retain(|v| v.as_str() != Some(server.as_str()));
+            if follow {
+                arr.push(json!(server));
+            }
+        })?;
+        return Ok(json!({"server": req.value("--server"), "follow_latest": follow}));
     }
     if let Some(skill) = req.value("--skill") {
         let bins: Vec<String> = serde_json::from_str(

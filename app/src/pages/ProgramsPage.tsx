@@ -29,6 +29,7 @@ function problemBadges(program: ProgramElement): { state: InboxState; text: stri
     if (problem.code === "unused") out.push({ state: "cleanup", text: "没人用了" });
   }
   if (program.problems.some((problem) => problem.code === "unpinned")) out.push({ state: "update", text: "没固定版本" });
+  else if (program.runners.some((runner) => runner.follow_latest && !runner.pinned)) out.push({ state: "unmanaged", text: "跟最新版本" });
   else if (program.freshness?.state === "behind") out.push({ state: "update", text: `可更新到 ${shortVersion(program.freshness.upstream)}` });
   return out;
 }
@@ -63,7 +64,7 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
   const { execute } = useExecutions();
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<{ program: ProgramElement; action: ProgramActionKind; version?: string; backup?: string } | null>(null);
-  const [pin, setPin] = useState<ProgramElement | null>(null);
+  const [pin, setPin] = useState<{ program: ProgramElement; mode: "pin" | "unpin" } | null>(null);
   const [rescanning, setRescanning] = useState(false);
   const focused = useRef(false);
 
@@ -128,11 +129,16 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
         break;
       case "runner":
         if (program.runners.length) {
+          const unpinned = program.runners.some((runner) => !runner.pinned);
           primary = {
-            label: program.runners.some((runner) => !runner.pinned) ? "固定版本…" : target ? `升级到 ${shortVersion(target)}…` : "改版本…",
+            label: unpinned ? "固定版本…" : target ? `升级到 ${shortVersion(target)}…` : "改版本…",
             testId: `program-pin-${program.program}`,
-            run: () => setPin(program),
+            run: () => setPin({ program, mode: "pin" }),
           };
+          // 已固定的可以取消固定、改回跟最新版本（检查新版本照常提示）
+          if (program.runners.some((runner) => runner.pinned)) {
+            menu.push({ label: "取消固定，跟最新版本…", testId: `program-unpin-${program.program}`, onSelect: () => setPin({ program, mode: "unpin" }) });
+          }
         }
         break;
     }
@@ -296,7 +302,14 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
           onClose={() => setDialog(null)}
         />
       )}
-      {pin && <ProgramPinDialog program={pin} initialVersion={upgradeTarget(pin) ?? pin.runners.find((runner) => runner.pinned)?.version ?? null} onClose={() => setPin(null)} />}
+      {pin && (
+        <ProgramPinDialog
+          program={pin.program}
+          mode={pin.mode}
+          initialVersion={upgradeTarget(pin.program) ?? pin.program.freshness?.upstream ?? pin.program.runners.find((runner) => runner.pinned)?.version ?? null}
+          onClose={() => setPin(null)}
+        />
+      )}
     </div>
   );
 }

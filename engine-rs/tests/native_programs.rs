@@ -645,3 +645,52 @@ fn declarations_are_saved_and_read_back() {
     );
     let _ = std::fs::remove_dir_all(&env.base);
 }
+
+/// MCP 服务没固定版本会报出来；用户选择「跟最新版本」后不再报，改回去又报。只写库。
+#[test]
+fn follow_latest_choice_silences_unpinned() {
+    let env = setup("follow");
+    std::fs::write(env.base.join("tools/npx"), "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(
+        env.base.join("tools/npx"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    std::fs::write(
+        env.home.join(".claude.json"),
+        r#"{"mcpServers": {"srv": {"command": "npx", "args": ["-y", "some-mcp"]}}}"#,
+    )
+    .unwrap();
+    let status = run(&env, "programs:status", &[]);
+    let p = element(&status, "npm:some-mcp");
+    assert_eq!(p["mode"], "runner");
+    assert_eq!(codes(p), vec!["unpinned"]);
+    assert_eq!(p["runners"][0]["follow_latest"], false);
+
+    assert_eq!(
+        run(
+            &env,
+            "programs:declare",
+            &["--server", "srv", "--follow-latest", "true"]
+        )["ok"],
+        true
+    );
+    let status = run(&env, "programs:status", &[]);
+    let p = element(&status, "npm:some-mcp");
+    assert!(codes(p).is_empty(), "选了跟最新就不再报：{p}");
+    assert_eq!(p["runners"][0]["follow_latest"], true);
+
+    assert_eq!(
+        run(
+            &env,
+            "programs:declare",
+            &["--server", "srv", "--follow-latest", "false"]
+        )["ok"],
+        true
+    );
+    assert_eq!(
+        codes(element(&run(&env, "programs:status", &[]), "npm:some-mcp")),
+        vec!["unpinned"]
+    );
+    let _ = std::fs::remove_dir_all(&env.base);
+}

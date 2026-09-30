@@ -178,6 +178,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--bin", ArgValueKind::GitRef));
             specs.push(("--program", ArgValueKind::ElementId));
             specs.push(("--allow-scripts", ArgValueKind::BoolText));
+            specs.push(("--server", ArgValueKind::GitRef));
+            specs.push(("--follow-latest", ArgValueKind::BoolText));
         }
         // 规则以实际文件为准：写一个目标，base 做 CAS；新内容四选一（引擎再强制恰好一个）
         ("rules", "apply") => {
@@ -2191,6 +2193,14 @@ mod tests {
                 "--bins",
                 "[\"playwright-cli\"]"
             ]
+        ));
+        assert!(ok(
+            "programs:declare",
+            &["--server", "serena", "--follow-latest", "true"]
+        ));
+        assert!(!ok(
+            "programs:declare",
+            &["--server", "serena", "--follow-latest", "maybe"]
         ));
         assert!(
             !ok(

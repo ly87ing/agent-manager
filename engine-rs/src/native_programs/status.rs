@@ -277,6 +277,17 @@ pub fn status(ctx: &Context, refresh_path: bool) -> Result<Value> {
     let policy = store::effective_policy(ctx)?;
     let user_path = locate::user_path(ctx, refresh_path);
     let install_methods = policy_object(&policy, "install_methods");
+    // 用户主动选择「跟最新版本」的 MCP 服务：不再报「没固定版本」
+    let follow_latest: Vec<String> = policy
+        .pointer("/programs/follow_latest")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
     let user_declarations = policy_object(&policy, "declarations");
 
     let mut programs: BTreeMap<String, Program> = BTreeMap::new();
@@ -519,7 +530,7 @@ pub fn status(ctx: &Context, refresh_path: bool) -> Result<Value> {
     let probes = crate::native_upstream::load_probe_cache(ctx).unwrap_or_default();
     let elements: Vec<Value> = programs
         .into_values()
-        .map(|p| program_json(ctx, p, &probes))
+        .map(|p| program_json(ctx, p, &probes, &follow_latest))
         .collect();
     let entry_dir = policy
         .pointer("/programs/entry_dir")
@@ -562,6 +573,7 @@ fn program_json(
     ctx: &Context,
     p: Program,
     probes: &BTreeMap<String, crate::native_upstream::ProbeRecord>,
+    follow_latest: &[String],
 ) -> Value {
     let home = &ctx.home_dir;
     let (scheme, name) = p.id.split_once(':').unwrap_or(("bin", p.id.as_str()));
@@ -644,7 +656,7 @@ fn program_json(
         problems.push(json!({"code": if installable { "missing" } else { "missing-no-install" }, "bins": missing_bins}));
     }
     for runner in &p.runners {
-        if !runner.pinned {
+        if !runner.pinned && !follow_latest.contains(&runner.server) {
             problems.push(json!({"code": "unpinned", "server": runner.server, "agent": runner.agent, "version": runner.version}));
         }
     }
@@ -711,7 +723,7 @@ fn program_json(
         "version": version,
         "installs": installs,
         "install": p.install.iter().map(|s| json!({"kind": s.kind, "package": s.package, "bins": s.bins})).collect::<Vec<_>>(),
-        "runners": p.runners.iter().map(|r| json!({"server": r.server, "agent": r.agent, "runner": r.runner, "version": r.version, "pinned": r.pinned})).collect::<Vec<_>>(),
+        "runners": p.runners.iter().map(|r| json!({"server": r.server, "agent": r.agent, "runner": r.runner, "version": r.version, "pinned": r.pinned, "follow_latest": follow_latest.contains(&r.server)})).collect::<Vec<_>>(),
         "dependents": p.dependents.iter().map(|d| json!({"kind": d.kind, "name": d.name, "agents": d.agents, "source": d.source, "bins": d.bins, "any": d.any})).collect::<Vec<_>>(),
         "problems": problems,
         "commands": manual_commands(&p.id, owner, &p.install),

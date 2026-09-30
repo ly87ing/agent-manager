@@ -22,6 +22,8 @@ export interface ProgramRunner {
   runner: "npx" | "uvx";
   version: string | null;
   pinned: boolean;
+  /** 用户主动选择跟最新版本（取消固定）：不再报「没固定版本」，检查新版本照常。 */
+  follow_latest?: boolean;
 }
 
 export interface ProgramDependent {
@@ -191,12 +193,41 @@ export function pinArgs(runner: "npx" | "uvx", args: string[], target: string): 
   return next;
 }
 
+/**
+ * 取消固定：改回跟最新版本——npx 写成 `包@latest`，PyPI 包去掉 `==版本`，git 源改回分支（默认 main）。
+ * 找不到可改的位置返回 null。
+ */
+export function unpinArgs(runner: "npx" | "uvx", args: string[], branch: string): string[] | null {
+  const next = [...args];
+  if (runner === "npx") {
+    const explicit = next.findIndex((arg) => arg === "--package" || arg === "-p");
+    const index = explicit >= 0 ? explicit + 1 : next.findIndex((arg) => !arg.startsWith("-"));
+    if (index < 0 || index >= next.length) return null;
+    const spec = next[index];
+    const at = spec.startsWith("@") ? spec.indexOf("@", 1) : spec.indexOf("@");
+    next[index] = `${at > 0 ? spec.slice(0, at) : spec}@latest`;
+    return next;
+  }
+  const from = next.indexOf("--from");
+  const index = from >= 0 ? from + 1 : next.findIndex((arg) => !arg.startsWith("-"));
+  if (index < 0 || index >= next.length) return null;
+  const spec = next[index];
+  if (spec.startsWith("git+")) {
+    const at = spec.lastIndexOf("@");
+    const base = at > "git+https://".length ? spec.slice(0, at) : spec;
+    next[index] = `${base}@${branch}`;
+    return next;
+  }
+  next[index] = spec.split(/==|\[|@/)[0];
+  return next;
+}
+
 /** 这个程序现在跑的版本 → 可升级到的版本（探测结果）。 */
 export function upgradeTarget(element: ProgramElement): string | null {
   const fresh = element.freshness;
   if (!fresh?.upstream) return null;
   if (fresh.state === "behind") return fresh.upstream;
-  // 按需拉取、没固定版本的：固定到上游当前版本
-  if (element.mode === "runner" && element.runners.some((runner) => !runner.pinned)) return fresh.upstream;
+  // 按需拉取、没固定版本（也不是主动选的跟最新）的：固定到当前最新版本
+  if (element.mode === "runner" && element.runners.some((runner) => !runner.pinned && !runner.follow_latest)) return fresh.upstream;
   return null;
 }

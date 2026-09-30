@@ -13,7 +13,7 @@ export function dependenciesOf(programs: ProgramElement[], kind: "skill" | "mcp"
     .filter((program) => program.dependents.some((dep) => dep.kind === kind && dep.name === name))
     .map((program) => ({
       program: program.program,
-      name: program.bins[0] ?? program.name,
+      name: program.bins[0] ?? program.name.split("/").pop() ?? program.name,
       missing: program.problems.some((problem) => ["missing", "missing-no-install", "runner-missing"].includes(problem.code)),
     }));
 }

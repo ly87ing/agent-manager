@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildInbox } from "../lib/inbox";
-import { pinArgs, upgradeTarget, type ProgramElement } from "../lib/programs";
+import { pinArgs, unpinArgs, upgradeTarget, type ProgramElement } from "../lib/programs";
 
 function program(overrides: Partial<ProgramElement>): ProgramElement {
   return {
@@ -43,6 +43,13 @@ describe("MCP 条目里的版本号改写：只改版本那一段", () => {
     expect(pinArgs("uvx", ["mcp-server-fetch==0.6.2"], "0.7.0")).toEqual(["mcp-server-fetch==0.7.0"]);
     expect(pinArgs("uvx", ["mcp-server-fetch"], "0.7.0")).toEqual(["mcp-server-fetch==0.7.0"]);
     expect(pinArgs("npx", ["-y"], "1.0.0")).toBeNull();
+  });
+
+  it("取消固定：npx 改成 @latest，PyPI 包去掉 ==版本，git 源改回分支", () => {
+    expect(unpinArgs("npx", ["-y", "chrome-devtools-mcp@1.9.0", "--isolated"], "main")).toEqual(["-y", "chrome-devtools-mcp@latest", "--isolated"]);
+    expect(unpinArgs("npx", ["-y", "@scope/srv@2.0.0"], "main")).toEqual(["-y", "@scope/srv@latest"]);
+    expect(unpinArgs("uvx", ["mcp-server-fetch==0.6.2"], "main")).toEqual(["mcp-server-fetch"]);
+    expect(unpinArgs("uvx", ["--from", "git+https://github.com/o/r@7a2968335f2198b966864de1ce3655c8e485a653", "r"], "dev")).toEqual(["--from", "git+https://github.com/o/r@dev", "r"]);
   });
 
   it("可升级到的版本：落后时给新版本；按需拉取没固定时给上游当前版本；其余没有", () => {

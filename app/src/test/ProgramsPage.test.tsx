@@ -229,4 +229,35 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     await waitFor(() => expect(calls.some((call) => call.command === "system:refresh-upstream")).toBe(true));
     expect(calls.find((call) => call.command === "system:refresh-upstream")!.args).toEqual(["--only", "programs:npm:@wecom/cli"]);
   });
+
+  it("已固定的 MCP 可以取消固定：改回 @latest，写入后记下「跟最新版本」，以后不再报没固定版本", async () => {
+    const r = routes();
+    const status = r["programs:status"] as Envelope<ProgramsData>;
+    status.data.elements.push(program({
+      program: "npm:chrome-devtools-mcp",
+      name: "chrome-devtools-mcp",
+      mode: "runner",
+      runners: [{ server: "chrome-devtools", agent: "codex", runner: "npx", version: "1.9.0", pinned: true }],
+      dependents: [{ kind: "mcp", name: "chrome-devtools", agents: ["codex"], source: "mcp", bins: [], any: false }],
+      freshness: { ...unknown, state: "behind", current: "1.9.0", upstream: "1.10.1" },
+    }));
+    const mcp = r["mcp:status"] as Envelope<{ elements: ReturnType<typeof makeElement>[] }>;
+    mcp.data.elements.push(makeElement({
+      id: "mcp:chrome-devtools",
+      domain: "mcp",
+      observed: { agents: { codex: { state: "enabled", source: "file", base: "c".repeat(64), actions: ["edit"], entry: { command: "npx", args: ["-y", "chrome-devtools-mcp@1.9.0", "--isolated"] } } } },
+    }));
+    const { calls } = renderWithEngine(<ProgramsPage />, r);
+    expect(await screen.findByTestId("program-pin-npm:chrome-devtools-mcp")).toHaveTextContent("升级到 1.10.1");
+    await userEvent.click(screen.getByRole("button", { name: "chrome-devtools-mcp 的更多操作" }));
+    await userEvent.click(await screen.findByTestId("program-unpin-npm:chrome-devtools-mcp"));
+    const dialog = await screen.findByTestId("program-pin-dialog");
+    expect(within(dialog).queryByTestId("program-pin-version")).toBeNull();
+    await waitFor(() => expect(calls.some((call) => call.command === "mcp:preview")).toBe(true));
+    const preview = calls.find((call) => call.command === "mcp:preview")!;
+    expect(JSON.parse(preview.args[preview.args.indexOf("--spec") + 1]).args).toEqual(["-y", "chrome-devtools-mcp@latest", "--isolated"]);
+    await userEvent.click(await screen.findByRole("button", { name: "写入" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "programs:declare")).toBe(true));
+    expect(calls.find((call) => call.command === "programs:declare")!.args).toEqual(["--server", "chrome-devtools", "--follow-latest", "true"]);
+  });
 });
