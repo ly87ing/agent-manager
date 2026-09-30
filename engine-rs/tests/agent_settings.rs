@@ -370,7 +370,7 @@ fn 缺_base_或缺_runtime_时拒绝_且零写() {
 }
 
 #[test]
-fn 状态输出实际值_写入基准与当前接入_缺库不建库且零写() {
+fn 状态输出实际值_写入基准与是否官方账号_缺库不建库且零写() {
     let (base, ctx) = temp_ctx("status-live");
     let bytes = serde_json::to_vec_pretty(&json!({"env": {
         "ANTHROPIC_BASE_URL": "https://mine.example.com",
@@ -384,18 +384,18 @@ fn 状态输出实际值_写入基准与当前接入_缺库不建库且零写() 
     assert_eq!(current["state"], "ready");
     assert_eq!(current["config"]["base_url"], "https://mine.example.com");
     assert_eq!(current["config"]["credential"]["configured"], true);
-    assert_eq!(current["config"]["credential"]["saved_var"], Value::Null);
     let digest = current["base"].as_str().unwrap();
     assert_eq!(digest.len(), 64);
-    // 库里什么都没有：不把任何内置默认当作当前，实际配置就是未保存的当前项
-    assert_eq!(current["current"]["profile"], Value::Null);
+    // 主配置里有第三方地址与令牌：不是官方账号，也不再与已保存接入比对
+    assert_eq!(current["current"]["official"], false);
     assert_eq!(current["current"]["default"], false);
-    assert_eq!(current["current"]["last_written"], Value::Null);
+    assert_eq!(current["current"]["profile"], Value::Null);
     assert!(!current.to_string().contains("status-live-secret"));
     // 没有配置文件的 Codex：默认账号，也有基准可写
     let codex = current_config(&ctx, "codex");
     assert_eq!(codex["state"], "missing");
     assert_eq!(codex["current"]["default"], true);
+    assert_eq!(codex["current"]["official"], true);
     assert!(codex["base"].is_string());
 
     assert!(

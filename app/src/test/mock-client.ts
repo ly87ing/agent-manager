@@ -71,7 +71,7 @@ function demoEnvelopes(): Record<string, Envelope> {
                 small_fast_model: null,
                 model_aliases: { opus: null, sonnet: null, haiku: null },
                 timeout_ms: null,
-                credential: { configured: true, kind: "token", variable: null, saved_var: null },
+                credential: { configured: true, kind: "token", variable: null },
                 // 演示：本工具不提供的档位（表单显示「保持当前」）、已有取值的预填、旧格式状态栏的修复入口
                 runtime: {
                   automation_mode: "custom",
@@ -82,7 +82,7 @@ function demoEnvelopes(): Record<string, Envelope> {
               },
               // 实际配置对不上任何已保存接入：演示「当前实际配置（未保存）」
               base: mockBase(1),
-              current: { profile: null, default: false, last_written: null, unverified: [], drifted_from: null },
+              current: { default: false, official: false },
             },
           },
           state: "managed-ok",
@@ -129,7 +129,7 @@ function demoEnvelopes(): Record<string, Envelope> {
                 default_permissions: null,
               },
               base: mockBase(2),
-              current: { profile: null, default: true, official: true, last_written: null, unverified: [], drifted_from: null },
+              current: { default: true, official: true },
             },
           },
           state: "managed-ok",
@@ -1141,117 +1141,37 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       return refuse("AGENT_CONFIG_CHANGED", "配置文件已在外部修改（与读取时不一致），文件与库都没有改动；请刷新后重试");
     }
 
-    const codex = element.spec.bin === "codex";
+    // 主账号只放官方登录：与引擎一致，切换接入与保存实际配置一律拒绝，只改运行参数
+    if (args.includes("--use") || args.includes("--use-default") || args.includes("--save-current") || args.includes("--connection")) {
+      return refuse("AGENT_MAIN_OFFICIAL_ONLY", "主账号只放官方登录，这里只改运行参数；第三方接口请新建一个账号");
+    }
+    const runtimeAt = args.indexOf("--runtime");
+    if (runtimeAt < 0) return refuse("USAGE_ERROR", "agents:configure 需要 --runtime <json>");
     const settings =
       element.spec.settings && typeof element.spec.settings === "object" && !Array.isArray(element.spec.settings)
         ? structuredClone(element.spec.settings as Record<string, unknown>)
         : {};
-    const profiles = (settings.profiles && typeof settings.profiles === "object" && !Array.isArray(settings.profiles)
-      ? settings.profiles
-      : {}) as Record<string, Record<string, unknown>>;
     const liveConfig = (observed.config ?? {}) as Record<string, unknown>;
     const runtime = (liveConfig.runtime ?? {}) as Record<string, unknown>;
-    let backfill: Record<string, unknown> | null = null;
-    const secretSourceReady = () => {
-      const secrets = routes["secrets:status"].data as { elements: Array<{ observed: { source?: { configured?: boolean; ready?: boolean } } }> };
-      const source = secrets.elements[0]?.observed.source;
-      return Boolean(source?.configured && source.ready);
-    };
-    /**
-     * 切换或保存前回填还没保存的实际配置，与引擎同一套令牌规则：已选密钥文件就写进去，
-     * 没选且没带放弃标志就拒绝。返回拒绝信封或 null。
-     */
-    const saveLive = (): Envelope | null => {
-      if (observed.current?.profile || observed.current?.default || args.includes("--discard-live")) return null;
-      const credential = liveConfig.credential as { configured?: boolean; kind?: string | null; saved_var?: string | null } | undefined;
-      const tokenUnsaved = Boolean(
-        credential?.configured && (credential.kind === "token" || credential.kind === "api_key") && !credential.saved_var,
-      );
-      const discardToken = args.includes("--discard-live-token");
-      if (tokenUnsaved && !discardToken && !secretSourceReady()) {
-        return refuse(
-          "AGENT_LIVE_TOKEN_UNSAVED",
-          "当前实际配置里的令牌还没有保存在任何变量里，切换会丢失它：先到“设置 → 密钥”选择外部密钥文件（令牌会写进该文件，库里只存变量名），或确认放弃这个令牌后带 --discard-live-token 重试",
-        );
+    const patch = JSON.parse(args[runtimeAt + 1]) as Record<string, unknown>;
+    if ("automation_mode" in patch) delete runtime.automation_raw;
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null || value === false || value === "") {
+        delete runtime[key];
+        delete settings[key];
+      } else {
+        runtime[key] = value;
+        settings[key] = value;
       }
-      const name = `imported-${baseSeed}`;
-      const tokenVar = tokenUnsaved && !discardToken ? `IMPORTED_${baseSeed}_TOKEN` : null;
-      profiles[name] = {
-        label: "导入的配置（演示）",
-        note: "切换前从助手实际配置自动保存",
-        ...(liveConfig.base_url ? { base_url: liveConfig.base_url } : {}),
-        ...(liveConfig.model ? { model: liveConfig.model } : {}),
-        ...(tokenVar ? { token_var: tokenVar } : {}),
-      };
-      backfill = {
-        name,
-        created: true,
-        label: "导入的配置（演示）",
-        token: !tokenUnsaved ? "none" : discardToken ? "discarded" : "adopted",
-        token_var: tokenVar,
-      };
-      return null;
-    };
-    const live = (profile: string | null): Record<string, unknown> => {
-      const selected = profile ? profiles[profile] : null;
-      return {
-        provider: codex ? (profile ?? "openai") : "anthropic",
-        base_url: selected?.base_url ?? null,
-        model: selected?.model ?? null,
-        small_fast_model: selected?.small_fast_model ?? null,
-        model_aliases: selected?.model_aliases ?? { opus: null, sonnet: null, haiku: null },
-        timeout_ms: selected?.timeout_ms ?? null,
-        credential: selected
-          ? { configured: Boolean(selected.token_var), kind: codex ? "env" : selected.auth ?? "token", variable: codex ? selected.token_var ?? null : null, saved_var: codex ? null : selected.token_var ?? null }
-          : { configured: false, kind: null, variable: null, saved_var: null },
-        runtime,
-      };
-    };
-
-    let current = observed.current ?? null;
-    const runtimeAt = args.indexOf("--runtime");
-    const useAt = args.indexOf("--use");
-    if (runtimeAt >= 0) {
-      const patch = JSON.parse(args[runtimeAt + 1]) as Record<string, unknown>;
-      if ("automation_mode" in patch) delete runtime.automation_raw;
-      for (const [key, value] of Object.entries(patch)) {
-        if (value === null || value === false || value === "") {
-          delete runtime[key];
-          delete settings[key];
-        } else {
-          runtime[key] = value;
-          settings[key] = value;
-        }
-      }
-      observed.config = { ...liveConfig, runtime };
-      if (observed.state === "missing") observed.state = "ready";
-    } else if (useAt >= 0 || args.includes("--use-default")) {
-      const profile = useAt >= 0 ? args[useAt + 1] : null;
-      const connectionAt = args.indexOf("--connection");
-      if (profile && connectionAt >= 0) profiles[profile] = JSON.parse(args[connectionAt + 1]);
-      if (profile && !(profile in profiles)) return refuse("AGENT_ERROR", `找不到接入:${profile}`);
-      const refused = saveLive();
-      if (refused) return refused;
-      if (profile) settings.active = profile;
-      else delete settings.active;
-      observed.state = "ready";
-      observed.config = live(profile);
-      current = { profile, default: profile === null, last_written: profile, unverified: [], drifted_from: null };
-    } else if (args.includes("--save-current")) {
-      const refused = saveLive();
-      if (refused) return refused;
-      current = backfill
-        ? { ...current, profile: (backfill as { name: string }).name, default: false }
-        : current;
     }
-    settings.profiles = profiles;
+    observed.config = { ...liveConfig, runtime };
+    if (observed.state === "missing") observed.state = "ready";
     element.spec.settings = settings;
     baseSeed += 1;
     observed.base = mockBase(baseSeed);
-    observed.current = current;
     recordRun(runId, "agents.configure");
     return makeEnvelope(
-      { domain: "agents", action: "configure", element: agentId, active: settings.active ?? null, current: current?.profile ?? null, backfill, discarded_live: args.includes("--discard-live"), base: observed.base },
+      { domain: "agents", action: "configure", element: agentId, mode: "runtime", base: observed.base },
       { command: "agents.configure", run_id: runId, lock: { held: true, pid: 4242 } },
     );
   };

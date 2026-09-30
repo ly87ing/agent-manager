@@ -632,11 +632,10 @@ fn status_element(
                 &|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()),
             )),
         );
-        // 实际值、写入基准与按内容识别的当前接入；只读零写
+        // 实际值、写入基准与是否官方账号；只读零写
         let current_config = crate::native_agent_settings::current_config_status(
             ctx,
             &def.id,
-            &def.spec,
             def.config_path(),
             kind,
         );

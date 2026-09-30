@@ -84,24 +84,14 @@ export interface AgentCurrentConfigCredential {
   configured: boolean;
   kind?: string | null;
   variable?: string | null;
-  /** Claude：哪个已保存接入的令牌变量解析值与实际令牌一致；没有为 null。不含取值。 */
-  saved_var?: string | null;
 }
 
-/** 引擎按内容识别出的当前接入。 */
+/** 主配置是不是官方账号（主账号只放官方登录）。 */
 export interface AgentCurrentConnection {
-  /** 与实际配置逐项一致的已保存接入；null 表示助手默认账号或还没保存。 */
-  profile: string | null;
-  /** 官方账号，且对不上别的已保存接入（没有接入键，或只指定了模型、别名与超时）。 */
+  /** 官方账号：没有接入键，或只指定了模型、别名与超时。 */
   default: boolean;
   /** 实际用的是官方账号：没有第三方地址与凭据（Claude）、接入方式是内置 openai（Codex）。 */
   official?: boolean;
-  /** 库里记下的上次写入的接入，只作记录，不代表当前。 */
-  last_written?: string | null;
-  /** 地址、模型都对上，但令牌变量在本进程取不到值、无法核对的接入。 */
-  unverified?: string[];
-  /** 还没保存、但与上次写入的那套身份一致：切换时外部改动会保存进它。 */
-  drifted_from?: string | null;
 }
 
 export interface AgentCurrentConfig {

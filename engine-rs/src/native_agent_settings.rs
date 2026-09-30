@@ -467,11 +467,10 @@ fn observe(
 /// `agents:status` 的 `observed.current_config`：实际值、写入基准 `base` 与按内容识别的当前接入。
 ///
 /// 只读零写：缺库不建库，密钥只读已刷新的缓存。`base` 只在文件可读（或还不存在）时给出，
-/// 界面没有它就不能写；识别当前接入所需的任何一步读不了，都只让 `current` 为空，不让整条 status 失败。
+/// 界面没有它就不能写；文件解析不了时只让 `current` 为空，不让整条 status 失败。
 pub(crate) fn current_config_status(
     ctx: &Context,
     agent_id: &str,
-    spec: &Value,
     config_path: Option<&str>,
     kind: Kind,
 ) -> Value {
@@ -506,31 +505,15 @@ pub(crate) fn current_config_status(
         return status;
     };
     status["base"] = Value::String(base_digest(kind, &bytes, &recorded, &statusline_path));
-    let (Ok(settings), Ok(live)) = (parse(spec), Live::read(kind, &bytes)) else {
+    let Ok(live) = Live::read(kind, &bytes) else {
         return status;
     };
-    if let (Live::Claude(root), Some(credential)) = (
-        &live,
-        status
-            .pointer_mut("/config/credential")
-            .and_then(Value::as_object_mut),
-    ) {
-        credential.insert("saved_var".into(), json!(saved_token_var(root, &settings)));
-    }
-    let identified = identify(&live, &settings, &live.claimed(&recorded));
-    status["current"] = identified.to_json(&settings);
+    // 主账号只放官方登录：只报是不是官方账号，不再与已保存的接入逐项比对
+    status["current"] = json!({
+        "default": live.is_default() || live.is_official(),
+        "official": live.is_official(),
+    });
     status
-}
-
-/// 哪个已保存接入的令牌变量解析值与实际令牌一致；只比较，不输出取值。
-fn saved_token_var(root: &Value, settings: &AgentSettings) -> Option<String> {
-    let (_, token) = claude_live_token(root)?;
-    settings
-        .profiles
-        .values()
-        .filter_map(|profile| profile.token_var.as_deref())
-        .find(|var| crate::secret_values::lookup(var).as_deref() == Some(token.as_str()))
-        .map(str::to_string)
 }
 
 /// 状态栏是**条件受管**：只有 `statusLine.command` 指向本工具部署的那份脚本时才算我们的。
@@ -591,13 +574,6 @@ impl AuthKind {
             None | Some("token") => Ok(AuthKind::Token),
             Some("api_key") => Ok(AuthKind::ApiKey),
             Some(other) => bail!("auth 只能是 token 或 api_key，收到 {other}"),
-        }
-    }
-
-    fn env_key(self) -> &'static str {
-        match self {
-            AuthKind::Token => "ANTHROPIC_AUTH_TOKEN",
-            AuthKind::ApiKey => "ANTHROPIC_API_KEY",
         }
     }
 }
@@ -944,74 +920,6 @@ pub(crate) fn owned_digest(bytes: &[u8], statusline_path: &std::path::Path) -> S
 }
 
 // ---------- 渲染：接入与运行参数分开写，互不越界 ----------
-
-/// 写 Claude 的接入键：先把接入键全部清掉，再按目标那套写回（`None` = 助手默认账号）。
-/// 运行参数的键一律不碰。
-///
-/// `resolve` 把变量名换成取值；取不到就报错而不是写一个空令牌上去——
-/// 空令牌会让助手以为配好了，实际每次请求都被拒。
-fn write_claude_connection(
-    root: &mut Map<String, Value>,
-    profile: Option<&ConnectionProfile>,
-    resolve: &dyn Fn(&str) -> Option<String>,
-) -> Result<()> {
-    // 切换接入配置时，上一套留下的变量必须消失，否则两套混着生效
-    for path in CLAUDE_CONNECTION_PATHS {
-        path_remove(root, path);
-    }
-    let Some(profile) = profile else {
-        return Ok(());
-    };
-    if profile.provider_ref.is_some() {
-        bail!("引用 config.toml 接入方式的接入配置只适用于 Codex");
-    }
-    if let Some(url) = profile.base_url.as_deref() {
-        path_set(
-            root,
-            &["env", "ANTHROPIC_BASE_URL"],
-            Value::String(url.to_string()),
-        );
-    }
-    if let Some(name) = profile.token_var.as_deref() {
-        let Some(value) = resolve(name) else {
-            bail!("环境变量 {name} 还没有取值：先在密钥页填上，或在启动环境里 export 它");
-        };
-        path_set(root, &["env", profile.auth.env_key()], Value::String(value));
-    }
-    if let Some(model) = profile.model.as_deref() {
-        path_set(
-            root,
-            &["env", "ANTHROPIC_MODEL"],
-            Value::String(model.to_string()),
-        );
-    }
-    if let Some(model) = profile.small_fast_model.as_deref() {
-        path_set(
-            root,
-            &["env", "ANTHROPIC_SMALL_FAST_MODEL"],
-            Value::String(model.to_string()),
-        );
-    }
-    for (tier, target) in &profile.model_aliases {
-        let key = match tier.as_str() {
-            "opus" => "ANTHROPIC_DEFAULT_OPUS_MODEL",
-            "sonnet" => "ANTHROPIC_DEFAULT_SONNET_MODEL",
-            "haiku" => "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-            "fable" => "ANTHROPIC_DEFAULT_FABLE_MODEL",
-            _ => continue,
-        };
-        path_set(root, &["env", key], Value::String(target.clone()));
-    }
-    if let Some(ms) = profile.timeout_ms {
-        // Claude Code 读的是字符串形式的环境变量
-        path_set(
-            root,
-            &["env", "API_TIMEOUT_MS"],
-            Value::String(ms.to_string()),
-        );
-    }
-    Ok(())
-}
 
 fn set_or_remove(root: &mut Map<String, Value>, path: &[&str], value: Option<String>) {
     match value {
@@ -1435,54 +1343,6 @@ pub(crate) fn codex_owned_digest(content: &str, recorded: &[String]) -> String {
     )
 }
 
-/// 旧版本为一套自定义接入写进主配置的 `[model_providers.<name>]` 表正文。
-///
-/// 主配置不再写入第三方接入；这里只用于按内容识别旧版本留下的表（与当时写出的逐项一致，
-/// 包括带令牌变量时的 `requires_openai_auth`），以便如实显示并切回官方账号。
-fn codex_provider_table_text(name: &str, profile: &ConnectionProfile) -> Result<String> {
-    let Some(url) = profile.base_url.as_deref() else {
-        bail!("接入配置 {name} 要填接口地址，Codex 的自定义接入方式没有默认地址");
-    };
-    let mut table = format!(
-        "\n[model_providers.{}]\nname = {}\nbase_url = {}\n",
-        name,
-        crate::native_mcp::codecs::toml_basic_string(profile.label.as_deref().unwrap_or(name)),
-        crate::native_mcp::codecs::toml_basic_string(url),
-    );
-    if let Some(var) = profile.token_var.as_deref() {
-        table.push_str(&format!(
-            "env_key = {}\n",
-            crate::native_mcp::codecs::toml_basic_string(var)
-        ));
-        // 旧版本带令牌变量时写了这个标志（让第三方表共用 auth.json 的登录）；照原样渲染才能认出来
-        table.push_str("requires_openai_auth = true\n");
-    }
-    // wire_api 目前只有 responses 这一种，写死避免用户填错
-    table.push_str("wire_api = \"responses\"\n");
-    if let Some(ms) = profile.timeout_ms {
-        table.push_str(&format!("stream_idle_timeout_ms = {ms}\n"));
-    }
-    Ok(table)
-}
-
-/// 按接入配置渲染出的 provider 表（解析后的结构），识别与回填时拿来和实际表比较。
-fn codex_rendered_table(name: &str, profile: &ConnectionProfile) -> Result<toml::value::Table> {
-    let parsed: toml::Value = codex_provider_table_text(name, profile)?.parse()?;
-    parsed
-        .get("model_providers")
-        .and_then(|providers| providers.get(name))
-        .and_then(toml::Value::as_table)
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("渲染出的接入方式表缺失：{name}"))
-}
-
-/// 表里的 `name` 只是显示名（本工具写的是接入配置的显示名），比较内容时不算。
-fn without_name(table: &toml::value::Table) -> toml::value::Table {
-    let mut table = table.clone();
-    table.remove("name");
-    table
-}
-
 /// 只写补丁里那几项运行参数的顶层键；补丁外的键原样保留。
 fn write_codex_runtime(existing: &str, patch: &RuntimePatch) -> String {
     let mut text = existing.to_string();
@@ -1585,7 +1445,7 @@ fn deploy_statusline(path: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-// ---------- 实际接入：解析与识别当前项 ----------
+// ---------- 实际接入：解析与是否官方账号 ----------
 
 /// 接入键的切片。空字符串与没写等价（写入时整组接入键会先清掉），不因它判成未保存。
 fn connection_slice(root: &Value) -> Value {
@@ -1598,32 +1458,11 @@ fn connection_slice(root: &Value) -> Value {
     Value::Object(slice)
 }
 
-/// 实际令牌：AUTH_TOKEN 优先，与渲染时两者只写一个一致。
-fn claude_live_token(root: &Value) -> Option<(AuthKind, String)> {
-    if let Some(token) = string_at(root, &["env", "ANTHROPIC_AUTH_TOKEN"]) {
-        return Some((AuthKind::Token, token.to_string()));
-    }
-    string_at(root, &["env", "ANTHROPIC_API_KEY"])
-        .map(|token| (AuthKind::ApiKey, token.to_string()))
-}
-
-/// 一套接入配置写到空文档后的接入部分；令牌取不到值等渲染失败时为 None。
-fn claude_rendered_connection(
-    profile: &ConnectionProfile,
-    resolve: &dyn Fn(&str) -> Option<String>,
-) -> Option<Value> {
-    let mut root = Map::new();
-    write_claude_connection(&mut root, Some(profile), resolve).ok()?;
-    Some(connection_slice(&Value::Object(root)))
-}
-
 /// Codex 实际文件里与接入有关的部分。
 struct CodexLive {
     text: String,
     /// `model_provider`；缺省即内置 openai。
     provider: Option<String>,
-    /// `model_provider` 指向的表；内置或不存在为 None。
-    table: Option<toml::value::Table>,
     model: Option<String>,
 }
 
@@ -1634,14 +1473,6 @@ impl CodexLive {
 
     fn on_openai(&self) -> bool {
         self.provider_id() == "openai"
-    }
-
-    fn table_text(&self, key: &str) -> Option<&str> {
-        self.table
-            .as_ref()?
-            .get(key)
-            .and_then(toml::Value::as_str)
-            .filter(|value| !value.is_empty())
     }
 }
 
@@ -1678,11 +1509,6 @@ impl Live {
                     .get("model_provider")
                     .and_then(toml::Value::as_str)
                     .map(str::to_string);
-                let table = provider
-                    .as_deref()
-                    .and_then(|id| root.get("model_providers")?.get(id))
-                    .and_then(toml::Value::as_table)
-                    .cloned();
                 let model = root
                     .get("model")
                     .and_then(toml::Value::as_str)
@@ -1691,7 +1517,6 @@ impl Live {
                 Ok(Live::Codex(CodexLive {
                     text: text.to_string(),
                     provider,
-                    table,
                     model,
                 }))
             }
@@ -1719,194 +1544,7 @@ impl Live {
             Live::Codex(live) => live.on_openai() && live.model.is_none(),
         }
     }
-
-    /// 本工具认领的 provider 表（库里记录 + 旧受管注释）；Claude 没有这一项。
-    fn claimed(&self, recorded: &[String]) -> BTreeSet<String> {
-        match self {
-            Live::Claude(_) => BTreeSet::new(),
-            Live::Codex(live) => codex_claimed_providers(&live.text, recorded),
-        }
-    }
 }
-
-enum Match {
-    Yes,
-    No,
-    /// 地址、模型等都对上，只是令牌变量在本进程取不到值，无法核对令牌。
-    Unverified,
-}
-
-/// 已保存接入与实际接入逐项相等：直接用写入函数把它渲染一遍再比，不另写一套比较规则。
-fn profile_matches(name: &str, profile: &ConnectionProfile, live: &Live) -> Match {
-    match live {
-        Live::Claude(root) => {
-            let actual = connection_slice(root);
-            if claude_rendered_connection(profile, &crate::secret_values::lookup).as_ref()
-                == Some(&actual)
-            {
-                return Match::Yes;
-            }
-            // 令牌变量取不到值：假设它就是实际令牌再比一次，对得上就是「无法核对」
-            let unresolved = profile
-                .token_var
-                .as_deref()
-                .is_some_and(|var| crate::secret_values::lookup(var).is_none());
-            match claude_live_token(root) {
-                Some((_, token))
-                    if unresolved
-                        && claude_rendered_connection(profile, &|_| Some(token.clone()))
-                            .as_ref()
-                            == Some(&actual) =>
-                {
-                    Match::Unverified
-                }
-                _ => Match::No,
-            }
-        }
-        Live::Codex(live) => {
-            if codex_matches(name, profile, live) {
-                Match::Yes
-            } else {
-                Match::No
-            }
-        }
-    }
-}
-
-/// Codex：比较语义内容（接入方式 + 模型），忽略表名与显示名。
-fn codex_matches(name: &str, profile: &ConnectionProfile, live: &CodexLive) -> bool {
-    if live.model.as_deref() != profile.model.as_deref() {
-        return false;
-    }
-    if let Some(reference) = profile.provider_ref.as_deref() {
-        return live.provider_id() == reference;
-    }
-    if profile.base_url.is_none() && profile.token_var.is_none() {
-        return live.on_openai();
-    }
-    match (&live.table, codex_rendered_table(name, profile)) {
-        (Some(actual), Ok(expected)) => {
-            !live.on_openai() && without_name(actual) == without_name(&expected)
-        }
-        _ => false,
-    }
-}
-
-/// 实际接入与上次写入的那套「身份」是否一致：Claude 看地址 + 认证头，Codex 看地址 +
-/// 令牌变量（且仍是本工具写的那张表）或引用的是同一个接入方式。身份一致时，
-/// 外部只改了模型、别名、超时等，就回填进它，而不是每次都新建导入项。
-fn same_identity(
-    name: &str,
-    profile: &ConnectionProfile,
-    live: &Live,
-    claimed: &BTreeSet<String>,
-) -> bool {
-    match live {
-        Live::Claude(root) => {
-            profile.provider_ref.is_none()
-                && profile.base_url.as_deref() == string_at(root, &["env", "ANTHROPIC_BASE_URL"])
-                && profile.token_var.as_ref().map(|_| profile.auth)
-                    == claude_live_token(root).map(|(kind, _)| kind)
-        }
-        Live::Codex(live) => {
-            if let Some(reference) = profile.provider_ref.as_deref() {
-                return live.provider_id() == reference;
-            }
-            if profile.base_url.is_none() && profile.token_var.is_none() {
-                return live.on_openai();
-            }
-            live.provider.as_deref() == Some(name)
-                && claimed.contains(name)
-                && live.table_text("base_url") == profile.base_url.as_deref()
-                && live.table_text("env_key") == profile.token_var.as_deref()
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Current {
-    /// 官方账号，且对不上别的已保存接入：没有接入键，或只指定了模型、别名与超时。
-    Default,
-    /// 与某套已保存接入逐项一致。
-    Profile(String),
-    /// 实际接入对不上任何已保存项。
-    Unsaved,
-}
-
-struct Identified {
-    current: Current,
-    /// 实际用的是官方账号（见 `Live::is_official`）；对上的已保存接入也可能是官方账号加模型。
-    official: bool,
-    unverified: Vec<String>,
-    /// 未保存、但与上次写入的那套身份一致：切换时回填进它。
-    drifted_from: Option<String>,
-}
-
-impl Identified {
-    fn profile(&self) -> Option<&str> {
-        match &self.current {
-            Current::Profile(name) => Some(name),
-            _ => None,
-        }
-    }
-
-    fn to_json(&self, settings: &AgentSettings) -> Value {
-        json!({
-            "profile": self.profile(),
-            "default": self.current == Current::Default,
-            "official": self.official,
-            "last_written": settings.active,
-            "unverified": self.unverified,
-            "drifted_from": self.drifted_from,
-        })
-    }
-}
-
-/// 按内容识别当前接入。`active` 只在内容相同的候选之间做平局裁决，不单独断言当前项。
-fn identify(live: &Live, settings: &AgentSettings, claimed: &BTreeSet<String>) -> Identified {
-    let mut candidates = Vec::new();
-    let mut unverified = Vec::new();
-    for (name, profile) in &settings.profiles {
-        match profile_matches(name, profile, live) {
-            Match::Yes => candidates.push(name.clone()),
-            Match::Unverified => unverified.push(name.clone()),
-            Match::No => {}
-        }
-    }
-    let active = settings.active.as_deref();
-    let current = if let Some(name) = active.filter(|name| candidates.iter().any(|c| c == name)) {
-        Current::Profile(name.to_string())
-    } else if live.is_default() {
-        Current::Default
-    } else if let Some(first) = candidates.first() {
-        Current::Profile(first.clone())
-    } else if live.is_official() {
-        // 官方账号只是指定了模型等：仍是官方账号，不是一套还没保存的接入
-        Current::Default
-    } else {
-        Current::Unsaved
-    };
-    let drifted_from = if current == Current::Unsaved {
-        active
-            .filter(|name| {
-                settings
-                    .profiles
-                    .get(*name)
-                    .is_some_and(|profile| same_identity(name, profile, live, claimed))
-            })
-            .map(str::to_string)
-    } else {
-        None
-    };
-    Identified {
-        current,
-        official: live.is_official(),
-        unverified,
-        drifted_from,
-    }
-}
-
-// ---------- 回填：切换前把还没保存的实际接入存进库 ----------
 
 fn agent_error(err: anyhow::Error) -> DispatchError {
     DispatchError::new("AGENT_ERROR", format!("{err:#}"))
@@ -2357,7 +1995,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         .cloned()
         .unwrap_or_default();
     apply_settings_changes(&mut preview, &changes);
-    let preview_settings = parse(&json!({"settings": preview})).map_err(agent_error)?;
+    parse(&json!({"settings": preview})).map_err(agent_error)?;
 
     let file_write = new_bytes.filter(|new| match &existing {
         Some(old) => old != new,
@@ -2463,18 +2101,12 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
     }
     guard.commit();
 
-    let current = Live::read(kind, &final_bytes).ok().map(|final_live| {
-        let claimed = final_live.claimed(&owned_after);
-        identify(&final_live, &preview_settings, &claimed)
-    });
     Ok(json!({
         "domain": "agents",
         "action": "configure",
         "element": format!("agents:{id}"),
         "target": path.display().to_string(),
         "mode": "runtime",
-        "active": preview_settings.active,
-        "current": current.as_ref().and_then(Identified::profile),
         "changed": changed,
         "base": new_base,
         "statusline": deploy,
@@ -2486,30 +2118,8 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn no_secrets(_: &str) -> Option<String> {
-        None
-    }
-
     fn sl() -> std::path::PathBuf {
         std::path::PathBuf::from("/data/statusline.sh")
-    }
-
-    fn profile(entry: Value) -> ConnectionProfile {
-        parse_profile("p", &entry).unwrap()
-    }
-
-    /// 只写接入键（测试用的小包装）：既有内容为基底，按目标那套写回。
-    fn connect(
-        existing: Option<&[u8]>,
-        target: Option<&ConnectionProfile>,
-        resolve: &dyn Fn(&str) -> Option<String>,
-    ) -> Result<Vec<u8>> {
-        let mut root = existing
-            .map(|bytes| serde_json::from_slice::<Value>(bytes).unwrap())
-            .and_then(|value| value.as_object().cloned())
-            .unwrap_or_default();
-        write_claude_connection(&mut root, target, resolve)?;
-        pretty_json(root)
     }
 
     /// 只写运行参数补丁（测试用的小包装）。
@@ -2610,34 +2220,6 @@ mod tests {
             parse(&json!({"bin": "claude"})).unwrap(),
             AgentSettings::default()
         );
-    }
-
-    #[test]
-    fn 只改自己那几条路径_别人的原样保留() {
-        let existing = serde_json::to_vec(&json!({
-            "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "x"}]}]},
-            "statusLine": {"type": "command", "command": "/x/mine.sh"},
-            "env": {"MY_OWN": "keep-me"},
-            "permissions": {"allow": ["Bash(ls:*)"]}
-        }))
-        .unwrap();
-        let relay = profile(json!({
-            "base_url": "https://api.example.com",
-            "model": "claude-opus-5"
-        }));
-        let out = connect(Some(&existing), Some(&relay), &no_secrets).unwrap();
-        let parsed: Value = serde_json::from_slice(&out).unwrap();
-
-        assert!(parsed["hooks"]["SessionStart"].is_array());
-        assert_eq!(parsed["env"]["MY_OWN"], "keep-me");
-        assert_eq!(parsed["permissions"]["allow"][0], "Bash(ls:*)");
-        assert_eq!(
-            parsed["env"]["ANTHROPIC_BASE_URL"],
-            "https://api.example.com"
-        );
-        assert_eq!(parsed["env"]["ANTHROPIC_MODEL"], "claude-opus-5");
-        // 没选内置状态栏时，用户自己那份原样留着
-        assert_eq!(parsed["statusLine"]["command"], "/x/mine.sh");
     }
 
     #[test]
@@ -2742,85 +2324,21 @@ mod tests {
     }
 
     #[test]
-    fn 两种认证方式写不同的环境变量() {
-        let resolve = |name: &str| (name == "TOK").then(|| "secret".to_string());
-        let bearer = profile(json!({"token_var": "TOK"}));
-        let parsed: Value =
-            serde_json::from_slice(&connect(None, Some(&bearer), &resolve).unwrap()).unwrap();
-        assert_eq!(parsed["env"]["ANTHROPIC_AUTH_TOKEN"], "secret");
-        assert!(parsed["env"].get("ANTHROPIC_API_KEY").is_none());
-
-        let api_key = profile(json!({"token_var": "TOK", "auth": "api_key"}));
-        let parsed: Value =
-            serde_json::from_slice(&connect(None, Some(&api_key), &resolve).unwrap()).unwrap();
-        assert_eq!(parsed["env"]["ANTHROPIC_API_KEY"], "secret");
-        assert!(parsed["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
-    }
-
-    #[test]
-    fn 切换接入配置时上一套的变量必须消失() {
-        let settings = parse(&json!({"settings": {
-            "active": "relay",
-            "profiles": {
-                "official": {},
-                "relay": {
-                    "base_url": "https://relay.example.com",
-                    "model": "relay-model",
-                    "small_fast_model": "relay-small",
-                    "model_aliases": {"opus": "relay-opus"},
-                    "timeout_ms": 600000
-                }
-            }
-        }}))
-        .unwrap();
-        let first = connect(None, settings.profiles.get("relay"), &no_secrets).unwrap();
-        let parsed: Value = serde_json::from_slice(&first).unwrap();
-        assert_eq!(
-            parsed["env"]["ANTHROPIC_BASE_URL"],
-            "https://relay.example.com"
-        );
-        assert_eq!(parsed["env"]["ANTHROPIC_SMALL_FAST_MODEL"], "relay-small");
-        assert_eq!(parsed["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"], "relay-opus");
-        assert_eq!(parsed["env"]["API_TIMEOUT_MS"], "600000");
-
-        // 切到什么都没配的 official：上一套留下的变量一个都不许剩
-        let second = connect(Some(&first), settings.profiles.get("official"), &no_secrets).unwrap();
-        let parsed: Value = serde_json::from_slice(&second).unwrap();
-        assert!(parsed.get("env").is_none(), "官方配置不需要任何环境变量");
-    }
-
-    #[test]
     fn 清空普通项只删自己那条_自动化模式写明安全值_且不碰同级() {
         let existing = serde_json::to_vec(&json!({
             "env": {"ANTHROPIC_BASE_URL": "https://old.example.com", "MY_OWN": "keep-me"},
             "permissions": {"defaultMode": "bypassPermissions", "allow": ["Bash(ls:*)"]}
         }))
         .unwrap();
-        let out = connect(Some(&existing), None, &no_secrets).unwrap();
-        let out = runtime(Some(&out), json!({"automation_mode": "manual"}));
+        let out = runtime(Some(&existing), json!({"automation_mode": "manual"}));
         let parsed: Value = serde_json::from_slice(&out).unwrap();
 
-        assert!(parsed["env"].get("ANTHROPIC_BASE_URL").is_none());
         assert_eq!(parsed["env"]["MY_OWN"], "keep-me", "同级的别人的变量要留着");
         assert_eq!(parsed["permissions"]["defaultMode"], "manual");
         assert_eq!(
             parsed["permissions"]["allow"][0], "Bash(ls:*)",
             "同级的 allow 要留着"
         );
-
-        // 只剩我们那一条时整个父对象收走
-        let only_ours =
-            serde_json::to_vec(&json!({"env": {"ANTHROPIC_BASE_URL": "https://x"}})).unwrap();
-        let out = connect(Some(&only_ours), None, &no_secrets).unwrap();
-        let parsed: Value = serde_json::from_slice(&out).unwrap();
-        assert!(parsed.get("env").is_none());
-    }
-
-    #[test]
-    fn 令牌取不到值时拒绝写入_而不是写个空的上去() {
-        let missing = profile(json!({"token_var": "MISSING_TOKEN"}));
-        let err = connect(None, Some(&missing), &no_secrets).unwrap_err();
-        assert!(err.to_string().contains("MISSING_TOKEN"));
     }
 
     #[test]
@@ -3268,59 +2786,6 @@ stream_idle_timeout_ms = 450000
         )
         .unwrap();
         assert_eq!(preset["runtime"]["automation_mode"], "auto");
-    }
-
-    fn claude_live(value: Value) -> Live {
-        Live::read(Kind::Claude, &serde_json::to_vec(&value).unwrap()).unwrap()
-    }
-
-    #[test]
-    fn 按内容识别当前接入_active_只在内容相同的候选间裁决() {
-        let settings = |active: Option<&str>| {
-            let mut raw = json!({"settings": {"profiles": {
-                "official": {"label": "官方"},
-                "relay": {"base_url": "https://relay.example.com", "model": "m1"}
-            }}});
-            if let Some(active) = active {
-                raw["settings"]["active"] = json!(active);
-            }
-            parse(&raw).unwrap()
-        };
-        // 空字符串与没写等价
-        let empty = claude_live(
-            json!({"permissions": {"defaultMode": "auto"}, "env": {"ANTHROPIC_MODEL": ""}}),
-        );
-        let none = BTreeSet::new();
-        // 没有接入键：切回默认后是默认账号；上次写的是 official 时就是 official
-        assert_eq!(
-            identify(&empty, &settings(None), &none).current,
-            Current::Default
-        );
-        assert_eq!(
-            identify(&empty, &settings(Some("official")), &none).current,
-            Current::Profile("official".into())
-        );
-        let relay = claude_live(
-            json!({"env": {"ANTHROPIC_BASE_URL": "https://relay.example.com", "ANTHROPIC_MODEL": "m1"}}),
-        );
-        // 库里 active 指向别处也不影响：内容说了算
-        assert_eq!(
-            identify(&relay, &settings(Some("official")), &none).current,
-            Current::Profile("relay".into())
-        );
-        // 外部只改了模型：未保存，但与上次写入的 relay 身份一致
-        let model_changed = claude_live(
-            json!({"env": {"ANTHROPIC_BASE_URL": "https://relay.example.com", "ANTHROPIC_MODEL": "m2"}}),
-        );
-        let identified = identify(&model_changed, &settings(Some("relay")), &none);
-        assert_eq!(identified.current, Current::Unsaved);
-        assert_eq!(identified.drifted_from.as_deref(), Some("relay"));
-        // 地址也换了：身份不同，切换时新建导入项
-        let other =
-            claude_live(json!({"env": {"ANTHROPIC_BASE_URL": "https://other.example.com"}}));
-        let identified = identify(&other, &settings(Some("relay")), &none);
-        assert_eq!(identified.current, Current::Unsaved);
-        assert_eq!(identified.drifted_from, None);
     }
 
     /// 与真实 codex 0.156.1 `login status` 的加载结果逐条对齐：左边这些都报
