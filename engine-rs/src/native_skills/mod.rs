@@ -55,6 +55,8 @@ pub(crate) struct AgentTargetInfo {
     pub(crate) id: String,
     pub(crate) enabled: bool,
     pub(crate) skills_dir: PathBuf,
+    /// 按定义里的 `bin` 认出的助手形态；认不出（自定义助手）为 None。
+    pub(crate) kind: Option<crate::native_agent_adapters::AdapterKind>,
 }
 
 #[derive(Debug, Clone)]

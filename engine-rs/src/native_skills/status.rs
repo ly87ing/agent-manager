@@ -95,6 +95,10 @@ fn load_agent_targets(policy: &Value, home_dir: &Path) -> BTreeMap<String, Agent
                 id: agent_id.clone(),
                 enabled,
                 skills_dir,
+                kind: raw
+                    .get("bin")
+                    .and_then(Value::as_str)
+                    .and_then(crate::native_agent_adapters::kind_for_bin),
             },
         );
     }
@@ -698,5 +702,7 @@ pub fn build_status(ctx: &Context) -> Result<Value> {
         "recommendations": super::recommend::recommendations_value(&meta.collections),
         // 各助手技能目录的实际条目（当前视图），不产生待处理项
         "installed": super::discover::installed(ctx, &meta, &bindings),
+        // 本工具没有管理的技能（其他来源）、Codex 共用目录与重名：只读，不产生待同步
+        "unmanaged": super::discover::unmanaged(ctx, &meta, &bindings),
     }))
 }

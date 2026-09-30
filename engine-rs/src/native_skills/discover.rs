@@ -256,6 +256,314 @@ pub(crate) fn installed(ctx: &Context, meta: &DomainMetadata, bindings: &Binding
     Value::Array(items)
 }
 
+/// Codex 共用技能目录：Codex 在各账号自己的 `$CODEX_HOME/skills` 之外还读 `~/.agents/skills`，
+/// 对所有 Codex 账号生效（2026-09-29 codex-cli 0.159.0 实测）；Claude 不读它。
+const CODEX_SHARED_ID: &str = "codex-shared";
+/// `npx skills` 的锁文件；只读，从不改写。
+const SKILL_LOCK_FILE: &str = ".agents/.skill-lock.json";
+/// 读锁文件、发布信息与 git 配置的上限：这些都是小文件，超限按读不到处理。
+const SMALL_FILE_LIMIT: u64 = 1024 * 1024;
+
+fn codex_shared_dir(home_dir: &Path) -> PathBuf {
+    home_dir.join(".agents/skills")
+}
+
+fn read_small_json(path: &Path) -> Option<Value> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() || meta.len() > SMALL_FILE_LIMIT {
+        return None;
+    }
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+/// 锁文件里的技能记录：技能名 → 记录。读不了或格式不对时为空。
+fn read_skill_lock(home_dir: &Path) -> Map<String, Value> {
+    read_small_json(&home_dir.join(SKILL_LOCK_FILE))
+        .and_then(|lock| lock.get("skills").and_then(Value::as_object).cloned())
+        .unwrap_or_default()
+}
+
+/// 从 `.git/config` 里读 `[remote "origin"]` 的 url；只读文件，不起 git 进程。
+fn origin_url(config: &Path) -> Option<String> {
+    let meta = std::fs::metadata(config).ok()?;
+    if meta.len() > SMALL_FILE_LIMIT {
+        return None;
+    }
+    let text = std::fs::read_to_string(config).ok()?;
+    let mut in_origin = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_origin = line.replace(' ', "") == "[remote\"origin\"]";
+            continue;
+        }
+        if in_origin {
+            if let Some((key, value)) = line.split_once('=') {
+                if key.trim() == "url" {
+                    let url = value.trim();
+                    return (!url.is_empty()).then(|| url.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 技能目录所在的 git 仓库：向上找 `.git` 目录（到主目录为止），返回 (origin url, 技能在仓库里的相对路径)。
+fn git_source(dir: &Path, home_dir: &Path) -> Option<(String, String)> {
+    let mut current = dir.to_path_buf();
+    for _ in 0..16 {
+        let git = current.join(".git");
+        if git.is_dir() {
+            let url = origin_url(&git.join("config"))?;
+            let rel = dir
+                .strip_prefix(&current)
+                .map(|rel| rel.to_string_lossy().to_string())
+                .unwrap_or_default();
+            return Some((url, rel));
+        }
+        if current == home_dir || !current.pop() {
+            return None;
+        }
+    }
+    None
+}
+
+/// 按锁文件、技能自带的 `skill-release.json`、所在 git 仓库识别来源；都没有时为 null。
+/// 只读：不访问网络，不起进程。
+fn detect_source(
+    name: &str,
+    content_dir: Option<&Path>,
+    lock: &Map<String, Value>,
+    home_dir: &Path,
+) -> Value {
+    let mut evidence: Vec<&str> = Vec::new();
+    let mut repository: Option<String> = None;
+    let mut path: Option<String> = None;
+    let mut version: Option<String> = None;
+    let mut installer: Option<&str> = None;
+    if let Some(entry) = lock.get(name) {
+        let url = entry
+            .get("sourceUrl")
+            .and_then(Value::as_str)
+            .filter(|url| !url.is_empty());
+        if let Some(url) = url {
+            evidence.push("skill-lock");
+            installer = Some("npx-skills");
+            repository = Some(url.to_string());
+            path = entry.get("skillPath").and_then(Value::as_str).map(|raw| {
+                raw.trim_end_matches("SKILL.md")
+                    .trim_end_matches('/')
+                    .to_string()
+            });
+        }
+    }
+    if let Some(dir) = content_dir {
+        if let Some(release) = read_small_json(&dir.join("skill-release.json")) {
+            let repo = release
+                .pointer("/source/repository")
+                .and_then(Value::as_str)
+                .filter(|url| !url.is_empty());
+            let ver = release
+                .get("version")
+                .and_then(Value::as_str)
+                .filter(|v| !v.is_empty());
+            if repo.is_some() || ver.is_some() {
+                evidence.push("skill-release");
+                if repository.is_none() {
+                    repository = repo.map(str::to_string);
+                }
+                version = ver.map(str::to_string);
+            }
+        }
+        if repository.is_none() {
+            if let Some((url, rel)) = git_source(dir, home_dir) {
+                evidence.push("git");
+                repository = Some(url);
+                path = Some(rel);
+            }
+        }
+    }
+    if evidence.is_empty() {
+        return Value::Null;
+    }
+    json!({
+        "repository": repository,
+        "path": path.filter(|p| !p.is_empty()),
+        "version": version,
+        "installer": installer,
+        "evidence": evidence,
+    })
+}
+
+/// skills:status 的 `unmanaged`：本工具没有管理的技能（「其他来源」）、Codex 共用目录与重名。
+///
+/// - `skills`：按技能名聚合各账号目录里的真实目录与外部链接，以及 Codex 共用目录里的条目；
+///   带识别出的来源，以及能不能纳入管理（Claude 自己同步的 `synced/`、没有 SKILL.md 的不能）。
+///   共用目录里与本工具已在 Codex 账号上管理的技能同名的，不算「其他来源」，只记为重名。
+/// - `duplicates`：同一个技能名既在某个 Codex 账号的技能目录里、又在共用目录里——Codex 会加载两份。
+///
+/// 只读零写：只 `read_dir`、读链接与小文件，不建数据目录，不访问网络。
+pub(crate) fn unmanaged(ctx: &Context, meta: &DomainMetadata, bindings: &Bindings) -> Value {
+    use crate::native_agent_adapters::AdapterKind;
+    let bases = manager_bases(ctx);
+    let link_bases = managed_bases(ctx, &meta.collections);
+    let collection_of_skill = collection_of_skill_map(ctx, meta);
+    let lock = read_skill_lock(&ctx.home_dir);
+    let codex_agents: BTreeSet<String> = meta
+        .agents
+        .iter()
+        .filter(|(_, info)| info.kind == Some(AdapterKind::Codex))
+        .map(|(id, _)| id.clone())
+        .collect();
+    let claude_agents: BTreeSet<String> = meta
+        .agents
+        .iter()
+        .filter(|(_, info)| info.kind == Some(AdapterKind::Claude))
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    // 技能名 → (位置列表, 内容目录, 不能纳入的原因)
+    let mut groups: BTreeMap<String, (Vec<Value>, Option<PathBuf>, Option<&'static str>)> =
+        BTreeMap::new();
+    let mut add =
+        |name: &str, location: Value, content: Option<PathBuf>, blocked: Option<&'static str>| {
+            let slot = groups.entry(name.to_string()).or_default();
+            slot.0.push(location);
+            if slot.1.is_none() {
+                slot.1 = content;
+            }
+            if slot.2.is_none() {
+                slot.2 = blocked;
+            }
+        };
+    let content_of = |entry: &RawEntry| -> Option<PathBuf> {
+        if entry.is_link {
+            entry.target.clone().filter(|_| entry.target_exists)
+        } else {
+            Some(entry.link_path.clone())
+        }
+    };
+    let blocked_of =
+        |entry: &RawEntry, content: Option<&Path>, claude: bool| -> Option<&'static str> {
+            if claude && !entry.is_link && entry.name == "synced" {
+                return Some("claude-synced");
+            }
+            if !content.is_some_and(|dir| dir.join("SKILL.md").is_file()) {
+                return Some("no-skill-md");
+            }
+            None
+        };
+
+    // Codex 账号上本工具管理着的技能名：共用目录里的同名项只算重名
+    let mut codex_managed: BTreeSet<String> = BTreeSet::new();
+    let mut codex_names: BTreeMap<String, Vec<(String, PathBuf)>> = BTreeMap::new();
+    for (entry, bound) in scan_all(meta, bindings) {
+        let managed = bound.is_some()
+            && entry.is_link
+            && entry.target_exists
+            && is_managed_link(&entry.link_path, &link_bases);
+        if codex_agents.contains(&entry.agent) {
+            codex_names
+                .entry(entry.name.clone())
+                .or_default()
+                .push((entry.agent.clone(), entry.link_path.clone()));
+            if managed {
+                codex_managed.insert(entry.name.clone());
+            }
+        }
+        if managed {
+            continue;
+        }
+        let (origin, _, _) = classify(&entry, &bases, &collection_of_skill);
+        if !matches!(origin, "native-dir" | "external-link") {
+            continue;
+        }
+        let content = content_of(&entry);
+        let blocked = blocked_of(
+            &entry,
+            content.as_deref(),
+            claude_agents.contains(&entry.agent),
+        );
+        add(
+            &entry.name,
+            json!({
+                "agent": entry.agent,
+                "shared": Value::Null,
+                "path": tildify(&entry.link_path, &ctx.home_dir),
+                "target": entry.target.as_ref().map(|t| Value::String(tildify(t, &ctx.home_dir))).unwrap_or(Value::Null),
+                "origin": origin,
+            }),
+            content,
+            blocked,
+        );
+    }
+
+    let mut shared_dirs: Vec<Value> = Vec::new();
+    let mut duplicates: Vec<Value> = Vec::new();
+    if !codex_agents.is_empty() {
+        let shared_dir = codex_shared_dir(&ctx.home_dir);
+        shared_dirs.push(json!({
+            "id": CODEX_SHARED_ID,
+            "kind": "codex",
+            "path": tildify(&shared_dir, &ctx.home_dir),
+            "exists": shared_dir.is_dir(),
+        }));
+        for entry in scan_agent_dir(CODEX_SHARED_ID, &shared_dir) {
+            for (agent, path) in codex_names.get(&entry.name).into_iter().flatten() {
+                duplicates.push(json!({
+                    "name": entry.name,
+                    "agent": agent,
+                    "paths": [tildify(path, &ctx.home_dir), tildify(&entry.link_path, &ctx.home_dir)],
+                }));
+            }
+            if codex_managed.contains(&entry.name) {
+                continue;
+            }
+            let origin = if !entry.is_link {
+                "native-dir"
+            } else if entry.target_exists {
+                "external-link"
+            } else {
+                continue;
+            };
+            let content = content_of(&entry);
+            let blocked = blocked_of(&entry, content.as_deref(), false);
+            add(
+                &entry.name,
+                json!({
+                    "agent": Value::Null,
+                    "shared": CODEX_SHARED_ID,
+                    "path": tildify(&entry.link_path, &ctx.home_dir),
+                    "target": entry.target.as_ref().map(|t| Value::String(tildify(t, &ctx.home_dir))).unwrap_or(Value::Null),
+                    "origin": origin,
+                }),
+                content,
+                blocked,
+            );
+        }
+    }
+
+    let skills: Vec<Value> = groups
+        .into_iter()
+        .map(|(name, (locations, content, blocked))| {
+            let source = if blocked == Some("claude-synced") {
+                Value::Null
+            } else {
+                detect_source(&name, content.as_deref(), &lock, &ctx.home_dir)
+            };
+            json!({
+                "name": name,
+                "locations": locations,
+                "source": source,
+                "adoptable": blocked.is_none(),
+                "blocked_reason": blocked,
+            })
+        })
+        .collect();
+    json!({"skills": skills, "shared_dirs": shared_dirs, "duplicates": duplicates})
+}
+
 pub(crate) fn discover(ctx: &Context) -> Result<Value> {
     let meta = load_metadata(ctx)?;
     let bindings = load_bindings_readonly(ctx)?;

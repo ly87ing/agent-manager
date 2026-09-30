@@ -3194,3 +3194,194 @@ fn disabling_or_removing_the_origin_keeps_the_users_version_linked() {
     assert!(mine.join("SKILL.md").is_file());
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// 其他来源（unmanaged）：复刻 2026-09-29 真实机器上的布局——`npx skills` 锁文件、带
+/// `skill-release.json` 的真实目录、Claude `synced/`、Codex 共用目录 `~/.agents/skills`
+/// 里与受管技能同名的链接、指向 git 仓库内的链接。识别来源、重名与能否纳入；全程零写。
+#[test]
+fn unmanaged_view_detects_sources_shared_dir_and_duplicates_with_zero_writes() {
+    let (root, ctx) = temp_ctx("skills-unmanaged-view");
+    let repo_dir = ctx.data_dir.join("repositories").join("test-skills");
+    std::fs::create_dir_all(repo_dir.join("alpha")).unwrap();
+    std::fs::write(repo_dir.join("alpha").join("SKILL.md"), "# Alpha").unwrap();
+    let set = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "skills.repositories.test-skills",
+                "--value",
+                r#"{"url":"https://example.invalid/test-skills.git"}"#,
+            ],
+        ),
+    );
+    assert!(set.ok, "{:?}", set.errors);
+    for agent in ["claude-code", "codex"] {
+        let add = execute(
+            &ctx,
+            &request(
+                "skills:apply",
+                &[
+                    "--only",
+                    "skill:test-skills/alpha",
+                    "--action",
+                    "add",
+                    "--agent",
+                    agent,
+                ],
+            ),
+        );
+        assert!(add.ok, "{agent}: {:?}", add.errors);
+    }
+    let home = &ctx.home_dir;
+    let claude_skills = home.join(".claude/skills");
+    let shared = home.join(".agents/skills");
+    // npx skills 装的 archify：Claude 与共用目录各一份真实目录，带发布信息
+    for dir in [claude_skills.join("archify"), shared.join("archify")] {
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("SKILL.md"), "# archify").unwrap();
+        std::fs::write(
+            dir.join("skill-release.json"),
+            r#"{"version":"3.0.1","source":{"repository":"https://github.com/tt-a1i/archify"}}"#,
+        )
+        .unwrap();
+    }
+    std::fs::create_dir_all(shared.join("orca-cli")).unwrap();
+    std::fs::write(shared.join("orca-cli/SKILL.md"), "# orca").unwrap();
+    std::fs::write(
+        home.join(".agents/.skill-lock.json"),
+        r#"{"version":3,"skills":{
+            "archify":{"sourceUrl":"https://github.com/tt-a1i/archify.git","skillPath":"archify/SKILL.md"},
+            "orca-cli":{"sourceUrl":"https://github.com/stablyai/orca.git","skillPath":"skills/orca-cli/SKILL.md"}}}"#,
+    )
+    .unwrap();
+    // Claude 自己同步的目录：没有 SKILL.md，不能纳入
+    std::fs::create_dir_all(claude_skills.join("synced/bucket-1")).unwrap();
+    // 共用目录里指向 git 仓库内技能的链接
+    let git_repo = home.join("src/team-skills");
+    std::fs::create_dir_all(git_repo.join(".git")).unwrap();
+    std::fs::write(
+        git_repo.join(".git/config"),
+        "[core]\n\tbare = false\n[remote \"origin\"]\n\turl = git@example.invalid:team/skills.git\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(git_repo.join("skills/gitty")).unwrap();
+    std::fs::write(git_repo.join("skills/gitty/SKILL.md"), "# gitty").unwrap();
+    std::os::unix::fs::symlink(git_repo.join("skills/gitty"), shared.join("gitty")).unwrap();
+    // 与 Codex 上受管的 alpha 同名：Codex 会加载两份
+    std::os::unix::fs::symlink(repo_dir.join("alpha"), shared.join("alpha")).unwrap();
+
+    let db = store::db_path(&ctx);
+    let db_before = std::fs::read(&db).unwrap();
+    let tree = |dir: &std::path::Path| {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        names
+    };
+    let shared_before = tree(&shared);
+    let claude_before = tree(&claude_skills);
+    let lock_before = std::fs::read(home.join(".agents/.skill-lock.json")).unwrap();
+
+    let status = execute(&ctx, &request("skills:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    assert_status_matches_contract(&status.data);
+    let unmanaged = &status.data["unmanaged"];
+    let skills = unmanaged["skills"].as_array().unwrap();
+    let names: Vec<&str> = skills.iter().map(|s| s["name"].as_str().unwrap()).collect();
+    assert_eq!(
+        names,
+        ["archify", "gitty", "orca-cli", "synced"],
+        "受管的 alpha 不算其他来源"
+    );
+    let find = |name: &str| skills.iter().find(|s| s["name"] == name).unwrap();
+
+    let archify = find("archify");
+    let places: Vec<(serde_json::Value, serde_json::Value, &str)> = archify["locations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| {
+            (
+                l["agent"].clone(),
+                l["shared"].clone(),
+                l["origin"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        places,
+        [
+            (
+                serde_json::json!("claude-code"),
+                serde_json::Value::Null,
+                "native-dir"
+            ),
+            (
+                serde_json::Value::Null,
+                serde_json::json!("codex-shared"),
+                "native-dir"
+            ),
+        ]
+    );
+    assert_eq!(archify["adoptable"], true);
+    assert_eq!(
+        archify["source"]["repository"],
+        "https://github.com/tt-a1i/archify.git"
+    );
+    assert_eq!(archify["source"]["path"], "archify");
+    assert_eq!(archify["source"]["version"], "3.0.1");
+    assert_eq!(archify["source"]["installer"], "npx-skills");
+    assert_eq!(
+        archify["source"]["evidence"],
+        serde_json::json!(["skill-lock", "skill-release"])
+    );
+
+    assert_eq!(find("orca-cli")["source"]["path"], "skills/orca-cli");
+    assert_eq!(
+        find("orca-cli")["source"]["version"],
+        serde_json::Value::Null
+    );
+
+    let gitty = find("gitty");
+    assert_eq!(gitty["locations"][0]["origin"], "external-link");
+    assert_eq!(
+        gitty["locations"][0]["target"],
+        "~/src/team-skills/skills/gitty"
+    );
+    assert_eq!(
+        gitty["source"]["repository"],
+        "git@example.invalid:team/skills.git"
+    );
+    assert_eq!(gitty["source"]["path"], "skills/gitty");
+    assert_eq!(gitty["source"]["evidence"], serde_json::json!(["git"]));
+
+    let synced = find("synced");
+    assert_eq!(synced["adoptable"], false);
+    assert_eq!(synced["blocked_reason"], "claude-synced");
+    assert_eq!(synced["source"], serde_json::Value::Null);
+
+    assert_eq!(
+        unmanaged["shared_dirs"],
+        serde_json::json!([{"id": "codex-shared", "kind": "codex", "path": "~/.agents/skills", "exists": true}])
+    );
+    assert_eq!(
+        unmanaged["duplicates"],
+        serde_json::json!([{"name": "alpha", "agent": "codex", "paths": ["~/.codex/skills/alpha", "~/.agents/skills/alpha"]}])
+    );
+
+    assert_eq!(std::fs::read(&db).unwrap(), db_before, "查询不得写库");
+    assert_eq!(tree(&shared), shared_before, "查询不得改动共用目录");
+    assert_eq!(tree(&claude_skills), claude_before, "查询不得改动助手目录");
+    assert_eq!(
+        std::fs::read(home.join(".agents/.skill-lock.json")).unwrap(),
+        lock_before,
+        "不得改锁文件"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}

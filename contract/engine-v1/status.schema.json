@@ -28,6 +28,42 @@
       "type": "array",
       "items": {"$ref": "#/$defs/skill_installed_entry"}
     },
+    "unmanaged": {
+      "description": "Skills domain only: skills this tool does not manage (other sources), the Codex shared skills directory (~/.agents/skills, read by every Codex account), and same-name duplicates Codex would load twice. Read-only, zero-write, no network.",
+      "type": "object",
+      "required": ["skills", "shared_dirs", "duplicates"],
+      "additionalProperties": false,
+      "properties": {
+        "skills": {"type": "array", "items": {"$ref": "#/$defs/skill_unmanaged"}},
+        "shared_dirs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "kind", "path", "exists"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string"},
+              "kind": {"enum": ["codex"]},
+              "path": {"type": "string"},
+              "exists": {"type": "boolean"}
+            }
+          }
+        },
+        "duplicates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "agent", "paths"],
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string"},
+              "agent": {"description": "Codex agent id whose skills directory also has this name.", "type": "string"},
+              "paths": {"description": "The account's entry, then the shared-directory entry.", "type": "array", "items": {"type": "string"}}
+            }
+          }
+        }
+      }
+    },
     "templates": {
       "description": "Rules domain only: saved rule templates (stored, not in effect), including templates derived on the fly from not-yet-migrated legacy rule sources. Applying one writes a target's real rules file.",
       "type": "array",
@@ -160,6 +196,45 @@
         "skill_paths": {"description": "Skills the source offers.", "type": "array", "items": {"type": "string"}},
         "added": {"description": "True when a non-deleted collection with the same name or URL already exists; the UI then offers no add action.", "type": "boolean"},
         "definition": {"description": "Collection definition written on add: url and skill_paths only (no agents, no assignment).", "type": "object"}
+      }
+    },
+    "skill_unmanaged": {
+      "description": "One skill name not managed by this tool, with every place it was found.",
+      "type": "object",
+      "required": ["name", "locations", "source", "adoptable", "blocked_reason"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {"type": "string"},
+        "locations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["agent", "shared", "path", "target", "origin"],
+            "additionalProperties": false,
+            "properties": {
+              "agent": {"description": "Agent id, or null for a shared directory.", "type": ["string", "null"]},
+              "shared": {"description": "Shared directory id (codex-shared), or null.", "type": ["string", "null"]},
+              "path": {"type": "string"},
+              "target": {"type": ["string", "null"]},
+              "origin": {"enum": ["native-dir", "external-link"]}
+            }
+          }
+        },
+        "source": {
+          "description": "Detected origin (npx skills lock file, the skill's skill-release.json, or the enclosing git repository), or null.",
+          "type": ["object", "null"],
+          "required": ["repository", "path", "version", "installer", "evidence"],
+          "additionalProperties": false,
+          "properties": {
+            "repository": {"type": ["string", "null"]},
+            "path": {"type": ["string", "null"]},
+            "version": {"type": ["string", "null"]},
+            "installer": {"enum": ["npx-skills", null]},
+            "evidence": {"type": "array", "items": {"enum": ["skill-lock", "skill-release", "git"]}}
+          }
+        },
+        "adoptable": {"type": "boolean"},
+        "blocked_reason": {"enum": ["claude-synced", "no-skill-md", null]}
       }
     },
     "skill_installed_entry": {
