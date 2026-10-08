@@ -2,6 +2,19 @@
 
 本页以当前分支的真实 Rust/Tauri 实现为基准；只有已接线并经过对应验证的能力才标记为完成。
 
+## 2026-10-08 发布验收
+
+四平台构建与 macOS / Linux 启动检查已通过；完整签名发布被 GitHub 计费条件阻断，尚未完成正式 Release 和实际自动更新验收。
+
+- `77866cd` 的 [普通 CI](https://github.com/ly87ing/agent-manager/actions/runs/37768672793) 和 [四平台制品 CI](https://github.com/ly87ing/agent-manager/actions/runs/37768672559) 全部通过。两种 macOS 架构的 DMG 均完成构建身份、完整 ad-hoc 签名、隔离 HOME 启动验收；Linux AppImage / deb 解包程序在隔离虚拟桌面存活检查通过。Windows NSIS / MSI 构建通过，真机安装与界面仍未验收。
+- 不配置任何来源的隔离 HOME 中，账号、技能、规则、MCP、命令和密钥共 7 个实际 CLI 状态入口正常；本机资源可见，未创建数据库或仓库缓存。前端 619 项、Rust 443 项本地回归通过；私有密钥仓库配置见 [密钥配置](SECRETS-MANAGEMENT.md)。
+- 本地 Tauri ad-hoc 打包、更新压缩包签名、独立验签和篡改拒绝通过。更新私钥与密码已保存到维护者私有仓库并配置 Actions Secrets；普通用户无需访问它们。
+- 首轮私有草稿 `v0.1.0-rc.1` 暴露构建身份测试的旧预期，已由 `2a71f12` 修正；发布模式 6 项测试和普通模式全量 443 项均通过。第二轮 [GUI Release](https://github.com/ly87ing/agent-manager/actions/runs/37770628640) 在启动任何步骤前被 GitHub 以“付款失败或 spending limit 需要提高”拒绝。没有发布正式版，也没有改变仓库可见性。
+
+恢复时先处理 GitHub Billing，再从最新 `main` 新建候选标签（下一个可用候选为 `v0.1.0-rc.3`），不要移动已有标签。完整签名发布、实际下载和自动更新安装仍需验收；安装包公开范围尚待确认。已发布预览包不含更新公钥，首次使用签名发布版需要手动安装。
+
+## 功能状态
+
 | 范围 | 状态 |
 | --- | --- |
 | SQLite 核心 | 已完成：`native-manager.db`、settings、policy、runs 和读写边界 |
