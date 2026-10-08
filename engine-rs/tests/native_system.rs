@@ -52,7 +52,16 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     assert!(env.errors.is_empty());
     assert!(!env.lock.held);
     assert!(!env.mode.offline);
-    assert_eq!(env.data["version"], Value::Null);
+    // 3b28f45 起，发布构建会回读编译时身份；隔离 HOME 不应清掉包的来源信息。
+    let commit = env!("AGENT_MANAGER_BUILD_COMMIT");
+    let date = env!("AGENT_MANAGER_BUILD_DATE");
+    let expected_version =
+        if commit.is_empty() || chrono::DateTime::parse_from_rfc3339(date).is_err() {
+            Value::Null
+        } else {
+            serde_json::json!({ "commit": commit, "date": date })
+        };
+    assert_eq!(env.data["version"], expected_version);
     for name in [
         "agents", "skills", "mcp", "rules", "aliases", "secrets", "runtime", "storage",
     ] {
