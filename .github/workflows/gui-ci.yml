@@ -96,7 +96,7 @@ jobs:
         if: ${{ runner.os == 'Linux' }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils xvfb dbus-x11
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -187,6 +187,41 @@ jobs:
           installers=("$RUNNER_TEMP/agent-manager-installers/"*.dmg)
           [[ "${#installers[@]}" == 1 ]]
           bash scripts/verify-macos-dmg.sh "${installers[0]}" "$GITHUB_SHA"
+
+      - name: Verify Linux packages in isolated desktop
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_root="$(mktemp -d "$RUNNER_TEMP/linux-installer.XXXXXX")"
+          trap 'rm -rf "$test_root"' EXIT
+          installers="$RUNNER_TEMP/agent-manager-installers"
+          images=("$installers/"*.AppImage)
+          debs=("$installers/"*.deb)
+          [[ "${#images[@]}" == 1 && "${#debs[@]}" == 1 ]]
+          chmod +x "${images[0]}"
+          (cd "$test_root" && "${images[0]}" --appimage-extract >/dev/null)
+          dpkg-deb --extract "${debs[0]}" "$test_root/deb"
+          for executable in "$test_root/squashfs-root/AppRun" "$test_root/deb/usr/bin/agent-manager-app"; do
+            [[ -x "$executable" ]]
+            runtime="$(mktemp -d "$test_root/runtime.XXXXXX")"
+            mkdir -p "$runtime/home" "$runtime/data" "$runtime/xdg"
+            chmod 700 "$runtime/xdg"
+            # 不依赖 FUSE；分别启动从 AppImage 与 deb 解包的真实程序。
+            env -i HOME="$runtime/home" AGENT_MANAGER_DATA_DIR="$runtime/data" \
+              XDG_RUNTIME_DIR="$runtime/xdg" PATH=/usr/bin:/bin \
+              xvfb-run -a dbus-run-session -- bash -c '
+                cd /
+                "$1" >"$2" 2>&1 &
+                app_pid=$!
+                trap "kill -TERM $app_pid 2>/dev/null || true; wait $app_pid 2>/dev/null || true" EXIT
+                for i in {1..5}; do
+                  sleep 1
+                  kill -0 "$app_pid" || { cat "$2"; exit 1; }
+                done
+              ' bash "$executable" "$runtime/app.log"
+            echo "isolated startup passed: $(basename "$executable")"
+          done
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
