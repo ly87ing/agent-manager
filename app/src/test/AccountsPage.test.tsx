@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { act, waitFor } from "@testing-library/react";
 import AccountsPage from "../pages/AccountsPage";
 import type { Envelope } from "../lib/contract";
 import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeElement, makeEnvelope } from "./fixtures";
@@ -57,7 +57,7 @@ function routes(options: { previewVersion?: () => number; statusline?: string } 
         id: "profiles:ds",
         domain: "profiles",
         spec: { display_name: "DeepSeek", base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-ds", base_url: "https://api.deepseek.com/anthropic", model: "deepseek-v4" },
-        observed: { config_dir: "~/.claude-ds", third_party: true, base: "file-base", definition_base: "def-base", blocked_reason: null },
+        observed: { config_dir: "~/.claude-ds", third_party: true, base: "file-base", definition_base: "def-base", editable_profile: { env: DS_DEFINITION.profile.env, model: DS_DEFINITION.profile.model }, blocked_reason: null },
         state: "managed-ok",
       })],
     }, { command: "profiles.status" }),
@@ -137,6 +137,64 @@ async function openCreate() {
 }
 
 describe("账号页", () => {
+
+  it("按地址、命令和身份搜索；无结果可清除，不写配置", async () => {
+    const { calls } = renderWithEngine(<AccountsPage />, routes());
+    const search = await screen.findByTestId("accounts-search");
+    await userEvent.type(search, "API.DEEPSEEK.COM");
+    expect(screen.getByTestId("account-row-profiles:ds")).toBeInTheDocument();
+    expect(screen.queryByTestId("account-row-agents:claude-code")).toBeNull();
+    await userEvent.clear(search);
+    await userEvent.type(search, "YOUR_EMAIL");
+    expect(screen.getByTestId("account-row-agents:claude-code")).toBeInTheDocument();
+    expect(screen.queryByTestId("account-row-profiles:ds")).toBeNull();
+    await userEvent.clear(search);
+    await userEvent.type(search, "nothing-matches");
+    await userEvent.click(screen.getByRole("button", { name: "清除搜索" }));
+    expect(screen.getByTestId("account-row-profiles:ds")).toBeInTheDocument();
+    expect(calls.every((call) => call.command.endsWith(":status") || call.command.endsWith(":auth-status") || ["profiles:shared-status", "system:discover"].includes(call.command))).toBe(true);
+  });
+
+  it("刷新重读配置和额度，保留搜索，不调用官方探测或写入", async () => {
+    const { calls } = renderWithEngine(<AccountsPage />, routes());
+    await userEvent.type(await screen.findByTestId("accounts-search"), "ds");
+    await userEvent.click(screen.getByTestId("accounts-refresh"));
+    expect(await screen.findByText("已从本机重新读取账号状态")).toBeInTheDocument();
+    expect(screen.getByTestId("accounts-search")).toHaveValue("ds");
+    for (const command of ["agents:status", "profiles:status", "aliases:status", "agents:auth-status"]) {
+      expect(calls.filter((call) => call.command === command).length).toBeGreaterThanOrEqual(2);
+    }
+    expect(calls.some((call) => call.args.includes("--probe") || call.command.endsWith(":apply") || call.command.endsWith(":set"))).toBe(false);
+  });
+
+  it("额度显示重置时间，窗口结束后自动移除旧百分比", async () => {
+    const baseRoutes = routes();
+    const profileRoute = baseRoutes["profiles:status"] as (args: string[]) => Promise<Envelope>;
+    const at = new Date("2026-10-07T12:00:00Z");
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(at);
+    try {
+      renderWithEngine(<AccountsPage />, {
+        ...baseRoutes,
+        "profiles:status": async (args) => {
+          const envelope = await profileRoute(args);
+          const data = envelope.data as { elements: { observed: Record<string, unknown> }[] };
+          data.elements[0].observed.usage = {
+            source: "test-cache", checked_at: at.toISOString(),
+            windows: [{ window_minutes: 300, used_percent: 82, resets_at: new Date(at.getTime() + 60_000).toISOString() }],
+          };
+          return envelope;
+        },
+      });
+      expect(await screen.findByText("1 分钟后重置")).toBeInTheDocument();
+      expect(screen.getByText("82%")).toBeInTheDocument();
+      await act(async () => { vi.advanceTimersByTime(60_000); });
+      expect(screen.queryByText("82%")).toBeNull();
+      expect(screen.queryByTestId("account-quota-profiles:ds")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("智能体本身只检测：显示装的版本与有没有新版本，「检查新版本」只查不装", async () => {
     const r = routes();
@@ -277,14 +335,93 @@ describe("账号页", () => {
     const model = within(drawer).getByTestId("account-model");
     await userEvent.clear(model);
     await userEvent.type(model, "deepseek-v5");
+    await userEvent.clear(within(drawer).getByTestId("account-name"));
+    await userEvent.type(within(drawer).getByTestId("account-name"), "新名称");
     await userEvent.click(within(drawer).getByTestId("account-save"));
     await waitFor(() => expect(screen.queryByTestId("account-drawer")).toBeNull());
 
     const apply = calls.find((call) => call.command === "profiles:apply-definition")!;
     expect(apply.args.slice(0, 6)).toEqual(["--only", "profiles:ds", "--base", "file-base", "--definition-base", "def-base"]);
-    expect(JSON.parse(valueOf(apply.args, "--candidate")!)).toMatchObject({ model: "deepseek-v5" });
+    expect(JSON.parse(valueOf(apply.args, "--candidate")!)).toMatchObject({ model: "deepseek-v5", display_name: "新名称" });
     expect(valueOf(apply.args, "--preview-file-base")).toBe("preview-file-base");
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+
+  it("编辑预填用实际值，打开后不重新取得基准；冲突时不改名称也不保存密钥", async () => {
+    const api = routes();
+    const status = api["profiles:status"] as (args: string[]) => Promise<Envelope>;
+    let reads = 0;
+    api["profiles:status"] = async (args) => {
+      reads += 1;
+      const result = await status(args);
+      const data = result.data as { elements: { observed: Record<string, unknown> }[] };
+      data.elements[0].observed.editable_profile = { env: DS_DEFINITION.profile.env, model: "actual-model" };
+      data.elements[0].observed.base = reads === 1 ? "opened-base" : "new-external-base";
+      return result;
+    };
+    api["profiles:preview"] = async () => ({ ...makeEnvelope({}), ok: false, errors: [{ code: "conflict", message: "配置已在外部修改", element: "profiles:ds" }] });
+    const { calls } = renderWithEngine(<AccountsPage />, api);
+    const row = await screen.findByTestId("account-row-profiles:ds");
+    await userEvent.click(within(row).getByRole("button", { name: "更多操作" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    const drawer = await screen.findByTestId("account-drawer");
+    expect(within(drawer).getByTestId("account-model")).toHaveValue("actual-model");
+    await userEvent.type(within(drawer).getByTestId("account-model"), "-changed");
+    await userEvent.type(within(drawer).getByTestId("account-name"), " renamed");
+    await userEvent.type(within(drawer).getByTestId("account-api-key"), "YOUR_NEW_TEST_KEY");
+    await userEvent.click(within(drawer).getByTestId("account-save"));
+    await screen.findByText("没有保存：配置已在外部修改");
+    expect(reads).toBe(1);
+    const preview = calls.find((call) => call.command === "profiles:preview")!;
+    expect(valueOf(preview.args, "--base")).toBe("opened-base");
+    expect(valueOf(preview.args, "--preview-secret-value")).toBe("YOUR_NEW_TEST_KEY");
+    expect(calls.some((call) => ["policy:set", "profiles:apply-definition", "secrets:set"].includes(call.command))).toBe(false);
+    expect(screen.getByTestId("account-drawer")).toBeVisible();
+  });
+
+  it("实际接入参数不能安全预填时不允许用旧登记覆盖，但仍能改名称", async () => {
+    const api = routes();
+    const status = api["profiles:status"] as (args: string[]) => Promise<Envelope>;
+    api["profiles:status"] = async (args) => {
+      const result = await status(args);
+      const data = result.data as { elements: { observed: Record<string, unknown> }[] };
+      delete data.elements[0].observed.editable_profile;
+      data.elements[0].observed.edit_blocked_reason = "凭据与引用变量不同";
+      return result;
+    };
+    const { calls } = renderWithEngine(<AccountsPage />, api);
+    const row = await screen.findByTestId("account-row-profiles:ds");
+    await userEvent.click(within(row).getByRole("button", { name: "更多操作" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    const drawer = await screen.findByTestId("account-drawer");
+    expect(within(drawer).getByTestId("account-model")).toBeDisabled();
+    expect(within(drawer).getByText(/凭据与引用变量不同/)).toBeVisible();
+    await userEvent.type(within(drawer).getByTestId("account-name"), " renamed");
+    await userEvent.click(within(drawer).getByTestId("account-save"));
+    await waitFor(() => expect(screen.queryByTestId("account-drawer")).toBeNull());
+    expect(calls.some((call) => call.command === "policy:set")).toBe(true);
+    expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
+  });
+
+  it("新密钥在精确预览后保存，后续配置失败时明确提示部分成功", async () => {
+    const api = routes();
+    api["profiles:apply-definition"] = { ...makeEnvelope({}), ok: false, errors: [{ code: "conflict", message: "预览后文件又变了", element: "profiles:ds" }] };
+    const { calls } = renderWithEngine(<AccountsPage />, api);
+    const row = await screen.findByTestId("account-row-profiles:ds");
+    await userEvent.click(within(row).getByRole("button", { name: "更多操作" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "编辑" }));
+    const drawer = await screen.findByTestId("account-drawer");
+    await userEvent.type(within(drawer).getByTestId("account-api-key"), "YOUR_NEW_TEST_KEY");
+    await userEvent.click(within(drawer).getByTestId("account-save"));
+    await screen.findByText("API Key 已保存，但账号配置未更新");
+    const preview = calls.findIndex((call) => call.command === "profiles:preview");
+    const secret = calls.findIndex((call) => call.command === "secrets:set");
+    const apply = calls.findIndex((call) => call.command === "profiles:apply-definition");
+    expect(secret).toBeGreaterThan(preview);
+    expect(apply).toBeGreaterThan(secret);
+    expect(valueOf(calls[apply].args, "--candidate")).not.toContain("YOUR_NEW_TEST_KEY");
+    expect(JSON.parse(valueOf(calls[apply].args, "--candidate")!)).not.toHaveProperty("display_name");
+    expect(screen.getByTestId("account-drawer")).toBeVisible();
   });
 
   it("移除账号：只删登记与启动命令，不碰目录", async () => {
@@ -306,6 +443,24 @@ describe("账号页", () => {
     renderWithEngine(<AccountsPage />, routes());
     await screen.findByTestId("account-row-profiles:ds");
     expect(screen.queryByTestId("accounts-quota-notice")).toBeNull();
+  });
+
+  it("移除账号时命令删除失败：明确说明剩余动作，不报全部成功", async () => {
+    const { calls } = renderWithEngine(<AccountsPage />, {
+      ...routes(),
+      "aliases:apply": makeEnvelope({}, {
+        command: "aliases.apply", ok: false,
+        errors: [{ code: "ALIAS_ERROR", element: null, message: "终端文件已在外部修改" }],
+      }),
+    });
+    const row = await screen.findByTestId("account-row-profiles:ds");
+    await userEvent.click(within(row).getByRole("button", { name: "更多操作" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "移除" }));
+    await userEvent.click(await screen.findByRole("button", { name: "移除" }));
+    expect(await screen.findByText("账号 ds 已移除，启动命令未删除")).toBeInTheDocument();
+    expect(screen.getByText("到「命令」页检查后删除；目录、登录与会话仍保留。")).toBeInTheDocument();
+    expect(screen.queryByText("已移除账号 ds")).toBeNull();
+    expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(1);
   });
 
   it("开启实时额度：先按完整文件预览的基准写主账号，再把状态栏同步给其余 Claude 账号", async () => {

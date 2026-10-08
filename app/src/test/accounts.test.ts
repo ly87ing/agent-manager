@@ -26,6 +26,13 @@ function profile(id: string, spec: Record<string, unknown>, observed: Record<str
 }
 
 describe("buildAccounts", () => {
+  it("实际地址与模型优先；实际缺失时不拿登记的旧值补齐", () => {
+    const spec = { display_name: "work", config_dir: "~/.claude-work", base_url: "https://old.example.com", model: "old-model" };
+    for (const current of [{ base_url: "https://actual.example.com", model: "actual-model" }, { base_url: null, model: null }]) {
+      const groups = buildAccounts([claude], [profile("work", spec, { third_party: true, current_connection: current })], {});
+      expect(groups[0].accounts[1]).toMatchObject({ apiHost: current.base_url ? "actual.example.com" : null, model: current.model });
+    }
+  });
   it("主账号在前，实例按名称排序；启动命令按配置目录反查 alias", () => {
     const groups = buildAccounts(
       [claude, instanceAsAgent],

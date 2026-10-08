@@ -310,6 +310,11 @@ export interface ProfileObserved {
   base?: string | null;
   /** 当前完整实例定义的摘要，更新定义和实际文件时一起做写前比对。 */
   definition_base?: string | null;
+  /** 从实际配置解析的可编辑接入字段；凭据仍为引用，缺省表示不能安全预填。 */
+  editable_profile?: Record<string, unknown>;
+  edit_blocked_reason?: string;
+  /** 实际文件中的模型与当前接口；null 表示文件里没有该字段。 */
+  current_connection?: { model: string | null; base_url: string | null };
   /** 实例定义与实际文件逐字段对比；凭据只给是否一致，取值为 <hidden>。 */
   fields?: ProfileField[];
   blocked_reason: string | null;

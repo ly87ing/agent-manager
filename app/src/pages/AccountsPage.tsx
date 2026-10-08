@@ -1,6 +1,6 @@
 import { useQueries, useQueryClient } from "@tanstack/react-query";
-import { Activity, Copy, LogIn, Plus } from "lucide-react";
-import { useState } from "react";
+import { Activity, Copy, LogIn, Plus, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AccountDrawer, type DrawerMode } from "../components/AccountDrawer";
 import { ActionMenu, type MenuAction } from "../components/AccountGrid";
@@ -10,9 +10,10 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { GettingStarted, type StartStep } from "../components/GettingStarted";
 import { LaunchCommandsDrawer } from "../components/LaunchCommandsDrawer";
 import { PageError, PageLoading } from "../components/PageState";
+import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { buildAccounts, type Account, type AgentAccounts } from "../lib/accounts";
-import { isStale, isWindowExpired, usageTone, windowLabel } from "../lib/agentUsage";
-import type { StatusData } from "../lib/contract";
+import { freshnessLabel, isStale, isWindowExpired, resetLabel, usageTone, windowLabel } from "../lib/agentUsage";
+import type { ProfileObserved, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import { secretSourceOf } from "../lib/secretSource";
 import { currentConfigOf } from "../lib/agentCurrent";
@@ -40,29 +41,32 @@ async function copyText(text: string, message: string) {
 }
 
 /** 一行放得下的额度：每个未过重置点的窗口一小段条。 */
-function QuotaCells({ usage, testId }: { usage: AgentUsage | null; testId: string }) {
-  const windows = (usage?.windows ?? []).filter((w) => !isWindowExpired(w.resets_at));
+function QuotaCells({ usage, testId, now }: { usage: AgentUsage | null; testId: string; now: Date }) {
+  const windows = (usage?.windows ?? []).filter((w) => !isWindowExpired(w.resets_at, now));
   if (!usage || windows.length === 0)
     return (
       <span className="text-xs text-muted-foreground" title="额度读自这个账号的使用记录；用它跑过一次后才有">
         用过后显示
       </span>
     );
-  const stale = isStale(usage.checked_at);
+  const stale = isStale(usage.checked_at, now);
   return (
-    <div data-testid={testId} className="flex items-center gap-3" title={`读自 ${usage.source}`}>
+    <div data-testid={testId} className="flex items-center gap-3" title={`${freshnessLabel(usage.checked_at, now) ?? "更新时间未知"} · 读自 ${usage.source}`}>
       {windows.map((w) => (
-        <span key={w.window_minutes} className="flex items-center gap-1.5 text-xs">
-          <span className="whitespace-nowrap text-muted-foreground">{windowLabel(w.window_minutes)}</span>
-          <span className="h-1.5 w-14 overflow-hidden rounded bg-muted">
-            <span
-              className={cn("block h-full", stale ? "bg-muted-foreground/40" : TONE_BAR[usageTone(w.used_percent)])}
-              style={{ width: `${Math.min(100, Math.max(0, w.used_percent))}%` }}
-            />
+        <span key={w.window_minutes} className="flex flex-col gap-1 text-xs">
+          <span className="flex items-center gap-1.5">
+            <span className="whitespace-nowrap text-muted-foreground">{windowLabel(w.window_minutes)}</span>
+            <span className="h-1.5 w-14 overflow-hidden rounded bg-muted">
+              <span
+                className={cn("block h-full", stale ? "bg-muted-foreground/40" : TONE_BAR[usageTone(w.used_percent)])}
+                style={{ width: `${Math.min(100, Math.max(0, w.used_percent))}%` }}
+              />
+            </span>
+            <span className={cn("w-9 tabular-nums", stale && "text-muted-foreground")}>
+              {Math.round(w.used_percent)}%{stale ? "?" : ""}
+            </span>
           </span>
-          <span className={cn("w-9 tabular-nums", stale && "text-muted-foreground")}>
-            {Math.round(w.used_percent)}%{stale ? "?" : ""}
-          </span>
+          <span className="text-[11px] text-muted-foreground">{resetLabel(w.resets_at, now) ?? "重置时间未知"}{stale ? " · 旧记录" : ""}</span>
         </span>
       ))}
     </div>
@@ -91,11 +95,13 @@ function AccountRow({
   group,
   auth,
   actions,
+  now,
 }: {
   account: Account;
   group: AgentAccounts;
   auth: OfficialAuthStatus | "pending" | null;
   actions: RowActions;
+  now: Date;
 }) {
   const id = account.elementId;
   const loginCommand = authTerminalCommand(group.kind, group.bin, "login", account.isMain ? undefined : account.configDir);
@@ -127,8 +133,8 @@ function AccountRow({
   return (
     <li data-testid={`account-row-${id}`} className="flex items-center gap-4 px-4 py-2.5">
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate font-medium">{account.name}</span>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="max-w-full truncate font-medium">{account.name}</span>
           {account.isMain && (
             <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">主账号</span>
           )}
@@ -136,7 +142,7 @@ function AccountRow({
             <span
               key={badge.text}
               className={cn(
-                "rounded px-1.5 py-0.5 text-[11px]",
+                "whitespace-nowrap rounded px-1.5 py-0.5 text-[11px]",
                 badge.tone === "warn" ? "bg-warning/15 text-warning" : "bg-muted text-muted-foreground",
               )}
             >
@@ -165,7 +171,7 @@ function AccountRow({
         </div>
       </div>
       <div className={COL_QUOTA}>
-        <QuotaCells usage={account.usage} testId={`account-quota-${id}`} />
+        <QuotaCells usage={account.usage} testId={`account-quota-${id}`} now={now} />
       </div>
       <div className={COL_ACTIONS}>
         {loggedOut ? (
@@ -237,6 +243,14 @@ export default function AccountsPage({
   const [confirmQuota, setConfirmQuota] = useState(false);
   const [commandsOf, setCommandsOf] = useState<Account | null>(null);
   const [quotaBusy, setQuotaBusy] = useState(false);
+  const [keyword, setKeyword] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    // 只更新展示时钟，不运行官方命令或扫描文件。
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const groups =
     agentsQuery.data?.ok
@@ -272,7 +286,7 @@ export default function AccountsPage({
   if (!group)
     return (
       <>
-        <h1 className="sr-only">账号</h1>
+        <h1 className="text-lg font-semibold tracking-tight">账号</h1>
         <p className="text-sm text-muted-foreground">没有识别到 Claude 或 Codex。</p>
       </>
     );
@@ -298,7 +312,12 @@ export default function AccountsPage({
     const profileId = account.elementId.replace(/^profiles:/, "");
     return {
       onLaunchCommands: () => setCommandsOf(account),
-      onEdit: () => withDefinition(account, (definition) => setDrawer({ type: "edit", group, account, definition })),
+      onEdit: () => withDefinition(account, (definition) => {
+        const observed = profilesQuery.data?.ok
+          ? profilesQuery.data.data.elements.find((element) => element.id === account.elementId)?.observed
+          : undefined;
+        setDrawer({ type: "edit", group, account, definition, observed: observed as ProfileObserved | undefined });
+      }),
       onRemove: () => withDefinition(account, (definition) => setRemoving({ id: profileId, name: account.name, definition })),
       onAddLaunch: () => withDefinition(account, (definition) => void ops.addLaunch(profileId, definition, group.bin)),
       onAdopt: () => account.profileBase && void ops.adopt(account.elementId, account.profileBase),
@@ -331,6 +350,28 @@ export default function AccountsPage({
     return query.data?.ok ? query.data.data : null;
   };
 
+  const visibleAccounts = group.accounts.filter((account) => {
+    const auth = authOf(account);
+    const identity = auth && auth !== "pending" ? auth.account : null;
+    return matchesKeyword(keyword, [account.name, account.command, account.configDir, account.apiHost, account.model,
+      identity?.email, identity?.org, identity?.plan, account.type === "api" ? "API" : "官方"]);
+  });
+
+  const refreshAccounts = async () => {
+    setRefreshing(true);
+    try {
+      const results = await Promise.all([
+        agentsQuery.refetch(), profilesQuery.refetch(), aliasSource.query.refetch(),
+        ...authQueries.map((query) => query.refetch()),
+      ]);
+      setNow(new Date());
+      if (results.some((result) => result.isError || !result.data?.ok)) toast.error("部分账号状态读取失败，请重试");
+      else toast.success("已从本机重新读取账号状态");
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const mainAccount = group.accounts.find((account) => account.isMain);
   const mainAuth = mainAccount ? authOf(mainAccount) : null;
   const startSteps: StartStep[] = [
@@ -358,9 +399,9 @@ export default function AccountsPage({
 
   return (
     <div className="space-y-3">
-      <h1 className="sr-only">账号</h1>
+      <h1 className="text-lg font-semibold tracking-tight">账号</h1>
       <GettingStarted steps={startSteps} />
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div role="tablist" className="inline-flex rounded-lg bg-muted p-1">
           {groups.map((item) => (
             <button
@@ -369,7 +410,7 @@ export default function AccountsPage({
               role="tab"
               aria-selected={item.agentId === group.agentId}
               data-testid={`accounts-tab-${item.agentId}`}
-              onClick={() => setSelected(item.agentId)}
+              onClick={() => { setSelected(item.agentId); setKeyword(""); }}
               className={cn(
                 "rounded-md px-3 py-1 text-sm",
                 item.agentId === group.agentId ? "bg-background font-medium shadow-sm" : "text-muted-foreground",
@@ -417,6 +458,17 @@ export default function AccountsPage({
           <Plus className="h-4 w-4" aria-hidden /> 添加账号
         </button>
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchInput value={keyword} onChange={setKeyword} placeholder="搜索账号、命令、地址或模型" testId="accounts-search" />
+        {keyword.trim() && <span className="text-xs text-muted-foreground">{visibleAccounts.length} / {group.accounts.length} 个账号</span>}
+        <button type="button" data-testid="accounts-refresh" disabled={refreshing}
+          onClick={() => void refreshAccounts()}
+          title="重新读取本机配置、登录记录与额度缓存；不联网、不运行登录命令"
+          className="ml-auto inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs hover:bg-accent disabled:opacity-40">
+          <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} aria-hidden />
+          {refreshing ? "读取中…" : "刷新状态"}
+        </button>
+      </div>
       {quotaNotLive && (
         <div data-testid="accounts-quota-notice" className="flex items-center gap-2 rounded-md border border-info/30 bg-info/5 px-3 py-2 text-xs">
           <Activity className="h-3.5 w-3.5 text-info" aria-hidden />
@@ -455,16 +507,18 @@ export default function AccountsPage({
           <span className={COL_ACTIONS} />
         </div>
         <ul data-testid="accounts-list" className="divide-y">
-          {group.accounts.map((account) => (
+          {visibleAccounts.map((account) => (
             <AccountRow
               key={account.elementId}
               account={account}
               group={group}
               auth={authOf(account)}
               actions={actionsOf(account)}
+              now={now}
             />
           ))}
         </ul>
+        {visibleAccounts.length === 0 && <p className="px-4 py-6 text-center text-sm text-muted-foreground">没有匹配的账号。<button type="button" onClick={() => setKeyword("")} className="ml-1 text-primary hover:underline">清除搜索</button></p>}
       </section>
       {drawer && (
         <AccountDrawer

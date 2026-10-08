@@ -11,7 +11,7 @@ import {
   type ProfileFormInput,
 } from "../lib/profileDefinition";
 import { DEFAULT_SECRETS_PATH, type SecretSourceState } from "../lib/secretSource";
-import type { StatusData } from "../lib/contract";
+import type { ProfileObserved, StatusData } from "../lib/contract";
 import { mcpInUseElsewhere } from "../lib/mcpFill";
 import { authTerminalCommand } from "../lib/profileDefinition";
 import { useEngineQuery } from "../lib/queries";
@@ -24,7 +24,15 @@ type Ops = ReturnType<typeof useAccountOps>;
 
 export type DrawerMode =
   | { type: "create"; group: AgentAccounts }
-  | { type: "edit"; group: AgentAccounts; account: Account; definition: Record<string, unknown> };
+  | { type: "edit"; group: AgentAccounts; account: Account; definition: Record<string, unknown>; observed?: ProfileObserved };
+
+function editDefinition(mode: Extract<DrawerMode, { type: "edit" }>): Record<string, unknown> {
+  if (!mode.observed?.editable_profile) return mode.definition;
+  const profile = { ...(mode.definition.profile as Record<string, unknown>) };
+  const keys = mode.group.kind === "claude" ? ["env", "model"] : ["base_url", "env_key", "wire_api", "model"];
+  for (const key of keys) delete profile[key];
+  return { ...mode.definition, profile: { ...profile, ...mode.observed.editable_profile } };
+}
 
 const FIELD = "mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 
@@ -63,7 +71,10 @@ export function AccountDrawer({
 }) {
   const { group } = mode;
   const bin = group.bin;
-  const editing = mode.type === "edit" ? parseProfileDefinition(mode.account.elementId.replace(/^profiles:/, ""), mode.definition) : null;
+  const editing = mode.type === "edit" ? parseProfileDefinition(mode.account.elementId.replace(/^profiles:/, ""), editDefinition(mode)) : null;
+  const editBlocked = mode.type === "edit" && !mode.observed?.editable_profile
+    ? mode.observed?.edit_blocked_reason ?? "读不到实际接入参数，请关闭后刷新重试"
+    : null;
   const presets = presetsFor(group.kind);
 
   const [type, setType] = useState<"official" | "api">(editing ? (editing.baseUrl || editing.tokenVar ? "api" : "official") : "official");
@@ -134,7 +145,7 @@ export function AccountDrawer({
       : !editing && reservedNames.includes(effectiveId)
         ? `${effectiveId} 已被占用`
         : null;
-  const apiError = type === "api" && (!baseUrl.trim() ? "填接口地址" : !tokenVar.trim() ? "填密钥变量名" : !apiKey && !keyKnown ? "填 API Key" : null);
+  const apiError = !editBlocked && type === "api" && (!baseUrl.trim() ? "填接口地址" : !tokenVar.trim() ? "填密钥变量名" : !apiKey && !keyKnown ? "填 API Key" : null);
   const previewKey = JSON.stringify(input);
 
   // 新建：输入稳定后自动预览将写入的文件；保存时引擎会再比对一次
@@ -167,10 +178,12 @@ export function AccountDrawer({
         return;
       }
       const profileId = mode.account.elementId.replace(/^profiles:/, "");
-      if (name.trim() !== editing!.displayName && !(await ops.rename(profileId, name.trim(), mode.definition))) return;
-      const connectionChanged = type === "api"
+      const nameChanged = name.trim() !== editing!.displayName;
+      const connectionChanged = !editBlocked && type === "api"
         && (baseUrl.trim() !== editing!.baseUrl || model.trim() !== editing!.model || tokenVar.trim() !== editing!.tokenVar || Boolean(apiKey));
-      if (connectionChanged && !(await ops.updateConnection(profileId, input, bin, secret))) return;
+      if (connectionChanged) {
+        if (!(await ops.updateConnection(profileId, input, bin, mode.observed!, secret, nameChanged ? name.trim() : undefined))) return;
+      } else if (nameChanged && !(await ops.rename(profileId, name.trim(), mode.definition))) return;
       onClose();
     } finally {
       setSaving(false);
@@ -279,11 +292,12 @@ export function AccountDrawer({
           </Field>
 
           {type === "api" && (
-            <>
+            <fieldset disabled={Boolean(editBlocked)} className="space-y-4">
+              {editBlocked && <p role="status" className="text-xs text-muted-foreground">暂不能编辑接入参数：{editBlocked}。仍可修改名称。</p>}
               <Field label="接口地址">
                 <input data-testid="account-base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://" className={FIELD} />
               </Field>
-              <Field label="API Key" hint={`保存到密钥文件的 ${tokenVar || "变量"}，不进本应用数据库${keyKnown ? "；已有值，留空则不改" : ""}`}>
+              <Field label="API Key" hint={`保存到外部密钥文件的 ${tokenVar || "变量"}，应用时也会写入此账号的助手配置，不进本应用数据库${keyKnown ? "；已有值，留空则不改" : ""}`}>
                 <input data-testid="account-api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" className={FIELD} />
               </Field>
               <Field label="模型">
@@ -292,7 +306,7 @@ export function AccountDrawer({
               <Field label="密钥变量名">
                 <input data-testid="account-token-var" value={tokenVar} onChange={(event) => setTokenVar(event.target.value)} placeholder="DEEPSEEK_API_KEY" className={cn(FIELD, "font-mono")} />
               </Field>
-            </>
+            </fieldset>
           )}
 
           {!editing && (

@@ -7,7 +7,7 @@ import { AgentIcon } from "./AgentIcon";
 
 /**
  * 技能、MCP 共用的账号表格：表头按助手分两层（助手 → 它的账号），账号名只在表头出现一次；
- * 每行在对齐的列里放一个开关。行尾固定宽度放编辑 / 删除等动作，鼠标移到行上才显示。
+ * 每行在对齐的列里放一个开关。行尾固定宽度放编辑 / 删除等动作，常驻显示。
  */
 
 export type CellTone = "on" | "off" | "warn" | "blocked";
@@ -79,7 +79,7 @@ export function AccountHeader({
 }) {
   const single = singleLevel(groups);
   return (
-    <div className={cn("flex items-center gap-3 border-b bg-muted px-4 py-2 text-xs text-muted-foreground", className)}>
+    <div className={cn("flex items-center gap-3 border-b bg-muted/50 px-4 py-2.5 text-xs text-muted-foreground", className)}>
       <div className="min-w-0 flex-1">{left}</div>
       <GroupColumns
         header
@@ -159,14 +159,13 @@ export function AccountSwitch({
 }
 
 /**
- * 行尾动作区（固定宽度，各行对齐）。hover 里的鼠标移到行上（或键盘聚焦）才显示；
- * always 里放需要处理时才出现、要一直看得见的（如「有更新」）。行需带 `group` 类。
+ * 行尾动作区固定宽度、常驻显示；always 里放需要处理时出现的提示（如「有更新」）。
  */
 export function RowActions({ children, always }: { children?: ReactNode; always?: ReactNode }) {
   return (
     <div className={cn(TRAILING, "flex items-center justify-end gap-0.5")}>
       {always}
-      <div className="flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">{children}</div>
+      <div className="flex items-center gap-0.5">{children}</div>
     </div>
   );
 }
@@ -224,8 +223,16 @@ export function ActionMenu({ label, items }: { label: string; items: MenuAction[
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const focusLast = useRef(false);
   /** 菜单的固定定位：渲染到页面最外层，不被表格等容器的 overflow 裁掉。 */
   const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
+  const positioned = position !== null;
+
+  useEffect(() => {
+    if (!open || !positioned) return;
+    const items = menuRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)");
+    if (items?.length) items[focusLast.current ? items.length - 1 : 0].focus();
+  }, [open, positioned]);
 
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) return;
@@ -280,7 +287,15 @@ export function ActionMenu({ label, items }: { label: string; items: MenuAction[
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={open}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+          event.preventDefault();
+          focusLast.current = event.key === "ArrowUp";
+          setPosition(null);
+          setOpen(true);
+        }}
         onClick={() => {
+          focusLast.current = false;
           setPosition(null);
           setOpen((value) => !value);
         }}
@@ -294,6 +309,21 @@ export function ActionMenu({ label, items }: { label: string; items: MenuAction[
             ref={menuRef}
             role="menu"
             aria-label={label}
+            onKeyDown={(event) => {
+              if (event.key === "Tab") {
+                setOpen(false);
+                buttonRef.current?.focus();
+                return;
+              }
+              if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              const available = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+              if (!available.length) return;
+              const index = available.indexOf(document.activeElement as HTMLButtonElement);
+              const next = event.key === "Home" ? 0 : event.key === "End" ? available.length - 1
+                : (index + (event.key === "ArrowDown" ? 1 : -1) + available.length) % available.length;
+              available[next].focus();
+            }}
             style={{ position: "fixed", top: position?.top ?? 0, right: position?.right ?? 0, visibility: position ? "visible" : "hidden" }}
             className="z-[60] min-w-44 rounded-md border bg-popover p-1 shadow-lg"
           >
@@ -302,11 +332,13 @@ export function ActionMenu({ label, items }: { label: string; items: MenuAction[
                 key={item.testId}
                 type="button"
                 role="menuitem"
+                tabIndex={-1}
                 data-testid={item.testId}
                 disabled={item.disabled}
                 title={item.title}
                 onClick={() => {
                   setOpen(false);
+                  buttonRef.current?.focus();
                   item.onSelect();
                 }}
                 className={cn("block w-full rounded px-2.5 py-1.5 text-left text-sm hover:bg-accent disabled:opacity-40 disabled:hover:bg-transparent", item.danger && "text-destructive")}

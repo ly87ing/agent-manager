@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { parseAliasValue } from "./aliasCommand";
-import type { StatusData } from "./contract";
+import type { ProfileObserved, StatusData } from "./contract";
 import { runEngine } from "./engine";
 import { useExecutions } from "./execution";
 import {
@@ -232,29 +232,22 @@ export function useAccountOps() {
       "--expect-definition", JSON.stringify(definition),
     ]).catch((error) => ({ ok: false, errors: [{ message: String(error) }] }) as const);
     if (!result.ok) toast.error(`没有保存：${result.errors[0]?.message ?? "未知错误"}`);
+    else await refresh();
     return result.ok;
   };
 
   /**
    * 改接入参数：登记与目录里的配置文件一起写（profiles:apply-definition），
-   * 先按当前文件与登记的基准做一次精确预览，引擎在写入时再比对一次。
+   * 保留打开表单时的文件与登记基准；精确预览失败前不保存新密钥。
    */
   const updateConnection = async (
     id: string,
     input: ProfileFormInput,
     bin: string,
+    observed: ProfileObserved,
     secret?: { variable: string; value: string },
+    displayName?: string,
   ): Promise<boolean> => {
-    if (secret?.value) {
-      const failed = await saveSecret(secret.variable, secret.value);
-      if (failed) {
-        toast.error(failed);
-        return false;
-      }
-    }
-    const status = await runEngine<StatusData>("profiles:status", []);
-    const element = status.ok ? status.data.elements.find((item) => item.id === `profiles:${id}`) : undefined;
-    const observed = element?.observed as { base?: string | null; definition_base?: string | null } | undefined;
     if (!observed?.base || !observed.definition_base) {
       toast.error("读不到这个账号目录的当前内容，没有保存");
       return false;
@@ -262,12 +255,21 @@ export function useAccountOps() {
     const profile = buildProfileDefinition(input, bin).profile as Record<string, unknown>;
     const keys = input.kind === "claude" ? ["env", "model"] : ["base_url", "env_key", "wire_api", "model"];
     const candidate: Record<string, unknown> = {};
+    if (displayName !== undefined) candidate.display_name = displayName || id;
     for (const key of keys) if (profile[key] !== undefined) candidate[key] = profile[key];
     const bases = ["--only", `profiles:${id}`, "--base", observed.base, "--definition-base", observed.definition_base];
-    const preview = await runEngine<ProfileDraftPreview>("profiles:preview", [...bases, "--candidate", JSON.stringify(candidate), "--exact"]);
+    const preview = await runEngine<ProfileDraftPreview>("profiles:preview", [...bases, "--candidate", JSON.stringify(candidate), "--exact",
+      ...(secret?.value ? ["--preview-secret-var", secret.variable, "--preview-secret-value", secret.value] : [])]);
     if (!preview.ok || !preview.data.file_base || !preview.data.content_base) {
       toast.error(`没有保存：${preview.ok ? "预览没有完成，请重试" : preview.errors[0]?.message ?? "预览失败"}`);
       return false;
+    }
+    if (secret?.value) {
+      const failed = await saveSecret(secret.variable, secret.value);
+      if (failed) {
+        toast.error(failed);
+        return false;
+      }
     }
     const applied = await execute({
       command: "profiles:apply-definition",
@@ -277,7 +279,9 @@ export function useAccountOps() {
       silent: true,
     });
     if (!applied?.ok) {
-      toast.error(`没有保存：${applied?.errors[0]?.message ?? "详见任务记录"}`);
+      const reason = applied?.errors[0]?.message ?? "详见任务记录";
+      if (secret?.value) toast.error("API Key 已保存，但账号配置未更新", { description: reason });
+      else toast.error(`没有保存：${reason}`);
       await refresh();
       return false;
     }
@@ -297,10 +301,15 @@ export function useAccountOps() {
       toast.error(`没有移除：${result.errors[0]?.message ?? "未知错误"}`);
       return false;
     }
-    if (aliasSource.source?.aliases[id]) {
-      await aliasSource.removeAlias(id, { label: `移除账号 ${id} 的启动命令`, silent: true });
+    const commandRemoved = !aliasSource.source?.aliases[id]
+      || await aliasSource.removeAlias(id, { label: `移除账号 ${id} 的启动命令`, silent: true });
+    if (commandRemoved) {
+      toast.success(`已移除账号 ${id}`, { description: "目录与里面的登录、会话都还在。" });
+    } else {
+      toast.warning(`账号 ${id} 已移除，启动命令未删除`, {
+        description: "到「命令」页检查后删除；目录、登录与会话仍保留。",
+      });
     }
-    toast.success(`已移除账号 ${id}`, { description: "目录与里面的登录、会话都还在。" });
     await refresh();
     return true;
   };
