@@ -94,10 +94,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - os: macos-15
             target: aarch64-apple-darwin
             bundles: "app,dmg"
-          - os: macos-latest
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             bundles: "app,dmg"
           - os: ubuntu-22.04
@@ -110,7 +110,8 @@ jobs:
     # 密钥只经 GitHub Secrets/Variables 注入，主仓库不落任何真实密钥（见
     # docs/GUI-PLATFORM-STATUS.md 的 updater 接线说明）。签名材料缺失或仍为
     # YOUR_* 占位时由 fail-closed 门禁直接失败，不做降级构建。私钥与各平台
-    # 证书 secrets 只注入到对应的 guard/import/build 步骤，不做 job 级暴露。
+    # 证书 secrets 只注入到对应步骤。商业证书仅在对应签名变量为 true 时启用；
+    # 默认 macOS ad-hoc、Windows 无 Authenticode，更新包签名始终必需。
     env:
       TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
 
@@ -170,7 +171,7 @@ jobs:
           fi
 
       - name: Fail-closed macOS signing requirements
-        if: ${{ runner.os == 'macOS' }}
+        if: ${{ runner.os == 'macOS' && vars.APPLE_SIGNING_ENABLED == 'true' }}
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -203,7 +204,7 @@ jobs:
           fi
 
       - name: Fail-closed Windows signing requirements
-        if: ${{ runner.os == 'Windows' }}
+        if: ${{ runner.os == 'Windows' && vars.WINDOWS_SIGNING_ENABLED == 'true' }}
         shell: bash
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -265,7 +266,7 @@ jobs:
 
       - name: Run unit tests
         working-directory: app
-        run: pnpm test:unit run
+        run: pnpm test:unit run --maxWorkers=2
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -285,11 +286,13 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ matrix.target }}-app-cargo-
 
       - name: Run engine-rs tests and checks
+        shell: bash
         run: |
           cargo test --manifest-path engine-rs/Cargo.toml
           cargo check --manifest-path engine-rs/Cargo.toml --all-targets
 
       - name: Run Tauri app tests and checks
+        shell: bash
         run: |
           cargo test --manifest-path app/src-tauri/Cargo.toml
           cargo check --manifest-path app/src-tauri/Cargo.toml --all-targets
@@ -308,7 +311,7 @@ jobs:
       # p12 与临时 keychain 使用 RUNNER_TEMP 下的固定路径，构建结束无论成败、
       # 无论本步骤在哪一行失败，都由末尾 cleanup 步骤按固定路径删除。
       - name: Import macOS signing certificate
-        if: ${{ runner.os == 'macOS' }}
+        if: ${{ runner.os == 'macOS' && vars.APPLE_SIGNING_ENABLED == 'true' }}
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -336,7 +339,7 @@ jobs:
       # pfx 解码到 RUNNER_TEMP 并导入 CurrentUser\My，仅把 thumbprint 写入
       # GITHUB_ENV；构建结束无论成败由末尾 cleanup 步骤按精确 thumbprint 移除。
       - name: Import Windows signing certificate
-        if: ${{ runner.os == 'Windows' }}
+        if: ${{ runner.os == 'Windows' && vars.WINDOWS_SIGNING_ENABLED == 'true' }}
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -360,6 +363,8 @@ jobs:
         working-directory: app
         env:
           WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+          WINDOWS_SIGNING_ENABLED: ${{ vars.WINDOWS_SIGNING_ENABLED }}
+          APPLE_SIGNING_ENABLED: ${{ vars.APPLE_SIGNING_ENABLED }}
         run: |
           node <<'EOF'
           const fs = require('fs');
@@ -375,7 +380,10 @@ jobs:
           c.plugins = c.plugins || {};
           c.plugins.updater = c.plugins.updater || {};
           c.plugins.updater.pubkey = pubkey;
-          if (process.platform === 'win32') {
+          if (process.platform === 'darwin' && process.env.APPLE_SIGNING_ENABLED !== 'true') {
+            c.bundle.macOS = { ...c.bundle.macOS, signingIdentity: '-' };
+          }
+          if (process.platform === 'win32' && process.env.WINDOWS_SIGNING_ENABLED === 'true') {
             const thumbprint = process.env.WINDOWS_CERTIFICATE_THUMBPRINT || '';
             const timestampUrl = process.env.WINDOWS_TIMESTAMP_URL || '';
             if (!thumbprint || !timestampUrl) {
@@ -401,9 +409,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && vars.APPLE_SIGNING_ENABLED == 'true' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ runner.os == 'macOS' && vars.APPLE_SIGNING_ENABLED == 'true' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && vars.APPLE_SIGNING_ENABLED == 'true' && secrets.APPLE_TEAM_ID || '' }}
         with:
           projectPath: app
           releaseId: ${{ needs.create-release.outputs.release_id }}
@@ -481,6 +489,16 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout release scripts
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Download release assets
         shell: bash
         env:
@@ -488,78 +506,12 @@ jobs:
         run: |
           set -eo pipefail
           mkdir -p updater-assets
-          gh release download "$RELEASE_TAG" --dir updater-assets --clobber
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir updater-assets --clobber
 
       - name: Assemble latest.json
         shell: bash
         run: |
-          node <<'EOF'
-          const fs = require('fs');
-          const path = require('path');
-
-          const tag = process.env.RELEASE_TAG;
-          const repo = process.env.GITHUB_REPOSITORY;
-          if (!tag || !repo) {
-            console.error('RELEASE_TAG or GITHUB_REPOSITORY is empty');
-            process.exit(1);
-          }
-          const version = tag.replace(/^v/, '').split('-')[0];
-          const dir = 'updater-assets';
-          const files = fs.readdirSync(dir);
-
-          const findOne = (pred, desc) => {
-            const hits = files.filter(pred);
-            if (hits.length !== 1) {
-              console.error(`expected exactly 1 ${desc}, found ${hits.length}: ${hits.join(', ')}`);
-              process.exit(1);
-            }
-            return hits[0];
-          };
-          const entry = (bundle) => {
-            const sig = `${bundle}.sig`;
-            if (!files.includes(sig)) {
-              console.error(`missing updater signature ${sig}`);
-              process.exit(1);
-            }
-            return {
-              signature: fs.readFileSync(path.join(dir, sig), 'utf8').trim(),
-              url: `https://github.com/${repo}/releases/download/${tag}/${bundle}`,
-            };
-          };
-
-          const macArm = findOne((f) => f.endsWith('.app.tar.gz') && f.includes('aarch64'), 'macOS aarch64 updater bundle');
-          const macX64 = findOne((f) => f.endsWith('.app.tar.gz') && !f.includes('aarch64') && (f.includes('x86_64') || f.includes('x64')), 'macOS x86_64 updater bundle');
-          const appimage = findOne((f) => f.endsWith('.AppImage.tar.gz'), 'Linux AppImage updater bundle');
-          const msi = findOne((f) => f.endsWith('.msi.zip'), 'Windows msi updater bundle');
-          const nsis = findOne((f) => f.endsWith('.nsis.zip'), 'Windows nsis updater bundle');
-
-          const eMacArm = entry(macArm);
-          const eMacX64 = entry(macX64);
-          const eLinux = entry(appimage);
-          const eMsi = entry(msi);
-          const eNsis = entry(nsis);
-
-          // 与 tauri-action uploadVersionJSON 默认行为一致（updaterJsonPreferNsis=false）：
-          // windows-x86_64 主键取 msi；每个平台同时写 {os}-{arch}-{bundle} 键。
-          const latest = {
-            version,
-            notes: `Agent Manager ${tag}`,
-            pub_date: new Date().toISOString(),
-            platforms: {
-              'darwin-aarch64': eMacArm,
-              'darwin-aarch64-app': eMacArm,
-              'darwin-x86_64': eMacX64,
-              'darwin-x86_64-app': eMacX64,
-              'linux-x86_64': eLinux,
-              'linux-x86_64-appimage': eLinux,
-              'windows-x86_64': eMsi,
-              'windows-x86_64-msi': eMsi,
-              'windows-x86_64-nsis': eNsis,
-            },
-          };
-          fs.writeFileSync('latest.json', JSON.stringify(latest, null, 2) + '\n');
-          console.log(`latest.json platforms: ${Object.keys(latest.platforms).join(', ')}`);
-          EOF
+          node scripts/assemble-updater.mjs
 
       - name: Upload latest.json to release
         shell: bash

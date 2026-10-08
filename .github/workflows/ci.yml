@@ -48,6 +48,9 @@ jobs:
         working-directory: app
         run: pnpm install --frozen-lockfile
 
+      - name: Verify release manifest assembly
+        run: node --test scripts/assemble-updater.test.mjs
+
       - name: Run engine and Tauri checks
         run: |
           cargo fmt --manifest-path engine-rs/Cargo.toml -- --check
