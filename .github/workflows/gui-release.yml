@@ -422,45 +422,6 @@ jobs:
           uploadUpdaterSignatures: true
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
-      # 本腿全部构建产物的 SHA256 清单，作为 Release 资产随包发布；文件名含
-      # target 三元组避免跨腿重名。artifactPaths 是 JSON 数组（tauri-action
-      # 源码 index.ts），用 node 解析并用 crypto 计算，跨平台且无路径引号问题。
-      - name: Generate SHA256 checksums
-        id: checksums
-        shell: bash
-        env:
-          ARTIFACT_PATHS: ${{ steps.build.outputs.artifactPaths }}
-        run: |
-          set -eo pipefail
-          out="checksums-${{ matrix.target }}.txt"
-          CHECKSUMS_OUT="$out" node <<'EOF'
-          const crypto = require('crypto');
-          const fs = require('fs');
-          const path = require('path');
-          const artifacts = JSON.parse(process.env.ARTIFACT_PATHS || '[]');
-          const lines = [];
-          for (const p of artifacts) {
-            let st;
-            try { st = fs.statSync(p); } catch { continue; }
-            if (!st.isFile()) continue;
-            const sum = crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
-            lines.push(`${sum}  ${path.basename(p)}`);
-          }
-          if (!lines.length) {
-            console.error('no build artifacts found for checksums');
-            process.exit(1);
-          }
-          fs.writeFileSync(process.env.CHECKSUMS_OUT, lines.join('\n') + '\n');
-          console.log(`checksummed ${lines.length} artifacts`);
-          EOF
-          echo "checksums_file=$out" >> "$GITHUB_OUTPUT"
-
-      - name: Upload checksums to release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" "${{ steps.checksums.outputs.checksums_file }}" --clobber
-
       - name: Restore ephemeral tauri.conf.json
         if: ${{ always() }}
         shell: bash
@@ -516,8 +477,8 @@ jobs:
         run: |
           node scripts/assemble-updater.mjs
 
-      - name: Upload latest.json to release
+      - name: Upload latest.json and checksums to release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" latest.json --clobber
+        run: gh release upload "$RELEASE_TAG" latest.json SHA256SUMS.txt --clobber

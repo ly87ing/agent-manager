@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 const tag = process.env.RELEASE_TAG;
 const repo = process.env.GITHUB_REPOSITORY;
@@ -9,7 +10,7 @@ if (!tag || !repo) {
 }
 const version = tag.replace(/^v/, '');
 const dir = 'updater-assets';
-const files = fs.readdirSync(dir);
+const files = fs.readdirSync(dir).filter((name) => !['latest.json', 'SHA256SUMS.txt'].includes(name));
 
 const findOne = (pred, desc) => {
   const hits = files.filter(pred);
@@ -66,4 +67,9 @@ const latest = {
   },
 };
 fs.writeFileSync('latest.json', JSON.stringify(latest, null, 2) + '\n');
+// 使用从 Release 下载后的真实文件名；GitHub 会规范化上传时的空格等字符。
+const checksum = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const sums = files.sort().map((name) => `${checksum(path.join(dir, name))}  ${name}`);
+sums.push(`${checksum('latest.json')}  latest.json`);
+fs.writeFileSync('SHA256SUMS.txt', sums.join('\n') + '\n');
 console.log(`latest.json platforms: ${Object.keys(latest.platforms).join(', ')}`);

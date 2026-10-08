@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 
 const script = fileURLToPath(new URL('./assemble-updater.mjs', import.meta.url));
 const bundles = [
@@ -37,6 +38,13 @@ test('Tauri 2 原生制品生成全部平台并保留预发布版本和 URL 编�
   assert.match(manifest.platforms['windows-x86_64-msi'].url, /\.msi$/);
   assert.match(manifest.platforms['windows-x86_64-nsis'].url, /-setup.exe$/);
   assert.equal(manifest.platforms['darwin-x86_64'].signature, 'test signature');
+  const sums = readFileSync(join(f.cwd, 'SHA256SUMS.txt'), 'utf8').trim().split('\n');
+  assert.equal(sums.length, bundles.length * 2 + 1);
+  for (const line of sums) {
+    const [hash, name] = [line.slice(0, 64), line.slice(66)];
+    const file = name === 'latest.json' ? join(f.cwd, name) : join(f.dir, name);
+    assert.equal(hash, createHash('sha256').update(readFileSync(file)).digest('hex'));
+  }
 });
 for (const failure of ['missing signature', 'empty signature', 'empty bundle', 'duplicate bundle', 'legacy format']) {
   test(`拒绝 ${failure}，不输出残缺更新清单`, t => {
@@ -52,5 +60,20 @@ for (const failure of ['missing signature', 'empty signature', 'empty bundle', '
     }
     assert.notEqual(f.run().status, 0);
     assert.throws(() => readFileSync(join(f.cwd, 'latest.json')), { code: 'ENOENT' });
+    assert.throws(() => readFileSync(join(f.cwd, 'SHA256SUMS.txt')), { code: 'ENOENT' });
   });
 }
+
+test('重跑草稿时替换旧清单，不把校验文件自身或旧 latest.json 加入摘要', t => {
+  const f = fixture(t);
+  writeFileSync(join(f.dir, 'latest.json'), '{"version":"old"}');
+  writeFileSync(join(f.dir, 'SHA256SUMS.txt'), 'old checksum list');
+  const r = f.run();
+  assert.equal(r.status, 0, r.stderr);
+  const sums = readFileSync(join(f.cwd, 'SHA256SUMS.txt'), 'utf8').trim().split('\n');
+  assert.equal(sums.length, bundles.length * 2 + 1);
+  assert.equal(sums.filter(line => line.endsWith('  latest.json')).length, 1);
+  assert.equal(sums.filter(line => line.endsWith('  SHA256SUMS.txt')).length, 0);
+  const digest = createHash('sha256').update(readFileSync(join(f.cwd, 'latest.json'))).digest('hex');
+  assert(sums.includes(`${digest}  latest.json`));
+});
