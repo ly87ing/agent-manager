@@ -168,6 +168,9 @@ jobs:
           echo "RUSTFLAGS=${RUSTFLAGS:+$RUSTFLAGS }--remap-path-prefix=$build_home=/YOUR_BUILD_HOME --remap-path-prefix=$source_root=/YOUR_SOURCE_ROOT" >> "$GITHUB_ENV"
           echo "AGENT_MANAGER_BUILD_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "AGENT_MANAGER_BUILD_DATE=$(git show -s --format=%cI HEAD)" >> "$GITHUB_ENV"
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            echo 'APPLE_SIGNING_IDENTITY=-' >> "$GITHUB_ENV"
+          fi
 
       # 普通 CI 制品不调用签名或 Release；正式发布仍由 GUI Release 门禁处理。
       - name: Build app installers
