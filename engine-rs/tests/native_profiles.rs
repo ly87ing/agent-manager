@@ -180,6 +180,193 @@ fn apply_now(ctx: &Context, id: &str) -> agent_manager_engine::Envelope {
 }
 
 #[test]
+fn failed_profile_commit_restores_only_its_own_write() {
+    for (tag, existed, external_change) in [
+        ("rollback-existing", true, false),
+        ("rollback-created", false, false),
+        ("rollback-external", true, true),
+        ("rollback-external-created", false, true),
+    ] {
+        let (root, ctx) = temp_ctx(tag);
+        assert!(save_definition(
+            &ctx,
+            "work",
+            r#"{
+            "bin":"claude", "profile":{"base_agent":"claude-code","kind":"claude",
+            "config_dir":"~/.claude-work","model":"new-model"}
+        }"#
+        ));
+        let target = ctx.home_dir.join(".claude-work/settings.json");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let before = b"{\"model\":\"old-model\",\"theme\":\"keep\"}\n";
+        if existed {
+            std::fs::write(&target, before).unwrap();
+        }
+        let base = base_of(&ctx, "work");
+        let mut conn = agent_manager_engine::store::open_write(&ctx).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER reject_profile_audit BEFORE INSERT ON operation_logs
+            BEGIN SELECT RAISE(FAIL, 'test audit failure'); END;",
+        )
+        .unwrap();
+        // 数据库保留写锁：让真实 apply 写完文件后等在 SQLite，再精确注入外部修改。
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        let worker_ctx = Context {
+            home_dir: ctx.home_dir.clone(),
+            data_dir: ctx.data_dir.clone(),
+        };
+        let worker = std::thread::spawn(move || {
+            execute(
+                &worker_ctx,
+                &request(
+                    "profiles:apply",
+                    &["--only", "profiles:work", "--base", &base],
+                ),
+            )
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let written = loop {
+            let bytes = std::fs::read(&target).unwrap_or_default();
+            if String::from_utf8_lossy(&bytes).contains("new-model") {
+                break true;
+            }
+            if worker.is_finished() || std::time::Instant::now() >= deadline {
+                break false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let external = b"{\"model\":\"external-model\",\"theme\":\"external\"}\n";
+        if written && external_change {
+            std::fs::write(&target, external).unwrap();
+        }
+        tx.commit().unwrap();
+        let result = worker.join().unwrap();
+        assert!(
+            written,
+            "必须走到实际文件写入后才测试提交失败: {:?}",
+            result.errors
+        );
+        assert!(!result.ok, "审计失败不能报成功");
+        if external_change {
+            assert_eq!(
+                std::fs::read(&target).unwrap(),
+                external,
+                "回滚不得覆盖外部修改"
+            );
+            assert!(result.errors.iter().any(|err| err.message.contains("回滚")));
+        } else if existed {
+            assert_eq!(std::fs::read(&target).unwrap(), before);
+        } else {
+            assert!(!target.exists(), "失败时移除本次创建且未被外部改过的文件");
+        }
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM operation_logs WHERE operation_type = 'profiles:apply'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "失败的写入不得留下成功记录");
+        drop(conn);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn edit_snapshot_uses_live_values_without_writes_or_plaintext_credentials() {
+    let (root, ctx) = temp_ctx("edit-snapshot");
+    let variable = "AM_TEST_EDIT_SNAPSHOT";
+    std::env::set_var(variable, "YOUR_TEST_TOKEN");
+    assert!(save_definition(&ctx, "cc-ly", &claude_profile(variable)));
+    assert!(apply_now(&ctx, "cc-ly").ok);
+    let target = ctx.home_dir.join(".claude-ly/settings.json");
+    let mut live: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
+    live["model"] = serde_json::json!("actual-model");
+    live["env"]["ANTHROPIC_BASE_URL"] = serde_json::json!("https://actual.example.com");
+    std::fs::write(&target, serde_json::to_vec(&live).unwrap()).unwrap();
+    let before = std::fs::read(&target).unwrap();
+    let policy = execute(&ctx, &request("policy:get", &[])).data;
+    let state = status(&ctx);
+    let edit = &element(&state, "cc-ly")["observed"]["editable_profile"];
+    assert_eq!(
+        element(&state, "cc-ly")["observed"]["current_connection"]["model"],
+        "actual-model"
+    );
+    assert_eq!(edit["model"], "actual-model");
+    assert_eq!(
+        edit["env"]["ANTHROPIC_BASE_URL"],
+        "https://actual.example.com"
+    );
+    assert_eq!(
+        edit["env"]["ANTHROPIC_AUTH_TOKEN"],
+        "${AM_TEST_EDIT_SNAPSHOT}"
+    );
+    assert!(!state.data.to_string().contains("YOUR_TEST_TOKEN"));
+    assert_eq!(std::fs::read(&target).unwrap(), before);
+    assert_eq!(execute(&ctx, &request("policy:get", &[])).data, policy);
+
+    // 没有实际模型时不给旧登记代填；凭据不一致则明确阻止接入预填。
+    live.as_object_mut().unwrap().remove("model");
+    std::fs::write(&target, serde_json::to_vec(&live).unwrap()).unwrap();
+    let state = status(&ctx);
+    assert!(element(&state, "cc-ly")["observed"]["editable_profile"]
+        .get("model")
+        .is_none());
+    live["env"]["ANTHROPIC_AUTH_TOKEN"] = serde_json::json!("YOUR_EXTERNAL_TOKEN");
+    std::fs::write(&target, serde_json::to_vec(&live).unwrap()).unwrap();
+    let state = status(&ctx);
+    let observed = &element(&state, "cc-ly")["observed"];
+    assert!(observed["editable_profile"].is_null());
+    assert!(observed["edit_blocked_reason"]
+        .as_str()
+        .unwrap()
+        .contains("凭据"));
+    assert!(!state.data.to_string().contains("YOUR_EXTERNAL_TOKEN"));
+
+    // 请求头即使没有常见令牌前缀也不能作为普通值返回给编辑表单。
+    let mut definition: serde_json::Value =
+        serde_json::from_str(&claude_profile(variable)).unwrap();
+    definition["profile"]["env"]["ANTHROPIC_CUSTOM_HEADERS"] =
+        serde_json::json!("X-Custom: YOUR_SAVED_HEADER");
+    assert!(save_definition(&ctx, "cc-ly", &definition.to_string()));
+    live["env"]["ANTHROPIC_AUTH_TOKEN"] = serde_json::json!("YOUR_TEST_TOKEN");
+    live["env"]["ANTHROPIC_CUSTOM_HEADERS"] = serde_json::json!("X-Custom: YOUR_EXTERNAL_HEADER");
+    std::fs::write(&target, serde_json::to_vec(&live).unwrap()).unwrap();
+    let state = status(&ctx);
+    assert!(element(&state, "cc-ly")["observed"]["editable_profile"].is_null());
+    assert!(!state.data.to_string().contains("YOUR_EXTERNAL_HEADER"));
+
+    assert!(save_definition(
+        &ctx,
+        "cx-work",
+        r#"{"bin":"codex","profile":{"base_agent":"codex","kind":"codex","config_dir":"~/.codex-work","base_url":"https://old.example.com/v1","env_key":"AM_TEST_EDIT_SNAPSHOT","model":"old-model"}}"#
+    ));
+    assert!(apply_now(&ctx, "cx-work").ok);
+    let codex = ctx.home_dir.join(".codex-work/config.toml");
+    let content = std::fs::read_to_string(&codex)
+        .unwrap()
+        .replace("old-model", "actual-model")
+        .replace("old.example.com", "actual.example.com");
+    std::fs::write(&codex, &content).unwrap();
+    let state = status(&ctx);
+    let edit = &element(&state, "cx-work")["observed"]["editable_profile"];
+    assert_eq!(
+        element(&state, "cx-work")["observed"]["current_connection"]["base_url"],
+        "https://actual.example.com/v1"
+    );
+    assert_eq!(edit["model"], "actual-model");
+    assert_eq!(edit["base_url"], "https://actual.example.com/v1");
+    assert_eq!(edit["env_key"], variable);
+    assert!(!state.data.to_string().contains("YOUR_TEST_TOKEN"));
+    assert_eq!(std::fs::read_to_string(&codex).unwrap(), content);
+    std::env::remove_var(variable);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn saved_profile_preview_matches_write_and_rejects_changed_file_or_secret() {
     let (root, ctx) = temp_ctx("saved-profile-preview");
     std::env::set_var("AM_TEST_SAVED_PREVIEW", "preview-token");
@@ -315,7 +502,7 @@ fn provider_candidate_updates_one_profile_definition_and_live_file_together() {
     let old_file = std::fs::read(&target).unwrap();
     let base = base_of(&ctx, "cc-ly");
     let definition_base = definition_base_of(&ctx, "cc-ly");
-    let candidate = r#"{"env":{"ANTHROPIC_BASE_URL":"https://new.example.com","ANTHROPIC_API_KEY":"${AM_TEST_PROVIDER_CANDIDATE}"},"model":"new-model","source_connection":"provider-demo"}"#;
+    let candidate = r#"{"display_name":"Updated account","env":{"ANTHROPIC_BASE_URL":"https://new.example.com","ANTHROPIC_API_KEY":"${AM_TEST_PROVIDER_CANDIDATE}"},"model":"new-model","source_connection":"provider-demo"}"#;
     let request_update = || {
         request(
             "profiles:apply-definition",
@@ -331,6 +518,18 @@ fn provider_candidate_updates_one_profile_definition_and_live_file_together() {
             ],
         )
     };
+    let original_policy = execute(&ctx, &request("policy:get", &[])).data;
+    let conn = store::open_write(&ctx).unwrap();
+    conn.execute_batch("CREATE TRIGGER reject_edit_audit BEFORE INSERT ON operation_logs BEGIN SELECT RAISE(FAIL, 'test audit failure'); END;").unwrap();
+    let failed = execute(&ctx, &request_update());
+    assert!(!failed.ok);
+    assert_eq!(std::fs::read(&target).unwrap(), old_file);
+    assert_eq!(
+        execute(&ctx, &request("policy:get", &[])).data,
+        original_policy
+    );
+    conn.execute_batch("DROP TRIGGER reject_edit_audit")
+        .unwrap();
     let done = execute(&ctx, &request_update());
     assert!(done.ok, "{:?}", done.errors);
     let file: serde_json::Value = serde_json::from_slice(&std::fs::read(&target).unwrap()).unwrap();
@@ -343,6 +542,12 @@ fn provider_candidate_updates_one_profile_definition_and_live_file_together() {
     assert_eq!(file["model"], "new-model");
     let policy = execute(&ctx, &request("policy:get", &[]));
     let profile = &policy.data["effective"]["agents"]["definitions"]["cc-ly"]["profile"];
+    assert_eq!(
+        policy.data["effective"]["agents"]["definitions"]["cc-ly"]["display_name"],
+        "Updated account"
+    );
+    assert!(profile.get("display_name").is_none());
+    assert!(file.get("display_name").is_none());
     assert_eq!(profile["source_connection"], "provider-demo");
     assert_eq!(
         profile["env"]["ANTHROPIC_API_KEY"],

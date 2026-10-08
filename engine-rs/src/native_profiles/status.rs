@@ -18,6 +18,55 @@ pub(crate) fn definition_base(raw: &Value) -> Result<String> {
     ))
 }
 
+/// 编辑预填复用实际配置的采纳逻辑，但不写登记。存在无法采纳的字段时不以旧值代填。
+fn editable_profile(def: &ProfileDef, raw: &Value, bytes: Option<&[u8]>) -> Result<Value> {
+    let original = raw["profile"].as_object().expect("validated profile");
+    let profile = if bytes.is_some() {
+        let (profile, notes) =
+            model::adopt_profile(def, original, bytes, &crate::secret_values::lookup)?;
+        if !notes.is_empty() {
+            anyhow::bail!("{}", notes.join("；"));
+        }
+        profile
+    } else {
+        original.clone()
+    };
+    let mut candidate = raw.clone();
+    candidate["profile"] = Value::Object(profile.clone());
+    model::parse_definition(&def.id, &candidate, def.enabled)?;
+    if profile
+        .get("env")
+        .and_then(Value::as_object)
+        .is_some_and(|env| {
+            env.iter().any(|(key, value)| {
+                key.to_ascii_uppercase().contains("HEADER")
+                    && value
+                        .as_str()
+                        .is_some_and(|text| !(text.starts_with("${") && text.ends_with('}')))
+            })
+        })
+    {
+        anyhow::bail!("实际配置包含请求头取值，不能自动预填接入参数");
+    }
+    let keys: &[&str] = match def.kind {
+        model::ProfileKind::Claude => &["env", "model"],
+        model::ProfileKind::Codex => &["base_url", "env_key", "wire_api", "model"],
+    };
+    let editable: Map<String, Value> = keys
+        .iter()
+        .filter_map(|key| {
+            profile
+                .get(*key)
+                .map(|value| ((*key).to_string(), value.clone()))
+        })
+        .collect();
+    // 实际文件中的普通字段也可能被误填成密钥；不把这样的内容带进表单或登记。
+    if crate::native::reject_secret_text(&serde_json::to_string(&editable)?).is_some() {
+        anyhow::bail!("实际配置包含疑似凭据的普通字段，不能自动预填接入参数");
+    }
+    Ok(Value::Object(editable))
+}
+
 /// 实例执行的命令：取基础助手定义里的 bin，取不到时退回实例类型的默认命令名。
 pub(crate) fn base_bin(ctx: &Context, def: &ProfileDef) -> String {
     let fallback = match def.kind {
@@ -202,7 +251,25 @@ fn element(ctx: &Context, def: &ProfileDef, raw: &Value) -> Value {
     );
     observed.insert("files".into(), Value::Array(files));
     observed.insert("base".into(), json!(base));
+    if base.is_some() {
+        if let Ok(connection) = model::live_connection(def.kind, bytes.as_deref()) {
+            observed.insert("current_connection".into(), connection);
+        }
+    }
     observed.insert("definition_base".into(), json!(definition_base(raw).ok()));
+    let editing = if let Some(reason) = blocked.as_ref().or(file_blocked.as_ref()) {
+        Err(anyhow::anyhow!("{reason}"))
+    } else {
+        editable_profile(def, raw, bytes.as_deref())
+    };
+    match editing {
+        Ok(profile) => {
+            observed.insert("editable_profile".into(), profile);
+        }
+        Err(err) => {
+            observed.insert("edit_blocked_reason".into(), json!(format!("{err:#}")));
+        }
+    }
     observed.insert("fields".into(), Value::Array(fields));
     observed.insert("env_refs".into(), Value::Array(env_refs));
     observed.insert(

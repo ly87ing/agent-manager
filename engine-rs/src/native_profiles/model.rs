@@ -727,6 +727,48 @@ fn codex_fields(bytes: &[u8]) -> std::collections::BTreeMap<String, String> {
     out
 }
 
+/// 账号行只读实际模型与正在使用的地址，不以登记里的旧值代替缺失字段。
+pub(crate) fn live_connection(kind: ProfileKind, bytes: Option<&[u8]>) -> Result<Value> {
+    let Some(bytes) = bytes else {
+        return Ok(serde_json::json!({"model": null, "base_url": null}));
+    };
+    let (model, url) = match kind {
+        ProfileKind::Claude => {
+            let root = parse_settings(bytes)?;
+            (
+                root.get("model")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                root.get("env")
+                    .and_then(|env| env.get("ANTHROPIC_BASE_URL"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
+        }
+        ProfileKind::Codex => {
+            let root: toml::Value = std::str::from_utf8(bytes)?.parse()?;
+            let provider = root.get(CODEX_MODEL_PROVIDER).and_then(toml::Value::as_str);
+            (
+                root.get("model")
+                    .and_then(toml::Value::as_str)
+                    .map(str::to_string),
+                provider
+                    .and_then(|name| {
+                        root.get("model_providers")?
+                            .get(name)?
+                            .get("base_url")?
+                            .as_str()
+                    })
+                    .map(str::to_string),
+            )
+        }
+    };
+    Ok(serde_json::json!({
+        "model": model.map(|value| display_value("model", &value)),
+        "base_url": url.map(|value| display_value("base_url", &value)),
+    }))
+}
+
 /// 采纳实际配置：把实际文件里的值写回实例定义的 profile 段（只改库，不动文件）。
 /// 返回新的 profile 段与提示；令牌等凭据不以明文进库——实际取值与引用变量不一致时只提示。
 pub(crate) fn adopt_profile(

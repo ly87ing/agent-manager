@@ -10,7 +10,7 @@
 //! `--base` 确认用户看到的就是这份实际内容；凭据不以明文进库。
 //!
 //! 事务顺序：preflight（零写）→ 取全局锁（调用方）→ 建目录 → 原子换入文件 →
-//! 写 binding 与审计 → 提交；提交失败即回滚文件到写前状态。
+//! 写 binding 与审计 → 提交；失败时只恢复仍是本次写入内容的文件，保留外部后续修改。
 
 use anyhow::{anyhow, bail, Result};
 use rusqlite::TransactionBehavior;
@@ -21,6 +21,7 @@ use super::model::{self, ProfileDef};
 use super::persistence::{load_bindings_from, write_binding, Binding};
 use super::status::definition_base;
 use crate::native::{Context, Request};
+use crate::native_mcp::rollback::{read_existing_bytes, safe_restore_bytes_cas};
 use crate::store;
 
 const MAX_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
@@ -427,10 +428,9 @@ fn plan_update_with_resolver(
         model::ProfileKind::Claude => &["env", "model"],
         model::ProfileKind::Codex => &["base_url", "env_key", "wire_api", "model"],
     };
-    if fields
-        .keys()
-        .any(|key| key != "source_connection" && !owned.contains(&key.as_str()))
-    {
+    if fields.keys().any(|key| {
+        key != "source_connection" && key != "display_name" && !owned.contains(&key.as_str())
+    }) {
         bail!("--candidate 只能更新该助手实例的接入字段");
     }
     // 账号可以直接编辑接入参数，不一定来自某个 Provider：不带来源时保留定义里原有的记录
@@ -455,6 +455,13 @@ fn plan_update_with_resolver(
         }
     }
     let mut next = original.clone();
+    if let Some(name) = fields.get("display_name") {
+        let name = name
+            .as_str()
+            .filter(|name| !name.trim().is_empty())
+            .ok_or_else(|| anyhow!("账号名称不能为空"))?;
+        next["display_name"] = json!(name.trim());
+    }
     let profile = next
         .get_mut("profile")
         .and_then(Value::as_object_mut)
@@ -462,7 +469,12 @@ fn plan_update_with_resolver(
     for key in owned {
         profile.remove(*key);
     }
-    profile.extend(fields.clone());
+    profile.extend(
+        fields
+            .iter()
+            .filter(|(key, _)| key.as_str() != "display_name")
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
     let def = model::parse_definition(&id, &next, current.enabled)?;
     let has_third_party_credential = match def.kind {
         model::ProfileKind::Claude => {
@@ -524,7 +536,7 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
 
 /// 原子换入：同目录临时文件 + rename，权限 0600。文件里有凭据：临时文件从创建起就是 0600，
 /// 且只新建不复用——上次中断留下的同名文件或链接先删掉，不会顺着链接把内容写到别处。
-fn atomic_write(target: &Path, content: &[u8]) -> Result<()> {
+fn atomic_write(target: &Path, content: &[u8], expected: Option<&[u8]>) -> Result<()> {
     use std::io::Write;
     let dir = target
         .parent()
@@ -548,11 +560,25 @@ fn atomic_write(target: &Path, content: &[u8]) -> Result<()> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let mut file = options.open(&tmp)?;
-    file.write_all(content)?;
-    file.sync_all()?;
-    drop(file);
-    std::fs::rename(&tmp, target)?;
+    let result = (|| -> Result<()> {
+        let mut file = options.open(&tmp)?;
+        file.write_all(content)?;
+        file.sync_all()?;
+        drop(file);
+        if read_existing_bytes(target)?.as_deref() != expected {
+            bail!("目标文件已在外部修改，拒绝替换");
+        }
+        std::fs::rename(&tmp, target)?;
+        Ok(())
+    })();
+    if let Err(err) = result {
+        if let Err(cleanup) = std::fs::remove_file(&tmp) {
+            if cleanup.kind() != std::io::ErrorKind::NotFound {
+                return Err(anyhow!("{err:#}；清理临时文件失败: {cleanup}"));
+            }
+        }
+        return Err(err);
+    }
     Ok(())
 }
 
@@ -588,24 +614,20 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     ensure_dir(&plan.dir)?;
     let existed = plan.previous.is_some();
     // 写前再比一次字节：锁内读取之后若又被改过，拒绝替换
-    let current = std::fs::read(&plan.real).ok();
+    let current = read_existing_bytes(&plan.real)?;
     if current != plan.previous {
         return Err(stale(def, &plan.file));
     }
     // 原本没有这个文件、这次也没有要写的内容：不新建空文件
-    if !(plan.previous.is_none() && model::is_empty_render(def.kind, &plan.content)) {
-        atomic_write(&plan.real, &plan.content)?;
+    let wrote_file = !(plan.previous.is_none() && model::is_empty_render(def.kind, &plan.content));
+    if wrote_file {
+        atomic_write(&plan.real, &plan.content, plan.previous.as_deref())?;
     }
-    let rollback = || match &plan.previous {
-        Some(bytes) => {
-            let _ = std::fs::write(&plan.real, bytes);
-        }
-        None => {
-            let _ = std::fs::remove_file(&plan.real);
-        }
-    };
 
     let result = (|| -> Result<()> {
+        if wrote_file && read_existing_bytes(&plan.real)?.as_deref() != Some(&plan.content) {
+            bail!("账号配置写后回读不一致");
+        }
         let mut conn = store::open_write(ctx)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         if let Some((candidate, expected)) = &update {
@@ -662,7 +684,13 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     })();
 
     if let Err(err) = result {
-        rollback();
+        if wrote_file {
+            if let Err(restore) =
+                safe_restore_bytes_cas(&plan.real, &plan.content, plan.previous.as_deref())
+            {
+                return Err(anyhow!("执行失败: {err:#}；配置回滚失败: {restore:#}"));
+            }
+        }
         return Err(err);
     }
 
@@ -771,7 +799,7 @@ mod tests {
         std::fs::write(&outside, "keep").unwrap();
         std::os::unix::fs::symlink(&outside, dir.join(".config.toml.am-tmp")).unwrap();
 
-        atomic_write(&dir.join("config.toml"), b"token = \"x\"\n").unwrap();
+        atomic_write(&dir.join("config.toml"), b"token = \"x\"\n", None).unwrap();
 
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
         assert_eq!(
