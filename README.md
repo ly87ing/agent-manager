@@ -82,6 +82,16 @@ AI CLI 的安装、升级与卸载不在本工具内执行。
 
 ## 开发
 
+跨平台安装包在 [GUI CI](https://github.com/ly87ing/agent-manager/actions/workflows/gui-ci.yml) 的成功运行页面中下载（Artifacts，保留 14 天），也可用 **Run workflow** 手动构建指定分支。
+
+| 平台 | 制品 |
+| --- | --- |
+| macOS Apple Silicon / Intel | 各自的 DMG |
+| Windows x64 | NSIS EXE、MSI |
+| Linux x64 | AppImage、DEB |
+
+每份制品附带 `SHA256SUMS.txt` 和 `build-info.json`，可核对文件摘要、提交和目标架构。这些是未做正式签名的测试安装包；正式签名、公证与自动更新仍走 GUI Release，不会由普通 CI 创建 Release。
+
 仓库结构：`engine-rs/`（CLI 与桌面端共用的 Rust 库与 SQLite 存储）、`app/`（Tauri 应用与 React 前端）、`contract/`（Engine Contract v1 schema）、`scripts/`（构建与验收脚本）。
 
 验证命令（仓库根目录）：
