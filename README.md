@@ -28,7 +28,9 @@
 
 ### 下载安装包
 
-尚未发布首个 GitHub Release，安装包暂未提供。公开发布仍需完成仓库外部条件：GitHub Actions 计费、签名密钥、Apple Developer ID 与公证、Windows 签名材料，以及 Linux/Windows/arm64 真机验收。当前进展见 [平台状态](docs/GUI-PLATFORM-STATUS.md)。发布后将提供 macOS（dmg）、Linux（AppImage/deb）与 Windows（NSIS/MSI）安装包。
+已提供 [0.1.0 预览安装包](https://github.com/ly87ing/agent-manager/releases/tag/preview-v0.1.0-20261008)：macOS（Apple Silicon / Intel dmg）、Linux（AppImage / deb）和 Windows（NSIS / MSI）。当前仓库私有，下载需要仓库访问权限；HTTPS 不会绕过权限检查。预览包没有配置自动更新。
+
+正式发布不要求购买 Apple 开发者账号：默认 macOS 使用 ad-hoc 签名、Windows 不做 Authenticode 签名，系统可能要求手动确认安装。更新包仍必须签名；商业证书和 Apple 公证可另行启用。发布与验收状态见 [平台状态](docs/GUI-PLATFORM-STATUS.md)。
 
 ### 从源码构建
 
