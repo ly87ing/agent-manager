@@ -5,6 +5,7 @@ process.env.TZ = "UTC";
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach } from "vitest";
+import { setTimeout as settleTimers } from "node:timers/promises";
 import { resetIgnoredForTest } from "../lib/inboxIgnore";
 
 // 每个用例从空的本机存储开始（主题、集合展开状态等不跨用例残留）
@@ -58,8 +59,10 @@ if (typeof window !== "undefined") {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // sonner 的通知订阅会排入零延时回调；卸载后等它执行，再允许 jsdom 销毁。
+  await settleTimers(0);
   setEngineClient(null);
   setSettingsClient(defaultSettingsClient);
 });
