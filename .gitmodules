@@ -1,4 +1,0 @@
-[submodule "secrets"]
-	path = secrets
-	url = https://github.com/ly87ing/secrets.git
-	branch = main

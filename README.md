@@ -32,7 +32,7 @@
 
 ### 从源码构建
 
-前置条件：Rust 工具链、Node.js 与 pnpm。克隆时不要加 `--recursive`：仓库含私有子模块 `secrets/`（不对外），跳过它不影响构建与使用。
+前置条件：Rust 工具链、Node.js 与 pnpm。构建与使用均不需要作者的 secrets 仓库。可在应用中手动配置密钥，也可选择自己私有仓库中的 `.env` 文件，见 [密钥配置](docs/SECRETS-MANAGEMENT.md)。
 
 macOS：
 

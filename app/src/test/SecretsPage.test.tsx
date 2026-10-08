@@ -278,7 +278,7 @@ describe("SecretsPage 新建密钥文件", () => {
       calls,
     );
     const create = await screen.findByTestId("secrets-source-create");
-    expect(screen.getByTestId("secrets-source-card")).toHaveTextContent("也可以在这里新建一个");
+    expect(screen.getByTestId("secrets-source-card")).toHaveTextContent("也可选择你自己的私有 secrets 仓库中的 .env 文件");
     await userEvent.click(create);
     await waitFor(() => expect(calls.some((call) => call.command === "secrets:source")).toBe(true));
     expect(calls.find((call) => call.command === "secrets:source")!.args).toEqual([

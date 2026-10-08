@@ -102,7 +102,7 @@ export default function SecretsPage() {
           <div>
             <h3 className="text-sm font-semibold text-foreground">密钥保存位置</h3>
             <p className="mt-1 text-xs text-muted-foreground">
-              在本应用里填的 API Key 只写进这个 `.env` 文件（仅本人可读），不进本应用的数据库。可以选已有的文件（比如私有仓库里的），也可以在这里新建一个。
+              手动填写的密钥保存在此文件，也可选择你自己的私有 secrets 仓库中的 .env 文件。无需访问作者的仓库。
             </p>
           </div>
           <span
@@ -159,7 +159,7 @@ export default function SecretsPage() {
           )}
         </div>
         <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
-          已有文件须权限为 600、使用 `KEY=VALUE` 格式；「新建一个」按上面的路径（留空用 {DEFAULT_SECRETS_PATH}）建一个仅本人可读的空文件。第一次在接入里填 API Key 时，没有文件也会自动在默认位置新建。文件内容不会放进配置备份。
+          一行一个 KEY=VALUE；macOS / Linux 文件权限须为 600。留空新建到 {DEFAULT_SECRETS_PATH}。应用不自动同步 Git，配置备份不包含密钥。
         </p>
         {source.error && !sourceChanged && (
           <p role="alert" data-testid="secrets-source-error" className="mt-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
