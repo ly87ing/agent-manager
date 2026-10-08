@@ -341,7 +341,7 @@ export default function SourcesPage({
           </div>
         ))}
         {total === 0 ? (
-          <EmptyState compact title="还没有来源" description="添加一个 git 仓库或本机目录（提供技能、规则和推荐的启动命令），或一个规则文件、规则目录。" testId="sources-empty" />
+          <EmptyState compact title="尚未添加来源（可选）" description="不添加也可管理本机账号与配置。需要更多技能或规则时，再选择仓库、本机目录或规则文件。" testId="sources-empty" />
         ) : (
           <ul className="divide-y">
             {collections.map((collection) => {
