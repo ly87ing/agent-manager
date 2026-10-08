@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest";
 import { decodeShareLink, encodeShareLink, SHARE_PREFIX } from "../lib/shareLink";
 
 describe("分享链接", () => {
+  it.each([
+    "https://example.com/YOUR_REPO.git", "http://example.com/YOUR_REPO.git",
+    "ssh://YOUR_USER@example.com:2222/YOUR_REPO.git", "git://example.com/YOUR_REPO.git",
+    "YOUR_USER@example.com:YOUR_REPO.git", "YOUR_HOST:YOUR_REPO.git",
+  ])("远程协议分享保留原地址：%s", (url) => {
+    const payload = { kind: "skills" as const, name: "example", definition: { url, skill_paths: null, rules_path: null } };
+    expect(decodeShareLink(encodeShareLink(payload))).toEqual(payload);
+  });
+
+  it.each(["file:///YOUR_REPO", "C:/YOUR_REPO", "~/YOUR_REPO", "https://", "git@", "ext::YOUR_COMMAND", "--upload-pack=YOUR_COMMAND"])("分享拒绝本机或无效地址：%s", (url) => {
+    expect(() => encodeShareLink({ kind: "skills", name: "example", definition: { url } })).toThrow(/只接受 git 地址/);
+  });
+
   it("MCP 与技能集合编码后原样解回（含中文与特殊字符）", () => {
     const mcp = { kind: "mcp" as const, name: "grok-search", spec: { command: "uvx", args: ["--from", "git+https://example.com/x", "搜索"], env: { API_KEY: "${GROK_API_KEY}" } } };
     expect(decodeShareLink(encodeShareLink(mcp))).toEqual(mcp);

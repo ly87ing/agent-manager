@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { isRemoteGitRepository } from "../lib/gitRepository";
 import { ChevronRight, X } from "lucide-react";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { type AvailableSkill, canAutoInclude, readScope, toSkillPaths } from "../lib/skillScope";
@@ -72,8 +73,8 @@ export function SkillCollectionFormDialog({
       setError("名称只能用小写字母/数字/连字符（如 my-skills）");
       return;
     }
-    if (sourceKind === "git" && !/^https?:\/\//.test(url.trim()) && !url.trim().startsWith("git@")) {
-      setError("仓库地址要以 https:// 或 git@ 开头");
+    if (sourceKind === "git" && !isRemoteGitRepository(url.trim()) && !/^file:\/\/\/[^\x00-\x1f\x7f]+$/.test(url.trim())) {
+      setError("请输入 HTTPS、SSH、git:// 或 file:// 仓库地址");
       return;
     }
     if (sourceKind === "local" && !/^(~\/|\/)/.test(sourcePath.trim())) {
@@ -173,6 +174,7 @@ export function SkillCollectionFormDialog({
             {sourceKind === "git" ? (
               <>
                 <input value={url} onChange={(e) => setUrl(e.target.value)} data-testid="collection-url-input" aria-label="仓库地址" className={inputClass} placeholder="https://github.com/example/skills.git" />
+                <p className="mt-1 text-xs text-muted-foreground">推荐 HTTPS；也支持 SSH、git://、file://</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <label htmlFor="collection-track-mode" className="text-xs text-muted-foreground">跟踪</label>
                   <select

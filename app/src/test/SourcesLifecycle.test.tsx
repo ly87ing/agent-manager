@@ -179,6 +179,22 @@ describe("来源页：添加、编辑、更新、移除", () => {
     expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(0);
   });
 
+  it.each([
+    "https://example.com/YOUR_REPO.git", "http://example.com/YOUR_REPO.git",
+    "ssh://YOUR_USER@example.com:2222/YOUR_REPO.git", "git://example.com/YOUR_REPO.git",
+    "YOUR_USER@example.com:YOUR_REPO.git", "YOUR_HOST:YOUR_REPO.git", "file:///YOUR_REPO",
+  ])("添加来源保留用户选择的协议：%s", async (url) => {
+    const { calls } = renderWithEngine(<SourcesPage />, skillsRoutes());
+    await userEvent.click(await screen.findByTestId("source-add-collection"));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByTestId("collection-url-input")).toHaveAttribute("placeholder", "https://github.com/example/skills.git");
+    fireEvent.change(within(dialog).getByTestId("collection-name-input"), { target: { value: "my-skills" } });
+    fireEvent.change(within(dialog).getByTestId("collection-url-input"), { target: { value: url } });
+    await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
+    const write = calls.find((call) => call.command === "policy:set")!;
+    expect(JSON.parse(write.args[write.args.indexOf("--value") + 1])).toMatchObject({ url });
+  });
+
   it("新增集合表单点取消：零写入且绝不迁移", async () => {
     const cancelRoutes = { ...skillsRoutes(), "db:migrate": makeEnvelope({ migrated: true }, { command: "db.migrate" }) };
     const { calls } = renderWithEngine(<SourcesPage />, cancelRoutes);

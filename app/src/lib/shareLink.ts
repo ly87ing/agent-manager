@@ -1,4 +1,5 @@
 import { TRACK_OPTIONS, trackFromForm, trackToForm, type TrackSpec } from "./skillTrack";
+import { isRemoteGitRepository } from "./gitRepository";
 /**
  * 分享链接：把一个 MCP 服务或技能集合的定义装进 `agentmanager://import?data=…`，
  * 别人粘贴或点开后，用现有的「新增」表单预填、自己检查后保存——链接本身从不直接写入。
@@ -89,7 +90,7 @@ function validate(payload: SharePayload): SharePayload | string {
   }
   if (payload.kind === "skills") {
     const def: Partial<Extract<SharePayload, { kind: "skills" }>["definition"]> = payload.definition ?? {};
-    if (typeof def.url !== "string" || !/^(https:\/\/|git@)/.test(def.url)) return "分享的来源只接受 git 地址（https:// 或 git@），不接受本机路径";
+    if (typeof def.url !== "string" || !isRemoteGitRepository(def.url)) return "分享的来源只接受 git 地址（HTTP(S)、SSH 或 git://），不接受本机路径";
     const paths = def.skill_paths ?? null;
     if (paths !== null && !(Array.isArray(paths) && paths.every((item) => typeof item === "string" && !item.includes("..") && !item.startsWith("/")))) {
       return "技能位置格式不对";
