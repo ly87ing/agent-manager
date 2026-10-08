@@ -180,6 +180,14 @@ jobs:
           BUILD_BUNDLES: ${{ matrix.bundles }}
         run: node scripts/collect-installers.mjs
 
+      - name: Verify macOS installer on native architecture
+        if: ${{ runner.os == 'macOS' }}
+        shell: bash
+        run: |
+          installers=("$RUNNER_TEMP/agent-manager-installers/"*.dmg)
+          [[ "${#installers[@]}" == 1 ]]
+          bash scripts/verify-macos-dmg.sh "${installers[0]}" "$GITHUB_SHA"
+
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
