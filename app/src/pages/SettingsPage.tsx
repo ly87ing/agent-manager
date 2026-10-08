@@ -71,7 +71,7 @@ function SettingsGroup({ title, children }: { title: string; children: ReactNode
 function SettingsRow({ label, note, children }: { label: string; note?: string; children?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-48">
         <div className="text-sm">{label}</div>
         {note && <div className="text-xs text-muted-foreground">{note}</div>}
       </div>
@@ -286,7 +286,7 @@ export default function SettingsPage({
 
   return (
     <div className="space-y-3">
-      <h1 className="sr-only">设置</h1>
+      <h1 className="text-lg font-semibold tracking-tight">设置</h1>
 
       <SettingsGroup title="通用">
         <SettingsRow label="外观" note="立即生效，保存在本机">

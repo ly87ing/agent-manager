@@ -67,8 +67,8 @@ export function ConfirmModal({
       >
         {/* 标题与按钮固定在上下，内容长了只滚中间：不用拖动就能点确认或取消 */}
         <div className="flex shrink-0 items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <h3 className="text-base font-semibold text-foreground">{title}</h3>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <h3 className="break-words text-base font-semibold text-foreground">{title}</h3>
             <RiskBadge risk={risk} label={riskLabel} />
           </div>
           <button type="button" onClick={onClose} disabled={executing} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-40">
@@ -95,7 +95,7 @@ export function ConfirmModal({
           {resultErrors && resultErrors.length > 0 && <div className="mt-3"><ErrorPanel title="执行失败" errors={resultErrors} /></div>}
         </div>
 
-        <div className="mt-4 flex shrink-0 justify-end gap-2">
+        <div className="mt-4 flex shrink-0 flex-wrap justify-end gap-2">
           {secondaryLabel && onSecondary && (
             <button type="button" data-testid="confirm-modal-secondary" onClick={onSecondary} disabled={executing} className="rounded-md border border-primary/30 px-4 py-2 text-sm text-primary hover:bg-primary/10 disabled:opacity-40">
               {secondaryLabel}
@@ -117,7 +117,7 @@ export function ConfirmModal({
             onClick={onConfirm}
             className={cn(
               "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-primary-foreground",
-              blocked ? "cursor-not-allowed bg-muted text-muted-foreground" : risk === "install-remove" ? "bg-destructive hover:bg-destructive/90" : "bg-primary hover:bg-primary/90",
+              blocked ? "cursor-not-allowed bg-muted text-muted-foreground" : risk === "install-remove" ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : "bg-primary hover:bg-primary/90",
             )}
           >
             {executing && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}

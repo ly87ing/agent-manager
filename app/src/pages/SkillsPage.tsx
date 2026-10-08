@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Library, PackageOpen, SearchX } from "lucide-react";
 import { toast } from "sonner";
@@ -280,7 +281,7 @@ export default function SkillsPage({
 
   return (
     <div className="space-y-3">
-      <h1 className="sr-only">技能</h1>
+      <h1 className="text-lg font-semibold tracking-tight">技能</h1>
       {query.data.errors.length > 0 && <ErrorPanel title="技能状态读取失败" errors={query.data.errors} />}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -364,7 +365,7 @@ export default function SkillsPage({
           }
         />
       ) : (
-        <div className="overflow-clip rounded-lg border bg-card">
+        <div role="region" aria-label="技能账号列表" tabIndex={0} className="table-scroll rounded-lg border bg-card" style={{ "--table-min-width": `${Math.max(704, 400 + groups.reduce((count, group) => count + group.columns.length * 64 + 16, 0))}px` } as CSSProperties}>
           <AccountHeader
             className="sticky top-0 z-10"
             groups={groups}

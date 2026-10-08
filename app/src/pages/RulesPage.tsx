@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { ArrowUpDown, Copy, Eye, Library, Pencil, Plus, Trash2 } from "lucide-react";
 import { AgentIcon } from "../components/AgentIcon";
 import { StateBadge } from "../components/StateBadge";
-import { COL_ACTION, COL_ICONS, COL_MIDDLE, PILL, PILL_HOVER, ROW, RowIcon, TableHeader } from "../components/DataTable";
+import { COL_ACTION, COL_ICONS, COL_MIDDLE, PILL, ROW, RowIcon, TableHeader } from "../components/DataTable";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { useRuleSources } from "../components/RuleSources";
 import { ErrorPanel } from "../components/ErrorPanel";
@@ -23,7 +23,7 @@ import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
 
 const PAGE_NOTE =
-  "以各助手的规则文件为准：这里显示并直接编辑实际文件。模板只保存在本机库里；推荐规则来自技能来源（如 agent-skills 的 rules/），不随程序发布。应用模板、来源里的规则或从另一处复制之前，目标现有内容若对不上任何已知内容，会先另存为一份备份模板。";
+  "编辑直接写入规则文件。模板保存在本机，推荐规则来自技能来源；覆盖未知内容前会自动备份。";
 
 /** 写入前被外部改过时引擎给出的固定说法。 */
 const EXTERNAL_EDIT = "已在外部修改";
@@ -98,7 +98,7 @@ export default function RulesPage({
   if (!query.data.ok) {
     return (
       <div className="space-y-4">
-        <h2 className="sr-only">规则</h2>
+        <h1 className="text-lg font-semibold tracking-tight">规则</h1>
         <ErrorPanel title="规则状态读取失败" errors={query.data.errors} />
       </div>
     );
@@ -159,10 +159,10 @@ export default function RulesPage({
 
   return (
     <div className="space-y-3">
-      <h2 className="sr-only">规则</h2>
+      <h1 className="text-lg font-semibold tracking-tight">规则</h1>
       {query.data.errors.length > 0 && <ErrorPanel title="规则状态读取失败" errors={query.data.errors} />}
 
-      <section className="overflow-clip rounded-lg border bg-card" aria-label="规则文件">
+      <section tabIndex={0} className="table-scroll rounded-lg border bg-card" aria-label="规则文件">
         <TableHeader title={`规则文件 · ${elements.length}`} middle="使用的规则" />
         {elements.length === 0 && <p className="px-4 py-3 text-xs text-muted-foreground">没有可显示的规则文件。</p>}
         <ul className="divide-y">
@@ -430,7 +430,7 @@ function RuleLibrary({
     );
 
   return (
-    <section className="overflow-clip rounded-lg border bg-card" aria-label="规则库">
+    <section tabIndex={0} className="table-scroll rounded-lg border bg-card" aria-label="规则库">
       <TableHeader title={`规则库 · ${count}`} middle="来源">
         <button type="button" data-testid="rule-source-add" onClick={() => onOpenSource?.(null)} className="inline-flex items-center gap-1 text-primary hover:underline">
           <Library className="h-3.5 w-3.5" aria-hidden /> 管理来源
@@ -464,7 +464,7 @@ function RuleLibrary({
                       type="button"
                       aria-label={`应用${sourceRuleLabel(rule)}到…`}
                       onClick={() => onApplyRule(rule)}
-                      className={PILL_HOVER}
+                      className={PILL}
                     >
                       应用到…
                     </button>
@@ -508,7 +508,7 @@ function RuleLibrary({
                   <button
                     type="button"
                     onClick={() => onApplyTemplate(template)}
-                    className={PILL_HOVER}
+                    className={PILL}
                   >
                     应用到…
                   </button>

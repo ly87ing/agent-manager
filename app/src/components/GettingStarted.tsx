@@ -72,7 +72,7 @@ export function GettingStarted({ steps }: { steps: StartStep[] }) {
           const isSkipped = !step.done && skipped.includes(step.id);
           const isDone = step.done || isSkipped;
           return (
-            <li key={step.id} data-testid={`start-step-${step.id}`} data-done={isDone} className="flex items-center gap-3 py-1.5">
+            <li key={step.id} data-testid={`start-step-${step.id}`} data-done={isDone} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-1.5">
               <span
                 className={cn(
                   "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px]",
@@ -81,8 +81,8 @@ export function GettingStarted({ steps }: { steps: StartStep[] }) {
               >
                 {isDone ? <Check className="h-3 w-3" aria-hidden /> : index + 1}
               </span>
-              <span className={cn("text-sm", isDone && "text-muted-foreground line-through")}>{step.label}</span>
-              <span className="min-w-0 truncate text-xs text-muted-foreground">{isSkipped ? "不用了" : step.hint}</span>
+              <span className={cn("min-w-0 break-words text-sm", isDone && "text-muted-foreground line-through")}>{step.label}</span>
+              <span className="min-w-0 basis-full break-words pl-8 text-xs text-muted-foreground sm:basis-auto sm:pl-0">{isSkipped ? "不用了" : step.hint}</span>
               {!isDone && step.optional && (
                 <button
                   type="button"

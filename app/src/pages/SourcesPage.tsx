@@ -279,7 +279,7 @@ export default function SourcesPage({
 
   return (
     <div className="space-y-3">
-      <h1 className="sr-only">来源</h1>
+      <h1 className="text-lg font-semibold tracking-tight">来源</h1>
       <div className="flex flex-wrap items-center justify-end gap-2">
         {updatable.length > 0 && (
           <button
@@ -447,7 +447,7 @@ export default function SourcesPage({
         )}
       </DataTable>
       <p className="px-1 text-xs text-muted-foreground">
-        git 仓库或本机目录提供技能，也可以带规则（默认在 rules/ 里）和推荐的启动命令；规则文件或目录只提供规则。更新、换版本都在这里做，技能、规则页只提示「有新版本」。
+        在此管理技能、规则和命令的来源，以及更新与版本切换。
       </p>
 
       {/* 未纳管：在账号里、但不来自任何来源的技能——识别出来源的纳入（只留一份源），外部目录登记为本机目录来源，残留链接清理 */}

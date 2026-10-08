@@ -3,7 +3,6 @@ import { RefreshCw, ScanSearch } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { ActionMenu } from "../components/AccountGrid";
-import { ROW } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
 import { PageError, PageLoading } from "../components/PageState";
 import { ProgramActionDialog, type ProgramActionKind } from "../components/ProgramActionDialog";
@@ -17,12 +16,8 @@ import { engineKeys, useCheckingUpdates, useEngineQuery, useRefreshUpstream } fr
 import { cn } from "../lib/utils";
 
 const TEXT_BUTTON = "rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40";
-const PRIMARY = "whitespace-nowrap rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-40";
-/** 列宽固定、表头与各行对齐（与来源页同一版式：一行一项）。 */
-const COL_NEED = "w-52 shrink-0";
-const COL_VERSION = "w-36 shrink-0";
-const COL_STATE = "w-32 shrink-0";
-const COL_ACT = "w-40 shrink-0";
+const PRIMARY = "whitespace-nowrap rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-40";
+const GRID = "grid grid-cols-2 items-center gap-x-4 gap-y-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_8rem]";
 
 /** 程序的问题 → 统一状态标签。 */
 function problemBadges(program: ProgramElement): { state: InboxState; text: string }[] {
@@ -114,7 +109,7 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
         if (installable) primary = { label: "安装…", testId: `program-install-${program.program}`, run: () => setDialog({ program, action: "install" }) };
         break;
       case "delegated":
-        primary = { label: target ? `升级到 ${shortVersion(target)}…` : "升级…", testId: `program-upgrade-${program.program}`, run: () => setDialog({ program, action: "upgrade", version: target ?? undefined }) };
+        if (target) primary = { label: `升级到 ${shortVersion(target)}…`, testId: `program-upgrade-${program.program}`, run: () => setDialog({ program, action: "upgrade", version: target ?? undefined }) };
         for (const backup of backups.filter((item) => item.reason !== "adopt")) {
           menu.push({ label: `回退到 ${backup.version ?? "上一版"}`, testId: `program-restore-${backup.id}`, onSelect: () => setDialog({ program, action: "restore", backup: backup.id }) });
         }
@@ -123,7 +118,7 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
         }
         break;
       case "managed":
-        primary = { label: target ? `升级到 ${shortVersion(target)}…` : "升级…", testId: `program-upgrade-${program.program}`, run: () => setDialog({ program, action: "upgrade", version: target ?? undefined }) };
+        if (target) primary = { label: `升级到 ${shortVersion(target)}…`, testId: `program-upgrade-${program.program}`, run: () => setDialog({ program, action: "upgrade", version: target ?? undefined }) };
         for (const version of program.managed_versions.filter((item) => item !== program.managed_current)) {
           menu.push({ label: `换到 ${version}`, testId: `program-switch-${version}`, onSelect: () => setDialog({ program, action: "switch", version }) });
           menu.push({ label: `删除旧版本 ${version}`, testId: `program-remove-version-${version}`, danger: true, onSelect: () => setDialog({ program, action: "remove", version }) });
@@ -157,12 +152,12 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
 
   return (
     <div className="space-y-3">
-      <h1 className="sr-only">程序</h1>
+      <h1 className="text-lg font-semibold">程序 <span className="ml-1 text-sm font-normal text-muted-foreground">{programs.length}</span></h1>
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <span className="mr-auto text-xs text-muted-foreground">
-          入口目录：<span className="font-mono">{data.entry_dir ?? "还没选（第一次由本工具安装时选）"}</span>
-          {data.user_path.error && <span className="ml-2 text-warning">读取你的 PATH 失败：{data.user_path.error}</span>}
-        </span>
+        <div className="mr-auto min-w-0 break-all text-xs text-muted-foreground">
+          入口目录：<span className="font-mono">{data.entry_dir ?? "首次安装时选择"}</span>
+          {data.user_path.error && <details className="mt-1 text-warning"><summary className="w-fit cursor-pointer">PATH 读取失败</summary><p className="mt-1">{data.user_path.error}</p></details>}
+        </div>
         <button type="button" data-testid="programs-rescan" disabled={rescanning} onClick={() => void rescan()} className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40">
           <ScanSearch className="h-4 w-4" aria-hidden /> 重新扫描
         </button>
@@ -173,20 +168,19 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
 
       {checking && (
         <p data-testid="programs-checking" className="rounded-md border border-info/30 bg-info/5 px-3 py-2 text-xs text-info">
-          正在检查新版本：完成前先不能升级、安装或改版本，免得按旧的检查结果操作。
+          检查中，暂不可安装或改版本。
         </p>
       )}
 
       {programs.length === 0 ? (
-        <EmptyState testId="programs-empty" title="技能和 MCP 都没有声明要用的程序" description="技能在 SKILL.md 里声明了要用的命令、或 MCP 用 npx / uvx 启动时，会出现在这里。" />
+        <EmptyState testId="programs-empty" title="暂无程序" description="技能和 MCP 的依赖会显示在这里。" />
       ) : (
         <section aria-label="程序" data-testid="programs-list" className="overflow-clip rounded-lg border bg-card">
-          <div className="flex items-center gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
-            <span className="min-w-0 flex-1 font-medium text-foreground">程序 · {programs.length}</span>
-            <span className={COL_NEED}>被谁需要</span>
-            <span className={COL_VERSION}>版本</span>
-            <span className={COL_STATE}>状态</span>
-            <span className={COL_ACT} />
+          <div className={cn(GRID, "hidden border-b bg-muted/50 px-4 py-2.5 text-xs text-muted-foreground md:grid")}>
+            <span>程序 / 来源</span>
+            <span>依赖此程序</span>
+            <span>版本与状态</span>
+            <span className="text-right">操作</span>
           </div>
           <ul className="divide-y">
             {programs.map((program) => {
@@ -200,51 +194,54 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
               const current = program.mode === "runner"
                 ? [...new Set(program.runners.map((runner) => (runner.version ? shortVersion(runner.version) : "没写版本")))].join("、")
                 : shortVersion(program.version ?? program.managed_current);
-              const newer = program.freshness?.state === "behind" && program.freshness.upstream ? shortVersion(program.freshness.upstream) : null;
               return (
                 <li
                   key={program.program}
                   data-testid={`program-row-${program.program}`}
                   data-program-anchor={program.program}
-                  className={cn(ROW, focus === program.program && "ring-2 ring-inset ring-primary/40")}
+                  className={cn(GRID, "px-4 py-3 hover:bg-accent/30", focus === program.program && "ring-2 ring-inset ring-primary/40")}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex min-w-0 items-center gap-2">
+                  <div className="col-span-2 min-w-0 space-y-1.5 md:col-span-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="truncate text-sm font-medium" title={program.program}>{displayName(program)}</span>
                       <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" title={MODE_HINT[program.mode]}>{MODE_LABEL[program.mode]}</span>
                     </div>
                     <div className="truncate font-mono text-xs text-muted-foreground" title={install?.real ?? where}>{where || "—"}</div>
                   </div>
                   <div
-                    className={cn(COL_NEED, "truncate text-xs text-muted-foreground")}
+                    className={"col-span-2 flex min-w-0 flex-col items-start gap-1 text-xs text-muted-foreground md:col-span-1"}
                     title={program.dependents.map((dep) => `${dep.kind === "skill" ? "技能" : "MCP"} ${dep.name}`).join("\n")}
                   >
                     {program.dependents.length === 0 && "没人用"}
-                    {program.dependents.map((dep, index) => (
-                      <span key={`${dep.kind}:${dep.name}`}>
-                        {index > 0 && "、"}
+                    {program.dependents.map((dep) => (
+                      <span className="max-w-full" key={`${dep.kind}:${dep.name}`}>
                         <button
                           type="button"
                           data-testid={`program-dependent-${program.program}-${dep.name}`}
                           onClick={() => onOpen?.(dep.kind === "skill" ? `skills:${dep.name}` : `mcp:${dep.name}`)}
-                          className="hover:text-foreground hover:underline"
+                          title={`${dep.kind === "skill" ? "技能" : "MCP"} ${dep.name}`}
+                          className="block max-w-full truncate text-left hover:text-foreground hover:underline"
                         >
-                          {index === 0 && (dep.kind === "skill" ? "技能 " : "MCP ")}
+                          {dep.kind === "skill" ? "技能 " : "MCP "}
                           {dep.name}
                         </button>
                       </span>
                     ))}
                   </div>
-                  <div className={cn(COL_VERSION, "truncate font-mono text-xs")}>
-                    <span className="text-foreground">{current || "—"}</span>
-                    {newer && <span className="text-info"> → {newer}</span>}
+                  <div className="min-w-0 space-y-1.5">
+                    <div className="truncate font-mono text-xs" title={current || undefined}>{current || "—"}</div>
+                    <div className="flex flex-wrap gap-1">
+                      {["delegated", "managed"].includes(program.mode) && !upgradeTarget(program) && (
+                        <span className="text-xs text-muted-foreground">
+                          {program.freshness.state === "current" ? "已是最新" : program.freshness.state === "ahead" ? "本地较新" : program.freshness.checked_at ? "版本未知" : "未检查"}
+                        </span>
+                      )}
+                      {problemBadges(program).map((badge) => (
+                        <StateBadge key={badge.text} state={badge.state}>{badge.text}</StateBadge>
+                      ))}
+                    </div>
                   </div>
-                  <div className={cn(COL_STATE, "flex gap-1 overflow-hidden")}>
-                    {problemBadges(program).map((badge) => (
-                      <StateBadge key={badge.text} state={badge.state}>{badge.text}</StateBadge>
-                    ))}
-                  </div>
-                  <div className={cn(COL_ACT, "flex items-center justify-end gap-1")}>
+                  <div className="flex items-center justify-end gap-1">
                     {primary && (
                       <button
                         type="button"
@@ -268,21 +265,25 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
 
       {data.suggestions.length > 0 && (
         <section aria-label="可能用到但没声明的程序" data-testid="programs-suggestions" className="overflow-clip rounded-lg border bg-card">
-          <div className="border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">技能说明里提到、但没声明的命令</span> · 确认后记为这个技能的依赖（只存在本工具里，不改技能文件）
+          <div className="space-y-1 border-b bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+            <h2 className="text-sm font-medium text-foreground">待确认的依赖 · {data.suggestions.length}</h2>
+            <p>仅记录依赖，不修改技能文件。</p>
           </div>
           <ul className="divide-y">
             {data.suggestions.map((item) => (
-              <li key={`${item.skill}:${item.bin}`} data-testid={`program-suggestion-${item.skill}-${item.bin}`} className="flex items-center gap-3 px-4 py-2 text-sm">
-                <div className="min-w-0 flex-1">
-                  <div>
+              <li key={`${item.skill}:${item.bin}`} data-testid={`program-suggestion-${item.skill}-${item.bin}`} className="flex flex-wrap items-start gap-3 px-4 py-3 text-sm">
+                <div className="min-w-0 flex-1 basis-48">
+                  <div className="break-words">
                     技能 {item.skill} 用到 <span className="font-mono">{item.bin}</span>
-                    {!item.found && <span className="ml-2 text-xs text-muted-foreground">（PATH 上没找到）</span>}
+                    {!item.found && <span className="ml-2 text-xs text-muted-foreground">（未找到命令）</span>}
                   </div>
-                  <div className="truncate font-mono text-xs text-muted-foreground" title={item.line}>{item.line}</div>
+                  <details className="mt-1.5 text-xs text-muted-foreground">
+                    <summary className="w-fit cursor-pointer hover:text-foreground">查看原文</summary>
+                    <p className="mt-2 whitespace-pre-wrap break-words rounded-md bg-muted/50 p-2 font-mono">{item.line}</p>
+                  </details>
                 </div>
                 <button type="button" data-testid={`program-declare-${item.skill}-${item.bin}`} onClick={() => void declare(item.skill, item.bin)} className={TEXT_BUTTON}>
-                  确认是依赖
+                  确认依赖
                 </button>
               </li>
             ))}
@@ -290,10 +291,12 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
         </section>
       )}
 
-      <p className="px-1 text-xs text-muted-foreground">
-        代管：程序留在原处，升级时本工具调用原来的包管理器，改动前整包备份、失败原样恢复、可以回退。本工具安装：装在本工具目录，按版本各一份，换版本只切指针。
-        按需拉取：MCP 启动时由 npx / uvx 按条目里的版本拉取，这里管理的是那个版本号。每个动作都能复制命令自己执行。
-      </p>
+      <details className="px-1 text-xs leading-relaxed text-muted-foreground">
+        <summary className="w-fit cursor-pointer hover:text-foreground">管理方式说明</summary>
+        <p className="mt-2">
+          代管：原地升级，自动备份，失败恢复。工具安装：多版本保存，可切换。按需拉取：管理 MCP 启动版本。各操作均可复制命令。
+        </p>
+      </details>
 
       {dialog && (
         <ProgramActionDialog

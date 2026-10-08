@@ -12,7 +12,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 215 30% 16%;
 
-    --primary: 199 89% 44%;
+    --primary: 199 89% 32%;
     --primary-foreground: 0 0% 100%;
 
     --muted: 40 40% 93%;
@@ -20,7 +20,7 @@
     --accent: 199 80% 94%;
     --accent-foreground: 215 30% 16%;
 
-    --destructive: 0 72% 52%;
+    --destructive: 0 72% 45%;
     --destructive-foreground: 0 0% 100%;
 
     --border: 38 30% 88%;
@@ -28,9 +28,9 @@
     --ring: 199 89% 44%;
 
     /* 语义色：徽章/状态指示（border-X/30 bg-X/10 text-X 三段式使用） */
-    --success: 152 60% 36%;
-    --warning: 36 92% 44%;
-    --info: 199 89% 44%;
+    --success: 152 60% 29%;
+    --warning: 36 92% 28%;
+    --info: 199 89% 32%;
     --violet: 263 70% 50%;
     --orange: 21 88% 40%;
     --rose: 347 83% 41%;
@@ -54,8 +54,8 @@
     --accent: 215 18% 21%;
     --accent-foreground: 40 30% 94%;
 
-    --destructive: 0 72% 64%;
-    --destructive-foreground: 0 0% 100%;
+    --destructive: 0 72% 70%;
+    --destructive-foreground: 215 30% 10%;
 
     --border: 215 16% 22%;
     --input: 215 14% 28%;
@@ -94,6 +94,12 @@
     @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  textarea,
+  select {
+    @apply bg-background text-foreground;
+  }
+
   /* 细滚动条：保留可见性，仅收窄并跟随主题色 */
   * {
     scrollbar-width: thin;
@@ -127,5 +133,16 @@
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
+  }
+}
+
+@layer components {
+  /* 宽列表保留列对齐，在表格内部滚动，避免名称和操作被压没。 */
+  .table-scroll {
+    overflow-x: auto;
+  }
+
+  .table-scroll > * {
+    min-width: var(--table-min-width, 44rem);
   }
 }

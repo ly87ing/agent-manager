@@ -50,6 +50,8 @@ export function AppLayout({
   const itemsRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef<HTMLDivElement>(null);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
   const [visibleCount, setVisibleCount] = useState(nav.length);
   const [moreOpen, setMoreOpen] = useState(false);
   const widthKey = nav.map((item) => `${item.key}:${item.badge ?? 0}`).join("|");
@@ -81,10 +83,15 @@ export function AppLayout({
 
   useEffect(() => {
     if (!moreOpen) return;
+    moreMenuRef.current?.querySelector<HTMLButtonElement>('[aria-current="page"], [role="menuitem"]')?.focus();
     const close = (event: MouseEvent) => {
       if (!moreRef.current?.contains(event.target as Node)) setMoreOpen(false);
     };
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setMoreOpen(false);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMoreOpen(false);
+      moreButtonRef.current?.focus();
+    };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -164,6 +171,7 @@ export function AppLayout({
               <div ref={moreRef} className="relative shrink-0">
                 <button
                   type="button"
+                  ref={moreButtonRef}
                   data-testid="nav-more"
                   aria-haspopup="menu"
                   aria-expanded={moreOpen}
@@ -182,7 +190,20 @@ export function AppLayout({
                   <ChevronDown className="h-3.5 w-3.5" aria-hidden />
                 </button>
                 {moreOpen && (
-                  <div role="menu" className="absolute left-0 top-full z-50 mt-1 min-w-36 rounded-md border bg-card p-1 shadow-lg">
+                  <div
+                    ref={moreMenuRef}
+                    role="menu"
+                    aria-label="更多页面"
+                    onKeyDown={(event) => {
+                      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+                      event.preventDefault();
+                      const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+                      const current = items.indexOf(document.activeElement as HTMLButtonElement);
+                      const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+                      items[next]?.focus();
+                    }}
+                    className="absolute left-0 top-full z-50 mt-1 min-w-36 rounded-md border bg-card p-1 shadow-lg"
+                  >
                     {folded.map((item) => {
                       const Icon = item.icon;
                       const isActive = isActiveKey(item.key);

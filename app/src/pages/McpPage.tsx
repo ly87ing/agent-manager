@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Info, Plus, SearchX, Server } from "lucide-react";
 import { toast } from "sonner";
@@ -92,7 +93,7 @@ export default function McpPage({
   if (!query.data.ok) {
     return (
       <div className="space-y-3">
-        <h1 className="sr-only">MCP</h1>
+        <h1 className="text-lg font-semibold tracking-tight">MCP</h1>
         <ErrorPanel title="MCP 状态读取失败" errors={query.data.errors} />
       </div>
     );
@@ -332,7 +333,7 @@ export default function McpPage({
 
   return (
     <div className="space-y-3">
-      <h1 className="sr-only">MCP</h1>
+      <h1 className="text-lg font-semibold tracking-tight">MCP</h1>
       {query.data.errors.length > 0 && <ErrorPanel title="MCP 状态读取失败" errors={query.data.errors} />}
       {brokenTargets.map((target) => (
         <div
@@ -411,7 +412,7 @@ export default function McpPage({
           }
         />
       ) : (
-        <div className="overflow-clip rounded-lg border bg-card">
+        <div role="region" aria-label="MCP 账号列表" tabIndex={0} className="table-scroll rounded-lg border bg-card" style={{ "--table-min-width": `${Math.max(704, 400 + groups.reduce((count, group) => count + group.columns.length * 64 + 16, 0))}px` } as CSSProperties}>
           <AccountHeader
             className="sticky top-0 z-10"
             groups={groups}

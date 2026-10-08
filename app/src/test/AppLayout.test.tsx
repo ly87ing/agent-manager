@@ -38,7 +38,16 @@ describe("顶栏放不下时收进「更多」", () => {
     await userEvent.click(more);
     const menu = screen.getByRole("menu");
     expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["来源5", "程序2"]);
-    await userEvent.click(within(menu).getByRole("menuitem", { name: /程序/ }));
+    expect(within(menu).getByRole("menuitem", { name: /来源/ })).toHaveFocus();
+    await userEvent.keyboard("{End}");
+    expect(within(menu).getByRole("menuitem", { name: /程序/ })).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(within(menu).getByRole("menuitem", { name: /来源/ })).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    expect(more).toHaveFocus();
+    expect(screen.queryByRole("menu")).toBeNull();
+    await userEvent.click(more);
+    await userEvent.click(screen.getByRole("menuitem", { name: /程序/ }));
     expect(onNavigate).toHaveBeenCalledWith("programs");
     expect(screen.queryByRole("menu")).toBeNull();
 

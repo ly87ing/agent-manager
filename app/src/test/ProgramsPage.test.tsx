@@ -112,6 +112,27 @@ function routes(): Record<string, Envelope | ((args: string[]) => Promise<Envelo
 }
 
 describe("程序页：谁需要、装在哪、什么版本；动作先看计划，也能自己执行", () => {
+  it.each(["delegated", "managed"] as const)("%s 仅在确认有新版本时提供升级入口", async (mode) => {
+    const states = [
+      { state: "current", checked_at: "2026-10-08T00:00:00Z", label: "已是最新" },
+      { state: "unknown", checked_at: null, label: "未检查" },
+      { state: "unknown", checked_at: "2026-10-08T00:00:00Z", label: "版本未知" },
+      { state: "ahead", checked_at: "2026-10-08T00:00:00Z", label: "本地较新" },
+    ] as const;
+    const contents = data();
+    contents.elements = states.map((item, i) => program({
+      program: `npm:state-${i}`, name: `state-${i}`, mode, version: "1.3.4",
+      freshness: { ...unknown, state: item.state, current: "1.3.4", upstream: item.state === "unknown" ? null : item.state === "ahead" ? "1.3.3" : "1.3.4", checked_at: item.checked_at },
+    }));
+    const { calls } = renderWithEngine(<ProgramsPage />, { ...routes(), "programs:status": makeEnvelope(contents) });
+    for (const [i, item] of states.entries()) {
+      const row = await screen.findByTestId(`program-row-npm:state-${i}`);
+      expect(row).toHaveTextContent(item.label);
+      expect(within(row).queryByRole("button", { name: /升级/ })).toBeNull();
+    }
+    expect(calls.some((call) => ["programs:preview", "programs:apply"].includes(call.command))).toBe(false);
+  });
+
   it("一行一个程序：管理方式、位置与版本、依赖方、统一状态标签；问题多的排前面", async () => {
     renderWithEngine(<ProgramsPage />, routes());
     const rows = await screen.findAllByTestId(/^program-row-/);
@@ -183,7 +204,7 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     const { calls } = renderWithEngine(<ProgramsPage />, routes());
     const row = await screen.findByTestId("program-suggestion-xiaoyu-bug-loop-playwright-cli");
     expect(row).toHaveTextContent("command -v playwright-cli");
-    await userEvent.click(within(row).getByRole("button", { name: "确认是依赖" }));
+    await userEvent.click(within(row).getByRole("button", { name: "确认依赖" }));
     await waitFor(() => expect(calls.some((call) => call.command === "programs:declare")).toBe(true));
     expect(calls.find((call) => call.command === "programs:declare")!.args).toEqual(["--skill", "xiaoyu-bug-loop", "--bins", "[\"playwright-cli\"]"]);
   });

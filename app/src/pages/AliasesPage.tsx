@@ -118,7 +118,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
 
   return (
     <div className="space-y-3">
-      <h1 className="sr-only">终端快捷命令</h1>
+      <h1 className="text-lg font-semibold tracking-tight">终端快捷命令</h1>
       {pathTarget && <PathHint target={pathTarget} />}
 
       <DataTable label="启动命令" testId="aliases-current">
@@ -188,7 +188,7 @@ export default function AliasesPage({ onOpenSkills }: { onOpenSkills?: () => voi
           </ul>
         )}
       </DataTable>
-      <p className="px-1 text-xs text-muted-foreground">{pageNote(source.targets)}</p>
+      <details className="px-1 text-xs text-muted-foreground"><summary className="w-fit cursor-pointer">保存与生效说明</summary><p className="mt-2">{pageNote(source.targets)}</p></details>
 
       {source.recommendations.length > 0 && (
         <DataTable label="推荐" testId="alias-recommendations">

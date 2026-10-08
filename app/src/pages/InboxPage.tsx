@@ -238,7 +238,7 @@ export default function InboxPage({ onOpen }: { onOpen: (target: string) => void
 
   return (
     <div data-testid="inbox-page" className="space-y-3">
-      <h1 className="sr-only">待处理</h1>
+      <h1 className="text-lg font-semibold tracking-tight">待处理</h1>
       {items.length === 0 && (
         <EmptyState
           icon={CheckCircle2}
