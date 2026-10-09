@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>iPhone 远程连接 Mac 上 Codex CLI 方案</title>
+  <title>Access Codex CLI on Mac from iPhone</title>
   <style>
     :root {
       --bg: #0c1412;
@@ -681,51 +681,52 @@
 <body>
   <div class="progress" id="progress"></div>
   <div class="shell">
-    <div class="viewer-note"><strong>推荐查看方式：</strong>PC 浏览器优先，移动端仅作补充阅读。</div>
+    <div class="viewer-note"><strong>Recommended viewing:</strong>Use a desktop browser; mobile is for supplementary reading.</div>
     <header class="hero" id="top">
       <div class="eyebrow">Remote Codex Blueprint</div>
       <div class="hero-grid">
         <div>
-          <h1>用 iPhone 远程进入你 Mac 上的 Codex CLI</h1>
+          <h1>Access Codex CLI on your Mac from iPhone</h1>
           <p class="lead">
-            这是一条最短、最稳、最适合长期编程的链路。手机不是把任务发给中间代理，而是通过
-            <code>Tailscale</code> 接入你的私有网络，借助 <code>SSH</code> 直接进入 Mac 的 shell，
-            再由 <code>tmux</code> 托管会话，让 <code>Codex CLI</code> 一直运行在你自己的机器上。
+            A short, reliable path for sustained programming. Your phone connects through
+            <code>Tailscale</code> to your private network, uses <code>SSH</code> to enter the Mac's shell directly,
+            and lets <code>tmux</code> keep the session alive while <code>Codex CLI</code> runs on your own machine.
+            Tasks do not pass through an intermediary agent.
           </p>
           <div class="hero-keyline">
-            <span>iPhone 负责入口</span>
-            <span>Tailscale 负责私网连通</span>
-            <span>Termius 负责 SSH 终端</span>
-            <span>tmux 负责会话保活</span>
-            <span>Codex CLI 负责编程任务</span>
+            <span>iPhone: entry point</span>
+            <span>Tailscale: private network</span>
+            <span>Termius: SSH terminal</span>
+            <span>tmux: persistent sessions</span>
+            <span>Codex CLI: programming tasks</span>
           </div>
         </div>
-        <div class="diagram" aria-label="全链路架构图">
+        <div class="diagram" aria-label="End-to-end architecture">
           <div class="diagram-grid">
             <div class="diagram-step">
               <span class="tag">Step 1</span>
               <h3>iPhone + Tailscale</h3>
-              <p>手机先加入同一个 tailnet。它获得一条只对你的私网可见的访问路径，不需要公网暴露 Mac 的 22 端口。</p>
+              <p>Join the same tailnet on your phone. Access stays within your private network; the Mac's port 22 needs no public exposure.</p>
             </div>
             <div class="diagram-step">
               <span class="tag">Step 2</span>
-              <h3>Termius 发起 SSH</h3>
-              <p>你在 Termius 点一下保存好的 Host，连接到 <code>YOUR_MAC_TAILNET_FQDN</code>。</p>
+              <h3>Termius starts SSH</h3>
+              <p>Tap a saved Host in Termius to connect to <code>YOUR_MAC_TAILNET_FQDN</code>.</p>
             </div>
             <div class="diagram-step">
               <span class="tag">Step 3</span>
               <h3>Mac Remote Login</h3>
-              <p>macOS 的 <code>Remote Login</code> 接收 SSH，会话落到你自己的用户 shell。</p>
+              <p>macOS <code>Remote Login</code> accepts SSH and starts your user's shell session.</p>
             </div>
             <div class="diagram-step">
               <span class="tag">Step 4</span>
-              <h3>tmux 接管会话</h3>
-              <p>连接后自动附着到 <code>codex</code> session；断网、锁屏、切应用都不会杀掉正在运行的任务。</p>
+              <h3>tmux keeps the session</h3>
+              <p>Automatically attach to the <code>codex</code> session. Network loss, locking, and app switching do not kill running tasks.</p>
             </div>
             <div class="diagram-step">
               <span class="tag">Step 5</span>
-              <h3>Codex CLI 继续工作</h3>
-              <p>你看到和控制的是 Mac 本机上的真实终端上下文，包括仓库、测试、日志和文件系统。</p>
+              <h3>Codex CLI keeps working</h3>
+              <p>View and control the Mac's actual terminal context, including repositories, tests, logs, and filesystem.</p>
             </div>
           </div>
         </div>
@@ -733,136 +734,138 @@
     </header>
 
     <div class="layout">
-      <nav class="side-nav" aria-label="章节导航">
-        <strong>目录</strong>
-        <a href="#overview">总览</a>
-        <a href="#architecture">架构</a>
-        <a href="#principle">原理</a>
-        <a href="#flow">消息流</a>
-        <a href="#mac">Mac 端</a>
-        <a href="#ios">iOS 端</a>
-        <a href="#routine">日常使用</a>
-        <a href="#security">安全边界</a>
+      <nav class="side-nav" aria-label="Section navigation">
+        <strong>Contents</strong>
+        <a href="#overview">Overview</a>
+        <a href="#architecture">Architecture</a>
+        <a href="#principle">How it works</a>
+        <a href="#flow">Message flow</a>
+        <a href="#mac">Mac setup</a>
+        <a href="#ios">iOS setup</a>
+        <a href="#routine">Daily use</a>
+        <a href="#security">Security</a>
         <a href="#faq">FAQ</a>
       </nav>
 
       <main class="content">
-        <section id="overview" class="reveal" data-rail-title="总览" data-rail-summary="这条方案的核心是把 iPhone 变成 Mac 的安全远程终端入口，而不是把任务先交给中间机器人再转发给 Codex。">
+        <section id="overview" class="reveal" data-rail-title="Overview" data-rail-summary="Use iPhone as a secure remote terminal for your Mac, rather than forwarding tasks through an intermediary bot to Codex.">
           <div class="section-label">Overview</div>
-          <h2>一句话方案</h2>
+          <h2>The recommended setup</h2>
           <p class="intro">
-            你要实现的是“在外面拿起手机，就能继续使用家里或公司那台 Mac 上的 Codex CLI 做编程任务”。最合适的链路不是消息机器人，也不是另一个 AI 平台包一层，而是把 iPhone 变成那台 Mac 的安全远程终端入口。
+            Pick up your phone while away and continue programming with Codex CLI on your home or work Mac.
+            Use iPhone as the Mac's secure remote terminal, rather than a messaging bot or another AI platform wrapped around it.
           </p>
           <div class="callout">
-            最终方案固定为：<strong>iPhone 上装 Tailscale 和 Termius，Mac 上装 Tailscale，开启 Remote Login，使用 tmux 持久化 Codex CLI 会话。</strong>
+            The final setup is: <strong>install Tailscale and Termius on iPhone, install Tailscale on Mac, enable Remote Login, and persist Codex CLI sessions with tmux.</strong>
           </div>
           <div class="callout">
-            文中的用户名、域名、Tailscale IP 和 Host 名都应视为占位符。真实值请保存到你的 secret 库或私密配置中，不要写回当前仓库。
+            Usernames, domains, Tailscale IPs, and Host names here are placeholders. Keep actual values in your secrets repository or private configuration; do not write them into this repository.
           </div>
           <div class="split">
             <div class="plain-block">
-              <h3>这套方案解决什么问题</h3>
+              <h3>Problems this setup solves</h3>
               <ul>
-                <li>不在公网暴露 SSH 端口。</li>
-                <li>手机掉后台或网络切换时，不丢失 Codex 会话。</li>
-                <li>你控制的是本机真实仓库，不是第三方平台里的镜像环境。</li>
-                <li>链路短，出问题时容易排查。</li>
+                <li>No public exposure of the SSH port.</li>
+                <li>No lost Codex session when the phone backgrounds the app or switches networks.</li>
+                <li>Control your actual local repository, rather than a replica on a third-party platform.</li>
+                <li>A short connection path that is easy to troubleshoot.</li>
               </ul>
             </div>
             <div class="plain-block">
-              <h3>这套方案不是什么</h3>
+              <h3>Outside this setup</h3>
               <ul>
-                <li>不是“飞书发一句话，后台自动派任务”的异步机器人。</li>
-                <li>不是“云端 Codex 替你保管工作目录”的托管方案。</li>
-                <li>不是“远程桌面控制 iTerm2 图形界面”。</li>
+                <li>An asynchronous bot that accepts a Lark message and dispatches tasks in the background.</li>
+                <li>A hosted service where cloud Codex holds your working directory.</li>
+                <li>Remote desktop control of the iTerm2 graphical interface.</li>
               </ul>
             </div>
           </div>
         </section>
 
-        <section id="architecture" class="reveal" data-rail-title="架构" data-rail-summary="整条链路拆成五个清晰组件：iPhone、Tailscale、Termius、macOS Remote Login、tmux 加 Codex CLI，各自职责单一。">
+        <section id="architecture" class="reveal" data-rail-title="Architecture" data-rail-summary="Five components have clear responsibilities: iPhone, Tailscale, Termius, macOS Remote Login, and tmux with Codex CLI.">
           <div class="section-label">Architecture</div>
-          <h2>完整架构拆解</h2>
+          <h2>The complete architecture</h2>
           <p class="intro">
-            这条链路只有五个核心组件。每个组件只有一个明确职责，所以整体非常稳定，也更容易知道哪里出了问题。
+            The path has five core components, each with one clear responsibility. This keeps the setup reliable and makes failures easier to locate.
           </p>
           <div class="rack">
             <div class="rack-row">
               <strong>iPhone</strong>
-              <p>你的远程操作入口。负责发起连接、输入命令、查看 Codex 输出。它不执行编程任务本身。</p>
+              <p>Your remote entry point: starts connections, accepts commands, and displays Codex output. It does not execute the programming tasks itself.</p>
             </div>
             <div class="rack-row">
               <strong>Tailscale</strong>
-              <p>负责把 iPhone 和 Mac 放进同一个私网 tailnet。它解决的是“怎么安全连上去”，不是“怎么操作终端”。</p>
+              <p>Places iPhone and Mac in the same private tailnet. It establishes secure connectivity; it does not provide terminal interaction.</p>
             </div>
             <div class="rack-row">
               <strong>Termius</strong>
-              <p>iPhone 上的 SSH 客户端。它通过 Tailscale 网络连接到 Mac 的 SSH 服务，并负责你的终端交互体验。</p>
+              <p>The iPhone SSH client. It connects to the Mac's SSH service over Tailscale and provides terminal interaction.</p>
             </div>
             <div class="rack-row">
               <strong>macOS Remote Login</strong>
-              <p>Mac 自带的 SSH server。开启后，它会接收来自 tailnet 内部的 SSH 连接，并把你送进对应的用户 shell。</p>
+              <p>The Mac's built-in SSH server. Once enabled, it accepts tailnet SSH connections and opens the corresponding user's shell.</p>
             </div>
             <div class="rack-row">
               <strong>tmux + Codex CLI</strong>
-              <p><code>tmux</code> 负责让远程会话不中断，<code>Codex CLI</code> 负责真正的代码理解、修改、测试与执行。</p>
+              <p><code>tmux</code> keeps sessions running across remote disconnections; <code>Codex CLI</code> understands, modifies, tests, and executes code.</p>
             </div>
           </div>
         </section>
 
-        <section id="principle" class="reveal" data-rail-title="原理" data-rail-summary="Tailscale 解决网络打通，SSH 解决终端建立，tmux 解决会话保活，Codex CLI 始终在 Mac 本机运行。">
+        <section id="principle" class="reveal" data-rail-title="How it works" data-rail-summary="Tailscale provides connectivity, SSH opens the terminal, tmux persists the session, and Codex CLI always runs locally on Mac.">
           <div class="section-label">Principle</div>
-          <h2>原理是怎样运作的</h2>
+          <h2>How the components work</h2>
           <div class="mini-grid">
             <div class="plain-block">
-              <h3>1. Tailscale 做的是网络层打通</h3>
+              <h3>1. Tailscale connects the network</h3>
               <p>
-                Tailscale 基于 WireGuard 思路把设备放进同一个私网。你的 iPhone 和 Mac 都登录同一个 tailnet 后，
-                iPhone 就能通过 Tailscale IP 或 MagicDNS 名称访问 Mac，例如 <code>YOUR_MAC_TAILNET_FQDN</code>。
+                Tailscale uses WireGuard-based networking to place devices in one private network. After iPhone and Mac join the same tailnet,
+                the phone can reach the Mac through its Tailscale IP or MagicDNS name, such as <code>YOUR_MAC_TAILNET_FQDN</code>.
               </p>
             </div>
             <div class="plain-block">
-              <h3>2. SSH 做的是终端会话建立</h3>
+              <h3>2. SSH establishes the terminal</h3>
               <p>
-                Termius 发起 SSH 连接，macOS 的 <code>Remote Login</code> 接受该连接。认证通过后，你拿到的是
-                Mac 上那个用户的 shell，而不是某个中间代理包装出来的终端。
+                Termius starts an SSH connection and macOS <code>Remote Login</code> accepts it. After authentication,
+                you get that user's actual Mac shell, rather than a terminal wrapped by an intermediary agent.
               </p>
             </div>
             <div class="plain-block">
-              <h3>3. tmux 做的是会话保活</h3>
+              <h3>3. tmux keeps sessions alive</h3>
               <p>
-                iOS 很容易切后台、锁屏或切换网络。没有 <code>tmux</code> 时，SSH 断开通常就意味着当前终端进程也会终止。
-                用 <code>tmux</code> 后，Codex 在后台 session 里持续运行，下一次连接只需要重新 attach。
+                iOS frequently backgrounds apps, locks the screen, or changes networks. Without <code>tmux</code>, an SSH disconnection commonly terminates the current terminal process.
+                With <code>tmux</code>, Codex continues in a background session; the next connection only needs to attach again.
               </p>
             </div>
             <div class="plain-block">
-              <h3>4. Codex CLI 始终运行在 Mac 本机</h3>
+              <h3>4. Codex CLI stays on Mac</h3>
               <p>
-                仓库、依赖、测试工具、git 状态、SSH key、环境变量，都仍然在你的 Mac 上。手机只是远程入口，这意味着本机开发体验和远程开发体验几乎是一致的。
+                Repositories, dependencies, test tools, git state, SSH keys, and environment variables stay on your Mac. The phone is only a remote entry point,
+                so local and remote development experiences are almost identical.
               </p>
             </div>
           </div>
           <div class="callout">
-            这也是为什么不推荐把这件事先做成“微信消息 -> 中间代理 -> 再调 Codex”的原因：对真正的编程任务来说，原生终端链路更短、更透明、上下文也更完整。
+            For actual programming, a native terminal path is shorter, more transparent, and preserves more context than WeChat messages → intermediary agent → Codex.
           </div>
         </section>
 
-        <section id="flow" class="reveal" data-rail-title="消息流" data-rail-summary="中间传输的是标准 SSH 终端字节流：Termius 发起连接，macOS 创建 shell，脚本附着 tmux，Codex 输出再经 SSH 回到手机。">
+        <section id="flow" class="reveal" data-rail-title="Message flow" data-rail-summary="A standard SSH terminal byte stream flows through Termius, a macOS shell, tmux, and Codex, with output returning to the phone over SSH.">
           <div class="section-label">Flow</div>
-          <h2>中间消息是如何交互的</h2>
+          <h2>How input and output travel</h2>
           <p class="intro">
-            整个全链路里，真正传输的不是“业务消息包”，而是标准 SSH 终端字节流。你点开 Host 之后，控制和输出按下面顺序流动。
+            This path carries a standard SSH terminal byte stream, rather than business-message packets. After you tap a Host, control and output flow in this order.
           </p>
           <div class="timeline">
             <ol>
-              <li>iPhone 打开 Tailscale，确认已经接入你的 tailnet。</li>
-              <li>你在 Termius 点击一个预先保存好的 Host，例如 <code>codex-remote-host</code>。</li>
-              <li>Termius 通过 Tailscale 网络，向 <code>YOUR_MAC_TAILNET_FQDN:22</code> 发起 SSH 连接。</li>
-              <li>Mac 上的 <code>Remote Login</code> 收到连接请求，校验用户名和 SSH key。</li>
-              <li>认证通过后，macOS 为该用户启动一个 shell 会话。</li>
-              <li>登录后自动执行一个启动脚本，例如 <code>~/bin/codex-remote</code>。</li>
-              <li>脚本检查是否存在名为 <code>codex</code> 的 <code>tmux</code> session；没有就创建，有就直接附着。</li>
-              <li><code>tmux</code> 内部已经启动或继续显示 <code>Codex CLI</code>；你接下来在手机上的输入，会变成 Mac 上终端的标准输入，Codex 的输出再经 SSH 流回 iPhone。</li>
+              <li>Open Tailscale on iPhone and confirm connection to your tailnet.</li>
+              <li>Tap a saved Termius Host, such as <code>codex-remote-host</code>.</li>
+              <li>Termius connects over Tailscale to SSH at <code>YOUR_MAC_TAILNET_FQDN:22</code>.</li>
+              <li>Mac <code>Remote Login</code> receives the connection and checks the username and SSH key.</li>
+              <li>After authentication, macOS starts a shell session for that user.</li>
+              <li>A startup script such as <code>~/bin/codex-remote</code> runs automatically after login.</li>
+              <li>The script checks for a <code>tmux</code> session named <code>codex</code>: create one if absent, or attach if present.</li>
+              <li><code>tmux</code> starts or displays the existing <code>Codex CLI</code>. Phone input becomes terminal standard input on Mac; Codex output returns over SSH to iPhone.</li>
             </ol>
           </div>
           <pre><code>iPhone
@@ -874,37 +877,37 @@
   -> tmux session: codex
   -> Codex CLI
   -> stdout / stderr
-  -> SSH 回传到 iPhone</code></pre>
+  -> SSH back to iPhone</code></pre>
         </section>
 
-        <section id="mac" class="reveal" data-rail-title="Mac 端" data-rail-summary="Mac 是执行端，需要负责 Tailscale 在线、Remote Login、tmux 会话和 Codex CLI 的长期运行。">
+        <section id="mac" class="reveal" data-rail-title="Mac setup" data-rail-summary="Mac runs Tailscale, Remote Login, persistent tmux sessions, and Codex CLI.">
           <div class="section-label">Mac Setup</div>
-          <h2>Mac 上需要做什么</h2>
+          <h2>Set up the Mac</h2>
           <p class="intro">
-            Mac 是执行端。它负责运行 Tailscale、暴露 SSH、保持 tmux 会话，并在这个会话里长期运行你的 Codex CLI。
+            Mac executes the work: it runs Tailscale, exposes SSH, keeps tmux sessions alive, and runs Codex CLI in those sessions.
           </p>
           <div class="steps">
             <div class="plain-block">
-              <h3>步骤 1：安装并登录 Tailscale</h3>
-              <p>在 Mac 上安装 Tailscale 官方客户端，登录你的账号，并确认它已经加入目标 tailnet。</p>
+              <h3>Step 1: Install and sign in to Tailscale</h3>
+              <p>Install the official Tailscale Mac client, sign in, and confirm it has joined the target tailnet.</p>
             </div>
             <div class="plain-block">
-              <h3>步骤 2：开启 Remote Login</h3>
-              <p>打开系统设置，进入 <code>General -> Sharing -> Remote Login</code>，只允许你自己的账号登录。</p>
-              <p>如果你的代码目录在 <code>Desktop</code> 或 <code>Documents</code> 等受保护路径，可按需打开 <code>Allow full disk access for remote users</code>。</p>
+              <h3>Step 2: Enable Remote Login</h3>
+              <p>In System Settings, open <code>General -> Sharing -> Remote Login</code> and allow only your own account.</p>
+              <p>If code lives in protected locations such as <code>Desktop</code> or <code>Documents</code>, enable <code>Allow full disk access for remote users</code> as needed.</p>
             </div>
             <div class="plain-block">
-              <h3>步骤 3：安装 tmux</h3>
-              <p>建议通过 Homebrew 安装，确保断线重连时会话仍然存在。</p>
+              <h3>Step 3: Install tmux</h3>
+              <p>Install through Homebrew to retain sessions after disconnecting and reconnecting.</p>
               <pre><code>brew install tmux</code></pre>
             </div>
             <div class="plain-block">
-              <h3>步骤 4：确保 Codex CLI 可直接运行</h3>
-              <p>先在本机终端里确认 <code>codex</code> 已安装、已登录、能在目标仓库正常运行。</p>
+              <h3>Step 4: Verify Codex CLI runs directly</h3>
+              <p>First confirm in a local terminal that <code>codex</code> is installed, logged in, and works in the target repository.</p>
             </div>
             <div class="plain-block">
-              <h3>步骤 5：准备一键附着脚本</h3>
-              <p>这个脚本的作用是：如果 <code>tmux</code> session 不存在，就创建并启动 Codex；如果已存在，就直接附着进去。</p>
+              <h3>Step 5: Prepare an attach script</h3>
+              <p>The script creates a <code>tmux</code> session and starts Codex if no session exists; otherwise, it attaches to the existing session.</p>
               <pre><code>mkdir -p ~/bin
 
 cat &gt; ~/bin/codex-remote &lt;&lt;'EOF'
@@ -924,40 +927,40 @@ EOF
 chmod +x ~/bin/codex-remote</code></pre>
             </div>
             <div class="plain-block">
-              <h3>步骤 6：可选，本机别名</h3>
-              <p>如果你也想在 Mac 本机快速进入同一个会话，可以在 <code>~/.zshrc</code> 里加一条别名。</p>
+              <h3>Step 6: Optional local alias</h3>
+              <p>To enter the same session quickly from Mac, add an alias to <code>~/.zshrc</code>.</p>
               <pre><code>alias cdx='~/bin/codex-remote'</code></pre>
             </div>
           </div>
         </section>
 
-        <section id="ios" class="reveal" data-rail-title="iOS 端" data-rail-summary="iPhone 只承担入口角色：加入 tailnet，并通过 Termius 以 SSH key 方式一键连到 Mac。">
+        <section id="ios" class="reveal" data-rail-title="iOS setup" data-rail-summary="iPhone is the entry point: join the tailnet and use a saved Termius Host with SSH key authentication to connect to Mac.">
           <div class="section-label">iOS Setup</div>
-          <h2>iPhone 上需要做什么</h2>
+          <h2>Set up the iPhone</h2>
           <p class="intro">
-            iPhone 只承担两个角色：接入 tailnet，以及作为 SSH 终端使用。推荐组合是 <code>Tailscale + Termius</code>。
+            iPhone has two roles: joining the tailnet and acting as the SSH terminal. Use <code>Tailscale + Termius</code>.
           </p>
           <div class="split">
             <div class="plain-block">
-              <h3>步骤 1：安装并登录 Tailscale</h3>
+              <h3>Step 1: Install and sign in to Tailscale</h3>
               <ul>
-                <li>在 App Store 安装 Tailscale。</li>
-                <li>登录与 Mac 相同的账号或同一个组织下的 tailnet。</li>
-                <li>确认在 Tailscale 设备列表中能看到你的 Mac。</li>
+                <li>Install Tailscale from the App Store.</li>
+                <li>Sign in with the same account as Mac or join the same organization's tailnet.</li>
+                <li>Confirm your Mac appears in the Tailscale device list.</li>
               </ul>
             </div>
             <div class="plain-block">
-              <h3>步骤 2：安装 Termius</h3>
+              <h3>Step 2: Install Termius</h3>
               <ul>
-                <li>在 App Store 安装 Termius。</li>
-                <li>导入或生成你的 SSH key。</li>
-                <li>确保对应公钥已经在 Mac 的 <code>~/.ssh/authorized_keys</code> 里。</li>
+                <li>Install Termius from the App Store.</li>
+                <li>Import or generate your SSH key.</li>
+                <li>Ensure the corresponding public key is in Mac <code>~/.ssh/authorized_keys</code>.</li>
               </ul>
             </div>
           </div>
           <div class="plain-block">
-            <h3>步骤 3：在 Termius 新建 Host</h3>
-            <p>推荐配置如下。这样你以后只需要点一下 Host 就能进入 Codex 会话。</p>
+            <h3>Step 3: Create a Termius Host</h3>
+            <p>Use the following configuration to enter your Codex session by tapping the Host.</p>
             <pre><code>Name: codex-remote-host
 Address: YOUR_MAC_TAILNET_FQDN
 Port: 22
@@ -966,38 +969,38 @@ Authentication: SSH Key
 Startup Snippet: ~/bin/codex-remote</code></pre>
           </div>
           <div class="plain-block">
-            <h3>步骤 4：首次连接验证</h3>
-            <p>点开这个 Host 后，如果一切配置正确，你看到的不会是普通 shell 提示符，而是直接进入或附着到你 Mac 上的 Codex 会话。</p>
+            <h3>Step 4: Verify the first connection</h3>
+            <p>With correct configuration, opening the Host enters or attaches directly to the Codex session on your Mac instead of displaying an ordinary shell prompt.</p>
           </div>
         </section>
 
-        <section id="routine" class="reveal" data-rail-title="日常使用" data-rail-summary="日常动作被收敛成一套稳定流程：Mac 保持在线，iPhone 打开 Tailscale 和 Termius，tmux 负责恢复原会话。">
+        <section id="routine" class="reveal" data-rail-title="Daily use" data-rail-summary="Keep Mac online, open Tailscale and Termius on iPhone, and let tmux restore the existing session.">
           <div class="section-label">Routine</div>
-          <h2>日常怎么使用</h2>
+          <h2>Daily workflow</h2>
           <div class="status-list">
             <div class="status-item">
-              <strong>出门前</strong>
-              <div>确认 Mac 开机、联网、Tailscale 在线，且本机可以正常运行 <code>codex</code>。</div>
+              <strong>Before leaving</strong>
+              <div>Confirm Mac is powered on, connected to the network, and online in Tailscale, and that <code>codex</code> runs locally.</div>
             </div>
             <div class="status-item">
-              <strong>开始工作</strong>
-              <div>iPhone 打开 Tailscale，随后打开 Termius，点一下 <code>codex-remote-host</code> Host。</div>
+              <strong>Start work</strong>
+              <div>Open Tailscale on iPhone, then Termius, and tap the <code>codex-remote-host</code> Host.</div>
             </div>
             <div class="status-item">
-              <strong>继续任务</strong>
-              <div>如果此前的 Codex 还在跑，你会重新回到原来的 <code>tmux</code> 会话；如果没有，会自动创建新会话。</div>
+              <strong>Resume tasks</strong>
+              <div>If Codex is still running, return to its existing <code>tmux</code> session; otherwise a new session is created automatically.</div>
             </div>
             <div class="status-item">
-              <strong>临时离开</strong>
-              <div>直接退出或把 iPhone 切后台即可。SSH 断开不会终止 <code>tmux</code> 里的 Codex。</div>
+              <strong>Step away</strong>
+              <div>Exit or background the iPhone app. Disconnecting SSH does not terminate Codex inside <code>tmux</code>.</div>
             </div>
             <div class="status-item">
-              <strong>切换项目</strong>
-              <div>可以为不同仓库准备不同脚本或不同 <code>tmux</code> session，例如 <code>codex-work</code>、<code>codex-side</code>。</div>
+              <strong>Change projects</strong>
+              <div>Create separate scripts or <code>tmux</code> sessions for repositories, such as <code>codex-work</code> and <code>codex-side</code>.</div>
             </div>
           </div>
           <div class="plain-block">
-            <h3>多项目脚本示例</h3>
+            <h3>Multi-project script example</h3>
             <pre><code>#!/bin/zsh
 set -e
 
@@ -1012,75 +1015,76 @@ exec tmux attach -t "$SESSION"</code></pre>
           </div>
         </section>
 
-        <section id="security" class="reveal" data-rail-title="安全边界" data-rail-summary="安全重点是不要暴露公网 22 端口，只允许指定账号登录，并优先使用 SSH key。">
+        <section id="security" class="reveal" data-rail-title="Security" data-rail-summary="Avoid public exposure of port 22, allow only the specified account, and prefer SSH keys.">
           <div class="section-label">Security</div>
-          <h2>安全边界与推荐做法</h2>
+          <h2>Security boundaries and practices</h2>
           <p class="intro">
-            这套方案的核心优势之一就是安全边界清晰。只要你不主动暴露公网 SSH 端口，它的攻击面会比传统“公网开放 22 端口 + 密码登录”小很多。
+            Clear security boundaries are a central advantage. Without public SSH exposure, the attack surface is much smaller than publicly opening port 22 with password login.
           </p>
           <div class="split">
             <div class="plain-block">
-              <h3>建议保留的边界</h3>
+              <h3>Boundaries to retain</h3>
               <ul>
-                <li>不要做路由器端口映射，不把 22 端口暴露到公网。</li>
-                <li>Remote Login 只允许指定账号，而不是 <code>All users</code>。</li>
-                <li>优先使用 SSH key，不要长期依赖密码登录。</li>
-                <li>Codex 仍在本机运行，代码和凭证不离开 Mac。</li>
+                <li>Do not forward router ports or expose port 22 to the public internet.</li>
+                <li>Allow only the specified account in Remote Login, rather than <code>All users</code>.</li>
+                <li>Prefer SSH keys; do not rely on password login long-term.</li>
+                <li>Codex runs locally; code and credentials stay on Mac.</li>
               </ul>
             </div>
             <div class="plain-block">
-              <h3>后续可加固的项</h3>
+              <h3>Further hardening</h3>
               <ul>
-                <li>给 Tailscale 开启更细的 ACL，只允许你的手机访问这台 Mac。</li>
-                <li>为不同仓库设置独立会话和只读检查脚本。</li>
-                <li>视需要使用 <code>mosh</code> 或更强的终端保活策略。</li>
+                <li>Use finer Tailscale ACLs to allow only your phone to access this Mac.</li>
+                <li>Use independent sessions and read-only inspection scripts for different repositories.</li>
+                <li>Consider <code>mosh</code> or stronger terminal persistence as needed.</li>
               </ul>
             </div>
           </div>
         </section>
 
-        <section id="faq" class="reveal" data-rail-title="FAQ" data-rail-summary="这里收口了几个高频问题，包括为什么 Mac 不需要装 Termius、为什么不推荐远程桌面、以及 tmux 的必要性。">
+        <section id="faq" class="reveal" data-rail-title="FAQ" data-rail-summary="Common questions: why Mac does not need Termius, why remote desktop is not recommended, and why tmux is necessary.">
           <div class="section-label">FAQ</div>
-          <h2>常见问题</h2>
+          <h2>Frequently asked questions</h2>
           <ol class="faq-list">
-            <li><strong>Mac 端也要装 Termius 吗？</strong> 不需要。Termius 只是 iPhone 上的 SSH 客户端，Mac 端只需要 Tailscale、Remote Login、tmux 和 Codex CLI。</li>
-            <li><strong>为什么不直接用远程桌面控制 iTerm2？</strong> 因为手机屏幕小、远程桌面延迟高，而且文本终端比图形远程桌面更稳、更清晰。</li>
-            <li><strong>为什么不用 WorkBuddy 或飞书机器人？</strong> 那些方案更适合消息派单或自动化任务，不如原生 SSH 终端适合持续编程。</li>
-            <li><strong>没有 tmux 会怎样？</strong> iPhone 切后台或网络断开时，Codex 很可能跟着断。tmux 是整个方案里最关键的保活层。</li>
-            <li><strong>如果 Mac 休眠了怎么办？</strong> iPhone 无法连接到已休眠且离线的 Mac，所以实际使用时要保证 Mac 处于开机联网状态。</li>
+            <li><strong>Does Mac need Termius too?</strong> No. Termius is the iPhone SSH client; Mac needs only Tailscale, Remote Login, tmux, and Codex CLI.</li>
+            <li><strong>Why not control iTerm2 through remote desktop?</strong> Phone screens are small and remote desktop adds latency. Text terminals are more reliable and clearer than graphical remote desktop.</li>
+            <li><strong>Why not WorkBuddy or a Lark bot?</strong> Those suit message-based task dispatch and automation; native SSH terminals better support sustained programming.</li>
+            <li><strong>What happens without tmux?</strong> Backgrounding iPhone or losing the network can disconnect Codex. tmux is the key session persistence layer.</li>
+            <li><strong>What if Mac sleeps?</strong> iPhone cannot connect to an asleep, offline Mac. Keep Mac powered on and connected during use.</li>
           </ol>
           <p class="footer-note">
-            这份页面的目标不是介绍所有可能的远程开发方案，而是固定出一条最适合你当前环境的主路径：<code>iPhone + Tailscale + Termius -> Mac -> tmux -> Codex CLI</code>。
+            This page fixes one primary path for the current environment rather than surveying every remote development option:
+            <code>iPhone + Tailscale + Termius -> Mac -> tmux -> Codex CLI</code>.
           </p>
         </section>
       </main>
 
-      <aside class="desktop-rail" aria-label="桌面侧栏信息">
+      <aside class="desktop-rail" aria-label="Desktop sidebar information">
         <div class="rail-panel current-section">
           <div class="section-label">Current Section</div>
-          <div class="rail-kicker" id="rail-kicker">正在阅读</div>
-          <h3 class="rail-summary-title" id="rail-title">总览</h3>
-          <p class="rail-summary-body" id="rail-summary">这条方案的核心是把 iPhone 变成 Mac 的安全远程终端入口，而不是把任务先交给中间机器人再转发给 Codex。</p>
+          <div class="rail-kicker" id="rail-kicker">Reading</div>
+          <h3 class="rail-summary-title" id="rail-title">Overview</h3>
+          <p class="rail-summary-body" id="rail-summary">Use iPhone as a secure remote terminal for your Mac, rather than forwarding tasks through an intermediary bot to Codex.</p>
         </div>
         <div class="rail-panel">
           <div class="section-label">Desktop First</div>
-          <h3>这份页面怎么读</h3>
-          <p>左侧用来跳转章节，中间是完整说明，右侧固定显示关键结论和最短操作路径，适合在 PC 上边看边配置。</p>
+          <h3>How to read this page</h3>
+          <p>Navigate sections on the left, read full instructions in the center, and use the right rail for key conclusions and the shortest setup path. Configure alongside this page on a desktop.</p>
         </div>
         <div class="rail-panel">
           <div class="section-label">Quick Start</div>
-          <h3>最短落地顺序</h3>
+          <h3>Shortest setup sequence</h3>
           <ul>
-            <li>Mac 安装并登录 Tailscale</li>
-            <li>Mac 开启 Remote Login</li>
-            <li>Mac 安装 tmux 并准备 <code>~/bin/codex-remote</code></li>
-            <li>iPhone 安装 Tailscale 和 Termius</li>
-            <li>Termius Host 指向 <code>YOUR_MAC_TAILNET_FQDN</code></li>
+            <li>Install and sign in to Tailscale on Mac</li>
+            <li>Enable Remote Login on Mac</li>
+            <li>Install tmux and prepare <code>~/bin/codex-remote</code></li>
+            <li>Install Tailscale and Termius on iPhone</li>
+            <li>Point the Termius Host at <code>YOUR_MAC_TAILNET_FQDN</code></li>
           </ul>
         </div>
         <div class="rail-panel">
           <div class="section-label">Entry Command</div>
-          <h3>远程进入的最终效果</h3>
+          <h3>Remote entry configuration</h3>
           <pre><code>Host: codex-remote-host
 Address: YOUR_MAC_TAILNET_FQDN
 Startup: ~/bin/codex-remote</code></pre>
@@ -1100,9 +1104,9 @@ Startup: ~/bin/codex-remote</code></pre>
 
     const setRailContent = (section) => {
       if (!section || !railTitle || !railSummary || !railKicker) return;
-      railTitle.textContent = section.dataset.railTitle || section.querySelector("h2")?.textContent || "当前章节";
+      railTitle.textContent = section.dataset.railTitle || section.querySelector("h2")?.textContent || "Current section";
       railSummary.textContent = section.dataset.railSummary || "";
-      railKicker.textContent = "正在阅读 · " + (section.dataset.railTitle || "章节");
+      railKicker.textContent = "Reading · " + (section.dataset.railTitle || "Section");
     };
 
     const copyText = async (text) => {
@@ -1132,16 +1136,16 @@ Startup: ~/bin/codex-remote</code></pre>
       const button = document.createElement("button");
       button.type = "button";
       button.className = "copy-button";
-      button.textContent = "复制";
+      button.textContent = "Copy";
       button.addEventListener("click", async () => {
         const text = pre.innerText;
         const original = button.textContent;
         try {
           const copied = await copyText(text);
-          button.textContent = copied ? "已复制" : "复制失败";
+          button.textContent = copied ? "Copied" : "Copy failed";
           button.classList.toggle("is-copied", copied);
         } catch (error) {
-          button.textContent = "复制失败";
+          button.textContent = "Copy failed";
         }
 
         window.setTimeout(() => {

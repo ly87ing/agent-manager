@@ -1,290 +1,276 @@
-# Rust 原生 GUI 目标与边界
+# Rust Native GUI Goals and Boundaries
 
-## 当前结论
+## Current Conclusions
 
-- **当前版本（2026-09-29）**：产品按 [多账号并行设计](MULTI-ACCOUNT-DESIGN.md) 实施，资源域为账号、技能、MCP、规则、启动命令与来源；Hooks、主配置切换第三方、接入备选、运行设置表单、总览与操作记录页已退役。基于 `2e70d14` 的 x86_64 DMG 通过独立包验收，并在隔离 HOME 里经界面新建了一个 API 账号，用真实 Claude 回读，见「交付回执（2026-09-29，多账号版本）」。下面各条是之前各阶段的结论；其中提到 Hooks、六个资源域、总览、Provider 切换与「切回官方账号」的内容已不适用。
-- 核心已就绪：Rust/SQLite/Tauri 共用库；2026-09-22 起数据模型改为「实际配置为准」（见下方裁决与 `GUI-REDESIGN.md`），源码、隔离实测与 x86_64 安装包真机验收已完成（见 2026-09-23 交付回执）。
-- 2026-09-24 认证按官方标准全面校正（独立环境取消 shell 继承、登录检查只看目录自己的登录、Codex 致命写法识别、
-  用量去重与实例统计等），源码、全量测试与真实 CLI 端到端已验证，安装包未重建，见「2026-09-24 按官方认证标准全面校正」。
-- 同日独立复核后又修了 7 处（用量分叉归属、状态脱敏、失效定义、子进程隔离默认值与 Linux 限制等）并新增系统级
-  设置提示，见「2026-09-24（续）独立复核后的修正」。
-- 已接线闭环：Agents、Skills、MCP、Rules、Hooks、Aliases 六个资源域，以及只读 `system:audit`、`secrets:status`、`system:discover`（接管发现，见下）、`system:refresh-upstream`（探测宇宙 agents/mcp/skills，缓存落 SQLite `upstream_probes` 表，三域 status 回填 freshness，前端收敛调用已补显式 `--action`）。
-- 2026-09-12 高级管理入口裁决已执行完毕：Aliases 原生闭环落地（`b7f30db`）；Tools、快照与 `system:converge` 退役清理完成（`9080c1d`）。
-- 远程 HTTP MCP 已落地（`b353aac`）：三客户端引用形式零明文落盘，与本地 stdio 同级安全语义。
-- 2026-09-14 里程碑（历史）：基于 `5ae995b` 的干净 Darwin x86_64 DMG 通过主审独立验收；四平台发布源码管线（`a2cc864`）与 Windows 阻断 CI（`9f56f00`）就绪。
-- 2026-09-15 里程碑：验收基线提交 `5a110be3` 的 x86_64 DMG 通过 verify 与主要真实 GUI E2E 主审独立验收；同源码 arm64 DMG 交叉构建静态验收通过（thin arm64、adhoc linker-signed，未在 arm64 设备运行）；完整矩阵 9/9 exit 0（Rust 269 项、Vitest 246 项、typecheck/build 通过且 0 warning）。
-- 当前状态：公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝；status/query 只读零写；点击动作直接触发真实 apply；apply 内部保留 preflight/写前校验、精确 scope、排他锁、外部修改检测、CAS/条件回滚与审计。定义保存仍只保存；破坏性定义移除、清日志等独立确认不变。
-- 本轮直接 apply 新交互已完成源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收：Engine 278 项、Tauri 11 项、Vitest 28 files / 248 tests、typecheck/build、8 份 schema 与隔离 smoke 全部通过；旧 DMG/旧 GUI E2E 不证明本轮新交互，最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify，交付回执见下。仍未完成：MCP 新增服务表单真实 GUI 验收（macOS 自动化输入限制）；公开跨平台发布条件——GitHub billing、真实密钥、Developer ID/公证、Windows 签名、Linux/Windows/arm64 真机运行与安装、updater 真实签名下载安装回读；未创建 tag、GitHub Release 或对外安装包，现有授权不包含这些动作。
-- 2026-09-16 发布就绪仓库内改造完成（三提交）：`d46b85a` 补齐 MIT 许可证、公开发布元数据、显式 Webview CSP 与应用图标，Bundle ID 定为 `io.github.ly87ing.agent-manager`；`47702ed` 增加前端顶层错误边界、自定义助手安装/升级确认与 MCP 空态引导，并清理退役代码；`14e6790` 将发布管线重构为草稿先行单写者编排（前置 create-release job 创建唯一 draft，矩阵以 releaseId 上传产物，收尾 job 单写 latest.json），支持 prerelease tag、逐平台 SHA256 checksums 与 engine-rs 版本一致性门禁，verify 脚本在已签名分支补充公证票据如实检查。对外发布仍未进行：GitHub billing、仓库 Secrets/Variables、签名与公证材料、Linux/Windows/arm64 真机验收、updater 真实链路均未就绪，未创建 tag 或 Release。
-- 2026-09-20 用户友好闭环：助手页以接入工作台、运行设置和账号实例为主；AI CLI 的安装、升级、卸载脚本与完整定义编辑已撤出产品主路径。新增接入先保存完整定义与可选凭据，成功后才执行启用；客户端安装状态、版本与来源仅在设置的只读诊断页展示。数据库既有生命周期字段第一阶段兼容保留，不在本轮物理删除。
+- **Current version (2026-09-29)**: implementation follows the [multi-account design](MULTI-ACCOUNT-DESIGN.md). Resource domains are accounts, skills, MCP, rules, launch commands, and sources. Hooks, third-party switching in the main configuration, connection alternatives, runtime settings forms, Overview, and operation history have been retired. The x86_64 DMG based on `2e70d14` passed independent package acceptance. An API account was created through the GUI under an isolated HOME and read back with real Claude; see "Delivery Receipt (2026-09-29, Multi-account Version)". The following conclusions describe earlier stages; references to Hooks, six resource domains, Overview, provider switching, and switching back to the official account no longer apply.
+- The core is ready: a shared Rust/SQLite/Tauri library. Since 2026-09-22, actual configuration is the source of truth (see the decision below and `GUI-REDESIGN.md`). Source, isolated live checks, and x86_64 package acceptance on a real machine are complete; see the 2026-09-23 delivery receipt.
+- On 2026-09-24, authentication was corrected against official standards: independent environments no longer inherit shell authentication, login checks inspect only the directory's own login, invalid Codex configurations are identified, and usage is deduplicated and counted by instance. Source, full tests, and real CLI E2E passed; the package was not rebuilt. See "2026-09-24: Authentication Corrections Against Official Standards".
+- Independent review that day led to 7 more corrections, including forked usage attribution, status redaction, invalid definitions, subprocess isolation defaults, and Linux restrictions, plus system-level settings notices. See "2026-09-24 Follow-up: Corrections After Independent Review".
+- Complete wiring covers six domains (Agents, Skills, MCP, Rules, Hooks, Aliases), read-only `system:audit`, `secrets:status`, `system:discover` (takeover discovery, below), and `system:refresh-upstream` (agents/mcp/skills probes cached in SQLite `upstream_probes`, freshness filled into status for all three domains, and explicit `--action` added to frontend convergence calls).
+- The 2026-09-12 advanced-management decision is implemented: native Aliases (`b7f30db`); Tools, snapshots, and `system:converge` retired (`9080c1d`).
+- Remote HTTP MCP is implemented (`b353aac`): all three clients persist references without plaintext, with the same security semantics as local stdio.
+- 2026-09-14 milestone (historical): a clean Darwin x86_64 DMG based on `5ae995b` passed the lead reviewer's independent acceptance; four-platform release workflow source (`a2cc864`) and blocking Windows CI (`9f56f00`) are ready.
+- 2026-09-15 milestone: the x86_64 DMG at acceptance baseline `5a110be3` passed verify and the main real GUI E2E checks independently. An arm64 DMG cross-built from the same source passed static acceptance (thin arm64, ad hoc linker-signed, not run on arm64 hardware). The complete matrix had 9/9 exit 0: Rust 269 tests, Vitest 246 tests, typecheck/build passed with 0 warnings.
+- Current behavior: public `*:plan` and `--dry-run` entry points are retired and rejected. Status/query is read-only with zero writes. Actions directly execute real apply, retaining internal preflight, write-time validation, exact scope, exclusive locks, external-change detection, CAS/conditional rollback, and audit. Saving a definition still only saves; destructive definition removal and log clearing retain separate confirmation.
+- This direct-apply interaction passed source, browser, isolated CLI, and uncommitted dirty candidate DMG acceptance: Engine 278 tests, Tauri 11 tests, Vitest 28 files / 248 tests, typecheck/build, 8 schemas, and isolated smoke checks. Old DMG/GUI E2E evidence does not prove the new interaction. A final clean DMG was rebuilt after `a01d0f5` and independently verified; see the receipt below. Still outstanding: real GUI acceptance of the MCP add-service form (macOS automation input limitations); public cross-platform release prerequisites (GitHub billing, real keys, Developer ID/notarization, Windows signing, real Linux/Windows/arm64 installation and runtime checks, and signed updater download/install/readback). No tag, GitHub Release, or public package was created; existing authorization excludes these actions.
+- 2026-09-16 release-readiness repository changes completed in three commits: `d46b85a` added the MIT license, public release metadata, explicit Webview CSP, and app icons, with Bundle ID `io.github.ly87ing.agent-manager`; `47702ed` added a top-level frontend error boundary, custom-agent installation/upgrade confirmation, MCP empty-state guidance, and retired-code cleanup; `14e6790` changed the release workflow to draft-first, single-writer orchestration (create-release creates the sole draft, matrix jobs upload by releaseId, final job alone writes latest.json), with prerelease tags, per-platform SHA256 checksums, engine-rs version consistency gates, and truthful notarization-ticket checks in the signed verify branch. Public release remains undone: GitHub billing, repository Secrets/Variables, signing/notarization material, Linux/Windows/arm64 machine acceptance, and the real updater chain are not ready. No tag or Release was created.
+- 2026-09-20 usability milestone: the agent page focuses on the connection workspace, runtime settings, and account instances. AI CLI installation/upgrade/removal scripts and full definition editing are removed from the main product path. Adding a connection saves its full definition and optional credentials before enabling it. Client installation status, version, and source appear only in read-only Settings diagnostics. Existing database lifecycle fields remain for phase-one compatibility and are not physically removed in this round.
 
-## 目标
+## Goal
 
-让 CLI 与 Tauri 共享一个 Rust 原生库，生效配置以各助手真实文件为准，`native-manager.db` 保存偏好、归属记录与未生效的备选。设置保存在 `app_settings` 表，不引入可写 JSON settings 或 profile 层。
+Share one native Rust library between CLI and Tauri. Actual assistant files determine effective configuration; `native-manager.db` stores preferences, ownership records, and inactive alternatives. Settings live in `app_settings`, with no writable JSON settings or profile layer.
 
-## 已完成
+## Completed
 
-- `engine-rs` 的 native/store/envelope 核心服务 CLI 与 Tauri。
-- SQLite 缺库读取零写、事务保存和重开读回。
-- Tauri bridge 的命令、参数、run id 和异步边界。
-- Policy 的 builtin/sqlite 来源和固定 `--layer local` 写入。
-- Claude Code、Codex 官方 `native` 默认渠道；brew 只按实际检测来源处理。
-- 根仓库 Python 与旧 `manage.sh` 入口清理。
-- Runs 列表与详情使用 SQLite `operation_logs`，新增操作记录时清理过期记录；本地结构化诊断日志基于 `data_dir/logs/agent-manager-YYYY-MM-DD.jsonl` 日切写入（严格脱敏、Unix 0700/0600、只读零写、拒随软链接），在诊断日志写入后及应用启动时清理过期文件。两者共用 `log_retention_days`（0 禁用自动清理）；执行中心支持 `runs:clear` 二次确认清空任务记录，设置页支持 `logs:clear` 二次确认清理诊断日志，两类清理互不影响。
-- Agent 原生运行配置与只读安装来源探测；既有生命周期 apply、锁与审计仅作兼容保留，普通 GUI 不提供入口。
-- Skills 原生域接线与完整闭环：内置技能仓库只作推荐来源，添加后才成为用户集合（2026-09-22 起；此前为首次写库固化）；集合与 Skill×Agent 独立更新/启停/移除；内容寻址快照与安全软连接落地及回滚保护；status 只读零写；真实 apply 跨进程锁与操作审计。
-- MCP 原生域接线与本地 stdio 闭环：Rust dispatcher 提供 `mcp:status`（只读）与真实 `mcp:apply`；定义与分配保存在 SQLite，支持 Claude JSON、Codex TOML、OpenCode JSON（需配置对应 Agent target）；逐助手支持 add/update/enable/disable/remove，库级支持 enable/disable/remove；status 只读零写，真实 apply 使用锁、审计、CAS 与回滚；env 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护。
-- `sources:get/set` 原生接线：规则来源固定为 `rules.shared`、`rules.codex`、`rules.claude`、`rules.opencode` 四项，保存使用 revision CAS 且只写 SQLite，不执行任何同步动作。（2026-09-22 起规则键已退役，规则改为实际文件 + 模板，见「实际配置为准裁决」。）
-- Rules 原生域接线：Rust dispatcher 提供 `rules:status`（只读）与真实 `rules:apply`；固定目标为 `rules:codex_global`（`~/.codex/AGENTS.md`）、`rules:claude_global`（`~/.claude/CLAUDE.md`）与 `rules:opencode_global`（`~/.config/opencode/AGENTS.md`），内容按共享与助手专用来源渲染；status 只读零写，真实 apply 使用全局排他锁、操作审计、文件字节 CAS 与事务/文件回滚，外部修改 fail-closed 拒绝覆盖，不承诺备份；没有中间产物目录，来源直接渲染写入目标。Tauri bridge 参数白名单与 Rules 页面已对齐真实 schema，并支持逐目标 `--only`。
-- Hooks 原生域接线：Rust dispatcher 提供 `hooks:status`（只读）与真实 `hooks:apply`；hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）使用 revision CAS 只写 SQLite；固定 Claude `~/.claude/settings.json` signature-set 合并（保留用户字段与非托管 hook）与 Codex `~/.codex/hooks.json` whole-file 两目标；status 只读零写，真实 apply 使用全局排他锁、Immediate 事务、精确旧字节 CAS、binding、审计与条件回滚，外部修改 fail-closed；前端两个目标与两个 JSON 编辑入口已接线。
-- Aliases 原生域接线：Rust dispatcher 提供 `aliases:status`（只读）与真实 `aliases:apply`；aliases 专用 `sources:get/set`（aliases.shell）使用 revision CAS 只写 SQLite，alias 名/值结构校验与疑似凭据拒绝；固定 `~/.zshrc` 与 `~/.zprofile` 两目标的受管 marker 区块写入（区块外字节保留），status 只读零写，真实 apply 使用全局排他锁、Immediate 事务、整文件字节 CAS、binding、审计与条件回滚，外部修改 fail-closed，不承诺备份；前端 Aliases 页与来源面板零改动直接可用。
-- 只读 `system:audit` 接线：聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态，支持 Tauri offline 桥接注入。
-- 密钥闭环：`secrets:status` 只读输出变量名、来源与是否可解析；用户显式选择权限为 `600` 的外部 `.env` 文件后，填写和接管只写该文件，SQLite 只存路径，配置备份不含路径或取值。历史 `secret_values` 仅用于显式迁移，先写文件成功再删旧表。
-- 2026-09-12 裁决退役已清理：Tools 域、快照（snapshots:list/restore）与 `system:converge` 的命令面、前端页面/类型/文案、契约 schema、种子文件与文档状态行全部清零；退役命令报错为 UNKNOWN_DOMAIN/UNKNOWN_VERB，六域 apply 输出不再携带 snapshot 字段，"自动备份"承诺文案改为 fail-closed 表述；`agent-tool/` 物理目录保留未动。
-- `system:refresh-upstream` 接线：探测宇宙为 enabled 的 npm 渠道 agents、MCP 的 npx 包与 uvx `git+repo@branch` 源、enabled 且有 url 的 skills 集合仓库；探测器（npm view / git ls-remote / git rev-parse / npx 缓存读取 / bin --version）不经 shell、参数数组执行、有界捕获、超时进程组终止（网络 ≤30s），单元素失败归 unknown+固定错误类别不拖垮整批；比较语义对齐旧版（semver 可比 → current/behind/ahead，hash 不可比 → 不同即 behind）；缓存落 SQLite `upstream_probes` 表（Immediate 事务逐元素 upsert，只存版本/commit 与错误类别），status 只读回填 freshness（缺表/缺行一律 unknown，status 零写零网络）；`--offline` 拒绝（OFFLINE_NETWORK_DENIED），`--only` 逐元素，不取 apply 锁；前端 Updates 页直接触发真实 apply（apply 内部保留 preflight/写前校验），调用已补显式 `--action`（agents→upgrade，mcp/skills→update）。
-- 远程 HTTP MCP 接线：远程定义 = `url`（仅 https 或本机回环 http，错误不回显 url）+ 可选 `headers`（值仅 `${VAR}` 占位符），与 stdio 字段互斥，`type` 由 codec 推导不持久化；三 codec 全部引用形式落盘零明文——Claude `type:"http"` 写字面量 `${VAR}`、Codex 写 `env_http_headers` 变量名映射、OpenCode `type:"remote"` 写 `{env:VAR}` 且固定 `oauth:false`；受管 marker 迁至条目级 `_MANAGED_BY`（stdio 旧位置兼容）；保存期 policy:set 跑完整定义校验；status/apply 审计对 headers 与 env 同级 `<literal>` 掩码，secrets:status 纳入 headers 并区分 `kind`；缺失变量同级 fail-closed。
-- Skills 发现失败可见（`8a428de`）：集合元素 observed 新增 `discovery_error`（类别 + skill_paths 项 + 固定消息），发现失败不再静默为空；前端「全部技能」空态按集合落地状态给出引导，集合卡片展示发现错误。
-- MCP 现有配置发现导入与接管（`a4ae118`）：`mcp:status` 增量输出 `import_candidates`（只读扫描三格式目标文件的未受管条目，env/header 值一律 `<literal>` 掩码，Codex `env_http_headers` 引用直通；受管/库内同名/binding/非法名排除）；前端一键转换为 `${VAR}` 占位符定义导入库（明文全程不出渲染进程），保存不执行动作；新增显式 `--allow-takeover`（仅逐 agent add/update）替换未受管同名条目，默认 fail-closed 不变，apply 审计恒含 takeover 字段。
-- macOS 候选包构建身份（`3b28f45`）：发布候选安装包嵌入可信构建身份（commit/date），严格拒绝与源码错配的产物。
-- 定义编辑原文保存（`5ae995b`）：SourceDefinitionsPanel 禁用文本框自动替换并有单测，Rules/Hooks 原文保存不再被 smart quotes 等自动改写。
+- `engine-rs` native/store/envelope core serves CLI and Tauri.
+- SQLite reads without a database perform zero writes; transactional saves survive reopening and readback.
+- Tauri bridge command, argument, run ID, and asynchronous boundaries.
+- Policy builtin/sqlite sources and fixed `--layer local` writes.
+- Official `native` default channels for Claude Code and Codex; brew is handled only when detected as the actual source.
+- Root-repository Python and old `manage.sh` entry points removed.
+- Runs list/details use SQLite `operation_logs`, pruning expired records when adding a record. Local structured diagnostics rotate daily at `data_dir/logs/agent-manager-YYYY-MM-DD.jsonl` (strict redaction, Unix 0700/0600, zero-write reads, symlinks rejected), pruning expired files after writes and at app startup. Both use `log_retention_days` (0 disables automatic cleanup). Execution Center `runs:clear` and Settings `logs:clear` each require a second confirmation and clear their own log category independently.
+- Native agent runtime configuration and read-only installation-source detection. Existing lifecycle apply, locks, and audit remain only for compatibility, without normal GUI entry points.
+- Complete native Skills domain: builtin repositories are recommendations, becoming user collections only after addition (since 2026-09-22; previously frozen on the first database write). Collections and Skill×Agent bindings independently support update/enable/disable/remove. Content-addressed snapshots, safe symlinks, rollback protection, zero-write status, cross-process apply locks, and operation audit are implemented.
+- Native MCP/local stdio: Rust dispatcher provides read-only `mcp:status` and real `mcp:apply`; SQLite stores definitions and assignments. Claude JSON, Codex TOML, and OpenCode JSON are supported with the corresponding Agent target configured. Per-agent add/update/enable/disable/remove and library enable/disable/remove are supported. Status performs zero writes; apply uses locks, audit, CAS, and rollback. SQLite definition/binding env fields persist only literal `${VAR}` references. Status, diagnostics, and operation logs never expose or save resolved values. Real apply resolves process environment values and writes the target codec's Claude/Codex/OpenCode configuration; target plaintext is protected by file permissions and client security boundaries.
+- Native `sources:get/set`: rule sources fixed to `rules.shared`, `rules.codex`, `rules.claude`, `rules.opencode`; revision CAS saves only SQLite without synchronization. (These rule keys were retired on 2026-09-22 in favor of actual files plus templates; see "Actual Configuration as the Source of Truth".)
+- Native Rules: read-only `rules:status` and real `rules:apply`; fixed targets `rules:codex_global` (`~/.codex/AGENTS.md`), `rules:claude_global` (`~/.claude/CLAUDE.md`), `rules:opencode_global` (`~/.config/opencode/AGENTS.md`), rendered from shared and assistant-specific sources. Zero-write status; apply uses a global exclusive lock, audit, file-byte CAS, transaction/file rollback, and fail-closed external-change protection without a backup promise. Sources render directly into targets without an intermediate directory. Tauri's argument allowlist and Rules page match the real schema and support per-target `--only`.
+- Native Hooks: read-only `hooks:status`, real `hooks:apply`, and Hooks-only revision-CAS `sources:get/set` (`hooks.claude/hooks.codex`) writing only SQLite. Fixed targets: Claude `~/.claude/settings.json` signature-set merge preserves user fields/unmanaged hooks; Codex `~/.codex/hooks.json` uses whole-file writes. Zero-write status; apply uses the global exclusive lock, Immediate transaction, exact old-byte CAS, bindings, audit, and conditional rollback, rejecting external changes. Both frontend targets and JSON editors are wired.
+- Native Aliases: read-only `aliases:status`, real `aliases:apply`, and Aliases-only revision-CAS `sources:get/set` (`aliases.shell`) writing only SQLite. Alias name/value structure is validated and suspected credentials rejected. Managed marker blocks in fixed `~/.zshrc` and `~/.zprofile` targets preserve outside bytes. Zero-write status; apply uses the global exclusive lock, Immediate transaction, whole-file byte CAS, bindings, audit, and conditional rollback; external changes fail closed without a backup promise. Existing frontend Aliases and source panels work without changes.
+- Read-only `system:audit` aggregates agents/skills/mcp/rules/hooks/aliases/secrets and runtime/storage status, supporting Tauri offline bridge injection.
+- Secrets workflow: `secrets:status` exposes only variable names, sources, and resolvability. After explicit selection of an external mode-`600` `.env` file, entry and takeover write only there. SQLite stores only the path; configuration backups exclude paths and values. Historical `secret_values` is used only for explicit migration: successfully write the file before deleting the old table.
+- 2026-09-12 retirement cleanup: Tools, snapshots (`snapshots:list/restore`), and `system:converge` commands, frontend pages/types/text, contract schemas, seeds, and documentation status entries removed. Retired commands return UNKNOWN_DOMAIN/UNKNOWN_VERB; six-domain apply output no longer includes snapshot fields. Automatic-backup promises became fail-closed descriptions. The physical `agent-tool/` directory remains untouched.
+- `system:refresh-upstream`: probes enabled npm agents, MCP npx packages and uvx `git+repo@branch` sources, and enabled skills collections with URLs. Probes (`npm view`, `git ls-remote`, `git rev-parse`, npx cache reads, `bin --version`) use argument arrays without a shell, bounded capture, and process-group termination on timeout (network ≤30s). Individual failures become unknown plus fixed error categories without failing the batch. Comparison matches the old behavior (comparable semver → current/behind/ahead; incomparable hashes → different means behind). SQLite `upstream_probes` caches per-element upserts in Immediate transactions, storing only version/commit and error category. Status reads freshness without writes/network; missing tables/rows mean unknown. `--offline` returns OFFLINE_NETWORK_DENIED; `--only` targets individual elements without the apply lock. Updates directly triggers real apply with internal preflight/write-time checks and explicit `--action` (agents→upgrade, mcp/skills→update).
+- Remote HTTP MCP: `url` accepts only https or loopback http, never echoed in errors; optional `headers` contain only `${VAR}` placeholders. Remote/stdio fields are mutually exclusive; codecs infer `type`, which is not persisted. All three codecs write references without plaintext: Claude `type:"http"` with literal `${VAR}`, Codex `env_http_headers` variable-name mappings, OpenCode `type:"remote"` with `{env:VAR}` and fixed `oauth:false`. Managed markers move to entry-level `_MANAGED_BY`, retaining the old stdio location for compatibility. Save-time policy:set validates full definitions; status/apply audit masks headers and env alike as `<literal>`. secrets:status includes headers and distinguishes `kind`; missing variables fail closed.
+- Visible Skills discovery failures (`8a428de`): collection observed elements include `discovery_error` (category, skill_paths entry, fixed message), rather than silently appearing empty. All Skills empty states guide users based on collection availability; collection cards show discovery errors.
+- MCP discovery/import/takeover (`a4ae118`): `mcp:status` adds read-only `import_candidates` scanned from unmanaged entries in all three target formats. Env/header values are `<literal>`; Codex `env_http_headers` references pass through. Managed entries, library name collisions, bindings, and invalid names are excluded. Frontend converts candidates to `${VAR}` definitions in one step without plaintext leaving the renderer; saving performs no action. Explicit `--allow-takeover` (only per-agent add/update) replaces unmanaged same-name entries; default fail-closed behavior remains. Apply audit always includes takeover.
+- macOS candidate build identity (`3b28f45`): release candidates embed trusted commit/date identity and strictly reject artifacts mismatched with source.
+- Verbatim definition saves (`5ae995b`): SourceDefinitionsPanel disables automatic text substitution with unit coverage; Rules/Hooks originals are no longer rewritten by smart quotes or similar features.
 
-## 契约要求
+## Contract Requirements
 
-Skill、MCP 等资源及其逐助手分配必须支持新增、编辑/更新、启用、禁用、删除。保存定义不得执行动作；UI 直接触发真实 apply（apply 内部保留 preflight/写前校验、精确 scope、锁、外部修改检测、CAS/条件回滚与审计），普通同步、启停、更新不二次确认，破坏性动作独立确认。AI CLI 普通界面只维护接入、运行参数和账号实例；不提供安装、升级、卸载和完整定义编辑入口，软件生命周期交给原安装渠道。既有生命周期字段与引擎能力第一阶段兼容保留。
+Resources such as Skills and MCP, and their per-agent assignments, must support add, edit/update, enable, disable, and delete. Saving definitions must not execute actions. UI directly triggers real apply with internal preflight/write-time validation, exact scope, locks, external-change detection, CAS/conditional rollback, and audit. Ordinary synchronization, enable/disable, and updates need no second confirmation; destructive actions require separate confirmation. The normal AI CLI interface manages only connections, runtime parameters, and account instances. Installation, upgrade, removal, and full definition editing belong to the original software channel; existing lifecycle fields and engine capabilities remain for phase-one compatibility.
 
-## 验收基线（2026-09-12，第四次）
+## Acceptance Baseline (2026-09-12, Fourth Round)
 
-绑定提交：Aliases 闭环 `b7f30db`、退役清理 `9080c1d`、refresh-upstream `7d9e83b`、远程 HTTP MCP `b353aac`。
+Bound commits: Aliases `b7f30db`, retirement `9080c1d`, refresh-upstream `7d9e83b`, remote HTTP MCP `b353aac`.
 
-- 自动化：`engine-rs` 测试 242 项、`app/src-tauri` 测试 11 项、前端 229 项，全部通过；`pnpm typecheck` 与 `pnpm build` 通过；`cargo fmt --check` 通过。
-- 真实隔离 CLI：Aliases 十二项反例、退役命令 UNKNOWN_DOMAIN/UNKNOWN_VERB、refresh-upstream shim 探测矩阵实测同前；远程 HTTP MCP 实测：保存期三层反例（http url / 字段混给 / headers 明文）USAGE_ERROR 且不回显正文、三 codec 零明文渲染（哨兵值 grep 为零）、缺失变量 fail-closed、删 marker 拒绝接管、条目内未受管字段 fail-closed、`_delete` 不误伤、secrets:status 含 `kind:"header"`。
-- 前端：mock 测试全绿（含 Updates 页行内收敛 `--action upgrade`、远程 MCP 表单与卡片掩码用例）。
-- 边界：以上不构成当前安装包的 Tauri 前后端真实业务 E2E；三真实客户端对条目级 marker 与引用展开的联调属安装包 E2E 项。
+- Automation: engine-rs 242 tests, app/src-tauri 11, frontend 229, all passed; `pnpm typecheck`, `pnpm build`, and `cargo fmt --check` passed.
+- Real isolated CLI: the previous twelve Aliases negative cases, UNKNOWN_DOMAIN/UNKNOWN_VERB retired-command checks, and refresh-upstream shim matrix still passed. Remote HTTP MCP: three save-time negative cases (http URL, mixed fields, plaintext headers) returned USAGE_ERROR without echoing content; all three codecs rendered without plaintext (zero sentinel grep matches); missing variables failed closed; removing a marker refused takeover; unmanaged entry fields failed closed; `_delete` spared unrelated data; secrets:status included `kind:"header"`.
+- Frontend mocks passed, including Updates inline convergence `--action upgrade` and remote MCP form/card masking.
+- Boundary: this does not establish real Tauri frontend/backend business E2E for the current package. Real-client entry-marker/reference-expansion integration belongs to package E2E.
 
-## 验收基线（2026-09-14，第五次）
+## Acceptance Baseline (2026-09-14, Fifth Round)
 
-绑定提交：安装包基线 `5ae995b`；发布源码管线 `a2cc864`；Windows 阻断 CI `9f56f00`。
+Bound commits: package baseline `5ae995b`, release workflow source `a2cc864`, blocking Windows CI `9f56f00`.
 
-- 独立包（主审独立验收）：基于 `5ae995b` 的干净 Darwin x86_64 DMG，`verify:macos` 通过——只读挂载、仓库外复制、架构与版本、无 Python、源码与 HOME 路径脱敏、从 `/` 隔离环境 5 秒存活；包内构建身份 commit/date 与源码一致；文件 SHA256 `71a386d6ab8e1a7f85ef59c82f379411e9aa1dccaa3c3166309b96b971fce26b`，7632599 bytes。后续 `a2cc864` 与 `9f56f00` 仅改工作流，该包仍代表当前产品代码，但不包含这两份工作流，不是仓库 HEAD 构建包。
-- GUI 业务 E2E 未启动：宿主 AX/computer-use 对 Agent Manager 与 Finder 均 permission_denied，8 个业务场景未执行；隔离 HOME/data 确认无 DB 或目标写入；属验收基础设施阻塞，不构成产品通过或产品失败。
-- 发布管线（仅源码层验收）：`a2cc864` 的 gui-release.yml 覆盖 macOS arm64+x86_64、Linux x86_64、Windows x86_64，产物形态 app/dmg、AppImage/deb、NSIS/MSI，含 updater 签名与 latest.json、Apple/Windows 签名及 Apple 公证接线，缺密钥/占位符/脏树/来源异常 fail-closed，临时证书清理，Release 固定 draft。2026-09-14 本地独立验收仅证明 YAML/结构、门禁正反例、配置合并、路径 remap 模拟与 cargo fmt；未做真实构建、签名、公证或更新发布。
-- Windows 阻断 CI（`9f56f00`）：Windows 引擎与应用升级为不可容错门禁（cargo fmt/test/check、engine release build、NSIS/MSI build，无 continue-on-error）。远程 GUI CI run 34935947828 六个 jobs 均 steps=[]，因 GitHub 账户付款失败或 spending limit 在启动前失败，非测试失败。
-- 外部状态：GitHub Actions secrets=0、variables=0、本机有效 codesigning identities=0；签名、公证、arm64/Linux/Windows 真实包与更新发布均未验证。未创建 tag、GitHub Release 或对外发布安装包，现有授权不包含这些动作。
+- Independent package acceptance by the lead reviewer: clean Darwin x86_64 DMG at `5ae995b` passed `verify:macos`: read-only mount, copy outside the repository, architecture/version, no Python, source/HOME path redaction, and 5-second survival in isolation from `/`. Embedded commit/date matched source. SHA256 `71a386d6ab8e1a7f85ef59c82f379411e9aa1dccaa3c3166309b96b971fce26b`, 7632599 bytes. Later `a2cc864` and `9f56f00` change workflows only; this package still represents product code but contains neither workflow and is not a HEAD build.
+- GUI business E2E never started: host AX/computer-use returned permission_denied for Agent Manager and Finder; 8 scenarios were not run. Isolated HOME/data had no database/target writes. This is acceptance-infrastructure blockage, neither product success nor failure.
+- Release workflow (source acceptance only): `a2cc864` gui-release.yml covers macOS arm64+x86_64, Linux x86_64, Windows x86_64; app/dmg, AppImage/deb, NSIS/MSI artifacts; updater signing/latest.json, Apple/Windows signing, Apple notarization, fail-closed missing-key/placeholder/dirty-tree/source checks, temporary certificate cleanup, and draft-only Releases. Local independent acceptance on 2026-09-14 proves YAML/structure, positive/negative gates, configuration merging, simulated path remapping, and cargo fmt only. No real build, signing, notarization, or updater publication occurred.
+- Blocking Windows CI (`9f56f00`): engine/app gates are mandatory (cargo fmt/test/check, engine release build, NSIS/MSI build, no continue-on-error). GUI CI run 34935947828 had six jobs with steps=[]; GitHub payment/spending-limit failure prevented startup, rather than tests failing.
+- External state: GitHub Actions secrets=0, variables=0, valid local codesigning identities=0. Signing, notarization, actual arm64/Linux/Windows packages, and updater publication remain unverified. No tag, GitHub Release, or public package was created; current authorization excludes those actions.
 
-## 验收基线（2026-09-15，第六次）
+## Acceptance Baseline (2026-09-15, Sixth Round)
 
-绑定验收提交：`5a110be3da66d1bedee906eb0c30f04b5b95b245`。
+Bound acceptance commit: `5a110be3da66d1bedee906eb0c30f04b5b95b245`.
 
-- 自动化完整矩阵：9/9 exit 0；`engine-rs` 258 项 + `app/src-tauri` 11 项 = Rust 269 项全部通过；Vitest 28 files / 246 tests 全部通过；`pnpm typecheck` 与 `pnpm build` 通过，0 warning。
-- x86_64 DMG（主审独立验收）：verify 脚本 exit 0；SHA256 `076d16b098ede8915802c0bc6dceec42dc06e0dcadddd137e7865681c7e90a68`，7632606 bytes；包内构建身份 commit/date 与源码精确一致；未签名。
-- arm64 DMG（交叉构建，仅静态验收）：SHA256 `a9540a2690b9d2ede16ef627f310e277ca49130e608c518b876aeaed0bbfd3f8`，7298163 bytes；thin arm64；adhoc linker-signed（非 Developer ID）；未在 arm64 设备运行。
-- 真实 GUI E2E（x86_64 安装包，主审独立验收；旧版 plan→confirm→apply 交互，现已失效，不证明本轮直接 apply 新交互）已覆盖：system:audit 缺库零写、Rules 取消零写/应用、Hooks 双目标、Aliases 双目标、MCP stdio+远程 HTTP 的 GUI plan/confirm/apply、Secrets 仅显示变量名与存在性、Runs、外部修改 plan fail-closed。MCP 定义使用共用 Rust CLI 写入隔离 SQLite 测试夹具；MCP 新增服务表单因 macOS 自动化输入限制未验收，不以测试夹具结果替代表单通过。
-- 零写与脱敏回读（旧版 dry-run 交互证据，现已失效）：stdio dry-run 数据库与目标文件哈希不变，日志不落库；远程 header 在 Codex 目标以环境变量引用写入，合成值不出现在目标文件、诊断日志与操作日志。
-- 外部状态（2026-09-15 复测）：GitHub Actions secrets=0、variables=0、本机有效 codesigning identities=0、GitHub Releases=0；GUI CI run 34936884572（该 run 绑定提交 `5a110be3`）六个 jobs 均 steps=[]，因账户付款失败或 spending limit 在启动前失败，非测试失败。
-- 发布结论：仍未达到公开跨平台发布条件——billing、真实密钥、Developer ID/公证、Windows 签名、Linux/Windows/arm64 真机运行与安装、updater 真实签名下载安装回读均未完成；现有授权不包含 tag、Release 或公开安装包。
+- Complete automated matrix: 9/9 exit 0; engine-rs 258 + app/src-tauri 11 = Rust 269 tests passed; Vitest 28 files / 246 tests passed; `pnpm typecheck`/`pnpm build` passed with 0 warnings.
+- x86_64 DMG independently accepted: verify exit 0; SHA256 `076d16b098ede8915802c0bc6dceec42dc06e0dcadddd137e7865681c7e90a68`, 7632606 bytes; embedded commit/date exactly matched source; unsigned.
+- arm64 DMG (cross-built, static acceptance only): SHA256 `a9540a2690b9d2ede16ef627f310e277ca49130e608c518b876aeaed0bbfd3f8`, 7298163 bytes; thin arm64; ad hoc linker-signed, not Developer ID; not run on arm64 hardware.
+- Real GUI E2E (x86_64 package, independently reviewed, old plan→confirm→apply interaction now obsolete and not evidence for direct apply) covered: system:audit zero-write missing-database reads, Rules cancel zero-write/apply, both Hooks and Aliases targets, MCP stdio+remote HTTP GUI plan/confirm/apply, Secrets names/presence only, Runs, and fail-closed external-change plans. MCP definitions were inserted into isolated SQLite fixtures through the shared Rust CLI. The add-service form was not accepted due to macOS automation input limitations; fixture success does not substitute for form acceptance.
+- Zero-write/redaction readback (obsolete old dry-run evidence): stdio dry-run left database/target hashes unchanged without operation-log writes. Codex remote headers were written as environment references; synthetic values appeared in neither target nor diagnostic/operation logs.
+- External state rechecked 2026-09-15: GitHub Actions secrets=0, variables=0, valid local codesigning identities=0, GitHub Releases=0. GUI CI run 34936884572 bound to `5a110be3` had six jobs with steps=[]; payment/spending-limit failure prevented startup, not test failure.
+- Public cross-platform release prerequisites remain unmet: billing, real keys, Developer ID/notarization, Windows signing, actual Linux/Windows/arm64 installation/runtime checks, and signed updater download/install/readback. Current authorization excludes tags, Releases, and public packages.
 
-## 交付回执（2026-09-16，直接 apply 最终 clean DMG）
+## Delivery Receipt (2026-09-16, Final Clean Direct-apply DMG)
 
-绑定最终提交：`a01d0f5b182c9da346a6663688b49ed4a83f31f4`（2026-09-15T17:32:20-07:00）。
+Bound final commit: `a01d0f5b182c9da346a6663688b49ed4a83f31f4` (2026-09-15T17:32:20-07:00).
 
-- 自动化矩阵（2026-09-16 主审独立复跑）：`engine-rs` 278 项、`app/src-tauri` 11 项全部通过；Vitest 248 tests 全部通过；`pnpm typecheck` 与 `pnpm build` 通过；两套 `cargo fmt --check` 通过。
-- 最终 clean x86_64 DMG（最终提交后于 2026-09-16 本地重建，主审独立验收）：`verify:macos` 全部通过——平台与元数据、构建身份 commit/date 与 `a01d0f5` 精确一致、无 Python 动态链接与遗留、源码与 HOME 路径脱敏、从 `/` 隔离环境 5 秒存活并优雅退出；未签名。SHA256 `1ba291cc794c00a1c68152276dad0b04f792b1b8ae1139156f0e6c24decf9898`，7572035 bytes。
-- GUI CI（外部阻塞复测）：run 35040441270（绑定 `a01d0f5`）六个 jobs 均 steps=[]，启动前失败（GitHub 账户付款失败或 spending limit），非测试失败。
-- 外部状态（2026-09-16 复测）：GitHub Actions secrets=0、variables=0、本机有效 codesigning identities=0；公开发布阻塞项维持原状。
-- 结论：直接 apply 改造的仓库内验收闭环完成；剩余未完成项仅为 MCP 新增服务表单真实 GUI 验收（macOS 自动化输入限制）与公开发布外部条件。
+- Automated matrix independently rerun 2026-09-16: engine-rs 278, app/src-tauri 11, Vitest 248 tests passed; `pnpm typecheck`, `pnpm build`, both `cargo fmt --check` passed.
+- Final clean x86_64 DMG rebuilt locally after the final commit on 2026-09-16, independently accepted: all `verify:macos` checks passed (platform/metadata, exact `a01d0f5` commit/date, no Python linkage/legacy artifacts, source/HOME redaction, 5-second survival and graceful exit under isolation from `/`); unsigned. SHA256 `1ba291cc794c00a1c68152276dad0b04f792b1b8ae1139156f0e6c24decf9898`, 7572035 bytes.
+- GUI CI external blockage rechecked: run 35040441270 at `a01d0f5` had six steps=[] jobs failing before startup due to payment/spending limits, not tests.
+- External state rechecked 2026-09-16: GitHub Actions secrets=0, variables=0, valid local codesigning identities=0; public release blockers unchanged.
+- Repository acceptance of direct apply is complete. Remaining work: real MCP add-service GUI acceptance (macOS automation input limitations) and external public-release prerequisites.
 
-## 交付回执（2026-09-16，发布就绪改造最终 clean DMG）
+## Delivery Receipt (2026-09-16, Final Clean Release-readiness DMG)
 
-绑定最终提交：`5a1582d004c7fe75d6744614b3a475efe3c75c12`（2026-09-16，含 `d46b85a`/`47702ed`/`14e6790`/`5a1582d` 四个发布就绪提交）。
+Bound final commit: `5a1582d004c7fe75d6744614b3a475efe3c75c12` (2026-09-16, including four release-readiness commits `d46b85a`/`47702ed`/`14e6790`/`5a1582d`).
 
-- 自动化矩阵（2026-09-16 主审复跑）：两套 `cargo fmt --check` 通过；`engine-rs` 与 `app/src-tauri` 11 项 cargo test 全部通过；Vitest 29 files / 259 tests 全部通过（较基线 +11：ErrorBoundary 4、MCP 空态 3、自定义助手确认 4）；`pnpm typecheck` 与 `pnpm build` 通过。
-- 最终 clean x86_64 DMG（最终提交后于 2026-09-16 本地重建，主审独立验收）：`verify:macos` 全部通过——Bundle Identifier `io.github.ly87ing.agent-manager` 与版本 0.1.0 校验通过、构建身份 commit/date 与 `5a1582d` 精确一致、无 Python 动态链接与遗留、路径脱敏、从 `/` 隔离环境 5 秒存活并优雅退出；未签名（公证票据检查按脚本语义报告"不适用"）。SHA256 `5936656ad180f2ec42e9aa6829f762acbcfd153c45c753bb3e9b2e7dbe27a175`，7572750 bytes。
-- 发布管线（`14e6790`）仅做 YAML/脚本级静态验收与正反例实测（tag 正则、版本门禁、latest.json 组装、checksums、stapler 分支），未真实执行；外部阻塞项（billing、secrets、签名/公证材料、真机验收、updater 链路）维持原状，未创建 tag 或 Release。
-- 结论：对外发布的仓库内就绪改造全部完成并验收；剩余未完成项不变——MCP 新增服务表单真实 GUI 验收与公开发布外部条件。
+- Matrix rerun by the lead reviewer 2026-09-16: both `cargo fmt --check`, all engine-rs cargo tests, 11 app/src-tauri tests passed; Vitest 29 files / 259 tests passed (+11: ErrorBoundary 4, MCP empty state 3, custom-agent confirmation 4); `pnpm typecheck`/`pnpm build` passed.
+- Final clean x86_64 DMG rebuilt locally after the final commit on 2026-09-16, independently accepted: `verify:macos` passed Bundle Identifier `io.github.ly87ing.agent-manager`, version 0.1.0, exact `5a1582d` commit/date, no Python linkage/legacy artifacts, redacted paths, 5-second survival and graceful exit under isolation from `/`; unsigned, notarization ticket reported "not applicable" per script semantics. SHA256 `5936656ad180f2ec42e9aa6829f762acbcfd153c45c753bb3e9b2e7dbe27a175`, 7572750 bytes.
+- Workflow `14e6790` received YAML/script static acceptance and positive/negative checks (tag regex, version gate, latest.json assembly, checksums, stapler branch), without real execution. External blockers (billing, secrets, signing/notarization, machine acceptance, updater chain) remain; no tag or Release.
+- Repository release-readiness work is complete and accepted. Remaining work is unchanged: real MCP add-service GUI acceptance and external public-release prerequisites.
 
-## 交付回执（2026-09-17，精品化 UI 改造）
+## Delivery Receipt (2026-09-17, UI Polish)
 
-绑定最终提交：`bcdcb6e`（2026-09-17，含 `e4debd2`/`8b4e753`/`6255aa1`/`bcdcb6e` 四个精品化提交；借鉴 cc-switch 的设计与便捷性做法）。
+Bound final commit: `bcdcb6e` (2026-09-17, four polish commits `e4debd2`/`8b4e753`/`6255aa1`/`bcdcb6e`, drawing on cc-switch design/usability).
 
-- 改造内容：设计令牌体系（CSS 变量 + 语义色 token 全组件覆盖）与浅色/深色/跟随系统三态主题（含原生标题栏同步与首屏防闪烁）；系统托盘驻留（关窗入托盘、托盘唤回/退出、macOS Dock Reopen、退出显式摘图标）、窗口位置尺寸记忆（有意排除可见性/全屏）、单实例唤回；页面与弹窗过渡动画（prefers-reduced-motion 降级）、骨架屏加载态、组件化空态引导；助手/技能/MCP/操作记录四页搜索（与既有筛选叠加）、全局快捷键 ⌘,/⌘F、设置入口更新提示角标（启动延迟检查、按版本忽略、未配置不检查）。
-- 自动化矩阵（2026-09-17 主审复跑）：两套 `cargo fmt --check` 通过；`engine-rs` cargo test 全部通过；`app/src-tauri` 15 项通过（+4：主题解析、窗口 flags、退出分类）；Vitest 35 files / 298 tests 全部通过；`pnpm typecheck` 与 `pnpm build` 通过（一条无害的 dynamic import 提示）。
-- 最终 clean x86_64 DMG（2026-09-17 本地重建，主审独立验收）：`verify:macos` 全部通过——构建身份 commit/date 与 `bcdcb6e` 精确一致、隔离环境 5 秒存活并优雅退出（覆盖托盘启动路径）；未签名。SHA256 `29188131ae0f46c1112a8f0b12987e3da82c21bff0887ff61555a15f68a9d809`，7873725 bytes。
-- 未验收项如实说明：托盘点击交互、Dock Reopen、关窗驻留的真机 GUI 验收未做（避免在宿主打扰桌面；隔离验收只覆盖启动与存活）；暗色观感经 dev server 截图抽查。
-- 结论：精品化仓库内改造完成并验收；公开发布外部条件（billing、签名/公证材料、真机验收、updater 链路、tag/Release 授权）维持原状。
+- Changes: design tokens (CSS variables and semantic color tokens across all components); light/dark/system themes with native title-bar synchronization and first-paint flash prevention; tray residency (close to tray, restore/quit, macOS Dock Reopen, explicit icon removal on exit); remembered window position/size intentionally excluding visibility/fullscreen; single-instance restore; page/modal transitions with prefers-reduced-motion fallback; skeleton loading and reusable empty states; agent/skills/MCP/history search composed with existing filters; global ⌘,/⌘F shortcuts; update badge at Settings (delayed startup check, per-version ignore, no check without configuration).
+- Matrix rerun by the lead reviewer 2026-09-17: both `cargo fmt --check`, all engine-rs tests, 15 app/src-tauri tests (+4: theme parsing, window flags, exit classification), Vitest 35 files / 298 tests, `pnpm typecheck`/`pnpm build` passed; one harmless dynamic-import notice.
+- Final clean x86_64 DMG rebuilt locally 2026-09-17 and independently accepted: `verify:macos` passed exact `bcdcb6e` commit/date, 5-second isolated survival and graceful exit covering tray startup; unsigned. SHA256 `29188131ae0f46c1112a8f0b12987e3da82c21bff0887ff61555a15f68a9d809`, 7873725 bytes.
+- Unaccepted: real GUI tray clicks, Dock Reopen, close-to-tray (to avoid disturbing the host desktop; isolation tested startup/survival only). Dark appearance was spot-checked with dev-server screenshots.
+- Repository UI polish is complete and accepted; external public-release conditions (billing, signing/notarization, machine acceptance, updater chain, tag/Release authorization) remain unchanged.
 
-### 2026-09-17 追加：Skills 计划外链接语义修复（`847d703` + `b313716`）
+### 2026-09-17 Follow-up: Unplanned Skills Link Semantics (`847d703` + `b313716`)
 
-- 起因（真机使用反馈）：「全部技能」矩阵中旧体系遗留链接行显示"已链接 + 计划外链接 + 添加"，语义自相矛盾，且非受管链接点「添加」必然被外部冲突保护 fail-closed 拒绝。
-- 改动：extra-link 单元格动作扩展为「纳入管理」（add）与「取消链接」（remove）；`skills:apply` 的逐 skill add/remove 支持显式 `--allow-takeover` 接管通道（仅限非受管符号链接，真实文件/目录仍 fail-closed；审计恒含 takeover 字段，对齐 MCP 先例）；status 单元格新增 `managed` 字段；Tauri 桥白名单放行该旗标；前端 extra-link 行标签改为「纳入管理/取消链接」，非受管链接先弹确认，「当前分配版本」列按 state 判定链接存在性（修掉 not-assigned 行误显"已链接"）。
-- 验证：`engine-rs` 279 项（新增 extra-link takeover 全链路正反例）、`app/src-tauri` 15 项、Vitest 303 项全部通过；typecheck/build 通过。
-- DMG（`847d703` 重建，主审独立验收）：`verify:macos` 全部通过；SHA256 `555b744ef97c85614bcdce750bdf822cf043b052a64484882427a8d9ddbe8830`。过程中发现单实例改造使验收副本在已有实例运行时秒退（存活检测误判），`b313716` 为验收脚本增加运行实例检出守卫后复验通过——该 DMG 不含 `b313716`（仅验收脚本，不影响产品代码）。
+- Real-machine feedback: legacy link rows in All Skills showed the contradictory "Linked + Unplanned link + Add"; adding an unmanaged link inevitably failed closed on external-conflict protection.
+- Changes: extra-link actions become "Adopt" (add) and "Unlink" (remove). Per-skill `skills:apply` add/remove supports explicit `--allow-takeover` for unmanaged symlinks only; real files/directories still fail closed. Audit always includes takeover, matching MCP. Status cells add `managed`; Tauri allows the flag. Frontend extra-link labels become Adopt/Unlink with confirmation for unmanaged links; Current Assigned Version checks state for link existence, fixing not-assigned rows falsely showing Linked.
+- Verification: engine-rs 279 (new full-chain positive/negative extra-link takeover cases), app/src-tauri 15, Vitest 303, typecheck/build passed.
+- DMG rebuilt at `847d703`, independently accepted: `verify:macos` passed; SHA256 `555b744ef97c85614bcdce750bdf822cf043b052a64484882427a8d9ddbe8830`. Single-instance behavior caused acceptance copies to exit immediately when another instance ran, falsely failing survival checks. `b313716` added a running-instance guard to the verify script; recheck passed. The DMG excludes `b313716`, which changes only acceptance scripts, not product code.
 
-### 2026-09-17 追加：技能矩阵批量操作（`26b94b3`）
+### 2026-09-17 Follow-up: Skills Matrix Batch Actions (`26b94b3`)
 
-- 全部技能矩阵新增勾选列与批量操作栏：批量启用/禁用（直执）与批量纳入管理/取消链接（含非受管行时一次汇总确认并带 `--allow-takeover`）；前端编排为逐行顺序 apply（每行独立 run_id/锁/审计/回滚），单行失败不中断，汇总 toast 反馈（执行通道新增 `silent` 选项抑制单行 toast，单行操作行为不变）。
-- 验证：Vitest 36 files / 313 tests 全部通过（新增批量用例 8 + 单行回归 1）；typecheck/build 通过；`26b94b3` 重建 DMG 通过 `verify:macos` 独立验收。
+- All Skills adds selection and batch enable/disable (direct execution) and adopt/unlink (one aggregate confirmation with `--allow-takeover` when unmanaged rows exist). Frontend applies rows sequentially, each with its own run_id/lock/audit/rollback; failures do not stop remaining rows. An aggregate toast reports results; the execution channel's new `silent` option suppresses per-row toasts without changing individual operations.
+- Verification: Vitest 36 files / 313 tests passed (8 new batch cases + 1 individual regression), typecheck/build passed; rebuilt `26b94b3` DMG independently passed `verify:macos`.
 
-### 2026-09-17 追加：动作执行反馈与版本提示（`0419d3c`）
+### 2026-09-17 Follow-up: Execution Feedback and Version Hints (`0419d3c`)
 
-- 起因（真机使用反馈）：点击「升级」无任何即时提示，不知道是否点上，也不知道从什么版本升到什么版本。
-- 改动：助手卡片动作点击立即转 spinner「正在执行…」且同卡其余按钮互斥禁用（含卸载/自定义确认弹窗路径的执行态串联）；升级 label 与 title 带版本区间「当前 → 最新」（缺失侧「未知」占位，git hash 缩写），进入 toast 与任务记录；UpdatesPage 行内/批量更新同样补版本与执行态。
-- 顺手修复：jsdom 套件在默认并行度下因资源竞争批量超时的既有 flaky（vite.config.ts testTimeout/hookTimeout 放宽至 20s），修复后默认并行 36 文件 320 用例全绿。
-- 验证：Vitest 320 全绿、typecheck/build 通过；`0419d3c` 重建 DMG 通过 `verify:macos` 独立验收；SHA256 `05f1018010a0cecc1cfbc318ad790778be9865b0bacc34b2e0d3f323d5fa6f73`。
+- Real-machine feedback: Upgrade gave no immediate response, leaving users unsure whether it started or which versions it involved.
+- Changes: card actions immediately show an Executing spinner and disable other actions on that card, including uninstall/custom-confirmation paths. Upgrade labels/titles show Current → Latest, Unknown for missing versions, abbreviated git hashes, and the same range in toasts/history. UpdatesPage inline/batch actions also show versions and execution state.
+- Existing jsdom flakiness under default parallelism was fixed by increasing vite.config.ts testTimeout/hookTimeout to 20s; all 36 files / 320 cases then passed in default parallel execution.
+- Verification: Vitest 320, typecheck/build passed; rebuilt `0419d3c` DMG independently passed `verify:macos`; SHA256 `05f1018010a0cecc1cfbc318ad790778be9865b0bacc34b2e0d3f323d5fa6f73`.
 
-### 2026-09-17 追加：接管中心（`04c99e6` + `f5e0273` + `763a988` + `d3faf30`）
+### 2026-09-17 Follow-up: Takeover Center (`04c99e6` + `f5e0273` + `763a988` + `d3faf30`)
 
-- 起因（用户需求）：一键接管机器上的 agent / mcp / skill 资源并分类标识；官方路径与各自原生安装方案继续用原生管理方式，其余用软链接方案。
-- 现状差距（实施前核对）：agents 只对已定义助手探测安装来源，不发现未定义助手；skills 只在已定义集合的矩阵格里看到计划外链接，目标目录里不属任何集合的条目无法发现，且集合必须有 git url，外部本地技能没有登记途径；MCP 已有 `import_candidates` 但逐条手工、无来源分类。
-- 引擎改动：新增只读 `system:discover`（`--only agents|skills|mcp`，零写零网络、不取 apply 锁），三域候选统一带 `manage` 分类（native / symlink / collection / register / cleanup）；skills 集合定义新增 `source_path`（与 `url` 互斥）的本地来源集合——直链登记源目录、不做内容快照，登记源根进入受管基准，集合级 update 不联网只重扫修链；agents 发现已知 CLI 并按来源给建议定义（仅 npm 反查成功者给管理命令）；MCP 复用既有掩码扫描并补 origin/manage。Tauri 命令面与参数白名单同步放行 `system:discover`。
-- 前端改动：新增「接管中心」页（导航第五项），分类展示 + 勾选批量 + 一次汇总确认，逐项走统一执行通道（独立 run_id / 执行记录 / 审计），单项失败不中断后续项；助手登记只写定义，技能与 MCP 走各自域既有真实 apply。
-- 顺带修复（独立提交 `04c99e6`）：`definitionKeyPrefix("agents")` 写的顶层 `agent_definitions` 引擎不读，自定义助手定义保存后不生效，改为引擎真实读取的 `agents.definitions`。
-- 补完（`763a988` / `d3faf30`）：dev mock 覆盖 `system:discover`（否则 `?mock=1` 下接管中心页只会报错）；技能集合表单改为来源二选一（git 仓库 / 本机目录），否则接管生成的本地来源集合在技能页点「编辑」会被 git 地址校验挡住、保存还会把 url 写回去破坏定义。
-- 自动化验证：`engine-rs` 289 项、`app/src-tauri` 15 项、Vitest 37 files / 330 tests 全部通过；`pnpm typecheck` 与 `pnpm build` 通过；两套 `cargo fmt --check` 通过。
-- 隔离环境真实 CLI 验收（隔离 HOME + AGENT_MANAGER_DATA_DIR，非 mock）：技能侧复刻本机形态（外部工具目录链接 + 官方目录内真实目录 + 断链），发现分类、按源根聚合建议集合、登记后逐助手 add、链接直指外部源、无内容快照、内容跟随外部更新、停用只删链接且外部源完好、已纳管项不再是候选、只读命令库哈希不变共 11 项检查全通过；MCP 侧发现掩码、导入接管、stdio 标记写入 env、SQLite 定义零明文且保留变量引用、status 零明文、用户其他字段保留、缺 `--allow-takeover` 时对未受管同名条目 fail-closed 共 7 项检查全通过；agents 侧 `agents.definitions.<id>` 登记后 `agents:status` 即出现该助手（state=unmanaged-detected、definition_origin=custom、无升级卸载动作）。
-- 最终 clean x86_64 DMG（`d3faf30` 后重建，主审独立验收）：`verify:macos` 全部通过——Bundle Identifier 与版本、Mach-O 架构、无 Python 动态链接与遗留、路径脱敏、构建身份 commit/date 与 `d3faf30` 精确一致、从 `/` 隔离环境（隔离 HOME、独立 DATA_DIR、最小 PATH）5 秒持续存活并优雅退出；未签名（公证按脚本语义报告"不适用"）。SHA256 `51c33f05882170f2f01e1711beeb79ecc27781c6de4517209d89393ed3131687`，7942641 bytes。
-- 浏览器验收（dev server + mock，Chrome DevTools）：接管中心页六个分区按来源正确渲染，「全选可接管项」得到 6 项、确认弹窗如实声明「其中 3 项会替换助手里的同名外部条目」，执行后 toast「接管完成：成功 6，失败 0」且勾选清空；控制台除 dev server 的 favicon 404 外无报错，页面无横向滚动。该验收证明页面渲染与编排链路，不证明真实引擎写入。
-- 未做/未验证，如实说明：断链与旧体系残留只标识，不提供清理动作（需手工删除）；助手发现基于固定已知 CLI 清单，清单外的助手不会被发现；安装包内的接管中心真机点击链路未验收（避免在宿主桌面执行真实写入），真实写入语义由隔离 CLI 验收覆盖。
+- User request: discover, classify, and adopt local agent/mcp/skill resources in one operation. Official paths/native installations retain native management; others use symlinks.
+- Before implementation: agents detected installation sources only for defined agents, not undefined ones. Skills exposed extra links only within defined collection matrix cells, missing unassigned target entries; collections required git URLs, with no external-local registration. MCP had manual `import_candidates` without source classification.
+- Engine: read-only `system:discover` (`--only agents|skills|mcp`, zero writes/network, no apply lock) returns `manage` classifications (native / symlink / collection / register / cleanup). Local skills collections add `source_path`, mutually exclusive with `url`; they directly link registered source directories without content snapshots. Registered roots become managed baselines; collection updates only rescan/repair links without network. Known-agent CLI discovery suggests definitions by source, supplying management commands only after successful npm reverse lookup. MCP reuses masked scanning and adds origin/manage. Tauri commands/argument allowlists admit `system:discover`.
+- Frontend: Takeover Center is the fifth navigation item, with categories, batch selection, one aggregate confirmation, and sequential unified execution (independent run_id/history/audit); failures do not interrupt later entries. Agent registration saves definitions only; Skills/MCP use existing real domain apply.
+- Separate fix `04c99e6`: `definitionKeyPrefix("agents")` wrote unread top-level `agent_definitions`, making custom definitions ineffective. It now writes the engine's real `agents.definitions`.
+- Completion `763a988` / `d3faf30`: dev mock supports `system:discover`, preventing errors under `?mock=1`; collection forms choose git repository or local directory, avoiding git-URL validation failures and destructive URL insertion when editing adopted local collections.
+- Automation: engine-rs 289, app/src-tauri 15, Vitest 37 files / 330 tests, `pnpm typecheck`/`pnpm build`, both `cargo fmt --check` passed.
+- Real isolated CLI acceptance (HOME + AGENT_MANAGER_DATA_DIR, no mocks): Skills replicated external-tool links, real official-directory folders, and broken links. All 11 checks passed: discovery classification, source-root grouping, registration/per-agent add, direct external-source links, no snapshots, external-update propagation, disable removing only links with sources intact, managed entries leaving candidates, and unchanged database hashes for reads. All 7 MCP checks passed: masked discovery, import/takeover, stdio env markers, SQLite reference-only definitions/status without plaintext, preservation of unrelated user fields, and fail-closed same-name unmanaged entries without `--allow-takeover`. Registered `agents.definitions.<id>` appeared in `agents:status` with state=unmanaged-detected, definition_origin=custom, and no upgrade/removal actions.
+- Final clean x86_64 DMG rebuilt after `d3faf30`, independently accepted: `verify:macos` passed Bundle Identifier/version, Mach-O architecture, no Python linkage/legacy artifacts, path redaction, exact `d3faf30` commit/date, 5-second survival/graceful exit from `/` with isolated HOME/DATA_DIR/minimal PATH. Unsigned; notarization "not applicable" per script. SHA256 `51c33f05882170f2f01e1711beeb79ecc27781c6de4517209d89393ed3131687`, 7942641 bytes.
+- Browser acceptance (dev server + mock, Chrome DevTools): six source categories rendered correctly; Select All Adoptable selected 6; confirmation stated that 3 replace same-name external entries; toast reported success 6/failure 0 and cleared selection. No errors except dev-server favicon 404; no horizontal scrolling. This proves rendering/orchestration, not real engine writes.
+- Unverified/unfinished: broken links/legacy remnants are identified only, requiring manual removal. Discovery uses a fixed known-CLI list, excluding others. Package GUI takeover clicks were not accepted to avoid real host writes; isolated CLI acceptance covers write semantics.
 
-### 2026-09-17 追加：启动命令界面化与易用性审查（`873c63f` + `d01a18e`）
+### 2026-09-17 Follow-up: Launch-command UI and Usability Review (`873c63f` + `d01a18e`)
 
-- 起因（用户需求）：界面上要能设置每个助手的启动参数别名，并支持选择时区与设置扩展参数。
-- 易用性审查（按「客户完成一件事要几步、要不要手写结构化文本」核对六域）：
+- User request: configure each agent's launch alias/arguments, timezone, and additional parameters through the UI.
+- Six-domain review counted steps and whether users must handwrite structured text:
 
-  | 域 | 新增 / 编辑 | 启停 | 删除 | 执行 | 编辑形态 | 结论 |
+  | Domain | Add/edit | Enable/disable | Delete | Execute | Editor | Conclusion |
   | --- | --- | --- | --- | --- | --- | --- |
-  | 助手 | 表单 | 卡片上只读 | 移除管理 | 安装/升级/卸载直执 | 结构化 | 启停与自动安装/自动更新改不了（见下） |
-  | 技能 | 表单 | 集合级 + 逐助手矩阵（含勾选批量） | 有 | 直执 | 结构化 | 完整 |
-  | MCP | 表单 | 库级 + 逐助手 | 有 | 直执 | 结构化 | 完整 |
-  | 规则 | 文本编辑 | — | 清空即移除 | 同步 | 文本（正文本就是 Markdown） | 合适 |
-  | Hooks | 手写 JSON | — | — | 同步 | 裸 JSON | 仍需照着 schema 手写（见下） |
-  | 启动命令 | 本轮补齐 | — | 本轮补齐 | 同步 | 结构化 | 本轮补齐 |
+  | Agents | Form | Read-only card | Unmanage | Direct install/upgrade/remove | Structured | Enable/disable and auto-install/update cannot be changed; see below |
+  | Skills | Form | Collection + per-agent matrix, including batch | Yes | Direct | Structured | Complete |
+  | MCP | Form | Library + per-agent | Yes | Direct | Structured | Complete |
+  | Rules | Text | — | Clear to remove | Synchronize | Text; content is Markdown | Appropriate |
+  | Hooks | Handwritten JSON | — | — | Synchronize | Raw JSON | Still requires schema-based handwriting; see below |
+  | Launch commands | Added this round | — | Added this round | Synchronize | Structured | Completed this round |
 
-- 本轮改动：助手卡片新增「启动命令」区（展示同步后实际生效的那一行、按项编辑、已配置时可直接同步）；编辑弹窗按项填写名称/命令/时区/语言/扩展参数并实时预览，常用时区置顶，读到非「环境变量+命令」写法时自动切原文编辑不改写用户写法；设置里的「终端快捷命令」从通用同步页换成结构化页（全局时区语言 + 逐条增删改 + 按需展开的原文编辑）。引擎侧零改动——时区/语言记号替换、注入校验与只改受管区块本就具备。
-- 自动化验证：Vitest 39 files / 360 tests 全部通过（新增纯函数 13、终端快捷命令页 9、助手卡片启动命令 4）；`pnpm typecheck` 与 `pnpm build` 通过。
-- 隔离环境真实 CLI 验收（隔离 HOME + 数据目录）：保存不写 shell 配置、同步后跟随全局的时区被替换、单独指定时区的条目不受全局影响、用户原有内容与 zprofile 同步、改全局时区后跟随项跟着变而指定项不变、含单引号的取值被引擎拒绝、移除条目后该行从配置消失而其余保留，共 12 项检查全通过。
-- 浏览器验收（dev server + mock）：助手卡片启动命令区与编辑弹窗回填正确，终端快捷命令页的全局默认与逐条列表渲染正确，控制台无报错。
-- 最终 clean x86_64 DMG（`d01a18e` 后重建，主审独立验收）：`verify:macos` 全部通过，包内构建身份 commit/date 与 `d01a18e` 精确一致，隔离环境 5 秒存活并优雅退出；未签名。SHA256 `4d901ab66775383ca7d5fb183d215567f458922272162bf106665c29d63af517`，7947490 bytes。
-- 审查发现但本轮未做（留待裁决，不擅自扩大范围）：Hooks 仍只能手写 JSON，没有按事件/命令填写的结构化表单；助手卡片上的启用停用、自动安装、自动更新是只读展示，要改只能去「个性化配置」手写；接管中心的断链与旧体系残留仍只标识、不提供清理动作。
+- Agent cards gain Launch Commands (effective synchronized line, per-item editing, direct synchronization when configured). Editor fields cover name/command/timezone/language/additional arguments with live preview and common timezones first. Unsupported environment-variable-plus-command syntax switches to original-text editing without rewriting user syntax. Settings Terminal Shortcuts becomes structured (global timezone/language, per-item CRUD, expandable raw editor). Engine unchanged: timezone/language substitution, injection checks, and managed-block-only writes already existed.
+- Automation: Vitest 39 files / 360 tests passed (13 pure-function, 9 shortcuts-page, 4 card-command cases); `pnpm typecheck`/`pnpm build` passed.
+- Real isolated CLI: all 12 checks passed, covering save without shell writes, global timezone substitution, explicit timezone independence, preserving user content/zprofile synchronization, global changes affecting only followers, rejecting single-quote values, and removing only the selected line.
+- Browser (dev + mock): launch sections/editor prefill, global shortcut defaults, and item lists rendered correctly without console errors.
+- Final clean x86_64 DMG after `d01a18e`, independently accepted: `verify:macos` passed exact commit/date, 5-second isolated survival/graceful exit; unsigned. SHA256 `4d901ab66775383ca7d5fb183d215567f458922272162bf106665c29d63af517`, 7947490 bytes.
+- Gaps identified but deferred for a decision: Hooks remains handwritten JSON without event/command forms; enable/disable and auto-install/update cards remain read-only, changeable only through handwritten Personal Configuration; broken/legacy links remain identification-only in Takeover Center.
 
-### 2026-09-17 追加：助手实例与启动命令自定义（`2204621` + `8893e91`）
+### 2026-09-17 Follow-up: Agent Instances and Custom Launch Commands (`2204621` + `8893e91`)
 
-- 起因（用户需求与裁决）：借鉴 cc-switch 做多账号，但用户指出它「改写全局配置来切换」的范式同一时刻只能用一个账号；用户提出改用独立配置目录 + 别名启动（`CLAUDE_CONFIG_DIR=… claude …`），可以多端同时工作。主审核实后采纳该范式。
-- 技术前提（实测，非文档推断）：`CLAUDE_CONFIG_DIR` 指向空目录后 `claude mcp list` 返回「未配置」并在该目录独立生成 `.claude.json`，配置与凭据确实隔离；`--settings <file-or-json>` 存在；Codex 侧 `$CODEX_HOME` 与 `-p/--profile <name>`（叠加 `$CODEX_HOME/<name>.config.toml`）存在。官方文档进一步说明 `CLAUDE_CONFIG_DIR` 下 settings、skills、agents、plugins、凭据、历史全部随之迁移，且官方给出的多账号示例就是这种别名写法。
-- 范式取舍如实记录：相比改写全局配置，隔离目录方案支持并发、不动全局文件、无切换竞态、删目录即回退；代价是每个实例各自登录一次、各存一份会话与技能/MCP 配置。
-- 实例定义即 agent 定义（多一个 `profile` 段），技能矩阵与 MCP 的逐助手分配因此天然适用，不另造分配模型。
-- 引擎新增 profiles 域：status 只读零写、只报变量名与能否解析；apply 只写实例目录下本工具全权拥有的那个文件（Claude `settings.json`；Codex 用 `agent-manager.config.toml` + 启动 `-p` 叠加，避开归 MCP 域的 `config.toml` 被整文件写入互相抹掉），目录 0700、文件 0600、原子换入、事务失败回滚，已有他人内容或被外部改过一律 fail-closed 需显式 `--allow-takeover`；鉴权只以 `${VAR}` 入库，Claude 写入时解析（客户端不展开引用），Codex 只写变量名；配置目录必须在 HOME 下且不得是主实例目录、数据目录内或符号链接。
-- 前端：助手页新增「实例」区（新建/编辑表单含启动方式预览，保存时同时把启动命令存成同名快捷命令；卡片支持写入配置、接管写入、同步启动命令、管理技能、移除），启动命令弹窗补自定义时区/语言与任意环境变量增删改。
-- 自动化验证：`engine-rs` 303 项、`app/src-tauri` 15 项、Vitest 41 files / 379 tests 全部通过；`pnpm typecheck` 与 `pnpm build` 通过；两套 `cargo fmt --check` 通过。
-- 隔离环境真实 CLI 验收（19 项检查全通过）：保存定义零落地；实例配置写入后含解析值而全局 `~/.claude/settings.json` 字节未变；目录 0700 / 文件 0600；**技能分配到实例后链接落在实例技能目录且主实例未被波及**；**MCP 分配写进实例的 `.claude.json` 且全局 `~/.claude.json` 未被创建**；主实例与实例的启动命令共存于受管区块；外部改动后拒绝覆盖且原文件不变，显式接管后方可写入。启动命令侧另有 12 项检查（自定义时区、跟随全局与单独指定的分别生效、移除后从配置消失）。
-- 最终 clean x86_64 DMG（`8893e91` 后重建，主审独立验收）：`verify:macos` 全部通过，构建身份与 `8893e91` 精确一致；SHA256 `cdec9c38375ae1f4dcc2cbdc709a2f2f6d483ac6a9ea1eef1132b5bd451f914c`，7984635 bytes；未签名。
-- 未做/未验证，如实说明：实例的技能解析依据官方文档与本机 `.claude.json`/凭据隔离实测，**未对「Claude 真的从实例目录加载 skills」做端到端实证**（新配置目录需先在该实例下登录才能起会话）；实例目前只支持 Claude Code 与 Codex；cc-switch 的用量查询、测速、代理与云同步不在本工具定位内，不做。
+- User decision: cc-switch's global-configuration switching allows only one account at a time. The proposed independent directory plus launch alias (`CLAUDE_CONFIG_DIR=… claude …`) supports concurrent clients; the lead reviewer verified and adopted it.
+- Measured prerequisites, not documentation inference: pointing `CLAUDE_CONFIG_DIR` at an empty directory makes `claude mcp list` report no configuration and creates a separate `.claude.json` there, confirming configuration/credential isolation. `--settings <file-or-json>` exists; Codex supports `$CODEX_HOME` and `-p/--profile <name>` overlaying `$CODEX_HOME/<name>.config.toml`. Official docs also move settings/skills/agents/plugins/credentials/history with `CLAUDE_CONFIG_DIR` and use this alias pattern for multiple accounts.
+- Trade-off: isolated directories allow concurrency, preserve global files, avoid switching races, and revert by directory removal; each instance needs its own login and session/Skills/MCP configuration storage.
+- Instance definitions are agent definitions with a `profile` section, reusing Skills matrix and per-agent MCP allocation without another assignment model.
+- New profiles domain: zero-write status shows only variable names/resolvability; apply writes only the fully owned instance file (Claude `settings.json`; Codex `agent-manager.config.toml` plus launch `-p` overlay, avoiding whole-file conflicts with MCP-owned `config.toml`). Directory 0700, file 0600, atomic replacement, transaction-failure rollback. Existing third-party content/external edits fail closed unless explicit `--allow-takeover`. Authentication persists only `${VAR}`; Claude resolves on write because its client does not expand references; Codex writes names only. Directories must be under HOME, excluding the main instance, data directory, and symlinks.
+- Frontend Instances section: create/edit with launch preview and same-name shortcut saved together; cards write/take over configuration, synchronize launch commands, manage skills, and remove. Launch editor adds custom timezone/language and arbitrary environment-variable CRUD.
+- Automation: engine-rs 303, app/src-tauri 15, Vitest 41 files / 379 tests, `pnpm typecheck`/`pnpm build`, both `cargo fmt --check` passed.
+- Real isolated CLI: all 19 checks passed: definition-only saves; resolved instance values with global `~/.claude/settings.json` byte-identical; 0700/0600; **assigned skill links land in instance skills directories without affecting the main instance**; **MCP goes into the instance `.claude.json` without creating global `~/.claude.json`**; main/instance commands coexist in managed blocks; external edits remain untouched unless explicitly taken over. Another 12 launch checks cover custom/global/explicit timezones and removal.
+- Final clean x86_64 DMG after `8893e91`, independently accepted: all `verify:macos` checks passed, exact identity; SHA256 `cdec9c38375ae1f4dcc2cbdc709a2f2f6d483ac6a9ea1eef1132b5bd451f914c`, 7984635 bytes; unsigned.
+- Unverified: instance skill resolution relies on official docs and measured `.claude.json`/credential isolation; **real Claude loading skills from the instance directory has no E2E evidence**, because new directories need login before sessions. Only Claude Code/Codex instances are supported. cc-switch usage queries, speed tests, proxies, and cloud synchronization are outside this product's scope.
 
-### 2026-09-17 追加：交互效率、缺口补齐与撤销（`44c4bf7`…`a270499`）
+### 2026-09-17 Follow-up: Interaction Efficiency, Gaps, and Undo (`44c4bf7`…`a270499`)
 
-- 起因：借鉴 cc-switch 与业界做法后，用户裁决「全部处理」——交互效率三件套、上轮三个易用性缺口、总览前置与撤销。
-- 总览与生效提示（`44c4bf7`）：总览从设置→高级管理提到侧栏第一项；执行成功后按目标补一句何时生效（助手下次启动、终端新开窗口、实例下次用该命令启动；规则还区分是哪个助手的目标），安装类动作本身即时可见不额外解释。
-- 助手偏好与撤销（`544e4f3`）：「自动安装 / 自动更新 / 已启用」从只读标签改为可点开关，只写本机偏好、不触发安装或同步；移除定义（助手、实例、快捷命令、MCP、技能集合）后给限时撤销，文案分清能恢复什么——只写定义的可完全复原，已清理过目标配置的撤销只加回定义、要再点一次应用。
-- 命令面板（`99e8216`）：`⌘K` 统一搜页面、助手、实例、技能集合、MCP 与常用动作，选资源跳到它所在页面（「某助手的技能」直接带预选），选动作走与页面相同的执行通道；方向键/回车/Esc 全键盘可完成，资源只在面板打开时才发起首次查询。
-- 残留链接清理（`b3a0182`）：引擎新增 `skills:apply --action remove-link`（按 `--agent` 与 `--link` 指名，不属于任何集合所以不要 `--only`）——只删链接本身、绝不跟随链接删源，真实文件/目录 fail-closed，仍有分配记录的条目要走所属集合的 remove，审计写不进去就把链接放回原样；接管中心里这些条目改为可勾选批量清理，确认文案把「纳管」与「删链接」分开说。
-- Hooks 结构化编辑（`bc9ecbb`）：按「事件 + 匹配器 + 命令」逐行填写，保存回填落盘结构并合并同事件同匹配器的命令；不理解的字段（timeout）与不展示的字段（removed_signatures）以读到的原值为基底原样保留并在界面标出，写入带版本号比对；原文编辑收进按需展开的入口。
-- 托盘常用入口（`ae0a1b8`）：新增「搜索与执行…」（唤回窗口并打开命令面板）与「接管中心」。托盘只负责把人带到能做这件事的地方，不直接触发写操作，锁与审计因此仍走同一条既有路径。
-- 自动化验证：`engine-rs` 305 项、`app/src-tauri` 15 项、Vitest 47 files / 408 tests 全部通过；`pnpm typecheck` 与 `pnpm build` 通过；两套 `cargo fmt --check` 通过。
-- 浏览器验收（dev server + mock）：`⌘K` 面板分组与资源条目正确渲染（30 项），Hooks 页两个结构化编辑器与空态正确，控制台无报错。
-- 最终 clean x86_64 DMG（`a270499` 后重建，主审独立验收）：`verify:macos` 全部通过，构建身份 commit/date 与 `a270499` 精确一致；SHA256 `9be8e340f3052b23fa013cc22a216a94c11b0a3f446f3a4fd7ba29f2a33c6775`，8004560 bytes；未签名。过程中先构建出过一个 `-dirty` 包（三处测试断言与 fmt 结果漏提交），补提交后重建，未以 dirty 包充当验收结论。
-- 未做/未验证，如实说明：托盘菜单的真机点击未验收（避免在宿主桌面弹出交互），托盘侧只验证了编译与事件接线、界面侧订阅有单测覆盖；命令面板与 Hooks 编辑的验证基于 mock 数据，未在安装包内做真机点击。
+- After reviewing cc-switch/industry practice, the user authorized all items: three interaction improvements, three earlier usability gaps, prominent Overview, and undo.
+- Overview/effect notices (`44c4bf7`): move Overview from Settings→Advanced Management to first sidebar item. Successful actions state when they take effect (next agent launch, new terminal window, next instance-command launch; rules identify the target agent). Installation is immediately observable and needs no extra notice.
+- Agent preferences/undo (`544e4f3`): Auto-install/Auto-update/Enabled become switches that save local preferences without installation/synchronization. Removing definitions (agents, instances, shortcuts, MCP, collections) offers timed undo with precise scope: definition-only removal fully restores; already-cleaned targets restore only definitions and require another apply.
+- Command palette (`99e8216`): `⌘K` searches pages/agents/instances/collections/MCP/common actions; resources navigate to their page with agent-skills preselection where needed; actions use the existing execution channel. Arrow/Enter/Esc keyboard support; initial resource queries occur only when opened.
+- Leftover-link cleanup (`b3a0182`): `skills:apply --action remove-link` names `--agent` and `--link`, without `--only` because no collection owns it. It removes only links, never source targets; real files/directories fail closed. Assigned links must use their collection's remove. Failed audit restores the original link. Takeover Center permits batch cleanup and distinguishes adoption from link deletion in confirmation.
+- Structured Hooks (`bc9ecbb`): event/matcher/command rows save the native structure and merge same-event/matcher commands. Unknown `timeout` and hidden `removed_signatures` retain original values and are identified in UI. Writes compare versions; raw editing is expandable.
+- Tray shortcuts (`ae0a1b8`): Search and Execute restores the window/palette; Takeover Center navigates there. Tray entries navigate rather than write, retaining the existing lock/audit path.
+- Automation: engine-rs 305, app/src-tauri 15, Vitest 47 files / 408 tests, `pnpm typecheck`/`pnpm build`, both `cargo fmt --check` passed.
+- Browser (dev + mock): `⌘K` groups/resources rendered 30 items; both structured Hooks editors/empty states rendered correctly without errors.
+- Final clean x86_64 DMG after `a270499`, independently accepted: `verify:macos` passed exact identity; SHA256 `9be8e340f3052b23fa013cc22a216a94c11b0a3f446f3a4fd7ba29f2a33c6775`, 8004560 bytes; unsigned. An earlier `-dirty` build omitted three test assertions/fmt results from commits; they were committed and rebuilt, and the dirty artifact was not used as the acceptance result.
+- Unverified: real tray-menu clicks were avoided to prevent host interaction; compilation/event wiring checked, UI subscriptions unit-tested. Palette/Hooks checks used mocks, without package machine clicks.
 
-### 2026-09-18 追加：短板修正与真机 GUI 验收（`52e6bd6`…`25388e9`）
+### 2026-09-18 Follow-up: Gap Corrections and Real-machine GUI Acceptance (`52e6bd6`…`25388e9`)
 
-用户裁决「全部修正」后逐项处理上一轮自评列出的短板。
+The user authorized correcting every weakness listed in the previous self-review.
 
-- 实例补规则与 Hooks（`52e6bd6`）：此前称「完整实例」但规则与 Hooks 的目标是固定的主实例路径。改为 profiles 域负责实例目录下的全部受管文件（Claude：settings.json 合并写入 + CLAUDE.md；Codex：agent-manager.config.toml + AGENTS.md + hooks.json），一个目录一个域，避免两个域整文件写入互相抹掉；binding 改为逐文件记录指纹。
-- 启动参数预设（`05b9263`，用户追加需求）：按实际命令给常用参数，Claude 全自动、Codex 全自动与「保留沙箱」两档。取值来自本机实测 `--help`；本机这版 Codex 没有 `--full-auto`，因此不提供。危险档选中后明确写出后果。
-- OpenCode 纳入内置定义（`81f7798`）：技能矩阵与 MCP 分配因此覆盖它；不给安装命令（无可靠核对过的官方安装方式），只登记为观测渠道。
-- 配置备份（`5f50c12`）：`config:export`（只读）与 `config:import`（整体替换，一个事务）。导入走与逐条保存同一道闸门；分配记录与写入指纹不进备份——恢复后仍要各自应用一次才落地。
-- MCP 命令可用性（`25388e9`）：status 多报一个 stdio 命令能否在本机解析，找不到时卡片直接提示；远程不做网络探测，恒「不适用」。
-- **真机 GUI 验收（本轮补上此前完全缺失的一环）**：隔离 HOME/数据目录启动打包产物，AX 固定窗口位置后只截该窗口矩形（不做全屏截图），键盘驱动验证：应用启动与窗口渲染、`⌘K` 命令面板打开与搜索、无匹配时空态、回车跳转到接管中心、`⌘,` 打开设置、再次经命令面板跳转到 MCP 页；隔离环境数据目录与 HOME 均 0 项写入，应用日志无 panic/error。此前最后一次安装包内点击验收是 2026-09-15 的旧交互，其后所有新功能都只有隔离 CLI 与 mock 单测。
-- 自动化：`engine-rs` 310 项、`app/src-tauri` 15 项、Vitest 49 files / 422 tests 全部通过；typecheck/build、两套 `cargo fmt --check` 通过。
+- Instance rules/Hooks (`52e6bd6`): previously called complete, instances still had rules/Hooks targeting main paths. Profiles now owns all managed instance files (Claude: merged settings.json + CLAUDE.md; Codex: agent-manager.config.toml + AGENTS.md + hooks.json), one domain per directory to avoid competing whole-file writes; bindings track each file's fingerprint.
+- Launch presets (`05b9263`, added user request): command-specific common flags, Claude full automation, Codex full automation and Keep Sandbox. Values come from measured local `--help`; this Codex lacks `--full-auto`, so it is not offered. Dangerous choices state consequences.
+- Builtin OpenCode definition (`81f7798`) extends Skills/MCP assignment. No install command without reliably verified official installation; observation channel only.
+- Configuration backup (`5f50c12`): read-only `config:export`; whole-replacement, single-transaction `config:import` through the same save gate. Backups exclude assignments/write fingerprints; restored resources still need individual apply.
+- MCP command availability (`25388e9`): status reports local stdio command resolution, with missing-command notices; remote is always Not Applicable, without network probes.
+- **Real-machine GUI acceptance, filling the previously missing stage**: packaged app launched under isolated HOME/data; AX fixed position, screenshots captured only the window rectangle. Keyboard checks covered startup/rendering, `⌘K` open/search/no-match empty state, Enter navigation to Takeover Center, `⌘,` Settings, and palette navigation to MCP. HOME/data had 0 writes; no panic/error logs. Previous package-click acceptance was the obsolete 2026-09-15 interaction; subsequent features had only isolated CLI/mock tests.
+- Automation: engine-rs 310, app/src-tauri 15, Vitest 49 files / 422 tests, typecheck/build, both `cargo fmt --check` passed.
 
-本轮未做与做不到，如实记录：
+Unfinished or unavailable:
 
-- **Linux / Windows 验证本机做不到**：交叉编译缺 C 工具链（`aarch64-linux-gnu-gcc`、`x86_64-w64-mingw32-gcc` 均不存在），需要 CI 或真机，而 GUI CI 仍因 GitHub 账户计费在启动前失败。arm64 macOS 目标 `cargo check` 通过（只证明跨架构可编译，不等于真机运行验收）。
-- **技能版本回滚：裁决不做**。内容寻址快照按哈希存放，没有 skill 维度的历史记录，要做得先加一张历史表；而本地来源集合是直链模式本就没有版本概念，git 集合的回退在源仓库侧操作更自然。投入产比不成立，需要时再议。
-- **一个待用户裁决的观察**：内置默认的终端快捷命令里，`claude` 预置了 `--dangerously-skip-permissions`，即全新环境默认就是全自动。本轮加的参数预设已让用户可主动选择该档，但改内置默认会影响正在依赖它的现有用法，因此保持原样待裁决。
-- 实例里的技能加载仍未端到端实证（新配置目录要先在该实例下登录才能起会话）。
+- **Linux/Windows cannot be verified locally**: cross-compilation lacks `aarch64-linux-gnu-gcc` and `x86_64-w64-mingw32-gcc`; CI/machines required, but GUI CI still fails before startup on GitHub billing. macOS arm64 `cargo check` passed, proving compilation only.
+- **Skill version rollback declined**: content-addressed hash snapshots lack per-skill history and would require a new table; direct-link local collections have no version concept; git rollback belongs naturally at the source. Cost/benefit does not justify it; revisit if needed.
+- **Observation awaiting user decision**: builtin `claude` shortcuts preselect `--dangerously-skip-permissions`, making fresh environments fully automatic. New presets allow explicit choice, but changing defaults affects existing users; left unchanged pending a decision.
+- Instance skills loading still lacks E2E evidence; the instance needs login before a session.
 
-### 2026-09-17 追加：启动参数编排、配置备份差异与 OpenCode 规则（`3478f54`…本次提交）
+### 2026-09-17 Follow-up: Launch Parameters, Backup Differences, and OpenCode Rules (`3478f54`…this commit)
 
-用户要求「常见参数由用户自己选、要看得见是否真的生效」，以及把上一轮自评列出的剩余项一次处理完。
+The user asked for selectable common parameters, visible evidence of effect, and all remaining self-review items.
 
-- 高权限参数改为主动勾选（`3478f54`）：内置默认不再预置 `--dangerously-skip-permissions`；`aliases:status` 逐条回读期望取值与终端配置里的实际取值，界面按「已生效 / 还是旧的 / 区块里没有 / 还没写过」显示。只回答配置文件里现在是什么，不替用户断言终端会话已重新加载。
-- 全局时区的位置与记号含义（`ce4a28f`）：有跟随项时提示改哪里；包装写法的原文编辑里写明 `{timezone}` / `{lang}` 会在写入时替换成什么。
-- 配置导入前的差异（`a12cf0c`）：导入是整体替换且不可撤销，现在先读当前配置按类别列出新增、改动与消失的条目。看差异只读不写。
-- OpenCode 成为规则域的第三个目标（本次提交）：`rules:status/apply` 固定目标由 Codex/Claude 扩到 Codex/Claude/OpenCode，目标文件 `~/.config/opencode/AGENTS.md`（[官方文档](https://opencode.ai/docs/rules/)：全局规则就在该路径）；来源新增 `rules.opencode`，默认留空——仓库里没有核对过的 OpenCode 专用适配正文，共享规则照常生效，专用内容由用户自己填。OpenCode 不加 Hooks 目标：它的扩展机制是 JS/TS 插件，不是 JSON 配置。
-- 接管中心批量进度（本次提交）：批量执行时显示「第几项 / 共几项、正在做哪一项」与进度条，并说明失败那项跳过、后面继续。
-- 首次使用引导（本次提交）：本地配置层为空（= 还没在这里保存过任何东西）时，默认落地页给出三步——先扫描接管、再分配、最后点「立即同步」才真正写文件，并直达接管中心。点「不再提示」后不再出现。
-- 自动化：`engine-rs` 313 项、`app/src-tauri` 15 项、Vitest 51 files / 439 tests 全部通过；`pnpm typecheck` 与 `pnpm build` 通过；两套 `cargo fmt --check` 通过。
-- 隔离 CLI 实证（OpenCode 规则目标）：隔离 HOME + 数据目录下 `rules:status` 列出三目标且都为「缺失」、零写；`rules:apply` 生成 `~/.config/opencode/AGENTS.md`（内容与其余目标同源共享段）；二次 apply 无动作；手工往该文件追加一行后 status 变为「已被外部修改」，再 apply 被 preflight 拒绝且用户那一行原样保留。
-- 安装包内真机验收（隔离 HOME + 空数据目录启动打包产物，AX 固定窗口后只截该窗口矩形）：全新环境落地页按真实引擎数据显示首次使用引导，`⌘K` 跳转接管中心正常（各分类为空态）；隔离数据目录与 HOME 均 0 项写入，日志无 panic/error。截图同时印证内置默认的 claude 启动命令已不含跳过权限确认的参数，且逐条回读显示「还没写入终端配置」。
-- 最终 clean x86_64 DMG（`31440f9` 后重建）：`verify:macos` 全部通过，构建身份 commit/date 与 `31440f9` 精确一致；SHA256 `f8a2ac041c272c877ef27d106e4ca1d84de948a99473020c7646175ca95982c5`，8034356 bytes；未签名。
-- 浏览器验收（dev server + `?mock=fresh` 全新机器数据）：首次使用引导按三步渲染、「去接管中心」跳转正确、「不再提示」点后消失并记住；接管中心批量执行逐项捕获到 7 条进度文案（第 1/7 → 第 7/7），结束后进度条消失、按钮复位；900px 窗口无横向滚动；控制台无报错与警告。接管完成后本地配置层不再为空，引导自动消失（不依赖用户手动关闭）。
+- Explicit high-privilege opt-in (`3478f54`): builtin defaults remove `--dangerously-skip-permissions`. `aliases:status` reads expected/actual shell values; UI shows Effective / Still old / Missing from block / Never written. It reports files, not whether a terminal session reloaded.
+- Global timezone location/substitution (`ce4a28f`): followers show where to change defaults; wrapper raw editors explain `{timezone}` / `{lang}` substitutions.
+- Import differences (`a12cf0c`): whole replacement is irreversible; UI first reads current configuration and groups additions/changes/removals by category. Diff reads perform no writes.
+- OpenCode becomes the third Rules target (this commit): fixed Codex/Claude/OpenCode `rules:status/apply`, target `~/.config/opencode/AGENTS.md` per [official docs](https://opencode.ai/docs/rules/). New `rules.opencode` defaults empty because no verified OpenCode-specific content exists in this repository; shared rules still apply and users supply dedicated content. No OpenCode Hooks target: extensions are JS/TS plugins rather than JSON configuration.
+- Batch progress in Takeover Center (this commit): item index/total, current item, progress bar, and explanation that failures are skipped while later items continue.
+- First-use guidance (this commit): an empty local layer means nothing saved here; landing page presents scan/adopt, assign, then Synchronize Now to write, with direct Takeover Center navigation. Don't Show Again dismisses it permanently.
+- Automation: engine-rs 313, app/src-tauri 15, Vitest 51 files / 439 tests, `pnpm typecheck`/`pnpm build`, both `cargo fmt --check` passed.
+- Isolated CLI evidence for OpenCode rules: under isolated HOME/data, `rules:status` listed three Missing targets with zero writes; apply created `~/.config/opencode/AGENTS.md` from the same shared source; second apply did nothing. Appending a user line changed status to Externally Modified; preflight refused apply and preserved it.
+- Packaged-machine acceptance (isolated HOME/empty data, AX-fixed window-only screenshots): real engine data showed first-use guidance; `⌘K` navigation to empty Takeover Center worked. HOME/data had 0 writes; no panic/error logs. Screenshots confirmed builtin claude commands no longer skip permission confirmation and readback said Not Yet Written to Terminal Configuration.
+- Final clean x86_64 DMG after `31440f9`: all `verify:macos` checks passed, exact commit/date; SHA256 `f8a2ac041c272c877ef27d106e4ca1d84de948a99473020c7646175ca95982c5`, 8034356 bytes; unsigned.
+- Browser (dev + fresh-machine `?mock=fresh`): three-step guidance, Takeover Center navigation, persistent Don't Show Again, and 7 batch progress messages (1/7 → 7/7) worked. Progress disappeared/buttons reset afterward; no horizontal scrolling at 900px or console errors/warnings. Adoption made the local layer nonempty and automatically dismissed guidance without manual closure.
 
-本轮未做与做不到，如实记录：
+Unfinished or unavailable:
 
-- **OpenCode 实例（多套独立配置）做不到，不做**。Claude 与 Codex 各有一个官方的「换一个配置目录」变量（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`），实例模型建立在此之上。OpenCode 没有等价物：按[官方配置文档](https://opencode.ai/docs/config/)，`OPENCODE_CONFIG` 只换一个配置**文件**，`OPENCODE_CONFIG_DIR` 只是额外搜索 agents/commands/modes/plugins 的目录，两者都不迁移全局 `~/.config/opencode/AGENTS.md`，也不隔离登录凭据与会话（那些在 `${XDG_DATA_HOME:-~/.local/share}/opencode/`）。要凑出隔离得同时设 `XDG_CONFIG_HOME` 与 `XDG_DATA_HOME` 两个通用变量，且本机未安装 opencode、无法实测。因此不提供 OpenCode 实例，等官方给出隔离变量再议。
-- **「助手页 6 条并发查询」不是真问题，不改**。实测本机引擎各只读命令（`agents:status` / `policy:get` / `aliases:status` / `profiles:status` / `system:audit` / `sources:get`）热态各约 10 毫秒，六条并发合计约 10 毫秒；首次 1.05 秒是二进制冷启动，与并发无关。桌面端引擎还是进程内调用，连启动开销都没有。此前测试里的超时是 jsdom 下的等待时限，不是引擎慢。
-- Linux / Windows 真机、签名公证、实例内技能加载端到端实证，与上一轮记录一致，仍未做。
+- **OpenCode independent instances are unavailable and excluded**. Claude/Codex each provide an official directory-isolation variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). Per [official configuration docs](https://opencode.ai/docs/config/), `OPENCODE_CONFIG` changes only a configuration **file**; `OPENCODE_CONFIG_DIR` adds an agents/commands/modes/plugins search directory. Neither moves global `~/.config/opencode/AGENTS.md` or isolates credentials/sessions in `${XDG_DATA_HOME:-~/.local/share}/opencode/`. Isolation would require both generic `XDG_CONFIG_HOME` and `XDG_DATA_HOME`; OpenCode is not installed locally and cannot be measured. Revisit when official isolation variables exist.
+- **Six concurrent agent-page queries are not a real problem; unchanged**. Warm local `agents:status` / `policy:get` / `aliases:status` / `profiles:status` / `system:audit` / `sources:get` each take about 10 ms; all six concurrently also take about 10 ms. First-run 1.05 seconds is binary cold startup, not concurrency. Desktop calls are in-process and avoid even that. Earlier timeouts were jsdom waits, not slow engine execution.
+- Linux/Windows machines, signing/notarization, and instance-skills E2E remain unverified as recorded previously.
 
-### 2026-09-18 追加：可用性实测与六项修正（`64cd48d`…`0aa5669`）
+### 2026-09-18 Follow-up: Usability Trials and Six Corrections (`64cd48d`…`0aa5669`)
 
-用户要求「测试和评估各个功能是否简单易用」，实测后逐项修正。评估用带存量资源的隔离环境走真实旅程，不看代码推断。
+The user requested functional usability testing/evaluation. Real journeys used isolated environments with existing resources rather than code inference.
 
-实测发现并已修的：
+Observed and corrected:
 
-- **快捷命令：区块外的日常编辑会把同步永久卡死**（`64cd48d`）。外部修改检测比的是整个文件的摘要，用户往 `~/.zshrc` 里加一行 `export EDITOR=vim` 就再也同步不了——而这个域的全部承诺就是「只换受管区块、区块外逐字节保留」。改成只比受管区块；binding 补 `applied_block_digest`，旧行按空串回退整文件语义，补列放在写路径，status 仍零写。
-- **实例启动命令是坏的**（`a0e33a6`）。生成的是 `CLAUDE_CONFIG_DIR="~/.claude-x"`，双引号里的 `~` 不展开，助手会在当前工作目录下另建一个名叫 `~` 的文件夹，而本工具写配置用的是绝对路径——两边不是同一个目录，实例功能实际不通。改成 `"$HOME/..."`，已写出去的坏命令回读时认得出来并给「订正」。
-- **实例只能挂一条启动命令、别名不能改名不能复制**（`a0e33a6`）。现在实例卡片列出指向该配置目录的全部命令（按 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 反查，不加字段，别名仍只有别名域一个写者），每条可编辑/复制/删除；别名可改名（真正重命名，不留两条）与复制；实例整体也能复制，复制时默认换掉配置目录。
-- **规则与快捷命令被手改过之后是死路**（`2e5c105`）。状态变「已被外部修改」、可用动作为空、同步永久失败，引擎不接受 `--allow-takeover`，页面也没有入口；而同页面的 Hooks 有。照 hooks 给两个域各补三处，只对「当前内容读得到」的冲突放行，错误文案点名是哪个目标、下一步点什么。
-- **密钥只认进程环境，GUI 启动基本拿不到**（最初由 `4d60857` 修复，后续安全边界已收紧）。现在「密钥」页先选择外部私有 `.env` 文件，再逐个变量填写；解析顺序为先外部文件、再回退进程环境，明文不再进入本机数据库。
-- **接管技能目录只收录已链接过的那几个**（`0aa5669`）。源目录里其余含 SKILL.md 的技能一并收进来，逐条标注哪些已在用。
-- **矩阵里「不支持」会被读成「这个助手用不了技能」**（`0aa5669`），改「未分配」，原因文案直接说下一步。
+- **Editing outside shortcut blocks permanently blocked synchronization** (`64cd48d`). Whole-file hashes meant adding `export EDITOR=vim` to `~/.zshrc` blocked all later synchronization, contradicting managed-block-only writes and byte-preserving outside content. Compare only the managed block; add `applied_block_digest` to bindings, with empty-string legacy fallback to whole-file semantics. Schema additions occur only on writes; status remains zero-write.
+- **Instance launch commands were broken** (`a0e33a6`). `CLAUDE_CONFIG_DIR="~/.claude-x"` does not expand quoted `~`; the assistant creates a literal `~` directory beneath cwd while this tool writes an absolute path. Generate `"$HOME/..."`; recognize old broken commands on readback and offer correction.
+- **One instance command, no alias rename/copy** (`a0e33a6`). Instance cards now reverse-match `CLAUDE_CONFIG_DIR` / `CODEX_HOME` and list all commands for the directory, without new fields or a second alias writer. Each supports edit/copy/delete; true renames leave one entry. Instances can be copied with a different directory by default.
+- **Externally edited rules/shortcuts had no recovery** (`2e5c105`). Externally Modified status had no actions, permanent synchronization failures, and no engine/UI takeover support, while Hooks already supported it. Add three corresponding points per domain, allowing only readable current-content conflicts; errors name the target and next action.
+- **Secrets recognized only process environment, usually unavailable to GUI** (initially `4d60857`, later security boundaries tightened). Secrets now selects an external private `.env` before variable entry; resolution prefers that file, then process environment; plaintext no longer enters the local database.
+- **Adopted skill directories included only previously linked skills** (`0aa5669`). Include all source-root entries containing SKILL.md and label existing usage.
+- **Unsupported matrix labels implied an agent could not use skills** (`0aa5669`). Rename to Unassigned and state the next step directly.
 
-- 自动化：`engine-rs` 317 项、`app/src-tauri` 15 项、Vitest 51 files / 451 tests 全部通过；typecheck、build、两套 `cargo fmt --check` 通过。
-- 最终 clean x86_64 DMG（`7e9cf47` 后重建）：`verify:macos` 全部通过，构建身份 commit/date 与 `7e9cf47` 精确一致；SHA256 `8761d7f2bc6ae0d2a11792265a87eac57c38054bf0ae14c07273438a23616adb`，8048422 bytes；未签名。
-- 安装包内真机验收：隔离 HOME + 空数据目录启动打包产物，界面正常渲染，隔离数据目录与 HOME 均 0 项写入，日志无 panic/fatal。
-- 浏览器验收（dev server + mock）：⌘K 搜「密钥」直达该页，逐变量给出「已填写 / 已配置（来自环境）/ 未配置」与填写入口；快捷命令每条都有复制，复制预填 `claude-copy`，编辑态名字可改；控制台无报错。
-- 隔离 CLI 实证（每项都在隔离 HOME + 空数据目录下真跑）：区块外加行后状态仍 managed-ok 且能同步、用户那行原样保留，区块内被改则拒绝并可接管；规则外部改动后 `--allow-takeover` 精确到单目标接管成功、多目标接管被拒；密钥填写后 status 的 `resolved/stored` 正确、apply 真的用上该值、操作记录与配置备份均不含明文、清空即撤销；接管扫描对「源目录 3 个技能只链接了 1 个」给出全部 3 个。
+- Automation: engine-rs 317, app/src-tauri 15, Vitest 51 files / 451 tests, typecheck/build, both `cargo fmt --check` passed.
+- Final clean x86_64 DMG after `7e9cf47`: all `verify:macos` checks passed, exact commit/date; SHA256 `8761d7f2bc6ae0d2a11792265a87eac57c38054bf0ae14c07273438a23616adb`, 8048422 bytes; unsigned.
+- Packaged-machine acceptance: isolated HOME/empty data, successful rendering, 0 HOME/data writes, no panic/fatal logs.
+- Browser (dev + mock): ⌘K search for Secrets navigated directly; variable states showed Entered / Configured from Environment / Unconfigured with entry actions. Every shortcut had Copy, prefilled `claude-copy`; editing allowed renames. No console errors.
+- Real isolated CLI per item: outside-block edits retained managed-ok and synchronized without losing user lines; inside edits refused overwrite but allowed takeover. Rules takeover succeeded for one exact target and rejected multiple targets. Secret status resolved/stored matched entered values, apply used them, operation logs/backups omitted plaintext, and clearing revoked them. Discovery returned all 3 source skills when only 1 was linked.
 
-本轮未做与做不到，如实记录：
+Unfinished or unavailable:
 
-- **接管 MCP 时需要保持原配置可用**。发现结果仍不携带明文；用户确认接管时，引擎只读目标服务的字面量取值并转存到“设置 → 密钥”选定的外部文件，回执只报变量名。同名不同值或外部文件不可用时整项停止，不继续覆盖助手配置。
-- **配置备份不带密钥取值**（本轮按此默认实施，用户未另行指定）。换机后需重填一次，好处是备份文件本身不是密钥载体。
-- **「助手页 6 条并发查询」不是真问题，未改**。实测本机各只读命令热态各约 10 毫秒、六条并发合计约 10 毫秒；首次 1.05 秒是二进制冷启动。
-- Linux / Windows 真机、签名公证、实例内技能加载端到端实证，与上一轮记录一致，仍未做。
+- **MCP takeover must preserve usable existing configuration**. Discovery still contains no plaintext. On confirmed takeover the engine reads only the target service's literal values and transfers them to the external file selected in Settings → Secrets. Receipts show variable names only. Same-name/different-value conflicts or unavailable files stop the entire item before assistant overwrite.
+- **Backups exclude secret values** (default implemented this round without another user instruction). A new machine needs re-entry; the backup itself is not a secret container.
+- **Six concurrent agent-page queries are not a real issue; unchanged**. Each warm read is about 10 ms, all six together about 10 ms; first 1.05 seconds is cold binary startup.
+- Linux/Windows machines, signing/notarization, and instance-skills E2E remain unverified as previously recorded.
 
-### 2026-09-18 追加：合并写入目标的检测口径与接管保值（`f1b7123`…）
+### 2026-09-18 Follow-up: Merged-target Detection and Value-preserving Takeover (`f1b7123`…)
 
-上一轮评估后用户要求继续处理剩余项。核心是同一个 bug 家族的另外两处。
+The user requested remaining items after evaluation: two more members of the same bug family.
 
-- **Hooks 的 Claude settings.json**（`f1b7123`）：signature-set 合并的前提就是「用户可以有
-  自己的字段」，但外部修改检测比的是整文件，用户动一次 model/permissions/statusLine，hooks
-  就被判「外部修改」、每次都要点接管。而同一产品里 MCP 早就是条目级比对——不是做不到，是没
-  统一。改成只比受管 hook 切片的摘要；Codex 的 hooks.json 整份归本工具，仍比整文件。
-- **实例的 settings.json**（`e406c0d`）：同样是合并写入（本工具只管 env/model/hooks），
-  同样拿整文件做检测。改成只比这三个键；拒绝文案原来说「不是本工具写入的那份」也是错的，
-  那份就是本工具写的、用户后来加了字段。
-- 两处都用同一套兼容：旧绑定存的是整文件摘要，整文件没变也照常放行，下次写入时自动升级为
-  切片摘要——不改表结构，存量用户不会被误报一次。
-- **接管 MCP 现在真的保值**（`e69d443`）：新增 `secrets:adopt --agent --server`，只读该助手
-  自己的配置、只取明文字面量（已是 `${VAR}` 的与 `_MANAGED_BY` 跳过），按与界面一致的规则
-  推变量名存进本机库。界面接管流程改为「先逐助手 adopt、再写定义、最后写回」，顺序有断言——
-  晚接就会用另一个值同步。此前只是在确认框里提示要自己补填。
-- 命令面板补齐设置下的四个二级页（密钥、终端快捷命令、更新中心、策略）。
-- `agent-rule/CLAUDE.md` 里几节仍把 `tests/*.py` 当作在跑的门禁，而 `tests/` 早已随 Python
-  实现清理删除。改为「纪律仍然有效，但没有自动门禁替你把关」，并标明工具需从 git 历史恢复。
+- **Claude Hooks settings.json** (`f1b7123`): signature-set merging explicitly permits user fields, but whole-file hashes marked any model/permissions/statusLine edit as an external change requiring takeover. MCP already compared entries. Compare only managed-hook slices; fully owned Codex hooks.json still uses the whole file.
+- **Instance settings.json** (`e406c0d`): merged writes own only env/model/hooks but compared the whole file. Compare those three keys. The old error claiming this was not the tool's file was also wrong: it was the tool's file with later user additions.
+- Both retain compatibility: old whole-file bindings remain valid when the file is unchanged, then upgrade to slice digests on the next write. No schema change or one-time false conflict for existing users.
+- **MCP takeover now preserves actual values** (`e69d443`): `secrets:adopt --agent --server` reads only that assistant's configuration and plaintext literals, skipping `${VAR}` and `_MANAGED_BY`. It derives variable names by UI rules and stores them in the local database. UI order is per-agent adopt → definition save → writeback, with order assertions; late adoption would synchronize another value. Previously confirmation merely asked users to refill secrets.
+- Command palette adds four Settings subpages: Secrets, Terminal Shortcuts, Update Center, Policy.
+- `agent-rule/CLAUDE.md` still described `tests/*.py` as active gates although Python retirement removed `tests/`. It now says the discipline remains but no automatic gate enforces it, and tools must be restored from git history.
 
-**实例内技能加载：端到端实证补上了**（此前一直记为未验证）。此前认为需要先在实例目录下登录
-才能验，实际不需要——Claude Code 的技能发现发生在鉴权之前。用隔离 HOME 建实例、把技能分配
-给它、再用该实例的配置目录起 `claude -p` 并收调试日志，日志写明：
+**Instance-skills E2E evidence is now available**, previously always unverified. Login is unnecessary: Claude discovers skills before authentication. An instance was created under isolated HOME, assigned a skill, and launched with `claude -p` using its directory and debug logging:
 
 ```
 Loading skills from: ... user=~/.claude-work/skills, project=[]
@@ -292,690 +278,435 @@ Loaded 1 unique skills (... user: 1 ...)
 Watching for changes in skill/command directories: ~/.claude-work/skills
 ```
 
-即分配给实例的技能确实被该实例加载，主实例目录 `~/.claude/skills` 根本不存在、未被牵连。
-`profileSkillsDir(configDir) = <configDir>/skills` 这个假设由此有了实证。
+The instance loaded its assigned skill; main `~/.claude/skills` did not exist and was unaffected. This proves `profileSkillsDir(configDir) = <configDir>/skills`.
 
-- 最终 clean x86_64 DMG（`c7f58c3` 后重建）：`verify:macos` 全部通过；SHA256 `31ef45d8ba79d7a4030a289058bd549ad2dd1829e48485a046ffb05fc915e2d5`，8080588 bytes；未签名。
-- 上一版 DMG（`04555d3` 后重建）：`verify:macos` 全部通过；SHA256 `520ab39ffbe94df44ae039d5119cd0e978ace04adb4e97d259b633b33565b084`，8077673 bytes；未签名。
+- Final clean x86_64 DMG after `c7f58c3`: all `verify:macos` checks passed; SHA256 `31ef45d8ba79d7a4030a289058bd549ad2dd1829e48485a046ffb05fc915e2d5`, 8080588 bytes; unsigned.
+- Previous DMG after `04555d3`: all `verify:macos` checks passed; SHA256 `520ab39ffbe94df44ae039d5119cd0e978ace04adb4e97d259b633b33565b084`, 8077673 bytes; unsigned.
 
-- **配置备份改为带上凭据取值**（`c7f58c3`，用户裁决）：此前不带、换机需重填。现在 export 带
-  `secrets` 段、import 整体恢复，A 机导出 → B 机全新导入 → 变量当场可解析 → 直接同步，写进
-  助手配置的值与 A 机一致。代价是这份文件等同密钥文件：界面因此不再把备份 JSON 铺在屏幕上
-  （只报「N 条定义 · M 份来源 · K 个凭据取值」加保管提示），复制到剪贴板拿到的仍是完整备份；
-  导入差异新增「凭据取值」一节，只列变量名与新增/改动/消失。status、操作记录、差异预览均不
-  含取值。顺带补上一个真缺口：备份的来源清单一直漏了 `rules.opencode`。
+- **Backups now include credential values** (`c7f58c3`, user decision). Export includes `secrets`; import restores it wholesale. Machine A export → fresh B import → immediate resolvability → direct synchronization writes A's values. The backup is therefore equivalent to a secret file. UI no longer displays JSON, only "N definitions · M sources · K credential values" and storage guidance; clipboard copying still returns the full backup. Import differences add Credential Values, showing names/additions/changes/removals only. Status/history/diffs exclude values. Also add the previously omitted `rules.opencode` source to backups.
 
-其余实测：Hooks 与实例都验了「改自己的东西照常同步且内容保留」「动了本工具写的那部分才拒绝、
-接管后用户内容仍在」；接管保值验了「写回的值与原值一致」且 status/备份/回执均不含明文。
+Other measurements confirmed Hooks/instances synchronize and preserve user-owned edits; managed-slice edits reject overwrite, and takeover retains user content. Takeover writeback retained original values; status/backups/receipts had no plaintext.
 
-### 2026-09-18 追加：真机试用反馈的功能修复与界面重做（`575bbc6`…`b0f8519`）
+### 2026-09-18 Follow-up: Real-machine Feedback Fixes and UI Redesign (`575bbc6`…`b0f8519`)
 
-用户在真机上逐页点过，提了功能失败、参数覆盖、缺全局同步、以及「这几个页面相当于完全没有
-设计」四类问题。逐条查证后处理。
+The user tried every page on a real machine and reported functional failures, parameter overwrites, missing global synchronization, and four pages effectively lacking design. Each was investigated before correction.
 
-**真机点出来的三处功能失败**（`cc5880e`）。查操作记录与诊断日志拿到全部原因，不靠猜：
+**Three functional failures found through real clicks** (`cc5880e`), with causes from operation/diagnostic logs:
 
-- 接管 MCP 报「失败 4」：3 条是「已存在残留受管条目，add 不适用，请先执行 remove 清理」。
-  那些条目是本工具以前自己写的，接管中心认出来还打了徽标，却仍只发 add——而界面上根本走不到
-  remove 那一步。改为带 `--allow-takeover` 时直接替换（残留内容不是用户的外部内容，覆盖它
-  零风险），不带仍拒绝且文案说清下一步。第 4 条是「凭证变量未配置」，属实需要用户补填。
-- 更新中心对 MCP 发库级 `--action update`，被引擎拒绝——MCP 的 update 是逐助手动作。改为按
-  `observed.agents` 里 assigned 的助手逐个展开；一个都没分配时直说「先分配再更新」，不再发
-  一条必失败的请求。
-- 接管失败只报「失败 4，详情见任务记录」等于什么都没说，改为直接列出每条的对象与原因。
+- MCP takeover reported 4 failures: 3 residual managed entries rejected add and required remove, even though this tool had written them and Takeover Center recognized/badged them but exposed no remove path. Explicit `--allow-takeover` now replaces remnants (not external user content); without it rejection remains with a clear next step. The fourth failure was a genuinely unconfigured credential variable requiring entry.
+- Update Center sent library-level MCP `--action update`, but MCP updates are per-agent. Expand to assigned agents in `observed.agents`; when none are assigned, explain Assign First rather than send a guaranteed failure.
+- "4 failures; see task history" was unhelpful. Show each object's failure cause directly.
 
-**界面**：toast 从右上移到右下（右上正好盖住各页标题与主操作按钮，而执行结果恰恰是点完那些
-按钮才弹出来的）；启动命令不再从 `LC_ALL` 中间断开，改横向滚动；更新中心两个时间列合并。
+**UI**: move toasts from top-right, where they obscured titles/main buttons just clicked, to bottom-right; launch commands scroll horizontally instead of breaking inside `LC_ALL`; merge Update Center's two time columns.
 
-**启动参数预设扩到五个助手**（`0785797`）。参数全部来自本机实测 `--help`，各家叫法完全不同，
-照抄别家会写出根本不存在的参数：Claude/Antigravity `--dangerously-skip-permissions`；
-Codex `--dangerously-bypass-approvals-and-sandbox` 与 `--ask-for-approval never --sandbox
-workspace-write`；Grok `--permission-mode bypassPermissions|acceptEdits`（取值不是开关）；
-Kimi `--auto` 与 `-y`。每家一个全自动档加一个折中档，危险档标出后果。
+**Launch presets expand to five agents** (`0785797`). All flags come from measured local `--help`; copying another client's spelling would produce nonexistent flags: Claude/Antigravity `--dangerously-skip-permissions`; Codex `--dangerously-bypass-approvals-and-sandbox` and `--ask-for-approval never --sandbox workspace-write`; Grok `--permission-mode bypassPermissions|acceptEdits` (values, not switches); Kimi `--auto` and `-y`. Each has full-automation and compromise presets with explicit dangerous consequences.
 
-**全局同步中心**（`0785797`）。配置分散在六个域，挨个页面看差异再各点一次同步太费事。总览
-最上方汇总，并把两类分开：可一键做的（引擎给了可执行动作）走批量、失败跳过、结束汇总；
-被外部改过或旧体系留下的绝不混进批量，列出原因并给「去处理」直达该页。判定只依据引擎的
-state 与 actions，不自己推断；用户主动停用的不催。syncPlan 是纯函数，六个用例覆盖。
+**Global Synchronization Center** (`0785797`): Overview collects changes across six domains. Executable actions from the engine support batch execution with skipped failures and aggregate results; externally modified/legacy items are excluded, with reasons and navigation. Decisions use engine state/actions only; intentionally disabled resources do not prompt. Pure `syncPlan` has six cases.
 
-**三个页面按同一套原则重做**（`b0f8519`）。用户说这几页「相当于完全没有设计」。把所有页面
-按同一把尺子量过，问题确实集中在这三个，其余（助手、接管中心、规则与 Hooks、操作记录、
-服务库）是健康的。共同根因是把引擎的数据结构原样铺成表：
+**Three pages redesigned consistently** (`b0f8519`). Review confirmed problems centered on these three; Agents, Takeover Center, Rules/Hooks, history, and service library were healthy. The common cause was rendering raw engine structures as tables:
 
-| 页面 | 改前 | 改后 |
+| Page | Before | After |
 | --- | --- | --- |
-| 总览 | 2.2 屏 / 11 区块，Agents/MCP/Skills 各出现两次 | 1 屏 / 8 区块 |
-| 全部技能 | 25 行（5 技能 × 5 助手） | 5 行 |
-| 助手中的服务 | 35 行（7 服务 × 5 助手） | 7 行 |
+| Overview | 2.2 screens / 11 blocks; Agents/MCP/Skills each duplicated | 1 screen / 8 blocks |
+| All Skills | 25 rows (5 skills × 5 agents) | 5 rows |
+| Agent Services | 35 rows (7 services × 5 agents) | 7 rows |
 
-三条原则（其余页面本来就符合）：① 资源 × 助手用矩阵，不铺笛卡尔积——新增共用
-`ResourceAgentMatrix`，一行一个资源、每个助手一格，点开那一行才出逐助手操作，可同时展开多行
-对比，能力一个不丢；② 拿不到值的列不占位——删掉整列「未获取」的版本列，以及列名写「版本」
-内容却是「已链接/未配置」的那列（「当前配置版本=未配置」和「状态=未配置」并排谁都看不懂），
-细节进悬停；③ 不把引擎内部说法给用户——「当前引擎未提供操作」改为有阻断原因就显示原因，
-没有才说「这里没有可做的」。总览按用户选的「我现在要不要做事」定位重做：版本部分与更新中心
-完全重复，压成一句结论加一个入口；体检明细默认收起。
+Three principles, already satisfied elsewhere: (1) resources × agents use a matrix rather than Cartesian-product rows. Shared `ResourceAgentMatrix` gives one resource per row, one agent per cell, expandable per-agent actions, and multiple expanded rows for comparison without lost capabilities. (2) Unknown-value columns take no space: remove all-Unavailable version columns and Version columns containing Linked/Unconfigured, which duplicated status confusingly; details move to hover. (3) Hide engine jargon: replace The Current Engine Provides No Actions with a blocking reason, or Nothing to Do Here when none exists. Overview answers whether users need action now; duplicate Update Center versions become one conclusion/link, and health details default collapsed.
 
-另外「残留」在界面上改叫「以前配过」——那个词对用户没有意义。
+UI Leftovers becomes Previously Configured, which is meaningful to users.
 
-- 自动化：`engine-rs` 326 项、`app/src-tauri` 15 项、Vitest 52 files / 472 tests 全部通过；
-  typecheck、build、两套 `cargo fmt --check` 通过。
-- 最终 clean x86_64 DMG（`07583cc` 后重建）：`verify:macos` 全部通过；SHA256 `311805bebb50908f1e6b71164f4cdf63680fa9331c559de080ca7c5c72c3e259`，8085021 bytes；未签名。
-- 实测：接管残留条目在隔离环境验到 `leftover → managed-ok, assigned=true`；三个页面的行数、
-  屏数、零信息列与黑话出现次数在浏览器里逐项量过（数字见上表）。
+- Automation: engine-rs 326, app/src-tauri 15, Vitest 52 files / 472 tests, typecheck/build, both `cargo fmt --check` passed.
+- Final clean x86_64 DMG after `07583cc`: all `verify:macos` checks passed; SHA256 `311805bebb50908f1e6b71164f4cdf63680fa9331c559de080ca7c5c72c3e259`, 8085021 bytes; unsigned.
+- Measurements: isolated leftover takeover reached `leftover → managed-ok, assigned=true`; browser row/screen counts, empty-information columns, and jargon occurrences were measured individually, as above.
 
-### 2026-09-20 追加：助手接入工作台第一闭环
+### 2026-09-20 Follow-up: Connection Workspace, First Increment
 
-> 历史里程碑：其中「安装与维护」和「管理助手」入口已被同日第五闭环撤下。
+> Historical milestone: Installation and Maintenance / Manage Agents were removed in the fifth increment later that day.
 
-- 起因：助手接入原来藏在完整定义弹窗与卡片下拉里，新增、切换、测试分散，默认页面先展示安装
-  维护信息。用户要求借鉴 cc-switch 的低操作成本，并继续做到更完整、可信的使用闭环。
-- 改动：助手页顶部新增任务式接入工作台，先选助手，再以卡片展示默认账号和每套接入；当前项、
-  地址、模型、凭据变量与测试结果就地可见，非当前项一键启用。下方单独保留「安装与维护」区，
-  完整定义编辑入口改名为「管理助手」。新增接入弹窗先选按 Claude/Codex 形态过滤的厂商预设或
-  自定义，再确认必要字段；高级字段按需展开。
-- 状态边界：新增接入只替换目标 profile，保留未知字段、其他接入和当前 active。Claude 可选填
-  凭据取值并通过 `secrets:set` 单独保存；Codex 只登记环境变量名。勾选立即启用时，定义与可选
-  凭据成功后才调用 `agents:configure --use`；切换成功回读 status 后才提示完成。
-- 自动化：Vitest 55 files / 501 tests、Rust `agent_settings` 集成测试 24 项、`native_secrets`
-  5 项与 Tauri 14 项全部通过；`pnpm build` 通过。新增用例覆盖完整字段保留、当前/非当前卡片、
-  一键切回默认、执行中互斥、只读测试、预设新增、凭据写入顺序与失败重试、取消零写入、校验错误、
-  助手切换、非支持助手只读边界与焦点恢复。
-- 浏览器验收：dev server + `?mock=1` 下验证 Claude/Kimi 与 Codex/Kimi 两条预设路径；Claude
-  自动填 Anthropic 端点并提供可选凭据框，Codex 自动填 Responses 端点且不出现明文凭据框；
-  Esc 关闭后焦点回到「添加接入」。900×800 和默认视口均无横向溢出，控制台无错误或警告。
-- 边界：本闭环只改前端编排、测试与文档，复用已验收的 Rust `agents:configure`、`agents:check`
-  与 `secrets:set` 契约；尚未重建安装包，也不把浏览器 mock 验收称为安装包真实写入验收。
+- Cause: connections were hidden in full-definition dialogs/card menus; add/switch/test were scattered while installation maintenance dominated the page. The user requested cc-switch's low interaction cost and a more complete, trustworthy workflow.
+- Change: a task-oriented top workspace selects an agent, then displays official/default and connection cards with current state, endpoint, model, credential variable, test result, and one-click activation. Installation and Maintenance remains separate below; full-definition editing becomes Manage Agents. Add Connection first selects a Claude/Codex-compatible vendor preset or Custom, then confirms required fields; advanced fields expand on demand.
+- Boundaries: adding replaces only the target profile, preserving unknown fields, other connections, and active. Claude optionally saves credentials separately through `secrets:set`; Codex registers only variable names. Immediate activation invokes `agents:configure --use` only after successful definition/credential saving; completion requires status readback.
+- Automation: Vitest 55 files / 501 tests, Rust `agent_settings` 24, `native_secrets` 5, Tauri 14 passed; `pnpm build` passed. New coverage includes full-field preservation, current/noncurrent cards, default return, execution exclusion, read-only tests, presets, credential write order/retry, zero-write cancellation, validation, agent switching, unsupported-agent read-only boundaries, and focus restoration.
+- Browser (dev + `?mock=1`): Claude/Kimi and Codex/Kimi presets; Claude Anthropic endpoint/optional credential input, Codex Responses endpoint/no plaintext input; Esc restores Add Connection focus. No overflow at 900×800/default viewport, errors, or warnings.
+- Boundary: frontend orchestration/tests/docs only, reusing accepted Rust `agents:configure`, `agents:check`, `secrets:set`; package not rebuilt; browser mock success does not prove package writes.
 
-### 2026-09-20 追加：命令面板接入快切第二闭环
+### 2026-09-20 Follow-up: Palette Connection Switching, Second Increment
 
-- 起因：第一闭环把新增、查看、测试和切换收进助手页，但用户仍要先导航到该页。cc-switch 的高频
-  优势之一是供应商切换随手可达；本项目已有跨资源的 `⌘K` 与托盘搜索入口，因此复用它，不再
-  增加一套绕开确认和审计的托盘写路径。
-- 改动：命令面板索引 Claude Code、Codex 的默认账号与每套接入，支持按显示名、内部名、地址、
-  模型和「供应商/接入/切换」搜索。当前项就地标明并禁用；选择其他项直接执行切换，切回默认使用
-  `--use-default`。写操作进入统一操作记录，成功后回读 `agents:status`，只有 active 与目标一致才
-  显示成功；外部修改拒绝时才弹接管确认并以 `--allow-takeover` 重试，其他失败不改变界面事实。
-- 无账号验收：DEV mock 新增一套 Codex/Kimi 示例，并实现 mock 内存态的 `agents:configure` 与
-  `agents:check`；它只在开发构建下加载，生产构建会剔除。真实厂商连通性因当前没有合适测试账号
-  跳过，不以模拟响应代替。
-- 自动化：Vitest 55 files / 506 tests、Rust `agent_settings` 24 项与 Tauri 14 项全部通过，
-  `pnpm build` 通过。命令面板新增用例覆盖 profile 切换、切回默认、操作记录 ID、状态回读、
-  当前项禁用、外部修改二次确认和普通失败；DEV mock 另覆盖测试、切换与回读。
-- 浏览器验收：`?mock=1` 下用键盘打开命令面板，搜索 Kimi 后回车切换，成功提示明确说明重启生效；
-  再次搜索时 Kimi 显示为当前项且不可重复执行。900×800 无横向溢出，控制台无错误或警告。
-- 边界：本闭环没有改 Rust 命令、数据库结构和托盘事件；尚未重建安装包，浏览器 DEV mock 不能
-  证明真实助手配置文件已写入。
+- Cause: the workspace still required navigation. cc-switch makes frequent vendor switching immediately available; existing `⌘K`/tray search can do this without a second tray write path bypassing confirmation/audit.
+- Change: palette indexes Claude Code/Codex defaults and connections, searchable by display/internal name, endpoint, model, and vendor/connection/switch terms. Current entries are marked/disabled; selecting another switches directly, with `--use-default` for defaults. Writes use unified history; success requires `agents:status` active matching the target. Only external-change rejection prompts takeover and `--allow-takeover` retry; other failures leave displayed facts intact.
+- Account-free acceptance: DEV mock adds Codex/Kimi and in-memory `agents:configure`/`agents:check`, loaded only in development and excluded from production. Real vendor connectivity was skipped without a suitable account; simulation is not a substitute.
+- Automation: Vitest 55 files / 506 tests, Rust `agent_settings` 24, Tauri 14, `pnpm build` passed. Added profile/default switching, operation IDs, readback, current-entry disablement, external-change confirmation, ordinary failure, plus mock check/switch/readback coverage.
+- Browser `?mock=1`: keyboard palette search Kimi/Enter switched, with restart-effect notice; searching again showed disabled current Kimi. No overflow at 900×800 or console errors/warnings.
+- Boundary: no Rust commands/schema/tray changes; package not rebuilt; DEV mock cannot prove real assistant-file writes.
 
-### 2026-09-20 追加：接入就地编辑与删除第三闭环
+### 2026-09-20 Follow-up: Inline Connection Editing/Removal, Third Increment
 
-- 起因：接入工作台已经能新增、切换和测试，但改地址、模型或删除旧接入仍要进入完整助手定义，
-  高频任务又回到了低频维护界面。
-- 改动：每张非默认接入卡片新增「编辑」「删除」。编辑直接预填现有字段；当前项默认保存后更新
-  助手配置，非当前项默认只保存，不暗中切换。内部唯一名称在编辑时固定。删除只允许非当前项，
-  当前项按钮禁用并说明先切换；确认删除只移除目标 profile，凭据变量保留供其他接入复用。
-- 数据边界：编辑目标 profile 时，先剥离表单拥有的字段再合并新值，使可选项可真正清空，同时
-  保留当前表单不认识的 profile 字段。删除保留其他 profiles、active、运行参数和定义未知字段；
-  helper 仍防御性清理悬空 active，但界面不会走到删除当前项。
-- 自动化：Vitest 55 files / 512 tests 与 `pnpm build` 全部通过。定义 helper 与助手页新增用例
-  覆盖未知字段保留、可选字段清空、当前/非当前编辑语义、删除确认、凭据不删除、当前项禁删和
-  零误写。Rust 契约与 Tauri 本批未改，沿用同一轮已通过的 `agent_settings` 24 项与 Tauri 14 项。
-- 浏览器验收：`?mock=1` 的 Codex/Kimi 卡片完成编辑预填、高级字段、Esc 焦点恢复、删除确认与
-  切为当前后删除禁用验证；900×800 无横向溢出，控制台无错误或警告。
-- 边界：未改 Rust 契约与数据库结构，未重建安装包；没有合适账号，未做真实厂商联网检查。
+- Cause: endpoints/models/deleting old connections still required full definitions despite workspace add/switch/test.
+- Change: nondefault cards gain Edit/Delete. Editors prefill existing fields; current connections default to saving and updating actual configuration, noncurrent ones to save-only without switching. Internal unique names are fixed during editing. Only noncurrent connections can be deleted; current Delete is disabled with switch-first guidance. Confirmation removes only the profile, retaining reusable credential variables.
+- Data: strip form-owned fields before merging new values so optional fields can clear, preserving unknown profile fields. Removal preserves other profiles, active, runtime/unknown definition fields. Helpers defensively clean dangling active references, although UI prevents current deletion.
+- Automation: Vitest 55 files / 512 tests, `pnpm build` passed, covering unknown fields, optional clearing, current/noncurrent editing, delete confirmation, retained credentials, current deletion prohibition, and no unintended writes. Unchanged Rust/Tauri reuse this round's passed `agent_settings` 24/Tauri 14.
+- Browser `?mock=1` Codex/Kimi: prefill/advanced fields/Esc focus/delete confirmation/current-delete disablement passed; no 900×800 overflow/errors/warnings.
+- Boundary: no Rust/schema changes or package rebuild; real vendor checks skipped without suitable accounts.
 
-### 2026-09-20 追加：接入安全复制第四闭环
+### 2026-09-20 Follow-up: Safe Connection Copy, Fourth Increment
 
-- 起因：新增相似线路仍要重新选择预设并逐项填写；cc-switch 已把复制作为厂商卡片的日常动作，
-  本项目需要借鉴这一低摩擦入口，同时避免把凭据与当前生效状态一起隐式复制。
-- 改动：每张接入卡片新增「复制」。副本预填地址、模型、认证方式、凭据变量名与高级参数，名称
-  自动使用 `<原名>-copy` / `<原名>-copy-2` 避让，64 字符长名称会先安全截断。副本唯一名称可编辑，
-  默认只保存、不切换；用户显式勾选后才启用。
-- 数据与安全边界：复制来源 profile 中表单尚不认识的扩展字段，但不读取凭据值，凭据输入框始终
-  为空；来源 profile、active 和其他定义保持不变。
-- 验证：定义 helper 与助手页定向测试共 48 项通过，覆盖名称碰撞、64 字符上限、未知字段复制、
-  来源不变、凭据为空、默认不切换与零 `secrets:set`；Vitest 全量 55 files / 515 tests 和
-  `pnpm build` 通过。浏览器 DEV mock 完成预填、唯一名称可编辑、重名阻止保存、Esc 焦点恢复验证；
-  900×800 无横向溢出，控制台无警告或错误。
-- 边界：未改 Rust 契约与数据库结构，未重建安装包；没有合适账号，未做真实厂商联网检查。
+- Cause: similar connections required preset reselection/manual fields. cc-switch's routine copy action is useful, while credentials/current activation must not be implicitly copied.
+- Change: Copy on every connection card prefills endpoint/model/authentication/credential variable/advanced parameters. Unique defaults use `<original-name>-copy` / `<original-name>-copy-2`, safely truncating 64-character names. New names are editable; save-only by default, activation only by explicit selection.
+- Data/security: unknown extension fields copy, credential values are never read and their input stays empty; source profile, active, and other definitions remain unchanged.
+- Verification: 48 targeted helper/page tests passed for collisions, 64-character limits, unknown-field copying, unchanged sources, empty credentials, no default switch, and zero `secrets:set`; full Vitest 55 files / 515 tests and `pnpm build` passed. DEV browser checked prefill/editable unique names/collision blocking/Esc focus; no overflow at 900×800, warnings, or errors.
+- Boundary: no Rust/schema changes or package rebuild; real vendor checks skipped without suitable accounts.
 
-### 2026-09-20 追加：运行时优先与客户端诊断第五闭环
+### 2026-09-20 Follow-up: Runtime-first UI and Client Diagnostics, Fifth Increment
 
-- 起因：真实窗口截图显示助手页仍被安装维护卡片、完整定义和命令文本占据，运行时与账号配置反而
-  不够直观。对照 cc-switch 的高频路径后，将产品职责收敛为 Provider/接入、变量、运行设置与账号
-  实例；AI CLI 软件安装和更新继续使用官方安装器、Homebrew、npm 等原渠道。
-- 改动：助手页撤下安装/升级/卸载卡片、完整 alias、完整定义编辑及助手增删停用入口；接入工作台
-  新增紧凑的「运行设置」，Claude 可控制状态栏与权限模式，Codex 控制权限模式。设置页新增只读
-  「客户端诊断」，集中展示是否安装、当前版本和识别到的安装来源，不提供生命周期动作。接管中心和
-  总览同步移除“由本工具升级”暗示及 AI CLI 版本更新展示。
-- 数据边界：`native-manager.db` 仍是唯一事实源；保存运行设置只拥有 `settings.yolo/statusline`，完整
-  保留 profiles、active、未知扩展字段及既有生命周期字段。第一阶段不改 Rust schema，也不物理删除
-  兼容能力；后续清理必须先审计调用方、CI、打包、文档和迁移边界。
-- 验证：Vitest 56 files / 495 tests、`pnpm build`、engine-rs 373 tests、Tauri 14 tests 全部通过。
-  在 1792×1044 原生 Tauri 窗口实测助手主内容一屏完整显示，运行设置弹窗无需滚动，客户端诊断页
-  仅有只读状态且无安装/更新按钮。
-- 边界：本轮没有合适的真实厂商账号，联网接入测试按授权跳过；未重建安装包。原生窗口验收证明
-  当前开发构建的布局与交互，不等同于安装包验收。
+- Cause: real-window screenshots still showed installation cards, full definitions, and commands dominating runtime/account configuration. cc-switch comparison narrowed responsibilities to Provider/connections, variables, runtime settings, and instances; CLI software remains managed by official installers/Homebrew/npm.
+- Change: remove install/upgrade/remove cards, full aliases/definitions, and agent add/delete/disable controls. Compact Runtime Settings supports Claude statusline/permission mode and Codex permission mode. Read-only Client Diagnostics in Settings shows installation/version/source without lifecycle actions. Takeover Center/Overview remove tool-managed upgrade implications and AI CLI version updates.
+- Data boundary: `native-manager.db` remains the sole source of truth at this historical stage. Runtime saving owns only `settings.yolo/statusline`, preserving profiles, active, unknown/lifecycle fields. Phase one retains Rust schema/compatibility; later removal first audits callers, CI, packaging, docs, and migration boundaries.
+- Verification: Vitest 56 files / 495 tests, `pnpm build`, engine-rs 373, Tauri 14 passed. Real 1792×1044 Tauri window showed all main agent content in one screen, runtime dialog without scrolling, diagnostics read-only without install/update buttons.
+- Boundary: real vendor connectivity skipped as authorized without suitable accounts; package not rebuilt. Native development-window layout/interaction is not package acceptance.
 
-### 2026-09-20 追加：CC Switch 能力迁移与认证安全闭环
+### 2026-09-20 Follow-up: CC Switch Capability Transfer and Authentication Safety
 
-- 范围：当前产品入口只服务 Claude Code 与 Codex；OpenCode 从内置发现、Skills/MCP 分配和 Rules
-  当前目标中移除。数据库里的旧定义与内部兼容 codec 不主动删除，避免升级时破坏既有数据。
-- Provider：保留既有接入卡片、预设、新增、切换、测试、编辑、删除、复制与命令面板快切，并补齐
-  排序、无密钥分享 JSON 导入导出。排序、导入和普通保存只改定义；导入不携带 `apiKey`、不自动
-  启用，不照搬 CC Switch 深链可带密钥并立即切换的危险语义。
-- 认证：新增脱敏只读状态；固定文件、拒绝符号链接与异常内容，只报告认证方式和可用性。普通配置
-  路径不写 Claude `.credentials.json` 或 Codex `auth.json`。登录、退出按钮只复制官方命令，应用永不
-  后台执行；实例命令带隔离的 `CLAUDE_CONFIG_DIR` / `CODEX_HOME`，由用户核对后在终端明确执行。
-- 多账号实例：继续以独立配置目录隔离登录、会话、Skills、MCP 和启动命令；Skills/MCP 页面从
-  `profiles:status` 回读实例真实形态，既保留 Claude/Codex 实例，又不误纳其他客户端。
-- Skills：保留本项目更强的内容寻址快照、受控软连接、逐实例分配、外部修改 fail-closed 与可逆停用；
-  不引入第二套 ZIP/历史备份模型。MCP 同样保留变量占位符、精确作用域、未受管接管保护、CAS、
-  条件回滚与审计，仅吸收更直接的筛选和批量交互。
-- 验证边界：自动化与浏览器 mock 只证明命令生成、状态展示及零误写编排；本轮未执行任何真实
-  `claude auth login/logout` 或 `codex login/logout`，也不以模拟结果冒充真实账号认证验收。
-- 验证结果：Vitest 57 files / 521 tests、前端类型检查与生产构建、engine-rs 384 tests、Tauri
-  14 tests 全部通过。浏览器 mock 实见 Claude/Codex 脱敏认证状态、只复制不执行入口、Codex
-  `auth.json` 保留提示、接入排序/导入导出，以及实例仍出现在 Skills/MCP 助手矩阵中。
-- 本机配置回读修正：此前接入工作台只读数据库定义，把空 `settings` 显示为“当前使用”，没有解析
-  已存在的 Claude/Codex 客户端配置。现在 `agents:status` 从固定目标只读返回脱敏观察值；界面分开
-  显示客户端实际配置与已纳管选择；运行设置弹窗分成可编辑表单、写入预览和不可保存的“本机
-  实际值”。读取零写、拒绝符号链接和异常文件，Claude 明文 token 只报告“已配置”，不进入状态
-  JSON、日志或数据库。
-- 本机配置一致性与就地修复：接入工作台对比可安全观察的受管 provider 字段，区分“一致”“不一致”
-  与“无法比较”；漂移时仅在用户显式点击后重新应用已纳管选择，复用既有外部修改确认、审计与状态
-  回读，不自动接管。扩展后的验证为 Vitest 57 files / 523 tests、engine-rs 384 tests、Tauri 14 tests，
-  前端类型检查与生产构建全部通过；浏览器 mock 实见漂移修复后转为一致，320 px 宽度无横向溢出且
-  控制台无错误。本轮仍未在真实 HOME 写入客户端配置，未执行真实 provider 联网、认证或安装包验收。
-- 多接入批量检查：用户可显式并发检查当前助手的全部自定义接入；卡片分别保留成功、失败与延迟，
-  单项失败不阻断其他结果，全部完成后汇总可用数量与最快线路。检查只调用既有只读
-  `agents:check`，不切换当前接入、不写配置。Vitest 扩展为 57 files / 524 tests，前端类型检查与生产
-  构建通过；浏览器 mock 实见“检查全部接入”到最快线路汇总。本轮没有真实 Provider 凭据，未把
-  mock 结果视为真实联网验收；后端与 Tauri 本批未修改。
-- 窄窗口布局修正：320 px 实图检查发现固定侧栏挤压主内容，虽无页面横向溢出但正文已变成竖排。
-  窄屏现改为顶部横向导航，桌面侧栏保持不变；复验页面宽度与滚动宽度均为 320 px，主内容恢复
-  正常排版且控制台无错误。导航与快捷键相关目标测试 33/33、前端全量 57 files / 524 tests、类型
-  检查与生产构建通过。
-- 最快接入直达与切换回读门禁：批量检查完成后，若最快成功线路不是当前项，可直接启用；该动作不
-  新增写路径，仍走 `agents:configure`、外部修改确认和 `agents:status` 回读。助手页此前虽执行
-  `refetch()`，却未核对回读结果；现在同时校验数据库 `active` 和客户端脱敏
-  `observed.current_config`。任一侧未与目标一致都保留真实界面并报错，不再误报切换或重新应用成功。
-  Vitest 为 57 files / 525 tests，类型检查与生产构建通过；浏览器 mock 实见 Claude 漂移重新应用后
-  恢复一致，以及默认账号经 Kimi Code 128 ms 推荐切换为 Kimi Code 后两侧均一致，控制台无错误。
-  未用真实 Provider 凭据执行联网与切换验收。
-- 命令面板切换统一双回读：`⌘K` 快切不再只核对数据库 `active`，而是与助手页共用完整 profile
-  解析及脱敏客户端配置比对；`active` 已变化但客户端实际配置未生效时不再提示成功。Vitest 扩展为
-  57 files / 526 tests；浏览器 mock 以键盘完成 Codex/Kimi 切换，再次搜索时当前项禁用，助手页回读
-  纳管选择与客户端实际配置一致，控制台无错误。后端、Tauri 与写入协议本批未修改。
-- 命令面板就地恢复当前接入：已纳管选择仍指向某接入、但客户端实际配置不一致或无法确认时，不再
-  把该项误标为不可操作的「当前接入」，而是显示「配置不一致 · 重新应用」并允许用户显式执行；
-  双回读确认一致后才恢复为禁用的当前项。Vitest 扩展为 57 files / 527 tests；浏览器 DEV mock
-  实见 Claude 默认账号从不一致、可点击，到重新应用后助手页显示一致且命令项禁用，控制台无错误。
-  本批未改后端、Tauri 与写入协议，也未用真实客户端配置或安装包验证该交互。
-- 托盘接入直达：托盘动态按 Claude Code/Codex 分组展示默认账号与自定义接入，可信当前项带勾且
-  禁用，不一致项提示重新应用。点击非当前项只唤回窗口并把命令面板精确过滤到该目标；用户按一次
-  Enter 或点击后才进入既有 `agents:configure`、外部修改确认、审计与双回读，保持 `ae0a1b8` 的
-  “托盘不静默写配置”安全裁决。Vitest 扩展为 57 files / 529 tests，Tauri 为 15 tests；新增用例
-  证明托盘事件本身零写入、确认后才切换，以及外部修改不会被静默覆盖。另以隔离数据目录和前端
-  DEV mock 实际点击同源 Tauri 应用的 macOS 状态栏菜单：Codex/Kimi Code 项能唤回窗口并精确过滤
-  命令面板，点击托盘后未自动切换，按 Enter 显式确认后出现成功回执；再次展开原生菜单时，标题已
-  更新为 Kimi Code，目标项带勾且禁用。该验收未读取或写入真实 `~/.claude`、`~/.codex`，也未
-  操作正在运行的 Claude/Codex；安装包、真实客户端配置和 Provider 联网仍未验证。
-- 接入备注与检索：每套接入可保存不超过 200 字的备注，卡片直接展示，`⌘K` 同时按备注检索；备注
-  只存数据库定义，不参与 Claude/Codex 配置渲染，复制与无密钥分享会一并携带。Vitest 为 57 files /
-  530 tests，类型检查与生产构建通过；浏览器 DEV mock 实见卡片备注，并以“月底到期”唯一过滤到
-  Codex/Kimi Code 接入，未执行切换。未启动原生应用，也未读取、写入或操作真实 Claude/Codex。
-- 键盘接入快切：新增 `⌘⇧K`，直接打开只含 Claude/Codex 默认账号与自定义接入的范围；输入继续按
-  名称、备注、地址或模型过滤。Esc 后再按 `⌘K` 会恢复完整命令面板，文本输入语境不抢快捷键；
-  执行仍复用既有外部修改确认、锁、审计和双回读。Vitest 为 57 files / 531 tests，类型检查与生产
-  构建通过；浏览器 DEV mock 实见 3 个接入项、备注唯一过滤及完整面板范围恢复，未执行切换，未启动
-  原生应用或操作真实 Claude/Codex。
-- 用量联动筛选：用量页新增「助手 → 模型」下拉条件，与时间范围共同驱动汇总卡、未定价提示和
-  明细表；切换时间会清除助手与模型，切换助手会清除模型，避免统计口径残留。筛选只处理
-  `usage:status` 的已读结果，不触发扫描或写入。Vitest 扩展为 57 files / 533 tests，类型检查与生产
-  构建通过；浏览器 DEV mock 实见助手筛选后汇总和明细同步变化。本批未启动原生应用、未点重新统计，
-  也未读取、写入或操作真实 Claude/Codex。
-- Provider 与运行管理收口：Provider 创建、编辑、应用彼此独立；使用中的自定义
-  Provider 必须先切换或重置才能删除，删除有二次确认；官方默认 Provider 只提供带确认的重置。
-  Claude/Codex 自动化改为手动、智能自动、完全放开三档，按适配器写入真实客户端字段。主 Agent
-  页面直接审查、新增、编辑、删除和显式同步它自己的运行别名，隔离实例仍按配置目录归属；别名定义
-  与 shell 落地保持两个动作，事实源仍是 `aliases.shell`。Vitest 57 files / 539 tests、前端类型检查与
-  生产构建、engine-rs 386 tests、Tauri 15 tests 全部通过。隔离 HOME 实际完成 Provider 创建/应用、
-  `automation_mode=auto` 写入、官方重置、重置后删除，以及两条别名同步并回读 `managed-ok`；真实
-  原生窗口只读确认了运行别名和官方重置界面，并打开后取消两类确认框。未操作真实 Claude/Codex，
-  未构建或验收安装包。
-- 环境化信息架构：助手页固定为「Agent → 默认环境/独立环境 → 当前环境内容」。默认
-  环境拆成接入 Provider、自动化与权限、启动命令、实际配置四页；添加 Provider 使用明确文字入口，
-  独立环境从弹窗迁到同一工作区并按当前 Agent 过滤，创建入口与 Provider 完全分离。启动命令含权限
-  参数时显示“覆盖环境自动化”及具体效果；实际配置直接展示目标文件和脱敏后的回读值。未改变 SQLite、
-  Provider、profile 或 alias 协议，`native-manager.db` 仍是唯一事实源。Vitest 57 files / 542 tests、
-  前端生产构建、engine-rs 与 Tauri 15 tests 全部通过；原生 Tauri 窗口只读验收了默认环境四页与
-  独立环境空态，未点击任何应用、同步或确认动作，未改动真实 Claude/Codex 配置。
-- Provider 接管差异审查：外部修改拒绝覆盖后，确认框不再要求用户盲选，逐项展示软件配置与客户端
-  当前值；用户可只覆盖受管字段，也可通过专用精简表单把客户端当前地址、模型及脱敏凭据元数据
-  保存为新 Provider。内部名称隐藏，缺少必填项时明确提示并禁止保存；未读取或保存凭据明文，取消
-  仍保持客户端文件零写。
-- 全局操作可理解性审查：恢复“导入现有配置”的侧栏常驻入口，并同步命令面板与托盘用词；
-  总览“全部同步”改为先列出本次将写入的待处理项目，再由用户确认，标为“要你决定”的项目不会
-  混入执行；MCP 导入页如实说明本机引擎转存原配置字面量密钥的边界，不再同时声称“拿不到明文”。
-- 运行配置逐项回读与结构化审查：实际配置页不再展示内部 JSON，改为按 Provider 与运行设置分组；
-  运行设置逐项并列软件保存值和客户端实际值，并把非自动化字段的漂移同样显示在默认环境摘要与
-  “自动化与权限”页。Claude 状态回读补齐内置/自定义状态栏及隐藏署名开关；写入成功只有在目标文件
-  回读为 ready、Provider 和适配器全部运行字段均一致后才提示完成。按项编辑页移除重复的底层键路径，
-  真实键值统一在“写入预览”集中审查；窄窗口对照改为纵向字段卡，避免三列表格挤压。Vitest 全量
-  58 files / 546 tests、前端类型检查与生产构建、Rust engine 390 tests、Tauri 16 tests 均通过；浏览器
-  mock 实见桌面与 320px 窄窗布局，控制台无错误或告警。本批未启动原生应用，也未读取或写入真实
-  Claude/Codex 配置。
-- 首次使用入口收口：全新安装继续直接进入 Provider 列表，“导入现有配置”由一级侧栏、命令面板与
-  托盘提供直达；删除已经没有调用方的旧三步长文案组件，保留测试防止它重新挡在日常工作台之前。
+- Scope: current product supports only Claude Code/Codex. Remove OpenCode from builtin discovery, Skills/MCP allocation, and current Rules targets. Preserve old database definitions/internal compatibility codecs to avoid upgrade data loss.
+- Provider: keep cards/presets/add/switch/test/edit/delete/copy/palette switching; add ordering and key-free shared JSON import/export. Ordering/import/save change definitions only; imports omit `apiKey` and automatic activation, excluding CC Switch deep links that can carry keys and switch immediately.
+- Authentication: redacted read-only fixed-file status rejects symlinks/abnormal content, reports method/availability only. Normal configuration never writes Claude `.credentials.json` or Codex `auth.json`. Login/logout copy official commands, never execute in the background. Instance commands include isolated `CLAUDE_CONFIG_DIR` / `CODEX_HOME` for user review and explicit terminal execution.
+- Instances: independent directories isolate login/sessions/Skills/MCP/commands; Skills/MCP read actual shapes from `profiles:status`, retaining Claude/Codex instances without admitting other clients.
+- Skills: preserve content-addressed snapshots, controlled symlinks, per-instance allocation, fail-closed external edits, reversible disablement; no second ZIP/history-backup model. MCP retains placeholders/exact scope/unmanaged takeover protection/CAS/conditional rollback/audit, adding only clearer filtering/batching.
+- Verification boundary: automation/browser mocks prove command generation/status/no-unintended-write orchestration only. No real `claude auth login/logout` or `codex login/logout`; simulations are not authentication acceptance.
+- Results: Vitest 57 files / 521 tests, typecheck/production build, engine-rs 384, Tauri 14 passed. Browser mocks showed redacted Claude/Codex authentication, copy-only controls, Codex `auth.json` preservation notice, connection sorting/import/export, and instance Skills/MCP matrix rows.
+- Actual configuration readback correction: workspace previously read only definitions and labeled empty `settings` Current without parsing existing files. `agents:status` now reads redacted observations from fixed targets; UI separates actual configuration/managed selection and runtime editing/write preview/noneditable Actual Local Values. Zero-write reads reject symlinks/abnormal files; Claude plaintext tokens yield only Configured, never status JSON/logs/database.
+- Consistency/inline repair: compare safely observable managed provider fields as Consistent / Inconsistent / Incomparable. Drift repair explicitly reapplies managed selection using existing external-change confirmation/audit/readback, never automatic takeover. Vitest 57 files / 523 tests, engine-rs 384, Tauri 14, typecheck/build passed; browser mock repaired drift to consistent, with no 320 px overflow/errors. No real HOME configuration writes, provider network/authentication, or package acceptance.
+- Batch connection checks: explicit concurrent checks for all custom connections retain per-card success/failure/latency, independent failures, and aggregate available-count/fastest-line results. Existing read-only `agents:check` only; no switching/configuration writes. Vitest 57 files / 524 tests, typecheck/build passed; browser mock exercised Check All through fastest-line summary. Without real credentials, mock results are not network acceptance; backend/Tauri unchanged this batch.
+- Narrow-window correction: real 320 px screenshots showed the fixed sidebar compressing text vertically despite no page overflow. Narrow layouts now use horizontal top navigation, retaining the desktop sidebar. Recheck measured both viewport/scroll width at 320 px with normal text/no console errors. Navigation/shortcut targeted tests 33/33, full frontend 57 files / 524 tests, typecheck/build passed.
+- Fastest connection/readback gate: after batch checks, users can enable the fastest successful noncurrent route using existing `agents:configure`, external-change confirmation, and `agents:status`. Previously `refetch()` occurred without checking results; now both database `active` and redacted `observed.current_config` must match. Either mismatch preserves actual UI facts and reports failure instead of false switching/reapply success. Vitest 57 files / 525 tests, typecheck/build passed. Browser mock repaired Claude drift and switched from default via Kimi Code 128 ms recommendation with both sides consistent/no errors. No real Provider network/switch acceptance.
+- Palette dual readback: `⌘K` shares full profile parsing/redacted file comparison with the agent page, rather than checking only database `active`; changed active without effective files is not success. Vitest 57 files / 526 tests; browser keyboard switched Codex/Kimi, then showed disabled current item and consistent managed/actual state without errors. Backend/Tauri/write protocol unchanged.
+- Palette current-connection recovery: managed selection with inconsistent/unconfirmed files shows Configuration Mismatch · Reapply rather than disabled Current Connection. Explicit execution restores disabled-current only after dual readback. Vitest 57 files / 527 tests; DEV browser changed Claude default from actionable mismatch to consistent/disabled without errors. No backend/Tauri/protocol changes or real configuration/package verification.
+- Direct tray connections: dynamic Claude/Codex default/custom groups mark trustworthy current entries checked/disabled and inconsistent entries Reapply. Noncurrent clicks only restore the window and precisely filter the palette; Enter/click then invokes existing configure, external-change confirmation, audit, dual readback. This preserves `ae0a1b8`'s no-silent-tray-write decision. Vitest 57 files / 529 tests, Tauri 15; tests prove tray events alone write nothing, explicit confirmation switches, external changes are not silently overwritten. With isolated data and frontend DEV mock, real macOS tray clicks on the same-source Tauri app selected Codex/Kimi Code, restored/filtered the palette without switching, then Enter produced success. Reopened native menu showed Kimi Code checked/disabled. No real `~/.claude`/`~/.codex` reads/writes or running-client operations; package, actual files, and Provider network unverified.
+- Connection notes/search: at most 200 characters per connection, displayed on cards and searched by `⌘K`. Database-only notes never render to Claude/Codex, but copy/key-free sharing retains them. Vitest 57 files / 530 tests, typecheck/build passed. DEV browser showed notes and uniquely filtered Codex/Kimi Code by Expires at Month-end without switching. No native app/real-client reads/writes/operations.
+- Keyboard switching: `⌘⇧K` opens only Claude/Codex defaults/custom connections, filtering names/notes/endpoints/models. Esc then `⌘K` restores all commands; text input retains shortcuts. Execution still uses confirmation/locks/audit/dual readback. Vitest 57 files / 531 tests, typecheck/build passed; DEV browser saw 3 connections, unique note filtering, restored full scope. No switching/native app/real-client operations.
+- Linked usage filters: Agent → Model selectors combine with time range for summaries/unpriced notices/details. Changing time clears both; changing agent clears model. Filters use already-read `usage:status` only, without scanning/writes. Vitest 57 files / 533 tests, typecheck/build passed; DEV browser confirmed summaries/details change together. No native app/recount/real-client reads/writes/operations.
+- Provider/runtime consolidation: create/edit/apply remain independent. Active custom Providers require switching/reset before deletion with second confirmation; official defaults only offer confirmed reset. Claude/Codex automation has Manual/Smart Automatic/Fully Unrestricted adapter-backed native fields. Main Agent directly reviews/adds/edits/removes/explicitly synchronizes its own aliases; isolated instances remain directory-owned. Definitions/shell writes are separate, with `aliases.shell` authoritative. Vitest 57 files / 539 tests, typecheck/build, engine-rs 386, Tauri 15 passed. Isolated HOME completed Provider create/apply, `automation_mode=auto`, official reset/deletion, two aliases synchronized/read back managed-ok. Real native window read-only checked aliases/reset and opened/canceled both confirmations. No real-client operations/package build/acceptance.
+- Environment information architecture: Agent → Default/Independent Environment → Environment Content. Default has Provider, Automation and Permissions, Launch Commands, Actual Configuration tabs. Provider addition is a text action; independent environments move from dialogs to the same Agent-filtered workspace, with separate creation. Permission flags show Override Environment Automation and effects. Actual Configuration shows files/redacted readback. SQLite/Provider/profile/alias protocols unchanged; historically `native-manager.db` remains authoritative here. Vitest 57 files / 542 tests, build, engine-rs, Tauri 15 passed. Native read-only checks covered four default tabs/independent empty state without apply/sync/confirmation or real-client changes.
+- Provider takeover review: after external-change rejection, confirmation shows software/client values per field. Users may overwrite only managed fields or save actual endpoint/model/redacted credential metadata as a new Provider through a focused form. Internal names hidden; missing required fields block saving. No plaintext reads/saves; cancellation leaves client files untouched.
+- Global action clarity: restore persistent Import Existing Configuration sidebar entry and matching palette/tray terms. Overview Synchronize All first lists planned writes and asks confirmation, excluding Needs Your Decision entries. MCP import explains the engine's literal-secret transfer boundary instead of simultaneously claiming plaintext is unavailable.
+- Runtime field readback/structured review: Actual Configuration groups Provider/runtime fields rather than internal JSON. Runtime fields pair saved/actual values; nonautomation drift also appears in default summary/Automation and Permissions. Claude observes builtin/custom statusline and hidden-attribution switches. Success requires target ready plus matching Provider/all adapter runtime fields. Item editors remove duplicate low-level paths; Write Preview centralizes real keys. Narrow views use vertical field cards instead of squeezed three-column tables. Vitest 58 files / 546 tests, typecheck/build, Rust engine 390, Tauri 16 passed; desktop/320px browser mock had no errors/warnings. No native app/real-file reads/writes this batch.
+- First-use consolidation: fresh installs open Providers directly; Import Existing Configuration is reachable through sidebar/palette/tray. Remove uncalled old three-step long-form guidance and retain regression preventing it from obstructing the daily workspace.
 
-## 剩余路线图（未排期）
+## Remaining Roadmap (Unscheduled)
 
-各项均无排期、无指定负责人。
+All items have no schedule or assigned owner.
 
-| 事项 | 前置 | 产出 | 完成标准 |
+| Item | Prerequisite | Deliverable | Completion criterion |
 | --- | --- | --- | --- |
-| 当前代码安装包与 GUI E2E | 参与域全部完成（已达） | 验收基线提交 `5a110be3` 的 x86_64 DMG 与主要真实 GUI E2E 已验收（2026-09-15，旧版交互）；本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 已验收 | 最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify，交付回执见上；MCP 新增服务表单待 macOS 自动化输入条件具备后补验 |
-| 发布 | GitHub billing 解决；updater/Apple/Windows 签名材料在仓库外与 Secrets 配齐（GitHub Actions secrets/variables 与本机 codesigning identities 当前均为 0） | 签名、公证、arm64、Linux、Windows、更新发布（发布管线 `14e6790` 草稿先行单写者编排已就绪，取代 `a2cc864`） | GUI CI 对当前产品代码基线真实跑绿；各平台真机安装/运行与 updater 真实签名下载安装回读独立验收通过（Release/打 tag 未授权，到达时报主审决定） |
+| Current package and GUI E2E | All participating domains complete (met) | x86_64 DMG and main real GUI E2E at `5a110be3` accepted 2026-09-15 for old interaction; new source/browser/isolated CLI/uncommitted dirty candidate accepted | Final clean DMG rebuilt after `a01d0f5` and independently verified; receipt above. MCP add-service form awaits macOS automation input capability |
+| Release | Resolve GitHub billing; supply updater/Apple/Windows signing outside repository and in Secrets (Actions secrets/variables/local codesigning identities currently all 0) | Signing/notarization, arm64/Linux/Windows/update release; draft-first single-writer `14e6790` ready, replacing `a2cc864` | Real green GUI CI at current product baseline; independent real-platform install/runtime and signed updater download/install/readback. Release/tag not authorized; refer to lead reviewer when reached |
 
-2026-09-15 验收基线提交 `5a110be3` 的 x86_64 DMG 已通过 verify 与主要真实 GUI E2E 主审独立验收（旧版 plan→confirm 交互），arm64 DMG 交叉构建静态验收通过。本轮直接 apply 新交互的源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；旧 DMG/旧 GUI E2E 不证明本轮新交互，最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify，交付回执见上。公开发布仍受外部条件阻塞：GitHub billing、真实密钥、Developer ID/公证、Windows 签名、Linux/Windows/arm64 真机运行与安装、updater 真实签名下载安装回读均未就绪。
+The 2026-09-15 x86_64 `5a110be3` DMG passed verify/main real GUI E2E independently under old plan→confirm behavior; arm64 cross-build passed static acceptance. New direct-apply source/browser/isolated CLI/dirty candidate acceptance is complete; old package/E2E cannot prove new behavior. Final clean `a01d0f5` DMG was rebuilt and independently verified, as above. Public release still lacks GitHub billing, real keys, Developer ID/notarization, Windows signing, actual Linux/Windows/arm64 runtime/install acceptance, and signed updater download/install/readback.
 
-## 高级管理入口裁决记录（2026-09-12）
+## Advanced-management Decisions (2026-09-12)
 
-- Tools：退役。真实条目仅剩 playwright-cli（两条 npm 命令），实施为全新大域且投入产比低；退役后由用户手动管理。已于 `9080c1d` 清理完毕。
-- Aliases：保留实施，为恢复后第一个最小闭环。已于 `b7f30db` 落地并通过主审独立验收。
-- 更新中心：`system:refresh-upstream` 已实施（参与域 agents/mcp/skills，探测缓存落 SQLite `upstream_probes` 表，三域 status 只读回填 freshness，`--offline` 拒绝，不取 apply 锁）；`system:converge` 已于 `9080c1d` 退役清理；Updates 页直接触发真实 apply（apply 内部保留 preflight/写前校验），前端调用已补显式 `--action`（agents→upgrade，mcp/skills→update）。
-- 快照：退役。新体系既定方向为 fail-closed 拒绝覆盖 + 操作内事务回滚，不恢复"写前持久备份"模型；"自动备份"承诺文案已于 `9080c1d` 清理。
-- 探测缓存：落 SQLite 新表（易失状态入库与 operation_logs 先例一致），不引入第二份可写状态文件。
-- 实施者：当时决定全部使用 Kimi YOLO 模式；2026-09-28 因 Kimi 无实施权限，当前协作规则已在 [AGENTS.md](../AGENTS.md) 更新。
+- Tools: retired. Only playwright-cli (two npm commands) remained; implementing a new large domain was not justified. Users manage it manually; cleanup completed `9080c1d`.
+- Aliases: retained as the first resumed small increment; implemented/independently accepted `b7f30db`.
+- Update Center: `system:refresh-upstream` implemented for agents/mcp/skills, cached in SQLite `upstream_probes`, freshness read-only in status, offline rejected, no apply lock. `system:converge` retired `9080c1d`; Updates directly executes real apply with internal preflight/write-time validation and explicit `--action` (agents→upgrade, mcp/skills→update).
+- Snapshots: retired in favor of fail-closed overwrite refusal and operation-local transaction rollback, without persistent prewrite backups. Automatic-backup promises removed `9080c1d`.
+- Probe cache: new SQLite table, following operation_logs precedent for volatile state; no second writable state file.
+- Implementers: Kimi YOLO was chosen then. Since Kimi lost implementation permission on 2026-09-28, current collaboration rules are updated in [AGENTS.md](../AGENTS.md).
 
-## 2026-09-15 公共 plan/dry-run 退役裁决
+## 2026-09-15: Public plan/dry-run Retirement
 
-- 公共 `*:plan`（`mcp:plan`、`rules:plan`、`hooks:plan`、`aliases:plan` 等）与 `--dry-run` 入口完全退役，请求一律被拒绝（plan 动词 UNKNOWN_VERB、`--dry-run` USAGE_ERROR），不再作为入口。
-- status、query、诊断等只读路径保持零写；六域写操作仅通过真实 apply 完成。
-- apply 内部保留 preflight/写前校验、精确 scope、排他锁、外部修改检测、CAS/条件回滚与操作审计。
-- 定义保存仍只保存，不执行安装/链接/同步；破坏性定义移除、清空日志等高风险动作保持独立二次确认。
-- MCP secrets 边界保留：SQLite 字面量 `${VAR}`；status/诊断/操作日志不暴露解析值；apply-time 可能按目标 codec 写入下游配置。
+- All public `*:plan` (`mcp:plan`, `rules:plan`, `hooks:plan`, `aliases:plan`, etc.) and `--dry-run` entry points are retired/rejected: UNKNOWN_VERB for plan, USAGE_ERROR for dry-run.
+- Status/query/diagnostics remain zero-write; six-domain writes use real apply only.
+- Apply retains internal preflight/write-time validation, exact scope, exclusive locks, external-change detection, CAS/conditional rollback, and audit.
+- Definition saves do not install/link/synchronize. Destructive removal/log clearing retain separate second confirmation.
+- MCP secret boundaries remain: SQLite literal `${VAR}`, no resolved values in status/diagnostics/history; apply may write values through target codecs.
 
-## 2026-09-22 助手配置零标记裁决
+## 2026-09-22: Marker-free Assistant Configuration
 
-- 触发：Codex 对 MCP 远程条目中的 `_MANAGED_BY` 报告无法识别的配置；盘点发现 MCP 三个 codec 都写该标记（stdio 写进 `env`/`environment`，会传给 MCP 进程），Codex MCP 条目与 `[model_providers.*]` 段前还写 `# [agent-manager:managed]` 注释，状态栏脚本在 Claude 配置目录写 `.agent-manager-usage.json`。
-- 裁决：以 `docs/GUI-REDESIGN.md`「助手配置零标记」为准。归属只记在 `native-manager.db`，与 rules、hooks、Claude 运行配置已采用的「定位 + 摘要」做法统一；本节取代上文远程 HTTP MCP 接线中「受管 marker 迁至条目级 `_MANAGED_BY`」的要求。
-- MCP：归属 = `mcp_bindings` 已分配且启用；旧标记只读剥离；无记录的同名条目（含带旧标记的残留）按用户条目处理，需显式接管。
-- Codex 运行配置：`agent_settings_bindings.owned_providers` 记录本工具写入的 provider id；旧注释仅用于一次性迁移识别。
-- 状态栏额度缓存迁至数据目录 `usage/`，不再读写助手配置目录内的缓存文件。
-- Shell 别名区块注释保留（rc 文件不是助手配置，无结构化字段可用）。Codex 实例的 `agent-manager.config.toml` 是 Codex 官方 profile 文件形式，保留。
+- Trigger: Codex rejected remote MCP `_MANAGED_BY`. Inventory found all three codecs writing it (stdio env/environment passed it into MCP processes), Codex MCP/`[model_providers.*]` comments `# [agent-manager:managed]`, and statusline `.agent-manager-usage.json` inside Claude configuration.
+- Decision: follow Marker-free Assistant Configuration in `docs/GUI-REDESIGN.md`. Ownership exists only in `native-manager.db`, using location + digest as Rules/Hooks/Claude runtime already do. This supersedes entry-level `_MANAGED_BY` requirements in earlier HTTP MCP wiring.
+- MCP ownership is assigned/enabled `mcp_bindings`; old markers stripped read-only. Same-name entries without records, including old marked remnants, are user-owned and need explicit takeover.
+- Codex runtime `agent_settings_bindings.owned_providers` records written provider IDs; old comments serve one-time migration identification only.
+- Statusline quota cache moves to data-directory `usage/`, no longer reading/writing assistant-directory caches.
+- Shell alias block comments remain: rc files are not assistant configuration and lack structural fields. Codex instance `agent-manager.config.toml` remains an official Codex profile-file format.
 
-## 2026-09-22 实际配置为准裁决
+## 2026-09-22: Actual Configuration as the Source of Truth
 
-- 触发：用户指出除内置默认（需确认后应用）外，所有配置都应直接读取用户真实环境。盘点确认现状相反：内置 policy 首次写库即固化；规则、hooks、别名、MCP 卡片、运行参数表单展示库内副本；外部修改的唯一出路是「接管 = 用库覆盖」；内置别名、技能仓库、hooks 被计为待同步。
-- 参考：CC Switch（`farion1231/cc-switch@8e478b2`）首启把实际配置导入为当前项、官方预设只追加不激活（`src-tauri/src/lib.rs:728-782`），切换前回填实际配置（`services/provider/mod.rs:5836-5884`），提示词读取以实际文件刷新已启用项（`services/prompt.rs:62-85`）。不照搬其整份覆盖 settings.json、MCP 导入后以库为准、读取时写库三点。
-- 裁决：采用 `GUI-REDESIGN.md`「数据模型：实际配置为准」三层模型；规则取消 shared + adapter 拼接，改为每个助手一个实际文件，另提供「复制到另一个助手」；Codex MCP 停用使用官方 `mcp_servers.<id>.enabled = false`。
-- 实施阶段与回执（均已推送 `rust`）：契约 `1ce4a15` → 技能内置仓库改推荐 `1e60a7b` → 接入与运行参数（实际值预填、切换前回填、令牌只经外部密钥文件）`1acc84a` → 规则（实际文件、模板、回填，取消拼接）`e89abc5` → MCP（实际条目为主、官方字段停用）`e318d8d` → Hooks（实际读写、清理建议）`94037ef` → 别名（实际区块、推荐项）`b2eb229` → 实例（生成文件以实际为准、覆盖或采纳二选一）`4268bad`。
-- 验收方式：每阶段两套 cargo test、前端单测、typecheck、build 全绿；关键修复做反向验证；隔离 HOME 用编译出的 CLI 实测回读（含用改动前二进制造旧库再升级）；接入、MCP、实例另在 DEV mock 下浏览器验收；Codex 停用由真实 `codex mcp list` 回读。安装包真机验收见 2026-09-23 交付回执。
+- Trigger: users required all configuration to read real environments except confirmed builtin recommendations. Inventory found the opposite: builtin policy frozen on first write, database copies in rules/Hooks/aliases/MCP/runtime forms, takeover-only database overwrite recovery, and builtin aliases/repositories/Hooks counted pending.
+- Reference: CC Switch `farion1231/cc-switch@8e478b2` imports actual configuration as current on first startup and appends inactive official presets (`src-tauri/src/lib.rs:728-782`), fills actual configuration back before switching (`services/provider/mod.rs:5836-5884`), and refreshes active prompts from files (`services/prompt.rs:62-85`). Do not copy whole settings.json replacement, database-authoritative imported MCP, or write-on-read behavior.
+- Decision: use the three-layer Actual Configuration as the Source of Truth model in `GUI-REDESIGN.md`; replace shared + adapter rules with one actual file per assistant plus Copy to Another Assistant. Codex MCP disable uses official `mcp_servers.<id>.enabled = false`.
+- Stages/receipts, all pushed to `rust`: contract `1ce4a15` → recommended skill repositories `1e60a7b` → actual-value runtime/connection prefill, preswitch readback, external-secret-only tokens `1acc84a` → actual rules/templates/readback without composition `e89abc5` → actual MCP/official disable `e318d8d` → actual Hooks/cleanup recommendations `94037ef` → actual alias blocks/recommendations `b2eb229` → actual instance files with overwrite/adopt choice `4268bad`.
+- Acceptance: both cargo suites, frontend units/typecheck/build passed each stage; critical fixes were tested in reverse. Built CLI readbacks used isolated HOME, including old databases created by old binaries. Connections/MCP/instances also had DEV mock browser checks; real `codex mcp list` read back disablement. Package-machine receipt is dated 2026-09-23.
 
-## 2026-09-23 运行设置与配置原文裁决
+## 2026-09-23: Runtime Settings and Raw Configuration
 
-- 触发：用户真机试用时问运行设置能否扩展更多参数；随后指出「实际配置」页与整文件编辑把所有值都摆出来，应像 CC Switch 那样区分对用户有意义、需要调整和展示的部分；并要求编辑框直接显示明文。
-- 参考：CC Switch（`farion1231/cc-switch@8e478b2`）主界面只有供应商卡片（名称、地址、额度），配置细节都在编辑面板里按重要性排：API Key、地址在前，「高级选项」默认折叠，配置 JSON 放最后且默认 3 行高，上方 6 个快捷开关直接改这段 JSON（`src/components/providers/forms/CommonConfigEditor.tsx`）；编辑当前供应商时 JSON 是整个 live `settings.json`（`EditProviderDialog.tsx` 读 `read_live_provider_settings`），令牌为明文。不照搬其整文件覆盖与通用配置片段合并。
-- 裁决：推理强度与 Artifact 开关写 Claude Code 官方持久键（`effortLevel`、`enableArtifact`），不写单次会话覆盖变量，旧变量由用户点「清理覆盖变量」撤掉；助手页去掉「实际配置」页签，只留接入 Provider / 运行设置 / 启动命令；运行设置表单直接在页签里；表单外的设置在运行设置底部「直接编辑配置文件」里改全文，默认收起，显示与写回都是原文，整文件摘要防覆盖，库与审计不存全文与取值。凭据名判断参照 CC Switch 按整类匹配。
-- 提交：官方持久键 `1b5ed7a` → 原文编辑命令与界面 `05cf21d` → 凭据名整类判断 `d643243` → 原文显示明文 `503839c` → 页签收敛与运行设置内嵌 `dba3f27` → 执行锁等过子进程短暂持有窗口 `f7060ba` → 禁止自动更新开关 `82e8170` → CodeMirror 编辑器（与本条同一提交）。
-- 执行锁：同一进程里别的线程启动子进程时，子进程在 exec 前握着锁文件描述符的副本，刚释放的锁被短暂占住，紧接着的写动作被误判为并发。高负载下 `tests/agent_settings.rs` 40 次失败 7 次、单线程 0 次；取锁在 500ms 内重试后同样负载 0/40。
-- 验收状态：各提交两套 cargo test、前端单测、typecheck、build 全绿；原文编辑与禁止自动更新另在隔离 HOME 用 CLI 实测回读；编辑器在 DEV mock 浏览器里实见高亮、行号与行内报错；页签收敛后的安装包已用真实环境启动供用户试用，真机逐项验收待做。
+- Trigger: real-machine users requested more runtime parameters, then asked to replace all-values Actual Configuration/full-file presentation with meaningful adjustable fields like CC Switch, while displaying plaintext in the editor.
+- Reference: CC Switch `farion1231/cc-switch@8e478b2` main UI has vendor cards (name/endpoint/quota); editors prioritize API Key/endpoint, collapse Advanced, and put three-line JSON last with 6 direct switches (`src/components/providers/forms/CommonConfigEditor.tsx`). Current-provider JSON is full live settings.json (`EditProviderDialog.tsx` reads `read_live_provider_settings`) with plaintext tokens. Do not copy whole-file overwrite/common-fragment merging.
+- Decision: Claude reasoning/Artifact use official persistent `effortLevel`/`enableArtifact`, not session overrides; users remove old variables through Clear Override Variables. Remove Actual Configuration tab, retaining Provider/Runtime Settings/Launch Commands. Embed runtime forms; other fields use collapsed Edit Configuration File at the bottom, showing/writing exact originals with whole-file digest protection. Database/audit excludes full content/values. Credential-name detection uses whole categories like CC Switch.
+- Commits: official persistent keys `1b5ed7a` → raw editor command/UI `05cf21d` → credential-category detection `d643243` → plaintext original `503839c` → tab consolidation/embedded runtime `dba3f27` → lock wait for brief subprocess inheritance `f7060ba` → Disable Auto-update `82e8170` → CodeMirror (same commit as this entry).
+- Execution lock: other threads' spawned processes inherit lock descriptors before exec, briefly holding a released lock and falsely rejecting immediate writes. High-load `tests/agent_settings.rs` failed 7/40, single-thread 0; retry acquisition within 500ms yielded 0/40 under the same load.
+- Acceptance: both cargo suites, frontend units/typecheck/build passed every commit. Isolated CLI readback additionally covered raw editing/Disable Auto-update; DEV browser showed syntax highlighting/line numbers/inline errors. Consolidated package launched in the real environment for user trials; itemized machine acceptance remains pending.
 
-## 2026-09-23 规则内容迁出裁决
+## 2026-09-23: Moving Rule Content Out
 
-- 触发：用户指出默认规则跟着二进制走，改一条就得重新发包。盘点发现「内置推荐规则」`core.md` 就是作者本人的全局规则（改过 32 次），属于个人内容，不是产品默认；而接入预设、hooks 清理签名、状态栏脚本等才是跟代码走的工具知识。
-- 裁决：规则内容迁到 agent-skills 仓库 `rules/`（subtree 保留历史，另补体积与锚点门禁和行为评测执行器），本工具作为技能来源读取，复用技能的集合定义、镜像目录与「更新资源库」；二进制不留兜底规则，只留旧库迁移用的冻结副本。推荐别名（固定时区与语言）同属个人内容，同样迁到 agent-skills `aliases/`，由别名页从来源读取。
-- 提交：agent-skills `001ae92`（迁入规则历史）、`948aaa0`（整理与门禁）、`50a8cde`（迁入别名）；本仓 `7c6eee7`（来源规则）→ `2b0f9ac`（删除 `agent-rule/`）→ `0bba6fe`（推荐来源生成挪到技能模块）→ `329e2b1`（来源别名）→ `107c30a`（删除 `config/shell-aliases.json`）→ `37c6933`（Tauri 桥放行 `--source-rule`）。均已推送。
-- 验收中发现并已修复：`7c6eee7` 起桥的命令白名单没放行 `rules:apply --source-rule`，桌面端点「应用来源规则」只显示「写入失败」；引擎、前端测试都不经过桥，是对安装包逐步点击时暴露的（`37c6933` 修复并补桥测试）。`329e2b1` 提交前漏跑 Tauri 测试，桥直连的别名状态测试仍按内置推荐断言，一并修正。规则页「更新来源」按钮起初用错技能 id 前缀（`skills:` 应为 `skill:`），单元测试与代码错在同一处，隔离 CLI 实测抓出后修正。
-- 验收：两套 cargo test（引擎 387、Tauri 20）、前端 558 项、typecheck、build 全绿；agent-skills 39 项测试全绿，门禁各做一次反例。隔离 HOME 用 CLI 以 agent-skills 临时克隆为上游，规则走通「推荐来源 → 登记 → 取回 → 应用（先备份）→ 上游出新版 → 可更新 → 一键更新不另存备份」，别名走通「推荐来源 → 取回 → 推荐带来源 → 添加 → 两个 rc 文件写入、`zsh -n` 通过」，审计记规则 id、摘要、上游提交号或别名来源，不含正文。`37c6933` 安装包 `verify:macos` 全部通过；从 DMG 取出的 .app 在隔离 HOME、隔离数据目录、替身 CLI 下经 System Events 逐步点击：规则页「取回 agent-skills」→ 出现来源规则 →「应用到…」写入且与来源 core.md 逐字节一致 → 上游提交新版后「更新来源」→「来源有新版本」→「更新到新版本」写入新版、无备份模板；终端快捷命令页推荐标「来自 agent-skills」，添加 grok 后两个 rc 文件出现区块、`zsh -n` 通过、审计记来源；运行设置页有「禁止自动更新」，展开「直接编辑配置文件」为 CodeMirror 编辑器（原文含令牌、格式化与查看改动在）。全程真实 `~/.claude`、`~/.codex`、rc 文件摘要不变。真实环境里 agent-skills 镜像尚未取回，由用户在规则页点「取回 agent-skills」。
+- Trigger: bundled rules required a package rebuild for any edit. Inventory showed recommended `core.md` was the author's personal global rules, edited 32 times, rather than product defaults. Connection presets, Hook cleanup signatures, and statusline scripts are code-coupled tool knowledge.
+- Decision: move rules to agent-skills `rules/` with subtree history, size/anchor gates, and behavior-evaluation runner. Read through skill sources, reusing collection definitions/mirrors/Update Resource Library. No binary fallback rules, only frozen legacy-migration copies. Personal timezone/language aliases also move to agent-skills `aliases/`, read from sources by the alias page.
+- Commits, all pushed: agent-skills `001ae92` (rule history), `948aaa0` (organization/gates), `50a8cde` (aliases); this repository `7c6eee7` (source rules) → `2b0f9ac` (remove `agent-rule/`) → `0bba6fe` (recommendation generation to Skills) → `329e2b1` (source aliases) → `107c30a` (remove `config/shell-aliases.json`) → `37c6933` (Tauri `--source-rule` allowlist).
+- Acceptance defects fixed: from `7c6eee7`, bridge denied `rules:apply --source-rule`, so desktop Apply Source Rule only failed; engine/frontend tests bypassed the bridge, exposed by package clicks. `37c6933` fixed/added bridge coverage. `329e2b1` omitted Tauri tests before commit; direct-bridge alias tests still expected builtin recommendations and were corrected. Update Source used wrong `skills:` rather than `skill:` prefix; implementation/tests shared the error, caught by isolated CLI.
+- Acceptance: engine 387, Tauri 20, frontend 558, typecheck/build passed; agent-skills 39 tests passed with a negative case for every gate. Isolated CLI with temporary agent-skills upstream completed recommendation → register → fetch → apply with backup → upstream new version → update availability → one-click update without another backup. Aliases completed recommendation → fetch → source-labelled recommendation → add → both rc blocks/`zsh -n`. Audit stores rule ID/digest/upstream commit or alias source, not content. `37c6933` package passed all `verify:macos`. Its DMG app, isolated HOME/data and substitute CLIs, was clicked through System Events: fetch agent-skills → source rules → Apply To writes byte-identical core.md → upstream commit → Update Source → New Source Version → Update writes new content without backup template. Shortcuts labelled From agent-skills; grok addition wrote both rc blocks, passed `zsh -n`, audited source. Runtime showed Disable Auto-update and CodeMirror raw editor with tokens/format/diff. Real Claude/Codex/rc digests remained unchanged throughout. Real agent-skills mirror was not fetched yet; user should click Fetch agent-skills on Rules.
 
-## 2026-09-23 agent-skills 目录整理裁决
+## 2026-09-23: agent-skills Directory Organization
 
-- 触发：用户指出 agent-skills 目录乱：七个技能与 `rules/`、`aliases/`、`tests/` 平铺在顶层，`tests/` 里混着调用模型的评测执行器，33KB 的 README 同时装着目录、实测记录、读数规则与投稿约定。
-- 裁决：agent-skills 把技能收进 `skills/`，调用模型的执行器与内置技能夹具挪到 `tools/evals/`，`tests/` 只留离线门禁；README 原文拆到 `docs/authoring.md`（设计原则、技能包结构、运行时适配、投稿约定）与 `docs/evaluation.md`（执行器、读数规则、宿主截断、实测记录、已试死路），README 只留范围、目录、结构、验证与用法。本工具：推荐定义改为 `skill_paths: ["skills"]`；旧定义里的单段技能名在顶层找不到时按 `skills/<名>` 找（只读，不改库，旧定义与旧库备份照常可用）；接管扫描按集合实际发现的技能名判定计划外链接，否则目录定义下同名链接会被当成外部链接另建集合；推荐卡片与确认框的「含 N 个技能」改为「技能取自 skills/」，因为一个 `skill_paths` 项可以装多个技能。
-- 提交：agent-skills `fb35311`（执行器与文档拆分）、`8566c8e`（技能收进 `skills/`）；本仓 `30a624e`。均已推送。
-- 验收：引擎全量 cargo test、Tauri 20 项、前端 558 项、build 全绿，新增用例在撤掉回退或名称匹配改动后各自失败；agent-skills 39 项全绿，新增「顶层不得出现技能包」门禁、英文检查覆盖 `docs/`，各做一次反例；四个执行器从任意目录都能找到 7 个技能、196 条触发用例与规则评测文件（只加载，未调用模型）。隔离 HOME 以本地裸仓库为上游：旧布局取回并启用 `verification` → 上游前进到整理后的提交再更新 → 旧定义仍发现 7 个技能、链接目标不变、来源规则与推荐别名照常 → 定义改为 `["skills"]` 后结果一致。
-- 真实环境：先备份库（`before-reorg`），经 CLI 执行与「更新资源库」相同的集合更新（镜像 `cbf1fd2` → `8566c8e`），再把集合定义改为 `["skills"]`（url、agents 不变）。前后 `skills:status` 逐行一致，`~/.claude/skills`、`~/.codex/skills` 共 24 条链接目标一致，各配置文件摘要一致；规则页两份规则文件匹配来源规则 `agent-skills/core`；四条推荐别名已在两个 rc 文件里，故不再推荐。CLI 更新镜像不刷新上游探测缓存，集合卡片仍显示 3 小时前探到的 `cbf1fd2`，另跑一次 `system:refresh-upstream --only skill:agent-skills`（只写探测缓存）后显示 `8566c8e`、已是最新。`30a624e` 安装包 SHA256 `d1cb0ae5d782ec47fb2da328ca0e9c1b314aa9542a317cba20e4b51259dba74b`（8689586 bytes），`verify:macos` 全部通过（未签名、只验 x86_64）；换成该版本后技能页推荐卡片显示「技能取自 skills/ · 已添加」，集合卡片「正常 · 已收录 7 个技能」，无发现失败。遗留：库里仍有已并入 `verification` 的 `frontend-verification` 绑定（两个助手均 missing-link），整理前即存在，未处理。
+- Trigger: seven skills, rules/aliases/tests were mixed at root, tests included model evaluation runners, and 33KB README combined directory/measurement/reading/contribution material.
+- Decision: skills move to `skills/`; model runners/builtin fixtures to `tools/evals/`; tests retain offline gates. README splits into `docs/authoring.md` (design/package/runtime/contribution) and `docs/evaluation.md` (runners/reading/host truncation/results/dead ends), leaving scope/directories/structure/validation/usage. This tool recommends `skill_paths: ["skills"]`; absent single-segment legacy root names resolve read-only as `skills/<name>` without database changes, preserving definitions/backups. Takeover scans discovered skill names to avoid treating existing same-name directory-source links as external new collections. Recommendation/confirmation replace Contains N Skills with Skills from skills/, since one skill_paths item can contain many.
+- Commits, all pushed: agent-skills `fb35311` (runners/docs), `8566c8e` (skills directory); this repository `30a624e`.
+- Acceptance: full engine cargo, Tauri 20, frontend 558/build passed; new fallback/name-matching cases fail when their fixes are reverted. agent-skills 39 passed, adding No Root Skill Packages and docs/ English gates, each with a negative case. All four runners locate 7 skills, 196 trigger cases, and rules evaluation files from arbitrary directories (load only, no models). Isolated HOME/local bare upstream: fetch old layout/enable verification → update reorganized upstream → old definition still discovers 7, unchanged link targets, working rules/aliases → `["skills"]` definition yields identical results.
+- Real environment: back up database (`before-reorg`), CLI collection-update equivalent to Update Resource Library (`cbf1fd2` → `8566c8e`), then change definition to `["skills"]` retaining url/agents. `skills:status` rows identical; 24 links across `~/.claude/skills` and `~/.codex/skills`, and configuration digests unchanged. Both rule files match agent-skills/core; four recommended aliases already exist in both rc files and cease being recommended. CLI mirror updates do not refresh probes; card still showed 3-hour-old cbf1fd2 until `system:refresh-upstream --only skill:agent-skills` updated cache to 8566c8e/latest. `30a624e` package SHA256 `d1cb0ae5d782ec47fb2da328ca0e9c1b314aa9542a317cba20e4b51259dba74b`, 8689586 bytes, all `verify:macos` passed (unsigned, x86_64 only). New GUI shows Skills from skills/ · Added and Healthy · 7 Skills, no discovery failure. Existing frontend-verification bindings, already merged into verification, remain missing-link for both agents; predated organization and untouched.
 
-## 2026-09-23 官方账号与第三方凭据隔离
+## 2026-09-23: Official and Third-party Credential Isolation
 
-- 触发：用户要求官方账号体系的凭证与第三方凭证完全隔离、不掺杂使用，不触碰官方账号，一切以各助手官方标准为准。实测（`claude auth status` 注入假凭据）发现同一配置目录里两种凭据并存时，Claude 在「只有地址没有令牌」或「API key 未确认」时会退回官方登录，同时请求照样发往第三方地址；调研 CC Switch、claude-code-router、ccs、ccm、opencode、Cline 后确认：做得稳的都不碰官方登录，按会话或配置目录隔离，并清理抢优先级的键。
-- 裁决：任一配置目录只放一种凭据。主配置（`~/.claude`、`~/.codex`）只放官方账号，本工具不再写入第三方接入（`agents:configure --use` 以 `AGENT_MAIN_OFFICIAL_ONLY` 拒绝），第三方接入一律在独立环境（实例）里用；从不读写钥匙串、`.credentials.json`、`auth.json` 或 `~/.claude.json` 的账号字段。
-- 提交（均已推送 `rust`）：`f4c4cbc` 外部命令执行器可取退出码与 stderr（重构）；`812a81c` 第三方实例写入前用官方命令确认目录无官方登录、Claude 定义规则、置空取消 shell 继承、Codex 启动前缀清空 `CODEX_API_KEY`/`CODEX_ACCESS_TOKEN`；`f918db6` 接入一键建成独立环境、实例表单支持 x-api-key 且保留其他 env；`192121b` 主配置只放官方账号（界面、命令面板、托盘同步，⌘⇧K 改名账号快切）；`c75c993` 清理切到指定接入的死路径（重构）；`7dbd73b` 补正 `c75c993` 漏改的用例；`2808579` 登录状态改用官方命令按需查询（`agents:auth-status`），status 不再读认证文件，第三方实例里的官方登录标为混用；`9a3af04` 旧 Codex 第三方启动命令缺前缀时提示与订正；`1578b76` 提示会压过主配置官方账号的外部设置（只读）。
-- 依据：Claude 官方文档（认证优先级、网关接入、settings `env` 置空取消 shell 变量、钥匙串按 `CLAUDE_CONFIG_DIR` 区分、`~/.claude.json` 保存登录会话）；Codex `rust-v0.156.0` 源码（`env_key` 优先且缺失即报错不退回登录、`requires_openai_auth` 只在无 `env_key` 时走官方身份路径、keyring 按 `CODEX_HOME` 摘要区分、`CODEX_API_KEY`/`CODEX_ACCESS_TOKEN` 优先于存储的登录）与官方配置参考。Codex 第三方表的 `requires_openai_auth` 渲染保留，只用于识别旧版本写进主配置的表。
-- 验收：每次推送前 engine-rs 全量、Tauri 20 项、Vitest 与 build 全绿（最终 57 files / 572 tests）。隔离 HOME 加真实 claude 2.1.281 / codex 0.156.0（Claude 以 `CLAUDE_CONFIG_DIR` 指向隔离目录，钥匙串按路径隔离）：第三方实例新目录写入、已存在目录经真实 `auth status` 探测后写入、出现登录会话记录后拒绝；真实 Claude 确认实例里的空串挡住 shell 导出的 `CLAUDE_CODE_OAUTH_TOKEN`、`ANTHROPIC_API_KEY`、`ANTHROPIC_AUTH_TOKEN`；真实 `codex login status` 在环境带 `CODEX_API_KEY` 时仍报未登录；主配置拒绝写入第三方接入且文件不变，切回官方把令牌转存密钥文件、主配置清空、数据目录无明文。本机真实 HOME 只读运行 `agents:auth-status`：Claude 主配置由此前误报的「缺失」变为已登录，Codex 已登录（chatgpt）；`credential_overrides` 两边为空；临时数据目录均保持为空。
-- 过程问题：`c75c993` 推送前全量测试的输出筛选（`grep | head`）截掉了 FAILED 行，一个用例未跟着改就推送了，`7dbd73b` 补正；之后复核改为只看 `test result` 与 `FAILED`。
-- 未做：桌面安装包里的点击验收（混用警告、切回官方、建成独立环境、检查登录、启动命令订正）；隔离环境里无法产生真实官方登录，「官方命令报告已登录」一支只由替身测试与真实主配置的只读查询覆盖；未抓包确认请求头；未与真实第三方中转联调。
+- Trigger: users required complete separation, no official-account interference, following official standards. Injected fake `claude auth status` credentials showed a directory containing both authentication types could fall back to official login for endpoint-without-token/unconfirmed API Key while still sending to the third-party endpoint. CC Switch/claude-code-router/ccs/ccm/opencode/Cline research found reliable approaches preserve official login, isolate sessions/directories, and clear overriding keys.
+- Decision: one credential type per directory. Main `~/.claude`/`~/.codex` contain only official accounts; third-party `agents:configure --use` returns `AGENT_MAIN_OFFICIAL_ONLY`. All third-party connections use independent instances. Never read/write keychain, `.credentials.json`, `auth.json`, or account fields in `~/.claude.json`.
+- Commits, all pushed to `rust`: `f4c4cbc` executor exit-code/stderr refactor; `812a81c` official-command login absence check before third-party writes, Claude definition rules/empty shell overrides, Codex launch clearing `CODEX_API_KEY`/`CODEX_ACCESS_TOKEN`; `f918db6` one-click connection→instance, x-api-key form preserving other env; `192121b` main official-only UI/palette/tray, ⌘⇧K Account Switching; `c75c993` dead explicit-connection switching cleanup refactor; `7dbd73b` missed test fix; `2808579` on-demand official `agents:auth-status`, no auth-file reads, official login in third-party instances marked mixed; `9a3af04` detect/correct missing old Codex clearing prefixes; `1578b76` read-only external-override notices.
+- Basis: Claude official authentication priorities/gateway/settings-empty-env cancellation/keychain keyed by CLAUDE_CONFIG_DIR/login sessions in ~/.claude.json; Codex rust-v0.156.0 source and config reference (env_key priority, missing variable errors without fallback; requires_openai_auth official only without env_key; CODEX_HOME-digest keyring; CODEX_API_KEY/CODEX_ACCESS_TOKEN override stored login). Third-party requires_openai_auth rendering retained only to identify legacy main-config tables.
+- Acceptance before each push: full engine, Tauri 20, Vitest/build passed, final 57 files / 572 tests. Isolated HOME with real claude 2.1.281/codex 0.156.0 (isolated CLAUDE_CONFIG_DIR/path-keyed keychain): writes to new/existing directories after real auth status, rejection after login-session records. Real Claude empty strings blocked shell CLAUDE_CODE_OAUTH_TOKEN/ANTHROPIC_API_KEY/ANTHROPIC_AUTH_TOKEN. Real codex login status stayed Not Logged In with CODEX_API_KEY. Main third-party write refused/unchanged; returning official transferred token externally, cleared main fields, and left no plaintext in data. Real HOME read-only agents:auth-status corrected Claude Missing to Logged In, Codex logged in via chatgpt; credential_overrides empty on both, temporary data directories empty.
+- Process defect: prepush `grep | head` truncated FAILED output for `c75c993`, allowing one stale test to ship. `7dbd73b` fixed it; subsequent reviews inspect only test result and FAILED.
+- Not done: packaged-desktop click acceptance (mixed-use warnings, return to official, independent-environment creation, login checks, launch-command correction); isolated environments cannot produce real official login, so the "official command reports logged in" branch is covered only by stand-ins and read-only real-main queries; no packet capture of headers or real third-party relay integration.
 
-## 2026-09-23 凭据隔离闭环审查后的修复
+## 2026-09-23 Fixes after credential-isolation workflow review
 
-- 触发：闭环审查发现三处阻断：桌面应用从访达启动时 PATH 只有系统目录，Homebrew/npm 装的助手找不到，已有第三方实例的写入因「无法确认登录」被拒（复现）；第三方 Codex 实例只写 `env_key`，启动命令不导出该变量时真实 codex 报 `Missing environment variable`，状态却显示正常（复现）；保存实例只写启动命令不写配置，空目录里一运行就引导登录官方账号，之后第三方凭据写不进来。用户要求避开与版本绑定紧的做法、学习 CC Switch 等成熟产品；必须与版本挂钩时不考虑老版本。
-- 裁决：Codex 实例照 CC Switch「保留官方登录」模式，把凭据写进实例 `config.toml` 的 `[model_providers.agent-manager].experimental_bearer_token`（Codex 0.48 起支持，官方说明取值作为 `Authorization: Bearer` 发出、供以程序方式配置时使用），与 Claude 实例写 `settings.json` 同一做法，库里只存变量名。不用 `model_providers.<id>.auth` 命令（0.118 起、需随包提供助手命令），也不再用 `-p` 叠加 `agent-manager.config.toml`（profile-v2，0.134 起替换 `-p`）。命令查找照 CC Switch 补一组常见安装目录，执行时把命令所在目录放到 PATH 最前。本机真实库与 rc 文件里没有独立环境或 `-p agent-manager` 命令，不做旧写法迁移。
-- 提交（均已推送 `rust`）：`ef9cc86` 命令查找补 `~/.npm-global/bin`、`~/.volta/bin`、`~/.bun/bin`、`/opt/homebrew/bin`、`/usr/local/bin`，版本探测与登录检查执行时补 PATH；`27fa934` 上一提交的格式化；`d4210e9` Codex 实例改写 `config.toml`（按键原位修改，只动 `model`、`model_provider` 与本工具那张接入表，写入基准只取这三项，MCP 条目变化不算外部修改）、凭据写 `experimental_bearer_token`、启动命令去掉 `-p`、官方账号实例不写 `model_provider`、凭据变量必须和地址一起设置、Codex 接入表单可选填取值；`c41c558` 新建第三方环境目标文件不存在时先写配置再写启动命令，写不进去时启动命令也先不写；`6a4a5f6` 实例临时文件以 0600 新建、残留链接先删除；`3b4b9a0` 删除无人调用的测试辅助函数。
-- 验收：每次推送前跑改动涉及的全量套件；最终提交 `3b4b9a0` 上 engine-rs 全量 401 项、Tauri 20 项、Vitest 57 files / 574 tests、build 与 `cargo fmt --check` 全绿；新增用例在撤掉对应修复后各自失败（npm 目录查找与同目录解释器、Codex 表单规则、保存顺序两例、临时文件链接）。隔离 HOME 用引擎 CLI 保存并写入第三方 Codex 实例（登录检查走真实 codex 0.156.0）：`config.toml` 权限 0600、状态 managed-ok、状态输出不含取值；按启动命令运行真实 `codex exec`，shell 里故意导出假的 `CODEX_API_KEY`/`CODEX_ACCESS_TOKEN`/`OPENAI_API_KEY`，本地抓包收到 `POST /v1/responses`，唯一凭据头为 `Authorization: Bearer <实例假令牌>`，shell 取值未出现；对照去掉清空前缀时 0.156 仍用实例令牌（前缀保留为纵深防御，并避免官方命令把 shell 变量报成登录）；实例目录没有生成 `auth.json`；真实 `~/.codex/auth.json`、`config.toml` 元数据前后一致。
-- 未做：桌面安装包点击验收（Finder 启动下的命令查找、建成独立环境后的保存顺序）；未与真实第三方中转联调；新实例不自动带上主配置的 MCP、技能、规则；外部密钥文件的备份责任未在界面提示；官方账号实例未拦截 shell 里导出的第三方变量。
+- Trigger: review found three reproduced blockers. Finder-launched desktop PATH contains only system directories, hiding Homebrew/npm assistants and rejecting existing third-party instance writes as "Cannot confirm login." Third-party Codex instances wrote only `env_key`; without exporting it, real Codex reported `Missing environment variable` despite healthy status. Saving an instance wrote only its command, so launching an empty directory prompted official login and later blocked third-party credentials. The user requested mature approaches such as CC Switch, avoiding tight version dependencies; where unavoidable, old versions need not be supported.
+- Decision: follow CC Switch's "Preserve official login" mode by writing Codex instance `[model_providers.agent-manager].experimental_bearer_token` in `config.toml` (supported since 0.48; official semantics send `Authorization: Bearer` for programmatic configuration), matching Claude settings.json writes with variable names only in the database. Do not use `model_providers.<id>.auth` commands (since 0.118, requiring a bundled value-producing helper) or layer `agent-manager.config.toml` with `-p` (profile-v2 replaces `-p` since 0.134). Add common installation directories to command lookup as CC Switch does, putting the executable's directory first in PATH during execution. No real local database or rc instance / `-p agent-manager` command exists, so no legacy migration is needed.
+- Commits, all pushed to `rust`: `ef9cc86` adds lookup in `~/.npm-global/bin`, `~/.volta/bin`, `~/.bun/bin`, `/opt/homebrew/bin`, `/usr/local/bin` and execution PATH for version/login probes; `27fa934` formats that commit; `d4210e9` writes Codex config.toml in place, owning only `model`, `model_provider`, and its provider table, with those three in the baseline so MCP changes are independent; writes `experimental_bearer_token`, removes `-p`, omits official-instance model_provider, requires credential variable with address, and optionally accepts Codex form values; `c41c558` writes missing third-party configuration before commands and suppresses commands if writing fails; `6a4a5f6` creates temporary instance files at 0600 and removes residual links first; `3b4b9a0` deletes an unused test helper.
+- Acceptance: affected full suites ran before every push. Final `3b4b9a0`: engine-rs 401 tests, Tauri 20, Vitest 57 files / 574 tests, build, and `cargo fmt --check` passed. Each added test failed when its fix was removed (npm lookup/same-directory interpreter, Codex form constraints, two save-order cases, temporary-file symlinks). Isolated-HOME engine CLI saved/wrote a third-party Codex instance with real codex 0.156.0 login checks: config.toml 0600, managed-ok, no values in status. Real `codex exec` via its launch command, with intentionally fake shell `CODEX_API_KEY`/`CODEX_ACCESS_TOKEN`/`OPENAI_API_KEY`, produced captured `POST /v1/responses` with only `Authorization: Bearer <fake-instance-token>`; shell values were absent. Removing the clearing prefix still used the instance token in 0.156; the prefix remained as defense in depth and to avoid shell credentials appearing as official login. No instance auth.json was created; real `~/.codex/auth.json` and config.toml metadata stayed unchanged.
+- Not done: packaged-desktop clicks for Finder lookup/save order; real third-party relay integration; automatic main MCP/skills/rules carryover; UI explanation of external-secret backup responsibility; blocking exported third-party variables in official instances.
 
-## 2026-09-24 按官方认证标准全面校正
+## 2026-09-24: Authentication Corrections Against Official Standards
 
-- 触发：用户要求学习 CC Switch 等业界工具，把本工具做到无可挑剔，认证部分一律遵从各助手官方标准。
-- 依据与方法：Claude Code 官方文档（认证优先级、设置参考 `env` 与 `apiKeyHelper`、环境变量参考、托管设置、
-  WIF 参考）与 2.1.281 二进制；Codex `rust-v0.156.1` 源码（npm latest 0.156.1）；CC Switch `f8788719`、
-  ccs、ccm 等源码；厂商预设能从厂商自己发布的代码读到的以代码为准（`@z_ai/coding-helper`、`MiniMax-AI/cli`、
-  `MoonshotAI/kimi-code`）。每条行为结论都用真实 claude 2.1.281 / codex 0.156.1 实测：本地假接口（抓请求头、
-  回 Anthropic Messages 与 Responses 流）、隔离 HOME 与配置目录。云端容器会给 root 注入自己的 Claude 登录，
-  凡涉及「未登录」的实测都以无权读取该令牌的普通用户运行；引擎权限类用例同样以普通用户跑全量（root 下两例
-  因目录只读限制对 root 无效而失败，普通用户全通过）。
-- 实测发现并已修复的问题：
-  - 独立环境没挡住 shell 继承：shell 里的 `CLAUDE_CODE_USE_BEDROCK=1` 把第三方实例改走 Bedrock，shell 的地址
-    与 key 把官方账号实例发往中转，shell 的 `ANTHROPIC_CUSTOM_HEADERS` 随请求发给实例接口；官方账号 Codex 实例
-    会被 shell 的 `CODEX_ACCESS_TOKEN` 压过目录登录（`f13cd7a`）。
-  - 登录检查有误判：共享的 Anthropic 联合身份档案让官方命令对任何目录都报已登录，会误拒所有第三方实例写入；
-    藏在第三方令牌下面的 Console 登录被当成未登录；只存 MCP 登录的 `.credentials.json` 被当成已登录。改为经
-    官方 `--settings` 取消目录声明的凭据、档案目录指向不存在处，按 `apiKeySource` 识别 Console 登录（`b210305`）。
-  - Codex：`wire_api = "chat"` 已是硬错误却仍被接受（`fdd294c`）；连同它共九类写法会让 Codex 所有命令起不来，
-    原文编辑可以写进去；可用性检查为内置 openai 读 0.156 已不用的 `OPENAI_API_KEY`；名为 `OpenAI` 的实例接入表会被
-    当成内置 openai（`ac4209b`）。
-  - 官方已弃用的 `ANTHROPIC_SMALL_FAST_MODEL` 仍在写（`4c6341b`）；官方新增的 `fable` 别名切回官方账号时不撤
-    （`3c61fac`）。
-  - 实例 `settings.json` 的 env 令牌会进入 Bash 工具、hooks 与 MCP 子进程；官方 `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`
-    实测可挡住，第三方实例默认开启（`3c61fac`）。
-  - 用量：Claude `--fork-session` 把旧回复抄进新文件导致重复计数；第三方接入只在实例里用，但实例用量完全没统计
-    （`cda5940`）。
-  - 厂商预设：Kimi Code 会员与开放平台两套密钥混用同一变量、出处写错；智谱模型落后一代（`af8eacf`）。
-- 另补：主配置「官方账号」卡片的检查登录与只复制的登录 / 退出命令、登录方式中文说法、实例换目录与移除时说明
-  登录不随行、x-api-key 首次确认说明（`9dc43f1`）；外部来源提示补齐另两个云厂商开关、命名档案与联合身份、附加
-  请求头、托管设置（含 `forceLoginMethod` / `forceLoginOrgUUID`）与 Codex `openai_base_url`（`b210305`）。
-  契约细节见 `GUI-REDESIGN.md` 相应各节。
-- 保留不改（有官方依据）：Codex 实例凭据仍写 `experimental_bearer_token`（源码注释称以程序方式配置时使用，
-  0600 文件，CC Switch 同法）；`auth` 命令式凭据需随包提供取值命令，维持前次裁决不用。Claude 用户级
-  `.claude.json` 的 MCP 头 `${VAR}` 实测会被展开，远程 MCP 零明文写法有效。
-- 验证：每个提交推送前跑全量——最终 engine-rs 420 项（普通用户）、Tauri 20 项、Vitest 57 files / 588 tests、
-  `pnpm build` 与 `cargo fmt --check` 全绿（更正：该次 Vitest 另有 1 个未处理的错误、退出码为 1，当时漏看，
-  见下一节）；新增用例均在撤掉对应修复后失败。真实 CLI 端到端：引擎 CLI 写出的
-  实例文件在恶意 shell 环境下，第三方 Claude 实例只把实例令牌发往自己的地址、官方账号实例零外发；第三方 Codex
-  实例 `codex exec` 只带实例令牌；引擎 CLI 扫描真实 CLI 写出的会话（含分叉）计数正确、重扫不增加。浏览器 mock
-  实见主配置登录检查一行与 360px 无横向溢出。
-- 未做：桌面安装包重建与真机点击验收（本环境为 Linux 容器，无 macOS）；未与真实第三方中转、真实官方账号联调；
-  Codex 写入后未用官方二进制再加载一次校验（只做源码确认的静态识别）；VS Code 扩展里使用实例的环境变量片段
-  未提供；未发布 tag 或 Release。
+- Trigger: the user requested an unassailable tool informed by CC Switch and industry practice, with authentication following each assistant's official standards.
+- Sources/method: official Claude authentication precedence, settings `env`/`apiKeyHelper`, environment variables, managed settings, WIF, and 2.1.281 binary; Codex `rust-v0.156.1` source (npm latest 0.156.1); CC Switch `f8788719`, ccs, ccm, and vendor-published preset code (`@z_ai/coding-helper`, `MiniMax-AI/cli`, `MoonshotAI/kimi-code`) where available. Every behavior conclusion was tested with real claude 2.1.281 / codex 0.156.1 against local fake Messages/Responses streaming endpoints capturing headers, isolated HOME/config directories. The cloud container injects root Claude login, so logged-out tests used an ordinary user unable to read it. Full engine permission tests also used an ordinary user: two root failures arose because read-only directory restrictions do not constrain root; all passed as the ordinary user.
+- Observed and fixed:
+  - Instances did not block shell inheritance: `CLAUDE_CODE_USE_BEDROCK=1` redirected third-party instances to Bedrock; shell address/key redirected official instances to relays; `ANTHROPIC_CUSTOM_HEADERS` reached instance endpoints; shell `CODEX_ACCESS_TOKEN` overrode official-instance directory login (`f13cd7a`).
+  - Login checks misclassified shared Anthropic federation as login in every directory, rejecting all third-party writes; Console login hidden under third-party tokens appeared logged out; MCP-only `.credentials.json` appeared logged in. Official `--settings` now cancels directory credentials, the profile directory points nowhere, and `apiKeySource` identifies Console (`b210305`).
+  - Codex accepted fatal `wire_api = "chat"` (`fdd294c`). Nine fatal forms could enter raw editing and break every command; availability checks used obsolete 0.156 openai `OPENAI_API_KEY`; provider name `OpenAI` was misrecognized as built-in (`ac4209b`).
+  - Deprecated `ANTHROPIC_SMALL_FAST_MODEL` was still written (`4c6341b`); new `fable` aliases were not removed on return to official (`3c61fac`).
+  - Instance env tokens reached Bash/hooks/MCP subprocesses; official `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` blocked them in testing and became the third-party default (`3c61fac`).
+  - Claude `--fork-session` copied replies and double-counted usage; instance-only third-party usage was entirely absent (`cda5940`).
+  - Kimi Code membership/Open Platform shared one variable and had wrong provenance; Z.ai models lagged one generation (`af8eacf`).
+- Also added: main Official account checks and copy-only login/logout commands, Chinese login-method labels, directory-change/removal warnings that login does not move, first-use x-api-key confirmation (`9dc43f1`); external-source warnings for two more cloud switches, named/federated profiles, extra headers, managed settings including `forceLoginMethod` / `forceLoginOrgUUID`, and Codex `openai_base_url` (`b210305`). See corresponding `GUI-REDESIGN.md` sections.
+- Preserved with official backing: instance Codex `experimental_bearer_token` remains in 0600 files, matching source comments on programmatic configuration and CC Switch. `auth` requires a bundled credential command, so the prior rejection remains. Claude user `.claude.json` MCP header `${VAR}` expands in real tests, validating plaintext-free remote MCP.
+- Verification: full suites before each push. Final engine-rs 420 (ordinary user), Tauri 20, Vitest 57 files / 588 tests, `pnpm build`, and `cargo fmt --check` passed, with a correction: Vitest also had one unhandled error and exit 1, overlooked then; see the next section. Each new case failed with its fix removed. Real CLI E2E: engine-written third-party Claude files under malicious shell sent only instance tokens to their own address, while official instances sent nothing externally; Codex exec used instance tokens only. Scanning real CLI sessions including forks counted correctly and rescans did not increase totals. Browser mock showed main login checks and no horizontal overflow at 360px.
+- Not done: rebuilt desktop package/macOS clicks (Linux container); real third-party or official-account integration; reloading Codex with the official binary after writing (source-confirmed static detection only); VS Code instance environment snippets; tag or Release publishing.
 
-## 2026-09-24（续）独立复核后的修正
+## 2026-09-24 Follow-up: Corrections After Independent Review
 
-- 触发：对上一节 `a4fdbad..790ea74` 的改动做独立对抗式复核（只读，逐条给出失败场景），并自查系统级设置。
-  每条结论都先复现再改；复核里不成立的部分如实记下。
-- 新增（`70c48f3`）：实例目录挡不住的系统级设置。真实 CLI 实测：`/etc/codex/managed_config.toml` 的
-  `openai_base_url` 压过主配置、官方凭据发往它；`/etc/codex/requirements.toml` 的 `model_provider` 让第三方实例
-  改走组织指定的地址；系统 `forced_login_method` 拒绝另一种登录；Claude 托管设置的 `env` 压过实例
-  `settings.json` 的地址与令牌，`forceLoginMethod` 让第三方实例启动即被拦下。主配置与每个实例的状态只报来源与
-  键名，卡片说明后果。
-- 复核成立并已修复：
-  - 建成独立环境时查实例状态失败没人接住，弹窗停住无提示（`d7b90f0`）；上一节所说 Vitest 全绿其实带着它。
-  - Codex 分叉的分叉、或父会话恢复过：前缀里夹着父会话自己的标记，原先第一条就当结束，父会话用量被再算一遍；
-    正写到一半的分叉被当成旧版本整份计入；截断后停在半截行漏算一条（`91343c4`，标记按 `thread_id` 归属判断）。
-  - 实例状态原样带出 `ANTHROPIC_CUSTOM_HEADERS` 与带 `user:pass@` 的地址；检查登录把整份 `.claude.json`（含
-    Console key）解析进内存（`8ee4f47`，改为隐藏、打码、定义不存这类地址、只记键在不在）。
-  - `requires_openai_auth = false` 被误判为与 `auth` 冲突；漏了空的 `auth.command`（`9c2df8e`，真实 0.156.1 复现）。
-  - 按新规则不再合法的旧定义从实例列表里消失、无法编辑或移除；实例文件自己设的隔离项被说成 shell 导出、写入
-    静默置空（`169032f`）。
-  - 从接入卡片建成的第三方环境没有默认隔离子进程凭据，已有环境写的 `true` 显示为关、保存被删（`f9a158a`）。
-    修复时另发现：2.1.281 的 Linux 版开了这项要用 bubblewrap，没装 `bwrap` 时 Claude 拒绝启动（实测；本容器
-    恰好装了 `bwrap`，上一节的子进程隔离实测因此没暴露）；下载 macOS 版核对，其代码里沙箱可用恒为否、没有这条
-    报错。Linux 上因此默认不开并说明。
-  - 厂商预设国内与国际两套账号共用一个密钥变量（`d4dfd4f`，MiniMax 照它的命令行、Z.ai 照它的配置助手命名）。
-- 复核不成立或部分成立：检查登录会让官方命令在从没启动过 Claude 的目录里补上它自己的首次启动记录（实测，之后
-  再查不变），这点成立，契约已改写得更准确；但「之后 MCP 保存被当成外部修改拒绝」不成立——MCP 按条目内容核对。
-  致命写法按 0.156 起的规则判断，旧版 Codex 上可能过严，提示与拒绝说明已写明依据版本，未按已安装版本放宽。
-- 另补：shell 启动文件导出了 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 时提示主配置不生效（`517dd9e`，本工具写的
-  启动别名不算）。
-- 另核对：全新第三方实例第一次交互启动依次是主题、安全说明、信任目录，不出现官方登录选择（实例令牌生效）。
-- 验证：推送前在干净的 `9acf29e` 上跑全量——engine-rs 428 项（普通用户；`517dd9e` 上 429 项）、Tauri 20 项、Vitest 58 files /
-  598 tests（无未处理错误、退出码 0）、`pnpm build`、`cargo fmt --check`；各新增用例在撤掉对应修复后失败（分叉
-  归属、前缀等待、接入建成的默认值、`true` 回填、失效定义等）。真实 CLI 端到端：引擎 CLI 在隔离 HOME 与
-  `/etc/codex`、`/etc/claude-code` 下报出系统级设置且不含取值、查询不在 HOME 下建任何文件；用量扫描真实会话
-  （含恢复与分叉）计数不变、重扫不增加；第三方 Claude 实例在恶意 shell 下只把实例令牌发往自己的地址、官方账号
-  实例零外发。
-- 未做：macOS 真机上开启子进程隔离的实际运行（只静态核对了 macOS 版代码）；复制型分叉只按源码与协议注释
-  构造样本，没有用 CLI 生成真实文件（`exec fork` 是引用型）；macOS 描述文件下发的 Claude / Codex 设置不检查；
-  安装包未重建。
+- Trigger: independent adversarial read-only review of `a4fdbad..790ea74`, with explicit failure scenarios, plus self-review of system settings. Every conclusion was reproduced before editing; invalid findings are recorded too.
+- Added (`70c48f3`): system settings unaffected by directory isolation. Real tests showed `/etc/codex/managed_config.toml` openai_base_url overriding main and receiving official credentials; `/etc/codex/requirements.toml` model_provider redirecting third-party instances to organization endpoints; system forced_login_method rejecting other login; Claude managed env overriding instance address/token and forceLoginMethod blocking third-party startup. Main/instance status reports origins/key names only; cards explain consequences.
+- Confirmed and fixed findings:
+  - Unhandled instance-status failure during connection-to-environment creation stalled the dialog silently (`d7b90f0`); the preceding claimed green Vitest result included it.
+  - Nested Codex forks/resumed parents contained parent markers in copied prefixes, causing premature end and double-counting; half-written forks were counted as legacy whole files; truncation inside a line missed an event (`91343c4`, markers now identify `thread_id` ownership).
+  - Instance status exposed `ANTHROPIC_CUSTOM_HEADERS` and `user:pass@` URLs; login parsing loaded complete `.claude.json`, including Console keys, into memory (`8ee4f47`: hide/mask, reject such definition URLs, check key existence only).
+  - `requires_openai_auth = false` was falsely incompatible with `auth`; empty `auth.command` was missed (`9c2df8e`, real 0.156.1 reproduction).
+  - Invalid legacy definitions disappeared and could not be edited/removed; instance-config isolation fields were mislabeled shell exports and silently cleared (`169032f`).
+  - Connection-created third-party instances lacked subprocess isolation by default; existing `true` appeared disabled and was removed on save (`f9a158a`). Further testing found Linux 2.1.281 requires bubblewrap for isolation and rejects startup without `bwrap`; the container already had it, masking the limitation earlier. Downloaded macOS code always reports sandbox unavailable and lacks that error. Linux therefore defaults off with explanation.
+  - Domestic/international vendor accounts shared one secret variable (`d4dfd4f`, naming follows MiniMax CLI and Z.ai helper).
+- Invalid/partial findings: first probes in never-started Claude directories do create official first-launch records, with later probes unchanged; the contract now says this accurately. The claim this later makes MCP writes reject external changes was false because MCP compares entry content. Fatal rules start with 0.156 and may overreject old clients; warnings state the version and were not relaxed by installed version.
+- Also added exported `CLAUDE_CONFIG_DIR` / `CODEX_HOME` warnings that main configuration is inactive (`517dd9e`); tool launch aliases do not count.
+- Also checked: initial interactive third-party startup proceeds through theme, safety notice, and directory trust without official-login selection, because instance credentials take effect.
+- Verification: full suites on clean `9acf29e` before push: engine-rs 428 ordinary-user tests (429 on `517dd9e`), Tauri 20, Vitest 58 files / 598 tests with no unhandled errors and exit 0, `pnpm build`, `cargo fmt --check`. Each added case failed with its fix removed (fork ownership, prefix waiting, connection-created defaults, true backfill, invalid definitions). Real E2E under isolated HOME and `/etc/codex` / `/etc/claude-code`: status reported system origins without values and queries created no HOME files; real sessions including resumes/forks retained counts on rescan; third-party Claude under malicious shell sent only instance tokens to its address, official instances nothing externally.
+- Not done: real macOS subprocess-isolation execution (static macOS code only); copy-based fork files generated by CLI (constructed from source/protocol comments; exec fork is reference-based); macOS-profile-delivered settings inspection; rebuilt package.
 
-## 2026-09-24（再续）借鉴 CC Switch 补齐接入与认证管理
+## 2026-09-24 Further continuation: adopting CC Switch connection/authentication features
 
-- 触发：用户要求重点分析助手配置管理（尤其 provider 与认证）是否完善，借鉴 CC Switch 的优点。
-- 对照：CC Switch 3.20.4（`f878871`）源码里的接入管理、预设、用量与余额脚本、测速、模型列表、通用配置片段与
-  MCP/技能同步；逐项判断在「实际配置为准、主配置只放官方账号、第三方只进独立环境」的前提下能不能用、怎么用。
-- 采纳（均已推送 `rust`）：
-  - `b07f643` 独立环境可「测一下」：`agents:check --only profiles:<实例>` 按实例定义发一次最小真实请求，只读。
-  - `2068bf8` 密钥页列出接入与独立环境引用的凭据变量、用在哪里、有没有取值，改了取值要重新写入哪些环境。
-  - `0de6349` 接入卡片列出由它建成的独立环境，没建成的直接给入口；添加接入可一步「保存并建成独立环境」。
-  - `b9ebb7c` 接入与实例表单可获取模型列表（`agents:models`，凭据不落盘）；别名一键指向默认模型；新增子代理
-    模型（官方 `CLAUDE_CODE_SUBAGENT_MODEL`）。
-  - `2e89b68` 厂商预设扩到 25 条并给出密钥页与接入文档；DeepSeek 与 Kimi 开放平台可查余额
-    （`agents:balance`，只用厂商文档写明的余额接口）。
-  - `6e52095` 独立环境可从默认环境带上权限、状态栏、Hooks、规则与 MCP（`profiles:seed`）：只补没有的、凭据
-    不带，Hooks/规则/MCP 走各自域的写入；新建表单默认勾选，卡片上可再带。
-- 不采纳及原因：本地代理与自动故障转移（本工具会变成凭据中转、改写请求，官方 CLI 不再直连）；代管官方 OAuth、
-  读写 `auth.json` 与钥匙串（登录只给官方命令）；库里明文存密钥；只测 TCP/HTTP 连通的「测速」（改为最小真实
-  请求，能发现令牌与模型错误）；执行用户 JS 脚本查用量；深链接携带密钥导入；整文件快照切换（会覆盖外部修改）。
-  CC Switch 的「通用配置片段」对应这里的 `profiles:seed`，但只复制一次、不持续合并。
-- 验证：推送 `6e52095` 前在干净工作区跑全量——engine-rs 442 项（普通用户）、Tauri 20 项、Vitest 60 files /
-  619 tests（退出码 0）、`pnpm build`、两套 `cargo fmt --check`；新增用例覆盖参数白名单、凭据跳过、已有不动、
-  损坏文件失败但其他项照常、目录 0700、重复执行零写。隔离 HOME 用编译出的引擎 CLI 端到端：Claude 与 Codex
-  实例五项都带上，主配置字节不变，实例文件 0600、目录 0700，实例与数据目录里没有主配置的凭据；真实
-  `claude mcp list`、`codex mcp list` 在实例目录只列出不含明文凭据的条目，Codex 正常加载合并后的配置；
-  再带一次全部 `exists`/`skipped`、实例文件字节不变。前几批的模型列表、实例检查、凭据变量使用方同样用本地
-  假接口与隔离 HOME 实测过（模型列表逐个候选地址尝试，令牌不写盘）。
-- 未做：macOS 真机与安装包重建；阿里云百炼、腾讯、百度等预设（厂商文档站点被本环境出口策略拦截，无法核实
-  地址与模型，宁缺不猜）；Coding Plan 类套餐额度（没有找到厂商文档写明的查询接口）；多线路并发测速排序；
-  VS Code 插件侧的配置；Codex 写入后调用已安装二进制做加载校验（目前按 0.156 起的规则静态自检）；技能不随
-  `profiles:seed` 带（在技能页按环境分配）。
+- Trigger: the user requested focused review of assistant configuration, especially provider/authentication completeness, learning from CC Switch.
+- Comparison: CC Switch 3.20.4 (`f878871`) source for providers, presets, usage/balance scripts, speed checks, model lists, common snippets, MCP/skills sync. Each was assessed against actual-file authority, official-only main configuration, and instance-only third-party use.
+- Adopted, all pushed to `rust`:
+  - `b07f643` instance "Test": `agents:check --only profiles:<instance>` sends one minimal real request read-only.
+  - `2068bf8` Secrets lists connection/instance credential variables, usage locations, presence, and environments needing rewrites after value changes.
+  - `0de6349` connection cards list associated instances, expose creation when absent, and allow "Save and create independent environment."
+  - `b9ebb7c` forms fetch model lists (`agents:models`, credentials not persisted), point aliases to default in one action, and support official `CLAUDE_CODE_SUBAGENT_MODEL`.
+  - `2e89b68` expands presets to 25 with key/docs links, plus DeepSeek/Kimi Open Platform balance (`agents:balance`, documented APIs only).
+  - `6e52095` carries permissions/statusline/Hooks/rules/MCP from default through `profiles:seed`, adding absent content only, excluding credentials, invoking native domain writes. Creation selects these by default; cards can carry them later.
+- Rejected: local proxy/failover (turns the tool into a credential intermediary rewriting requests, losing direct official CLI connections); managing OAuth/auth.json/keychain (official commands own login); plaintext database secrets; TCP/HTTP-only "speed tests" (minimal real requests catch model/token failures); user JS usage scripts; credential-bearing import deep links; full-file snapshot switching (overwrites external edits). CC Switch common snippets correspond to one-time seed here, without continuous merging.
+- Verification before `6e52095` push on a clean tree: engine-rs 442 ordinary-user tests, Tauri 20, Vitest 60 files / 619 tests exit 0, `pnpm build`, both `cargo fmt --check`. Cases cover argument allowlists, credential skips, existing content preservation, corrupt-file failure isolation, 0700 directories, and repeat zero writes. Isolated-HOME compiled CLI copied all five items to Claude/Codex instances, preserving main bytes, 0600 files/0700 directories, and omitting main credentials from instance/data paths. Real `claude mcp list` / `codex mcp list` showed only nonplaintext entries and Codex loaded merged configuration; repeating returned exists/skipped and unchanged bytes. Prior model lists, instance checks, and variable consumers also used local fake endpoints/isolated HOME, trying list candidates individually without persisting tokens.
+- Not done: real macOS/rebuilt packages; Alibaba Cloud Bailian/Tencent/Baidu presets (documentation blocked by environment egress policy, so addresses/models remained unverified); Coding Plan quota APIs (none documented found); concurrent multiroute speed ranking; VS Code configuration; installed-binary Codex post-write load check (static 0.156+ checks only). Seed excludes skills, assigned per environment on Skills.
 
-## 2026-09-24 用户反馈：默认环境看不出状态与风险
+## 2026-09-24 User feedback: default-environment state and risk are unclear
 
-- 触发：用户截图（旧安装包）里 Codex 默认环境显示「当前实际配置（未保存）· 当前使用」和一张带「应用」的
-  「助手默认账号」，问：看不出现在是什么状态、该怎么操作、有没有风险，点默认账号的「应用」认证会不会丢。
-- 复现（隔离 HOME、真实 codex 0.156.1、假的 API key 登录）：配置只有 `model = "gpt-6-luna"` 与运行参数，
-  引擎报 `default: false`（未保存）；执行切回后 `auth.json` 字节不变、`codex login status` 前后都是已登录，
-  但 `model` 被删、库里多了一条「导入的配置」。当前代码在同样情况下还会误报「主配置里有第三方接入」。
-- 修正（`136dff5`）：账号按地址与凭据判定，模型等只是官方账号上的设置（`current.official`）；已是官方账号时
-  切回零写；默认环境逐行写明账号、登录保存在哪、模型与来源、自动化；接入页签分「账号」与「第三方接入 · 只在
-  独立环境里用」；切回只在混用时出现，确认框逐条列出改动范围。
-- 验证：engine-rs 443 项（普通用户）、Tauri 20 项、Vitest 61 files / 625 tests（退出码 0）、`pnpm build`、两套
-  `cargo fmt --check`；新增引擎用例（Codex 与 Claude 官方账号带模型零写）与界面用例（截图场景、确认框内容）；
-  新引擎重跑上面的复现：状态报官方账号，切回零写，`model` 保留，登录不变；浏览器 mock 截图核对两种状态。
-- 未做：官方账号的默认模型还不能在界面里改（要到「运行设置」底部直接编辑配置文件）；安装包未重建。
+- Trigger: an old-package screenshot showed Codex "Current actual configuration (unsaved) · In use" and an "Assistant default account" Apply card. The user could not determine state, next action, risk, or whether Apply loses authentication.
+- Reproduction with isolated HOME, real codex 0.156.1, fake API-key login: configuration had only `model = "gpt-6-luna"` and runtime parameters, yet engine reported `default: false`. Returning left auth.json bytes/login unchanged but removed model and created "Imported configuration." Current code also falsely reported main third-party use.
+- Fix (`136dff5`): classify accounts by address/credentials; model is an official-account setting (`current.official`). Returning when already official writes nothing. Default rows identify account/login storage/model source/automation. Connection tabs separate account from third-party instance-only connections. Return appears only for mixed use, with explicit scope in confirmation.
+- Verification: engine-rs 443 ordinary-user tests, Tauri 20, Vitest 61 files / 625 tests exit 0, build, both format checks. New tests cover official Claude/Codex models with zero writes and screenshot/dialog behavior. Reproduction now reports official, returns write-free, preserves model/login; browser mock checked both states.
+- Not done: UI editing of official default model (raw editing at bottom of Runtime settings required); rebuilt package.
 
-## 2026-09-24 用户反馈：用 CC Switch 不会困惑，这里会
+## 2026-09-24 User feedback: CC Switch is clear, this tool is confusing
 
-- 判断：CC Switch 只有一种东西（供应商卡片）、永远正好一张在用（启动时把实际配置导入成 default 卡片，另预置
-  官方卡片）、一个动作（启用＝改写同一个配置目录）。这里的困惑来自结构：默认环境里摆着不能在默认环境里用的
-  Provider 卡片，真正能用的独立环境在另一个页签；「接入」「独立环境」「实例」「默认账号」几个概念同时出现。
-  官方账号与第三方凭据分目录隔离是用户此前的要求，所以不照搬「启用＝改写主配置」，改为每张卡片都是能直接
-  启动的环境、写明终端命令。
-- 修正（`9290dec`）：去掉「默认环境 / 独立环境」页签，先选助手，同页依次列出默认环境、独立环境与用来建独立
-  环境的第三方接入；右上角「新建环境」（第三方厂商，或另一个官方账号）为主入口，第三方表单的主按钮是「下一步：
-  建成独立环境」；独立环境卡片头部写明账号类型与终端命令。
-- 验证：Vitest 61 files / 626 tests（退出码 0）、`pnpm build`、`tsc`；导航相关用例改为不再切页签，新增「新建环境」
-  两条路径与卡片终端命令的用例；浏览器 mock 截图核对三节布局、菜单与第三方表单，360px 宽无横向溢出。引擎与
-  Tauri 未改动（上一轮全量：engine-rs 443、Tauri 20）。
-- 未做：「新建环境 → 第三方」仍是两步（先保存接入，再在预填的独立环境表单里确认命令名与带上的设置），没有合成
-  一张表单；安装包未重建，桌面应用里没有点过。
+- Assessment: CC Switch has one object (vendor cards), exactly one active item (startup imports actual configuration into default, plus an official preset), and one action (Enable rewrites one directory). Here unusable-on-default Provider cards sat in the default tab while usable instances sat elsewhere, with competing "connection," "independent environment," "instance," and "default account" terms. The user previously required credential isolation by directory, so instead of copying main rewrites, each card becomes a launchable environment with its command.
+- Fix (`9290dec`): remove default/independent tabs; select an assistant and show default, instances, then third-party templates on one page. Top-right New environment (vendor or another official account) is primary; third-party form says "Next: create independent environment." Instance headers show account type and command.
+- Verification: Vitest 61 files / 626 tests exit 0, build, tsc; navigation tests no longer switch tabs, new tests cover both creation routes/commands; mock screenshots checked sections/menu/form and no horizontal overflow at 360px. Engine/Tauri unchanged; previous full baseline 443/20.
+- Not done: New environment → Third-party remains two steps (save connection, then confirm command/carryover in prefilled instance form), not one form; no rebuilt package or desktop clicks.
 
-## 2026-09-24 用户问：现在还会有授权凭证的疑问吗
+## 2026-09-24 User asks whether credential questions remain
 
-- 走查结论（按用户会走的路径）：官方登录一侧已说清（保存在哪、本工具不读不改、按需用官方命令检查）；第三方
-  API Key 一侧还有四处会卡住或让人疑惑：第一次填 Key 必须先自己建一个权限 600 的 `.env` 文件，否则提示「尚未
-  选择外部密钥文件」；表单同时要「变量名」和「Key」，看不出这个变量现在有没有值；换了 Key 之后卡片只显示笼统的
-  「实际配置与实例定义不同」，还给出对凭据没有意义的「以实际配置更新定义」；卡片平时不说 Key 写在哪。
-- 修正（`ac894ac`）：`secrets:source --create`（0600 独占新建、已存在不动、不进数据目录、校验不过即删）；
-  `secrets:status` 报文件里已有的变量名；接入表单 API Key 在前、一句话写明有没有值与写到哪，没有密钥文件时保存前
-  自动新建 `~/.config/agent-manager/secrets.env`；密钥页可「新建一个」；`profiles:status` 把第三方凭据标为
-  `credential`，卡片写明来自哪个变量、写在哪个文件、是否一致，换了 Key 时按钮是「写入新密钥」且直接写。
-- 验证：engine-rs 445 项（普通用户）、Tauri 20 项、Vitest 61 files / 632 tests（退出码 0）、`pnpm build`、两套
-  `cargo fmt --check`；新增引擎用例（新建密钥文件的权限、不覆盖、数据目录与相对路径拒绝；凭据换值后的状态与动作）
-  与界面用例（自动新建顺序、有无值的说明、卡片「写入新密钥」不弹确认、密钥页新建）。隔离 HOME 端到端：新建的
-  文件 0600、目录 0700；真实 claude 2.1.281 对本地假接口第一次发出第一个 Key；换 Key 后状态报凭据不一致、只给写入、
-  不含取值；写入后真实 claude 发出新 Key；数据目录里没有任何 Key。
-- 未做：Codex 第三方环境换 Key 的端到端只由引擎用例覆盖（同一段比较逻辑），没有跑真实 codex；安装包未重建。
+- Walkthrough: official storage, noninterference, and on-demand official checks are clear. Four third-party API Key problems remain: first use requires manually creating a 600 .env or reports no external secret file; variable name plus Key hides whether a value exists; changed keys appear as generic definition drift with meaningless credential "Update definition"; cards omit key destination.
+- Fix (`ac894ac`): `secrets:source --create` exclusively creates missing 0600 files outside data directories and removes invalid new files; `secrets:status` lists existing names. Forms put API Key first, explain presence/destination, and automatically create `~/.config/agent-manager/secrets.env` before saving when absent. Secrets offers "Create one." `profiles:status` marks credentials `credential`; cards show variable/file/consistency and offer direct "Write new key" after changes.
+- Verification: engine-rs 445 ordinary-user tests, Tauri 20, Vitest 61 files / 632 tests exit 0, build, both format checks. Engine cases cover permissions/no overwrite/data-directory and relative-path rejection/changed-value actions; UI covers creation order, presence text, confirmation-free new-key action, and file creation. Isolated E2E created 0600 files/0700 directories; real claude 2.1.281 sent the first key to a local fake endpoint, then reported credential mismatch without values or definition-update action after rotation. Rewriting sent the new key; no key remained in the data directory.
+- Not done: real Codex rotation E2E (shared comparison covered only by engine cases); rebuilt package.
 
-## 2026-09-27 CC Switch 可吸收体验清单（持续实施）
+## 2026-09-27 CC Switch experience improvements (ongoing implementation)
 
-> 已退役：2026-09-28 起按多账号设计，本节以及下面 09-28 各条里的 Provider 接入库、切回官方账号、运行设置表单、Hooks 预览等功能已删除（P6 与 2026-09-29 的清理），这些记录只作历史。
+> Retired: under the multi-account design from 2026-09-28, Provider libraries, return-to-official actions, runtime forms, Hooks previews, and related features in this section and the following 09-28 records were deleted in P6 and the 2026-09-29 cleanup. These records are historical only.
 
-目标限定在助手配置与 Provider 的日常使用：保留独立配置目录、官方账号与第三方凭据隔离、实际文件为准和逐目标写前比对。前面「借鉴 CC Switch 补齐接入与认证管理」记录的预设、复制、排序、导入导出、真实请求检查、模型列表、余额与初次带入设置已有源码与测试；本清单不把那些历史验证当成当前安装包验收。
+The scope is daily assistant/Provider configuration, preserving separate directories, official/third-party credential isolation, actual-file authority, and target-specific write baselines. Presets, copy, sorting, import/export, real-request checks, model lists, balance, and initial carryover described in the earlier CC Switch section already have source/tests; historical verification does not establish current-package acceptance.
 
-| 待补闭环 | 当前代码证据 | 完成条件 |
+| Remaining workflow | Current code evidence | Completion criterion |
 | --- | --- | --- |
-| 从日常入口使用独立环境 | `⌘⇧K` 的「账号与环境」范围集中列出官方账号、独立环境与已有启动命令；环境只定位卡片，命令只复制启动名。卡片上的「复制启动名」与「复制一条」分开；托盘逐条列出实际启动名，缺命令时打开卡片。托盘事件只打开精确入口，不切换或启动助手 | 已在隔离原生应用中创建官方独立环境，托盘点到对应命令面板项；重复点击前后实例配置、rc 文件和数据库摘要一致。`⌘⇧K` 新范围有前端交互用例，尚无本轮原生窗口操作；多条命令、缺命令及未写入的分支有局部用例；安装包与不同平台的实际菜单尚未验收 |
-| 修改 Provider 后维护已建环境 | 编辑时列出来源关联的独立环境与逐字段差异，默认不勾选；仍与旧 Provider 相同的字段可随本次修改带入，已自行修改或上次未勾选的字段默认保留，后续可在同一面板逐字段选择补同步。旧环境按原地址与凭据变量推断，多重匹配拒绝自动关联。`profiles:apply-definition` 同时比对实际文件和定义摘要，锁内写文件、定义与归属，失败回滚；界面逐环境回读定义与实际字段 | 隔离原生界面已分别验本次更新和上次未勾选后的补同步，回读文件与数据库；多目标失败隔离和旧环境歧义尚无原生窗口实测。旧环境已脱离原值且缺少来源标识时仍需手工核对 |
-| 维护环境之间的共用设置 | 新建时 `profiles:seed` 仍只补缺项；已建环境卡片用 `profiles:shared-status` / `profiles:shared-apply` 按权限、状态栏、Hooks、规则和每条 MCP 比较实际文件，默认不选，来源与目标摘要同时校验，逐项写后回读。差异列表隐藏自由文本；勾选后 `profiles:shared-preview` 只读展示目标文件完整原文及逐项结果 | 隔离原生窗口继续覆盖 Hooks、规则、MCP、Codex 与多项顺序更新，检查失败隔离；已安装客户端加载 MCP 已在隔离目录验证，其他设置的运行效果和安装包仍待验收；不做后台同步 |
-| 扩大接入覆盖时维持可信度 | 当前接入适配器只支持 Claude Code/Codex；预设只收有厂商来源的协议与端点，余额只查有官方接口的厂商 | 逐客户端确认原生配置格式、认证隔离和真实请求路径后再扩；每条新预设有厂商文档、可编辑字段和隔离环境验证；不能确认的能力不展示为可用 |
+| Use independent environments through daily entry points | `⌘⇧K` Accounts and environments lists official accounts, instances, and existing commands; environments locate cards, commands copy names. Cards distinguish "Copy launch name" from "Copy one command." Tray lists actual names and opens cards for missing commands; events open exact entries without switching/launching assistants | An official independent environment was created in an isolated native app and the tray opened its palette item; repeated clicks preserved instance/rc/database digests. New shortcut scope has frontend cases but no current native interaction. Multiple/missing/unwritten command branches have local cases; package and platform menus remain unaccepted |
+| Maintain instances after Provider edits | Edit lists associated environments/field differences, unselected by default. Fields still matching old Provider can follow edits; self-modified or previously unselected fields remain by default and can later be selected individually. Legacy association uses original address/variable, rejecting ambiguity. `profiles:apply-definition` checks actual-file/definition digests and writes files/definition/ownership under lock with rollback; UI reads back each environment | Isolated native UI verified current updates and later synchronization of previously unselected fields, with file/database readback. Multitarget failure isolation and legacy ambiguity lack native interaction. Legacy environments diverged from original values without provenance need manual checking |
+| Maintain shared settings between environments | Creation seed adds missing fields only. Existing cards compare actual permissions/statusline/Hooks/rules/each MCP through `profiles:shared-status` / `profiles:shared-apply`, unselected by default, checking source/target digests and reading back per item. Differences hide free text; selection calls read-only `profiles:shared-preview` for complete target text/results | Continue native isolated coverage of Hooks/rules/MCP/Codex and sequential updates, checking failure isolation. Installed-client MCP loading is verified in isolated directories; other runtime effects and packages remain pending. No background sync |
+| Keep broader connection coverage trustworthy | Adapters currently support Claude Code/Codex only; presets require vendor-backed protocols/endpoints, balances require official APIs | Expand only after native format, isolation, and real request paths are confirmed per client. Every preset needs vendor docs, editable fields, and isolated verification; unconfirmed capabilities cannot appear usable |
 
-实施按表中顺序分批提交并推送；每批先跑定向检查，再跑受影响的完整 Rust/前端检查。界面 mock 只能证明交互，真实客户端行为在隔离 HOME、数据目录和测试助手路径下回读；当前安装包另行构建并验收。前述不采纳项仍按 2026-09-24 的安全与产品裁决处理，不因清单标题扩大成全局配置覆盖、OAuth 代管或本地代理。
+Implement in table order through incremental commits/pushes, targeted checks first, then affected complete Rust/frontend suites. UI mocks prove interaction only; real client behavior requires isolated HOME/data/test-assistant readback. Current packages need separate builds/acceptance. Rejections remain governed by the 2026-09-24 security/product decision; this list does not authorize global overwrites, OAuth management, or proxies.
 
-入口闭环验证：前端 61 个测试文件、636 项通过，`pnpm build` 通过；Tauri 21 项和引擎完整测试通过。原生调试应用以隔离 HOME、数据目录及替身助手启动，实际创建独立环境后，`⌘K` 能定位并聚焦卡片；系统托盘显示环境与启动名，点击后打开对应命令面板项。托盘点击前后只读回读四个隔离文件摘要不变。该记录只证明入口闭环；没有运行真实 Claude/Codex，也没有重建安装包。
+Entry-point verification: frontend 61 files / 636 tests and build passed; Tauri 21 and full engine tests passed. A native debug app with isolated HOME/data/stand-ins created an environment; `⌘K` located/focused its card, tray listed environment/name and opened its palette item. Four isolated file digests stayed unchanged across tray clicks. This proves entry points only, without real Claude/Codex or rebuilt packages.
 
-Provider 逐环境更新验证：引擎新增三项隔离用例，前端完整测试为 61 个文件、642 项，`pnpm build`、引擎完整测试、Tauri 21 项及两套格式检查通过。另用隔离 HOME、数据目录和替身助手启动原生调试窗口：编辑 Provider 地址后，界面列出差异，勾选一个独立环境并保存，界面回报该环境已更新并回读；再直接读取隔离实例文件、数据库定义与 `profiles:status`，地址一致且状态为 `managed-ok`，隔离主配置目录未生成，数据库不含测试凭据取值。没有运行真实 Claude/Codex，也没有重建安装包；默认不勾选、多目标失败隔离和旧环境歧义目前只有局部用例，尚无原生窗口实测。
+Per-environment Provider updates: three new isolated engine cases; frontend 61 files / 642 tests, build, full engine, Tauri 21, both format checks passed. Native isolated debug UI edited a Provider address, listed differences, selected/saved one instance, and reported/read back the update. Direct instance-file/database/`profiles:status` readback agreed on address and managed-ok; no main configuration directory appeared and the database contained no test credential value. No real assistants/package rebuild. Default-unselected, multitarget failures, and legacy ambiguity had local tests only.
 
-Provider 补同步验证：前端完整测试为 61 个文件、644 项，`pnpm build` 通过。隔离原生调试窗口预置 Provider 新地址、已建环境旧地址，再次打开编辑面板时不改 Provider 本身；旧地址差异默认不勾选，显式勾选该字段后更新成功。直接回读独立环境文件、数据库定义与 `profiles:status` 均为新地址且状态 `managed-ok`；隔离主配置未生成，数据库不含测试凭据取值。没有运行真实 Claude/Codex 或重建安装包。
+Later Provider synchronization: frontend 61 files / 644 tests and build passed. Isolated native debug data had new Provider address/old environment address; reopening edit without changing Provider showed an unselected old-address difference. Explicit selection updated successfully. File/database/status all showed the new address and managed-ok; no main files or database test values. No real assistants or package rebuild.
 
-Provider 多环境失败隔离补验（2026-09-28）：隔离 HOME、数据目录和替身 Claude CLI 中建立两个受管环境，先用 `profiles:preview` 确认两个目标的新地址预览均零写；随后在预览后外部改动第一个环境的受管 API 地址。按同一批写入基准逐个执行 `profiles:apply-definition`，第一个明确拒绝旧基准、保留外部地址，第二个成功写入新地址与模型并回读为 `managed-ok`；主环境 `settings.json` 的 SHA256 不变。前端新增回归用例，确认首个写入失败后继续更新第二个并报告「1 个未确认」，且旧环境同时匹配两个 Provider 时禁用自动关联。前端全量 652 项与构建通过。原生调试窗口可被系统列出，但辅助功能持续拒绝读取（权限查询显示已授权），因此本项仍缺原生界面操作证据；未运行真实 Claude/Codex，也未重建安装包。
+Provider multitarget failure isolation (2026-09-28): isolated HOME/data/stand-in Claude created two managed environments. `profiles:preview` confirmed both new-address candidates without writes; then an external edit changed the first owned API address. Per-environment `profiles:apply-definition` using the same batch baselines rejected the first, preserved its external address, and updated the second address/model to managed-ok. Main settings.json SHA256 stayed unchanged. Frontend regression continued after first failure, reported "1 unconfirmed," and disabled autoassociation for two matching Providers. Full frontend 652/build passed. The system listed the native debug window, but accessibility repeatedly refused reads despite reported authorization; native interaction evidence remains absent. No real assistants/package rebuild.
 
-共用设置更新验证：隔离 Rust 用例覆盖 Claude 五类资源中的权限、状态栏、Hooks、规则、MCP 同名覆盖及含明文凭据 MCP 拦截，并覆盖来源/目标旧摘要拒绝；Codex 用例覆盖审批、沙箱与状态栏更新时保留实例接入表和模拟登录文件。前端完整测试为 61 个文件、646 项，`pnpm build`、引擎全量测试、Tauri 21 项和两套格式检查通过。隔离原生调试窗口中，已有 Claude 环境的权限与状态栏均显示差异且默认不勾选；只勾权限后，界面回读一致，文件中权限与来源一致、状态栏仍是环境自己的值，主配置和模拟登录文件摘要不变。预览后外部改变来源状态栏，原生窗口更新被拒，环境状态栏仍是原值。原生窗口尚未逐项操作 Hooks、规则、MCP 和 Codex；没有运行真实 Claude/Codex，也没有重建安装包。
+Shared-setting updates: isolated Rust covers Claude permissions/statusline/Hooks/rules/same-named MCP replacement, plaintext-MCP blocking, and stale source/target digests. Codex covers approval/sandbox/statusline preserving provider and fake auth files. Frontend 61 files / 646, build, full engine, Tauri 21, both format checks passed. Native isolated Claude showed permissions/statusline differences unselected. Selecting permissions only yielded consistent readback and source permissions while retaining instance statusline; main/fake-login digests stayed unchanged. External source-statusline change after preview rejected native updating and preserved the target. Native Hooks/rules/MCP/Codex actions remained untested; no real assistants/package rebuild.
 
-共用设置取值预览增量：`profiles:shared-status` 对审批、沙箱等固定选项显示来源与目标取值；自由文本只显示数量或隐藏提示，不把命令、规则正文、MCP 参数与凭据送到界面。隔离 CLI 在两个独立环境逐项更新 Claude 的 Hooks、规则、MCP 和 Codex 的权限、状态栏、规则，六项写后状态均为 `same`，七个主配置与模拟登录文件摘要不变；前端定向用例验证多项顺序执行时单项失败不阻止后续更新，并回读两项状态。本轮原生调试窗口已启动，但计算机辅助功能读取被系统拒绝，未取得新界面操作证据；真实客户端加载和安装包仍未验收。
+Shared-setting value previews: `profiles:shared-status` shows source/target fixed approval/sandbox values, while free text remains counts/hidden notices without commands, rule text, MCP arguments, or credentials sent in differences. Isolated CLI updated Claude Hooks/rules/MCP and Codex permissions/statusline/rules across two instances; all six read back `same`, and seven main/fake-login digests stayed unchanged. Targeted frontend cases prove sequential failure isolation and two status readbacks. Native debug launched, but accessibility refused reads, leaving no new interaction evidence; real loading/package acceptance remained pending.
 
-账号与环境快捷入口增量：`⌘⇧K` 将官方账号、独立环境及其已存在的启动命令放在同一范围；前端定向用例覆盖搜索、复制启动名、定位卡片、未写入或缺命令时不误示可启动，并断言这些动作不调用配置写入。前端全量 59 个文件、631 项和构建通过；本轮未取得原生窗口操作证据，真实 Claude/Codex 配置未参与验证。
+Account/environment shortcuts: `⌘⇧K` groups official accounts, instances, and existing launch names. Frontend cases cover search/copy/locate/missing or unwritten commands and assert no configuration writes. Full frontend 59 files / 631 and build passed. No current native interaction evidence or real assistant configuration verification.
 
-Codex 独立环境换 Key 验收（2026-09-27）：用当前源码编译的 Rust CLI、隔离 HOME/数据目录、真实 `codex-cli 0.156.0` 和仅监听 `127.0.0.1` 的测试接口执行。第一次写入后，Codex 向 `/v1/responses` 发出使用测试凭据 A 的请求；在外部密钥文件改为 B 后，`profiles:status` 报 `drifted`，显式重写并回读实例 `config.toml` 后，Codex 再次请求时使用 B，文件不再含 A。测试服务只记录凭据类别；隔离数据库不含 A/B 取值，隔离默认 `config.toml` 与 `auth.json` 均未生成。同一流程再次运行时，宿主 Claude/Codex 三个配置及认证文件的前后摘要一致。此项只证明本机隔离的换 Key 请求路径；未验收原生窗口、安装包、真实厂商接口或完整对话响应。
+Codex key-rotation acceptance (2026-09-27): current-source Rust CLI, isolated HOME/data, real `codex-cli 0.156.0`, and loopback-only `127.0.0.1` test endpoint. Initial writes produced `/v1/responses` using test credential A. Changing the external secret to B made status drifted; explicit rewrite/readback of config.toml then produced B requests with no A in the file. The server logged credential categories only; database lacked A/B values, and default config.toml/auth.json were absent. Repeating preserved three host Claude/Codex configuration/auth digests. This proves only local isolated rotation requests, not native UI, packages, real vendors, or complete conversation responses.
 
-共用设置真实客户端加载验证：在一次性隔离 HOME、应用数据目录和模拟登录文件中建立 Claude/Codex 独立环境，将主环境的权限、状态栏、Hooks、规则及各一条 MCP 逐项复制到目标。`profiles:shared-status` 写后回读均为 `same`；隔离主配置和模拟登录文件的七份摘要不变。随后以隔离配置目录运行本机已安装的 Claude Code 2.1.283 和 Codex 0.156.0，分别执行 `claude mcp list` 与 `codex mcp list`，两者退出码均为 0，输出均包含复制后的测试 MCP；运行前后真实主配置和认证文件摘要不变。此项只证明两款客户端可从独立目录加载 MCP，未验证权限、状态栏、Hooks、规则的运行效果、模型请求、原生窗口或安装包。
+Shared settings with real clients: disposable isolated HOME/data/fake login created Claude/Codex instances; copied main permissions/statusline/Hooks/rules/one MCP each. Shared status readback was same; seven main/fake-login digests stayed unchanged. Installed Claude Code 2.1.283 / Codex 0.156.0 ran mcp list in isolated directories, both exit 0 and listing copied MCP. Real main/auth digests stayed unchanged before/after. This proves MCP loading only, not other settings' runtime effects, model requests, native UI, or packages.
 
-运行设置完整文件即时预览（2026-09-28）：`agents:preview-runtime` 只读重读目标文件，并与 `agents:configure` 共用运行参数渲染函数；输入变化后先显示改动键，随后显示当前实际文件合并后的完整 JSON/TOML，旧请求结果不会盖掉新输入。隔离 Rust 用例确认 Claude/Codex 的预览与随后写入逐字节一致、Codex 注释与用户字段保留、旧基准拒绝且文件不变、缺失文件预览不创建文件或数据库。前端全量 650 项、引擎和 Tauri 全套测试、构建与格式检查通过；DEV mock 浏览器回读到 Claude/Codex 完整文件。该阶段浏览器 mock 只证明界面交互，尚未在当前安装包或原生窗口验收；未读取或写入真实 Claude/Codex 配置。
+Runtime complete-file immediate previews (2026-09-28): `agents:preview-runtime` rereads read-only and shares runtime rendering with configure. Input changes show affected keys then complete actual-merged JSON/TOML; stale responses cannot replace newer inputs. Isolated Rust checks byte-identical preview/write, preserved Codex comments/user fields, stale rejection/unchanged files, and missing-file preview without file/database creation. Frontend 650, complete engine/Tauri, build, and format checks passed; DEV mock read back complete files. Mock evidence covers interaction only, not native/current-package acceptance; real assistant files were neither read nor written.
 
-原生窗口补验（2026-09-28，当前源码调试构建）：以隔离 HOME、`AGENT_MANAGER_DATA_DIR` 和只回版本号的替身 `claude`/`codex` 启动 Tauri；在 Claude 运行设置选择「智能自动」，窗口自动显示包含原有 `theme`、`env` 与新增 `permissions.defaultMode` 的完整 `settings.json` 候选；在 Codex 选择同项，窗口自动显示保留原注释、模型和 `history` 的完整 `config.toml` 候选，并列出 `approval_policy`、`sandbox_mode` 与 `approvals_reviewer`。两份目标文件预览前后 SHA256 相同，隔离数据目录为空。在「启动命令」新增表单切换 Codex「智能自动」，alias 预览即时出现 `--approve-for-me`；取消后隔离 `.zshrc`、`.zprofile` 均未创建。仅验当前源码的调试构建与这些交互；安装包仍待单独验收，未操作真实 Claude/Codex 配置。
+Additional native-window verification (2026-09-28, current-source debug build): Tauri with isolated HOME, `AGENT_MANAGER_DATA_DIR`, and version-only stand-ins. Claude Smart automatic immediately showed complete settings.json with existing theme/env and new permissions.defaultMode; Codex showed preserved comments/model/history and approval_policy/sandbox_mode/approvals_reviewer. Both target SHA256 values stayed unchanged and data remained empty. Changing new-command Codex automation to Smart automatic immediately showed `--approve-for-me` in alias preview; cancellation created neither rc file. Only these current-debug interactions were verified; package acceptance remained separate and real configurations untouched.
 
-新建独立环境的勾选设置即时预览（2026-09-28）：`profiles:preview --items` 在只读路径中依创建顺序计算权限、状态栏、Hooks、规则与 MCP 的目标文件，MCP 逐条复用现有复制计划；两种新环境的隔离 Rust 用例将预览原文与随后 `profiles:seed` 写成的主文件及附加文件逐字节比对，预览前实例目录和数据库均不存在。含明文凭据的 MCP 条目在预览中跳过且不泄露取值，已有同名条目保持原样。两个创建表单随勾选变化重新预览并展示文件路径、原文和逐项结果；前端 59 个文件、652 项测试及构建通过，引擎全量与 Tauri 22 项、两套格式检查通过。源码调试应用曾在隔离 HOME/数据目录与替身 CLI 下启动，数据目录未写入；macOS 辅助功能仍拒绝读取窗口（权限查询为已授权），本轮没有原生窗口操作证据。没有运行真实 Claude/Codex 或重建安装包。
+New-instance selected-setting immediate previews (2026-09-28): read-only `profiles:preview --items` calculates permissions/statusline/Hooks/rules/MCP in creation order, reusing individual MCP copy plans. Isolated Rust for both types compares preview text with seed main/additional bytes while no instance directory/database exists before preview. Plaintext MCP is skipped without values leaking; existing names stay intact. Both forms refresh previews on selection, displaying paths/text/results. Frontend 59 files / 652/build, full engine/Tauri 22/both format checks passed. Isolated debug with stand-ins launched without data writes, but macOS accessibility refused reads despite authorization; no native interaction evidence or real assistants/rebuilt package.
 
-已建环境共用设置的完整文件即时预览（2026-09-28）：`profiles:shared-preview --selection` 按状态列表的实际写入顺序在内存中合并所选项，来源或目标摘要已变则拒绝；差异列表仍隐藏自由文本，勾选后只在本机显示相关文件路径、完整原文和逐项失败。隔离 Rust 用例对 Claude 与 Codex 的权限、状态栏、Hooks、规则、MCP 多项结果逐文件比对后续 `profiles:shared-apply` 写入字节，并验证预览零写与旧来源摘要拒绝。前端 59 文件、653 项测试、构建、引擎全量、Tauri 22 项及两套格式检查通过。当前源码调试应用在隔离 HOME、数据目录和替身 CLI 中实际打开环境卡片：勾选权限、状态栏、规则后窗口显示合并后的 `settings.json` 与 `CLAUDE.md`，预览前后四份隔离配置和数据库 SHA256 相同；外部改动隔离来源状态栏后旧预览报变化并禁用更新，刷新差异再勾选可读到新正文，目标文件及数据库仍未改。未运行真实 Claude/Codex，也未重建安装包。
+Existing-instance complete shared previews (2026-09-28): `profiles:shared-preview --selection` merges selected items in actual write order in memory, rejecting changed source/target digests. Differences still hide free text; selection displays complete local files/paths/failures. Isolated Rust compares multi-item permissions/statusline/Hooks/rules/MCP per-file bytes against apply and verifies zero writes/stale-source rejection. Frontend 59 files / 653, build, engine, Tauri 22, formats passed. Native isolated debug opened a card; selecting permissions/statusline/rules displayed merged settings.json/CLAUDE.md. Four isolated config/database SHA256 values stayed unchanged. External source-statusline edits invalidated preview and disabled update; refreshed selection showed new text with targets/database still unchanged. No real assistants/package rebuild.
 
-MCP 新增与编辑的完整文件即时预览（2026-09-28）：`mcp:preview` 复用 `mcp:apply` 的只读计划，只接受 add/edit；表单输入有效后按选中的助手展示各自目标文件的完整结果，输入或目标变化撤掉旧结果。隔离 Rust 用例比对 Claude JSON 与 Codex TOML 的预览和写入字节，验证预览零写、目标条目被外部改动时拒绝旧摘要；隔离 CLI 另行回读新文件与数据库。前端单工作线程全量 59 文件、655 项通过，构建、引擎全量、Tauri 22 项、两套格式检查通过；并发运行前端全量时，旧环境表单的一项等待断言两次超时，单文件和单工作线程全量均通过，未改该断言。原生调试窗口在隔离 HOME、数据目录和替身 CLI 中显示 Claude 已有条目与新增条目的合并原文；改启动命令后旧预览消失并显示新命令，选 Codex 后同时显示新建 TOML 文件。取消前后隔离 Claude 文件摘要一致，Codex 文件与数据库均未创建。未运行真实 Claude/Codex，也未重建安装包。
+MCP add/edit complete previews (2026-09-28): `mcp:preview` shares `mcp:apply`'s read-only plan, accepting add/edit. Valid input shows complete files for selected assistants; input/target changes invalidate old results. Isolated Rust compares Claude JSON/Codex TOML preview/write bytes and checks zero writes/stale external-entry digests; isolated CLI separately reads files/database. Single-worker frontend 59 files / 655, build, engine, Tauri 22, formats passed. Concurrent full frontend twice timed out on an existing environment-form wait assertion; single-file/single-worker passed without weakening it. Native isolated debug showed existing/new Claude entries; editing command invalidated/refreshed text, selecting Codex added new TOML preview. Cancellation preserved Claude digest and created no Codex file/database. No real assistants/package rebuild.
 
-Hooks 完整文件即时预览（2026-09-28）：结构化及原文编辑复用 `hooks:apply` 的只读计划，自动展示目标路径与整个候选 JSON；未填完的行或未形成 JSON 对象的原文不发请求，输入变化隐藏旧结果。隔离 Rust 用例对 Claude 与 Codex 比较预览和实际写入字节、确认预览零写及旧基准拒绝。Hooks 前端定向 33 项、前端单工作线程全量 59 文件 656 项、构建、引擎全量、Tauri 22 项通过。首次全量与两套 Cargo 同时运行时，旧环境表单一项等待断言超时；该文件单独 46 项及无其他检查并行的全量重跑均通过，未改其断言。隔离 HOME、数据目录和替身 CLI 的原生调试窗口中，Claude Hooks 编辑器显示包含原有 `theme` 的完整 `settings.json`，命令改为 `echo new` 后候选原文同步更新；取消前后目标文件 SHA256 相同，数据目录未创建。未操作真实 Claude/Codex 配置，也未重建安装包。
+Hooks complete previews (2026-09-28): structured/raw editing shares read-only `hooks:apply` plans and automatically shows complete target JSON/path. Incomplete rows/nonobject raw input send no request; input changes hide old results. Isolated Rust compares both assistant preview/write bytes and checks zero writes/stale rejection. Targeted frontend 33, single-worker full 59 files / 656, build, engine, Tauri 22 passed. Concurrent frontend/two Cargo runs timed out on an existing environment wait; its 46-test file and nonconcurrent full rerun passed with assertions intact. Native isolated Claude showed complete settings.json including theme; changing to `echo new` updated text. Cancellation preserved target SHA256 without creating data. No real configuration operations/package rebuild.
 
-MCP 跨助手复制的完整文件即时预览（2026-09-28）：`mcp:preview` 新增 `copy`，与实际复制共用目标格式转换、同名冲突和来源/目标摘要校验；复制弹窗在选择目标及勾选替换后展示目标文件路径和完整候选原文，撤销替换立即隐藏旧结果。隔离 Rust 用例对 Claude → Codex 复制比对预览与写入字节，验证预览前目标文件及数据库不变、同名未确认时拒绝；前端定向 18 项、单工作线程全量 59 文件 656 项、构建、引擎全量、Tauri 22 项及两套格式检查通过。隔离原生调试窗口中，Codex `config.toml` 候选保留原注释与模型并换入复制后的 MCP 命令；取消替换勾选后旧预览消失，退出弹窗前后 Claude 与 Codex 两份配置 SHA256 相同，隔离数据目录未创建。未操作真实 Claude/Codex 配置，也未重建安装包。
+MCP cross-assistant copy complete previews (2026-09-28): preview adds copy, sharing conversion/name conflicts/source-target digests. Target/replacement selection shows complete text/path; unchecking replacement immediately hides it. Isolated Claude → Codex compares preview/write bytes, verifies unchanged target/database before preview, and rejects unconfirmed conflicts. Targeted frontend 18, single-worker 59 files / 656, build, engine, Tauri 22, formats passed. Native isolated Codex preserved comments/model with copied MCP command; unchecking hid text and closing preserved both config SHA256 values without creating data. No real configuration operations/package rebuild.
 
-MCP 删除确认框的完整文件预览（2026-09-28）：`mcp:preview` 复用删除写入计划；Codex 删除时展示目标文件路径与完整候选原文，Claude 已保存的停用项只删库记录时明确说明配置文件不变，风险标签也写作「删除已保存内容」。预览失败时确认按钮不可用；同一条目取消后重新打开会重新读取，不沿用旧结果。隔离 Rust 用例确认预览与实际删除逐字节一致、预览不改文件和数据库；前端定向 12 项、全量 59 文件 658 项、生产构建、引擎全量与 Tauri 22 项通过。浏览器 DEV mock 可见目标路径、剩余条目和已保存项不改文件的说明；mock 原文是演示数据，不代表真实配置。隔离 HOME、数据目录和替身助手启动了当前源码调试应用，目标文件未变且数据目录未创建；macOS 辅助功能接口持续拒绝读取窗口，故本轮没有原生界面点击与视觉验收。未操作真实 Claude/Codex 配置，也未重建安装包。
+MCP deletion complete previews (2026-09-28): preview reuses deletion plans. Codex shows complete resulting files; Claude saved disabled database-only deletion explains unchanged configuration, labeled "Delete saved content." Preview failures disable confirmation; reopening rereads instead of reusing old results. Isolated Rust checks byte-identical deletion and unchanged preview files/database. Targeted frontend 12, full 59 files / 658, production build, engine, Tauri 22 passed. DEV mock showed paths/remaining entries/database-only explanation, with demonstration text rather than real files. Isolated debug launched with targets unchanged and no data creation; accessibility refusal prevented native clicking/visual acceptance. No real configuration operations/package rebuild.
 
-终端快捷命令完整文件即时预览（2026-09-28）：新增 `aliases:preview`，与保存共用只读写入计划；新增、编辑或改名时显示将变化的 `.zshrc`、`.zprofile` 的实际路径和完整候选原文，输入变化或界面重读到新的文件基准时撤掉旧结果，预览失败时禁用保存。隔离 Rust 用例和 CLI 均比对预览与随后写入的两个文件逐字节一致，确认原有区块外内容保留、预览不创建文件或数据库、旧基准拒绝，写后 `zsh -n` 通过。前端全量 59 文件 660 项、生产构建、引擎全量、Tauri 22 项及两套格式检查通过。浏览器 DEV mock 已查看两份文件及输入变化后的状态，但 mock 内容仅为演示；未在本轮原生窗口或安装包验收，也未读取或写入真实 Claude/Codex 配置。
+Terminal shortcut complete previews (2026-09-28): new `aliases:preview` shares save plans, showing actual .zshrc/.zprofile paths/complete candidates on add/edit/rename. Input or new baseline invalidates old results; failure disables save. Isolated Rust/CLI compare both preview/write files byte for byte, preserving outside-block content, creating no preview files/database, rejecting stale baselines, and passing zsh -n afterward. Full frontend 59 files / 660, production build, engine, Tauri 22, formats passed. DEV mock checked both files/input changes with demonstration data only; no native/current-package or real-config acceptance.
 
-终端快捷命令确认框预览补齐（2026-09-28）：移除、添加来源推荐、加入旧版已保存命令，以及助手页直接删除启动命令，确认前均调用既有 `aliases:preview` 展示将变化文件的完整候选原文；预览失败时确认不可点。只丢弃旧版库记录的操作仍明确说明终端文件不变。隔离 Rust 用例对三种写文件操作比对预览与实际写入字节并确认预览零写；隔离 CLI 删除最后一条后回读文件与预览一致、`zsh -n` 通过。前端定向 41 项、单工作线程全量 59 文件 663 项、生产构建、引擎全量、Tauri 22 项通过。首次全量有一项旧测试缺少预览夹具而失败，补上预览成功与参数一致断言后定向和全量均通过，未跳过或降低断言。浏览器 DEV mock 已查看助手页删除确认框的两份候选文件并取消，mock 原文仅为演示；本轮未验当前原生窗口或安装包，也未操作真实 Claude/Codex 配置。
+Terminal shortcut confirmation previews (2026-09-28): remove/recommendation/legacy-add and assistant-page command deletion all preview complete candidates before confirmation; failed previews disable it. Discarding legacy database records still explains unchanged terminal files. Isolated Rust compares three write types and confirms preview zero writes; CLI final-alias removal matched preview and passed zsh -n. Targeted frontend 41, single-worker full 59 files / 663, production build, engine, Tauri 22 passed. An old test initially lacked a preview fixture; adding success/parameter assertions made targeted/full pass without skipping or weakening. DEV mock viewed/canceled two assistant deletion candidates; demonstration only, no current-native/package or real-configuration operations.
 
-终端快捷命令预览失败后的恢复入口（2026-09-28）：新增、编辑、移除、添加推荐、加入旧版已保存命令，以及助手页启动命令编辑与删除，在预览报错时提供「关闭并重新读取」。该操作放弃旧表单或确认框，重新调用 `aliases:status` 读取实际配置，必须从新状态重新发起写入；不会把旧输入套在新的文件基准上。定向前端 40 项、全量 59 文件 665 项与生产构建通过；测试覆盖外部修改后界面读到新值、确认按钮不可用、恢复过程不调用 `aliases:apply`。本轮只改前端与文档，未进行原生窗口或安装包验收，未读取或写入真实 Claude/Codex 配置。
+Terminal shortcut preview-failure recovery (2026-09-28): add/edit/remove/recommendation/legacy and assistant launch edit/delete offer "Close and reread" on failure. This discards stale forms/dialogs, calls `aliases:status`, and requires a new operation; old input never acquires a new baseline. Targeted frontend 40, full 59 files / 665, production build passed, covering refreshed external values, disabled confirmation, and no `aliases:apply` during recovery. Frontend/docs only; no native/package or real-configuration reads/writes.
 
-切回官方账号的完整文件预览（2026-09-28）：`agents:preview-default` 只读重读主配置并校验页面基准，与 `agents:configure --use-default` 共用文件渲染函数；确认框展示写入后的完整文件路径与原文，预览未完成或失败时不能确认，失败可关闭并重读实际状态。隔离 Rust 用例比对 Claude 与 Codex 预览和实际写入字节，确认预览零写、Codex 用户表及注释保留、已是官方账号时原文不改、旧基准拒绝。前端单工作线程全量 59 文件 667 项、生产构建、类型检查、引擎全量、Tauri 22 项及 Rust 格式检查通过；并行运行前端全量与构建时出现既有界面超时，单工作线程重跑通过。浏览器 DEV mock 已查看确认框完整候选文件，mock 原文仅为演示；本轮未在原生窗口或安装包验收，也未读取或写入真实 Claude/Codex 配置。
+Return-to-official complete previews (2026-09-28): agents:preview-default rereads main and validates page baseline, sharing agents:configure --use-default rendering. Dialog shows complete paths/text; unfinished/failed previews block confirmation, with close/reread recovery. Isolated Rust compares both assistant bytes, zero writes, Codex user tables/comments, official no-op, and stale rejection. Single-worker frontend 59 files / 667, production build, typecheck, engine, Tauri 22, Rust formats passed. Concurrent frontend/build hit existing UI timeout; single-worker rerun passed. DEV mock viewed complete demonstration candidates; no native/package or real-configuration reads/writes.
 
-切回官方账号预览后的整文件校验（2026-09-28）：确认框把 `agents:preview-default` 返回的原文件 SHA256 带到 `agents:configure --use-default`；写入前仍校验受管字段基准，并额外拒绝预览后发生的非受管内容变化，避免用户看到的完整候选文件已过期。其他配置写入仍只校验各自受管字段。隔离 Rust 用例比对 Claude/Codex 预览与写入字节，并覆盖 Codex 新增非受管注释后受管基准不变、整文件校验拒绝且配置与已保存定义不变；隔离 CLI 同样回读到 `AGENT_CONFIG_CHANGED`，预览零写，Claude 文件不变。前端单工作线程全量 59 文件 667 项、生产构建、引擎全量、Tauri 22 项及 Rust 格式检查通过。原生调试窗口可列出，但辅助功能接口拒绝读取，故未取得原生界面操作证据；未操作真实 Claude/Codex 配置，也未重建安装包。
+Return-to-official full-file validation after preview (2026-09-28): dialog passes original SHA256 from agents:preview-default into agents:configure --use-default. Writes still validate owned baseline and additionally reject later unowned changes, preventing stale complete-file confirmation. Other writes retain owned-field baselines. Isolated Rust checks bytes and an unowned Codex comment changing the full digest but not owned baseline, rejecting without file/definition changes; isolated CLI returned AGENT_CONFIG_CHANGED with zero preview writes and unchanged Claude file. Single-worker frontend 59 files / 667, production build, engine, Tauri 22, formats passed. Native window was listed but accessibility refused reads; no native evidence/real config/package rebuild.
 
-运行设置完整文件预览的确认门（2026-09-28）：`agents:preview-runtime` 返回原文件摘要；只有当前输入对应的完整预览成功且带摘要时，界面才能提交，并把摘要穿过完全放开二次确认交给写入命令。预览后文件的非受管内容变化也返回 `AGENT_CONFIG_CHANGED`，其他无需完整预览的快捷修复仍沿用受管字段基准。隔离 Rust 用例覆盖 Claude/Codex 预览与写入同字节、缺文件的 `missing` 基准、Claude Hooks 外部改动后拒绝且定义不变；隔离 CLI 回读确认预览零写、外部改动拒绝及不变时写入字节一致。前端定向 60 项、单工作线程全量 59 文件 668 项、类型检查、生产构建、引擎全量、Tauri 22 项和两套 Rust 格式检查通过。此轮未取得原生窗口操作证据，未操作真实 Claude/Codex 配置，也未重建安装包。
+Runtime complete-preview confirmation gate (2026-09-28): agents:preview-runtime returns original digest; only a successful current-input complete preview with digest permits submission, carrying it through fully-unrestricted confirmation. Unowned changes also return AGENT_CONFIG_CHANGED; quick repairs without full previews retain owned baselines. Isolated Rust checks both byte sequences, missing-file baseline, and external Claude Hooks edits rejecting without definition changes. CLI confirms zero writes/rejection/identical writes when unchanged. Targeted frontend 60, single-worker full 59 files / 668, typecheck, production build, engine, Tauri 22, both formats passed. No native evidence, real configs, or package rebuild.
 
-桌面旧生命周期入口清理（2026-09-28）：应用产品代码已无 `agents:apply` 调用，桌面桥接白名单不再放行它，并删去仅为该旧入口存在的参数类型、提示分支和测试夹具；Rust CLI 命令及数据库里的旧定义保持可读。Tauri 全量 22 项、前端单工作线程全量 59 文件 668 项、生产构建及格式检查通过；隔离 CLI 回读确认该命令仍可识别、缺显式目标与动作时拒绝且零写入。此项不涉及真实 Claude/Codex 配置；未做原生窗口操作或安装包验收。
+Desktop legacy-lifecycle entry cleanup (2026-09-28): product code no longer calls `agents:apply`; desktop allowlist removes it with entry-only parameter types/messages/fixtures. Rust CLI and old database definitions remain readable. Tauri 22, single-worker frontend 59 files / 668, production build/formats passed. Isolated CLI still recognizes the command and rejects missing explicit target/action without writes. No real configuration involvement, native interaction, or package acceptance.
 
-新建环境保存前预览门（2026-09-28）：手动新建独立环境、从 Provider 预设新建环境，以及编辑 Provider 时显式勾选更新已有环境，只有当前输入对应的文件预览成功后才允许提交；纯 Provider 模板保存和只编辑已有环境定义仍可直接保存。前端定向用例覆盖预览等待、输入变化、预览失败、手动重读期间禁用提交及原有保存路径；单工作线程全量 59 文件 672 项、类型检查和生产构建通过。本轮仅改前端与文档，未进行原生窗口或安装包验收，也未读取或写入真实 Claude/Codex 配置。
+Pre-save new-environment preview gate (2026-09-28): manual creation, Provider-preset creation, and explicitly selected existing-environment updates require successful current-input file previews. Provider-only saves/existing-definition-only edits remain direct. Targeted cases cover waiting/input changes/failure/manual reread disabling/original save paths. Single-worker full 59 files / 672, typecheck/production build passed. Frontend/docs only; no native/package or real-configuration reads/writes.
 
-命令面板切回官方账号的完整预览门（2026-09-28）：先以独立提交 `e1408c2` 把助手页原有确认框原样提成共用组件；命令面板及托盘唤回后的官方账号动作改为先展示完整目标文件，再用预览时的状态基准与整文件摘要确认写入。令牌未保存或实际配置存不下的二次确认沿用这两个基准；外部改动拒绝后关闭旧确认并重读状态。命令面板定向 21 项、前端单工作线程全量 59 文件 676 项、类型检查和生产构建通过，覆盖等待、失败、取消零写、托盘入口、正常回读及二次确认后外部改动。本轮未进行原生窗口或安装包验收，也未读取或写入真实 Claude/Codex 配置。
+Command-palette return-to-official preview gate (2026-09-28): standalone refactor `e1408c2` extracts the assistant confirmation unchanged into a shared component. Palette/tray-reopened official actions show complete files, then submit preview status/full-file baselines. Unsaved-token/unrepresentable-content confirmations preserve both; rejected external changes close stale confirmation and reread. Targeted palette 21, single-worker full 59 files / 676, typecheck/production build passed, covering waiting/failure/cancel zero writes/tray/readback/external changes after secondary confirmation. No native/package or real-config reads/writes.
 
-已保存独立环境写入前的完整文件预览（2026-09-28）：实例卡片的「写入配置」「用定义覆盖实际配置」「写入新密钥」统一先调用只读 `profiles:preview`，按真实取值与 `profiles:apply` 的计划显示 Claude `settings.json` 或 Codex `config.toml` 的完整候选文件；预览失败不能确认。确认同时带原文件 SHA256 与候选内容 SHA256，文件中的非受管内容、实例定义或密钥取值变化使预览失效时拒绝写入；原 CLI 调用未带这两个可选摘要时保留旧语义。隔离 Rust 用例验证预览零写、Claude/Codex 实际写入与候选逐字一致、外部文件或密钥变化拒绝、主配置不变且凭据不进库；前端用例覆盖三种入口、预览失败和取消零写。引擎全量、Tauri 22 项、前端单工作线程全量 59 文件 678 项、类型检查、生产构建及两套 Rust 格式检查通过。并行执行时前端曾有超时，单工作线程重跑全绿；本轮未进行原生窗口或安装包验收，也未写入真实 Claude/Codex 配置。
+Saved-instance complete pre-write previews (2026-09-28): Write configuration, Overwrite from definition, and Write new key all call read-only `profiles:preview` with real values/apply plans, showing complete settings.json/config.toml; failure blocks confirmation. Confirmation carries original and candidate SHA256; unowned file, definition, or secret changes invalidate writing. CLI without these optional digests keeps prior semantics. Isolated Rust checks zero writes, byte-identical candidates, external-file/secret rejection, unchanged main, no database credentials; UI covers all entries/failure/cancel. Engine, Tauri 22, single-worker frontend 59 files / 678, typecheck/production build/both formats passed. Parallel frontend timed out; single-worker rerun passed. No native/package acceptance or real configuration writes.
 
-Provider 勾选更新已有环境的真实文件预览（2026-09-28）：`profiles:preview` 的候选模式新增显式 `--exact`，按当前密钥取值渲染；表单尚未保存的新密钥只在本次只读请求中临时覆盖对应变量。返回完整候选文件及原文件、候选内容摘要，`profiles:apply-definition` 写前与锁内重新比对两份摘要；未带 `--exact` 的 CLI 预览仍只显示变量引用且不返回摘要。界面更改密钥或选项即撤掉旧预览，缺摘要时禁用提交；只更新勾选的环境，写入请求不带密钥明文。隔离 Rust 用例验证预览零写、写入与预览逐字一致、外部文件或密钥变化拒绝、主配置不变、密钥不进库；前端用例覆盖缺摘要阻断、新密钥重新预览、先存密钥后写文件。引擎全量两轮通过，Tauri 22 项、前端单工作线程全量 59 文件 678 项、类型检查与生产构建通过；本轮未做原生窗口或安装包验收，也未写入真实 Claude/Codex 配置。
+Provider-selected existing-environment exact previews (2026-09-28): `profiles:preview` candidate mode adds explicit `--exact` to render current values; unsaved form keys temporarily override the corresponding variable for this read-only request. Complete candidates and original/content digests are returned; apply-definition rechecks both before writing and under lock. CLI without exact retains references and no digests. Key/option changes invalidate previews; absent digests disable submission. Only selected environments update, with no plaintext keys in write requests. Isolated Rust checks zero writes/exact bytes/external-file or key rejection/main unchanged/no database keys; UI checks missing-digest blocking/new-key repreview/key-save-before-config order. Full engine passed twice; Tauri 22, single-worker frontend 59 files / 678, typecheck/production build passed. No native/package acceptance or real-config writes.
 
-备份导入后的恢复提示收紧（2026-09-28）：移除“去总览一键同步”入口及仅为它存在的传参；总览当前只批量处理可同步项，不能一键写入导入的 Provider、独立环境等。导入成功后保留明确的下一步：到对应页面逐项预览和应用，密钥单独配置。导入和差异预览的引擎路径未改；前端备份与导航定向 12 项、单工作线程全量 59 文件 678 项、类型检查及生产构建通过。未对真实配置执行导入或写入，未做原生窗口验收。
+Tighter post-import restoration guidance (2026-09-28): remove "Go to overview and sync all" and its exclusive parameters. Bulk sync cannot restore imported Providers/instances in one action. Success instead directs users to individual previews/application and separate secret setup. Engine import/difference-preview paths unchanged. Targeted backup/navigation 12, single-worker full 59 files / 678, typecheck/production build passed. No real imports/writes or native acceptance.
 
-易用性整体审查与来源管理（2026-09-29，`a7042d4`…`60c1517`）：技能、MCP、规则、命令页统一成对齐的表格与账号开关；新增顶栏「来源」页（git 仓库 / 本机目录 / 规则文件，添加、更新、编辑、停用、移除，列出推荐来源可「添加…」或「不用了」），来源可选；技能可「改成我的版本」；移除来源可一并清理下载，只动指向本来源内容的链接；账号登录状态默认只读本机文件，版本探测用临时配置目录，查询不再写 HOME。全局审查 11 项：术语统一（技能集合改称来源等，文案守卫扩词）、账号页「开始使用」（登录主账号、可选的技能来源）与表头、Hooks 改名「自动命令（Hooks）」表格化、MCP 不支持的账号不占列、MCP「粘贴配置」（密钥类明文改成变量）、命令页次要内容收进「更多」、去掉重复计数与推荐、顶栏「搜索 ⌘K」、出错提示写成「出了什么事 / 怎么办」（原文留详情）。验证：引擎 441 项、Tauri 21 项、前端 60 文件 559 项、类型检查、生产构建、两套 Rust 格式检查与 `cargo check --all-targets` 本机通过；dev server mock 下截图核对各页；早前以隔离 HOME 跑引擎回读移除来源、改成我的版本与查询零写（发现并修复移除来源会删掉用户版本链接）。未做：GitHub CI 因账户计费未启动任何作业（自 2026-09-08 起无绿灯），以上以本机等价步骤代替，Windows 未覆盖；打包应用只在本机打开，未用真实或隔离数据逐项点击（原生界面自动化条件不具备）；分享链接的系统深链只验了解析与对话框单测。
+Overall usability review and sources (2026-09-29, `a7042d4`…`60c1517`): aligned skill/MCP/rule/command tables with account toggles. New top-level Sources supports git/local directories/rule files, add/update/edit/disable/remove, optional recommendations with "Add…" / "No longer needed." Skills can "Make my own version." Source removal may clean downloads but touches only links to that source. Login defaults to local read-only checks; version probes use temporary configuration, leaving HOME unchanged. Eleven global review items: consistent terminology (collections → sources and broader wording guard); Accounts Get started (main login, optional sources) and headers; Hooks renamed Automatic commands and tabled; unsupported MCP accounts omit columns; Paste MCP configuration converts plaintext secrets to variables; command secondary content moves to More; repeated counts/recommendations removed; top-bar Search ⌘K; errors explain what happened/what to do with raw detail collapsed. Verification: engine 441, Tauri 21, frontend 60 files / 559, typecheck/production build/both formats/`cargo check --all-targets` passed locally; dev mock screenshots checked pages. Earlier isolated CLI verified source removal/custom versions/query zero writes, finding and fixing removal of user-version links. Not done: GitHub billing prevented every CI job (no green since 2026-09-08), replaced by local equivalents without Windows; packaged app opened only, with no real/isolated item clicks because native automation unavailable; share-link system deep links covered parsing/dialog tests only.
 
-Hooks 移除与窄窗口顶栏（2026-09-29，`30ab8af`、`4169d95`、`bfad127`）：按用户裁决整体移除 Hooks——界面标签与编辑器、桥接 `hooks:*` 白名单、引擎 `native_hooks` 域及其测试删除；新账号带设置、共用设置同步、系统检查不再含 hooks；配置备份不导出 hooks，旧备份的 `hooks.*` 整份导入时跳过并列入 `skipped`。各账号文件里的 hooks 与库里旧表不动。隔离 HOME 下用 release 引擎回读：`hooks:status` 为 UNKNOWN_DOMAIN，审计无 hooks 段，seed 传 hooks 被拒、不传时新账号 settings.json 无 hooks，共用设置只剩权限、状态栏、规则、MCP，主配置字节不变。顶栏在 900px（窗口最小宽度）下隐藏应用名、搜索只留图标，dev server 实测 900/1000/1280 均无横向溢出。引擎 403 项、Tauri 20 项、前端 534 项、类型检查、构建与格式检查通过；远程 CI 仍因计费未运行。
+Hooks removal and narrow top bar (2026-09-29, `30ab8af`, `4169d95`, `bfad127`): user decision removes Hooks UI/editor/bridge `hooks:*` allowlist/`native_hooks`/tests; creation carryover/shared sync/system audit exclude hooks; backups omit them, with imported hooks.* skipped and reported. Actual account hooks/legacy database tables remain unchanged. Isolated release CLI reports `hooks:status` as UNKNOWN_DOMAIN, no audit segment, rejects hooks seed, and creates new settings without it when omitted. Shared settings retain permissions/statusline/rules/MCP, main bytes unchanged. At 900px minimum width, top bar hides app name and uses search icon; dev checks at 900/1000/1280 show no horizontal overflow. Engine 403, Tauri 20, frontend 534, typecheck/build/formats passed; remote CI still blocked by billing.
 
-接入识别残留清理（2026-09-29，`2283a9b`）：`agents:status` 的 `current` 只报 `default` / `official`，不再与库里已保存的接入逐项比对；`agents:configure` 的结果不再带 `active` / `current`；只为切换接入而存在的渲染与匹配函数及其用例一并删除，DEV mock 的切换分支改为与引擎一样拒绝。已保存接入的解析保留，密钥页仍据此列出旧接入引用的变量。引擎全量（lib 153 项）、Tauri 20 项、Vitest 58 个文件 534 项、typecheck 与 build 通过；隔离 HOME 回读 `agents:status`：第三方主配置报 `official: false`，缺失的 Codex 配置报 `official: true`，不含令牌，也不建数据目录。另修一个偶发失败的前端用例（`1eca352`、`2e70d14`）：它取第一次预览比对参数，机器繁忙时防抖会先按输入到一半的内容预览一次。
+Residual connection-recognition cleanup (2026-09-29, `2283a9b`): `agents:status` current reports default/official only, without saved-profile matching; configure results drop active/current. Connection-switch-only rendering/matching functions/tests removed; DEV mock rejects switching as engine does. Saved connections still parse for Secrets variable references. Full engine (lib 153), Tauri 20, Vitest 58 files / 534, typecheck/build passed. Isolated status reported third-party main `official: false` and missing Codex `official: true`, with no tokens/data creation. Intermittent frontend case also fixed (`1eca352`, `2e70d14`): it inspected first-preview parameters, but busy-machine debounce could preview partial input first.
 
-技能来源的版本管理 A、B 期（2026-09-29，`921675c`…`dfe1a55`，方案见 [技能来源](SKILL-VERSIONING.md)）：A 期技能页新增只读「其他来源」，扫描 Codex 共用目录 `~/.agents/skills`，按 npx skills 锁文件、`skill-release.json`、所在 git 仓库识别来源，标出 Codex 会加载两份的重名。B 期 git 来源新增跟踪方式（缺省自动：有版本号标签跟最新正式版，否则跟主分支；可改为版本规则、主分支、指定分支、匹配分支、固定），只下载 `skill_paths`、规则目录与 `aliases/`（`tree:0` 部分克隆 + 稀疏检出），「版本」对话框可更新到最新或切换到任意标签 / 分支，切换后把该来源在用的技能换过去。验证：引擎全量（新增真实 git 夹具用例覆盖自动 / 主分支 / 固定 / 含预发布、回滚、只下载指定目录、检查更新与拒绝坏输入）、Tauri 21 项、Vitest 58 文件 544 项、typecheck 与 build 通过；隔离数据目录用真实 GitHub 回读：现有 agent-skills 完整镜像升级后只留 `skills/`、`rules/`、`aliases/` 且 7 个技能都在，archify 新下载 14 MB、v3.0.1 ↔ v3.0.0 切换后文件内容与「检查更新」一致。未做：切换前的文件级预览；C 期纳入管理与冗余清理；安装包未重建验收。
+Skill-source versioning phases A/B (2026-09-29, `921675c`…`dfe1a55`; [Skill Sources](SKILL-VERSIONING.md)): A adds read-only Other sources, scans Codex shared `~/.agents/skills`, identifies origin via npx lock/skill-release.json/git, flags duplicate names loaded twice. B adds git tracking: automatic follows latest stable version tag when available, otherwise main; alternatives are version rule/main/specific branch/matching branch/pinned. Only skill_paths/rules/aliases download via tree:0 partial clone and sparse checkout. Version dialog updates latest or switches any tag/branch, then moves in-use skills. Verification: full engine with real-git fixtures for automatic/main/pinned/prerelease/rollback/scoped downloads/update checks/bad input; Tauri 21, Vitest 58 files / 544, typecheck/build passed. Real GitHub isolated-data readback upgraded agent-skills full mirror to only `skills/`, `rules/`, and `aliases/` with all 7 skills; new archify download was 14 MB and v3.0.1 ↔ v3.0.0 contents/update checks agreed. Not done: file-level preview, C adoption/redundancy cleanup, rebuilt-package acceptance.
 
-技能来源 B 期预览与 C 期纳入管理（2026-09-29，`0c3c344`…`333a491`）：新增 `skills:preview`（换版本前列出各技能的文件变化与跟着换的账号，确认后才换）、`skills:adopt-preview` / `skills:adopt`（识别来源并与本地逐文件比对，本地是旧版本时按对应版本纳入；只留一份源，多余副本先备份再清理，失败按清单恢复，可撤回；已管理的重名只做清理；认不出来源的可保留本地内容放进 `~/my-skills`）。验证：引擎全量 411 项（新增真实 git 夹具覆盖一致 / 旧版本 / 本地改过 / 改名 / 重名清理 / 保留本地 / 过期指纹 / 中途失败恢复 / 撤回 / 不可纳入）、Tauri 22 项、Vitest 58 文件 550 项、typecheck 与 build；真实环境只读预览（archify、orca-cli、find-skills、xiaoyu 重名、synced）判断正确且数据库与目录零改动；隔离 HOME 复制真实 archify、find-skills 与锁文件，用真实 GitHub 纳入后只剩一份源、两个账号都链接、共用目录清空，撤回后与原内容逐字节一致。性能：上千标签的仓库查版本由 14 秒降到 4 秒；orca 首次纳入预览约 80 秒。未做：界面点选的原生窗口验收（按钮与对话框只经前端单测）；安装包独立验收见下一条回执。
+Skill-source B previews and C adoption (2026-09-29, `0c3c344`…`333a491`): `skills:preview` lists file changes/affected accounts before confirmed version switching. `skills:adopt-preview` / `skills:adopt` identify source and compare local files, adopting the matching older version when necessary; retain one source, back up redundant copies before cleanup, restore by manifest on failure, and support undo. Managed duplicates receive cleanup only; unknown sources may preserve local content under `~/my-skills`. Verification: full engine 411 with real-git fixtures for identical/old/edited/renamed/duplicates/local preservation/stale fingerprints/partial restoration/undo/ineligible; Tauri 22, Vitest 58 files / 550, typecheck/build. Read-only real previews classified archify/orca-cli/find-skills/xiaoyu duplicates/synced correctly with no database/directory writes. Isolated HOME copied real archify/find-skills/lock; real GitHub adoption left one source, both accounts linked, shared directory empty, and undo restored identical bytes. Version lookup on thousand-tag repositories fell from 14 to 4 seconds; first orca adoption preview took about 80 seconds. Native selection unaccepted (buttons/dialogs unit-tested only); independent package acceptance is in the next receipt.
 
-Windows 支持（2026-09-30）：新增平台层（主目录、目录联接、`PATHEXT` 找命令、命令转发脚本、注册表只读取 PATH）；启动命令在 Windows 上写成 `~/.agent-manager/bin/<名>.cmd`，与 rc 文件同一套查询、编辑与写前比对，本工具不写注册表，命令目录不在 PATH 上时给出用户自己执行的命令；MCP 的 npx 一类命令在 Windows 上写成 `cmd /c`；程序页认 npm 全局的 cmd-shim、本工具安装的入口用 `.cmd` 转发；git 调用关掉换行转换；实时额度文件名在 Windows 上统一路径写法。依据与细节见 [平台状态](GUI-PLATFORM-STATUS.md#windows-支持2026-09-30)。验证：引擎与桌面端对 `x86_64-pc-windows-gnu` 交叉编译无警告；Docker + Wine 11 下 Windows 版引擎测试 399 项通过（含在 `cmd` 里真正运行生成的启动命令脚本）；macOS 引擎 439 项、Tauri 23 项、前端 605 项、生产构建通过。未做：Windows 真机运行桌面应用与安装包、真实 Claude Code / Codex / Git Bash 状态栏；GitHub CI 仍因计费无法启动。
+Windows support (2026-09-30): platform layer covers home directories, directory junctions, PATHEXT lookup, command-forwarding scripts, registry PATH reads only. Commands become `~/.agent-manager/bin/<name>.cmd`, sharing rc query/edit/baselines. Registry remains unchanged; absent command-directory PATH produces instructions for users. npx-style MCP uses cmd /c. Programs recognize global npm cmd-shims; installed entries use .cmd forwarding. git disables newline conversion and quota filenames normalize Windows paths. See [Platform Status](GUI-PLATFORM-STATUS.md#windows-support-2026-09-30). Engine/desktop x86_64-pc-windows-gnu cross-compilation was warning-free; Docker/Wine 11 Windows engine 399 tests passed, including executing generated commands in cmd. macOS engine 439, Tauri 23, frontend 605, production build passed. Not done: physical Windows desktop/package, real Claude/Codex/Git Bash statusline; GitHub CI remains billing-blocked.
 
-## 交付回执（2026-09-29，多账号版本）
+## Delivery Receipt (2026-09-29, Multi-account Version)
 
-绑定提交：`2e70d14`（产品代码；其后只改文档）。
+Bound commit: `2e70d14` (product code; later changes are documentation only).
 
-- 安装包：clean x86_64 DMG，SHA256 `37c07fb92bf3dca5b3502c86a8db5edee535d9a042764ad5fc04244717f702e5`，8761959 bytes；`verify:macos` 全部通过（构建身份一致、无 Python、路径脱敏、隔离运行 5 秒存活并优雅退出）；未签名、未公证。
-- 界面：从 DMG 复制出的 .app 以隔离 HOME、隔离数据目录启动，PATH 只含真实 `claude` 2.1.285 与 `codex` 0.159.0；按钮经 macOS 辅助功能按下，文本框聚焦后粘贴输入。在账号页添加 API 账号 `gui-api`，接口指向本机假 Anthropic 服务。创建前抽屉逐条列出 6 项计划，创建后准备情况 4/4。回读结果：`~/.claude-gui-api/`（700）里的 `settings.json`（600）写入了地址、模型、令牌与主账号的权限规则，`CLAUDE.md` 复制了主账号规则；API Key 只在 600 的外部 `secrets.env` 里，数据库与数据目录里没有明文；`.zshrc` / `.zprofile` 只多了受管那几行，用户自己的 alias 保留，`zsh -n` 通过；主账号文件哈希不变。
-- 真实 Claude：在交互式 zsh 里执行新写入的 `gui-api -p`，请求发到假服务，模型是 `fake-model`，请求里带着主账号规则里的标记（P4「规则被真实 Claude 读取」）。界面「开启实时额度」后，主账号与 `gui-api` 的 `statusLine` 都指向数据目录里的状态栏脚本，主账号权限保留；伪终端里的真实交互会话渲染出本工具的状态栏（模型、目录、上下文、花费）。
-- 登录隔离（P2 风险项）：隔离 `CODEX_HOME` 下真实 `codex login status`（0.159.0）报 `Not logged in`，主账号凭据是 `~/.codex/auth.json` 文件存储（只看元数据）；隔离 `CLAUDE_CONFIG_DIR` 下 `claude auth status` 报 `loggedIn: false`。
-- 未覆盖：额度文件要靠官方订阅会话提供的 `rate_limits`，API Key 会话没有，本次状态栏没有写出额度，P5 仍缺订阅账号实测；在隔离目录里真实登录后主账号不受影响，这一点需要用户登录，未测；官方账号与 Codex 账号的界面新建未做；外部修改被拒本次没有在界面复测（引擎与 CLI 用例覆盖）；WebKit 仍按真实主目录保存 webview 数据；未签名；只验 x86_64。
+- Package: clean x86_64 DMG, SHA256 `37c07fb92bf3dca5b3502c86a8db5edee535d9a042764ad5fc04244717f702e5`, 8761959 bytes; all verify:macos checks passed (matching build identity, no Python, sanitized paths, isolated 5-second survival/graceful exit). Unsigned/unnotarized.
+- UI: DMG-extracted app launched under isolated HOME/data, with PATH containing only real claude 2.1.285 and codex 0.159.0. macOS accessibility pressed buttons and focused/pasted fields. Accounts added `gui-api` targeting a local fake Anthropic endpoint; drawer listed 6 planned actions before creation and readiness was 4/4 afterward. Readback: `~/.claude-gui-api/` 700 contained settings.json 600 with address/model/token/main permissions, and CLAUDE.md copied main rules. API Key was only in external 600 secrets.env, with no plaintext in database/data. rc files added only managed lines, preserving user aliases and passing zsh -n; main hashes unchanged.
+- Real Claude: interactive zsh ran `gui-api -p`, requesting the fake service with fake-model and the main-rule marker (P4 real rule loading). Enabling live quota pointed main/gui-api statusLine to the data-directory script while preserving permissions. Real interactive pseudoterminal rendered model/directory/context/cost statusline.
+- Login isolation (P2 risk): real 0.159.0 codex login status in isolated CODEX_HOME reported Not logged in; main credentials were file-stored auth.json (metadata only). Isolated CLAUDE_CONFIG_DIR `claude auth status` reported `loggedIn: false`.
+- Not covered: quota requires subscription rate_limits absent in API-key sessions, so no quota file was written and P5 still needs subscription testing; proving real isolated login preserves main requires user login and was not tested; official/Codex account UI creation absent; external rejection not UI-retested (engine/CLI cover it); WebKit still uses real-home webview storage; unsigned, x86_64 only.
 
-## 交付回执（2026-09-23，实际配置为准 x86_64 DMG 真机验收）
+## Delivery Receipt (2026-09-23, Actual-configuration x86_64 DMG Machine Acceptance)
 
-绑定提交：`c0065c090e2ed89e6adedac60bc025a159baefda`（产品代码；其后 `0ceb7e0` 只改验收脚本）。
+Bound commit: `c0065c090e2ed89e6adedac60bc025a159baefda` (product code; later `0ceb7e0` changes acceptance scripts only).
 
-- 安装包：本机重建 clean x86_64 DMG，SHA256 `56cd1ab2a10da097d6a321215948fbbbb1150e00be4b3cf6218af5554de3358d`，8514164 bytes；`verify:macos` 全部通过（元数据、构建身份 commit/date 精确一致、无 Python、路径脱敏、隔离环境 5 秒存活并优雅退出）；未签名、未公证。
-- 验收环境：从 DMG 复制出的 .app 直接以隔离 HOME、隔离 `AGENT_MANAGER_DATA_DIR`、只含替身 `claude`/`codex`（只回版本号）的 PATH 启动；经 macOS 辅助功能（System Events/JXA）点击原生窗口、窗口区域截图，文件与库逐项回读。全程不运行真实 Claude/Codex、不点登录/退出/可用性检查/安装升级。
-- 通过的场景：启动与各页 status 零写（数据目录为空、HOME 与夹具逐字节一致）；总览不把内置项计入待同步；技能页显示真实技能目录、内置仓库只作推荐；MCP 直接列出手写条目，GUI 停用 Codex 条目只加 `enabled = false`（注释、`cwd`、`enabled_tools`、用户 provider 表保留），Claude 条目含明文令牌且未选密钥文件时拒绝停用并提示；规则页显示实际文件，外部抢先写入后「写入」被拒且保留外部内容，重开后写入内置推荐并先把外部内容另存为备份模板；Hooks 显示 `prompt` 与 `command` 两类且不阻塞；终端快捷命令内置项只作推荐，添加后两个 rc 文件出现区块、区块外用户 alias 保留、`zsh -n` 通过；助手切到默认账号时先弹「令牌未保存」，显式放弃后只撤掉 `ANTHROPIC_*` 三键（hooks、permissions、theme 保留），原实际配置存为导入项且无令牌；独立环境卡片逐字段列出差异，「用定义覆盖」经确认后合并写入（用户 env 与 theme 保留），外部改模型后「以实际配置更新定义」只改库、文件不动。
-- 验收中发现并已修复：Claude MCP 停用快照仅按取值格式判定凭据，`GITHUB_TOKEN` 等无厂商前缀的令牌会以明文进库（`c0065c0` 改为变量名或取值像凭据即转存，回归用例覆盖）；验收脚本的构建身份整行匹配依赖字符串布局，会误报（`0ceb7e0` 改为按标记格式提取比对，反例保留）。
-- 真实环境核对：验收前后 `~/.claude/settings.json`、`~/.claude/CLAUDE.md`、`~/.claude.json` 的 `mcpServers`、`~/.codex/config.toml`/`AGENTS.md`/`hooks.json`、`~/.zshrc`/`~/.zprofile` 摘要一致，`~/.codex/auth.json` 只比元数据（未读内容）一致，应用 Application Support 目录一致。例外：WebKit 按真实主目录存放本应用 webview 数据，`~/Library/WebKit/io.github.ly87ing.agent-manager` 的访问统计与 localStorage WAL/共享内存文件被触碰（`localstorage.sqlite3` 主文件未变、WAL 为 0 字节），与 Claude/Codex 账号和配置无关。
-- 局限：替身 CLI 位于非标准路径，两个助手在总览显示「要你决定」（安装来源 system），属验收环境现象；独立环境定义经 CLI 写入隔离库后在 GUI 操作，新建表单的键盘输入未走真机；未签名包；只验 x86_64。
+- Package: locally rebuilt clean x86_64 DMG, SHA256 `56cd1ab2a10da097d6a321215948fbbbb1150e00be4b3cf6218af5554de3358d`, 8514164 bytes; verify:macos passed metadata, exact commit/date build identity, no Python, sanitized paths, isolated 5-second survival/graceful exit. Unsigned/unnotarized.
+- Environment: DMG-extracted app ran directly with isolated HOME/AGENT_MANAGER_DATA_DIR and version-only stand-in claude/codex PATH. macOS System Events/JXA clicked native UI and captured window areas, with item-by-item file/database readback. No real assistants, login/logout/check/install/upgrade actions.
+- Passed: startup/page status zero writes, empty data and byte-identical HOME/fixtures; built-ins excluded from pending sync; skills show real directories/repository recommendations only; MCP shows manual entries, Codex disable adds only `enabled = false` preserving comments/cwd/enabled_tools/user providers, and Claude plaintext-token disable without selected secret file rejects visibly. Rules show actual files; external edits cause write rejection/preservation; reopening applies recommendation after backup-template preservation. Hooks prompt/command do not block. Recommended aliases write both blocks preserving outside aliases and passing zsh -n. Returning assistant to default first warns unsaved token; explicit discard removes only three ANTHROPIC_* keys, preserving hooks/permissions/theme and importing actual content without token. Instance differences are listed; confirmed definition overwrite merges while preserving user env/theme; after external model changes, definition-from-actual updates only database, not files.
+- Found/fixed: Claude disabled snapshots detected values only, allowing prefixless GITHUB_TOKEN into plaintext database. `c0065c0` now moves values when either name or value resembles credentials, with regressions. Acceptance build-identity whole-line layout comparison falsely failed; `0ceb7e0` extracts markers instead and preserves counterexamples.
+- Real environment: unchanged digests for ~/.claude/settings.json, `~/.claude/CLAUDE.md`, `~/.claude.json` mcpServers, ~/.codex/config.toml/AGENTS.md/hooks.json, `~/.zshrc` / `~/.zprofile`; auth.json metadata only unchanged, as was Application Support. Exception: WebKit uses real `~/Library/WebKit/io.github.ly87ing.agent-manager`; access statistics/localStorage WAL/shared memory were touched, main localstorage.sqlite3 unchanged and WAL 0 bytes, unrelated to assistant accounts/configuration.
+- Limits: nonstandard stand-ins show assistants as Your decision needed/system install source, an environment artifact. Instance definitions were created by CLI before GUI actions; new-form keyboard entry was not tested on the machine. Unsigned, x86_64 only.
 
-## 本次停止点与恢复入口
+## Current stopping point and recovery entry
 
-- 当前停止点（2026-09-29）：多账号版本 `2e70d14` 的 DMG 与界面新建账号验收已完成（见上方回执）。仍待：用官方订阅账号实测额度文件写入（P5）、在隔离目录真实登录后确认主账号不受影响、GitHub Actions 计费（CI 作业因账户付款失败未启动）。以下两条是更早的停止点。
-- 停止点：验收基线提交 `5a110be3` 的旧版 x86_64 DMG 与 GUI E2E、arm64 静态验收均已完成；直接 apply 改造已完成源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收，最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify，交付回执见上；本轮三提交（`d46b85a`/`47702ed`/`14e6790`）完成对外发布就绪的仓库内改造（LICENSE/元数据/CSP/图标/错误边界/自定义助手确认/MCP 空态/管线草稿先行单写者重构），发布管线（`14e6790`）与 Windows 阻断 CI（`9f56f00`）已就绪，公开发布仍受外部条件阻塞，未创建 tag 或 Release。
-- 恢复入口（按序）：解决 GitHub billing；在仓库外/Secrets 配齐 updater/Apple/Windows 签名材料；让 GUI CI 对当前产品代码基线真实跑绿；Linux/Windows/arm64 各平台真机安装与运行独立验收；MCP 新增服务表单在 macOS 自动化输入条件具备时补验；由用户单独授权后打 tag（含 `-` 后缀时产出 prerelease draft），release workflow 创建 draft Release、上传四平台产物与 checksums 并单写 latest.json；逐平台签名/公证/updater 真实下载安装回读独立验收通过后才公开。
+- Current stopping point (2026-09-29): multi-account `2e70d14` DMG/account-creation acceptance complete, per receipt above. Pending: subscription quota-file writes P5; real isolated login preserving main; GitHub Actions billing because payment failure prevented jobs. The following two entries are earlier stopping points.
+- Stopping point: old `5a110be3` x86_64 DMG/GUI E2E and arm64 static acceptance complete. Direct apply completed source/browser/isolated CLI/uncommitted dirty-DMG acceptance; final clean DMG rebuilt after a01d0f5 and independently verified, per receipt above. Three commits d46b85a/47702ed/14e6790 completed in-repository release readiness (LICENSE/metadata/CSP/icons/error boundary/custom-assistant confirmation/MCP empty states/draft-first single-writer pipeline refactor). Release pipeline 14e6790 and Windows blocking CI 9f56f00 ready; external conditions still block public publishing, without tag/Release.
+- Recovery in order: resolve billing; provision updater/Apple/Windows signing outside repository/in Secrets; obtain real green GUI CI for current code; independently install/run physical Linux/Windows/arm64; complete macOS MCP-add forms when automated input is available; with separate user authorization tag (hyphen suffix produces prerelease draft), then workflow creates draft Release/four-platform artifacts/checksums and single-writes latest.json. Public release requires independent real signing/notarization/updater download-install readback per platform.
 
-## 验证
+## Verification
 
-`cargo fmt --manifest-path engine-rs/Cargo.toml -- --check`、两套 Cargo test/check，以及 `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`。打包与独立包验收使用 `pnpm --dir app run build:macos` 与 `./scripts/verify-macos-dmg.sh <path-to-dmg>`。
+`cargo fmt --manifest-path engine-rs/Cargo.toml -- --check`, both Cargo test/check suites, and `cd app && pnpm test:unit run && pnpm typecheck && pnpm build`. Package/independent acceptance use `pnpm --dir app run build:macos` and `./scripts/verify-macos-dmg.sh <path-to-dmg>`.
 
-## 2026-10-07：借鉴 CC Switch 与 Magpie（源码与本地联调通过）
+## 2026-10-07: Learning from CC Switch and Magpie (source and local integration passed)
 
-目标：在本机、单用户、独立账号目录的部署模型下，让账号更容易找到和使用，编辑以实际配置为准，失败可解释且保留用户的外部修改。
+Goal: make accounts easier to find/use under local single-user deployment with isolated directories, editing actual configuration, explaining failures, and preserving external edits.
 
-对照本轮拉取的源码：CC Switch `5ae6ad3888ba4543f6fad343c87656a97bd69da4`；Magpie 按 `yetone/magpie@3aeb7d1bf8609eac8e67cb6b41677c548847e433` 理解（核对问题尚未收到回复）。上游代码只作依据，不直接搬运实现。
+Sources fetched this round: CC Switch `5ae6ad3888ba4543f6fad343c87656a97bd69da4`; Magpie interpreted as `yetone/magpie@3aeb7d1bf8609eac8e67cb6b41677c548847e433` (clarification unanswered). Upstream source informs decisions, not copied implementation.
 
-| 约束 | 来源 | 本轮边界 |
+| Constraint | Source | Scope this round |
 | --- | --- | --- |
-| 账号独立、主账号只保留官方登录 | AGENTS.md、多账号设计 | 不恢复主配置接入切换或跨客户端订阅复用 |
-| 实际文件为准、预览零写、外部修改不覆盖 | GUI 重设计 | 不用数据库旧值掩盖实际状态；失败回滚也要比对 |
-| 简单局部修改、无额外可写配置 | AGENTS.md | 复用已有状态、查询、表单与写入入口；无需迁移 |
-| 不发布安装包 | 用户授权边界 | 本轮只做源码优化与本地验证，不打 tag 或 Release |
+| Independent accounts; official login only in main | AGENTS.md, multi-account design | Do not restore main connection switching or cross-client subscription reuse |
+| Actual-file authority, zero-write previews, preserved external edits | GUI redesign | Do not hide reality behind old database values; rollback also compares |
+| Simple local changes without extra writable configuration | AGENTS.md | Reuse existing status/queries/forms/write paths; no migration |
+| No package publishing | User authorization boundary | Source improvements/local verification only, no tag/Release |
 
-| 借鉴点与源码依据（已观察） | 本项目落点 | 验收条件 | 状态 |
+| Observed upstream idea/source | Implementation here | Acceptance criterion | State |
 | --- | --- | --- | --- |
-| [Magpie 的字段写入事务](https://github.com/yetone/magpie/blob/3aeb7d1bf8609eac8e67cb6b41677c548847e433/internal/agent/agent.go#L442)、[CC Switch 的失败恢复](https://github.com/farion1231/cc-switch/blob/5ae6ad3888ba4543f6fad343c87656a97bd69da4/src-tauri/src/services/provider/mod.rs) | 账号配置写入回读、条件回滚，账号移除的部分失败反馈 | SQLite 失败恢复旧文件/移除新文件；外部再次修改时保留并报冲突；命令删除失败不报全部成功 | 本地通过 |
-| [CC Switch 的列表搜索](https://github.com/farion1231/cc-switch/blob/5ae6ad3888ba4543f6fad343c87656a97bd69da4/src/components/providers/ProviderList.tsx#L255)、两者的快捷操作入口 | 账号页搜索与只读刷新、额度重置说明、菜单键盘操作 | 搜账号/命令/地址/模型；刷新不写配置或自动探测登录；键盘打开、移动、执行与退出菜单；窄窗口无溢出 | 本地通过 |
-| [Magpie 的实际字段读取与精确编辑](https://github.com/yetone/magpie/tree/3aeb7d1bf8609eac8e67cb6b41677c548847e433/internal/agent) | 核对账号行与编辑表单的实际值、过期编辑保护、密钥说明 | 外部改模型后显示实际值，编辑不静默覆盖外部变化；说明与实际密钥落盘一致 | 本地通过 |
+| [Magpie field-write transactions](https://github.com/yetone/magpie/blob/3aeb7d1bf8609eac8e67cb6b41677c548847e433/internal/agent/agent.go#L442), [CC Switch failure recovery](https://github.com/farion1231/cc-switch/blob/5ae6ad3888ba4543f6fad343c87656a97bd69da4/src-tauri/src/services/provider/mod.rs) | Account-write readback/conditional rollback, partial-removal feedback | SQLite failure restores old/removes new files; repeated external edits remain with conflicts; command deletion failure is not complete success | Passed locally |
+| [CC Switch list search](https://github.com/farion1231/cc-switch/blob/5ae6ad3888ba4543f6fad343c87656a97bd69da4/src/components/providers/ProviderList.tsx#L255), shortcut entries in both | Account search/read-only refresh/quota reset explanations/keyboard menus | Search account/command/address/model; refresh neither writes nor autoprobes login; keyboard open/move/execute/close; no narrow overflow | Passed locally |
+| [Magpie actual reads/precise edits](https://github.com/yetone/magpie/tree/3aeb7d1bf8609eac8e67cb6b41677c548847e433/internal/agent) | Actual account-row/form values, stale-edit protection, key explanations | External models show actual values, edits do not silently overwrite, explanations match credential destinations | Passed locally |
 
-无需新增服务、后台任务、数据库 schema、网络路由或外部团队配合。影响面是 profiles 写入、账号界面及共享行菜单；CLI 共用 profiles 引擎，菜单的其他页面调用方须一并回归。
+No new service, background task, database schema, routes, or outside team is needed. Scope is profiles writes, Accounts UI, and shared row menus. CLI shares profiles engine; other menu callers require regression coverage.
 
-替代方案是引入网关、自动路由与动态模型目录，优势是少做人工选择，但会改变当前账号与凭据边界，其中接入检查和模型获取已随 `1082269` 退役；本轮不据竞品功能恢复用户已移除的能力。最可能的回归是加严写入检查误拒绝合法符号链接目标，或刷新打断表单：分别用链接目标测试与保留打开时基准验证。
+Gateway/automatic routing/dynamic catalogs would reduce manual selection but alter account/credential boundaries. Connection checks/model retrieval retired in 1082269; competitor features do not restore user-removed capabilities. Likely regressions are stricter checks rejecting valid symlinks or refresh disrupting forms, covered by target-link cases and preserved opening baselines.
 
-本轮起点 `b7f6b1e`：引擎 441 项、Tauri 23 项、前端 65 文件 606 项、TypeScript 检查通过。pnpm 11 的自动安装检查要求清理依赖目录而失败，使用现有 `app/node_modules/.bin/vitest` 与 `tsc` 验证，没有重装。上述数字为修改前基线，不代表本轮优化通过；原生 GUI、真实账号与安装包尚未验收。
+Starting b7f6b1e baseline: engine 441, Tauri 23, frontend 65 files / 606, TypeScript passed. pnpm 11 automatic-install checking failed because it required deleting dependencies; existing app/node_modules/.bin/vitest and tsc were used without reinstalling. These pre-change numbers do not prove improvements; native GUI/real accounts/packages remain unaccepted.
 
-账号优化阶段验收回执（后续桌面与打包结果见下节，未发布）：
+Account-improvement receipt (later desktop/package results below; unpublished):
 
-- 结论与层级：源码、自动回归和隔离浏览器到 Rust CLI 的联调通过；未达到原生桌面安装交付与用户验收层级。目标是 `b7f6b1e` 上的本轮工作区改动，浏览器入口为本机 Vite 账号页。
-- 完整检查：`cargo test --manifest-path engine-rs/Cargo.toml` 443 项、`cargo test --manifest-path app/src-tauri/Cargo.toml` 23 项通过；在 `app/` 执行 `./node_modules/.bin/vitest run --maxWorkers=1`，65 文件 617 项通过；`tsc --noEmit`、`vite build`、引擎 `cargo fmt -- --check` 和 `git diff --check` 通过。一次跨越修改过程的前端运行混用了旧模块与新增测试，已废弃该结果并从最终源码完整重跑；没有删测或降低断言。
-- 写入反例：隔离 HOME 与 SQLite 中注入审计提交失败，覆盖原文件存在/不存在、文件未变/外部再次修改四种情况。旧实现会覆盖外部新内容，同一用例在旧实现失败、改后通过。名称与接入参数共用一次提交，审计失败时二者及文件均恢复。
-- 实际值与敏感信息：Claude、Codex 的账号行读实际地址和模型；编辑预填复用只读解析，实际字段缺失不补旧模型。凭据不一致、请求头等无法安全预填时说明原因，接入字段不可保存，仍可改名。凭据只返回变量引用；普通字段疑似密钥时拒绝预填。
-- 浏览器交互：1000×650 与 320×740 截图和尺寸回读无横向溢出；搜索、刷新、菜单方向键/End/Escape 已实际操作。浏览器发现隐藏菜单尚未定位时无法聚焦，修为定位后聚焦，并补回归。额度重置及过期隐藏以固定时钟测试覆盖，未使用真实订阅额度。
-- 真实引擎联调：浏览器账号查询和编辑经临时本机传输连接 Rust CLI；助手 CLI 为隔离替身，HOME、数据、密钥文件均在临时目录。表单显示实际地址/模型；打开后外部改模型，保存被拒，外部文件、登记名称、主账号文件不变，未创建密钥文件。关闭刷新后重新编辑成功，文件与登记的模型、名称一致，实际地址及无关 theme 保留，凭据仍以引用入库，外部密钥文件权限为 0600。结果通过独立文件与 `policy:get` 回读，不仅依赖界面提示。
-- 边界：上述联调替换的是浏览器到引擎的传输，不证明原生 Tauri IPC 或安装包。临时服务只放行账号相关操作，其他页面刷新产生的 HTTP 400 属测试入口限制，不作为其他页面的验收结果；这些页面的回归由完整前端测试覆盖。没有真实登录、联网模型探测、订阅额度或原生窗口验证，也没有打包、签名、发布、tag 或 Release。
-- 部分成功仍如实表达：外部密钥文件与账号配置不是一个跨文件事务；若精确预览后密钥保存成功、后续账号写入失败，界面明确提示「API Key 已保存，但账号配置未更新」。移除登记后命令删除失败也单独报告，不宣称全部成功。
+- Conclusion/level: source, automated regression, and isolated browser-to-Rust CLI integration passed; native installation delivery/user acceptance was not reached. Target was this workspace's changes atop b7f6b1e via local Vite Accounts.
+- Full checks: `cargo test --manifest-path engine-rs/Cargo.toml` 443 and `cargo test --manifest-path app/src-tauri/Cargo.toml` 23; app `./node_modules/.bin/vitest run --maxWorkers=1` 65 files / 617; tsc --noEmit, vite build, engine `cargo fmt -- --check` and `git diff --check` passed. A run spanning edits mixed old modules/new tests; discarded and rerun completely on final source without removed tests/weaker assertions.
+- Write counterexamples: isolated HOME/SQLite inject audit-commit failure for existing/missing originals crossed with unchanged/re-edited files. Old implementation overwrote newer external content; the same test failed before and passed after. Name/connection parameters share one commit, restoring both and files on audit failure.
+- Actual/sensitive values: Claude/Codex rows read actual address/model; prefilling reuses read-only parsing without restoring missing old models. Unsafe credential/header prefilling explains why and disables connection save while retaining rename. Credentials return references only; suspected keys in ordinary fields block prefilling.
+- Browser: screenshots/dimension readback at 1000×650/320×740 showed no horizontal overflow; search/refresh/arrows/End/Escape were operated. Hidden menus could not focus before positioning; fixed post-position focus with regression. Reset/stale quota uses fixed-clock tests, not real subscription data.
+- Real engine integration: temporary local transport connected browser account queries/edits to Rust CLI; stand-in assistants and HOME/data/secrets used temporary paths. Forms showed actual address/model. External model edits after opening rejected saves, preserving external files/name/main and creating no secret file. Close/refresh/reopen edited successfully, agreeing on file/registered model/name, preserving address/theme, keeping database credential references and external secret 0600. Independent files/`policy:get` confirmed results beyond UI messages.
+- Boundary: transport substitution does not prove Tauri IPC/packages. Temporary service allowed account actions only; other-page HTTP 400 responses reflected test scope, not those pages' acceptance, whose regressions rely on full frontend tests. No real login/model probing/subscription/native-window acceptance or packaging/signing/publishing/tag/Release.
+- Partial success remains explicit: external secrets and account configuration are not cross-file transactional. If exact preview precedes successful secret save but failed account write, UI says "API Key saved, but account configuration was not updated." Command deletion after registration removal is also reported separately, never complete success.
 
+### Subsequent UI and local-package acceptance
 
-### 后续 UI 与本地打包验收
-
-- 全局调整浅色与深色对比度、表单背景、表格间距和操作可见性；窄窗口中的表格可横向滚动，标题、导航和弹窗保持可读。浏览器检查了 13 个页面的浅色、深色与 320 像素窄屏布局，并验证菜单键盘操作。
-- 程序页仅在存在目标新版本时显示升级按钮；当前、本地较新、未知和未检查分别显示状态。默认文案缩短，原文及管理方式收进详情。真实本机程序已显示「已是最新」，无升级按钮。
-- 最终前端回归为 65 文件、619 项通过，TypeScript 与 Vite 构建通过；推送前复跑引擎 443 项、Tauri 23 项及引擎格式检查通过。
-- 按用户要求生成本地 macOS x64 app 与 DMG，并启动原生窗口检查。安装包通过隔离 HOME、数据目录和最小 PATH 的独立运行检查。构建标识为起点 b7f6b1e 加工作区改动，不代表之后提交的 SHA 已重新打包。
-- 本地包未签名、公证或发布；没有创建 tag 或 Release。真实登录、联网模型调用及订阅额度未验证。
+- Adjusted light/dark contrast, form backgrounds, table spacing, and action visibility. Narrow tables scroll horizontally; headings/navigation/dialogs remain readable. Browser checked 13 pages in light/dark/320px layouts and keyboard menus.
+- Programs show Upgrade only for an available target version; current/newer-local/unknown/unchecked states are distinct. Shorter default text moves original/manageability to details. Real local programs show Up to date without Upgrade.
+- Final frontend 65 files / 619, TypeScript/Vite passed; before push, engine 443/Tauri 23/engine fmt reran successfully.
+- As requested, built local macOS x64 app/DMG and opened native UI. Package passed independent isolated HOME/data/minimal PATH execution. Build identity is b7f6b1e plus workspace changes, not a rebuilt later commit SHA.
+- Local package unsigned/unnotarized/unpublished; no tag/Release. Real login, network model calls, and subscription quotas unverified.
