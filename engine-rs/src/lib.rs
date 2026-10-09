@@ -26,6 +26,7 @@ pub(crate) mod native_programs;
 pub(crate) mod native_rules;
 pub(crate) mod native_runs;
 pub(crate) mod native_secrets;
+pub(crate) mod native_sessions;
 pub mod native_skills;
 pub(crate) mod native_system;
 pub(crate) mod native_upstream;

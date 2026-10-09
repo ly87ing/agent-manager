@@ -20,6 +20,11 @@ export function useAccountNames(): (agent: string) => string {
   return accountNameMap(...useAccountSources());
 }
 
+/** 全部账号（按助手分组），带启动命令与额度。 */
+export function useAccountList() {
+  return buildAccounts(...useAccountSources());
+}
+
 /** 技能、MCP 表格的表头：把格子里出现的账号键按助手分组。 */
 export function useAccountGroups(): (ids: string[]) => AccountGroup[] {
   const groups = buildAccounts(...useAccountSources());

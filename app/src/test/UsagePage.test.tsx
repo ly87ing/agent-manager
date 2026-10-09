@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
 import UsagePage from "../pages/UsagePage";
-import { makeEnvelope } from "./fixtures";
+import { vi } from "vitest";
+import { agentManagementFixture, makeAliasStatus, makeElement, makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
@@ -49,6 +50,15 @@ describe("用量页", () => {
     await userEvent.click(within(screen.getByTestId("usage-account-claude:work")).getByRole("button"));
     expect(screen.getByTestId("usage-agent-filter")).toHaveValue("claude:work");
     expect(screen.queryByTestId("usage-by-account")).toBeNull();
+  });
+
+  it("缓存命中率 = 缓存读取 ÷（输入 + 缓存写入 + 缓存读取）", async () => {
+    const base = routes();
+    const data = JSON.parse(JSON.stringify(base["usage:status"].data));
+    data.rows[0] = { ...data.rows[0], input: 100_000, cache_write: 100_000, cache_read: 800_000 };
+    data.rows[1] = { ...data.rows[1], input: 0, cache_read: 0 };
+    renderWithEngine(<UsagePage />, { ...base, "usage:status": makeEnvelope(data, { command: "usage.status" }) });
+    expect(await screen.findByTestId("usage-cache-hit")).toHaveTextContent("80%");
   });
 
   it("说清楚这是按 API 价折算，不是账单", async () => {
@@ -147,4 +157,31 @@ describe("用量页", () => {
     renderWithEngine(<UsagePage />, empty);
     expect(await screen.findByTestId("usage-empty")).toHaveTextContent("重新统计");
   });
+
+  it("最近会话：复制「进目录 + 同一个账号接着聊」的命令，只读不写", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const now = Date.now();
+    const { calls } = renderWithEngine(<UsagePage />, routes({
+      "agents:status": makeEnvelope({ domain: "agents", elements: [makeElement({ id: "agents:claude-code", domain: "agents", spec: { display_name: "Claude Code", bin: "claude" }, observed: { management: agentManagementFixture("claude") } })] }, { command: "agents.status" }),
+      "profiles:status": makeEnvelope({ domain: "profiles", elements: ["work", "relay"].map((id) => makeElement({ id: `profiles:${id}`, domain: "profiles", spec: { display_name: id, base_agent: "claude-code", kind: "claude", config_dir: `~/.claude-${id}`, base_url: null, model: null }, observed: { config_dir: `~/.claude-${id}`, blocked_reason: null }, state: "managed-ok" })) }, { command: "profiles.status" }),
+      "aliases:status": makeEnvelope(makeAliasStatus({ cw: 'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude' }), { command: "aliases.status" }),
+      "usage:sessions": makeEnvelope({ domain: "usage", action: "sessions", accounts: [
+        { agent: "claude:work", kind: "claude", sessions: [{ id: "s-work", cwd: "/work/app", title: "修登录", updated_at: new Date(now - 5 * 60_000).toISOString() }] },
+        { agent: "claude:relay", kind: "claude", sessions: [{ id: "s-relay", cwd: "/work/x", title: null, updated_at: new Date(now - 3600_000).toISOString() }] },
+      ] }, { command: "usage.sessions" }),
+    }));
+    const section = await screen.findByTestId("recent-sessions");
+    const rows = within(section).getAllByRole("listitem").map((row) => row.getAttribute("data-testid"));
+    expect(rows).toEqual(["session-s-work", "session-s-relay"]);
+    expect(screen.getByTestId("session-s-work")).toHaveTextContent("修登录");
+    expect(screen.getByTestId("session-s-work")).toHaveTextContent("5 分钟前");
+    expect(screen.getByTestId("session-s-relay")).toHaveTextContent("没有标题");
+    // 没有启动命令的账号不给复制
+    expect(screen.getByTestId("session-copy-s-relay")).toBeDisabled();
+    await userEvent.click(screen.getByTestId("session-copy-s-work"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("cd /work/app && cw --resume s-work"));
+    expect(calls.every((call) => call.command.endsWith(":status") || call.command === "usage:sessions")).toBe(true);
+  });
 });
+

@@ -488,6 +488,10 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("usage", "status" | "scan" | "clear") => {
             crate::native_usage::handle(ctx, request).map(|d| (d, vec![]))
         }
+        // 最近会话：只读会话文件开头，不写库
+        ("usage", "sessions") => {
+            crate::native_sessions::sessions(ctx, request).map(|d| (d, vec![]))
+        }
         // 运行参数落到助手自己的配置文件；与装卸升级分开，那条走 shell 命令，这条写文件
         ("agents", "configure") => {
             crate::native_agent_settings::apply(ctx, request).map(|data| (data, vec![]))

@@ -606,6 +606,19 @@ function demoEnvelopes(): Record<string, Envelope> {
     "profiles:status": profilesStatus,
     "usage:status": usageStatus,
     "usage:scan": makeEnvelope({ domain: "usage", action: "scan", files: 3, bytes: 24_576 }, { command: "usage.scan" }),
+    "usage:sessions": makeEnvelope({
+      domain: "usage",
+      action: "sessions",
+      accounts: [
+        { agent: "claude", kind: "claude", sessions: [
+          { id: "3f1c2a9e-0d6b-4b8e-9f0a-1c2d3e4f5a6b", cwd: "/Users/demo/code/agent-manager", title: "托盘面板显示额度", updated_at: new Date(Date.now() - 4 * 60_000).toISOString() },
+          { id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d", cwd: "/Users/demo/code/site", title: null, updated_at: new Date(Date.now() - 26 * 3600_000).toISOString() },
+        ] },
+        { agent: "codex", kind: "codex", sessions: [
+          { id: "01a11ec8-518b-7913-8e69-3f6761d218df", cwd: "/Users/demo/code/agent-manager", title: "补齐会话列表的测试", updated_at: new Date(Date.now() - 3 * 3600_000).toISOString() },
+        ] },
+      ],
+    }, { command: "usage.sessions" }),
     "aliases:status": makeEnvelope({ domain: "aliases", elements: [] }, { command: "aliases.status" }),
     // 程序：与本机实测同形（2026-09-30）——npm 全局的 wecom-cli、npx 固定版本、uvx 跟分支、应用自带、没声明的候选
     "programs:status": makeEnvelope(

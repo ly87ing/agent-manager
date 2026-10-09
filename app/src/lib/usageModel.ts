@@ -126,6 +126,15 @@ export function groupUsage(data: UsageData | undefined): UsageGroup[] {
     .sort((a, b) => (a.day === b.day ? a.model.localeCompare(b.model) : b.day.localeCompare(a.day)));
 }
 
+/**
+ * 缓存命中率：读进来的上下文里有多少走了提示缓存。引擎已把两家的输入都记成不含缓存的部分，
+ * 所以分母是输入 + 缓存写入 + 缓存读取。没有任何输入时为 null。
+ */
+export function cacheHitRate(totals: { input: number; cacheWrite: number; cacheRead: number }): number | null {
+  const prompt = totals.input + totals.cacheWrite + totals.cacheRead;
+  return prompt > 0 ? totals.cacheRead / prompt : null;
+}
+
 /** 合计：费用只把能算的加起来，另外报有多少桶算不出。 */
 export function totalsOf(groups: UsageGroup[]): {
   input: number;

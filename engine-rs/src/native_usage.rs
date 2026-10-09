@@ -391,14 +391,14 @@ fn codex_chunk_usage(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionKind {
+pub(crate) enum SessionKind {
     Claude,
     Codex,
 }
 
-/// 会话文件清单：主配置与各独立环境的 Claude projects、Codex sessions，各自递归找 .jsonl。
-/// 返回（文件，助手一栏的记法，格式）。实例目录取自实例定义；同一目录只扫一次。
-fn session_files(ctx: &Context) -> Vec<(PathBuf, String, SessionKind)> {
+/// 各账号的配置目录：主配置与各独立环境。返回（目录，助手一栏的记法，格式）。
+/// 实例目录取自实例定义；同一目录只出现一次。
+pub(crate) fn session_roots(ctx: &Context) -> Vec<(PathBuf, String, SessionKind)> {
     let home = &ctx.home_dir;
     let mut roots: Vec<(PathBuf, String, SessionKind)> = vec![
         (
@@ -429,8 +429,14 @@ fn session_files(ctx: &Context) -> Vec<(PathBuf, String, SessionKind)> {
             roots.push((dir, label, kind));
         }
     }
+    roots
+}
+
+/// 会话文件清单：各账号目录下的 Claude projects、Codex sessions，各自递归找 .jsonl。
+/// 返回（文件，助手一栏的记法，格式）。
+fn session_files(ctx: &Context) -> Vec<(PathBuf, String, SessionKind)> {
     let mut out = Vec::new();
-    for (root, label, kind) in roots {
+    for (root, label, kind) in session_roots(ctx) {
         let (dir, prefix) = match kind {
             SessionKind::Claude => (root.join("projects"), None),
             SessionKind::Codex => (root.join("sessions"), Some("rollout-")),

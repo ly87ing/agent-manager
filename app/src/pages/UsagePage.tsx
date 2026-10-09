@@ -6,10 +6,12 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import { engineKeys, useEngineQuery } from "../lib/queries";
+import { RecentSessions } from "../components/RecentSessions";
 import { AgentIcon } from "../components/AgentIcon";
 import { useAccountNames } from "../lib/useAccountNames";
 import {
   byAccount,
+  cacheHitRate,
   dailySeries,
   usageAccountKey,
   formatCost,
@@ -376,6 +378,14 @@ export default function UsagePage() {
               </p>
             </div>
           ))}
+          {cacheHitRate(totals) !== null && (
+            <div title="缓存读取 ÷（输入 + 缓存写入 + 缓存读取）：上下文里有多少走了提示缓存">
+              <p className="text-xs text-muted-foreground">缓存命中</p>
+              <p data-testid="usage-cache-hit" className="mt-0.5 text-sm tabular-nums text-foreground">
+                {Math.round((cacheHitRate(totals) ?? 0) * 100)}%
+              </p>
+            </div>
+          )}
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
           这是「同样的用量按 API 单价要花多少」，不是你的账单。订阅制下该付的是订阅费，
@@ -444,6 +454,8 @@ export default function UsagePage() {
           </table>
         </section>
       )}
+
+      <RecentSessions agent={agent} labelOf={labelOf} />
 
       {groups.length === 0 ? (
         <EmptyState
