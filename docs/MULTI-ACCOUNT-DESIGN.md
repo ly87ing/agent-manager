@@ -1,281 +1,281 @@
-# 多账号并行：重新设计与实施规划
+# Concurrent Accounts: Redesign and Implementation Plan
 
-状态：**方案已确认并实施（2026-09-28）**，P0–P7 已完成（2026-09-29 用当前代码的 DMG 在界面新建账号并回读）；P5 的额度写入仍缺官方订阅会话实测，见文末「实施记录」。[GUI 重设计](GUI-REDESIGN.md) 中与本文冲突的内容（主配置切换、接入备选、总览等）已按附录 A 退役，不再作为新要求。
+Status: **Design confirmed and implemented (2026-09-28)**. P0–P7 are complete (2026-09-29: an account was created through the UI of a DMG built from the current code and read back). P5 quota writes still lack testing with an official subscription session; see Implementation Record below. Conflicting material in [GUI Redesign](GUI-REDESIGN.md) (main-configuration switching, saved connections, overview, etc.) was retired under Appendix A and is no longer a new requirement.
 
-## 1. 定位
+## 1. Positioning
 
-**Agent Manager 让同一台 Mac 上的多个 Claude Code / Codex 账号同时使用：每个账号一个独立配置目录、一条启动命令，一套技能、MCP 与规则以软链接或受管条目分发给所有账号。**
+**Agent Manager lets multiple Claude Code / Codex accounts run simultaneously on the same Mac: each account has its own configuration directory and launch command; one set of skills, MCP, and rules is distributed to all accounts through symlinks or managed entries.**
 
-- 使用场景：几个终端各开一个账号并行干活；某个账号额度快用完，换另一个终端里的账号继续。
-- 部署模型：单用户、本机桌面应用 + 同一 Rust 库的 CLI；只读写本机文件，不联网改配置，不读写凭据。
-- 不再以「切换」为主线：账号之间没有「当前」与「备选」，都是并列、同时可用的。
+- Use case: work in parallel with one account per terminal; when an account is nearly out of quota, continue in another account's terminal.
+- Deployment model: a single-user local desktop application plus a CLI using the same Rust library; reads and writes local files only, does not change configuration over the network, and does not read or write credentials.
+- Switching is no longer the central workflow: accounts have no current/alternative distinction; all are peers and can be used concurrently.
 
-### 目标
+### Goals
 
-1. 一屏看清每个助手的全部账号：启动命令、官方还是 API、登录状态、额度。
-2. 新增一个账号只需回答「官方还是 API」「叫什么」，其余（目录、启动命令、技能、MCP、规则、共用设置）自动就位。
-3. 技能、MCP、规则装一次，默认分配给全部账号；个别账号可以关掉某项。
-4. 默认窗口（1000×650）里每页首屏就是主列表，操作与结果不需要拖动。
+1. See every account for each assistant on one screen: launch command, official or API, login status, and quota.
+2. Add an account by answering only Official or API? and What name? Directory, launch command, skills, MCP, rules, and shared settings are prepared automatically.
+3. Install skills, MCP, and rules once and assign them to all accounts by default; individual accounts can disable an item.
+4. In the default window (1000×650), each page's main list appears on the first screen, with no dragging needed to see actions and results.
 
-### 非目标
+### Non-goals
 
-- 在主配置里切换第三方接入（交给 cc-switch 等工具或新建 API 账号）。
-- 读写登录凭据：登录只通过助手自己的 `/login` / `codex login`。为认出是哪个账号，只读取身份信息：Claude 的 `.claude.json` 登录记录，Codex `auth.json` 里 `id_token` 的邮箱与套餐；令牌取值一律不读、不存。
-- 助手软件的安装、升级、卸载。
-- 为 Agent Manager 另存一份生效配置：实际文件仍是唯一事实源。
+- Switching third-party connections in the main configuration (use tools such as cc-switch or create an API account).
+- Reading/writing login credentials: login uses only the assistant's own `/login` / `codex login`. Account identification reads identity information only: Claude's login record in `.claude.json`, and email/plan from the `id_token` in Codex `auth.json`; token values are never read or stored.
+- Installing, upgrading, or uninstalling assistant software.
+- Saving a separate effective configuration for Agent Manager: actual files remain the sole source of truth.
 
-## 2. 概念模型
+## 2. Conceptual Model
 
 ```mermaid
 flowchart LR
-  subgraph 共享资源
-    S[技能集合 / 技能]
-    M[MCP 服务]
-    R[规则 CLAUDE.md / AGENTS.md]
-    C[共用设置 权限 / 状态栏]
+  subgraph Shared_resources[Shared resources]
+    S[Skill collections / skills]
+    M[MCP services]
+    R[Rules CLAUDE.md / AGENTS.md]
+    C[Shared settings permissions / status line]
   end
-  subgraph Claude Code 账号
-    A1["claude → ~/.claude（官方）"]
-    A2["cc2 → ~/.claude-cc2（官方）"]
-    A3["ds → ~/.claude-ds（API）"]
+  subgraph Claude_Code_accounts[Claude Code accounts]
+    A1["claude → ~/.claude (official)"]
+    A2["cc2 → ~/.claude-cc2 (official)"]
+    A3["ds → ~/.claude-ds (API)"]
   end
-  S -- 软链接到 目录/skills --> A1 & A2 & A3
-  M -- 写入各自配置文件 --> A1 & A2 & A3
-  R -- 写入 目录/CLAUDE.md --> A1 & A2 & A3
-  C -- 写入 目录/settings.json --> A2 & A3
+  S -- Symlink into directory/skills --> A1 & A2 & A3
+  M -- Write each configuration file --> A1 & A2 & A3
+  R -- Write directory/CLAUDE.md --> A1 & A2 & A3
+  C -- Write directory/settings.json --> A2 & A3
 ```
 
-**账号 = 一个配置目录 + 一条启动命令。** 启动命令以 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 指向该目录，助手的登录、设置、会话、技能、规则都在里面，所以多个账号可以同时运行。
+**Account = a configuration directory + a launch command.** The launch command points `CLAUDE_CONFIG_DIR` / `CODEX_HOME` to that directory. The assistant's login, settings, sessions, skills, and rules live there, allowing multiple accounts to run at once.
 
-- **主账号**：`~/.claude` / `~/.codex`，启动命令就是 `claude` / `codex`。只放官方登录（沿用现行「主配置只放官方账号」）；只读展示，不提供切换。
-- **官方账号**：独立目录，在该目录里 `/login` 一次，之后各用各的订阅。
-- **API 账号**：独立目录，写入地址、密钥引用、模型；不能在里面登录官方账号（沿用「一个目录只放一种凭据」）。
-- **共享资源**：技能、MCP、规则、共用设置。它们的「分配」就是「哪些账号有它」，默认全部账号。
+- **Main account:** `~/.claude` / `~/.codex`, launched as `claude` / `codex`. Official login only (preserving the existing main-configuration policy); displayed read-only, with no switching action.
+- **Official account:** a separate directory; run `/login` once there, then each account uses its own subscription.
+- **API account:** a separate directory holding endpoint, secret reference, and model; official login is not allowed there (preserving one credential type per directory).
+- **Shared resources:** skills, MCP, rules, and shared settings. Assignment means which accounts have a resource; all accounts are the default.
 
-依据（均为本机实测或源码，2026-09-28）：
+Evidence, all from local testing or source on 2026-09-28:
 
-| 事实 | 依据 |
+| Fact | Evidence |
 | --- | --- |
-| Claude 官方登录按目录隔离 | 已观察：Claude Code 2.1.284 钥匙串条目名为 `Claude Code-credentials-<配置目录 sha256 前 8 位>`（设了 `CLAUDE_CONFIG_DIR` 时） |
-| Claude 用户规则与技能跟随配置目录 | 已观察：同一版本里 User 级 `CLAUDE.md` 与 `skills/`、`rules/`、`agents/`、`commands/` 都以配置目录为根 |
-| Codex 登录按目录隔离 | 已观察（旧验收记录，未重测）：[任务书](goal-rust-gui.md) 记录 `rust-v0.156.0` keyring 按 `CODEX_HOME` 摘要区分 |
-| 额度可按目录读取 | 已观察：`agent_usage.rs` 按配置目录读状态栏落盘文件与 `.claude.json` 缓存；Codex 读 `<CODEX_HOME>/sessions` |
+| Claude official login is isolated by directory | Observed: Claude Code 2.1.284 names its keychain entry `Claude Code-credentials-<first 8 hex digits of the configuration directory sha256>` when `CLAUDE_CONFIG_DIR` is set |
+| Claude user rules and skills follow the configuration directory | Observed: in the same version, User-level `CLAUDE.md`, `skills/`, `rules/`, `agents/`, and `commands/` all use the configuration directory as their root |
+| Codex login is isolated by directory | Observed in an older verification record, not retested: the [Work Plan](goal-rust-gui.md) records `rust-v0.156.0` keyring separation by `CODEX_HOME` digest |
+| Quota can be read per directory | Observed: `agent_usage.rs` reads status-line output files and `.claude.json` caches per configuration directory; Codex reads `<CODEX_HOME>/sessions` |
 
-## 2.1 管理体系：对象、统一状态与闭环（2026-09-30，用户确认）
+## 2.1 Management Model: Objects, Unified States, and Complete Workflows (2026-09-30, User-confirmed)
 
-整个应用按同一个模型组织，页面和按钮都由它推出，同一件事只有一个负责的地方。
+The application follows one model that determines its pages and buttons. Each responsibility has one owner.
 
-**对象与关系。** 账号（配置目录 + 启动命令）是「在哪生效」；技能、MCP、规则、命令、账号设置是「什么在生效」；来源（git 仓库、本机目录、规则文件）是「内容从哪来、用哪个版本」。三种关系各有唯一负责的页面：来源 → 资源（提供，带版本）在**来源页**；资源 → 账号（分配）在**资源页**；账号本身在**账号页**。MCP 与账号设置没有来源这一层，内容就是账号配置文件里的实际值。同类账号默认共享技能、MCP、规则（已确认）。
+**Objects and relationships.** Accounts (configuration directory + launch command) define where configuration takes effect. Skills, MCP, rules, commands, and account settings define what takes effect. Sources (git repositories, local directories, rule files) define where content comes from and which version is used. Each relationship has one responsible page: source → resource (provision, including version) belongs to **Sources**; resource → account (assignment) belongs to **resource pages**; accounts themselves belong to **Accounts**. MCP and account settings have no source layer: their content is the actual value in account configuration files. Accounts of the same assistant type share skills, MCP, and rules by default (confirmed).
 
-**来源可选（2026-10-08 确认）。** 所有外部仓库和内容源均可不配置，不阻断启动、账号管理和本机实际配置的读写。作者的公开仓库只作推荐，不自动添加、下载或计入待处理。密钥由用户直接填写或选择自己的外部文件 / 私有仓库；不推荐、不依赖作者的私有 secrets 仓库。
+**Sources are optional (confirmed 2026-10-08).** Every external repository and content source can be left unconfigured without blocking startup, account management, or reading/writing actual local configuration. The author's public repositories are recommendations only; they are not automatically added, downloaded, or counted as pending. Users enter secrets directly or select their own external file / private repository. The author's private secrets repository is neither recommended nor required.
 
-**统一状态。** 各领域原有的状态词（技能 `linked / missing-link / dead-link / drifted / extra-link / disabled`，MCP `enabled / disabled / invalid`，规则 `same / differs / missing`，来源 `current / behind`）统一映射成下面几种，每种只对应一个处理动作（映射在 `app/src/lib/inbox.ts`）：
+**Unified states.** Existing domain terms (skills `linked / missing-link / dead-link / drifted / extra-link / disabled`, MCP `enabled / disabled / invalid`, rules `same / differs / missing`, sources `current / behind`) map to the following states, each with one action (mapping in `app/src/lib/inbox.ts`):
 
-| 统一状态 | 含义 | 唯一处理动作 | 在哪处理 |
+| Unified state | Meaning | Only action | Responsible page |
 | --- | --- | --- | --- |
-| 生效 | 实际文件与预期一致 | — | — |
-| 已停用 | 用户主动停用 | 启用 | 资源页 |
-| 损坏 | 断链、条目无法识别、找不到命令、变量没取值、来源读取失败 | 修复或移除 | 资源页 / 来源页 |
-| 已偏离 | 被外部改过，与来源或预期不一致（入口被占用、规则改过且来源也更新、两个终端文件写法不同、Codex 重名） | 看差异后决定 | 资源页 / 来源页 |
-| 缺失 | 同类账号在用、这个账号还没有 | 补齐 | 资源页 |
-| 有新版本 | 来源有新内容，或已取回、账号还没换过去 | 更新（git 先预览） | 来源页；已取回的直接换 |
-| 未纳管 | 在账号里、但不来自任何来源 | 纳入，或留着不管 | 来源页「未纳管」 |
+| Effective | Actual files match expectations | — | — |
+| Disabled | Intentionally disabled by the user | Enable | Resource page |
+| Broken | Dead link, unrecognized entry, missing command, unresolved variable, or source read failure | Repair or remove | Resource / Sources page |
+| Drifted | Externally changed and inconsistent with source or expectation (occupied entry point, edited rules with a changed source, different terminal-file representations, duplicate Codex names) | Review differences and decide | Resource / Sources page |
+| Missing | Used by accounts of the same type but absent from this account | Fill | Resource page |
+| Update available | Source has new content, or content has been fetched but accounts have not switched | Update (preview git first) | Sources page; switch directly if already fetched |
+| Unmanaged | Present in an account but not from any source | Adopt or leave unmanaged | Unmanaged section of Sources |
 
-**闭环。** 读取实际文件 → 算出状态 → 待处理（统一列表 + 导航角标，同一份计算）→ 唯一的处理动作 → 写入管线（预览只显示改动 → 确认 → 加锁、写前比对 → 回读 → 记录，可撤回）→ 回读后状态回到「生效」，这一条从待处理里消失。能直接做的（补齐、修复、换到已取回的新版本、添加新发现的技能）在待处理页做，和资源页上是同一个动作；要看差异或做选择的跳到负责的页面并定位到那一项。
+**Complete workflow.** Read actual files → compute state → pending items (one computation for the unified list and navigation badges) → the only applicable action → write pipeline (preview changes only → confirm → lock and compare before writing → read back → record, with undo) → after readback, state returns to Effective and the pending item disappears. Direct actions (fill, repair, switch to an already fetched version, add newly discovered skills) are available in Inbox and use the same actions as resource pages. Actions requiring differences or choices navigate to the responsible page and locate the item.
 
-待处理页只做汇总和入口，不重复各页的明细（2026-09-30 用户反馈后调整）：分类可折叠、默认收起，标题给出数量和摘要；同一原因、同一来源的项合成一行（例如「wecom-cli 里还没用的技能 · 9 项」，点开看名单，处理去技能页那个来源）。用户不想处理的可以逐行或整类「忽略」：忽略的不计入导航角标与各页「只看待处理」，放在底部「已忽略」里可恢复；按「项 + 当时的说明」记，状态变了（例如来源里又多了技能）会重新提示。忽略只存本机界面偏好，不写任何配置。
+Inbox aggregates status and entry points without duplicating page details (adjusted after user feedback on 2026-09-30). Categories are collapsible and collapsed by default; headings show counts and summaries. Items with the same cause and source merge into one row (for example, Unused skills in wecom-cli · 9 items; expand to see the list and go to that source in Skills to act). Users may Ignore a row or an entire category. Ignored items do not count in navigation badges or Pending only filters and appear under Ignored at the bottom, where they can be restored. Ignore records use the item plus its explanation at that time; changed state (for example, more skills in the source) prompts again. Ignoring stores only local UI preferences and writes no configuration.
 
-**导航由模型推出。**
+**Navigation follows the model.**
 
-| 导航 | 负责 | 不做 |
+| Navigation | Owns | Does not own |
 | --- | --- | --- |
-| 待处理 | 汇总所有非「生效」的项，分组列出，每条一个处理按钮 | 自己的判断——只用统一状态 |
-| 账号 | 建号、登录、启动命令、账号设置；发现未登记的助手 | 资源分配（只读汇总，点过去） |
-| 技能 · MCP · 规则 · 命令 | 分配：启用 / 停用、编辑、删除、补齐；统一状态标签与「只看待处理」 | 来源的添加、更新、换版本、移除（只标「可更新」等，点过去） |
-| 来源 | 添加、推荐、编辑跟踪方式、检查与更新（git 先预览）、换版本、分享、停用、移除；未纳管的纳入（识别出来源的只留一份源，外部目录登记为本机目录来源，残留链接清理）；从分享链接导入 | 分配到哪些账号 |
-| 程序 | 技能与 MCP 依赖的命令行程序：谁需要、装在哪、什么版本；代管升级与回退、本工具安装、换版本、删除、纳入，MCP 条目版本号的固定与升级；每个动作都能复制命令自己执行（[程序生命周期](PROGRAM-LIFECYCLE.md)） | 智能体本身（只在账号页检测版本） |
-| 设置 | 密钥、操作记录与撤回、诊断、应用更新 | 业务资源 |
+| Inbox | Aggregates all non-Effective items, grouped with one action button per item | Independent judgments; uses unified states only |
+| Accounts | Account creation, login, launch commands, account settings, discovery of unregistered assistants | Resource assignment (read-only summary linking to its owner) |
+| Skills · MCP · Rules · Commands | Assignment: enable/disable, edit, delete, fill; unified state labels and Pending only | Adding/updating/switching/removing sources (labels such as Update available link to Sources) |
+| Sources | Add, recommend, edit tracking, check/update (preview git first), switch versions, share, disable, remove; adopt unmanaged resources (keep one source when recognized, register external directories as local-directory sources, clean residual links); import from share links | Which accounts receive a resource |
+| Programs | CLI programs required by skills and MCP: dependents, location, version; delegated upgrades/rollback, tool-managed installation, version switching, deletion, adoption, MCP entry version pinning/upgrades. Every action has an equivalent copyable command ([Program Lifecycle](PROGRAM-LIFECYCLE.md)) | Assistants themselves (version detection only on Accounts) |
+| Settings | Secrets, operation records and undo, diagnostics, application updates | Business resources |
 
-## 3. 功能与界面
+## 3. Features and UI
 
-外壳改为顶栏，去掉侧栏与快捷键图例；页头只有标题，没有描述段。顶栏不出横向滚动条：应用名只在窗口标题栏里；窗口放不下全部主入口时，从末尾起收进「更多」菜单（待处理数合计显示在上面，当前页在菜单里时按钮显示它的名字），窄窗口里搜索只显示图标。
-
-```
-[待处理] [账号] [技能] [MCP] [规则] [命令] [来源] [程序]        [用量] ⚙
-```
-
-### 3.1 账号（默认页）
+Replace the sidebar and shortcut legend with a top bar. Page headers contain only a title, with no description paragraph. The top bar has no horizontal scrollbar: the application name appears only in the window title bar. When primary entries do not fit, move entries from the end into More (show total pending count; if the current page is inside, show its name on the button). Search becomes an icon in narrow windows.
 
 ```
-Claude Code | Codex                                          [+ 添加账号]
-个人 Max    claude   官方 · 已登录    5h ███████░ 82%   周 ██░ 31%   [复制] ⋯
-公司 Pro    cc2      官方 · 已登录    5h ██░░░░░ 20%   周 █░░ 12%   [复制] ⋯
-团队        cc3      官方 · 未登录                                  [登录] ⋯
-DeepSeek    ds       API · deepseek-v4                              [复制] ⋯
+[Inbox] [Accounts] [Skills] [MCP] [Rules] [Commands] [Sources] [Programs]        [Usage] ⚙
 ```
 
-- 每行一个账号；主按钮只有一个：已可用时「复制」启动命令，未登录时「登录」（复制在该目录登录的官方命令）。
-- 额度条按 5 小时、每周两个窗口；过了重置点不显示，超过 24 小时的记录转灰（沿用「额度来源」口径）。
-- `⋯` 菜单：编辑、在 Finder 中打开目录、复制目录路径、移除。
-- 点行名打开右侧抽屉：名称、启动命令、目录（只读）；API 账号另有地址、密钥引用、模型；下方列出该账号已有的技能 / MCP / 规则，可逐项关掉。
-- **添加账号**抽屉：类型（官方 / API）、名称、启动命令名（默认由名称生成）；API 类型可选预设（DeepSeek、MiniMax 等现有预设）。保存后依次：建目录 → 写共用设置与 API 参数 → 分发共享资源 → 写启动命令；官方账号最后提示「登录」。
-- 状态标签只有三种，各带一个处理动作：
-  - 「未登录」→ 登录；
-  - 「启动命令未生效」（shell 里没有这条 alias）→ 写入；
-  - 「目录被外部改过」→ 采用目录内容。
-  其他细节（系统级覆盖、凭据覆盖）只在抽屉里显示。
-
-### 3.2 技能
+### 3.1 Accounts (Default Page)
 
 ```
-[集合 ▾] [账号 ▾] [搜索] [只看待处理]                               [全部补齐]
-agent-skills   24 个技能 · 可更新                                  [更新] ⋯
-  change-discipline         全部账号                                    ⋯
-  verification              全部账号（ds 除外）                         ⋯
-team-skills    6 个技能                                             [更新] ⋯
+Claude Code | Codex                                               [+ Add account]
+Personal Max  claude  Official · Logged in  5h ███████░ 82%  Week ██░ 31%  [Copy] ⋯
+Work Pro      cc2     Official · Logged in  5h ██░░░░░ 20%  Week █░░ 12%   [Copy] ⋯
+Team          cc3     Official · Not logged in                           [Log in] ⋯
+DeepSeek      ds      API · deepseek-v4                                    [Copy] ⋯
 ```
 
-- 集合（git 仓库）→ 技能两级；每个技能显示分配给了哪些账号，默认「全部账号」。
-- 分配以内容寻址快照 + 软链接落地（现有实现）；新账号自动获得「全部账号」的技能。
-- 各账号目录里非本工具管理的技能（外部链接、真实目录）在来源页「未纳管」里，可「纳入管理」；技能页只给一条去那里的入口。
-- 来源的添加、更新、换版本、移除都在来源页（见 2.1）：技能页标题行的「可更新」「尚未下载」「跟踪方式有误」点过去，技能页不直接更新。
-- 来源的版本跟踪（版本号 / 主分支）、更新与回滚，以及「纳入管理」与冗余清理，见 [技能来源：版本管理与纳入管理](SKILL-VERSIONING.md)。
+- One account per row with one primary button: Copy the launch command when usable; Log in when not logged in (copies the official login command for that directory).
+- Quota bars cover 5-hour and weekly windows. Hide them after reset; gray out records older than 24 hours (retaining the Quota Sources criteria).
+- `⋯` menu: edit, open directory in Finder, copy directory path, remove.
+- Clicking the row name opens a right drawer: name, launch command, directory (read-only); API accounts also show endpoint, secret reference, and model. Existing skills / MCP / rules appear below and can be disabled individually.
+- **Add account** drawer: type (official / API), name, launch-command name (derived from the name by default); API accounts can select existing presets such as DeepSeek and MiniMax. Saving creates the directory → writes shared settings and API parameters → distributes shared resources → writes the launch command; official accounts then prompt Log in.
+- Only three actionable status labels:
+  - Not logged in → Log in.
+  - Launch command not effective (alias absent from the shell) → Write.
+  - Directory changed externally → Adopt directory content.
+  Other details (system-level overrides, credential overrides) appear only in the drawer.
 
-#### 来源的生命周期（2026-09-29，用户确认）
+### 3.2 Skills
 
-| 阶段 | 行为 |
+```
+[Collection ▾] [Account ▾] [Search] [Pending only]                         [Fill All]
+agent-skills   24 skills · Update available                                  [Update] ⋯
+  change-discipline         All accounts                                              ⋯
+  verification              All accounts except ds                                    ⋯
+team-skills    6 skills                                                       [Update] ⋯
+```
+
+- Two levels: collection (git repository) → skills. Each skill shows its assigned accounts, defaulting to All accounts.
+- Assignments use content-addressed snapshots and symlinks (existing implementation); new accounts automatically receive skills assigned to All accounts.
+- Skills in account directories that this tool does not manage (external links, real directories) appear in Unmanaged on Sources for adoption. Skills provides only a navigation entry there.
+- Source addition, updates, version switching, and removal belong to Sources (2.1). Update available, Not downloaded, and Invalid tracking labels in Skills navigate there; Skills does not update sources directly.
+- See [Skill Sources: Versioning and Adoption](SKILL-VERSIONING.md) for source version tracking (release / main branch), updates and rollback, adoption, and redundancy cleanup.
+
+#### Source Lifecycle (2026-09-29, User-confirmed)
+
+| Stage | Behavior |
 | --- | --- |
-| 首次安装 | 不写入任何规则、MCP、技能或启动命令；打开页面的查询也不调用会写配置目录的官方命令。来源页推荐 agent-skills，确认后才登记（「启用…」还会下载并链接到全部账号，已有同名内容的跳过；「添加…」只登记），规则不在这里写；「不用了」之后不再推荐。来源是可选的：账号页「开始使用」里这一步可点「不用」，不用来源时各账号已有的技能、MCP、规则照常按实际文件管理。 |
-| 不想用了 | 集合行常驻「移除来源」（规则库里来自集合的规则也有）。确认框列清影响：技能链接移除、用户自己的同名目录不动；规则文件内容保留、不再跟随；已写入的启动命令不动。git 集合默认一并清理下载的仓库与没人再用的版本快照。停用或移除推荐来源后不再推荐它。停用、移除只动指向本集合内容的链接。 |
-| 在它基础上改 | 已启用技能是只读快照，不能原地改。技能菜单「改成我的版本…」把现在用着的那一版复制到用户目录（默认 `~/my-skills`），登记为用户的本机集合并记下来历，勾选的账号换过去；原集合更新不动用户文件，只提示「原版有更新」。规则写入账号后就是用户的文件，改过后来源出新版只提示、看过差异确认才覆盖，覆盖前另存备份。 |
+| First installation | Writes no rules, MCP, skills, or launch commands; page queries do not invoke official commands that write configuration directories. Sources recommends agent-skills and registers it only after confirmation (Enable… also downloads it and links it to all accounts, skipping existing same-name content; Add… only registers it). Rules are not written here. Dismissing the recommendation prevents future recommendations. Sources are optional: the Getting started flow on Accounts allows Skip for this step, and existing skills/MCP/rules continue to be managed from actual files without a source. |
+| No longer wanted | Collection rows always offer Remove source (also available for rules from collections in the rule library). Confirmation lists impacts: remove skill links without touching user-owned same-name directories; preserve rule-file content and stop following the source; leave written launch commands intact. Git collections remove downloaded repositories and unused version snapshots by default. Disabled or removed recommended sources are not recommended again. Disabling/removing affects only links pointing to this collection's content. |
+| Customize a source | Enabled skills are read-only snapshots and cannot be edited in place. Make my own version… copies the currently used version into a user directory (default `~/my-skills`), registers a local user collection and provenance, and switches selected accounts to it. Original source updates leave user files alone and show only Original has updates. Rules written into accounts are user files; after edits, source updates only notify, and overwrite requires reviewing differences and confirming, with a backup saved first. |
 
 ### 3.3 MCP
 
-- 一行一个服务：名称、命令或地址、「全部账号 / N 个账号」；`⋯` 编辑、复制、删除。
-- 编辑直接写每个账号自己的配置文件（Claude `<目录>/.claude.json`，Codex `<目录>/config.toml`），写前比对。
-- 同名服务在不同账号里内容不同时，行上标「各账号不同」，抽屉里逐个账号展示。
+- One service per row: name, command or URL, All accounts / N accounts; `⋯` offers edit, copy, and delete.
+- Editing writes directly to each account's own configuration (Claude `<directory>/.claude.json`, Codex `<directory>/config.toml`), with comparison before writing.
+- A same-name service with different contents across accounts shows Different across accounts; the drawer displays each account separately.
 
-### 3.4 规则
+### 3.4 Rules
 
-- 一行一个规则文件来源：本机模板、你直接指定的规则文件或目录，或技能集合里的规则位置（默认 `rules/`，可改指子目录或某个文件）；显示分配到哪些账号。
-- 分发即写入 `<目录>/CLAUDE.md` / `<目录>/AGENTS.md`；目标已有不认识的内容时先另存备份（沿用现行规则）。
+- One rule-file source per row: a local template, a directly specified file/directory, or a rules location within a skill collection (default `rules/`, configurable to a subdirectory or specific file). Show assigned accounts.
+- Distribution writes `<directory>/CLAUDE.md` / `<directory>/AGENTS.md`. Save a backup first if the target contains unrecognized content (preserving existing behavior).
 
-### 3.5 其余入口
+### 3.5 Other Entries
 
-- **共用设置**：在「设置」里，选择哪些设置从主账号同步给其他账号（现有：权限、状态栏、规则、MCP）。
-- **用量**：保留现有按账号的 token 统计页，作为顶栏右侧次级入口。
-- **扫描本机已有内容**：未登记的助手在账号页底部，外部技能目录、计划外链接与残留链接在来源页「未纳管」里；没有可处理的内容时不显示。
-- **托盘**：每个账号一行，显示最紧的额度窗口，点击复制启动命令。
+- **Shared settings:** Settings lets users choose which settings to synchronize from the main account to other accounts (currently permissions, status line, rules, MCP).
+- **Usage:** retain account-specific token statistics as a secondary entry on the right of the top bar.
+- **Scan existing local content:** unregistered assistants appear at the bottom of Accounts; external skill directories, unexpected links, and residual links appear in Unmanaged on Sources. Hide these sections when nothing is actionable.
+- **Tray:** one row per account with its tightest quota window; click to copy its launch command.
 
-### 3.6 版式规则（验收项）
+### 3.6 Layout Rules (Acceptance Criteria)
 
-- 列表行高约 48–56px，一行一项；状态用标签，不写句子。
-- 每行只露一个主操作，其余进 `⋯`；编辑一律在右侧抽屉。
-- 列表页不出现超过一行的说明文字；解释放在 `ⓘ` 提示或空状态里。
-- 不套卡片：列表是一整块，分组用标题行。
+- List rows are about 48–56px high, one item per row; statuses use labels rather than sentences.
+- Each row exposes one primary action; the rest go into `⋯`. All editing uses right drawers.
+- List pages have no explanatory text longer than one line; explanations belong in `ⓘ` tips or empty states.
+- No nested cards: a list is one block, grouped by heading rows.
 
-## 4. 数据与写入规则
+## 4. Data and Write Rules
 
-沿用 [GUI 重设计 · 数据模型](GUI-REDESIGN.md#数据模型实际配置为准)：实际文件是唯一事实源，写前重读比对，不覆盖外部修改，查询零写。新增或改变的只有：
+Retain [GUI Redesign · Data Model](GUI-REDESIGN.md#data-model-the-actual-configuration-is-authoritative): actual files are the sole source of truth; reread and compare before writing; do not overwrite external changes; queries perform zero writes. Only these rules are added or changed:
 
-| 项 | 规则 |
+| Item | Rule |
 | --- | --- |
-| 账号登记 | 库里只记账号 id、显示名、助手、目录、启动命令名、类型；API 参数以目录里的实际文件为准，库里的副本只用于判断归属 |
-| 「定义与实际不一致」 | 不再作为概念出现；只在外部修改时标「目录被外部改过」，一个动作：采用目录内容 |
-| 共享资源分配 | 默认全部账号。技能按「在用即全给」：至少一个账号上启用着的技能，新账号自动链接、其余账号可一键「补齐」；某账号上「停用」是例外，补齐不加回；从没被选用的新发现技能要先点「添加」，添加即加到全部账号。MCP 在同一种助手内补齐：某账号上启用着的服务，从同格式账号复制到还没有它的账号，账号上停用的不动，跨助手仍用「复制到…」。规则只补还没有规则文件的账号（从同类主账号复制），已有内容一律不动 |
-| 主账号 | 只读展示接入方式；不写入第三方，不提供「切回官方」 |
-| 移除账号 | 删除启动命令与登记；目录默认保留（含会话与登录），用户勾选才删除 |
+| Account registration | Store only account id, display name, assistant, directory, launch-command name, and type. Actual directory files determine API parameters; database copies are used only to determine ownership |
+| Definition differs from actual configuration | No longer a concept. External changes show only Directory changed externally, with one action: Adopt directory content |
+| Shared resource assignment | All accounts by default. Skills use what any account uses: if enabled on at least one account, automatically link it to new accounts and offer one-click Fill for others. Disabling on one account is an exception; filling does not re-enable it. Newly discovered skills that have never been selected require Add first; adding assigns them to all accounts. Fill missing MCP services within the same assistant type: copy enabled services from an account of the same format to accounts missing them, leave disabled services alone, and retain Copy to… across assistant types. Fill missing rules only for accounts with no rule file (copy from the same-type main account); never change existing content |
+| Main account | Show connection type read-only; do not write third-party connections or provide Switch back to official |
+| Account removal | Remove launch command and registration; preserve directory by default (including sessions and login), deleting it only when selected by the user |
 
-## 5. 实现方式
+## 5. Implementation Approach
 
-后端大体已按「多账号」建模（实例 = 目录 + 启动命令，技能 / MCP / 规则都把实例当分发目标）；主要工作是前端重写和删除「主配置切换」一整条线。
+The backend already largely models multiple accounts (instance = directory + launch command; skills/MCP/rules distribute to instances). The main work is rewriting the frontend and removing the entire main-configuration switching workflow.
 
-| 模块 | 处理 | 说明 |
+| Module | Treatment | Notes |
 | --- | --- | --- |
-| `native_profiles`（实例） | 复用 | 账号的增删改、共用设置；`seed`、`apply-definition`、`shared-apply` 已有 |
-| `native_aliases` | 复用 | 启动命令写入 `~/.zshrc` 受管区块；`~/.zprofile` 已有区块时同步，不新建 |
-| `native_skills` / `native_mcp` / `native_rules` | 复用 + 小改 | 加「默认全部账号」与「新账号补齐分配」 |
-| `agent_usage` + `assets/statusline.sh` | 复用 + 接线 | 经共用设置把状态栏脚本装到各账号，额度变实时（决策 1） |
-| `native_auth` | 复用 | 只读登录状态、生成官方登录命令 |
-| `native_discover` | 复用 | 首次导入 |
-| `native_usage` | 复用 | 用量页 |
-| `native_agent_settings`（4319 行）、接入库、`agents:configure` 切换 | 删除 | 主配置切换、接入备选、运行设置表单；先下线界面，后端另起清理提交 |
-| `native_hooks` | 整体移除（2026-09-29，用户裁决） | 界面、桥接与引擎域都已删除；各账号文件里的 hooks 原样保留 |
-| 前端 `AgentsPage`、`ConnectionWorkbench`、`ConnectionFormDialog`、`ProfileCards`、`ProfileFormDialog`、总览、操作记录、命令面板中的切换项 | 删除 | 由新页面替代 |
-| 前端新写 | 新增 | `AppShell`（顶栏）、`AccountsPage`、`AccountDrawer`、`SkillsPage`、`McpPage`、`RulesPage` 的列表模板与抽屉 |
+| `native_profiles` (instances) | Reuse | Account CRUD and shared settings; `seed`, `apply-definition`, `shared-apply` already exist |
+| `native_aliases` | Reuse | Write launch commands in the managed `~/.zshrc` block; synchronize an existing `~/.zprofile` block without creating one |
+| `native_skills` / `native_mcp` / `native_rules` | Reuse with small changes | Add All accounts by default and fill assignments for new accounts |
+| `agent_usage` + `assets/statusline.sh` | Reuse and wire up | Install the status-line script for each account through shared settings, enabling real-time quota (decision 1) |
+| `native_auth` | Reuse | Read-only login status and official login command generation |
+| `native_discover` | Reuse | Initial import |
+| `native_usage` | Reuse | Usage page |
+| `native_agent_settings` (4319 lines), connection library, `agents:configure` switching | Delete | Main-configuration switching, saved connections, runtime settings forms; retire UI first, then clean backend in a separate commit |
+| `native_hooks` | Remove entirely (2026-09-29, user decision) | UI, bridge, and engine domain removed; hooks in account files preserved |
+| Frontend `AgentsPage`, `ConnectionWorkbench`, `ConnectionFormDialog`, `ProfileCards`, `ProfileFormDialog`, overview, operation records, command-palette switching items | Delete | Replaced by new pages |
+| New frontend | Add | `AppShell` (top bar), `AccountsPage`, `AccountDrawer`, list templates and drawers for `SkillsPage`, `McpPage`, `RulesPage` |
 
-新增后端接口只有一个聚合读：`accounts:status`，一次返回每个助手的账号列表（登记、目录存在、启动命令是否生效、登录状态、额度、共享资源计数），只读零写。第一版可以先在前端组合现有 `profiles:status`、`agents:auth-status`、额度读取，页面稳定后再下沉为后端接口。
+Only one new backend interface is an aggregate read: `accounts:status`, returning each assistant's accounts in one response (registration, directory existence, launch-command effectiveness, login status, quota, shared resource counts), read-only with zero writes. The first version can combine existing `profiles:status`, `agents:auth-status`, and quota reads in the frontend, then move aggregation into the backend once the page is stable.
 
-## 6. 备选方案
+## 6. Alternatives
 
-| 方案 | 得到 | 代价 | 结论 |
+| Approach | Benefits | Cost | Decision |
 | --- | --- | --- | --- |
-| **本方案**：保留后端，收窄范围，重写前端 | 多账号、软链接技能、按账号分发，已有测试 | 前端重写，旧 UI 测试需要重写 | 采用 |
-| fork cc-switch，加入多账号 | 成熟界面、供应商切换、社区更新 | 已观察：它每个助手只有一个固定目录（`get_app_skills_dir(app)`），MCP 分配是写死的 `apps.claude` 等字段；多账号要改核心与表结构，上游每周 14–58 个提交，合并持续冲突 | 否 |
-| 在现有界面上继续调整 | 改动最小 | 已试一周：以「切换」为主线的信息架构本身让页面难懂 | 否 |
-| 只做 CLI + 托盘 | 最省 | 失去一屏看全部账号额度与共享资源分配的核心价值 | 否 |
+| **This plan:** retain backend, narrow scope, rewrite frontend | Multiple accounts, symlinked skills, per-account distribution, existing tests | Frontend rewrite and old UI test rewrites | Adopt |
+| Fork cc-switch and add multiple accounts | Mature UI, provider switching, community updates | Observed: one fixed directory per assistant (`get_app_skills_dir(app)`), hard-coded MCP assignment fields such as `apps.claude`; multiple accounts require core/schema changes, and upstream's 14–58 weekly commits cause ongoing merge conflicts | Reject |
+| Keep adjusting the existing UI | Smallest change | Tried for a week: switching-centered information architecture itself makes pages difficult to understand | Reject |
+| CLI + tray only | Least work | Loses the core value of one screen showing all account quotas and shared resource assignments | Reject |
 
-cc-switch 可与本工具并用，但只用它的供应商切换；两边的 MCP 与技能功能不要同时启用，否则会互相改写同一批文件。
+cc-switch may coexist with this tool for provider switching only. Do not enable MCP and skill features in both, or they will overwrite the same files.
 
-## 7. 风险与验证点
+## 7. Risks and Verification Points
 
-| 风险 | 等级 | 处理 |
+| Risk | Evidence level | Treatment |
 | --- | --- | --- |
-| 额度不新鲜：`.claude.json` 缓存只在 Claude 主动查询时刷新，挑账号会被误导 | 已观察（文档「额度来源」） | 共用设置给每个账号装状态栏脚本（决策 1）；未装时额度条标「缓存 · N 分钟前」 |
-| 页面再次变成长文 | 推断（本轮教训） | 3.6 版式规则写入验收；每页交付附 1000×650 首屏截图与内容高度 |
-| 与用户已有 alias 冲突（如已有 `alias claude='…'`） | 已观察（本机存在带参数的 `claude` alias） | 主账号启动命令读现有 alias 不改写；新账号命令名冲突时拒绝并提示 |
-| 已有实例的迁移 | 推断 | 现有实例直接显示为账号，不改任何文件；旧「接入备选」只读保留在「设置 · 旧数据」直至用户删除 |
-| Codex 登录隔离 | 已观察（2026-09-29，codex-cli 0.159.0）：隔离 `CODEX_HOME` 下 `login status` 报未登录，主账号凭据是 `~/.codex/auth.json` 文件存储 | 在隔离目录真实登录后主账号仍保持登录，需要用户登录，未测 |
-| 大量前端测试依赖旧文案 | 已观察 | 旧页面测试随页面删除；数据安全、写前比对、范围隔离的断言迁到新页面或 Rust 测试，不降低覆盖 |
+| Stale quota: `.claude.json` cache refreshes only when Claude actively queries it, misleading account selection | Observed (Quota Sources document) | Install the status-line script for each account through shared settings (decision 1); otherwise label quota Cache · N minutes ago |
+| Pages become long prose again | Inferred from this round's lessons | Make 3.6 layout rules acceptance criteria; deliver a 1000×650 first-screen screenshot and content height for every page |
+| Conflict with existing user aliases (such as `alias claude='…'`) | Observed: a local `claude` alias has arguments | Read the main account's existing alias without rewriting it; reject and explain new account command-name conflicts |
+| Existing instance migration | Inferred | Display existing instances as accounts without changing files; preserve old saved connections read-only in Settings · Legacy data until users delete them |
+| Codex login isolation | Observed (2026-09-29, codex-cli 0.159.0): `login status` in isolated `CODEX_HOME` reported not logged in; main-account credentials use file storage at `~/.codex/auth.json` | Verify main-account login survives actual login in an isolated directory; requires user login and has not been tested |
+| Many frontend tests depend on old text | Observed | Delete old-page tests with those pages; migrate data safety, pre-write comparison, and scope isolation assertions into new pages or Rust tests without reducing coverage |
 
-## 8. 分期计划
+## 8. Phased Plan
 
-每期单独提交、独立验收；代码清理与行为变更分开提交。
+Commit and independently verify each phase; separate code cleanup from behavior changes.
 
-| 期 | 交付 | 完成标准 |
+| Phase | Delivery | Completion criteria |
 | --- | --- | --- |
-| P0 | 本文确认后，改写 `docs/GUI-REDESIGN.md` 的定位与界面章节、`AGENTS.md` 的当前目标；列出删除清单 | 文档链接与命令可用；无与本文冲突的旧要求 |
-| P1 | 顶栏外壳 + 账号页（只读列表：启动命令、类型、登录、额度、复制 / 登录） | mock 与隔离 HOME 下，1000×650 首屏显示全部账号；`pnpm test:unit run`、`pnpm build` 通过 |
-| P2 | 添加 / 编辑 / 移除账号抽屉（官方、API） | 隔离 HOME 真实新建两个账号：目录、alias、共用设置、技能软链接逐项回读正确；外部修改被拒 |
-| P3 | 技能页重写 + 「默认全部账号」 | 新技能自动链接到所有账号；单账号关闭只影响该账号；`cargo test` 全绿 |
-| P4 | MCP 页、规则页重写 | 同一服务写入各账号配置文件并回读；规则写入 `<目录>/CLAUDE.md` 并被真实 Claude 读取 |
-| P5 | 实时额度：状态栏脚本经共用设置分发到每个账号 | 真实会话后额度文件更新，账号页显示「实时」 |
-| P6 | 删除旧页面、旧组件、旧测试；后端删除主配置切换与接入库 | 引用清点为零；全量 `cargo test`（engine-rs、Tauri）、Vitest、build 通过 |
-| P7 | 托盘改为账号列表；README 与截图更新；打包验收 | DMG 在隔离 HOME 启动并完成一次新建账号 |
+| P0 | After confirming this document, rewrite positioning/UI sections in `docs/GUI-REDESIGN.md` and current goals in `AGENTS.md`; list removals | Working links/commands; no old requirements conflicting with this plan |
+| P1 | Top-bar shell + Accounts page (read-only list: launch command, type, login, quota, Copy / Log in) | With mocks and isolated HOME, all accounts visible on the first 1000×650 screen; `pnpm test:unit run` and `pnpm build` pass |
+| P2 | Add/edit/remove account drawers (official, API) | Actually create two accounts in isolated HOME and read back directory, alias, shared settings, and skill symlinks individually; reject external changes |
+| P3 | Skills page rewrite + All accounts by default | New skills link to all accounts automatically; disabling on one account affects only that account; all `cargo test` checks pass |
+| P4 | MCP and Rules page rewrites | Write and read back the same service in each account configuration; write rules to `<directory>/CLAUDE.md` and have actual Claude read them |
+| P5 | Real-time quota: distribute status-line script through shared settings to each account | Actual sessions update quota files; Accounts shows Real-time |
+| P6 | Delete old pages/components/tests; remove main-configuration switching and connection library from backend | Reference inventory is empty; complete `cargo test` (engine-rs, Tauri), Vitest, and build pass |
+| P7 | Account-list tray; update README/screenshots; package verification | DMG launches in isolated HOME and completes account creation |
 
-## 9. 已定决策（2026-09-28，用户确认）
+## 9. Confirmed Decisions (2026-09-28, User-confirmed)
 
-| # | 问题 | 决定 |
+| # | Question | Decision |
 | --- | --- | --- |
-| 1 | 是否给每个账号装状态栏额度脚本 | 每个账号都装（经共用设置分发） |
-| 2 | 新技能 / MCP / 规则默认分配 | 全部账号 |
-| 3 | 附录 A 删除清单 | 不需要的功能一律清理 |
-| 4 | 主账号放什么 | 只放官方登录；API 一律新建账号 |
+| 1 | Install quota status-line scripts for each account? | Install for every account through shared settings |
+| 2 | Default assignment for new skills / MCP / rules | All accounts |
+| 3 | Appendix A removal list | Remove every unneeded feature |
+| 4 | What belongs in main accounts? | Official login only; create separate accounts for all API access |
 
-## 附录 A：删除清单
+## Appendix A: Removal List
 
-界面入口（P1–P4 替换，P6 删代码）：
+UI entries (replaced in P1–P4, code deleted in P6):
 
-- 助手页：默认环境卡、「查看实际配置文件」、账号与登录 / 运行设置 / 启动命令子页、混用提示、当前实际配置（未保存）、官方账号卡与「切回官方账号」、第三方接入库与「建成独立环境」、实例「定义与实际不一致」对比与双向覆盖按钮、「更新共用设置」按钮（移到设置）。
-- 总览页、操作记录页（审计日志继续写库，设置里保留「清空」）、更新中心。
-- 命令面板里的账号切换与接入项（`⌘K` 保留为页面与账号搜索）。
-- Hooks 功能整体移除（2026-09-29 用户裁决，原计划「并入共用设置」作废）：页面、编辑器、新账号带 hooks、共用设置同步 hooks 与 `hooks:*` 引擎命令都已删除；各账号文件里已有的 hooks 不动、照常生效；旧备份里的 `hooks.*` 导入时跳过。
+- Assistants page: default environment card; View actual configuration files; account/login, runtime settings, launch-command subpages; mixed-use notices; current actual configuration (unsaved); official-account card and Switch back to official; third-party connection library and Create independent environment; instance Definition differs from actual comparison and two-way overwrite buttons; Update shared settings button (moved to Settings).
+- Overview, operation records page (audit logs continue to be written to the database; Settings retains Clear), update center.
+- Account switching and connection items in the command palette (`⌘K` remains for page/account search).
+- Entire Hooks feature (user decision on 2026-09-29 invalidates the original fold-into-shared-settings plan): page, editor, hooks in new accounts, shared-settings hook synchronization, and `hooks:*` engine commands were all deleted. Existing hooks in account files remain intact and effective; `hooks.*` in old backups are skipped during import.
 
-后端（P6，单独提交）：
+Backend (P6, separate commit):
 
-- `agents:configure` 的接入切换、`--use-default`、接入备选的保存与导入；`native_agent_settings` 中只服务于上述功能的部分。
-- 保留：`agents:auth-status`、额度读取、实例 / 别名 / 技能 / MCP / 规则 / 用量 / 发现 / 密钥的全部写入保护。
+- Connection switching in `agents:configure`, `--use-default`, saved-connection persistence/import, and portions of `native_agent_settings` serving only those features.
+- Retain `agents:auth-status`, quota reads, and all write protections for instances / aliases / skills / MCP / rules / usage / discovery / secrets.
 
-## 实施记录
+## Implementation Record
 
-| 期 | 提交 | 验证 |
+| Phase | Commit | Verification |
 | --- | --- | --- |
-| P0 文档 | `0ff01a6` | 链接检查 |
-| P1 顶栏与账号页 | `2375b85` | 前端测试、1000×650 截图 |
-| P2 账号增删改 | `69f701d`、`827eb49` | 隔离 HOME 真实新建 / 编辑 / 移除回读 |
-| P3 技能 | `3553c0c`、`49cbb5f` | 隔离 HOME 补齐与例外回读 |
-| P4 MCP 与规则 | `974b3bd`、`8e66fcb`、`4f3a796` | 隔离 HOME 复制与补齐回读；修复已移除账号仍是 MCP 目标 |
-| P5 实时额度 | `2246430` | 隔离 HOME 写入状态栏、同步、模拟一次状态栏调用后读到实时额度；2026-09-29 真实 Claude 交互会话渲染出本工具状态栏，但 API Key 会话没有 `rate_limits`，额度文件写入仍缺订阅账号实测 |
-| P6 清理 | `1237065`、`1082269`、`2283a9b` | 引擎、桥接、前端全量测试；已退役命令返回 `UNKNOWN_VERB`；`2283a9b` 删去主配置接入识别的残留 |
-| P7 托盘与 README | `1237065` 与本次文档提交 | 托盘单测；安装包验收见 [平台状态](GUI-PLATFORM-STATUS.md) |
-| P2 / P4 / P7 补验 | `2e70d14` | DMG 在隔离 HOME 经界面新建 API 账号，文件逐项回读；真实 Claude 经新启动命令读到复制过去的规则，见 [任务书](goal-rust-gui.md)「交付回执（2026-09-29，多账号版本）」 |
+| P0 documentation | `0ff01a6` | Link checks |
+| P1 top bar and Accounts | `2375b85` | Frontend tests, 1000×650 screenshot |
+| P2 account CRUD | `69f701d`, `827eb49` | Actual creation/edit/removal and readback in isolated HOME |
+| P3 skills | `3553c0c`, `49cbb5f` | Fill and exception readback in isolated HOME |
+| P4 MCP and rules | `974b3bd`, `8e66fcb`, `4f3a796` | Copy/fill readback in isolated HOME; fixed removed accounts remaining MCP targets |
+| P5 real-time quota | `2246430` | Wrote/synchronized status line in isolated HOME; simulated one status-line invocation and read real-time quota. On 2026-09-29, an actual interactive Claude session rendered this tool's status line, but API Key sessions had no `rate_limits`; quota file writes still lack subscription-account testing |
+| P6 cleanup | `1237065`, `1082269`, `2283a9b` | Complete engine/bridge/frontend tests; retired commands return `UNKNOWN_VERB`; `2283a9b` removed residual main-configuration connection recognition |
+| P7 tray and README | `1237065` and this documentation commit | Tray unit tests; package verification in [Platform Status](GUI-PLATFORM-STATUS.md) |
+| P2 / P4 / P7 additional verification | `2e70d14` | Created an API account through the DMG UI in isolated HOME and read back each file; actual Claude read copied rules through the new launch command. See the [Work Plan](goal-rust-gui.md), Delivery Receipt (2026-09-29, Multi-account Version) |

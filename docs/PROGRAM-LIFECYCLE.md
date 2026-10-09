@@ -1,287 +1,287 @@
-# 程序：技能与 MCP 依赖的程序的生命周期（设计）
+# Programs: Lifecycle of Programs Required by Skills and MCP (Design)
 
-状态：2026-09-30 用户确认方向（第 16 节），已实施 A、B、C 期与 D 期的新版本检测；未实施项见第 17 节。
+Status: the user confirmed the direction on 2026-09-30 (section 16). Phases A, B, C and upstream version detection from phase D are implemented; see section 17 for unimplemented items.
 
-## 1. 要解决的问题
+## 1. Problem
 
-很多技能要配合命令行程序使用（例如 wecom-cli 系列技能调用 `wecom-cli`），MCP 服务也要靠某个程序启动（`npx chrome-devtools-mcp@1.9.0`、`uvx --from git+…serena@main`）。这些程序现在各自由 npm 全局、uv、Homebrew 或别的应用装着，Agent Manager 不知道谁需要它们、装在哪、什么版本、有没有新版，也就谈不上安装、升级、回滚与回收。
+Many skills require CLI programs (for example, wecom-cli skills call `wecom-cli`), and MCP services also need programs to launch (`npx chrome-devtools-mcp@1.9.0`, `uvx --from git+…serena@main`). These programs are installed separately through global npm, uv, Homebrew, or other applications. Agent Manager currently does not know who needs them, where they are installed, their versions, or available updates, so it cannot manage installation, upgrades, rollback, or cleanup.
 
-本设计让「程序」成为与技能、MCP 并列的一类资源：**有声明、有归属、有版本记录、可预览地安装与升级、可回滚、没人用时可回收**，并接入现有的「待处理」闭环。
+This design makes Programs a resource category alongside Skills and MCP: **declared dependencies, clear ownership, version records, previewable installation/upgrades, rollback, and cleanup when unused**, integrated with the existing Inbox workflow.
 
-**范围之外：** Claude Code、Codex 等智能体本身（`claude`、`codex` 及其附带程序）的安装与升级不由本工具管理，也永远不碰它们的文件与链接；对智能体只做检测：装了哪些、什么版本、有没有新版本（账号页显示，「检查新版本」按对应 npm 包 `@anthropic-ai/claude-code`、`@openai/codex` 查；用户裁决，2026-09-30）。
+**Out of scope:** this tool does not install or upgrade assistants such as Claude Code and Codex (`claude`, `codex`, and bundled programs), and never touches their files or links. It only detects installed assistants, versions, and available updates (shown on Accounts; Check for new versions queries corresponding npm packages `@anthropic-ai/claude-code` and `@openai/codex`; user decision, 2026-09-30).
 
-**兜底：** 本工具不便代办、或自动执行失败时，每个动作都给出同样效果的命令，用户可以复制到终端自己执行（用户，2026-09-30）。
+**Fallback:** when automation is impractical or fails, every action provides an equivalent command that users can copy into a terminal and execute themselves (user, 2026-09-30).
 
-## 2. 约束
+## 2. Constraints
 
-| 约束 | 来源 | 排除了什么 |
+| Constraint | Source | Excludes |
 | --- | --- | --- |
-| 不管理智能体本身的生命周期 | 用户（2026-09-30） | 把 `claude`、`codex` 当作程序；改动 `~/.local/bin/claude` 等 |
-| 原本没有的不添加；只处理本工具自己变更的部分 | 用户（2026-09-29） | 未经确认改账号配置、改 rc 文件、往用户目录放文件、往全局装或删东西 |
-| 是否接管由用户决定；接管后只留一份，冗余的清理 | 用户（技能纳入，2026-09-29） | 静默接管已有全局安装；受管与全局两份并存 |
-| 有版本用版本，没有跟主分支；能检测并变更 | 用户（技能版本管理） | 只查「在不在」 |
-| 实际文件是唯一事实源；查询、预览零写入 | [GUI 重设计](GUI-REDESIGN.md) | 状态靠库里记录推断；预览时下载、安装或执行程序 |
-| 同类账号共享资源 | 用户（2026-09-30） | 按账号各装一份 |
-| 统一状态与待处理闭环、可忽略 | [多账号设计](MULTI-ACCOUNT-DESIGN.md) 2.1 | 程序另起一套提示方式 |
-| 不考虑工作量，求最佳效果 | 用户（2026-09-30） | 为省事只做检测 |
+| Do not manage assistant lifecycles | User (2026-09-30) | Treating `claude`/`codex` as managed programs; changing files such as `~/.local/bin/claude` |
+| Do not add what was absent; handle only changes made by this tool | User (2026-09-29) | Unconfirmed account configuration/rc edits, files in user directories, global installation/deletion |
+| Users decide whether to adopt; retain one copy after adoption and clean redundancy | User (skill adoption, 2026-09-29) | Silent takeover of global installations; retaining both managed and global copies |
+| Track releases when available, otherwise the main branch; detect and change versions | User (skill versioning) | Checking existence only |
+| Actual files are the sole source of truth; queries/previews perform zero writes | [GUI Redesign](GUI-REDESIGN.md) | Inferring status from database records; downloading, installing, or executing programs during previews |
+| Same-type accounts share resources | User (2026-09-30) | Separate program installations per account |
+| Unified states and complete Inbox workflow, with ignoring | [Concurrent Account Design](MULTI-ACCOUNT-DESIGN.md) 2.1 | A separate program notification model |
+| Seek the best result regardless of workload | User (2026-09-30) | Detection-only scope for convenience |
 
-**「原本没有的不添加」在本设计中的解释：** 本工具新增的任何东西（入口链接、受管目录、账号配置里的键、MCP 条目改写）都是用户在预览里逐项看过、明确同意后才做的「用户配置」，不是静默添加；每一项都登记，撤回时只移除登记过的。删除别人装的东西只发生在「纳入」这一个动作里，且只删被纳入的那个包，删前先整包备份。
+**How this design interprets Do not add what was absent:** anything this tool adds (entry links, managed directories, account configuration keys, MCP entry rewrites) becomes user configuration only after individual preview and explicit consent, never silently. Each item is registered; undo removes only registered items. Deleting someone else's installation happens only during adoption, only for the adopted package, and only after a whole-package backup.
 
-## 3. 现状与依据（2026-09-30）
+## 3. Current State and Evidence (2026-09-30)
 
-证据等级：**已观察** = 本机只读查询或隔离实测看到的；**推断** = 从机制推出、未实测；**未验证** = 外部文档所述或尚无依据。
+Evidence levels: **Observed** = local read-only inspection or isolated testing; **Inferred** = follows from the mechanism but not tested; **Unverified** = external documentation or no evidence yet.
 
-**依赖的实际形态**
+**Actual dependency forms**
 
-| 形态 | 实例 | 现在谁装、在哪 | 等级 |
+| Form | Example | Installer and location | Level |
 | --- | --- | --- | --- |
-| 技能声明了程序 | wecom-cli 技能 `metadata.requires.bins: ["wecom-cli"]`；安装方法 `npm install -g @wecom/cli`、要求 ≥1.2.1 只写在 `wecomcli-shared` 正文里 | npm 全局 `~/.npm-global`，1.3.4；`bin/wecom.js` 是 `#!/usr/bin/env node` 脚本，按 `os.arch()` 选择平台子包（`optionalDependencies`）；整包 8.4 MB | 已观察 |
-| 技能用到但没声明 | xiaoyu-bug-loop 正文 `command -v playwright-cli` | npm 全局 | 已观察 |
-| 技能自带脚本只要运行时 | archify 自带 `bin/archify.mjs`，只需 node | 系统 node（x86_64） | 已观察 |
-| MCP 临时拉取、固定版本 | `npx -y chrome-devtools-mcp@1.9.0` | npx 缓存 | 已观察 |
-| MCP 临时拉取、跟分支 | `uvx --from git+…/serena@main` | uv 缓存 | 已观察 |
-| MCP 用别的应用自带的程序 | node_repl 在 `ChatGPT.app` 包内 | 那个应用 | 已观察 |
-| 一个 npm 包提供多个命令 | `chrome-devtools-mcp` 提供 2 个、`lighthouse` 提供 3 个、`cline` 提供 2 个 | npm 全局 | 已观察（独立审阅核实） |
-| 程序自己的全局状态 | `~/.config/wecom` 存在 | 程序自己 | 已观察（独立审阅核实） |
+| Skill declares a program | wecom-cli skill `metadata.requires.bins: ["wecom-cli"]`; installation `npm install -g @wecom/cli` and requirement ≥1.2.1 appear only in the body of `wecomcli-shared` | Global npm `~/.npm-global`, 1.3.4; `bin/wecom.js` is a `#!/usr/bin/env node` script selecting platform subpackages (`optionalDependencies`) using `os.arch()`; whole package 8.4 MB | Observed |
+| Skill uses an undeclared program | `command -v playwright-cli` in xiaoyu-bug-loop body | Global npm | Observed |
+| Skill bundles scripts requiring only a runtime | archify bundles `bin/archify.mjs`, requiring only node | System node (x86_64) | Observed |
+| MCP fetches on demand, pinned version | `npx -y chrome-devtools-mcp@1.9.0` | npx cache | Observed |
+| MCP fetches on demand, follows a branch | `uvx --from git+…/serena@main` | uv cache | Observed |
+| MCP uses another application's bundled program | node_repl inside `ChatGPT.app` | That application | Observed |
+| One npm package provides multiple commands | `chrome-devtools-mcp` provides 2, `lighthouse` 3, `cline` 2 | Global npm | Observed (independent review) |
+| Program owns global state | `~/.config/wecom` exists | Program itself | Observed (independent review) |
 
-已有的可复用能力（已观察）：`system:refresh-upstream` 已能探测 MCP 的 npx 包版本与 uvx git 源，结果进 `upstream_probes` 表（`engine-rs/src/native_upstream.rs` 头注释）；全局排他锁是 `fs2` 文件锁，进程退出自动释放（`engine-rs/src/native.rs`）；技能来源已有跟踪方式、版本目录、切换回滚、纳入撤回一整套做法（[技能版本管理](SKILL-VERSIONING.md)）。全局 npm 目录与本工具数据目录在同一分区（`df`），整目录移动是同分区改名。
+Reusable capabilities (observed): `system:refresh-upstream` already detects npx package versions and uvx git sources for MCP and stores results in `upstream_probes` (header comment in `engine-rs/src/native_upstream.rs`). The global exclusive lock is an `fs2` file lock, released on process exit (`engine-rs/src/native.rs`). Skill sources already support tracking, version directories, switching/rollback, and adoption/undo ([Skill Versioning](SKILL-VERSIONING.md)). Global npm and this tool's data directories are on the same partition (`df`), so moving a whole directory is a same-partition rename.
 
-**让智能体找得到程序：隔离实测（已观察）**
+**Making programs discoverable by assistants: isolated testing (observed)**
 
-方法：隔离 HOME 与配置目录，本机假模型服务让智能体真实调用一次执行命令的工具，回读它看到的 `PATH` 与 `command -v`。Claude Code 2.1.285、Codex 0.159.0。
+Method: isolate HOME and configuration directories; a local fake model service makes each actual assistant invoke its command execution tool once; read back its `PATH` and `command -v`. Claude Code 2.1.285, Codex 0.159.0.
 
-| 方式 | Claude Code | Codex |
+| Method | Claude Code | Codex |
 | --- | --- | --- |
-| 启动命令前加 `PATH="<目录>:$PATH"` | 可用，目录在最前 | 可用，但默认用登录 shell 执行，macOS `path_helper` 把系统路径排到前面，目录落到最后 |
-| 账号配置里写 `PATH = "<目录>:$PATH"`（Claude `env`、Codex `shell_environment_policy.set`） | `$PATH` 不展开，成了字面量 | 同左，连 `ls` 都找不到 |
-| Claude 账号 `env.CLAUDE_ENV_FILE` 指向脚本 `export PATH="<目录>:$PATH"` | 可用，目录在最前 | 不适用 |
-| Codex `allow_login_shell = false` + 启动命令前缀 | 不适用 | 可用、顺序保持，但改变用户的 shell 行为，排除 |
+| Prefix launch command with `PATH="<directory>:$PATH"` | Works; directory comes first | Works, but default execution uses a login shell; macOS `path_helper` puts system paths first and the directory last |
+| Put `PATH = "<directory>:$PATH"` in account configuration (Claude `env`, Codex `shell_environment_policy.set`) | `$PATH` remains literal, unexpanded | Same; even `ls` cannot be found |
+| Point Claude account `env.CLAUDE_ENV_FILE` at a script containing `export PATH="<directory>:$PATH"` | Works; directory comes first | Not applicable |
+| Codex `allow_login_shell = false` + launch-command prefix | Not applicable | Works and preserves order, but changes user shell behavior; excluded |
 
-**用户 PATH 上的目录（已观察）：** 本机 `~/.local/bin` 写在 `.zshenv`、`.zprofile`、`.zshrc` 里，zsh 的 `-c`、`-lc`、`-ic`、`-lic` 四种启动形态都能看到它；而从 Dock 启动的应用 `launchctl getenv PATH` 为空——**桌面应用自己的 PATH 不能代表用户 PATH**。
+**Directories in user PATH (observed):** local `~/.local/bin` is present in `.zshenv`, `.zprofile`, and `.zshrc` and visible in zsh `-c`, `-lc`, `-ic`, and `-lic` modes. For Dock-launched applications, `launchctl getenv PATH` is empty: **desktop application PATH cannot represent user PATH**.
 
-**未验证：** 从 IDE（VS Code 等）里启动的智能体会话看到的 PATH；Claude Code 会话内是否重读 PATH（决定新装程序对已开会话何时生效）；[OpenClaw 技能格式](https://docs.openclaw.ai/clawhub/skill-format)的字段语义在真实技能上的写法（本机没有一个技能用这个格式）；uv 在自定义 `UV_TOOL_DIR`、`UV_TOOL_BIN_DIR` 下的行为；`npm ci` 与平台子包的配合。它们都列进第 17 节对应分期的验收。
+**Unverified:** PATH seen by assistant sessions launched from IDEs (such as VS Code); whether Claude Code sessions reread PATH (determines when new programs become available to existing sessions); actual field usage in [OpenClaw skill format](https://docs.openclaw.ai/clawhub/skill-format) (no local skill uses it); uv behavior with custom `UV_TOOL_DIR` / `UV_TOOL_BIN_DIR`; interaction between `npm ci` and platform subpackages. All are listed for verification in their corresponding phases in section 17.
 
-## 4. 目标
+## 4. Goal
 
-每个技能与 MCP 需要的程序都有声明和清楚的归属；外部装的程序默认由本工具代为调用原包管理器检测、升级、回退，不改变它装在哪；用户选择「托管」的程序按版本各装一份在本工具目录里，锁定版本、可预览升级、可回滚、没人用时回收，并通过用户确认的入口目录被智能体找到。部署模型：单机单用户，所有账号共享同一份程序；Agent Manager 桌面应用与引擎 CLI 可能同时运行，共用一把文件锁。
+Every program required by a skill or MCP has a declaration and clear ownership. External installations default to delegated management: this tool invokes the original package manager for detection, upgrades, and rollback without relocating the installation. Programs explicitly selected for tool management have one installation per version in the tool's directory, pinned versions, previewable upgrades, rollback, and cleanup when unused; assistants discover them through a user-confirmed entry directory. Deployment model: one machine, one user, one shared program copy across accounts. The Agent Manager desktop application and engine CLI may run concurrently and share a file lock.
 
-## 5. 对象模型
+## 5. Object Model
 
 ```
-来源 ──提供──► 技能 ──需要──┐
-                          ├──► 程序 ──代管：原包管理器（npm 全局、uv tool）
-MCP 服务 ─────需要─────────┘      └─ 托管：本工具目录，按版本各一份（npm / PyPI / GitHub Release / Go）
-账号 ──使用──► 技能、MCP（程序整机共享，不分账号）
+Source ──provides──► Skill ──requires──┐
+                                     ├──► Program ──delegated: original package manager (global npm, uv tool)
+MCP service ─────────requires─────────┘            └─ tool-managed: tool directory, one copy per version (npm / PyPI / GitHub Release / Go)
+Account ──uses──► Skills, MCP (programs shared machine-wide, not per account)
 ```
 
-**程序**（一个包；可提供多个命令）：
+**Program** (one package, potentially multiple commands):
 
-| 字段 | 说明 |
+| Field | Description |
 | --- | --- |
-| 标识 | `npm:@wecom/cli`、`pypi:serena`、`git:github.com/oraios/serena`、`github:owner/repo`、`go:module` |
-| 命令 | 这个包提供的**全部**可执行文件（从包元数据读，不只是被声明需要的那几个） |
-| 管理方式 | **代管**：装在原处（npm 全局、uv tool），本工具调用原包管理器做升级与回退；**托管**：装在本工具目录；**只观察**：Homebrew、系统、应用自带、来源不明 |
-| 跟踪方式 | 自动（有版本跟最新稳定版）、跟版本（可带匹配，如 `1.*`）、跟分支、固定；与技能来源同一套 |
-| 约束 | 所有依赖方要求的交集，例如 `>=1.2.1` |
-| 版本记录 | 精确版本 + 完整性（npm integrity、wheel 哈希、下载文件 sha256、git 提交）+ 安装时的运行时（node 路径与架构） |
-| 依赖方 | 哪些技能、MCP 需要它，各自来自哪种声明（第 6 节），以及托管时每个依赖方用的是哪个版本 |
+| Identifier | `npm:@wecom/cli`, `pypi:serena`, `git:github.com/oraios/serena`, `github:owner/repo`, `go:module` |
+| Commands | **All** executables provided by the package, read from package metadata, rather than only declared dependencies |
+| Management mode | **Delegated:** remains in place (global npm, uv tool); this tool calls the original package manager for upgrades/rollback. **Tool-managed:** installed in the tool's directory. **Observe-only:** Homebrew, system, bundled with applications, or unknown source |
+| Tracking | Automatic (latest stable release when releases exist), version (patterns such as `1.*` allowed), branch, pinned; same model as skill sources |
+| Constraints | Intersection of all dependent requirements, such as `>=1.2.1` |
+| Version record | Exact version + integrity (npm integrity, wheel hash, downloaded-file sha256, git commit) + installation runtime (node path/architecture) |
+| Dependents | Required skills/MCP, each declaration source (section 6), and each dependent's selected version in tool-managed mode |
 
-运行时（node、python、uv 本身）只观察：检测在不在、版本与架构，不够就提示，不代装。
+Runtimes (node, python, uv itself) are observe-only: detect existence, version, and architecture; report deficiencies without installing on the user's behalf.
 
-## 6. 声明从哪来
+## 6. Declaration Sources
 
-按可信度从高到低合并，同一程序多处声明时取交集；每条依赖都记下来源，回收与冲突判断要用：
+Merge in descending trust order, intersecting declarations for the same program. Record every dependency's source for cleanup and conflict decisions:
 
-1. **技能自己的声明**：`metadata.openclaw.requires.{bins, anyBins, env, config}` 与 `metadata.openclaw.install`（kind 为 brew / node / go / uv / download）；兼容简写 `metadata.requires.bins`（wecom-cli 用的写法）。[Agent Skills 规范](https://agentskills.io/specification)的 `compatibility` 是自由文本，只原样显示。
-2. **MCP 启动命令**：`npx [-y] <包>[@版本]` → `npm:<包>`，带版本即固定；`uvx --from <源>[@引用] <命令>` 与 `uvx <包>[==版本]` → `pypi:` 或 `git:`；绝对路径 → 按所在位置判归属；`node <脚本>`、`python <脚本>` → 只依赖运行时。
-3. **用户确认的补充声明**：引擎扫描 SKILL.md 正文里的 `command -v X`、`which X`、`npm install -g X`、`brew install X`、`uv tool install X`，给出候选（带出处行），用户确认后才记。补充声明只存本工具库，不改技能文件；技能来源更新后自带声明优先。
-4. **安装方式缺失**：只知道要 `X`、不知道从哪装时，状态为「缺失 · 不知道怎么装」，处理动作是「补充安装方式」，不猜。
+1. **Skill declarations:** `metadata.openclaw.requires.{bins, anyBins, env, config}` and `metadata.openclaw.install` (kind brew / node / go / uv / download); also support shorthand `metadata.requires.bins` used by wecom-cli. [Agent Skills specification](https://agentskills.io/specification) `compatibility` is free text and displayed unchanged.
+2. **MCP launch commands:** `npx [-y] <package>[@version]` → `npm:<package>`, pinned when a version is specified; `uvx --from <source>[@ref] <command>` and `uvx <package>[==version]` → `pypi:` or `git:`; absolute paths → ownership from location; `node <script>` / `python <script>` → runtime dependency only.
+3. **User-confirmed supplementary declarations:** scan SKILL.md bodies for `command -v X`, `which X`, `npm install -g X`, `brew install X`, `uv tool install X`; show candidates with source lines and record only after confirmation. Store supplements only in this tool's database, without editing skills. Native declarations take precedence after source updates.
+4. **Missing installation method:** when `X` is required but its installation source is unknown, show Missing · Unknown installation method with Provide installation method as the action; do not guess.
 
-## 7. 三种管理方式
+## 7. Three Management Modes
 
-### 7.1 只观察（默认用于 Homebrew、系统、应用自带、来源不明）
+### 7.1 Observe-only (Default for Homebrew, System, Application-bundled, Unknown Sources)
 
-显示位置、版本（读得到时）、是否满足约束；升级与删除给出原方式的命令，由用户自己执行。
+Show location, version when readable, and constraint satisfaction. Provide original-method upgrade/delete commands for users to run themselves.
 
-### 7.2 代管（外部已有安装的默认方式）
+### 7.2 Delegated Management (Default for Existing External Installations)
 
-程序留在原处，本工具代为调用原包管理器：
+Keep programs in place and invoke the original package manager:
 
-| 动作 | npm 全局 | uv tool |
+| Action | Global npm | uv tool |
 | --- | --- | --- |
-| 检测新版本 | `npm view <包> version`（检查时联网） | 同技能来源的 git 探测 / PyPI 查询 |
-| 升级 / 换版本 | `npm install -g <包>@<版本>` | `uv tool install --force <包>==<版本>` |
-| 回退 | 升级前把整个包目录与它的命令链接**移到**本工具的备份目录（同分区改名，零网络），失败或用户撤回时原样移回 | 同左（uv tool 的环境目录） |
+| Detect updates | `npm view <package> version` (network during checks) | Git probes as for skill sources / PyPI queries |
+| Upgrade / switch version | `npm install -g <package>@<version>` | `uv tool install --force <package>==<version>` |
+| Roll back | Before upgrading, **move** the entire package directory and its command links into the tool's backup directory (same-partition rename, no network); restore unchanged on failure or undo | Same (uv tool environment directory) |
 
-预览写明完整命令、会被替换的包目录与命令、使用的 npm 配置（registry 等照用户的 `~/.npmrc`，因为装的就是用户的全局环境）。代管不引入入口目录、不产生第二份程序，是风险最小的主路径。
+Preview shows the full command, package directory/commands being replaced, and npm configuration (registry and related settings follow user `~/.npmrc`, since this is the user's global environment). Delegated management introduces no entry directory or second program copy and is the lowest-risk primary path.
 
-### 7.3 托管（用户对某个程序明确选择）
+### 7.3 Tool-managed (Explicit User Selection per Program)
 
-适合：需要多个版本并存（例如 MCP 各自固定版本）、要可靠回滚、要与全局环境隔离、或原本没有安装的新程序。
+Suitable for multiple concurrent versions (such as separately pinned MCP versions), reliable rollback, global-environment isolation, or new programs not previously installed.
 
-**目录**（数据目录下，全部由本工具拥有）：
+**Directory layout** (under the data directory, wholly tool-owned):
 
 ```
 programs/
-  npm/@wecom__cli/1.3.4/            # 一个版本一份，内含 node_modules 与 .agent-manager-program.json
-  npm/@wecom__cli/current -> 1.3.4  # 当前版本指针（跟踪型依赖方用）
+  npm/@wecom__cli/1.3.4/            # One copy per version; includes node_modules and .agent-manager-program.json
+  npm/@wecom__cli/current -> 1.3.4  # Current version pointer for tracking dependents
   bin/wecom-cli -> ../npm/@wecom__cli/current/node_modules/.bin/wecom-cli
 ```
 
-`.agent-manager-program.json` 最后一步写入，记录包、版本、完整性、全部命令、安装时的运行时路径与架构、所用后端；没有它的版本目录视为未完成的安装（「损坏 · 安装未完成」，处理为清理后重装）。
+Write `.agent-manager-program.json` last, recording package, version, integrity, all commands, runtime path/architecture at installation, and backend. A version directory without it is an incomplete installation (Broken · Incomplete installation; clean up and reinstall).
 
-**后端：**
+**Backends:**
 
-| 后端 | 安装方式 | 完整性 | 注意 |
+| Backend | Installation method | Integrity | Notes |
 | --- | --- | --- | --- |
-| npm | `npm install --prefix <版本目录> --cache <数据目录>/npm-cache --no-save <包>@<版本>`；registry 与认证照用户 `~/.npmrc`（预览里写明），前缀与缓存由本工具指定 | npm integrity | 平台子包按运行 npm 的 node 架构解析，所以记录 node 路径与架构，node 变了判「损坏 · 运行时变了」 |
-| PyPI / git（Python） | 直接装到最终版本目录（venv 里写死了绝对路径，**不能先装临时目录再改名**）；跟分支的先解析成提交再装 | wheel 哈希 / git 提交 | uv 在自定义目录下的解释器位置与收据行为待实测（第 17 节 B 期） |
-| GitHub Release | 按 OpenClaw `download` 或补充声明的资源名模板下载，校验 sha256 后解包 | sha256 | |
-| Go | `GOBIN=<版本目录>/bin go install <模块>@<版本>` | Go 模块校验和 | |
-| Homebrew | 不托管（全局的，装不进本工具目录），只观察 | — | |
+| npm | `npm install --prefix <version-directory> --cache <data-directory>/npm-cache --no-save <package>@<version>`; registry/authentication follow user `~/.npmrc` (shown in preview); tool sets prefix/cache | npm integrity | Platform subpackages follow the architecture of node running npm; record node path/architecture and mark Broken · Runtime changed if node changes |
+| PyPI / git (Python) | Install directly into the final version directory (venvs embed absolute paths; **never install into a temporary directory and rename**); resolve branch tracking to a commit before installing | wheel hash / git commit | Interpreter location and receipt behavior in custom uv directories require testing (phase B in section 17) |
+| GitHub Release | Download using OpenClaw `download` or a supplementary asset-name template, verify sha256, then extract | sha256 | |
+| Go | `GOBIN=<version-directory>/bin go install <module>@<version>` | Go module checksum | |
+| Homebrew | Not tool-managed (global, cannot install into this tool's directory); observe-only | — | |
 
-**安装流程：** 预览（命令、目标目录、实际大小、安装脚本、依赖方）→ 用户确认 → 取全局文件锁 → 装入（npm、Release、Go 先装临时目录再同分区改名；Python 直接装最终目录）→ 校验完整性 → 在隔离的 `HOME`、`XDG_CONFIG_HOME` 下执行一次版本检查（声明给了检查方式时），PATH 与智能体实际使用的一致 → 写 `.agent-manager-program.json` → 需要时切换 `current` → 回读 → 写操作记录。任一步失败删掉这次的版本目录，已有版本与指针不动。
+**Installation flow:** preview (command, target, actual size, install scripts, dependents) → user confirmation → global file lock → install (npm/Release/Go into temporary directories, then same-partition rename; Python directly into final directory) → integrity verification → one version check in isolated `HOME` / `XDG_CONFIG_HOME` when declared, using the same PATH as assistants → write `.agent-manager-program.json` → switch `current` if needed → read back → operation record. Failure at any step removes this installation's version directory without changing existing versions/pointers.
 
-**升级、换版本、回滚：** 新版本装进新目录、验证通过后原子切换 `current`。回滚只能回到仍保留的版本（界面只列这些）；保留策略：`current`、上一个版本、以及任何依赖方固定引用的版本永远保留，其余超出「保留数」（默认 2，可改）的进入「可清理」。
+**Upgrade, version switch, rollback:** install a new version in a new directory, verify, then switch `current` atomically. Rollback can use only retained versions, and the UI lists only those. Retention: always keep `current`, the previous version, and any version explicitly pinned by a dependent. Other versions beyond Retained count (default 2, configurable) become Eligible for cleanup.
 
-**MCP 保持 npx / uvx，管理条目里的版本号（用户裁决，2026-09-30）：** 与 VS Code、Claude Code、Cursor 等主流客户端的写法一致，条目仍写 `npx -y 包@版本` / `uvx --from 源@引用`；本工具管理的是那个版本号——没固定的（`@main`、`latest`、不写）标出来，可一键固定到当前最新版本（git 源固定到提交号），升级就是改版本号。只改启动参数里版本那一段，走 MCP 的编辑（先预览改动的行、写前比对、只动这个条目），其余字段原样。固定之后只跑那个版本、发布方出新版也不会被自动换掉，但检查新版本照常，行上仍提示「可更新到 X」、由用户决定是否升级；也可以「取消固定，跟最新版本」（npx 改回 `@latest`、PyPI 包去掉 `==版本`、git 源改回分支，默认 `main`），并在库里记下这是用户的选择（`programs.follow_latest`），此后不再报「没固定版本」、显示「跟最新版本」，重新固定时清掉这个记录（用户，2026-09-30）。业界对照：主流客户端都用 npx / uvx 并建议固定版本；Claude Desktop 的 MCPB 把服务与依赖打包、用绝对路径启动；Docker MCP Toolkit、ToolHive 构建成固定版本的容器——后两者需要客户端或 Docker 支持，不采用。
+**Keep MCP on npx / uvx; manage the entry's version (user decision, 2026-09-30):** follow mainstream clients such as VS Code, Claude Code, and Cursor, retaining `npx -y <package>@<version>` / `uvx --from <source>@<ref>`. Manage that version: flag unpinned references (`@main`, `latest`, omitted), offer one-click pinning to the current latest version (git to a commit), and upgrade by changing the version. Change only the version segment in launch arguments through MCP editing (preview changed lines, compare before writing, affect only this entry); preserve all other fields. Pinning runs only that version without silently following new releases, while update checks still show Update available: X for user choice. Unpin and follow latest is also available (npx back to `@latest`, remove `==version` from PyPI, git back to a branch, default `main`). Record that user choice in `programs.follow_latest`; stop warning Unpinned and show Following latest; clear the record when repinned (user, 2026-09-30). Industry comparison: mainstream clients use npx / uvx and recommend pinning; Claude Desktop MCPB bundles services/dependencies and launches absolute paths; Docker MCP Toolkit and ToolHive build pinned containers. The latter approaches need client or Docker support and are not adopted.
 
-## 8. 让智能体找得到托管的程序：入口目录
+## 8. Assistant Discovery of Tool-managed Programs: Entry Directory
 
-代管与只观察的程序本来就在用户 PATH 上，不需要入口目录。托管的程序依据第 3 节实测采用**入口目录**：
+Delegated and observe-only programs already reside on user PATH and need no entry directory. Based on section 3 testing, tool-managed programs use an **entry directory**:
 
-- **用户 PATH 由登录交互 shell 探测**：以用户的 `$SHELL` 分别用 `-c`、`-lc`、`-lic` 取 PATH（桌面应用自己的 PATH 不可用，已观察为空）。候选入口目录必须**在三种形态下都出现**、用户可写、不属于系统与 Homebrew（本机 `~/.local/bin` 满足）。
-- 第一次托管某个程序时，预览里让用户选定入口目录；只放指向 `programs/bin/<命令>` 的链接，一个包的**全部**命令都放（避免只放声明的几个），每条链接登记位置与指向。
-- 入口目录里已有同名、且不是本工具登记过的文件时，**拒绝放入**并标「已偏离 · 同名冲突」，列出冲突位置；不覆盖。智能体自己的文件永远不在处理范围内。
-- PATH 上同一命令出现多份（例如托管一份、全局又装了一份）时标「已偏离 · 同名多份」，列出各自位置与哪个会先被找到。
-- **备选（用户不想往任何用户目录放链接时）**：只给本工具启动的账号——在本工具管理的启动命令前加 `PATH="<programs/bin>:$PATH"`，Claude 账号另在账号配置写 `env.CLAUDE_ENV_FILE` 指向本工具的脚本以覆盖 IDE 启动。已实测的代价：Codex 下同名全局程序优先；在 IDE 里启动的 Codex 会话找不到；给账号配置新增了一个键。只在用户明确选择时启用，逐账号确认。
+- **Probe user PATH through login/interactive shell modes:** use user `$SHELL` with `-c`, `-lc`, and `-lic` (desktop application PATH is unusable and was observed empty). Candidate entry directories must appear **in all three modes**, be user-writable, and belong to neither the system nor Homebrew (local `~/.local/bin` qualifies).
+- On first tool-managed installation, let the user choose the entry directory in preview. Add only links to `programs/bin/<command>`, for **all** package commands, not merely declared ones; register every link's location and target.
+- **Reject** insertion when the directory already contains a same-name file not registered by this tool; show Drifted · Name conflict and the conflicting path; never overwrite. Assistant-owned files are always outside scope.
+- Multiple copies of a command on PATH (for example, tool-managed plus global) show Drifted · Duplicate command, with all locations and discovery order.
+- **Alternative if the user wants no links in user directories:** only for accounts launched by this tool, prefix managed launch commands with `PATH="<programs/bin>:$PATH"`; for Claude, also set account `env.CLAUDE_ENV_FILE` to the tool's script to cover IDE launches. Tested costs: same-name global programs take precedence in Codex; IDE-launched Codex sessions cannot discover the program; one new account configuration key. Enable only by explicit user choice, confirmed per account.
 
-## 9. 纳入：从代管改为托管
+## 9. Adoption: Delegated to Tool-managed
 
-纳入只是「代管 → 托管」的一次切换，由用户对单个程序发起：
+Adoption is a user-initiated transition for one program:
 
-1. **拒绝的情形**：包目录是链接（`npm link`）、或来源不是 registry 的普通版本（git、tarball、本地路径）、或有本地改动（与 registry 同版本的完整性不符）——这些「重装同版本」不等价，只能继续代管。
-2. **预览**：外部位置与版本、包的全部命令、将装的托管版本（默认同版本）、会移走的外部包目录与命令链接、会放的入口链接、不会碰的东西（`~/.config/wecom` 这类程序自己的配置与登录信息）。
-3. **执行顺序**（任何时刻 PATH 上至少有一份可用的程序）：装托管版本并验证 → 放入口链接并回读 PATH 能找到托管的那份 → 把外部包目录与它的命令链接**移到**本工具备份目录（同分区改名，不执行 `npm uninstall`）→ 回读 PATH 上只剩托管的一份。
-4. **撤回**（零网络）：先把备份的包目录与命令链接移回原处并回读可用 → 再删入口链接与托管版本。
-5. 已移走的外部包在「保留天数」（与技能纳入的备份一致）后才可清理备份。
+1. **Reject** linked package directories (`npm link`), sources other than ordinary registry releases (git, tarballs, local paths), or local modifications (integrity differs from the same registry version). Reinstalling the same version is not equivalent in these cases; retain delegated management.
+2. **Preview:** external location/version, all package commands, tool-managed version to install (same version by default), external package directory/command links to move, entry links to add, and excluded data (program-owned configuration/login such as `~/.config/wecom`).
+3. **Execution order** (at least one working copy remains on PATH at all times): install/verify the tool-managed version → add entry links and read back that PATH finds it → **move** external package directory/command links into the tool's backup directory (same-partition rename, no `npm uninstall`) → read back that only the tool-managed copy remains on PATH.
+4. **Undo** (no network): restore backed-up package directory/command links to their original location and read back usability → remove entry links and the tool-managed version.
+5. Backups of relocated external packages become cleanable only after Retention days (same as skill adoption backups).
 
-## 10. 统一状态与待处理
+## 10. Unified States and Inbox
 
-程序的状态并入统一状态（[多账号设计](MULTI-ACCOUNT-DESIGN.md) 2.1），在待处理页与技能、MCP 同一套分类、折叠、合并、忽略。**每一项只取一个主原因，主原因决定唯一的处理动作**；同时成立的其他原因作为标签显示。主原因按下表从上到下取第一个成立的：
+Program states join the unified model ([Concurrent Account Design](MULTI-ACCOUNT-DESIGN.md) 2.1), using the same categories, collapse, merging, and ignoring as Skills/MCP in Inbox. **Each item has one primary cause determining its only action**; other simultaneous causes appear as labels. Select the first matching cause from top to bottom:
 
-| 统一状态 | 主原因 | 唯一处理动作 |
+| Unified state | Primary cause | Only action |
 | --- | --- | --- |
-| 损坏 | 安装未完成（版本目录缺 `.agent-manager-program.json`） | 清理后重装 |
-| 损坏 | 完整性不符 / 指针或入口链接断了 | 修复（重装同一版本 / 重建链接） |
-| 损坏 | 运行时缺失或变了（node 不在、架构变了） | 按记录重装（运行时本身只提示） |
-| 损坏 | 版本不满足约束（托管或代管的已装版本低于要求） | 升级到满足约束的版本 |
-| 损坏 | 约束冲突（依赖方要求无交集） | 查看冲突方（逐个决定依赖方用哪个版本） |
-| 损坏 | 验证失败（含安装脚本被关闭导致） | 查看原因（可在此允许安装脚本后重试） |
-| 已偏离 | 同名冲突（入口目录已有别人的同名文件） | 查看（改用别的入口目录，或自行处理冲突文件） |
-| 已偏离 | 同名多份（PATH 上同一命令不止一份） | 查看各份位置后纳入或删掉多余的 |
-| 已偏离 | 托管目录被外部改过 | 修复（重装同一版本） |
-| 缺失 | 程序哪里都没有，知道怎么装 | 安装（默认托管，先预览） |
-| 缺失 | 不知道怎么装 | 补充安装方式 |
-| 缺失 | 托管了但还没选入口目录 | 选入口目录 |
-| 缺失 | 没初始化（声明给了检查方式且检查不通过） | 初始化（给出命令） |
-| 有新版本 | 按跟踪方式有新版（代管、托管） | 升级（预览依赖方与变化） |
-| 有新版本 | 有已知漏洞（只覆盖 npm 与 PyPI，查 [OSV](https://osv.dev)） | 升级到修复版本 |
-| 未纳管 | 在用的是只观察的外部程序，且版本读得到 | 改为代管（npm 全局、uv tool 时）或忽略 |
-| 未纳管 | 版本读不出（Homebrew、`.app`、来源不明，且不执行程序无法得知） | 忽略（只观察） |
-| 可清理 | 托管程序没有依赖方 / 超出保留数的旧版本 | 删除（先预览；依赖方只来自补充声明时只「建议」，不进批量删除） |
+| Broken | Incomplete installation (version directory lacks `.agent-manager-program.json`) | Clean up and reinstall |
+| Broken | Integrity mismatch / broken pointer or entry link | Repair (reinstall same version / rebuild link) |
+| Broken | Runtime missing or changed (node absent, architecture changed) | Reinstall from records (runtime itself is notification-only) |
+| Broken | Version violates constraints (installed delegated/tool-managed version below requirement) | Upgrade to a satisfying version |
+| Broken | Conflicting constraints (dependent requirements have no intersection) | Review conflicting dependents and choose a version per dependent |
+| Broken | Verification failed, including disabled install scripts | Review cause (allow scripts here and retry if needed) |
+| Drifted | Name conflict (someone else's same-name file in entry directory) | Review (choose another entry directory or handle conflict manually) |
+| Drifted | Duplicate command (multiple copies on PATH) | Review locations, then adopt or delete extras |
+| Drifted | Tool-managed directory changed externally | Repair (reinstall same version) |
+| Missing | Absent everywhere, known installation method | Install (tool-managed by default, preview first) |
+| Missing | Unknown installation method | Provide installation method |
+| Missing | Tool-managed but no entry directory selected | Choose entry directory |
+| Missing | Not initialized (declared check fails) | Initialize (provide command) |
+| Update available | New version under tracking policy (delegated/tool-managed) | Upgrade (preview dependents and changes) |
+| Update available | Known vulnerability (npm/PyPI only, using [OSV](https://osv.dev)) | Upgrade to a fixed version |
+| Unmanaged | In-use external observe-only program with readable version | Delegate management (global npm / uv tool) or ignore |
+| Unmanaged | Unreadable version (Homebrew, `.app`, unknown source, unknowable without execution) | Ignore (observe-only) |
+| Eligible for cleanup | Unused tool-managed program / old versions beyond retention | Delete (preview first; supplementary-only dependencies yield suggestions, excluded from bulk deletion) |
 
-「可清理」是新增的统一状态：它不是问题，但要用户确认才动。已忽略的项沿用待处理的忽略机制。技能与 MCP 行上显示依赖标签（「需要 wecom-cli ✓」「缺 playwright-cli」），点过去到程序页那一行。
+Eligible for cleanup is a new unified state: it is not a problem, but action requires user confirmation. Ignored items reuse the Inbox ignore mechanism. Skill/MCP rows show dependency labels (Requires wecom-cli ✓, Missing playwright-cli); clicking navigates to the corresponding Programs row.
 
-**新版本与漏洞检测**沿用 `system:refresh-upstream`：只在用户点「检查更新」或开启的定时检查时联网，结果只写探测缓存；查询零网络。
+**Version and vulnerability detection** reuse `system:refresh-upstream`: network access occurs only on Check updates or enabled scheduled checks, with results written only to the probe cache. Queries use no network.
 
-## 11. 安全与并发
+## 11. Safety and Concurrency
 
-- 所有安装、升级、回退、纳入、删除都先预览、后确认，逐条写操作记录，可撤回；查询与预览不下载、不执行程序。
-- npm 包有 `preinstall`、`install`、`postinstall` 脚本时，预览里单独列出；默认 `--ignore-scripts`，验证失败时说明「可能需要允许安装脚本」，由用户逐包允许。
-- 执行程序（版本检查）一律在隔离的 `HOME`、`XDG_CONFIG_HOME` 下，不让它往用户的配置目录写东西。
-- 写入取现有的全局文件锁（进程退出自动释放），桌面应用与 CLI 互斥；删除版本目录前检查没有正在运行的进程的可执行文件位于该目录（例如正在跑的 MCP 服务），有则推迟并提示。
-- 下载只走 HTTPS，校验不过即删除并报错；库与操作记录不存凭据，只存包标识、版本与摘要。
+- All installation, upgrades, rollback, adoption, and deletion require preview then confirmation, create individual operation records, and support undo. Queries/previews neither download nor execute programs.
+- Preview lists npm `preinstall`, `install`, and `postinstall` scripts separately. Default to `--ignore-scripts`; if verification fails, explain that install scripts may need to be allowed, with per-package user consent.
+- All program execution (version checks) uses isolated `HOME` / `XDG_CONFIG_HOME` to prevent writes to user configuration directories.
+- Writes acquire the existing global file lock (released on process exit), mutually excluding desktop and CLI. Before deleting a version directory, check for running processes with executables there (for example, active MCP services); defer and notify if found.
+- Downloads use HTTPS only; delete and report failed verification. Database/operation records store no credentials, only package identifiers, versions, and digests.
 
-## 12. 界面
+## 12. UI
 
-- **新增「程序」页**，放在「来源」旁：一行一个程序——名称与全部命令、管理方式（托管 / 代管 / 只观察）、当前版本与约束、跟踪方式、依赖方（点过去）、统一状态；行上动作按第 10 节。顶部是「检查更新」「全部升级」与入口目录设置。
-- **技能、MCP 行**：依赖标签；缺失的程序在「只看待处理」里一并算进该技能或服务。
-- **来源页**：添加或更新来源的预览里列出它的技能需要哪些程序，可一并安装。
-- **待处理**：程序的各状态按第 10 节进入分类。
+- **Add Programs** beside Sources: one row per program with name/all commands, management mode (tool-managed / delegated / observe-only), current version/constraints, tracking, clickable dependents, and unified state. Row actions follow section 10. The top offers Check updates, Upgrade all, and entry-directory settings.
+- **Skill/MCP rows:** dependency labels; missing programs count toward the skill/service in Pending only.
+- **Sources:** add/update previews list required programs for the source's skills and allow joint installation.
+- **Inbox:** classify program states according to section 10.
 
-## 13. 引擎命令与数据
+## 13. Engine Commands and Data
 
-| 命令 | 作用 | 写入 |
+| Command | Purpose | Writes |
 | --- | --- | --- |
-| `programs:status` | 程序、依赖（带声明来源）、归属、版本、状态、补充声明候选、用户 PATH 探测结果 | 零写、零网络、不执行程序 |
-| `programs:preview` | 安装、升级、换版本、回退、纳入、撤回、删除、放入口链接的完整计划 | 零写 |
-| `programs:apply --action install\|upgrade\|switch\|rollback\|repair\|remove\|link\|unlink` | 执行，取全局文件锁，失败回滚 | 程序目录、备份目录、入口链接、操作记录；代管时为原包管理器 |
-| `programs:adopt [--undo <备份>]` | 代管 → 托管 / 撤回 | 同上 |
-| `programs:declare` | 保存或删除补充声明、跟踪方式、管理方式、入口目录 | 库 |
-| `system:refresh-upstream` | 扩展探测范围到程序；新增 OSV 漏洞探测 | 探测缓存 |
+| `programs:status` | Programs, dependencies with declaration sources, ownership, versions, states, supplementary declaration candidates, user PATH probes | Zero writes, no network, no program execution |
+| `programs:preview` | Complete plans for install, upgrade, switch, rollback, adopt, undo, delete, and entry links | Zero writes |
+| `programs:apply --action install\|upgrade\|switch\|rollback\|repair\|remove\|link\|unlink` | Execute with global file lock and rollback on failure | Program/backup directories, entry links, operation records; original package manager in delegated mode |
+| `programs:adopt [--undo <backup>]` | Delegated → tool-managed / undo | Same as above |
+| `programs:declare` | Save/delete supplementary declarations, tracking, management mode, entry directory | Database |
+| `system:refresh-upstream` | Extend probing to programs and add OSV vulnerability detection | Probe cache |
 
-库里只存：补充声明、跟踪方式、管理方式、入口目录选择、入口链接登记、MCP 条目指向登记、纳入备份记录、探测缓存。版本内容、当前指针、链接是否存在一律以文件为准。Tauri 桥接按现有白名单方式放行这些命令与参数。
+Store only supplementary declarations, tracking, management mode, entry-directory choices, entry-link registrations, MCP entry target registrations, adoption backups, and probe caches in the database. Actual files determine version content, current pointers, and link existence. Tauri permits these commands/arguments using its existing allowlist model.
 
-## 14. 影响面
+## 14. Impact
 
-| 项 | 标记 | 依据 |
+| Item | Treatment | Basis |
 | --- | --- | --- |
-| 用户 PATH 与 rc 文件 | 不改 | 设计：只往用户选定、在三种 shell 形态下都已在 PATH 上的目录放登记过的链接 |
-| 账号配置文件 | 只在用户选择托管 MCP 服务时改该条目的命令（逐条确认）；备选方式下另加 `CLAUDE_ENV_FILE` | 第 7.3、8 节 |
-| 全局安装 | 代管：只在用户确认的升级、回退时由原包管理器改动那一个包，改动前整包移到备份；纳入：只移走被纳入的那个包 | 第 7.2、9 节 |
-| npm 配置与缓存 | 代管照用用户 `~/.npmrc` 与缓存；托管照用 registry 与认证，前缀与缓存改用本工具目录 | 第 7 节 |
-| 数据目录占用 | 增加：每个托管版本一份（wecom-cli 整包 8.4 MB），默认保留 2 个另加被固定引用的 | 已观察（大小） |
-| 多账号 | 共享同一份程序与入口 | 设计 |
-| 升级与回滚单位 | 单个程序；托管回滚是切指针、代管回退是移回备份，均零网络 | 第 7 节 |
-| 智能体会话 | 已运行的会话是否看到新装的程序待实测 | 未验证 |
-| 技能作者 | 不要求改动；有 OpenClaw 声明的直接用，没有的靠补充声明 | 第 6 节 |
+| User PATH and rc files | Unchanged | Design: only registered links in user-selected directories already present in all three shell modes |
+| Account configuration | Change only the selected MCP entry's command for tool-managed services, with individual confirmation; alternative adds `CLAUDE_ENV_FILE` | Sections 7.3, 8 |
+| Global installations | Delegated: original manager changes only the confirmed package for upgrade/rollback after whole-package backup; adoption moves only the adopted package | Sections 7.2, 9 |
+| npm configuration/cache | Delegated uses user `~/.npmrc` and cache; tool-managed retains registry/authentication but uses tool-owned prefix/cache | Section 7 |
+| Data-directory usage | Increases by one copy per tool-managed version (wecom-cli whole package 8.4 MB); retain 2 by default plus pinned references | Observed size |
+| Multiple accounts | Share programs and entry points | Design |
+| Upgrade/rollback unit | One program; tool-managed rollback switches pointers, delegated rollback restores backups; both without network | Section 7 |
+| Assistant sessions | Discovery of newly installed programs by running sessions requires testing | Unverified |
+| Skill authors | No changes required; use OpenClaw declarations when present, supplements otherwise | Section 6 |
 
-## 15. 反驳与裁决
+## 15. Objections and Decisions
 
-独立审阅（未参与讨论的审阅者，只读本文件与本机只读查询，2026-09-30）提出 15 条，逐条裁决如下：
+An independent reviewer, uninvolved in the discussion, read this file and performed local read-only queries on 2026-09-30. All 15 objections were decided individually:
 
-| # | 反驳 | 裁决 |
+| # | Objection | Decision |
 | --- | --- | --- |
-| 1 | 桌面应用读不到用户 PATH；入口目录的可达性依据不足；IDE 启动未验证 | 采纳：用户 PATH 改为按 `-c`、`-lc`、`-lic` 三种形态探测，候选须三种都在（第 8 节）；已核实 Dock 启动 PATH 为空、`~/.local/bin` 四种形态都在；IDE 列为未验证并进验收 |
-| 2 | `npm uninstall -g` 会删掉整个包的全部命令 | 采纳：一律按包的全部命令处理；纳入不再卸载，改为整包移到备份（第 7.3、9 节） |
-| 3 | 撤回先删后重装会有零份窗口；重装同版本不等价 | 采纳：纳入与撤回都保证「任何时刻至少一份」，改为移动备份、零网络；`npm link`、非 registry、有本地改动的拒绝纳入（第 9 节） |
-| 4 | Python venv 不能先装临时目录再改名；uv 目录变量语义 | 采纳：Python 直接装最终目录、元数据最后写入判完成；uv 行为列进 B 期实测 |
-| 5 | 固定版本的 MCP 被指向 `current` 后会被静默改版本；与冲突处理矛盾 | 采纳：固定版本的条目指向具体版本目录，跟踪型才指向 `current`；被固定引用的版本不回收（第 7.3 节） |
-| 6 | npm 继承用户全局配置与缓存 | 采纳（修正）：代管本来就是用户全局环境，照用；托管照用 registry 与认证（否则私有源装不上），前缀与缓存由本工具指定，并写进预览 |
-| 7 | 平台子包依赖运行 npm 的 node 架构；大小说法不对 | 采纳：记录 node 路径与架构，变了判损坏；大小更正为已观察的 8.4 MB |
-| 8 | 版本检查会往真实 HOME 写状态；读不到版本的缺状态 | 采纳：执行程序一律在隔离 `HOME`、`XDG_CONFIG_HOME`；补「版本读不出」主原因 |
-| 9 | 状态与动作不能一一对应，缺若干状态 | 采纳：第 10 节改为「主原因决定唯一动作」的有序表，补齐安装未完成、未选入口目录、运行时变了、验证失败、同名冲突与同名多份区分 |
-| 10 | 多进程与回收时正在运行的程序 | 采纳：现有锁已是进程退出自动释放的文件锁（已核实）；删版本目录前检查运行中的进程 |
-| 11 | 与「原本没有的不添加」的张力 | 采纳：第 2 节写明解释——新增项都是用户逐项确认的配置并登记；删除只在纳入时、只针对该包、先备份 |
-| 12 | 「代管」（外部安装保持原处、由本工具调用原包管理器）没被评估；mise 否决理由不准确 | 采纳：代管成为外部已有安装的默认方式（第 7.2 节），托管改为用户按程序选择；对 mise 的否决理由更正见下 |
-| 13 | 若干前提未分级 | 采纳：第 3 节按已观察 / 推断 / 未验证分级，未验证项进第 17 节验收；OSV 只声明覆盖 npm 与 PyPI |
-| 14 | 保留策略与回滚冲突；依赖方来自补充声明时会误判可清理 | 采纳：回滚只列保留的版本，被固定引用的永远保留；只来自补充声明的依赖不进批量删除 |
-| 15 | 自评漏项；C 期验收缺反例 | 采纳：本节即是；反例进第 17 节 |
+| 1 | Desktop cannot read user PATH; insufficient evidence for entry-directory reachability; IDE launches unverified | Accepted: probe `-c`, `-lc`, `-lic` and require all three (section 8). Confirmed empty Dock PATH and local `~/.local/bin` in all four modes; IDE remains unverified and enters acceptance |
+| 2 | `npm uninstall -g` deletes all package commands | Accepted: always handle all commands; adoption moves whole-package backups instead of uninstalling (7.3, 9) |
+| 3 | Delete-then-reinstall undo leaves a no-copy window; reinstalling the same version is not equivalent | Accepted: keep at least one copy throughout adoption/undo, move backups without network, reject `npm link`, non-registry sources, local modifications (9) |
+| 4 | Python venvs cannot be installed temporarily then renamed; uv directory variable semantics unclear | Accepted: Python installs to final directory and records completion metadata last; uv tested in phase B |
+| 5 | Pointing pinned MCP at `current` silently changes versions and contradicts conflict handling | Accepted: pinned entries target specific version directories; tracking entries alone use `current`; pinned versions retained (7.3) |
+| 6 | npm inherits user global configuration/cache | Accepted with correction: delegated intentionally uses the global environment; tool-managed retains registry/authentication for private sources, while tool controls prefix/cache and shows them in preview |
+| 7 | Platform subpackages depend on node architecture running npm; size claim incorrect | Accepted: record node path/architecture; changes mark Broken; size corrected to observed 8.4 MB |
+| 8 | Version checks write to real HOME; no state for unreadable versions | Accepted: isolate all execution with `HOME` / `XDG_CONFIG_HOME`; add Unreadable version primary cause |
+| 9 | States/actions are not one-to-one and several are missing | Accepted: ordered primary-cause/action table in section 10, adding incomplete installation, missing entry directory, runtime changes, failed verification, and separating name conflicts from duplicates |
+| 10 | Multiple processes and running programs during cleanup | Accepted: existing lock is a verified process-exit-released file lock; check running processes before deleting version directories |
+| 11 | Tension with Do not add what was absent | Accepted: section 2 explains individually confirmed, registered additions; deletion only during adoption, only that package, after backup |
+| 12 | Delegated management (external installation stays in place, original manager called by this tool) not evaluated; mise rejection inaccurate | Accepted: delegated becomes the external-installation default (7.2); tool management is per-program user choice; mise correction below |
+| 13 | Several assumptions lack evidence levels | Accepted: section 3 separates observed/inferred/unverified; unverified items enter section 17 acceptance; OSV coverage limited to npm/PyPI |
+| 14 | Retention conflicts with rollback; supplementary declarations can misclassify cleanup | Accepted: list only retained rollback versions; always retain pinned references; supplementary-only dependencies excluded from bulk deletion |
+| 15 | Self-review omitted issues; phase C lacked counterexamples | Accepted: this section records review; counterexamples enter section 17 |
 
-**对 mise 的更正与仍不采用的理由：** mise 的 shims 目录确实可以不激活 shell、只把一个目录放进 PATH，与本设计的入口目录同构（推断，未查证其当前版本）。仍不作为主方案，因为它不知道技能与 MCP 的依赖关系，回收、约束求交、待处理都要本工具另做，且会在用户 HOME 下引入它自己的全局配置与数据目录；可在托管后端里作为可选实现，不影响本设计的对象模型。
+**mise correction and continued rejection:** its shims directory can indeed work without shell activation by adding one PATH directory, structurally matching this design's entry directory (inferred; its current version was not checked). It remains outside the primary plan because it does not know skill/MCP dependencies; this tool would still implement cleanup, constraint intersection, and Inbox, while mise introduces its own global configuration/data directories under user HOME. It could be an optional tool-managed backend without changing the object model.
 
-**仍然最可能失败的地方：** 托管后端在个别包上装得上但运行不了（依赖全局路径、原生模块与运行时不匹配）。保护：验证不通过不切换；这类程序保持代管即可正常使用。**会推翻入口目录方案的证据：** IDE 里启动的会话看不到入口目录——那时对 IDE 场景改用备选方式，第 17 节 B 期验收会给出结论。
+**Most likely remaining failure:** individual packages install successfully but cannot run under tool management (global-path dependencies, native-module/runtime mismatch). Protection: never switch if verification fails; retain delegated management for those programs. **Evidence that would overturn the entry-directory approach:** IDE-launched sessions cannot see it. Use the alternative for IDE scenarios in that case; phase B verification in section 17 will decide.
 
-## 16. 决定（2026-09-30，用户确认）
+## 16. Decisions (2026-09-30, User-confirmed)
 
-| # | 决定 | 结果 |
+| # | Decision | Result |
 | --- | --- | --- |
-| 1 | 三种管理方式：外部已有安装默认「代管」，用户可对单个程序改为本工具安装 | 同意 |
-| 2 | 新程序（原本没有安装的）装成本工具安装 | 按建议实施：隔离、可多版本、换版本只切指针；安装时在对话框里选入口目录 |
-| 3 | 本工具安装的程序让智能体找得到的方式 | 按建议用入口目录（本机 `~/.local/bin`），用户在安装对话框里选 |
-| 4 | MCP 条目改不改成绝对路径 | 不改：保持 npx / uvx，管理条目里的版本号（见 7.3 节末） |
-| 5 | npm 安装脚本 | 默认不执行、逐包允许，与 [pnpm 10](https://socket.dev/blog/pnpm-10-0-0-blocks-lifecycle-scripts-by-default)、[Bun](https://bun.com/docs/pm/lifecycle)、[Deno](https://docs.deno.com/runtime/reference/cli/approve_scripts/)、[npm 12](https://github.blog/changelog/2026-06-09-upcoming-breaking-changes-for-npm-v12/) 的默认一致；装完列出被跳过脚本的包 |
-| 6 | 智能体本身 | 只检测版本与新版本，不管理安装 |
-| 7 | 不好代办的 | 给命令让用户自己执行 |
+| 1 | Three management modes: existing external installations default to delegated; users can choose tool installation for individual programs | Agreed |
+| 2 | New, previously uninstalled programs use tool-managed installation | Implement recommendation: isolated, multiple versions, pointer-only switching; select entry directory in installation dialog |
+| 3 | Assistant discovery of tool-installed programs | Use recommended entry directory (local `~/.local/bin`), selected in installation dialog |
+| 4 | Convert MCP entries to absolute paths? | No: keep npx / uvx and manage entry version numbers (end of 7.3) |
+| 5 | npm install scripts | Disabled by default, allowed per package, matching defaults in [pnpm 10](https://socket.dev/blog/pnpm-10-0-0-blocks-lifecycle-scripts-by-default), [Bun](https://bun.com/docs/pm/lifecycle), [Deno](https://docs.deno.com/runtime/reference/cli/approve_scripts/), [npm 12](https://github.blog/changelog/2026-06-09-upcoming-breaking-changes-for-npm-v12/); list packages whose scripts were skipped after installation |
+| 6 | Assistants themselves | Detect versions/updates only; do not manage installation |
+| 7 | Actions impractical to automate | Provide commands for users to run themselves |
 
-## 17. 分期与验收
+## 17. Phases and Acceptance
 
-所有验收在隔离 HOME、数据目录与测试助手路径下进行；智能体相关的用本机假模型服务真实调用执行命令的工具回读。
+All verification uses isolated HOME, data directories, and test assistant paths. Assistant-related checks use a local fake model service to invoke the actual command execution tool and read results back.
 
-| 期 | 内容 | 状态（2026-09-30） |
+| Phase | Content | Status (2026-09-30) |
 | --- | --- | --- |
-| A | `programs:status`：声明解析（OpenClaw 与简写）、MCP 命令解析、外部安装识别（含全部命令）、用户 PATH 三形态探测、补充声明候选；技能与 MCP 行的依赖标签；待处理接入 | 已实施。本机只读回读：wecom-cli（npm 全局 1.3.4，4 个技能需要）、chrome-devtools-mcp（npx 固定 1.9.0）、serena 与 grok-search（uvx 跟分支，标未固定）、node_repl（ChatGPT.app 自带，只观察）、playwright-cli（没声明，作为候选）；查询前后数据目录与用户目录不变 |
-| B | 代管升级、换版本、回退（整包移备份）；本工具安装：npm 与 PyPI / git 后端、版本目录、指针、入口链接、换版本、删除旧版本、整个删除、可清理 | 已实施。隔离 HOME 真实 npm 走通：代管升级到不存在的版本失败后逐字节恢复、回退逐字节恢复、入口目录有别人的同名文件时拒绝且不动；引擎集成测试用假 npm 固化这些行为。uv 后端隔离 HOME 真实实测（uv 0.7.15、PyPI 包 cowsay）：本工具安装的安装、升级、换版本、删除，代管的升级与回退（回退后 uv tool 目录逐字节一致）。**未验证**：在 IDE 里启动的会话能否找到入口目录里的程序 |
-| C | 纳入（代管 → 本工具安装）与撤回；MCP 条目的版本号固定与升级 | 已实施。纳入全程 PATH 上至少一份、结束只剩一份，撤回只移动本机目录、逐字节恢复；`npm link` 的包拒绝纳入 |
-| D | 新版本检测（程序与智能体）；漏洞检测、约束冲突、来源页一并安装 | 新版本检测已实施（「检查新版本」只写探测缓存）。**未实施**：OSV 漏洞检测、版本约束求交与冲突、本工具安装的完整性校验（篡改判损坏）、删除版本目录前检查运行中的进程、GitHub Release 与 Go 后端、来源页一并安装 |
+| A | `programs:status`: declaration parsing (OpenClaw/shorthand), MCP command parsing, external installation recognition (all commands), three-mode user PATH probing, supplementary declaration candidates; skill/MCP dependency labels; Inbox integration | Implemented. Local read-only readback: wecom-cli (global npm 1.3.4, needed by 4 skills), chrome-devtools-mcp (npx pinned 1.9.0), serena/grok-search (uvx branch tracking, unpinned), node_repl (ChatGPT.app bundled, observe-only), playwright-cli (undeclared candidate). Data/user directories unchanged before/after queries |
+| B | Delegated upgrade/switch/rollback (whole-package backups); tool installation: npm/PyPI/git backends, version directories, pointers, entry links, switches, old-version deletion, complete removal, cleanup eligibility | Implemented. Actual npm in isolated HOME: failed upgrade to nonexistent version restored byte for byte; rollback restored byte for byte; foreign same-name entry file rejected and untouched. Engine integration tests preserve these behaviors with fake npm. Actual isolated uv backend testing (uv 0.7.15, PyPI cowsay): tool-managed install/upgrade/switch/delete and delegated upgrade/rollback (uv tool directory byte-identical after rollback). **Unverified:** discovery of entry-directory programs by IDE-launched sessions |
+| C | Adoption (delegated → tool-installed), undo; MCP entry version pinning/upgrades | Implemented. At least one copy on PATH throughout adoption, exactly one at completion; undo only moves local directories and restores byte for byte; `npm link` packages rejected |
+| D | Update detection (programs/assistants); vulnerabilities, constraint conflicts, joint installation from Sources | Update detection implemented (Check for new versions writes only probe cache). **Not implemented:** OSV detection, constraint intersection/conflicts, integrity checks for tool-installed programs (tampering → Broken), running-process checks before directory deletion, GitHub Release / Go backends, joint installation from Sources |
