@@ -271,7 +271,11 @@ describe("来源页：添加、编辑、更新、移除", () => {
       "skills:preview": makeEnvelope({
         from: { commit: "1".repeat(40), kind: "branch", name: "main", label: "main" },
         to: { commit: "2".repeat(40), kind: "branch", name: "main", label: "main" },
-        downloaded: true, same: false, skills: [{ name: "alpha", path: "skills/alpha", files: [{ status: "modified", file: "SKILL.md" }], accounts: ["claude-code"] }], rules: [], other: [],
+        downloaded: true, same: false, skills: [
+          { name: "alpha", path: "skills/alpha", files: [{ status: "modified", file: "SKILL.md" }], accounts: ["claude-code"] },
+          { name: "gamma", path: "skills/gamma", files: [{ status: "added", file: "SKILL.md" }, { status: "added", file: "scripts/run.sh" }], accounts: [] },
+          { name: "omega", path: "skills/omega", files: [{ status: "deleted", file: "SKILL.md" }], accounts: [] },
+        ], rules: [], other: [],
       }),
       "skills:versions": makeEnvelope({ collection: "agent-skills", track: { mode: "auto" }, auto_resolved: "default", latest: { commit: "2".repeat(40), kind: "branch", name: "main", label: "main" }, current: { commit: "1".repeat(40), kind: "branch", name: "main", label: "main" }, default_branch: "main", tags: [], tags_total: 0, branches: [{ name: "main", commit: "2".repeat(40) }], branches_total: 1 }),
     };
@@ -281,6 +285,11 @@ describe("来源页：添加、编辑、更新、移除", () => {
     await userEvent.click(await screen.findByTestId("source-update-agent-skills"));
     const dialog = await screen.findByRole("dialog", { name: "agent-skills 的版本" });
     await within(dialog).findByTestId("preview-skill-alpha");
+    // 整个新加或被删掉的技能单独标出来
+    expect(within(dialog).queryByTestId("preview-skill-new-alpha")).toBeNull();
+    expect(within(dialog).getByTestId("preview-skill-new-gamma")).toHaveTextContent("新技能");
+    expect(within(dialog).getByTestId("preview-skill-gamma")).toHaveTextContent("由你决定给哪些账号");
+    expect(within(dialog).getByTestId("preview-skill-gone-omega")).toBeInTheDocument();
     expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
     await userEvent.click(within(dialog).getByTestId("versions-preview-confirm"));
     await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));

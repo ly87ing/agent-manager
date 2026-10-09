@@ -18,6 +18,12 @@ interface PreviewData {
 
 const CHANGE: Record<string, string> = { added: "新增", deleted: "删除", modified: "修改" };
 
+/** 整个技能是新加的还是被删掉的：看它的 SKILL.md。 */
+function skillChange(files: FileChange[]): "added" | "deleted" | null {
+  const entry = files.find((change) => change.file === "SKILL.md");
+  return entry?.status === "added" || entry?.status === "deleted" ? entry.status : null;
+}
+
 interface VersionsData {
   collection: string;
   track: TrackSpec;
@@ -186,8 +192,22 @@ export function SkillVersionsDialog({
                       <div key={skill.name} data-testid={`preview-skill-${skill.name}`} className="rounded border p-2">
                         <p className="font-medium text-foreground">
                           {skill.name}
+                          {skillChange(skill.files) === "added" && (
+                            <span data-testid={`preview-skill-new-${skill.name}`} className="ml-2 rounded bg-info/10 px-1.5 py-0.5 text-[11px] font-normal text-info">
+                              新技能
+                            </span>
+                          )}
+                          {skillChange(skill.files) === "deleted" && (
+                            <span data-testid={`preview-skill-gone-${skill.name}`} className="ml-2 rounded bg-warning/15 px-1.5 py-0.5 text-[11px] font-normal text-warning">
+                              这一版删掉了它
+                            </span>
+                          )}
                           <span className="ml-2 font-normal text-muted-foreground">
-                            {skill.accounts.length ? `跟着换：${skill.accounts.map(nameOf).join("、")}` : "没有账号在用"}
+                            {skill.accounts.length
+                              ? `跟着换：${skill.accounts.map(nameOf).join("、")}`
+                              : skillChange(skill.files) === "added"
+                                ? "换过去后出现在技能页，由你决定给哪些账号"
+                                : "没有账号在用"}
                           </span>
                         </p>
                         <ul className="mt-1 space-y-0.5 font-mono">
