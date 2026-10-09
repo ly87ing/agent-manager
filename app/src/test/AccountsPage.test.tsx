@@ -339,6 +339,11 @@ describe("账号页", () => {
     await userEvent.type(within(drawer).getByTestId("account-base-url"), "https://relay.example.com");
     await userEvent.type(within(drawer).getByTestId("account-token-var"), "RELAY_KEY");
     await userEvent.type(within(drawer).getByTestId("account-api-key"), "sk-secret-value");
+    // 说清楚内容发往哪、Key 明文写在哪个文件
+    const risk = within(drawer).getByTestId("account-api-risk");
+    expect(risk).toHaveTextContent("relay.example.com");
+    expect(risk).toHaveTextContent("/settings.json");
+    expect(risk).not.toHaveTextContent("sk-secret-value");
     await within(drawer).findByTestId("account-create-plan");
     await userEvent.click(within(drawer).getByTestId("account-save"));
     await waitFor(() => expect(screen.queryByTestId("account-drawer")).toBeNull());

@@ -186,6 +186,7 @@ describe("命令面板", () => {
     const dialog = await screen.findByRole("dialog", { name: "从分享链接导入" });
     expect(within(dialog).getByTestId("import-link-input")).toHaveValue(link);
     expect(within(dialog).getByTestId("import-link-summary")).toHaveTextContent("shared-srv");
+    expect(within(dialog).getByTestId("import-link-risk")).toHaveTextContent("在你的电脑上运行 uvx");
     expect(writes(calls)).toEqual([]);
   });
 });

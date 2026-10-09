@@ -34,6 +34,15 @@ function editDefinition(mode: Extract<DrawerMode, { type: "edit" }>): Record<str
   return { ...mode.definition, profile: { ...profile, ...mode.observed.editable_profile } };
 }
 
+/** 接口地址里的主机名；还不是合法地址时为 null。 */
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url.trim()).host || null;
+  } catch {
+    return null;
+  }
+}
+
 const FIELD = "mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -300,6 +309,12 @@ export function AccountDrawer({
               <Field label="API Key" hint={`保存到外部密钥文件的 ${tokenVar || "变量"}，应用时也会写入此账号的助手配置，不进本应用数据库${keyKnown ? "；已有值，留空则不改" : ""}`}>
                 <input data-testid="account-api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" className={FIELD} />
               </Field>
+              {hostOf(baseUrl) && (
+                <p data-testid="account-api-risk" className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-foreground">
+                  用这个账号时，你的提示词、代码片段和这个 Key 都会发往 <span className="font-mono font-medium">{hostOf(baseUrl)}</span>；
+                  Key 会明文写进 <span className="font-mono">{`${editing?.configDir ?? defaultConfigDir(group.kind, effectiveId || "…")}/${group.kind === "codex" ? "config.toml" : "settings.json"}`}</span>（只有你自己能读）。只接你信任的服务。
+                </p>
+              )}
               <Field label="模型">
                 <input data-testid="account-model" value={model} onChange={(event) => setModel(event.target.value)} className={FIELD} />
               </Field>

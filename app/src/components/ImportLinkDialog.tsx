@@ -3,6 +3,25 @@ import { useState } from "react";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { decodeShareLink, type SharePayload } from "../lib/shareLink";
 
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}
+
+/** 导入后会发生什么：远程服务收到什么、本机会运行什么、技能从哪来。 */
+function importRisk(payload: SharePayload): string {
+  if (payload.kind === "skills") {
+    return `技能会从 ${hostOf(payload.definition.url)} 下载，里面的说明会被助手当作指令执行，可能让助手运行命令。`;
+  }
+  if (payload.spec.url) {
+    return `助手会把调用内容${Object.keys(payload.spec.headers ?? {}).length > 0 ? "和这些请求头" : ""}发往 ${hostOf(payload.spec.url)}。`;
+  }
+  return `助手每次启动都会在你的电脑上运行 ${payload.spec.command ?? "这条命令"}${(payload.spec.args ?? []).length > 0 ? ` ${(payload.spec.args ?? []).join(" ")}` : ""}。`;
+}
+
 /**
  * 从分享链接导入：粘贴（或点开）链接后先把里面的内容摆出来，确认后交给对应页面的「新增」表单预填，
  * 由用户检查后保存。这里不写任何东西。
@@ -59,6 +78,9 @@ export function ImportLinkDialog({
                 </p>
               )}
               {payload.kind === "skills" && <p className="break-all font-mono text-muted-foreground">{payload.definition.url}</p>}
+              <p data-testid="import-link-risk" className="rounded border border-warning/40 bg-warning/10 px-2 py-1.5 text-foreground">
+                {importRisk(payload)}只导入你信任的人发来的链接。
+              </p>
               <p className="pt-1 text-muted-foreground">下一步打开「新增」表单并预填这些内容，检查后由你保存；在那之前什么都不会写入。</p>
             </div>
           )}
