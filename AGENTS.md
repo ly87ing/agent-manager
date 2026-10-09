@@ -1,38 +1,45 @@
 # AGENTS.md
 
-## 当前目标
-- 实现 Tauri 2 界面与 Rust 原生后端。产品定位与分期计划见 `docs/MULTI-ACCOUNT-DESIGN.md`（多账号并行：账号 = 配置目录 + 启动命令，技能 / MCP / 规则默认分配给全部账号）；数据语义与写入保护见 `docs/GUI-REDESIGN.md`，两者冲突时以前者为准；实施与验收记录见 `docs/goal-rust-gui.md`。
-- 主账号（`~/.claude`、`~/.codex`）只放官方登录；不再开发主配置切换第三方、接入备选库等附录 A 列出的功能，已有实现按分期计划清理。
-- 桌面和 CLI 复用同一 Rust 库。新版不依赖 Python、`manage.sh`、旧适配器或源码目录。
-- Python 不再维护，用户已授权清理；不新增 Python 功能、投影兼容层或双实现对照义务。
-- 当前目标不等于已实现状态。未通过编译、实际操作和独立验收的候选不得称为完成。
+## Current goal
 
-## 实施协作
-- 主审负责设计、范围裁决与验收；委派实施时由有权限的实施标签页写产品代码和测试，主审独立验收。没有可用实施者时，主审直接实施并完整验证。
-- Kimi 当前没有实施权限，不再向它派工或反复重试；只有权限恢复且用户重新指定后才考虑使用。
-- 先交付一个小闭环再扩大范围。共享接口只有一个负责人；向实施者交代文件范围、输入输出和验证反例。
-- 用户已授权在 `main` 分支分批提交、推送通过验收的改动。提交由主审执行，核对整个待推送范围及远程提交；不混入无关修改。此授权不包含创建 Release、打 tag 或发布安装包。
+- Implement a Tauri 2 interface and a native Rust backend. Product scope and phases are in `docs/MULTI-ACCOUNT-DESIGN.md` (parallel accounts: account = configuration directory + launch command; skills, MCP, and rules are assigned to all accounts by default). Data semantics and write protection are in `docs/GUI-REDESIGN.md`; the multi-account design takes precedence if they conflict. Implementation and acceptance records are in `docs/goal-rust-gui.md`.
+- Main accounts (`~/.claude`, `~/.codex`) hold official logins only. Do not develop third-party switching in the main configuration, connection-preset libraries, or other features listed in Appendix A. Remove existing implementations according to the phased plan.
+- The desktop app and CLI reuse the same Rust library. The new version does not depend on Python, `manage.sh`, legacy adapters, or the source directory.
+- Python is no longer maintained, and the user has authorized its removal. Do not add Python features, projection compatibility layers, or obligations to compare two implementations.
+- A goal is not an implemented state. Do not call a candidate complete until it has passed compilation, actual operation, and independent acceptance.
 
-## 开发与验证
-- Rust 工具链、Node.js 与 pnpm 是原生版本的开发工具；不要再把 Python 和旧 make 管线作为新版前置条件。
-- 修改行为或共享接口前读历史、调用方和邻近测试，使用 `change-discipline`；方案与改造设计使用 `solution-shaping`；验收（含界面）使用 `verification`；文档使用 `reader-facing-writing`；临时产物使用 `artifact-hygiene`。
-- 先运行最小相关检查，再运行对应完整检查：`cargo test --manifest-path engine-rs/Cargo.toml`、`cargo test --manifest-path app/src-tauri/Cargo.toml`；前端在 `app/` 运行 `pnpm test:unit run` 和 `pnpm build`。
-- 文档改动检查链接、命令和目标一致性，不为旧文案断言补回已废弃要求。没有运行或没有真正覆盖的验证必须说明。
-- 不删测、降断言或跳过来掩盖有效失败。旧 Python 专属测试随退役实现清理；仍适用的数据安全、范围隔离和反例迁入 Rust。
-- 真实验收使用隔离 HOME、数据目录及测试助手路径；不得以 mock、退出码或实施者自报替代实际结果回读。
+## Implementation collaboration
 
-## 数据与清理边界
-- 助手真实文件与目录是生效配置的唯一事实源；`native-manager.db` 只存应用偏好、识别定义、归属记录（定位 + 摘要）和真实环境表达不了的「已保存未生效」备选（见 `docs/GUI-REDESIGN.md`「数据模型：实际配置为准」）。不为 Agent Manager 新增第二份 `settings.json` 或其他可写配置。查询、预览、取消和演练不得写入状态。
-- 界面读取与表单预填读实际配置；编辑生效项直接写回实际文件并做写前重读比对；切换备选前先回填实际内容。内置默认只作推荐，逐项确认后才应用，不固化进库、不计入待同步。
-- 保存备选不执行安装或资源应用。逐助手动作不能影响其他助手；不覆盖外部修改。
-- 清理旧实现前清点调用、CI、打包、文档及测试引用，对未提交修改留存本地补丁；不批量 reset/clean，不删除用户会话、真实配置、凭据或外部仓库。
-- 代码清理与行为变更分别提交，不重写历史。
+- The lead reviewer owns design, scope decisions, and acceptance. When implementation is delegated, an authorized implementation tab writes product code and tests, and the lead reviewer independently verifies it. If no implementer is available, the lead reviewer implements and fully verifies the work.
+- Kimi currently has no implementation permission. Do not assign it work or repeatedly retry. Consider it again only after permissions are restored and the user explicitly selects it again.
+- Deliver one small end-to-end slice before expanding scope. Each shared interface has one owner. Give implementers the file scope, inputs, outputs, and negative verification cases.
+- The user has authorized incremental commits and pushes of accepted changes on `main`. The lead reviewer commits, checks the entire outgoing range and remote commits, and excludes unrelated changes. This authorization does not include creating Releases, tags, or publishing installers.
+- Use English for repository documentation and new content. Commit and push verified changes promptly; conversation remains in Simplified Chinese.
 
-## 生成文件
-- 推荐规则不在本仓库：正文在 agent-skills 仓库 `rules/` 维护，本工具作为技能来源读取，只在用户逐项应用时写入目标；生效规则以各助手的规则文件为准。`engine-rs/assets/legacy-rules/` 只是旧库迁移判定用的冻结副本，不要当推荐内容改。
-- README、任务书与实际验收状态一致；没有生成、运行或回读的结果不得声明通过。
+## Development and verification
 
-## 敏感信息
-- 真实敏感信息只允许存放在外部私有 `secrets/` 仓库，不允许写入当前仓库的代码、文档、示例、计划、HTML、README 或生成产物。
-- Tailscale / SSH / 远程访问场景中的真实用户名、设备名、`.ts.net` 域名、Tailscale IP、SSH Host 配置、公钥内容和可推导内网拓扑的组合信息都按敏感信息处理。
-- 当前仓库只能保留占位符、模板、注入逻辑和通用说明；示例统一使用 `YOUR_*`。数据库和日志不保存明文凭据。
+- The Rust toolchain, Node.js, and pnpm are the development tools for the native version. Do not make Python or the old make pipeline prerequisites.
+- Before changing behavior or shared interfaces, read history, callers, and nearby tests, and use `change-discipline`. Use `solution-shaping` for designs and migrations, `verification` for acceptance (including UI), `reader-facing-writing` for documentation, and `artifact-hygiene` for temporary artifacts.
+- Run the smallest relevant check first, then the corresponding full checks: `cargo test --manifest-path engine-rs/Cargo.toml`, `cargo test --manifest-path app/src-tauri/Cargo.toml`; in `app/`, run `pnpm test:unit run` and `pnpm build`.
+- For documentation changes, check links, commands, and consistency with the goals. Do not restore retired requirements to satisfy assertions about old wording. State explicitly when verification was not run or did not exercise the change.
+- Do not delete tests, weaken assertions, or skip checks to conceal valid failures. Remove Python-only tests with the retired implementation; migrate still-applicable data safety, scope isolation, and negative cases to Rust.
+- Real acceptance uses an isolated HOME, data directory, and test-assistant paths. Mocks, exit codes, and implementer reports cannot replace reading back actual results.
+
+## Data and cleanup boundaries
+
+- Assistants' real files and directories are the sole source of truth for active configuration. `native-manager.db` stores only app preferences, recognition definitions, ownership records (location + digest), and saved but inactive alternatives that the real environment cannot represent (see "Data model: the actual configuration is authoritative" in `docs/GUI-REDESIGN.md`). Do not add a second `settings.json` or other writable configuration for Agent Manager. Queries, previews, cancellation, and rehearsals must not write state.
+- UI reads and form prefill use actual configuration. Editing an active item writes directly to its real file after re-reading and comparing it before writing. Before switching to an alternative, save the actual contents back. Built-in defaults are recommendations only: apply them after individual confirmation, never persist them automatically or count them as pending synchronization.
+- Saving an alternative does not install software or apply resources. Actions for one assistant must not affect another or overwrite external changes.
+- Before removing legacy implementations, inventory callers, CI, packaging, documentation, and test references. Preserve uncommitted changes as a local patch. Do not run bulk reset/clean or delete user sessions, real configuration, credentials, or external repositories.
+- Commit code cleanup and behavior changes separately. Do not rewrite history.
+
+## Generated files
+
+- Recommended rules are not maintained in this repository. Their text lives in `rules/` in the agent-skills repository; this tool reads it as a skill source and writes to targets only when the user applies individual items. Active rules are the files used by each assistant. `engine-rs/assets/legacy-rules/` contains frozen copies solely for legacy database migration detection; do not edit them as recommendations.
+- Keep the README and task documents consistent with actual acceptance status. Do not claim a result passed unless it was generated, run, and read back.
+
+## Sensitive information
+
+- Real sensitive information belongs only in an external private `secrets/` repository. Never put it in this repository's code, documentation, examples, plans, HTML, README, or generated artifacts.
+- In Tailscale, SSH, and remote-access scenarios, treat real usernames, device names, `.ts.net` domains, Tailscale IPs, SSH Host configuration, public-key contents, and combinations that reveal internal topology as sensitive.
+- This repository may contain only placeholders, templates, injection logic, and generic guidance. Use `YOUR_*` in examples. Databases and logs must not store plaintext credentials.

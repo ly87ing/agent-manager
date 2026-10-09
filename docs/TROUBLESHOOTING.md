@@ -1,10 +1,10 @@
-# 故障排查
+# Troubleshooting
 
-本文面向当前 Rust/Tauri 实现。生效配置以各助手真实文件为准；Agent Manager 自身的偏好、归属记录与未生效备选在 `native-manager.db`，设置在 `app_settings` 表。旧 Python、`manage.sh`、三层 JSON 和 profile 同步入口已退役，不是排查步骤。
+This guide covers the current Rust/Tauri implementation. Real assistant files are authoritative for active configuration. Agent Manager preferences, ownership records, and inactive alternatives are in `native-manager.db`; settings are in `app_settings`. Python, `manage.sh`, three-layer JSON, and profile synchronization entry points are retired and are not troubleshooting steps.
 
-## 先确认开发环境
+## Check the development environment first
 
-在仓库根目录运行：
+From the repository root:
 
 ```sh
 cargo --version
@@ -14,11 +14,11 @@ cargo check --manifest-path engine-rs/Cargo.toml --all-targets
 cargo check --manifest-path app/src-tauri/Cargo.toml --all-targets
 ```
 
-前端问题在 `app/` 运行 `pnpm typecheck`、`pnpm test:unit run` 或 `pnpm build`。
+For frontend issues, run `pnpm typecheck`, `pnpm test:unit run`, or `pnpm build` in `app/`.
 
-## 数据库不存在或读取为空
+## Database missing or reads empty
 
-使用隔离目录检查，不覆盖 HOME：
+Check in an isolated directory without overriding HOME:
 
 ```sh
 export AGENT_MANAGER_DATA_DIR="$(mktemp -d)"
@@ -26,63 +26,58 @@ cargo run --manifest-path engine-rs/Cargo.toml -- db:status --json
 cargo run --manifest-path engine-rs/Cargo.toml -- policy:get --json
 ```
 
-缺库时 `db:status` 应报告不存在，`policy:get` 应返回 Rust 内置默认值且不创建数据库。保存才会初始化 `native-manager.db`。
+With no database, `db:status` should report absence and `policy:get` should return Rust built-in defaults without creating a database. Saving initializes `native-manager.db`.
 
-## 设置没有保存
+## Settings not saved
 
-设置必须通过 Tauri 设置页保存，并由 Rust bridge 写入 `app_settings` 表。检查数据目录、数据库写权限，并在保存后重新打开设置页或重启应用读回。查询与 status 只读零写。
+Save through the Tauri Settings page; the Rust bridge writes `app_settings`. Check the data directory and database write permissions, then reopen Settings or restart the app to read back. Queries and status perform zero writes.
 
-## Policy 来源不符合预期
+## Unexpected policy source
 
-Policy UI 只显示 `builtin` 和 `sqlite`。编辑请求固定使用 `--layer local`，其持久化结果显示为 `sqlite`。旧共享层、同步层和 JSON settings 不再参与有效值计算。
+Policy UI shows only `builtin` and `sqlite`. Edit requests use `--layer local`; persisted results show `sqlite`. The old shared/synchronization layers and JSON settings no longer participate in effective-value calculation.
 
-## 执行动作失败
+## Action failed
 
-保存定义不会执行安装、卸载、链接或同步。执行问题按页面显示的引擎 action 排查：
+Saving a definition does not install, uninstall, link, or synchronize. Investigate the engine action shown on the page:
 
-1. 确认 `status` 返回的 observed 状态。
-2. 执行按钮点击即真实 `apply`；`apply` 内部 preflight（写前校验）检测不适用、未接管与外部改动并 fail-closed，envelope 错误会给出拒绝类别。
-3. 查看页面错误详情和 operation log；不要手动拼接旧命令。
+1. Check the observed state returned by `status`.
+2. Execute triggers real `apply` immediately. Internal preflight checks applicability, unmanaged content, and external changes, failing closed. Envelope errors identify the rejection category.
+3. Read page error details and the operation log; do not reconstruct old commands manually.
 
-确认弹窗只用于定义移除、清空日志等破坏性动作；普通同步、启停、更新没有二次确认步骤。
+Only destructive actions such as removing definitions or clearing logs require confirmation. Ordinary synchronization, enable/disable, and updates have no second confirmation.
 
-Agent、Skills、MCP、Rules、Aliases 与实例原生域已接线（Hooks 已于 2026-09-29 移除），生效配置都以各助手的实际文件为准：status 只读零写，输出实际内容与写入基准 `base`；写入带 `--base`，文件在打开后被外部改过时拒绝并提示「已在外部修改」，刷新后重新操作即可，不再有「接管 = 用库覆盖」。实际安装来源不可管理、Agent 已禁用、offline 阻断或动作不适用时，引擎不会提供或执行对应 action。Skills 集合与技能分配通过内容快照与安全软连接落地，遇外部非受管内容或冲突时 fail-closed 拒绝覆盖。MCP 支持本地 stdio 与远程 HTTP，`mcp:status` 直接列出各助手配置文件里的条目，`mcp:apply` 逐条编辑、启停、复制、删除；Claude 停用的条目以快照存库（疑似凭据转存到外部密钥文件、库里只留 `${VAR}`），Codex/OpenCode 用官方 `enabled = false`。Runs 操作记录基于 SQLite `operation_logs` 提供历史审计与二次确认清空，保留期由 `log_retention_days` 控制。
+Native Agent, Skills, MCP, Rules, Aliases, and instance domains are connected; Hooks was removed on 2026-09-29. Active configuration uses actual files. Read-only status returns actual content and write baseline `base`; writes require `--base`. If a file changed externally after opening, the app reports an external modification. Refresh and retry; adoption no longer means overwriting from the database. The engine neither offers nor executes actions when the actual installation source cannot be managed, the Agent is disabled, offline blocks the action, or it is inapplicable. Skills collections/assignments use snapshots and safe symlinks and refuse to overwrite unmanaged external content or conflicts. MCP supports local stdio and remote HTTP; `mcp:status` directly lists file entries, and `mcp:apply` edits, toggles, copies, and removes individual entries. Disabled Claude entries are saved snapshots with credential-like values moved externally and only `${VAR}` in storage; Codex/OpenCode use official `enabled = false`. Runs uses SQLite `operation_logs` for history and confirmed clearing; `log_retention_days` controls retention.
 
-公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝；执行前请用 `<domain>:status` 确认状态。
+Public `*:plan` and `--dry-run` entry points are retired and rejected. Check `<domain>:status` before executing.
 
-验收基线提交 `5a110be3` 的候选包只证明旧版 plan→confirm 交互，不证明本轮直接 apply 新交互。本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（SHA256 与验证结果见 [交付回执](goal-rust-gui.md)）。2026-09-09 Darwin x86_64 DMG 已通过只读挂载、仓库外复制、无 Python、路径脱敏和从 `/` 隔离环境 5 秒启动验收；该包早于当前 Rules/MCP/Hooks/Secrets 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks/Secrets/system:audit GUI 业务闭环。签名、公证、arm64、Linux、Windows 和更新发布仍未验证。
+Historical acceptance: the candidate at `5a110be3` proves only the older plan→confirm interaction, not direct apply. Source, browser, isolated CLI, and uncommitted dirty-DMG acceptance for direct apply were completed. A final clean DMG was rebuilt after `a01d0f5` and independently verified by the lead reviewer; see [delivery receipts](goal-rust-gui.md) for SHA256 and results. The 2026-09-09 Darwin x86_64 DMG passed read-only mounting, copying outside the repository, Python independence, path redaction, and five-second isolated startup from `/`. It predates current Rules/MCP/Hooks/Secrets and read-only `system:audit` and cannot prove those GUI workflows. Signing, notarization, arm64, Linux, Windows, and update releases were still unverified at that milestone; see [platform status](GUI-PLATFORM-STATUS.md) for later evidence.
 
-`system:audit` 已接入 Rust dispatcher：只读聚合 agents/skills/mcp/rules/aliases/secrets 与 runtime/storage 状态。密钥取值优先读取「密钥」页选择的外部 `.env` 文件，再回退进程环境；数据库只保存路径。若页面显示“文件不可用”，检查它是否存在、是否是普通文件、是否为 UTF-8 `KEY=VALUE`，以及 Unix 权限是否为 `600`。应用不会自动创建文件或修改权限，也不会回显取值。历史数据库明文需在页面输入确认词后显式迁移，失败时旧表保留。
+`system:audit` aggregates agents/skills/mcp/rules/aliases/secrets and runtime/storage read-only through the Rust dispatcher. Secrets resolve first from the external `.env` selected on Secrets, then the process environment; the database stores only the path. If the file is unavailable, check existence, regular-file status, UTF-8 `KEY=VALUE`, and Unix mode `600`. The app does not automatically create files, change permissions, or reveal values. Legacy database plaintext requires explicit migration with the confirmation word; failures retain the old table.
 
-## Claude Code 的额度停在很多天前
+## Claude Code quota stuck several days in the past
 
-助手卡片上的额度读自本机文件，不联网。Claude 这一侧有两个来源，取较新的那个：
+Assistant cards read local files without network requests. Claude uses the newer of two sources:
 
-| 来源 | 什么时候更新 |
+| Source | Update time |
 | --- | --- |
-| `<数据目录>/usage/<编码后的配置目录>.json` | 状态栏每次渲染（事件驱动，300ms 防抖） |
-| `~/.claude.json` 的 `cachedUsageUtilization` | 只在 Claude Code 主动查额度时；**常规对话不触发** |
+| `<data-directory>/usage/<encoded-config-directory>.json` | Every status-line render, event-driven with 300ms debounce |
+| `cachedUsageUtilization` in `~/.claude.json` | Only when Claude Code actively checks quota; **ordinary conversation does not trigger it** |
 
-只有后者时，数字会停在上次查额度的时刻——连用几天都不动是正常现象，不是读错了。
-卡片上会照实写「N 天前更新」，过了重置点的窗口不再显示百分比。
+With only the latter, numbers remain at the last check, even after days of use. This is expected, not a read error. The card reports how many days ago it updated and hides percentages after a window's reset time.
 
-要拿到与 Claude Code 状态栏同屏的实时值，有两条路：
+There are two ways to capture live values matching the Claude Code status line:
 
-**用本工具维护的状态栏**：助手编辑弹窗里把「状态栏」选成「用本工具的」，保存即部署。
-它显示模型、目录、分支、上下文、花费与 5h/7d 额度，并顺手把额度存下来。已经有自己的
-状态栏就别选这个——选了会把 `statusLine` 指到本工具那份（且因为那一项已有内容，
-第一次写入会要求你显式接管）。
+**Use this tool's status line:** select it in the assistant edit dialog; saving deploys it. It shows model, directory, branch, context, cost, and 5h/7d quota while recording quota. If you want to preserve your own status line, do not select this option: it redirects `statusLine` to this tool's script, and the first write to a populated field requires explicit adoption.
 
-**保留自己的状态栏**：在自己的脚本里把额度顺手存一份。
-Claude Code 每次渲染状态栏都会把 `rate_limits` 通过 stdin 推给脚本，但自己不写任何
-文件，外部进程读不到；脚本存下来，本工具就能读到。在解析出用量之后加这一段：
+**Keep your own status line:** add quota recording to your script. Claude Code supplies `rate_limits` on stdin each render but writes no file for another process to read. Add this after parsing usage:
 
 ```bash
-# $five / $week 是已用百分比，$five_reset / $week_reset 是 Unix 秒的重置时刻，
-# $now 是当前时刻（这几个变量名按你自己脚本里的实际命名改）
-# 存到 Agent Manager 数据目录（macOS 默认 ~/Library/Application Support/agent-manager，
-# Linux 为 ${XDG_DATA_HOME:-~/.local/share}/agent-manager；设置了 AGENT_MANAGER_DATA_DIR 时以它为准），
-# 文件名是配置目录编码：先 % -> %25，再 / -> %2F。不要写进助手自己的配置目录。
+# $five / $week are used percentages; $five_reset / $week_reset are Unix reset seconds.
+# $now is the current time; adjust variable names to match your own script.
+# Write to Agent Manager's data directory (macOS default ~/Library/Application Support/agent-manager;
+# Linux ${XDG_DATA_HOME:-~/.local/share}/agent-manager; AGENT_MANAGER_DATA_DIR overrides these).
+# Encode the configuration-directory filename: % -> %25, then / -> %2F.
+# Do not write into the assistant's configuration directory.
 if [[ -n $five || -n $week ]]; then
   am_dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
   am_pct='%'
@@ -101,17 +96,15 @@ if [[ -n $five || -n $week ]]; then
 fi
 ```
 
-写临时文件再 `mv` 覆盖，多个窗口并发也不会让本工具读到半截内容；文件写坏了本工具
-自动回退到缓存那份。路径跟随 `CLAUDE_CONFIG_DIR`，所以每个实例各存各的，不会串。
-`rate_limits` 只对 Pro/Max 订阅出现，且要等会话里第一次 API 响应之后才有。
+A temporary file followed by `mv` avoids partial reads across concurrent windows. Invalid content falls back to the cached source. The path follows `CLAUDE_CONFIG_DIR`, keeping instance records separate. `rate_limits` appears only for Pro/Max subscriptions, after the session's first API response.
 
-Codex 那一侧不用配：它的额度由服务端随每次响应写进会话记录，用它就会更新。
+Codex needs no setup: the server writes quota to session records on every response, so use refreshes it.
 
-## 安装渠道
+## Installation channels
 
-Claude Code 与 Codex 的内置默认渠道是官方 `native` 命令。brew 只在实际检测结果中作为来源展示，不是默认渠道；若 observed 与预期不符，应检查本机 PATH 和实际安装来源。
+Claude Code and Codex default to official `native` commands. Brew appears only as an actual detected source. If observed state differs from expectations, inspect local PATH and the actual installation source.
 
-## 验证
+## Verification
 
 ```sh
 cargo test --manifest-path engine-rs/Cargo.toml

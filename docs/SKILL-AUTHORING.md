@@ -1,106 +1,56 @@
-# Skill 编写标准
+# Skill Authoring Standards
 
-适用于 `agent-skills` 仓库(ly87ing/agent-skills)所有受管 skill。硬性形态契约(命名、frontmatter、
-英文正文、`agents/openai.yaml` 单文件、≤500 行且 ≤16000 字符、evals)已由该仓库 `tests/test_skill_contracts.py` 编码,此处不重复;
-本文只收录测试无法编码的编写判断标准。
+Applies to all managed skills in `agent-skills` (ly87ing/agent-skills). That repository's `tests/test_skill_contracts.py` encodes the structural contract: naming, frontmatter, English body, a single `agents/openai.yaml`, ≤500 lines and ≤16000 characters, and evals. This document covers authoring judgments that tests cannot encode.
 
-依据:Anthropic Agent Skills 官方最佳实践(docs.claude.com → Agent Skills best practices)、
-OpenAI Codex Skills 官方文档(developers.openai.com/codex/skills)。两家一致的核心:
-description 决定触发(写清能力 + 何时用 + 何时不用);SKILL.md 是目录页,细节下沉 `references/`、
-确定性逻辑下沉 `scripts/`(执行而非读入,只有输出进上下文);指令自包含、含验证步骤与正反例;
-核心文件不放时效性事实(易变事实放 references 并标注核验日期)。
+Sources: Anthropic's official Agent Skills best practices (docs.claude.com → Agent Skills best practices) and OpenAI's official Codex Skills documentation (developers.openai.com/codex/skills). Both emphasize: descriptions determine triggering and must state capabilities, when to use, and when not to use; SKILL.md is an index, with details in `references/` and deterministic logic in `scripts/` (execute rather than load them; only outputs enter context); instructions are self-contained with verification and positive/negative examples; time-sensitive facts belong in references with verification dates, not core files.
 
-## 本仓库增补的两条治理标准
+## Two additional governance standards
 
-1. **补充而非替代**。领域定制 skill 只讲本地知识会把模型的通用工程判断挤掉——这是可复现的评测失败模式
-   (安全左移 skill 初版只讲本公司案例,效果反而不如无 skill 对照组)。正确形态 = 通用判断 + 本地证据叠加,
-   SKILL.md 必须显式写明"本 skill 补充什么、不替代什么"。
-2. **本地证据优先于通用模板**。清单、权重、注意力分配按自家历史数据的真实分布校准,不照搬业界通用清单
-   (如 OWASP 通用比例);每条证据给可回查的原单编号,对抗审查专抓"转述层与证据库不一致"。
-   本地事故换来的知识(TR)与业内通用默认值冲突时,本地知识优先——通用默认是无信息先验,
-   TR 是团队用真实事故买来的后验。
+1. **Supplement rather than replace.** A domain skill consisting only of local knowledge can displace general engineering judgment. This was a reproducible evaluation failure: the first security-shift-left skill used only company cases and performed worse than the no-skill control. Combine general judgment with local evidence. SKILL.md must explicitly state what it supplements and what it does not replace.
+2. **Local evidence takes precedence over generic templates.** Calibrate checklists, weights, and attention to actual historical distributions rather than copying generic industry proportions such as OWASP. Give a traceable original issue number for every piece of evidence; adversarial review targets disagreement between summaries and the evidence base. When incident-derived local knowledge (TR) conflicts with industry defaults, local knowledge wins: defaults are uninformed priors; TR is a posterior earned through real incidents.
 
-## 欠触发的头号成因:描述少报正文能力(2026-07-19 实测)
+## Leading cause of missed triggers: descriptions omit existing capabilities (observed 2026-07-19)
 
-首次全量触发扫描(110 条对完整 16 个已装 skill)97/110,13 条失败里 7 条判 `none`——
-不是选错,是判"哪个都不用"。逐条读正文后确认根因不是能力缺失,而是**描述没有宣告
-正文已经覆盖的场景**,四例同因:
+The first full scan tested 110 cases against all 16 installed skills: 97/110 passed. Of 13 failures, 7 selected `none`, rather than a wrong skill. Reading the bodies showed that capabilities were present but **descriptions did not advertise covered scenarios**. Four examples shared this cause:
 
-| 用例 | 正文早已覆盖 | 描述当时只字未提 |
-|---|---|---|
-| artifact-hygiene #12 | 已被版控的文件不要建 .bak/时间戳副本 | 产物类型枚举里没有"备份副本" |
-| safe-merge-review #9 | 并行发布线上 is-ancestor/commit-id/issue 号都会误报 missing,须按内容判 | 触发枚举全是 merge 机制 |
-| safe-merge-review #14 | 对追踪 ref 模拟 re-pin/bump/apply | 未提跨仓依赖未推送的 go/no-go |
-| reader-facing-writing #8 | 大规模主观改写未指定目标时先给提纲或选项 | 未提这一场景 |
+| Case | Already covered in the body | Absent from the description |
+| --- | --- | --- |
+| artifact-hygiene #12 | Do not create .bak/timestamp copies of version-controlled files | Backup copies missing from artifact types |
+| safe-merge-review #9 | Parallel releases make is-ancestor/commit-id/issue checks falsely report missing; compare content | Trigger list covered only merge mechanics |
+| safe-merge-review #14 | Simulate re-pin/bump/apply for a tracked ref | No go/no-go for unpushed cross-repository dependencies |
+| reader-facing-writing #8 | Give an outline or options before a large subjective rewrite with no target | Scenario unmentioned |
 
-**所以每次给正文加条款,必须同时问描述有没有把它宣告出去。** 这条是确定性的:
-读正文与描述即可判定,不依赖噪声测量,也不该等触发率掉下来才发现。
-反向同样成立——描述宣告了正文没有的能力,会把不该来的任务拉进来,实例:
-safe-merge-review 曾宣告 "a merge request link" 而正文与 references 零处提到 MR;
-ones-manhour-fill 曾写 "safe add-only writes",字面读作不做删改,反而把删除请求
-引导绕开正文里"删前读回并核对 UTC+8 日期"那条护栏。
+**Whenever a body clause is added, check that the description advertises it.** This can be judged deterministically by reading body and description, without noisy measurement or waiting for trigger rates to fall. The reverse matters too: claiming unsupported capabilities attracts the wrong tasks. safe-merge-review once mentioned "a merge request link" with no MR guidance in body or references. ones-manhour-fill once said "safe add-only writes," implying no deletion or modification and routing deletion requests around the guard requiring read-back and UTC+8 date verification before deletion.
 
-**改一个描述不是局部操作:同一目录里所有 skill 在竞争同一次选择。** 2026-07-19 实证:
-给 frontend-verification 描述补上"投屏全屏"后,reader-facing-writing#19(深色会场大屏
-欢迎页)由通过转为失败,被 fv 拿走 —— 这条用例本身没动过。修法不是把词删掉,而是按
-**动词**划分归属:设计意图归 reader-facing-writing,"检查已建页面在会场全屏下的渲染"
-归 frontend-verification。
+**A description change is not local: all skills in the catalog compete for the same selection.** On 2026-07-19, adding projected full-screen rendering to frontend-verification caused reader-facing-writing #19 (a dark welcome screen for a venue) to fail and select fv, despite no case change. The fix was ownership by **verb**: design intent belongs to reader-facing-writing; checking an existing page's rendering in venue full-screen conditions belongs to frontend-verification.
 
-推论:补完某个 skill 的描述后,复测范围必须包含**相邻 skill 的用例**,不能只测自己那
-几条。只测自己会看到"修好了",同时把邻居推下水而不自知。
+Retesting after a description change must include **neighboring skills' cases**, not just its own. Otherwise a local fix can silently break adjacent selection.
 
-**扩描述前先核两道预算,都是硬上限:**
+**Check two hard budgets before expanding a description:**
 
-1. 单个 description ≤ 1024 字符(官方规范,`tests/test_skill_contracts.py` 会拒)。2026-07-30
-   实测本仓 5 个中三个逼近上限(1008/1014/1006),再加须先腾空间。
-2. 全部已安装 skill 的 name+description 总量。社区实测 Claude Code 按字符预算截断,
-   **超出的 skill 被静默丢弃且无任何告警**,而 system prompt 又禁止使用未列出的 skill。
-   2026-07-30 实测本机 11 个已装 skill 合计 8003 字符(本仓 5 个 description 占 4816),
-   对社区所述约 15000 的默认预算余量约 7000。改描述前跑一次总量统计,别把别的 skill 挤下车。
+1. Each description ≤1024 characters, enforced by `tests/test_skill_contracts.py`. On 2026-07-30, three of this repository's five descriptions were near the limit (1008/1014/1006); make room before adding.
+2. Total name+description length for all installed skills. Community observations indicate Claude Code truncates by a character budget: **excess skills are silently dropped with no warning**, while the system prompt prohibits using unlisted skills. On 2026-07-30, 11 installed skills totaled 8003 characters, including 4816 from this repository's five descriptions. The reported default budget of about 15000 left roughly 7000. Measure totals before changes to avoid excluding other skills.
 
-补完描述缺口后必须复测,命中率不是 100%。2026-07-19 四处按此法所做的修复,复测
-(N=5,完整目录,串行)结果:artifact-hygiene#12 与 safe-merge-review#9 均由 0.00 升到
-1.00;reader-facing-writing#8 由 0.00 升到 0.80 但区间跨阈值,判定未定;
-safe-merge-review#14 纹丝不动,仍以 5/5 输给 change-discipline。
+Filling description gaps still requires retesting; trigger success is not 100%. The four 2026-07-19 fixes were retested serially with the full catalog (N=5): artifact-hygiene #12 and safe-merge-review #9 rose from 0.00 to 1.00; reader-facing-writing #8 rose from 0.00 to 0.80 but its interval crossed the threshold, so the result was inconclusive. safe-merge-review #14 still lost all 5/5 to change-discipline.
 
-**一条用例若在补全描述后仍被另一个 skill 稳定拿走,先怀疑归属本身有争议,而不是
-继续调描述。** #14 问的是"这个分支能不能合",但阻塞点是跨仓依赖契约,两个 skill
-都站得住。此类分歧应记录为已知项,不要为了让测试变绿而改写期望——那与"用例错写"
-(如 change-discipline#5 在二元 harness 里写成分级期望)是两回事:后者是结构缺陷,
-前者是判断分歧。
+**If a case consistently selects another skill after filling the description gap, question ownership before continuing to tune wording.** #14 asked whether a branch could merge, but its blocker was a cross-repository contract; both skills were defensible. Record this as a known disagreement. Do not change expectations merely to pass tests. This differs from a malformed case, such as change-discipline #5 using a graded expectation in a binary harness: that is a structural defect, while the former is a judgment disagreement.
 
-## 怎么证明一条条款该存在(2026-07-19 实测确立)
+## Proving that a clause should exist (established 2026-07-19)
 
-先问删除测试,再谈触发。官方把"没有这条指令模型会不会做错"摆在第一位;
-`tests/run_behaviour_evals.py` 就是回答它的:同一 prompt 带/不带 skill 正文各跑一遍,
-独立评分对照 expected_output,看 lift。**without 已通过不是成功,是删除测试在触发**——
-该条款没有改变任何行为,却让每次触发都为它付费。实测例:artifact-hygiene 的"凭据不进
-命令输出"条款,裸模型本来就做对,触发率再怎么调也没有收益可拿。
+Start with the deletion test, then triggering. Official guidance first asks whether the model would err without the instruction. `tests/run_behaviour_evals.py` answers this by running the same prompt with and without the skill body, independently scoring against expected_output, and comparing lift. **A passing without-skill run activates the deletion test; it is not success.** An ineffective clause costs context on every trigger. For example, the bare model already kept credentials out of command output in artifact-hygiene's case, so trigger tuning offered no benefit.
 
-`tests/run_trigger_evals.py` 只回答"会不会加载",不能替代上面那步。用它时:
+`tests/run_trigger_evals.py` answers only whether the skill loads, not the behavior question. When using it:
 
-1. **目录必须含邻居**。只拿本仓 skill 组目录会系统性偏乐观——agent 实际在全部已安装的
-   skill 里选。用 `--catalog-dir ~/.claude/skills`。一条用例可以输给本仓不拥有的 skill,
-   那才是真实条件。
-2. **比区间,不比点值**。单次判定几乎不含信息。`--runs-per-query` 配 Wilson 区间,
-   区间跨阈值标 `?` = 本 N 什么也没判定,不等于通过。曾有同一配置三次运行得
-   0.17/0.58/0.40,看着像仪器漂移,齐性检验 p≈0.11——只是 N≈10 的二项噪声。
-3. **配对交错、串行**。比较两个候选描述要在同一次运行内逐条交替并轮换先后;
-   分块设计(先跑完 A 再跑 C)会把时间效应算到候选头上。并发(`--jobs`)实测会偏移判定,
-   曾让一个更差的候选测出 1.00、交错串行下只有 0.10——差点据此上线。
-4. **效应量小于离散度就是测不出来**,如实说,别改。曾有三个候选区间大幅重叠,
-   要分开需每臂 150+ 样本,不成比例——那就维持现状。
+1. **Include neighbors in the catalog.** A catalog containing only this repository's skills is systematically optimistic; the real agent chooses among all installed skills. Use `--catalog-dir ~/.claude/skills`. Losing to a skill outside this repository is a real operating condition.
+2. **Compare intervals, not point estimates.** A single verdict says little. Use `--runs-per-query` with Wilson intervals; `?` means the interval crosses the threshold and this N establishes nothing, not a pass. One configuration produced 0.17/0.58/0.40 across three runs; a homogeneity test gave p≈0.11, consistent with binomial noise at N≈10 rather than instrument drift.
+3. **Pair and interleave serially.** Compare descriptions within one run, alternating candidates per case and rotating order. Running all A then all C confounds time with the candidate. Observed `--jobs` concurrency shifted judgments: a worse candidate scored 1.00 concurrently but only 0.10 in interleaved serial runs, nearly leading to deployment on false evidence.
+4. **If the effect is smaller than dispersion, report it as unmeasurable and leave it unchanged.** Three candidates had heavily overlapping intervals and would need 150+ samples per arm to distinguish them; that cost was disproportionate.
 
-两条反直觉的实测结论,别再踩:
+Two counterintuitive observations:
 
-- **负向条款会反噬**。给 description 加"Not for X"会把 X 的关键词引进描述,反而把评委往
-   本 skill 拉。要划边界,用正向判据("什么让任务归这里"),不用禁止句。
-- **不要把评分器调到同意自己**。首个行为 FAIL 看着明显冤枉,起草了更宽松的评分提示;
-   重读期望才发现评分器是对的,回答只诊断没补救。只为措辞差异或等价命令放宽,
-   绝不为缺失步骤放宽。
+- **Negative clauses can backfire.** "Not for X" introduces X's keywords and can attract selection. Define boundaries with positive criteria for ownership instead.
+- **Do not tune the scorer to agree with you.** An apparently unfair first behavior FAIL prompted a looser scoring draft; rereading the expectation showed the scorer was right: the answer diagnosed but did not remediate. Allow wording differences or equivalent commands, never missing steps.
 
-## 变更流程
+## Change workflow
 
-dev 仓库(`~/Documents/github/agent-skills`)修改 → 增补 eval 用例 → 跑仓库契约测试 →
-按仓库惯例 commit(不带 AI 署名)→ 经用户同意 push → 在 Agent Manager「技能」页更新对应资源库、逐助手确认启用 →
-抽验各 agent 实际加载。
+Edit the development repository (`~/Documents/github/agent-skills`) → add eval cases → run repository contract tests → commit in repository style without AI attribution → push with user consent → update the source on Agent Manager Skills and confirm enablement per assistant → spot-check what each agent actually loads.

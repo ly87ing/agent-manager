@@ -1,112 +1,112 @@
-# 技能来源：版本管理与纳入管理
+# Skill Sources: Versioning and Adoption
 
-状态：**方案已确认并全部实施（2026-09-29）**：A、B、C 三期与 B 期的预览都已完成。实施与验收记录见 [任务书](goal-rust-gui.md)。本文细化 [多账号设计](MULTI-ACCOUNT-DESIGN.md) 3.2「技能」，两者冲突时以本文为准。
+Status: **design confirmed and fully implemented (2026-09-29)**. Phases A, B, and C and phase-B preview are complete; implementation and acceptance are in the [task document](goal-rust-gui.md). This refines Skills in section 3.2 of the [multi-account design](MULTI-ACCOUNT-DESIGN.md) and takes precedence if they conflict.
 
-## 目标
+## Goal
 
-每个技能都有一个明确的来源和跟踪方式：Manager 按跟踪方式检测有没有新版本，由用户确认后更新或回滚，并分发到所有应该有它的账号。用别的工具装进账号目录的技能先如实显示；是否纳入管理由用户逐项决定，纳入后只保留一份源，多余的副本清理掉。
+Every skill has a clear source and tracking method. Manager checks for new versions according to tracking, updates or rolls back after confirmation, and distributes to all intended accounts. Skills installed by other tools are shown truthfully first. The user decides adoption per item; adoption retains one source and removes redundant copies.
 
-部署模型：单用户、单机桌面应用；同一台机器上还可能有别的技能管理工具（`npx skills`、Claude 同步、插件）；只在用户点「检查」或「更新」时访问网络。
+Deployment: a single-user, single-machine desktop app that may coexist with `npx skills`, Claude synchronization, and plugins. Network access occurs only on an explicit Check or Update.
 
-## 已确认的决定（2026-09-29，用户）
+## Confirmed user decisions (2026-09-29)
 
-| # | 问题 | 决定 |
+| # | Question | Decision |
 | --- | --- | --- |
-| 1 | 用别的方式装进来的技能是否接管 | 由用户逐项决定。取代 `discover.rs` 原先「真实目录只标识、不接管」的规则；Claude 自己同步的 `synced/`、插件与 Codex 内置 `.system/` 仍然只显示 |
-| 2 | 纳入后原来的副本 | 只保留一份源；多余的副本（账号目录里的真实目录、Codex 共用目录里的同名项）先备份再清理 |
-| 3 | 跟踪方式 | 仓库有版本号标签就跟版本，否则跟主分支；必须能检测「有没有新版本」，也能执行变更（更新、切换、回滚） |
-| 4 | 快照保留数 | 不重要；按固定值保留，不做成设置项 |
+| 1 | Adopt skills installed elsewhere? | Decide per item. Replaces `discover.rs`'s old identify-only rule for real directories. Claude `synced/`, plugins, and Codex built-in `.system/` remain display-only |
+| 2 | Original copies after adoption | Keep one source; back up redundant real account directories and same-name Codex shared entries before removal |
+| 3 | Tracking | Follow version tags when present, otherwise the main branch. Detect updates and execute update, switch, and rollback |
+| 4 | Snapshot retention count | Use a fixed value, not a setting |
 
-## 事实依据
+## Evidence
 
-| 事实 | 依据 |
+| Fact | Basis |
 | --- | --- |
-| Claude 只从各账号配置目录的 `skills/` 读技能，不读 `~/.agents/skills` | 已观察：Claude Code 2.1.285，隔离 HOME 实测 |
-| Codex 读 `$CODEX_HOME/skills` 与 `~/.agents/skills`，后者对所有 Codex 账号生效；同名技能两份都加载 | 已观察：codex-cli 0.159.0，`codex debug prompt-input`，工作目录在 HOME 之外 |
-| `npx skills` 把技能装进 `~/.claude/skills` 与 `~/.agents/skills`，在 `~/.agents/.skill-lock.json` 记录来源仓库、技能路径与内容哈希 | 已观察：本机锁文件 |
-| 有的技能自带发布信息（archify 的 `skill-release.json`：仓库、版本、通道），自带的更新提醒只读、不下载 | 已观察：archify 3.0.1 |
-| 版本表达各不相同：只有 main；持续打版本号标签（archify `v2.0.0…v3.0.1`）；大量 release 分支与 `-rc` 标签（orca）；另有大量非版本分支（`codex/*`、`labs/*`） | 已观察：`git ls-remote` |
-| 来源仓库可能很大：archify 约 463 MB，orca 约 966 MB | 已观察：GitHub API `size` |
-| 现有来源只能跟默认分支，更新时整库 `git clone`，版本只记内容哈希，不记提交与标签 | 已观察：`native_skills/apply.rs` `remote_ref`、`skill_bindings` 表 |
+| Claude reads only each account's `skills/`, not `~/.agents/skills` | Observed with Claude Code 2.1.285 in isolated HOME |
+| Codex reads `$CODEX_HOME/skills` and `~/.agents/skills`; the latter affects all Codex accounts, and both same-name copies load | Observed with codex-cli 0.159.0, `codex debug prompt-input`, working directory outside HOME |
+| `npx skills` installs to `~/.claude/skills` and `~/.agents/skills`, recording source, path, and content hash in `~/.agents/.skill-lock.json` | Observed local lock file |
+| Some skills include release metadata; archify `skill-release.json` gives repository/version/channel, and its own update hint is read-only | Observed archify 3.0.1 |
+| Version schemes vary: main only; version tags (archify `v2.0.0…v3.0.1`); many release branches and `-rc` tags (orca); other branches (`codex/*`, `labs/*`) | Observed `git ls-remote` |
+| Sources can be large: archify about 463 MB, orca about 966 MB | Observed GitHub API `size` |
+| The previous implementation followed only the default branch, ran a full `git clone` on update, and stored content hashes without commits/tags | Observed `native_skills/apply.rs` `remote_ref` and `skill_bindings` |
 
-## 版本模型
+## Version model
 
-来源定义增加 `track`（跟踪方式）与 `current`（当前版本：提交，以及标签或分支名）。旧来源没有 `track`，按「主分支」处理，行为不变。
+Source definitions add `track` and `current` (commit plus tag or branch). Old sources without `track` retain main-branch behavior.
 
-| 跟踪方式 | 「最新版本」怎么选 | 何时用 |
+| Tracking | Latest-version selection | Use |
 | --- | --- | --- |
-| 版本（`tag`，默认规则 `v*`） | 按语义化版本取最大的标签；预发布（`-rc`、`-beta` 等）默认排除 | 仓库有版本号标签时的默认值 |
-| 主分支（`default`） | 远端默认分支的最新提交 | 没有版本号标签时的默认值 |
-| 指定分支（`branch`） | 该分支的最新提交 | 用户改选 |
-| 最新匹配分支（`branch-pattern`，如 `release/*`） | 分支名里版本号最大的那个 | 用户改选 |
-| 固定（`pinned`） | 不自动变；只提示有更新的版本 | 用户改选 |
+| Version (`tag`, default pattern `v*`) | Highest semantic-version tag; exclude prereleases such as `-rc` / `-beta` by default | Default when version tags exist |
+| Main branch (`default`) | Latest commit on the remote default branch | Default without version tags |
+| Specific branch (`branch`) | Latest commit on that branch | User selection |
+| Latest matching branch (`branch-pattern`, e.g. `release/*`) | Branch with the highest version in its name | User selection |
+| Fixed (`pinned`) | No automatic change; only notify about newer versions | User selection |
 
-- 版本在来源这一级切换，来源下所有账号一起跟随；某个账号要用不同的内容，走「改成我的版本」。
-- 检查新版本只用 `git ls-remote --heads --tags`：不下载、不写库。
-- 下载用部分克隆加稀疏检出，只取 `skill_paths` 对应的目录；失败时退回浅克隆指定 ref，并在界面提示仓库大小。已有的完整克隆继续可用。
-- 操作：**检查**（显示「v3.0.1 → v3.0.2」）、**更新 / 切换到指定版本 / 回滚**（先把镜像换到目标版本，再把这个来源在用、内容有变化的技能逐个账号换过去，停用的不动；完成后报出换了几处）。
-- **预览**（`skills:preview`）：换版本前把目标提交取进本工具的镜像缓存（不检出、不动账号目录、不写库），列出各技能增删改的文件、会跟着换的账号与规则的变化；界面上「切换」「更新到」与来源行的「更新」都先预览、确认后才换。
-- 全部更新按各来源自己的跟踪方式走，固定的不动；来源里的规则只提示「来源有新版」，沿用现有做法。
+- Versions switch at source level and all its accounts follow. Use Make My Version when one account needs different content.
+- Checks use only `git ls-remote --heads --tags`, with no download or database write.
+- Downloads use partial clone and sparse checkout for `skill_paths` only. On failure, fall back to a shallow clone of the chosen ref and show repository size. Existing full clones remain usable.
+- **Check** displays transitions such as `v3.0.1 → v3.0.2`. **Update / switch / rollback** first changes the mirror, then replaces changed active skills for each account using that source; disabled assignments stay untouched. Report the count changed.
+- **Preview** (`skills:preview`) fetches the target commit into the mirror cache without checkout, account-directory changes, or database writes. Show added/deleted/modified skill files, affected accounts, and rule changes. Switch, Update To, and source-row Update all preview and require confirmation first.
+- Update All follows each source's tracking and leaves pinned sources unchanged. Source rules keep the existing source-update notification behavior.
 
-## 纳入管理
+## Adoption
 
-识别来源（只读，先匹配的优先）：
+Identify sources read-only, first match wins:
 
-| 顺序 | 依据 | 结果 |
+| Order | Evidence | Result |
 | --- | --- | --- |
-| 1 | Claude `synced/`、插件目录、Codex `.system/` | 不可纳入，只显示 |
-| 2 | `~/.agents/.skill-lock.json` 里有同名记录 | 仓库 = `sourceUrl`，路径 = `skillPath` 所在目录 |
-| 3 | 技能目录里有 `skill-release.json` | 仓库 = `source.repository`，当前版本 = `version` |
-| 4 | 目录或链接目标位于某个 git 仓库内 | 仓库 = 该仓库的 `origin`，路径 = 相对路径 |
-| 5 | 以上都不是 | 只能作为本机来源纳入（先移到 `~/my-skills/`），没有版本跟踪 |
+| 1 | Claude `synced/`, plugin directories, Codex `.system/` | Display only, no adoption |
+| 2 | Same-name record in `~/.agents/.skill-lock.json` | Repository = `sourceUrl`; path = containing directory of `skillPath` |
+| 3 | `skill-release.json` in the skill directory | Repository = `source.repository`; current version = `version` |
+| 4 | Directory or symlink target inside a Git repository | Repository = its `origin`; path = relative path |
+| 5 | None of the above | Local-source adoption only (move to `~/my-skills/` first); no version tracking |
 
-执行（用户逐项点「纳入管理」后）：
+After the user selects Adopt for an item:
 
-1. 预览，零写入：识别出的来源、建议的跟踪方式、当前版本；在临时目录取对应版本，与现有目录比对内容。
-2. 内容不一致时列出差异文件，由用户选：用来源的版本，或者保留改动（转为本机来源）。不静默覆盖。
-3. 原目录备份到数据目录 → 登记来源 → 按「默认全部账号」链接到所有同类账号 → 清理多余副本（账号目录里的真实目录、Codex 共用目录里的同名项，都已备份）→ 回读 → 写操作记录，可以撤回（撤回时从备份恢复）。
-4. 同一仓库的多个技能聚合成一个来源一起纳入，只下载一次。
-5. 不改 `npx skills` 的锁文件。之后如果它又往共用目录放了一份，由下面的重复检测提示出来。
+1. Preview without writes: identified source, recommended tracking, current version. Fetch that version into a temporary directory and compare contents.
+2. If contents differ, list changed files and let the user choose source content or preserve edits as a local source. Never overwrite silently.
+3. Back up original directories into app data → register source → link to all same-type accounts by default → clean backed-up redundant account directories and Codex shared entries → read back → record operation. Undo restores backups.
+4. Group skills from the same repository into one source and download once.
+5. Leave the `npx skills` lock file unchanged. If it later adds a shared copy, duplicate detection reports it.
 
-## Codex 共用目录与重复
+## Codex shared directory and duplicates
 
-- 扫描 `~/.agents/skills`，在界面上标为「Codex 共用（全部 Codex 账号生效，不能按账号关）」。
-- 同一个技能名既出现在共用目录、又出现在某个 Codex 账号的 `skills/` 里时，标黄「Codex 会加载两份」；清理动作（先备份）随纳入管理一起在 C 期提供。
+- Scan `~/.agents/skills` and label it shared by all Codex accounts, with no per-account disable.
+- If a name appears there and in a Codex account's `skills/`, warn that Codex loads two copies. Phase C provides backed-up cleanup with adoption.
 
-## 影响面
+## Impact
 
-| 范围 | 影响 |
+| Scope | Change |
 | --- | --- |
-| 各助手读技能的位置 | 新增扫描 `~/.agents/skills`；Claude 不变 |
-| 数据库 | 来源定义增加 `track`、`current`（策略数据，不改表结构）；分配表不变 |
-| 快照 | 每个来源保留最近几个版本，其余没人用的清掉 |
-| 上游检查 | 由 `ls-remote HEAD` 改为按跟踪方式解析；仍然只读 |
-| 全部更新、补齐、停用 | 更新按跟踪方式；补齐、停用语义不变 |
-| 改成我的版本 | `forked_from` 记来源 + 提交；「原版有更新」按跟踪方式判断 |
-| 配置备份、分享链接 | 带上 `track`；旧数据按主分支处理 |
-| 用户目录 | 纳入与清理会替换或删除真实目录：一律先备份，可撤回 |
-| 别的工具 | 不写 `npx skills`、Claude 同步、插件的文件 |
+| Skill scan locations | Add `~/.agents/skills`; Claude unchanged |
+| Database | Add policy definition fields `track` and `current`; no schema or assignment-table change |
+| Snapshots | Keep a few recent versions per source; remove unused older ones |
+| Upstream checks | Resolve by tracking instead of `ls-remote HEAD`; remain read-only |
+| Update All, Fill, Disable | Update follows tracking; Fill and Disable semantics unchanged |
+| Make My Version | `forked_from` records source + commit; original-update detection follows tracking |
+| Backups and share links | Include `track`; old data uses main branch |
+| User directories | Adoption/cleanup replace or delete real directories only after backup, with undo |
+| Other tools | Never write `npx skills`, Claude synchronization, or plugin files |
 
-## 分期
+## Phases
 
-| 期 | 内容 | 写文件 | 验收 |
+| Phase | Scope | File writes | Acceptance |
 | --- | --- | --- | --- |
-| A | 扫描 Codex 共用目录；识别来源；重复检测；「其他来源」分组（2026-09-30 起在来源页「未纳管」） | 否 | 隔离 HOME 复刻真实布局（锁文件、真实目录、共用目录、重复链接），状态回读正确且零写入；真实环境只读查询 |
-| B（已实施） | 跟踪方式、检查、预览、更新、切换、回滚；部分克隆 | 是 | 隔离 HOME：按版本在 v3.0.0 与 v3.0.1 之间切换并回滚；版本号排序反例（`v2.10.0` 与 `v2.9.0`、`-rc`）单测；记录大仓库的下载体积 |
-| C（已实施） | 纳入管理与冗余清理（含撤回） | 是 | 隔离 HOME 复刻真实布局，纳入后逐账号回读只剩一份源，撤回后字节级恢复 |
+| A | Scan Codex shared directory; identify sources and duplicates; Other Sources grouping (Unmanaged on Sources since 2026-09-30) | No | Reproduce lock files, real directories, shared directory, and duplicate links in isolated HOME; correct read-back with zero writes; read-only real-environment queries |
+| B (implemented) | Tracking, checks, preview, updates, switching, rollback, partial clone | Yes | Isolated HOME: switch/rollback between v3.0.0 and v3.0.1; negative sorting tests (`v2.10.0` vs `v2.9.0`, `-rc`); measure large-repository downloads |
+| C (implemented) | Adoption and redundant-copy cleanup, including undo | Yes | Reproduce real layout in isolated HOME; read back one source per account after adoption and byte-for-byte restoration after undo |
 
-## 实现要点
+## Implementation details
 
-- 纳入预览（`skills:adopt-preview`）只在系统临时目录取来源里这一个技能目录比对，结束即删；本地是旧版本时先比 git 目录树 ID 找到对应的正式版本标签（只取目录结构、不下载文件内容），对上了再逐文件确认，按那个版本纳入。
-- 执行（`skills:adopt`）以预览给出的指纹核对本地内容、目标版本与是否覆盖本地改动，对不上就不动手；备份与清单在数据目录 `adopt-backups/<编号>/`，失败按清单恢复，撤回（`--undo`）同样按清单。
-- 同一仓库的技能并进已登记的来源并沿用它现在的版本（不因纳入一个技能挪动整个来源）；本地改过名字的按来源里的目录名链接。
-- 链接到哪些账号由用户在纳入时勾选：默认全部账号（决定 2），标出原来就有它的账号（它所在的账号目录，以及共用目录对应的全部 Codex 账号），至少选一个；账号选择不参与指纹。
-- 长操作的交互：预览只读，「取消」即丢弃结果；执行会移动目录，中途不能安全停下，所以执行时不给「取消」、不响应 Esc 与点遮罩，只提供「在后台继续」（关窗后照常执行，结束弹提示并可撤销）。两个阶段都按引擎报告的步骤显示进度（`runs:progress`，进度文件在系统临时目录，结束即删）；换版本时同样锁住对话框直到完成。
-- 大仓库首次纳入预览较慢：orca（约 966 MB、上千个标签）实测约 80 秒，普通仓库约 8 秒。
+- Adoption preview (`skills:adopt-preview`) fetches only that skill directory into system temporary storage and removes it afterward. For an older local version, compare Git tree IDs against release tags using directory structure without downloading contents, then verify matching files and adopt that version.
+- Execution (`skills:adopt`) checks preview fingerprints for local content, target version, and permission to replace edits. Mismatches prevent changes. Backups and manifests live in `adopt-backups/<id>/` under app data; failure and `--undo` restore according to the manifest.
+- Merge same-repository skills into an existing source at its current version; adopting one skill must not move the whole source. Link locally renamed skills under their source-directory name.
+- The user selects accounts during adoption, defaulting to all (decision 2). Mark accounts that already had the skill, including all Codex accounts for a shared copy. Require at least one; account selection is excluded from the fingerprint.
+- Long actions: preview is read-only and Cancel discards results. Execution moves directories and cannot safely stop midway, so it has no Cancel and ignores Esc/backdrop dismissal. Continue in Background closes the dialog while execution continues, with completion notification and undo. Both phases display engine-reported steps (`runs:progress`), using system temporary progress files removed afterward. Version switching also locks the dialog until completion.
+- First adoption previews are slower for large sources: orca (about 966 MB, thousands of tags) took about 80 seconds; ordinary repositories about 8 seconds.
 
-## 未验证
+## Unverified
 
-- `npx skills` 是否支持指定分支或标签。
-- 私有仓库（依赖本机 git 凭据）的检查与下载。
-- ~~部分克隆在 orca 这类大仓库上实际省多少~~：已观察（2026-09-29）：orca 约 966 MB 的仓库只取 3 个技能目录时镜像约 35 MB、首次约 20 秒，切换版本约 7 秒；archify 约 463 MB 只取 `archify/` 约 14 MB、约 15 秒。
-- Windows 与 Linux 上的链接行为。
+- Whether `npx skills` supports a chosen branch or tag.
+- Checks/downloads for private repositories using local Git credentials.
+- ~~Partial-clone savings on large repositories such as orca~~: observed 2026-09-29. Fetching 3 skill directories from orca's roughly 966 MB repository produced a roughly 35 MB mirror, took about 20 seconds initially, and about 7 seconds for version switching. Fetching only `archify/` from roughly 463 MB produced about 14 MB in about 15 seconds.
+- Link behavior on Windows and Linux.

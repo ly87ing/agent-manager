@@ -1,54 +1,54 @@
-# MCP 配置指南
+# MCP Configuration Guide
 
-MCP 以各助手配置文件里的实际条目为准：Claude Code 的 `~/.claude.json`（顶层 `mcpServers`，即 user scope）、Codex 的 `~/.codex/config.toml`（`[mcp_servers.*]`），以及配置过 `mcp_config` 的其他助手（含实例、OpenCode）。在客户端里直接加的条目会原样出现在 MCP 页，无需导入。`native-manager.db` 只保存「已保存未生效」的 MCP 项，不另存一份当作当前配置。
+Actual entries in assistant configuration files are authoritative: Claude Code `~/.claude.json` (top-level `mcpServers`, user scope), Codex `~/.codex/config.toml` (`[mcp_servers.*]`), and other assistants with `mcp_config`, including instances and OpenCode. Entries added directly in a client appear on MCP without import. `native-manager.db` stores only saved but inactive MCP items, never a second copy of current configuration.
 
-## 读取
+## Reading
 
-`mcp:status` 只读零写：`targets` 列出各助手的配置文件（格式、是否存在、停用方式、文件级错误）；`elements` 按服务名汇总各助手里的同名条目，同名条目内容可以各不相同。每条给出：
+`mcp:status` performs zero writes. `targets` lists assistant configuration files, their format, existence, disable mode, and file-level errors. `elements` groups entries by service name across assistants; same-name entries may have different contents. Each entry includes:
 
-- 状态：启用 / 停用 / 结构无法识别；来源是配置文件还是本工具保存的停用快照。
-- 已建模字段：stdio 的 `command`、`args`、`env`（Codex 另有 `startup_timeout_sec`），远程的 `url`、`headers`。env 与 headers 的变量引用原样显示为 `${VAR}`，字面量在引擎输出里一律为 `<literal>`，界面显示为「（保留原值）」（保存时换回 `<literal>`，两种写法都认）。新增服务可「粘贴配置」：认 `mcpServers` 等常见片段，名字像密钥的明文取值与请求头取值不填进表单，改成同名 `${VAR}`。
-- 未建模的官方字段（如 Codex 的 `cwd`、`enabled_tools`、`tools.*`）：写入时原样保留；非凭据类的显示原值，其余显示 `<hidden>`。
-- 摘要 `base`：写入时作为基准回传。
+- State: enabled, disabled, or unrecognized structure; source: configuration file or a disabled snapshot saved by this tool.
+- Modeled fields: stdio `command`, `args`, `env` (plus Codex `startup_timeout_sec`); remote `url`, `headers`. Variable references remain `${VAR}`; all literals become `<literal>` in engine output. The UI shows a keep-original-value label and restores `<literal>` on save; both representations are accepted. Paste Configuration recognizes common fragments such as `mcpServers`; credential-like plaintext env values and header values are replaced with same-name `${VAR}` references rather than filled into the form.
+- Unmodeled official fields, such as Codex `cwd`, `enabled_tools`, and `tools.*`: preserved on write. Non-credential values remain visible; others are `<hidden>`.
+- Digest `base`, returned as the write baseline.
 
-一个助手的文件读不了（解析失败、符号链接、格式不支持、与别的助手共用同一文件），只影响这个助手，其他助手照常。
+A file that cannot be read because of parsing, symlinks, unsupported format, or sharing with another assistant affects only that assistant.
 
-## 写入
+## Writing
 
-`mcp:apply` 每次只动一个助手里的一个条目：
+`mcp:apply` changes one entry for one assistant per operation:
 
-| 动作 | 参数 | 说明 |
+| Action | Arguments | Behavior |
 | --- | --- | --- |
-| `add` | `--agent --spec` | 写入新条目；该助手里已有同名条目或停用快照时拒绝 |
-| `edit` | `--agent --spec --base` | 只改已建模字段，其余字段、键顺序、注释与其他表原样保留 |
-| `disable` / `enable` | `--agent --base` | 见下节 |
-| `copy` | `--agent --to --base` | 按目标助手的格式转换后写入；目标已有同名条目时默认拒绝，覆盖需 `--replace --to-base`，目标条目原有的其他字段不保留；没带过去的字段在提示里列出 |
-| `remove` | `--agent --base` | 从配置文件删除这一条，连同它的停用快照；界面单独确认 |
-| `forget` | 无 | 删除一份还没写进任何助手的已保存定义 |
+| `add` | `--agent --spec` | Add an entry; reject if that assistant already has the name in a file or disabled snapshot |
+| `edit` | `--agent --spec --base` | Change modeled fields only; preserve other fields, key order, comments, and tables |
+| `disable` / `enable` | `--agent --base` | See the next section |
+| `copy` | `--agent --to --base` | Convert to the target format; reject existing names unless `--replace --to-base` is supplied. Other fields in the replaced target entry are not preserved; omitted source fields are listed in hints |
+| `remove` | `--agent --base` | Delete the entry and its disabled snapshot; the UI requires separate confirmation |
+| `forget` | None | Delete a saved definition never written to any assistant |
 
-写入前在锁内重读文件并核对 `--base`；不一致就报「已在外部修改」，文件与库都不变，界面刷新后重来。随后在内存里确认新内容可解析、其他条目与文件其余部分不变，再以旧字节做原子替换并回读；失败按条件回滚。操作审计只记动作与范围，不记命令参数、地址或任何取值。
+Re-read the file and compare `--base` under the lock. A mismatch reports an external modification and leaves both file and database unchanged; refresh and retry. Validate in memory that the candidate parses and preserves other entries and file contents, then atomically replace against the old bytes and read back. Failures use conditional rollback. Auditing records only action and scope, never command arguments, endpoints, or values.
 
-`--spec` 只接受已建模字段。env 取值：`${VAR}` 为变量引用，写入时按助手解析（Claude 的运行时引用保持原样）；`<literal>` 表示保留该键的原值；其他为新写的普通取值，命中疑似凭据检测时拒绝并提示改用 `${VAR}`。headers 只接受 `${VAR}` 引用或 `<literal>`，以客户端原生引用形式写入（Claude `${VAR}`、Codex `env_http_headers`、OpenCode `{env:VAR}`）。远程地址仅允许 `https://` 或本机回环 `http://localhost` / `http://127.0.0.1`（编辑时地址没改不再检查）。编辑不能切换 stdio 与远程。写入的条目只含客户端官方字段；旧版 `_MANAGED_BY` 与 `# [agent-manager:managed]` 读取时剥离，编辑或启停这一条时顺带清除。
+`--spec` accepts only modeled fields. For env, `${VAR}` is a reference resolved according to the assistant (Claude runtime references remain unchanged); `<literal>` preserves that key's original value. Other inputs are new ordinary values, rejected if they resemble credentials, with guidance to use `${VAR}`. Headers accept only references or `<literal>`, written in native client form (Claude `${VAR}`, Codex `env_http_headers`, OpenCode `{env:VAR}`). Remote URLs allow only `https://` or loopback `http://localhost` / `http://127.0.0.1`; unchanged URLs are not revalidated during edit. Editing cannot switch stdio and remote transports. Written entries contain only official client fields. Legacy `_MANAGED_BY` and `# [agent-manager:managed]` markers are stripped on read and removed when that entry is edited or toggled.
 
-## 启停
+## Enabling and disabling
 
-- **Codex、OpenCode**：官方字段 `enabled`。停用写 `enabled = false`，条目留在文件里；启用去掉 `enabled`（回到默认），不写原来没有的 `enabled = true`。新增条目只写用户填了的字段：没有环境变量就不写 `env` 表，没填启动超时就不写 `startup_timeout_sec`。
-- **Claude Code**：官方只有按项目记录的停用列表（`/mcp` 面板），没有全局的逐条字段。停用 = 把条目移出 `~/.claude.json`，存成本工具里的停用快照；启用 = 按快照写回（目标里已有同名条目则拒绝）。快照里不留疑似凭据：命中疑似凭据检测的 env 字面量与全部 header 字面量转存到「密钥」页选择的外部文件、快照里改为 `${VAR}`，写回时解析成原值；没选可用文件时拒绝停用。未命中检测的普通 env 取值（如 `NODE_ENV=production`）原样保存在快照里。
+- **Codex and OpenCode:** use official `enabled`. Disable writes `enabled = false` while keeping the entry. Enable removes `enabled` to restore its default, rather than adding `enabled = true`. New entries contain only supplied fields: no env table without variables, and no `startup_timeout_sec` without an entered timeout.
+- **Claude Code:** the official client has only project-specific disabled lists in `/mcp`, with no global per-entry field. Disable removes the entry from `~/.claude.json` and saves a disabled snapshot; enable restores it and rejects an existing same-name entry. Snapshots retain no credential-like values: detected env literals and all header literals move to the external file selected on Secrets and become `${VAR}` in the snapshot, resolving back to their original values on restore. Without a usable file, disable is rejected. Ordinary env values such as `NODE_ENV=production` remain unchanged in the snapshot.
 
-## 旧库迁移
+## Legacy database migration
 
-旧版本的「服务库定义 + 逐助手分配」在读取时按同一规则即时换算，在第一次 MCP 写入时落库，并清掉旧分配表与策略里的旧定义；迁移不改任何配置文件：
+Old service-library definitions and per-assistant assignments are converted on read using the same rules and persisted on the first MCP write, removing the old assignment table and policy definitions. Migration never changes configuration files:
 
-- 已分配、配置文件里也有同名条目：以文件为准。
-- 已分配但文件里没有，或分配已停用：成为该助手的停用快照。
-- 从未分配、或库里改过还没应用的定义：成为「已保存的定义（还没写进任何助手）」，可以「添加到助手」或删除。
+- Assigned with a same-name file entry: the file wins.
+- Assigned but absent from the file, or assignment disabled: become a disabled snapshot for that assistant.
+- Never assigned, or modified in the library but not applied: become saved definitions not yet written to any assistant, available to add to an assistant or delete.
 
-`policy:set` 写入的 `mcp.definitions.*` 与旧配置备份里的 MCP 定义照常校验，并同样转成已保存的定义。
+`mcp.definitions.*` written by `policy:set` and MCP definitions from old backups are validated normally and converted to saved definitions too.
 
-## 密钥与备份
+## Secrets and backups
 
-变量取值优先来自「密钥」页选择的外部 `.env` 文件，找不到时回退进程环境；数据库只保存文件路径。`secrets:status` 列出实际条目与停用快照里引用的变量及其能否解析，不输出取值。配置备份包含 MCP 的已保存项（只含变量引用与普通取值），导入时逐项写入、同名以备份为准，本机已有的已保存项不删除；备份不含密钥取值或文件路径。
+Variables resolve first from the external `.env` selected on Secrets, then from the process environment. The database stores only the file path. `secrets:status` lists references in actual entries and disabled snapshots and their resolvability, never values. Configuration backups contain saved MCP items with references and ordinary values only. Import writes items individually, lets the backup win on same-name items, and does not delete other local saved items. Backups contain neither secret values nor file paths.
 
-## 上游版本
+## Upstream versions
 
-「检查更新」探测各助手实际条目与已保存项里的 npx 包与 uvx `git+repo@branch` 源，每个服务名取一份（先看配置文件里的条目，按助手顺序取第一条）；同名条目在不同助手里钉了不同版本时只反映选中的那一条。
+Check Updates probes npx packages and uvx `git+repo@branch` sources in actual and saved entries. It picks one entry per service name, preferring configuration files and taking the first assistant in order. If assistants pin different versions under the same name, the result reflects only the selected entry.

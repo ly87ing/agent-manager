@@ -1,44 +1,46 @@
 # Agent Manager
 
-让同一台 Mac 上的多个 Claude Code / Codex 账号同时使用：每个账号一个独立配置目录、一条启动命令，一套技能、MCP 与规则默认分给全部账号。基于 Tauri 2、React 与 Rust/SQLite，桌面应用与命令行共用同一 Rust 引擎。
+Run several Claude Code and Codex accounts side by side on one Mac. Each account has its own configuration directory and launch command; skills, MCP servers, and rules are assigned to all accounts by default. Built with Tauri 2, React, and Rust/SQLite, the desktop app and CLI share one Rust engine.
 
-## 功能
+## Features
 
-**所有外部来源均可选。** 不配置任何仓库也能管理本机账号、MCP、规则和已有技能。作者的公开技能仓库仅作推荐，确认后才下载；密钥可直接填写到应用创建的本地文件，也可选择自己私有仓库中的文件，不需要作者的 secrets 仓库。
+**All external sources are optional.** You can manage local accounts, MCP, rules, and existing skills without configuring a repository. The author's public skill repository is only a recommendation and is downloaded after confirmation. Secrets can be entered directly into a local file created by the app or stored in a file from your own private repository; the author's secrets repository is not required.
 
-- **账号**：按助手列出主账号（`claude` / `codex`，只放官方登录）与独立账号（例如 `cc2`、`ds`），支持按名称、命令、地址或模型搜索，以及从本机刷新状态。每行显示实际接口、模型、登录状态与额度重置时间；已过期的额度不再显示旧百分比。「添加账号」可选官方账号或 API 厂商预设，创建目录与启动命令，并带上共用设置和在用技能。API Key 保存到外部密钥文件，应用时还会以明文写入该账号的助手配置；数据库只保存引用。编辑表单读取实际配置，保存时比对打开时的基准；名称和接入参数一起提交。无法安全预填时说明原因，仍可单独改名。移除保留目录、登录和会话，启动命令删除失败会单独提示。登录只复制官方命令，由你在终端执行。
-- **实时额度**：一键为全部 Claude 账号装上 Agent Manager 的用量状态栏，它每次刷新时把额度记在本工具的数据目录里，账号页与托盘据此显示实时额度；Codex 的额度直接读它自己的会话记录。
-- **技能**：以集合（git 仓库或本机目录）管理技能，软链接到各账号的技能目录。在用的技能默认给全部账号，「补齐」一键链接到还缺它的账号；某个账号上停用是例外，补齐不会加回。新发现的技能点「添加」就加到全部账号。git 来源可选跟踪方式（有版本号就跟最新版本，否则跟主分支；也可指定分支、匹配分支或固定版本），只下载用到的目录；「版本」里先预览变化再更新或切换到任意版本。别的工具（如 npx skills）装进来的技能列在来源页「未纳管」，可逐项「纳入管理」：只留一份源、多余副本先备份再清理，可撤回。来源的添加、更新、换版本、移除都在来源页。
-- **待处理**：各页不是「生效」的项统一成损坏、已偏离、缺失、有新版本、未纳管几种状态，集中列出，每条一个处理按钮（和对应页面上是同一个动作）；处理完重新读取，处理好的自动消失。
-- **MCP**：直接读写各账号配置文件里的条目，一服务一行汇总在哪些账号上启用；同一种助手内可一键补齐，跨助手用「复制到…」。编辑、启停、删除都先预览完整文件并核对是否被外部改过。
-- **规则**：直接编辑各账号的 `CLAUDE.md` / `AGENTS.md`；规则模板只存在本机，推荐规则来自技能来源（agent-skills 的 `rules/`）；「补齐」只给还没有规则文件的账号复制主账号的规则，已有内容一律不动。
-- **用量**：读本机会话记录按账号累加 token，可按时间、账号与模型筛选，按单价表折算（不是账单）。
-- **来源**：技能与规则从哪来、用哪个版本都在这里——添加、推荐、跟踪方式、检查与更新、换版本、分享、停用、移除；各账号里不来自任何来源的技能在「未纳管」里纳入；分享链接也从这里导入。
-- **程序**：技能与 MCP 用到的命令行程序（如 wecom-cli、npx 拉取的 MCP 包）。列出谁需要它、装在哪、什么版本、有没有新版本；原本用 npm 全局或 uv 装的留在原处，由本工具调用原来的包管理器升级，改动前整包备份，失败原样恢复、可以回退；原本没有的装进本工具目录，按版本各一份、换版本只切指针；npx / uvx 拉取的 MCP 服务管理条目里的版本号（没固定的可一键固定）。npm 安装脚本默认不执行。每个动作都先看计划，也能复制命令自己执行。智能体本身只在账号页显示版本和有没有新版本，不管安装。
-- **设置**：操作记录、密钥文件、客户端诊断、主题与配置备份。
+- **Accounts:** list each assistant's main account (`claude` / `codex`, official login only) and separate accounts such as `cc2` or `ds`. Search by name, command, endpoint, or model, and refresh local status. Each row shows the actual endpoint, model, login state, and quota reset time; expired quota percentages are hidden. Add an official account or an API-provider preset to create its directory and launch command with shared settings and active skills. API keys are stored in an external secrets file and also written in plaintext to that account's assistant configuration when applied; the database stores only references. Edit forms read actual configuration and compare it with the opening baseline before saving; name and connection changes are submitted together. If safe prefill is unavailable, the app explains why and still allows renaming. Removal preserves the directory, login, and sessions; failure to remove a launch command is reported separately. Login copies the official command for you to run in a terminal.
+- **Live quota:** install the Agent Manager usage status line for all Claude accounts with one action. Each refresh records quota in this tool's data directory for the accounts page and tray. Codex quota is read from its own session records.
+- **Skills:** manage collections from Git repositories or local directories, with symlinks in each account's skill directory. Active skills are assigned to all accounts by default. Fill links them to accounts where they are missing; disabling one for an account is an exception that Fill respects. Adding a newly discovered skill assigns it to all accounts. Git sources can follow the latest version when version tags exist, otherwise the main branch; a specific branch, matching branches, or fixed version can also be selected. Only used directories are downloaded. Preview changes in Versions before updating or switching to any version. Skills installed by other tools, such as npx skills, appear as unmanaged on Sources and can be adopted individually: retain one source, back up redundant copies before cleanup, and allow undo. Add, update, switch, and remove sources on the Sources page.
+- **Inbox:** collect items that are broken, drifted, missing, have a new version, or are unmanaged. Each has one action, identical to the action on its resource page. Read back after handling; resolved items disappear automatically.
+- **MCP:** read and write entries in each account's actual configuration files. One row per service summarizes enabled accounts. Fill within one assistant type, or Copy to another assistant. Editing, enabling, disabling, and deleting preview the complete file and check for external changes.
+- **Rules:** edit each account's `CLAUDE.md` / `AGENTS.md` directly. Templates are local; recommended rules come from skill sources (`rules/` in agent-skills). Fill copies the main account's rules only to accounts without a rule file and never changes existing content.
+- **Usage:** read local session records and total tokens per account. Filter by time, account, and model, and estimate cost from a price table; this is not a bill.
+- **Sources:** manage where skills and rules come from and which version they use: add, recommend, select tracking, check and update, switch versions, share, disable, and remove. Adopt account skills with no source from the unmanaged list. Import share links here too.
+- **Programs:** manage command-line programs required by skills and MCP, such as wecom-cli and MCP packages fetched with npx. See dependents, install location, version, and available updates. Existing global npm or uv installations stay in place and are upgraded through their original package manager, with a full backup before changes, restoration on failure, and rollback. Missing programs are installed in this tool's directory, one copy per version; switching changes only the pointer. For MCP services fetched with npx / uvx, manage the entry's version and pin unpinned entries with one action. npm install scripts are disabled by default. Preview every action's plan or copy its commands to execute yourself. Assistants themselves show their version and update availability on Accounts; the app does not install them.
+- **Settings:** operation history, secrets files, client diagnostics, themes, and configuration backups.
 
-## 体验
+## Experience
 
-- 顶栏入口：待处理、账号、技能、MCP、规则、命令、来源、程序；右侧是「搜索 ⌘K」、主题切换、用量与设置。每页首屏就是列表，一行一项。
-- `⌘K` 搜页面、账号与资源，选中账号即复制它的启动命令；`⌘⇧K` 只列账号。`⌘F` 页内搜索，`⌘,` 打开设置。
-- 托盘按助手列出全部账号（名称 · 启动命令 · 额度），点一下唤回命令面板并定位到它，按 Enter 复制启动命令；托盘不写任何配置。
-- 浅色 / 深色 / 跟随系统主题；窗口位置与尺寸跨会话记忆；单实例运行；新版本提示。
+- Top navigation: Inbox, Accounts, Skills, MCP, Rules, Commands, Sources, and Programs. Search `⌘K`, theme controls, Usage, and Settings are on the right. Each page opens with a list, one item per row.
+- `⌘K` searches pages, accounts, and resources; selecting an account copies its launch command. `⌘⇧K` lists accounts only. `⌘F` searches the current page; `⌘,` opens Settings.
+- The tray groups all accounts by assistant (name · launch command · quota). Click to open the command palette at that account, then press Enter to copy the command. The tray does not write configuration.
+- Light, dark, and system themes; persistent window position and size; single-instance operation; update notifications.
 
-界面语言为简体中文。
+The application UI is in Simplified Chinese.
 
-## 安装
+## Installation
 
-### 下载安装包
+### Download an installer
 
-已提供 [0.1.0 预览安装包](https://github.com/ly87ing/agent-manager/releases/tag/preview-v0.1.0-20261008)：macOS（Apple Silicon / Intel dmg）、Linux（AppImage / deb）和 Windows（NSIS / MSI）。当前仓库私有，下载需要仓库访问权限；HTTPS 不会绕过权限检查。预览包没有配置自动更新。
+[0.1.0 preview installers](https://github.com/ly87ing/agent-manager/releases/tag/preview-v0.1.0-20261008) are available for macOS (Apple Silicon / Intel DMG), Linux (AppImage / DEB), and Windows (NSIS / MSI). The repository is currently private, so downloads require repository access; HTTPS does not bypass access checks. Preview packages do not configure automatic updates.
 
-正式发布不要求购买 Apple 开发者账号：默认 macOS 使用 ad-hoc 签名、Windows 不做 Authenticode 签名，系统可能要求手动确认安装。更新包仍必须签名；商业证书和 Apple 公证可另行启用。发布与验收状态见 [平台状态](docs/GUI-PLATFORM-STATUS.md)。
+A production release does not require purchasing an Apple developer account. By default, macOS uses ad-hoc signing and Windows has no Authenticode signature, so the operating system may require manual installation confirmation. Update packages still require signing; commercial certificates and Apple notarization can be enabled separately. See [platform status](docs/GUI-PLATFORM-STATUS.md) for release and acceptance status.
 
-### 从源码构建
+### Build from source
 
-前置条件：Rust 工具链、Node.js 与 pnpm。构建与使用均不需要作者的 secrets 仓库。可在应用中手动配置密钥，也可选择自己私有仓库中的 `.env` 文件，见 [密钥配置](docs/SECRETS-MANAGEMENT.md)。
+Prerequisites: the Rust toolchain, Node.js, and pnpm. Building and using the app do not require the author's secrets repository. Enter secrets manually in the app or select an `.env` file from your own private repository; see [secrets configuration](docs/SECRETS-MANAGEMENT.md).
 
-macOS：
+Clone without `--recursive`.
+
+macOS:
 
 ```sh
 git clone https://github.com/ly87ing/agent-manager.git
@@ -47,58 +49,58 @@ pnpm --dir app install --frozen-lockfile
 pnpm --dir app run build:macos
 ```
 
-产物位于 `app/src-tauri/target/release/bundle/dmg/`。独立包验收：`pnpm --dir app run verify:macos`。Linux 与 Windows 安装包由 [.github/workflows/gui-release.yml](.github/workflows/gui-release.yml) 构建；本地构建脚本目前仅面向 macOS。Windows 上启动命令写成 `~/.agent-manager/bin` 里的 `.cmd` 脚本，本工具不改注册表；支持范围与验证情况见 [平台状态](docs/GUI-PLATFORM-STATUS.md#windows-支持2026-09-30)。
+Outputs are in `app/src-tauri/target/release/bundle/dmg/`. Verify the standalone package with `pnpm --dir app run verify:macos`. Linux and Windows installers are built by [.github/workflows/gui-release.yml](.github/workflows/gui-release.yml); the local build script currently targets macOS only. On Windows, launch commands are `.cmd` scripts in `~/.agent-manager/bin`; the tool does not modify the registry. See [Windows support](docs/GUI-PLATFORM-STATUS.md#windows-support-2026-09-30) for scope and verification.
 
-## 快速上手
+## Quick start
 
-1. 打开应用，账号页列出每个助手的主账号与已有的独立账号（读取只读，不写任何文件）；顶部「开始使用」提示还没做的几步（登录主账号；添加技能来源，可选，不用也行），做完或关掉就不再出现。
-2. 点「添加账号」：官方账号建好后点「登录」复制登录命令，到终端执行一次；API 账号填好地址与 API Key 即可。
-3. 新开一个终端，输入账号的启动命令（例如 `cc2`），即可与其他账号同时使用。
-4. 在技能、MCP、规则页点「补齐」，把在用的资源分给新账号；需要实时额度时在账号页点「开启实时额度」。
+1. Open the app. Accounts lists each assistant's main account and existing separate accounts; reading does not write files. The Getting Started prompt shows remaining steps (log in to the main account; optionally add a skill source) and disappears once completed or dismissed.
+2. Select Add Account. For an official account, copy its login command and run it once in a terminal. For an API account, enter its endpoint and API key.
+3. Open a new terminal and enter the launch command, such as `cc2`, to use the account alongside others.
+4. Select Fill on Skills, MCP, and Rules to assign active resources to the new account. Select Enable Live Quota on Accounts when needed.
 
-AI CLI 的安装、升级与卸载不在本工具内执行。
+AI CLI installation, upgrades, and uninstallation are handled outside this tool.
 
-执行（apply）内置安全语义：
+Apply includes these safety guarantees:
 
-- 写前 preflight 校验，精确限定变更范围（scope）；
-- 排他锁防止并发写；
-- 外部修改检测：目标被本工具以外改动过时 fail-closed 拒绝覆盖；
-- 条件回滚与操作审计，每次执行可在任务记录页回查。
+- Preflight validation before writing, with an exact change scope.
+- An exclusive lock to prevent concurrent writes.
+- External-change detection: fail closed rather than overwrite a target changed outside this tool.
+- Conditional rollback and an audit trail, available in operation history for every execution.
 
-移除定义、清空日志等破坏性动作需二次确认。
+Destructive actions, such as removing definitions or clearing logs, require confirmation.
 
-## 数据与安全
+## Data and security
 
-- **以实际配置为准**：各账号的真实文件与目录是生效配置的唯一事实源；应用数据目录下的 `native-manager.db`（SQLite）只保存偏好、账号登记、归属记录和未生效的备选（如 Claude 侧停用的 MCP），没有第二份可写配置文件；查询与状态读取只读，缺库时不创建文件。内置默认只作推荐，确认后才应用。
-- **写入范围**：仅写入受管目标——各账号配置目录里的受管条目（`settings.json` / `config.toml` 的本工具负责的键、MCP 条目、规则文件、技能链接），以及 `~/.zshrc` 的受管区块（`~/.zprofile` 已有受管区块时同步，不新建）。主账号只放官方登录，本工具不往主配置写第三方接入；登录凭据只由助手自己的 `/login` 保存，本工具从不读写。
-- **密钥模型**：MCP 的生效条目就在各助手配置文件里，本工具只在「已保存未生效」项（如 Claude 侧停用的条目）里存东西：密钥一律改成 `${VAR}` 引用、取值转存到外部文件，只有不像凭据的普通取值（如 `NODE_ENV=production`）原样保存。用户在「密钥」页显式选择一个外部 `.env` 文件后，应用会校验它是普通文件、权限为 `600` 且内容是合法 `KEY=VALUE`；填写和接管的取值只写该文件。页面不回显取值，数据库只保存文件路径，配置备份不包含路径或取值；未选择可用文件时写入操作 fail-closed。
-- **不收集数据**：无遥测上传；日志仅写入本机应用数据目录，严格脱敏并按保留期自动清理。
+- **Actual configuration is authoritative:** real files and directories in each account are the sole source of truth for active configuration. `native-manager.db` (SQLite) in the app data directory stores preferences, account registration, ownership records, and inactive alternatives such as disabled Claude MCP entries. There is no second writable configuration file. Queries and status reads are read-only and do not create a missing database. Built-in defaults are recommendations applied only after confirmation.
+- **Write scope:** only managed targets are written: managed entries in account configuration directories (owned keys in `settings.json` / `config.toml`, MCP entries, rule files, and skill links) and the managed block in `~/.zshrc` (`~/.zprofile` is synchronized only if it already has a managed block). Main accounts hold official logins only; third-party connections are never written to main configuration. Only the assistant's own `/login` stores login credentials; this tool never reads or writes them.
+- **Secrets model:** active MCP entries live in assistant configuration files. This tool stores only saved but inactive items, such as disabled Claude entries. Credentials become `${VAR}` references with values moved to an external file; ordinary values that do not resemble credentials, such as `NODE_ENV=production`, stay unchanged. After you explicitly select an external `.env` file on Secrets, the app checks that it is a regular file with mode `600` and valid `KEY=VALUE` contents. Entered or adopted values are written only there. The page never displays values; the database stores only the file path, and configuration backups include neither paths nor values. Writes fail closed without a usable selected file.
+- **No data collection:** no telemetry uploads. Logs stay in the local app data directory, are strictly redacted, and are removed according to the retention setting.
 
-## 文档
+## Documentation
 
-- [架构](docs/ARCHITECTURE.md)：数据流与调用边界
-- [MCP 配置指南](docs/MCP-CONFIG-GUIDE.md)：MCP 条目的读写、启停方式与密钥规则
-- [Secrets 边界](docs/SECRETS-MANAGEMENT.md)
-- [故障排查](docs/TROUBLESHOOTING.md)
-- [平台状态](docs/GUI-PLATFORM-STATUS.md)：各平台构建与验收状态
-- [变更日志](CHANGELOG.md)
-- 面向贡献者：[GUI 重设计契约](docs/GUI-REDESIGN.md)、[目标与验收](docs/goal-rust-gui.md)、[Engine 契约](contract/README.md)、[桌面应用开发说明](app/README.md)
+- [Architecture](docs/ARCHITECTURE.md): data flow and call boundaries
+- [MCP configuration guide](docs/MCP-CONFIG-GUIDE.md): reading, writing, enabling, disabling, and secrets rules
+- [Secrets boundaries](docs/SECRETS-MANAGEMENT.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
+- [Platform status](docs/GUI-PLATFORM-STATUS.md): platform builds and acceptance
+- [Changelog](CHANGELOG.md)
+- For contributors: [GUI redesign contract](docs/GUI-REDESIGN.md), [goals and acceptance](docs/goal-rust-gui.md), [engine contract](contract/README.md), and [desktop development](app/README.md)
 
-## 开发
+## Development
 
-跨平台安装包在 [GUI CI](https://github.com/ly87ing/agent-manager/actions/workflows/gui-ci.yml) 的成功运行页面中下载（Artifacts，保留 14 天），也可用 **Run workflow** 手动构建指定分支。
+Download cross-platform installers from successful [GUI CI](https://github.com/ly87ing/agent-manager/actions/workflows/gui-ci.yml) runs (Artifacts, retained for 14 days), or use **Run workflow** to build a selected branch manually.
 
-| 平台 | 制品 |
+| Platform | Artifacts |
 | --- | --- |
-| macOS Apple Silicon / Intel | 各自的 DMG |
-| Windows x64 | NSIS EXE、MSI |
-| Linux x64 | AppImage、DEB |
+| macOS Apple Silicon / Intel | Separate DMGs |
+| Windows x64 | NSIS EXE, MSI |
+| Linux x64 | AppImage, DEB |
 
-每份制品附带 `SHA256SUMS.txt` 和 `build-info.json`，可核对文件摘要、提交和目标架构。这些是未做正式签名的测试安装包；正式签名、公证与自动更新仍走 GUI Release，不会由普通 CI 创建 Release。
+Each artifact includes `SHA256SUMS.txt` and `build-info.json` to check file digests, commit, and target architecture. These are test installers without production signing. Production signing, notarization, and automatic updates use GUI Release; ordinary CI does not create a Release.
 
-仓库结构：`engine-rs/`（CLI 与桌面端共用的 Rust 库与 SQLite 存储）、`app/`（Tauri 应用与 React 前端）、`contract/`（Engine Contract v1 schema）、`scripts/`（构建与验收脚本）。
+Repository layout: `engine-rs/` (the Rust library and SQLite storage shared by CLI and desktop), `app/` (Tauri and React), `contract/` (Engine Contract v1 schemas), and `scripts/` (build and acceptance scripts).
 
-验证命令（仓库根目录）：
+Verification commands, from the repository root:
 
 ```sh
 cargo test --manifest-path engine-rs/Cargo.toml
@@ -106,17 +108,8 @@ cargo test --manifest-path app/src-tauri/Cargo.toml
 cd app && pnpm test:unit run && pnpm typecheck && pnpm build
 ```
 
-冒烟测试 `./scripts/ci-smoke.sh` 在隔离数据目录运行，不触碰真实环境。完整验证要求见 [docs/goal-rust-gui.md](docs/goal-rust-gui.md) 的"验证"一节。
+`./scripts/ci-smoke.sh` runs smoke tests in an isolated data directory without touching the real environment. Full verification requirements are in the Verification section of [docs/goal-rust-gui.md](docs/goal-rust-gui.md).
 
-## 许可证
+## License
 
 [MIT](LICENSE)
-
-## English Summary
-
-Agent Manager is a desktop app (Tauri 2 + React + Rust/SQLite) for running several Claude Code and Codex accounts side by side on one Mac. Each account is its own config directory plus a shell launch command; skills, MCP servers and rules are shared with every account by default. The desktop app and CLI share one Rust engine. The UI is in Simplified Chinese.
-
-- **Features**: an accounts page listing the main account and every extra account with launch command, official/API type, login state and live quota; add, edit and remove accounts in a side drawer (API keys go to an external secrets file only); skill collections symlinked into every account with one-click "fill"; MCP entries edited in each account's own config file; rules edited in place; one-click live quota via the built-in status line; local usage totals per account.
-- **Install**: no public GitHub Release yet; see [platform status](docs/GUI-PLATFORM-STATUS.md). To build from source on macOS, install the Rust toolchain, Node.js and pnpm, clone without `--recursive`, then run `pnpm --dir app install --frozen-lockfile && pnpm --dir app run build:macos`.
-- **Safety model**: the real files in each account's directory are the only source of truth; every write re-reads the file and refuses if it changed since you looked, runs under an exclusive lock with rollback and an audit log, and never touches login credentials. The main account keeps only the official login. No telemetry.
-- **License**: [MIT](LICENSE).

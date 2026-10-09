@@ -1,50 +1,45 @@
-# /goal 任务书模板
+# /goal Task Templates
 
-> 通用历史模板，不是当前项目要求或授权。Rust 原生重设计使用 [goal-rust-gui.md](goal-rust-gui.md)；下文的固定审查遍数、逐字节兼容和重复全量测试不自动适用于本项目。
+> These are generic historical templates, not current project requirements or authorization. The native Rust redesign uses [goal-rust-gui.md](goal-rust-gui.md). Fixed review counts, byte-for-byte compatibility, and repeated full tests below do not automatically apply to this project.
 
-从历史 /goal 任务书中提炼的稳定范式(2026-07 全量会话挖掘)。写任务书时按任务类型取对应模板,
-通用骨架所有类型共用。
+These patterns were extracted from historical /goal task documents through a full session review in 2026-07. Choose the template for the task type; all types share the common structure.
 
-## 通用骨架
+## Common structure
 
+```text
+Goal: <one-sentence end state>
+Quality bar: <audience-level standard, e.g. "expert-level AI material, substantive, grounded in theory and practice, understandable when read or presented">
+Self-review: review and improve at least N times (N≥3 for important deliverables, N≥10 for high-value material), until the quality bar is met
+Cadence: commit and push changes promptly; record milestones in project documents rather than leaving them only in conversation
 ```
-目标:<一句话终态>
-质量门槛:<受众级水准句,如"达到业界 AI 专家水准,内容充实,理论结合实际,看得懂听得明白">
-自审:至少审查和提升 N 遍(重要交付物 N≥3,高价值物料 N≥10),直到达到质量门槛
-节奏:变更及时推送(commit+push);阶段成果落地到项目文档,不停留在会话里
-```
 
-## 审查类任务书(四件套,缺一不可)
+## Review tasks (all four elements required)
 
-1. **判据先行**:听众 × 时长 × 自家铁律逐条列出,审查按判据逐项过。
-2. **数字点名真源**:每个必须核实的数字写明真源路径(会话 jsonl 逐条核、媒体时长 ffprobe 实测、
-   可数的原型 HTML)——不要只读产物就下结论。
-3. **"不要报的"已决清单**:列出已决定/已知悉事项(含 commit hash,如"用户 2a843ad 有意删除 X,
-   不要建议加回"),防止噪音复报。
-4. **报告硬格式**:文件+行号+现状+**具体改法**;"可以更好"但给不出具体改法的不要报,
-   不用"更清晰"这类空话;指定排序维度。
+1. **Criteria first:** enumerate audience × duration × local hard rules, and review each criterion.
+2. **Name primary sources for numbers:** give the source path for each number requiring verification (inspect session jsonl entries, measure media duration with ffprobe, count prototype HTML). Do not conclude from the deliverable alone.
+3. **Resolved items to omit:** list deliberate or acknowledged decisions with commit hashes, such as "the user intentionally deleted X in 2a843ad; do not suggest restoring it," to prevent repeated noise.
+4. **Required report format:** file + line + current state + **specific change**. Omit claims that something could be better without a concrete correction; avoid empty phrases such as "clearer." Specify the sorting dimension.
 
-迭代追加:上一轮空手的维度点名("这个维度上轮没产出 confirmed 结论,这次当独立重点,别再空手")。
+For iterations, name dimensions that produced no confirmed conclusion last round and make them an independent focus.
 
-## 实现类任务书
+## Implementation tasks
 
-- 禁区清单(不放宽词表/不动既有分隔符/不加泛词等,按项目列)。
-- 复用既有机制,不新增抽象。
-- 新测试必须带反例(每条新规则配反例证明未放宽)。
-- 既有输出逐字节不变;跑两遍全绿。
-- 先对账已提交现状再报真实增量;行为变更主动 Flag。
-- 未指令不 commit。
+- List prohibited changes for the project, such as broadening vocabulary, changing existing delimiters, or adding generic terms.
+- Reuse existing mechanisms; add no abstraction.
+- Pair every new rule with a negative test proving it did not broaden behavior.
+- Keep existing output byte-for-byte unchanged; run tests twice with all passing.
+- Reconcile committed state before reporting real additions; explicitly flag behavior changes.
+- Do not commit without an instruction.
 
-## 批量分类任务书
+## Batch classification tasks
 
-- 固定枚举 verdict + pattern;逐条判定。
-- 1:1 覆盖验证(无遗漏、无增删、无重复),结果落固定路径 JSON。
-- 预置反误判规则(如"批次标签≠安全缺陷")。
-- 每个执行者汇报"关键判断口径"(judgment calls worth flagging)。
+- Fix the verdict + pattern enums and classify every item.
+- Verify 1:1 coverage with no omissions, additions, deletions, or duplicates; save JSON at the prescribed path.
+- Predefine rules against false positives, such as "a batch label is not a security defect."
+- Each implementer reports judgment calls worth flagging.
 
-## 溯源/核验任务书
+## Traceability and verification tasks
 
-- 逐断言给三级判定(符合/部分不符/严重不符)+ 原始 offset/原文摘录。
-- 取证材料只读零污染(备份解压到临时目录操作)。
-- instruction 文件审查自定义 correctness:事实断言对平台实测为真、规则跨文件一致、
-  流程无歧义可执行、交叉引用可解析。
+- Give each assertion a three-level verdict (matches / partially mismatches / seriously mismatches), plus the original offset and excerpt.
+- Keep evidence read-only and uncontaminated; unpack backups only in a temporary directory.
+- Define correctness for instruction-file reviews: factual claims match platform observations, rules agree across files, procedures are unambiguous and executable, and cross-references resolve.

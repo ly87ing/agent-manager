@@ -1,22 +1,24 @@
-# Agent Manager 桌面应用
+# Agent Manager Desktop App
 
-本目录是 Tauri 2 应用。React UI 通过 bridge 调用 `engine-rs`；CLI 与桌面端共享同一 Rust 原生库。运行时不依赖 Python、`manage.sh` 或源码树资源。
+This directory contains the Tauri 2 app. The React UI calls `engine-rs` through the bridge; CLI and desktop share one native Rust library. Runtime does not depend on Python, `manage.sh`, or source-tree resources.
 
-`native-manager.db` 是本工具定义、分配和偏好的唯一事实源，设置在 `app_settings` 表。查询与 status 只读零写；定义保存只写 SQLite。
+The following records describe earlier implementation milestones. For the current product model, active configuration is authoritative as specified in [the multi-account design](../docs/MULTI-ACCOUNT-DESIGN.md) and [GUI redesign](../docs/GUI-REDESIGN.md).
 
-Claude Code 与 Codex 的内置默认渠道是官方 `native` 命令。Homebrew 仅作为检测到的实际来源展示，不是默认。
+`native-manager.db` is the source of truth for this tool's definitions, assignments, and preferences; settings are in `app_settings`. Queries and status perform zero writes; saving definitions writes only SQLite.
 
-保存定义不执行安装或链接。执行按钮直接触发真实 `apply`；`apply` 内部先做 preflight/写前校验，再按精确 scope、排他锁、外部修改检测、CAS/条件回滚执行并审计；普通同步、启停、更新不二次确认。管理删除（移除定义）与卸载软件是不同动作，破坏性操作保持独立确认。
+The built-in default channel for Claude Code and Codex is the official `native` command. Homebrew is shown only when detected as the actual source, never as the default.
 
-Agent、MCP、Skills 页面已按目标交互组织；Agent、Skills 和 MCP 生命周期已接入 Rust 原生域。Skills 支持集合与单技能更新、启停与移除，采用内容快照与安全软连接落地，status 只读零写。SQLite 核心、Tauri bridge、设置页面、Runs SQLite 操作记录与清理（`log_retention_days` 控制保留期，Runs 页二次确认清空）和 Python 清理已完成。错误消息在出库前统一脱敏；按 2026-09-19 裁决，JSONL 结构化诊断日志已退役。Rules 原生 status/apply 与规则专用 `sources:get/set` 已接线（固定 Codex/Claude/OpenCode 三目标，外部修改 fail-closed）；Hooks 原生 status/apply 与 hooks 专用 `sources:get/set`（hooks.claude/hooks.codex）已接线：固定 Claude `~/.claude/settings.json` signature-set 合并与 Codex `~/.codex/hooks.json` whole-file 两目标，外部修改 fail-closed；验收基线提交 `5a110be3` 的候选包仅证明旧版 plan→confirm 交互。本轮直接 apply 新交互的源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成；最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（交付回执见 ../docs/goal-rust-gui.md）。
+Saving a definition neither installs nor links resources. Execute triggers real `apply`, which runs preflight validation before writing, then applies exact scope, an exclusive lock, external-change detection, CAS/conditional rollback, and auditing. Ordinary synchronization, enable/disable, and updates need no second confirmation. Removing a managed definition and uninstalling software are separate actions; destructive operations retain independent confirmation.
 
-公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝。
+Agent, MCP, and Skills pages use the target interaction, and their lifecycles are connected to native Rust domains. Skills supports updates, enable/disable, and removal for collections and individual skills, using content snapshots and safe symlinks; status is read-only. SQLite core, the Tauri bridge, Settings, Runs history and cleanup (`log_retention_days` controls retention; Runs requires confirmation to clear), and Python removal are complete. Errors are redacted before leaving storage. JSONL diagnostic logs were retired by the 2026-09-19 decision. Native Rules status/apply and rule-specific `sources:get/set` were connected for the fixed Codex/Claude/OpenCode targets, with fail-closed external-change checks. Native Hooks status/apply and hook-specific `sources:get/set` (`hooks.claude/hooks.codex`) were connected for Claude `~/.claude/settings.json` signature-set merging and Codex `~/.codex/hooks.json` whole-file writes, also fail closed. The candidate at acceptance baseline `5a110be3` proves only the older plan→confirm interaction. Source, browser, isolated CLI, and uncommitted dirty-DMG acceptance for direct apply have been completed. The final clean DMG was rebuilt after final commit `a01d0f5` and independently verified by the lead reviewer; see [delivery receipts](../docs/goal-rust-gui.md).
 
-Rust dispatcher 已实现本地 stdio 与远程 HTTP MCP 的 `mcp:status`（只读）与真实 `mcp:apply`。定义与分配保存在 `native-manager.db` 的 SQLite 表中，支持 Claude JSON、Codex TOML 和 OpenCode JSON；OpenCode 需在对应 Agent definition 配置 `mcp_config` 目标。逐助手支持 `add`、`update`、`enable`、`disable`、`remove`，库级支持 `enable`、`disable`、`remove`；`mcp:status` 只读零写，真实 `apply` 具备排他锁、操作审计、CAS 和回滚保护，`env` 在 SQLite definition/binding 中只持久化字面量 `${VAR}` 形式的环境变量引用；status、诊断与操作日志不展示或保存解析后的真实值；真实 apply 执行时从进程环境解析，并按目标 codec 写入 Claude、Codex 或 OpenCode 的目标客户端配置，目标文件的明文由文件权限与客户端安全边界保护。远程定义含 `url`（仅允许 `https://` 或本机回环 `http://localhost` / `http://127.0.0.1`）与可选 `headers`（值只允许 `${VAR}` 占位符），与 stdio 字段互斥；headers 以引用形式写入（Claude `${VAR}`、Codex `env_http_headers`、OpenCode `{env:VAR}`），明文不落盘。
+Public `*:plan` and `--dry-run` entry points are retired and rejected.
 
-`system:audit` 已接入 Rust dispatcher 及其 Tauri offline 桥接：只读聚合 agents/skills/mcp/rules/hooks/aliases/secrets 与 runtime/storage 状态。`secrets:status` 只读检查已启用 MCP 定义中的合法 `${VAR}`，先从用户明确选择的外部 `.env` 文件解析，再回退进程环境；只输出变量名、来源与布尔状态。`secrets:source` 只保存外部文件路径，`secrets:set` 只写该文件，`secrets:migrate-legacy` 在外部文件完整写入成功后才删除历史 `secret_values` 表。密钥取值和外部文件路径都不进入配置备份，状态、诊断和操作记录也不输出取值；畸形定义固定脱敏失败。设置页高级管理可达 Aliases、更新中心等页面，Aliases 原生 `aliases:status/apply` 已接线。按 2026-09-12 产品裁决，Tools 域、快照（`snapshots:*`）与 `system:converge` 已退役，相关页面、Tauri 白名单与契约 schema 已移除；`system:refresh-upstream` 已接线（探测缓存落 SQLite `upstream_probes` 表，三域 status 回填 freshness）。
+The Rust dispatcher implemented read-only `mcp:status` and real `mcp:apply` for local stdio and remote HTTP MCP. In that milestone, definitions and assignments were SQLite tables in `native-manager.db`, supporting Claude JSON, Codex TOML, and OpenCode JSON; OpenCode requires an `mcp_config` target in its Agent definition. Per-assistant actions were `add`, `update`, `enable`, `disable`, and `remove`; library actions were `enable`, `disable`, and `remove`. Status performs zero writes. Apply has exclusive locking, audit, CAS, and rollback. SQLite definition/binding `env` values persist only literal `${VAR}` references; status, diagnostics, and logs never expose or store resolved values. Apply resolves them from the process environment and uses the target codec to write client configuration; file permissions and client security boundaries protect target-file plaintext. Remote definitions use `url` (only `https://`, or loopback `http://localhost` / `http://127.0.0.1`) and optional `headers` whose values must be `${VAR}` placeholders, mutually exclusive with stdio fields. Headers are written as references (Claude `${VAR}`, Codex `env_http_headers`, OpenCode `{env:VAR}`), never plaintext.
 
-## 本地开发
+`system:audit` is connected to the Rust dispatcher and Tauri offline bridge, aggregating agents/skills/mcp/rules/hooks/aliases/secrets and runtime/storage read-only. `secrets:status` checks valid `${VAR}` references in enabled MCP definitions, resolves from the explicitly selected external `.env` file before falling back to the process environment, and returns only variable names, sources, and booleans. `secrets:source` stores only the external path; `secrets:set` writes only that file. `secrets:migrate-legacy` removes the old `secret_values` table only after all external writes succeed. Neither secret values nor external-file paths enter configuration backups; status, diagnostics, and operation records omit values. Malformed definitions fail with fixed, redacted messages. Advanced Settings exposes Aliases, the update center, and other pages; native `aliases:status/apply` is connected. The 2026-09-12 decision retired Tools, snapshots (`snapshots:*`), and `system:converge`, removing their pages, Tauri allowlist entries, and contract schemas. `system:refresh-upstream` is connected: probes are cached in SQLite `upstream_probes`, and freshness is returned by status for the three domains.
+
+## Local development
 
 ```sh
 pnpm install --frozen-lockfile
@@ -27,16 +29,16 @@ cargo test --manifest-path src-tauri/Cargo.toml
 cargo check --manifest-path src-tauri/Cargo.toml --all-targets
 ```
 
-CLI 查询在仓库根目录运行。测试数据库使用临时 `AGENT_MANAGER_DATA_DIR`，不覆盖 HOME。
+Run CLI queries from the repository root. Test databases use a temporary `AGENT_MANAGER_DATA_DIR`, without overriding HOME.
 
-### macOS 打包与独立验收（限定 Darwin x86_64）
+### macOS packaging and standalone acceptance (Darwin x86_64 only)
 
 ```sh
 pnpm run build:macos
-# 产物生成在 src-tauri/target/release/bundle/dmg/，可直接运行验证脚本或使用 npm script：
+# Outputs are in src-tauri/target/release/bundle/dmg/; use the verification script or npm script:
 pnpm run verify:macos
-# 或显式指定 DMG 路径：
+# Or provide the DMG path explicitly:
 ../scripts/verify-macos-dmg.sh src-tauri/target/release/bundle/dmg/Agent\ Manager_0.1.0_x64.dmg
 ```
 
-打包脚本自动配置 `--remap-path-prefix` 剥离本机构建 HOME 与源码根路径。验收脚本完成只读挂载、脱离仓库隔离复制、无 Python 动态与静态依赖检查、脱敏校验，以及在 `/` 下使用最小 PATH 与隔离目录的 5 秒存活、源码零引用和退出检测。2026-09-09 已在 Darwin x86_64 实机构建 DMG 并通过上述独立运行验收；该包早于当前 Rules/MCP/Hooks/Secrets 与只读 `system:audit` 实现，不能证明当前 Rules/MCP/Hooks/Secrets/system:audit GUI 业务闭环。更新的安装包验收状态见根 README（验收基线提交 `5a110be3`，旧版交互证据）。Apple 签名、公证、arm64 真机运行、Linux、Windows 和更新发布仍未验证。
+The build script sets `--remap-path-prefix` to strip the local build HOME and source-root paths. Verification mounts read-only, copies outside the repository, checks static and dynamic Python independence and redaction, then checks five-second survival, zero source references, and exit from `/` with a minimal PATH and isolated directories. A DMG was built and passed standalone acceptance on a real Darwin x86_64 machine on 2026-09-09. That package predates the current Rules/MCP/Hooks/Secrets and read-only `system:audit` implementation and cannot prove their GUI workflows. See the root README for newer package status (baseline `5a110be3` is evidence for the old interaction). Apple signing, notarization, real arm64 execution, Linux, Windows, and update releases were still unverified at this milestone; later status is recorded in [platform status](../docs/GUI-PLATFORM-STATUS.md).

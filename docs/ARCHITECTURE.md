@@ -1,14 +1,14 @@
-# 当前架构
+# Current Architecture
 
-Rust 原生库读写 `native-manager.db`，CLI 和 Tauri bridge 共同调用它，React UI 通过 bridge 展示结果并提交请求。
+The native Rust library reads and writes `native-manager.db`. CLI and the Tauri bridge call the same library; the React UI displays results and submits requests through the bridge.
 
-## 事实源
+## Source of truth
 
-生效配置以各助手真实文件与目录为准（见 `GUI-REDESIGN.md`「数据模型：实际配置为准」）。`native-manager.db` 保存应用偏好、助手识别定义、归属记录与未生效的备选；设置位于 `app_settings` 表。没有第二份可写 JSON settings，也没有共享 profile 层。缺库读取不建库，写入通过 SQLite 事务初始化 schema 并记录 operation log。
+Actual assistant files and directories are authoritative for active configuration (see "Data model: the actual configuration is authoritative" in `GUI-REDESIGN.md`). `native-manager.db` stores app preferences, assistant recognition definitions, ownership records, and inactive alternatives; settings are in `app_settings`. There is no second writable JSON settings file or shared profile layer. Reads do not create a missing database; writes initialize schemas through SQLite transactions and record operation logs.
 
-内置 policy 是编译进 Rust 的只读默认值。`policy:get` 只返回 builtin 与 sqlite 归属；写入参数固定为 `--layer local`，持久化层名为 `sqlite`。
+Built-in policy consists of read-only defaults compiled into Rust. `policy:get` reports only builtin and sqlite ownership. Writes use `--layer local`, while the persisted layer is named `sqlite`.
 
-## 调用边界
+## Call boundaries
 
 ```text
 CLI ───────┐
@@ -17,26 +17,26 @@ Tauri ─────┘
 React UI ── Tauri commands
 ```
 
-入口是 `execute(Context, Request) -> Envelope`。Tauri 先验证命令、参数和 run id，再在阻塞线程调用共享库。
+The entry point is `execute(Context, Request) -> Envelope`. Tauri validates the command, arguments, and run id, then calls the shared library on a blocking thread.
 
-## 保存与执行
+## Saving and execution
 
-定义保存只更新 SQLite，不链接或执行外部动作。`status` 只读读取状态；资源执行按钮直接触发真实 `apply`，`apply` 内部包含 preflight/写前校验、精确 scope、排他锁、外部修改检测、CAS/条件回滚与审计，并记录 operation log。
+Saving definitions updates only SQLite; it neither links resources nor performs external actions. `status` reads state without writes. Resource execution triggers real `apply`, including preflight/write validation, exact scope, an exclusive lock, external-change detection, CAS/conditional rollback, auditing, and an operation log.
 
-Skill、MCP 等资源及其逐助手分配支持新增、编辑/更新、启用、禁用、删除。助手界面只管理账号（独立配置目录 + 启动命令）与主账号的实时额度状态栏；安装、升级、卸载和完整定义编辑不再作为产品入口，软件生命周期由原安装渠道负责。既有生命周期字段和引擎能力第一阶段兼容保留。
+Skills, MCP, and other resources and their per-assistant assignments support add, edit/update, enable, disable, and remove. The assistant UI manages only accounts (separate configuration directory + launch command) and the main account's live-quota status line. Installation, upgrades, uninstallation, and full definition editing are no longer product entry points; software lifecycle belongs to the original installation channel. Existing lifecycle fields and engine capabilities remain for compatibility in phase one.
 
-公共 `*:plan` 与 `--dry-run` 入口已退役，调用会被拒绝。
+Public `*:plan` and `--dry-run` entry points are retired and rejected.
 
-## MCP 原生域
+## Native MCP domain
 
-MCP 以各助手配置文件里的实际条目为准（Claude `~/.claude.json` 顶层 `mcpServers`、Codex `config.toml` 的 `[mcp_servers.*]`，以及配置了 `mcp_config` 的其他助手与实例）。`mcp:status` 只读零写，直接列出各助手里的 stdio 与远程条目：env/headers 引用原样、字面量掩码，未建模的官方字段原样保留，每条给出写入基准 `base`。
+MCP uses actual entries in assistant configuration files: top-level `mcpServers` in Claude `~/.claude.json`, `[mcp_servers.*]` in Codex `config.toml`, and other assistants/instances with `mcp_config`. Read-only `mcp:status` directly lists stdio and remote entries. Env/header references are preserved, literals masked, and unmodeled official fields preserved; every entry has a write baseline `base`.
 
-`mcp:apply` 逐条 `add`、`edit`、`enable`、`disable`、`remove`、`copy`、`forget`，每次只动一个助手里的一个条目；锁内重读并核对 `--base`，外部改过则拒绝（「已在外部修改」），写前自检、原子替换、回读与条件回滚、审计只记动作与范围。停用：Codex/OpenCode 写官方 `enabled = false`；Claude Code 移出条目并存停用快照（`mcp_saved`），疑似凭据的字面量转存到用户选择的外部 `.env` 文件、快照里只留 `${VAR}`。变量取值来自外部文件，找不到时回退进程环境；SQLite 只保存外部文件路径与「已保存未生效」项，status、诊断与操作日志不展示或保存真实值。旧版服务库定义与分配表在首次 MCP 写入时迁移，迁移不改配置文件。细节见 [MCP 配置指南](MCP-CONFIG-GUIDE.md)。
+`mcp:apply` performs `add`, `edit`, `enable`, `disable`, `remove`, `copy`, or `forget`, changing only one entry for one assistant per action. It re-reads and checks `--base` under the lock, refuses external changes, validates before writing, replaces atomically, reads back, and conditionally rolls back. Audit records only action and scope. To disable, Codex/OpenCode write official `enabled = false`; Claude Code removes the entry and stores a disabled snapshot (`mcp_saved`). Literals resembling credentials move to the user-selected external `.env` file, leaving only `${VAR}` in the snapshot. Variables resolve from that file, falling back to the process environment. SQLite stores only the external-file path and saved but inactive items; status, diagnostics, and logs neither expose nor store actual values. Old service-library definitions and assignment tables migrate on the first MCP write without changing configuration files. See the [MCP configuration guide](MCP-CONFIG-GUIDE.md).
 
-## 默认渠道与状态
+## Default channels and status
 
-Claude Code 和 Codex 的内置默认都是官方 `native` 命令；brew 只作为实际检测来源，不改变默认。
+Claude Code and Codex default to official `native` commands. Brew is shown only when detected as the actual source and does not alter defaults.
 
-`system:audit` 已接入 Rust dispatcher：只读聚合 agents/skills/mcp/rules/aliases/secrets 与 runtime/storage 状态。`secrets:status` 只读输出变量名、来源与是否可解析；`secrets:source` 验证并保存外部 `.env` 路径，要求普通文件、Unix 权限 `600`、合法 `KEY=VALUE`，且不能位于应用数据目录；`secrets:set` 只写该文件；MCP 停用 Claude 条目时转存疑似凭据也只写该文件，同名不同值拒绝覆盖。`secrets:migrate-legacy` 由用户显式触发，先写外部文件，全部成功后才删除历史 `secret_values` 表。设置页「配置工具」可达客户端诊断、Aliases 与 Secrets，Aliases 原生 `aliases:status/apply` 已接线。按 2026-09-12 产品裁决，Tools 域、快照（`snapshots:*`）与 `system:converge` 已退役，相关页面、Tauri 白名单与契约 schema 已移除；`system:refresh-upstream` 已接线（探测缓存落 SQLite `upstream_probes` 表，agents/mcp/skills 三域 status 回填 freshness）。
+`system:audit` is connected to the Rust dispatcher and aggregates agents/skills/mcp/rules/aliases/secrets and runtime/storage read-only. `secrets:status` reports variable names, sources, and resolvability only. `secrets:source` validates and saves an external `.env` path: a regular file, Unix mode `600`, valid `KEY=VALUE`, outside the app data directory. `secrets:set` writes only that file; moving credential-like Claude MCP literals on disable does too, rejecting a same-name variable with a different value. Explicit `secrets:migrate-legacy` writes the external file first and removes the old `secret_values` table only after every write succeeds. Settings Configuration Tools opens client diagnostics, Aliases, and Secrets; native `aliases:status/apply` is connected. The 2026-09-12 decision retired Tools, snapshots (`snapshots:*`), and `system:converge`, removing their pages, Tauri allowlist entries, and contract schemas. `system:refresh-upstream` is connected: probes are cached in SQLite `upstream_probes` and agents/mcp/skills status returns freshness.
 
-SQLite 核心、Tauri bridge、设置页面、主要资源页面布局、Agent 原生生命周期、Skills 原生域、MCP 原生域、Rules、Aliases 原生域（以实际配置为准，`sources:get/set` 已退役）、Runs SQLite `operation_logs` 及 Python 清理已完成。Agent 与 Skills 的 apply 均使用跨进程文件锁与结构化操作审计；内置技能仓库只作推荐来源，添加后才成为用户集合；集合与 Skill×Agent 均支持更新、启停与移除，并通过内容快照与安全软连接落地；status 只读零写。SQLite `operation_logs` 记录任务操作历史，并在新增操作记录时按 `log_retention_days` 清理过期记录（0 禁用自动清理）；执行中心支持 `runs:clear` 二次确认清空。按 2026-09-19 裁决，JSONL 结构化诊断日志与 `logs:clear` 已退役，envelope 不再带 `log_file`；错误消息出库前仍统一走脱敏。2026-09-22 起接入配置、MCP、Rules、Hooks、Aliases 与实例生成的文件都以实际配置为准：status 输出实际内容与写入基准 `base`，apply 带 `--base`，外部修改时拒绝并提示刷新，不再有「接管 = 用库覆盖」（见 [GUI 重设计](GUI-REDESIGN.md)「数据模型：实际配置为准」）。旧版 DMG/GUI E2E 不证明本轮直接 apply 新交互；本轮源码、浏览器、隔离 CLI 与未提交候选 dirty DMG 验收已完成，最终 clean DMG 已在最终提交 `a01d0f5` 后重建并通过主审独立 verify（[交付回执](goal-rust-gui.md)）。签名、公证、arm64 真机运行、Linux、Windows 和更新发布仍未验证。详见 [契约](../contract/README.md) 与 [平台状态](GUI-PLATFORM-STATUS.md)。
+The following acceptance records describe earlier milestones; later platform evidence is in [platform status](GUI-PLATFORM-STATUS.md). SQLite core, the Tauri bridge, Settings, main resource layouts, native Agent/Skills/MCP/Rules/Aliases (actual-configuration model; `sources:get/set` retired), Runs SQLite `operation_logs`, and Python removal are complete. Agent and Skills apply use cross-process locks and structured audits. The built-in skill repository is only a recommendation until added as a user collection. Collections and Skill×Agent entries support update, enable/disable, and removal through snapshots and safe symlinks; status performs zero writes. SQLite `operation_logs` records history and prunes expired records when adding a record according to `log_retention_days` (0 disables pruning); `runs:clear` requires confirmation. The 2026-09-19 decision retired JSONL diagnostics and `logs:clear`; envelopes no longer carry `log_file`, while errors still pass through redaction. Since 2026-09-22, connection configuration, MCP, Rules, Hooks, Aliases, and instance-generated files use actual configuration: status returns actual content and `base`, and apply requires `--base`. External changes are rejected with refresh guidance; adoption no longer means overwriting files from the database (see the data-model section in [GUI redesign](GUI-REDESIGN.md)). Old DMG/GUI E2E results do not prove this round's direct-apply interaction. Source, browser, isolated CLI, and uncommitted dirty-DMG acceptance were completed; the final clean DMG was rebuilt after commit `a01d0f5` and independently verified by the lead reviewer ([delivery receipts](goal-rust-gui.md)). Signing, notarization, real arm64 execution, Linux, Windows, and update releases were not verified at that milestone. See the [contract](../contract/README.md) and [platform status](GUI-PLATFORM-STATUS.md).

@@ -1,58 +1,58 @@
 # Changelog
 
-本项目的重要变更记录在此文件。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
+All notable changes are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and version numbers follow [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - 未发布
+## [0.1.0] - Unreleased
 
-首个公开候选版本。公开发布仍受仓库外部条件阻塞：GitHub Actions 计费、仓库 Secrets/Variables（当前均为 0）、Apple Developer ID 与公证、Windows 签名材料、Linux/Windows/arm64 真机验收、updater 真实链路验收均未就绪；尚未创建 tag 或 GitHub Release，安装包暂未提供。
+First public release candidate. At this candidate milestone, public release remained blocked by external repository conditions: GitHub Actions billing, repository Secrets/Variables (both at 0), Apple Developer ID and notarization, Windows signing material, real-device acceptance on Linux/Windows/arm64, and end-to-end updater acceptance were not ready. No tag or GitHub Release had been created, and installers were not yet available. See the README and platform status for subsequent preview delivery.
 
-### 新增
+### Added
 
-- 六个资源域的完整管理闭环：
-  - 助手：安装、升级、卸载内置助手（Claude Code、Codex）与自行添加的助手，如实检测实际安装来源。
-  - Skills：集合与单个技能的更新、启停与移除，内容快照与安全软连接落地。
-  - MCP 服务器：本地 stdio 与远程 HTTP 两类传输，按助手分配，支持 Claude JSON、Codex TOML、OpenCode JSON 三种客户端格式；支持从客户端现有配置发现导入。
-  - Rules：共享与助手专用规则，应用到 `~/.codex/AGENTS.md`、`~/.claude/CLAUDE.md` 与 `~/.config/opencode/AGENTS.md`。
-  - Hooks：Claude `~/.claude/settings.json` 合并写入与 Codex `~/.codex/hooks.json` 整文件写入。
-  - Shell Aliases：`~/.zshrc` 与 `~/.zprofile` 受管区块维护；只比受管区块，区块外的改动不影响同步。
-- `native-manager.db`（SQLite）作为唯一事实源；查询与状态读取只读零写。
-- 直接执行（apply）交互：写前校验、精确范围、排他锁、外部修改 fail-closed 拒绝覆盖、条件回滚与操作审计；卸载、移除定义、清空日志等破坏性动作二次确认。
-- MCP 密钥：定义里只存 `${VAR}` 引用；在「密钥」页选择一个权限为 `600` 的外部 `.env` 文件后，可直接填写或接管取值。外部文件优先、进程环境只读回退；数据库只保存文件路径，界面永不回显，取值不进操作记录与配置备份。历史数据库明文只显示数量，必须显式迁移，且外部文件全部写入成功后才清除旧表。
-- 上游更新检查（助手、MCP、Skills），探测结果缓存于 SQLite。
-- 任务操作记录（SQLite，保留期可配、清空需二次确认）；错误消息在出库前统一脱敏。
-- 助手接入配置：Claude Code 与 Codex 都可存多套接入方式，卡片上一个下拉切换，切换与写入是一条命令，保存即写入。Claude 写 `~/.claude/settings.json` 的 `env`（含 Bearer/x-api-key 两种认证、模型别名、小任务模型）；Codex 写 `~/.codex/config.toml` 的 `[model_providers.<名字>]` 与 `model_provider`（令牌用 `env_key` 指向变量名，不落盘）。
-- 助手状态栏：可选用本工具维护的那份，或保持你自己定义的不动。用本工具那份时会把助手推给状态栏的实时额度存一份，卡片上的额度因此与状态栏同屏。
-- 用量统计（`usage:status` / `scan` / `clear`）：从 Claude 的 `~/.claude/projects` 与 Codex 的 `~/.codex/sessions` 增量累加 token，按 UTC 小时聚合存库、界面按本地时区分组成天；内置 Anthropic 官方三个模型的单价（取自官方定价页，2026-09-20 核对），其余可在用量页填。没有单价的模型只报 token 不报钱。
-- 接入配置可用性检查（`agents:check`）：发一个最小真实请求验证地址、令牌与模型名，把 HTTP 结果翻成能照着做的话；令牌经 0600 临时文件交给 curl，不进命令行与审计。
-- 接入配置厂商预设：智谱 GLM、Kimi、DeepSeek（国内/国际）的官方端点与模型名一键填入，按形态分开（Claude 的 Anthropic 端点与 Codex 的 Responses 端点不是同一个地址）。只收厂商自营且有官方文档写明的端点，聚合中转站不收。
-- 跳过权限确认：Claude 写 `permissions.defaultMode`，Codex 写 `approval_policy` 与 `sandbox_mode`；需显式确认后才执行。
-- 上述写入按受管项 fail-closed：Claude 比键路径（`env.ANTHROPIC_*`、`API_TIMEOUT_MS`、`permissions.defaultMode`，以及指向本工具脚本时的 `statusLine`），Codex 比四个顶层键与带受管标记的 `[model_providers.*]` 段；外部改过这些就拒绝覆盖，其余内容（含注释与 MCP 域写的段）原样保留。
-- 前端顶层错误边界、自定义助手安装/升级确认、MCP 空态引导。
-- MIT 许可证、公开发布元数据与显式 Webview CSP；Bundle ID 定为 `io.github.ly87ing.agent-manager`。
-- 四平台发布管线（macOS dmg、Linux AppImage/deb、Windows NSIS/MSI）：草稿先行创建唯一 draft Release、矩阵按 releaseId 上传产物、收尾任务单写 updater `latest.json`、prerelease tag 支持、逐平台 SHA256 checksums、engine-rs 版本一致性门禁；Release 固定为 draft。
-- 命令面板（`⌘K`）：统一搜索助手、实例、技能集合、MCP、页面与常用动作，选资源跳到它所在页面，选动作走与页面相同的执行通道。
-- 托盘常用入口：唤回主界面、打开命令面板、直达接管中心；托盘不直接触发写操作。
-- Hooks 结构化编辑：按事件与命令逐行填写，保存时回填落盘结构并保留不展示的字段；原文编辑收进按需展开的入口。
-- 助手卡片可停用或启用助手（停用后不再为它维护技能、MCP 等资源，已装软件不受影响），移除定义后可限时撤销。
-- 总览提到一级导航；执行成功后说明何时生效（助手重启、终端新开窗口）。
-- 接管中心可清理断链与旧体系残留链接：只删链接本身，真实目录与仍有分配记录的条目会被拒绝。
-- 助手实例：同一个助手的多套独立配置，各自的配置目录、登录、会话、技能与 MCP，多个实例可同时使用互不干扰（用 `CLAUDE_CONFIG_DIR` / `CODEX_HOME` 隔离，全局配置不动）。实例即一条助手定义，因此技能矩阵与 MCP 分配天然支持逐实例；鉴权只登记变量名，Claude 在写入实例配置时解析、Codex 只写变量名。
-- 启动命令：在助手卡片上为每个助手设定固定启动方式——时区（常用时区置顶，可跟随全局或单独指定）、语言与每次都带上的扩展参数，实时预览最终写入终端配置的那一行；设置里的「终端快捷命令」改为按条增删改，原文编辑收进按需展开的入口。
-- 接管中心：扫描本机已有的助手、技能与 MCP 资源并按来源分类，勾选后批量纳入管理。官方路径与原生安装方案只标识、继续走各自的升级卸载方式；外部资源以软链接纳管——技能可登记为本机目录来源的集合，链接直接指向源目录，内容仍由原处维护并随其更新，停用只删链接不动源。
-- 启动参数预设：按各助手实际支持的参数给出常用档（含高权限全自动），由用户主动勾选；内置默认不再预置跳过权限确认的参数。快捷命令逐条回读终端配置里的实际取值，显示是否与设定一致。
-- 配置备份：导出为一个文件，导入前按类别列出会新增、改动与消失的条目（看差异只读不写）。备份只含定义与来源，不含密钥取值或外部密钥文件路径；换机器时需单独迁移私有 `.env` 文件。旧版含非空 `secrets` 段的备份会被拒绝导入。
-- 接管中心批量执行进度：显示进行到第几项、正在处理哪一项；失败那项跳过、后面继续。
-- 首次使用引导：全新环境在落地页给出三步上手路径，并直达接管中心；可关闭不再提示。
-- 启动命令与快捷命令可自由编排：一个实例可以挂多条启动命令，每条都能编辑、复制、删除；快捷命令支持改名与复制。
-- 目标被本工具以外改过时的「接管原内容」入口覆盖规则与快捷命令（此前只有 Hooks 有，其余两域无路可走）。
-- 合并写入的目标只检测本工具写的那部分：改 `~/.claude/settings.json` 或实例配置里自己的设置，不再被判成外部修改、不再需要每次接管。
-- 接管已有的 MCP 会把原配置里填好的密钥一并接过来，保持原样可用；原来就是变量引用的仍需在「密钥」页填一次。
-- 技能集合的范围改为勾选：先选「全部技能」还是「只用其中这些」，后者直接勾来源里发现的技能，不用手敲目录名。
-- 总览页新增同步状态：一个地方看清六个域里哪些配置还没落到助手里，安全的一键全部同步；被外部改过、要你先决定的单独列出并指向对应页面。
-- 启动参数预设覆盖 Claude Code、Codex、Antigravity、Grok、Kimi 五个助手，各自的权限档按官方参数给出，勾选即用。
-- macOS 打包与独立包验收脚本（构建路径脱敏、只读挂载、隔离存活运行，已签名时如实检查公证票据）。
+- Complete management workflows for six resource domains:
+  - Assistants: install, upgrade, and uninstall built-in assistants (Claude Code, Codex) and user-added assistants, with truthful detection of the actual installation source.
+  - Skills: update, enable, disable, and remove collections and individual skills; deploy content snapshots through safe symlinks.
+  - MCP servers: local stdio and remote HTTP transports, assignments per assistant, Claude JSON / Codex TOML / OpenCode JSON codecs, and discovery/import from existing client configuration.
+  - Rules: shared and assistant-specific rules applied to `~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`, and `~/.config/opencode/AGENTS.md`.
+  - Hooks: merge into Claude `~/.claude/settings.json` and write the whole Codex `~/.codex/hooks.json` file.
+  - Shell aliases: maintain managed blocks in `~/.zshrc` and `~/.zprofile`; compare only managed blocks, so outside changes do not affect synchronization.
+- `native-manager.db` (SQLite) as the source of truth in the original definition model; queries and status reads perform zero writes.
+- Direct apply interaction: validation before writing, exact scope, exclusive locking, fail-closed refusal to overwrite external changes, conditional rollback, and operation auditing. Destructive actions such as uninstalling, removing definitions, and clearing logs require confirmation.
+- MCP secrets: definitions store only `${VAR}` references. After selecting an external `.env` file with mode `600` on Secrets, values can be entered or adopted directly. The external file takes precedence, with the process environment as a read-only fallback. The database stores only the file path; the UI never reveals values, and operation records and configuration backups omit them. Historical database plaintext is reported only as a count and requires explicit migration; the old table is removed only after all external-file writes succeed.
+- Upstream update checks for assistants, MCP, and skills, with probe results cached in SQLite.
+- SQLite operation history with configurable retention and confirmation before clearing. Error messages are redacted before leaving storage.
+- Assistant connection configuration: multiple connection presets for Claude Code and Codex, switched through a dropdown on the card. Switching and writing are one command; saving writes immediately. Claude writes `env` in `~/.claude/settings.json` (Bearer/x-api-key authentication, model aliases, and a small-task model). Codex writes `[model_providers.<name>]` and `model_provider` in `~/.codex/config.toml` (tokens use an `env_key` variable name rather than being stored on disk).
+- Assistant status lines: use this tool's version or leave a user-defined version unchanged. When this tool's version is used, it records live quota supplied by the assistant so card quota matches the status line.
+- Usage statistics (`usage:status` / `scan` / `clear`): incrementally total tokens from Claude `~/.claude/projects` and Codex `~/.codex/sessions`, aggregate by UTC hour in storage, and group into local-time days in the UI. Built-in prices for three official Anthropic models were checked against the official pricing page on 2026-09-20; other prices can be entered on Usage. Models without a price show tokens only.
+- Connection availability checks (`agents:check`): send a minimal real request to validate endpoint, token, and model, then turn the HTTP result into actionable guidance. Tokens reach curl through a mode-0600 temporary file, never command arguments or the audit trail.
+- Provider presets for official Zhipu GLM, Kimi, and DeepSeek (domestic/international) endpoints and models. Presets are separated by API shape: Claude Anthropic and Codex Responses endpoints differ. Only provider-operated endpoints documented by their official sources are included; aggregating relays are excluded.
+- Permission-confirmation bypass: write Claude `permissions.defaultMode` or Codex `approval_policy` and `sandbox_mode` only after explicit confirmation.
+- Fail-closed writes compare only managed items: Claude key paths (`env.ANTHROPIC_*`, `API_TIMEOUT_MS`, `permissions.defaultMode`, and `statusLine` when pointing to this tool's script), and Codex's four top-level keys and managed `[model_providers.*]` sections. Changes to these items block overwriting; all other content, including comments and MCP-owned sections, is preserved.
+- A top-level frontend error boundary, confirmation for custom-assistant installation/upgrades, and MCP empty-state guidance.
+- MIT license, public-release metadata, explicit Webview CSP, and bundle ID `io.github.ly87ing.agent-manager`.
+- Release pipeline for four platform targets (macOS DMG, Linux AppImage/DEB, Windows NSIS/MSI): create one draft Release first, upload matrix artifacts by releaseId, generate updater `latest.json` once in the final job, support prerelease tags, produce per-platform SHA256 checksums, and gate engine-rs version consistency. Releases remain drafts.
+- Command palette (`⌘K`): search assistants, instances, skill collections, MCP, pages, and common actions. Resources open their page; actions use the same execution channel as page controls.
+- Tray shortcuts to the main window, command palette, and adoption center. The tray never triggers writes directly.
+- Structured hook editing by event and command. Saving reconstructs the on-disk structure and preserves hidden fields; raw editing is available on demand.
+- Enable/disable assistant cards. Disabling stops resource maintenance without changing installed software. Removing a definition offers time-limited undo.
+- Overview in top-level navigation, with post-success guidance about when changes take effect (restart the assistant or open a new terminal).
+- Adoption-center cleanup for broken links and links left by the old system. Only links are deleted; real directories and entries still assigned are rejected.
+- Assistant instances: separate configurations of the same assistant, each with its own directory, login, sessions, skills, and MCP. `CLAUDE_CONFIG_DIR` / `CODEX_HOME` isolate concurrent instances without changing global configuration. An instance is an assistant definition, so skill matrices and MCP assignments support it directly. Authentication stores variable names only; Claude resolves values when writing instance configuration, while Codex writes only the variable name.
+- Launch commands: configure each assistant's time zone (common zones first; inherit globally or override), language, and persistent extra arguments, with a live preview of the line written to terminal configuration. Settings terminal shortcuts use individual add/edit/delete controls; raw editing is available on demand.
+- Adoption center: scan existing local assistants, skills, and MCP resources, classify by source, and adopt selected items in a batch. Official paths and native installation methods are identified and retain their original upgrade/uninstall paths. External resources are managed through symlinks; a skill collection can register a local directory, linking directly to its source so external edits propagate. Disabling removes only the link.
+- Launch-argument presets based on each assistant's supported arguments, including fully automatic high-permission modes, selected explicitly by the user. Built-in defaults no longer include permission-bypass arguments. Shortcuts read back actual terminal values and show whether they match the settings.
+- Single-file configuration backups. Before import, list additions, changes, and removals by category; diff inspection is read-only. Backups contain definitions and sources, never secret values or external secrets-file paths. Private `.env` files must be moved separately between machines. Older backups with a nonempty `secrets` section are rejected.
+- Batch adoption progress showing the current item and count. Failed items are skipped and processing continues.
+- First-run guidance with a three-step path and a direct link to the adoption center; dismissible permanently.
+- Flexible launch commands and shortcuts: multiple launch commands per instance, each editable, copyable, and removable; shortcuts can be renamed and copied.
+- Adopt Existing Content for externally changed rules and shortcuts (previously available only for hooks).
+- Merged writes compare only the portion owned by this tool. User edits to unrelated settings in `~/.claude/settings.json` or instance configuration no longer count as conflicts or require repeated adoption.
+- Adopting existing MCP entries includes already configured secret values to preserve usability; existing variable references still require one entry on Secrets.
+- Skill collection scope selected with checkboxes: all skills or a chosen subset of discovered skills, without typing directory names.
+- Overview synchronization status for all six domains, with one action to synchronize safe items. Externally modified items requiring a decision are separate and link to their resource page.
+- Launch-argument presets for Claude Code, Codex, Antigravity, Grok, and Kimi, using official permission arguments.
+- macOS packaging and standalone acceptance scripts: redact build paths, mount read-only, run in isolation, and truthfully check notarization tickets when signed.
 
-### 移除
+### Removed
 
-- Python 实现与 `manage.sh` 入口；CLI 与桌面端现共用同一 Rust 库。
-- 公共 plan/dry-run 入口；写操作仅通过真实 apply 完成。
+- Python implementation and `manage.sh` entry point. CLI and desktop now share one Rust library.
+- Public plan/dry-run entry points. Writes occur only through real apply.
