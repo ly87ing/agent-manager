@@ -1,6 +1,6 @@
 import type { EngineElement } from "../lib/contract";
 import type { McpAgentCell, McpObserved, McpSpec } from "../lib/observed";
-import { Pencil, Share2, Trash2 } from "lucide-react";
+import { Pencil, PlugZap, Share2, Trash2 } from "lucide-react";
 import type { AccountGroup } from "../lib/accounts";
 import { AccountCells, AccountSwitch, RowActions, type CellTone } from "./AccountGrid";
 import { mcpBrief, mcpEntrySummary } from "./McpAssignmentRow";
@@ -68,6 +68,7 @@ export function McpServerCard({
   onAddFromSaved,
   onForget,
   onConfigureSecrets,
+  onCheck,
   dependencies = [],
   onOpenProgram,
 }: {
@@ -89,6 +90,8 @@ export function McpServerCard({
   onAddFromSaved: (element: EngineElement) => void;
   onForget: (element: EngineElement) => void;
   onConfigureSecrets?: (variable: string) => void;
+  /** 测试连接：像助手那样连一次。 */
+  onCheck?: (element: EngineElement) => void;
 }) {
   const spec = element.spec as unknown as McpSpec;
   const name = element.id.replace(/^mcp:/, "");
@@ -156,6 +159,18 @@ export function McpServerCard({
           }}
         />
         <RowActions>
+          {onCheck && first && (
+            <button
+              type="button"
+              data-testid={`check-${element.id}`}
+              aria-label={`测试 ${name} 的连接`}
+              title="测试连接（运行一次它的命令或请求它的地址，不改配置）"
+              onClick={() => onCheck(element)}
+              className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <PlugZap className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          )}
           {editable && (
             <button
               type="button"

@@ -61,6 +61,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         // 以实例的实际配置更新实例定义：只写库，不动实例文件
         ("profiles", "adopt") => true,
         ("mcp" | "aliases", "preview") => true,
+        // 测试连接：运行条目里的命令或请求地址一次，只返回结果，不写文件、不写库
+        ("mcp", "check") => true,
         // 用户逐环境确认后同时更新定义与实际配置文件
         ("profiles", "apply-definition") => true,
         // 把默认环境的权限、状态栏、规则与 MCP 一次性带进实例：只补实例没有的
@@ -271,6 +273,10 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--dest", ArgValueKind::FilePath));
             specs.push(("--collection", ArgValueKind::ElementId));
+        }
+        ("mcp", "check") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--agent", ArgValueKind::ElementId));
         }
         ("agents", "auth-status") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -779,6 +785,7 @@ mod tests {
             "usage:sessions",
             "mcp:status",
             "mcp:preview",
+            "mcp:check",
             "mcp:apply",
             "skills:status",
             "skills:apply",

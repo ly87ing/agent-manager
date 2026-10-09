@@ -509,15 +509,17 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ) => crate::native_skills::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("SKILL_ERROR", format!("{err:#}"))),
-        ("mcp", "status" | "preview" | "apply") => crate::native_mcp::dispatch(ctx, request)
-            .map(|(data, notes)| {
-                let warnings = notes
-                    .into_iter()
-                    .map(|note| diagnostic("MCP_NOTICE", None, note))
-                    .collect();
-                (data, warnings)
-            })
-            .map_err(|err| DispatchError::new("MCP_ERROR", format!("{err:#}"))),
+        ("mcp", "status" | "preview" | "apply" | "check") => {
+            crate::native_mcp::dispatch(ctx, request)
+                .map(|(data, notes)| {
+                    let warnings = notes
+                        .into_iter()
+                        .map(|note| diagnostic("MCP_NOTICE", None, note))
+                        .collect();
+                    (data, warnings)
+                })
+                .map_err(|err| DispatchError::new("MCP_ERROR", format!("{err:#}")))
+        }
         // 规则以实际文件为准：apply 写文件（取锁），模板保存/删除只写库
         ("rules", "status" | "apply" | "save-template" | "delete-template") => {
             crate::native_rules::handle(ctx, request)

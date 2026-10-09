@@ -71,6 +71,33 @@ describe("McpPage：实际条目为主", () => {
     expect(calls.some((call) => call.command === "policy:get" || call.command === "policy:set")).toBe(false);
   });
 
+  it("测试连接：选账号后运行一次 mcp:check，显示服务与工具，不调用任何写命令", async () => {
+    const checks: string[][] = [];
+    const { calls } = renderWithEngine(<McpPage />, {
+      ...routes(),
+      "mcp:check": async (args: string[]) => {
+        checks.push(args);
+        return makeEnvelope({
+          domain: "mcp", action: "check", server: "fs", agent: args[3], ok: true, stage: "done",
+          message: "连接成功，提供 2 个工具", server_info: { name: "fs-mcp", version: "1.0.0" },
+          tool_count: 2, tools: ["read_file", "write_file"], detail: null, elapsed_ms: 1234,
+        }, { command: "mcp.check" });
+      },
+    });
+    await expandAll();
+    await userEvent.click(screen.getByTestId("check-mcp:fs"));
+    const dialog = await screen.findByRole("dialog", { name: "测试连接 · fs" });
+    expect(dialog).toHaveTextContent("不改任何配置");
+    await userEvent.click(within(dialog).getByTestId("mcp-check-agent-codex"));
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
+    const result = await within(dialog).findByTestId("mcp-check-result");
+    expect(result).toHaveTextContent("连接成功，提供 2 个工具");
+    expect(result).toHaveTextContent("fs-mcp 1.0.0");
+    expect(result).toHaveTextContent("read_file、write_file");
+    expect(checks).toEqual([["--only", "mcp:fs", "--agent", "codex"]]);
+    expect(calls.some((call) => call.command === "mcp:apply" || call.command === "mcp:preview")).toBe(false);
+  });
+
   it("某个助手的文件读不了：顶部说明，其他助手照常", async () => {
     const status = mcpStatusData();
     status.targets = mcpTargets({ codex: { error: "配置文件解析失败: TOML 语法错误" } });

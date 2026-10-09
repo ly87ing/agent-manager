@@ -11,8 +11,10 @@
 //! - `write`：单条目写入的新字节计算与写前自检
 //! - `status` / `preflight` / `apply`：只读状态、写入计划、执行
 //! - `policy_view`：定义形态校验（policy:set / config:import / 已保存定义）
+//! - `check`：测试连接（像助手那样连一次，只返回结果）
 
 pub mod apply;
+pub mod check;
 pub mod codecs;
 pub mod entry;
 pub mod inventory;
@@ -82,6 +84,8 @@ pub fn dispatch(ctx: &Context, req: &Request) -> Result<(Value, Vec<String>)> {
             Ok((json!({ "files": files }), plan.warnings))
         }
         "mcp:apply" => apply::apply(ctx, req),
+        // 测试连接：用户点了才运行条目里的命令或请求地址；只返回结果，不落盘
+        "mcp:check" => Ok((check::check(ctx, req)?, Vec::new())),
         _ => bail!("mcp 域不支持命令 '{}'", req.command),
     }
 }

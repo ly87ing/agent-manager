@@ -8,6 +8,7 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import { mcpEntrySummary } from "../components/McpAssignmentRow";
 import { AccountHeader } from "../components/AccountGrid";
 import { McpRemoveDialog, type McpRemovePreview } from "../components/McpRemoveDialog";
+import { McpCheckDialog } from "../components/McpCheckDialog";
 import { McpServerCard } from "../components/McpServerCard";
 import { McpServerFormDialog, type McpFilePreview, type McpFormMode, type McpFormPayload } from "../components/McpServerFormDialog";
 import { PageError, PageLoading } from "../components/PageState";
@@ -81,6 +82,7 @@ export default function McpPage({
   const [removing, setRemoving] = useState<EngineElement | null>(null);
   const [pendingForget, setPendingForget] = useState<EngineElement | null>(null);
   const [editingSecret, setEditingSecret] = useState<string | null>(null);
+  const [checking, setChecking] = useState<EngineElement | null>(null);
 
   useEffect(() => {
     if (!importPayload || !query.data?.ok) return;
@@ -482,11 +484,14 @@ export default function McpPage({
                 onAddFromSaved={openAddFromSaved}
                 onForget={setPendingForget}
                 onConfigureSecrets={setEditingSecret}
+                onCheck={setChecking}
               />
             ))}
           </ul>
         </div>
       )}
+
+      {checking && <McpCheckDialog element={checking} nameOf={nameOfAgent} onClose={() => setChecking(null)} />}
 
       {form && (
         <McpServerFormDialog

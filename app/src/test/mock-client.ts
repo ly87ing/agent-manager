@@ -606,6 +606,11 @@ function demoEnvelopes(): Record<string, Envelope> {
     "profiles:status": profilesStatus,
     "usage:status": usageStatus,
     "usage:scan": makeEnvelope({ domain: "usage", action: "scan", files: 3, bytes: 24_576 }, { command: "usage.scan" }),
+    "mcp:check": makeEnvelope({
+      domain: "mcp", action: "check", server: "demo", agent: "claude-code", ok: true, stage: "done",
+      message: "连接成功，提供 3 个工具", server_info: { name: "demo-mcp", version: "1.4.0" },
+      tool_count: 3, tools: ["search", "fetch", "summarize"], detail: null, elapsed_ms: 2310,
+    }, { command: "mcp.check" }),
     "usage:sessions": makeEnvelope({
       domain: "usage",
       action: "sessions",

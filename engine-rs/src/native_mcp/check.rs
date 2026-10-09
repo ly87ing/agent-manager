@@ -1,0 +1,746 @@
+//! 测试连接：像助手那样连一次某个账号里的 MCP 条目，结果只返回、不落盘。
+//!
+//! - 命令型（stdio）：用用户的 PATH 启动条目里的命令，按 MCP 协议发 `initialize`、
+//!   `notifications/initialized`、`tools/list`，拿到工具清单后关掉进程。
+//! - 地址型（Streamable HTTP）：用系统的 curl 依次 POST 同样三条消息，带上条目的请求头；
+//!   请求头经 stdin 交给 curl（`-H @-`），不出现在进程参数里。旧的 SSE 传输不检测。
+//!
+//! 变量引用按各助手的写法取值（本工具的密钥文件优先，其次进程环境）；有变量取不到值就不启动，
+//! 直接说缺哪个。命令可能自己下载依赖（如 npx），所以只在用户点「测试连接」时运行。
+//! 输出里出现的变量取值一律打码，再经统一脱敏。
+
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
+use std::time::{Duration, Instant};
+
+use anyhow::{anyhow, bail, Result};
+use serde_json::{json, Value};
+
+use super::entry::{env_ref, HeaderVal, Transport, View};
+use super::inventory;
+use super::model::{canonicalize_agent_id, is_valid_server_name};
+use super::targets::Format;
+use crate::native::{Context, Request};
+
+const PROTOCOL_VERSION: &str = "2025-06-18";
+/// 命令型默认等这么久（首次 npx 要下载）；条目写了 startup_timeout_sec 时用它的。
+const STDIO_TIMEOUT: Duration = Duration::from_secs(30);
+const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
+/// 报告里最多列这么多个工具名。
+const TOOL_NAMES: usize = 30;
+const STDERR_TAIL: usize = 600;
+
+struct Outcome {
+    ok: bool,
+    /// 停在哪一步：variables / start / initialize / tools / done。
+    stage: &'static str,
+    message: String,
+    server: Option<Value>,
+    tools: Option<Vec<String>>,
+    detail: Option<String>,
+}
+
+impl Outcome {
+    fn fail(stage: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            stage,
+            message: message.into(),
+            server: None,
+            tools: None,
+            detail: None,
+        }
+    }
+}
+
+fn parse_args(req: &Request) -> Result<(String, String)> {
+    let mut only = None;
+    let mut agent = None;
+    let mut iter = req.args.iter();
+    while let Some(arg) = iter.next() {
+        let slot = match arg.as_str() {
+            "--only" => &mut only,
+            "--agent" => &mut agent,
+            other => bail!("mcp:check 不接受参数 '{other}'"),
+        };
+        let value = iter
+            .next()
+            .filter(|value| !value.starts_with("--"))
+            .ok_or_else(|| anyhow!("参数 '{arg}' 缺少参数值"))?;
+        if slot.replace(value.clone()).is_some() {
+            bail!("参数 '{arg}' 重复");
+        }
+    }
+    let only = only.ok_or_else(|| anyhow!("缺少 --only mcp:<name>"))?;
+    let server = only
+        .strip_prefix("mcp:")
+        .filter(|name| is_valid_server_name(name))
+        .ok_or_else(|| anyhow!("--only 只接受 mcp:<name>，得到 '{only}'"))?;
+    let agent = agent.ok_or_else(|| anyhow!("缺少 --agent"))?;
+    Ok((server.to_string(), canonicalize_agent_id(&agent)))
+}
+
+/// 文本里的 `${NAME}`（Claude）/ `{env:NAME}`（OpenCode）按助手的写法换成取值。
+/// Codex 不在字符串里展开变量，原样返回。取不到值时返回变量名。
+fn expand(
+    format: &Format,
+    text: &str,
+    used: &mut Vec<String>,
+) -> std::result::Result<String, String> {
+    let (open, close) = match format {
+        Format::ClaudeJson => ("${", "}"),
+        Format::OpenCodeJson => ("{env:", "}"),
+        _ => return Ok(text.to_string()),
+    };
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(open) {
+        let after = &rest[start + open.len()..];
+        let Some(end) = after.find(close) else { break };
+        let inner = &after[..end];
+        // Claude 支持 ${NAME:-默认值}
+        let (name, default) = match inner.split_once(":-") {
+            Some((name, default)) if *format == Format::ClaudeJson => (name, Some(default)),
+            _ => (inner, None),
+        };
+        if !crate::secret_values::valid_var_name(name) {
+            out.push_str(&rest[..start + open.len()]);
+            rest = after;
+            continue;
+        }
+        let value = match (crate::secret_values::lookup(name), default) {
+            (Some(value), _) => value,
+            (None, Some(default)) => default.to_string(),
+            (None, None) => return Err(name.to_string()),
+        };
+        used.push(value.clone());
+        out.push_str(&rest[..start]);
+        out.push_str(&value);
+        rest = &after[end + close.len()..];
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+fn resolve_ref(name: &str, used: &mut Vec<String>) -> std::result::Result<String, String> {
+    let value = crate::secret_values::lookup(name).ok_or_else(|| name.to_string())?;
+    used.push(value.clone());
+    Ok(value)
+}
+
+/// 去掉输出里的变量取值，再走统一脱敏。
+fn scrub(text: &str, secrets: &[String]) -> String {
+    let mut out = text.to_string();
+    for secret in secrets.iter().filter(|value| value.len() >= 4) {
+        out = out.replace(secret.as_str(), "***");
+    }
+    crate::sanitize::sanitize_diagnostic_message(&out)
+}
+
+fn request(id: u64, method: &str, params: Value) -> Value {
+    json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })
+}
+
+fn initialize() -> Value {
+    request(
+        1,
+        "initialize",
+        json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": { "name": "agent-manager", "version": env!("CARGO_PKG_VERSION") },
+        }),
+    )
+}
+
+const INITIALIZED: &str = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+
+/// 没等到响应的原因：进程关了输出（多半已退出），或到点了。
+enum Waited {
+    Exited,
+    Timeout,
+}
+
+/// 一个子进程：stdout 按行进通道，stderr 只留结尾一段。
+struct Running {
+    child: Child,
+    lines: Receiver<String>,
+    stderr: Receiver<Vec<u8>>,
+}
+
+impl Running {
+    fn spawn(mut command: Command, stdin: Option<&[u8]>) -> std::io::Result<Self> {
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command.spawn()?;
+        if let Some(data) = stdin {
+            if let Some(mut pipe) = child.stdin.take() {
+                let _ = pipe.write_all(data);
+            }
+        }
+        let (tx, lines) = channel();
+        let stdout = child.stdout.take().expect("piped stdout");
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let (tx, stderr) = channel();
+        let mut pipe = child.stderr.take().expect("piped stderr");
+        std::thread::spawn(move || {
+            let mut tail = Vec::new();
+            let mut buf = [0u8; 1024];
+            while let Ok(n) = pipe.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                tail.extend_from_slice(&buf[..n]);
+                if tail.len() > STDERR_TAIL * 4 {
+                    tail.drain(..tail.len() - STDERR_TAIL * 4);
+                }
+            }
+            let _ = tx.send(tail);
+        });
+        Ok(Self {
+            child,
+            lines,
+            stderr,
+        })
+    }
+
+    fn send(&mut self, message: &str) -> bool {
+        match self.child.stdin.as_mut() {
+            Some(pipe) => pipe
+                .write_all(format!("{message}\n").as_bytes())
+                .and_then(|_| pipe.flush())
+                .is_ok(),
+            None => false,
+        }
+    }
+
+    /// 等 id 对上的响应；中间的通知、日志行跳过。
+    fn wait_for(&mut self, id: u64, deadline: Instant) -> std::result::Result<Value, Waited> {
+        loop {
+            let left = deadline
+                .checked_duration_since(Instant::now())
+                .ok_or(Waited::Timeout)?;
+            match self.lines.recv_timeout(left) {
+                Ok(line) => {
+                    let text = line
+                        .trim()
+                        .strip_prefix("data:")
+                        .unwrap_or(line.trim())
+                        .trim();
+                    if let Ok(value) = serde_json::from_str::<Value>(text) {
+                        if value.get("id").and_then(Value::as_u64) == Some(id) {
+                            return Ok(value);
+                        }
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => return Err(Waited::Timeout),
+                Err(RecvTimeoutError::Disconnected) => return Err(Waited::Exited),
+            }
+        }
+    }
+
+    /// 剩下的 stdout 全部收齐（进程自己结束时用）。
+    fn drain(&mut self, deadline: Instant) -> Vec<String> {
+        let mut out = Vec::new();
+        while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+            match self.lines.recv_timeout(left) {
+                Ok(line) => out.push(line),
+                Err(_) => break,
+            }
+        }
+        out
+    }
+
+    /// 关 stdin 让服务自己退出，稍等后结束整个进程组；返回 stderr 结尾。
+    fn finish(mut self) -> String {
+        drop(self.child.stdin.take());
+        let until = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < until {
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        if !matches!(self.child.try_wait(), Ok(Some(_))) {
+            terminate(&mut self.child);
+        }
+        let _ = self.child.wait();
+        let tail = self
+            .stderr
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap_or_default();
+        let text = String::from_utf8_lossy(&tail).to_string();
+        let start = text
+            .char_indices()
+            .rev()
+            .nth(STDERR_TAIL)
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+        text[start..].trim().to_string()
+    }
+}
+
+#[cfg(unix)]
+fn terminate(child: &mut Child) {
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    if unsafe { kill(-(child.id() as i32), 9) } != 0 {
+        let _ = child.kill();
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate(child: &mut Child) {
+    let _ = child.kill();
+}
+
+fn rpc_error(response: &Value) -> Option<String> {
+    let error = response.get("error")?;
+    Some(
+        error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("服务返回错误")
+            .to_string(),
+    )
+}
+
+fn server_info(response: &Value) -> Option<Value> {
+    response.pointer("/result/serverInfo").cloned()
+}
+
+fn tool_names(response: &Value) -> Option<Vec<String>> {
+    Some(
+        response
+            .pointer("/result/tools")?
+            .as_array()?
+            .iter()
+            .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_string))
+            .collect(),
+    )
+}
+
+/// 用户 PATH（登录 shell 里的那份）接在继承的 PATH 前面：从程序坞启动的应用 PATH 很短。
+fn user_path(ctx: &Context) -> (Vec<PathBuf>, std::ffi::OsString) {
+    let mut dirs = crate::native_programs::locate::user_path(ctx, false).dirs;
+    if let Some(inherited) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&inherited) {
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+    }
+    let joined = std::env::join_paths(&dirs).unwrap_or_default();
+    (dirs, joined)
+}
+
+fn check_stdio(ctx: &Context, format: &Format, view: &View) -> (Outcome, Vec<String>) {
+    let mut secrets = Vec::new();
+    let mut env = Vec::new();
+    for (key, raw) in &view.env {
+        let value = match env_ref(format, raw) {
+            Some(var) => resolve_ref(&var, &mut secrets),
+            None => expand(format, raw, &mut secrets),
+        };
+        match value {
+            Ok(value) => env.push((key.clone(), value)),
+            Err(var) => {
+                return (
+                    Outcome::fail(
+                        "variables",
+                        format!(
+                        "变量 {var} 没有取值：到「设置 › 密钥」里填上，或在启动本工具的环境里设置"
+                    ),
+                    ),
+                    secrets,
+                )
+            }
+        }
+    }
+    let mut args = Vec::new();
+    for raw in &view.args {
+        match expand(format, raw, &mut secrets) {
+            Ok(value) => args.push(value),
+            Err(var) => {
+                return (
+                    Outcome::fail("variables", format!("变量 {var} 没有取值")),
+                    secrets,
+                )
+            }
+        }
+    }
+    let command_text = match expand(format, &view.command, &mut secrets) {
+        Ok(value) => value,
+        Err(var) => {
+            return (
+                Outcome::fail("variables", format!("变量 {var} 没有取值")),
+                secrets,
+            )
+        }
+    };
+    let (dirs, path) = user_path(ctx);
+    let program = if command_text.contains('/') || command_text.contains('\\') {
+        Some(PathBuf::from(&command_text))
+    } else {
+        crate::native_programs::locate::find_all(
+            &crate::native_programs::locate::UserPath {
+                dirs,
+                stable: Vec::new(),
+                error: None,
+            },
+            &command_text,
+        )
+        .into_iter()
+        .next()
+    };
+    let Some(program) = program else {
+        return (
+            Outcome::fail("start", format!("在 PATH 里找不到命令 {command_text}")),
+            secrets,
+        );
+    };
+    let mut command = Command::new(&program);
+    command
+        .args(&args)
+        .env("PATH", &path)
+        .env("HOME", &ctx.home_dir)
+        .current_dir(&ctx.home_dir);
+    for (key, value) in &env {
+        command.env(key, value);
+    }
+    let timeout = view
+        .startup_timeout_sec
+        .filter(|sec| *sec > 0)
+        .map(|sec| Duration::from_secs(sec as u64))
+        .unwrap_or(STDIO_TIMEOUT);
+    let deadline = Instant::now() + timeout;
+    let mut running = match Running::spawn(command, None) {
+        Ok(running) => running,
+        Err(err) => return (Outcome::fail("start", format!("启动失败：{err}")), secrets),
+    };
+    let mut outcome = stdio_session(&mut running, deadline, timeout);
+    let stderr = running.finish();
+    if !outcome.ok && !stderr.is_empty() {
+        outcome.detail = Some(stderr);
+    }
+    (outcome, secrets)
+}
+
+fn stdio_session(running: &mut Running, deadline: Instant, timeout: Duration) -> Outcome {
+    if !running.send(&initialize().to_string()) {
+        return Outcome::fail("start", "命令启动后马上退出了");
+    }
+    let response = match running.wait_for(1, deadline) {
+        Ok(response) => response,
+        Err(Waited::Exited) => return Outcome::fail("initialize", "命令退出了，没有回应初始化"),
+        Err(Waited::Timeout) => {
+            return Outcome::fail(
+                "initialize",
+                format!(
+                    "{} 秒内没有回应初始化（输出的可能不是 MCP 协议）",
+                    timeout.as_secs()
+                ),
+            )
+        }
+    };
+    if let Some(error) = rpc_error(&response) {
+        return Outcome::fail("initialize", format!("初始化被拒绝：{error}"));
+    }
+    let server = server_info(&response);
+    running.send(INITIALIZED);
+    running.send(&request(2, "tools/list", json!({})).to_string());
+    let tools = running
+        .wait_for(2, deadline)
+        .ok()
+        .and_then(|value| tool_names(&value));
+    Outcome {
+        ok: true,
+        stage: "done",
+        message: match &tools {
+            Some(tools) => format!("连接成功，提供 {} 个工具", tools.len()),
+            None => "连接成功，但没有列出工具".to_string(),
+        },
+        server,
+        tools,
+        detail: None,
+    }
+}
+
+/// 一次 POST：返回（响应头里的会话 id，id 对上的 JSON-RPC 响应）。
+fn http_post(
+    url: &str,
+    headers: &[(String, String)],
+    session: Option<&str>,
+    body: &Value,
+    want: Option<u64>,
+    deadline: Instant,
+) -> std::result::Result<(Option<String>, Option<Value>), String> {
+    let left = deadline
+        .checked_duration_since(Instant::now())
+        .ok_or("超时")?
+        .as_secs()
+        .max(1);
+    let mut header_text = format!(
+        "Content-Type: application/json\nAccept: application/json, text/event-stream\nMCP-Protocol-Version: {PROTOCOL_VERSION}\n"
+    );
+    for (name, value) in headers {
+        header_text.push_str(&format!("{name}: {value}\n"));
+    }
+    if let Some(id) = session {
+        header_text.push_str(&format!("Mcp-Session-Id: {id}\n"));
+    }
+    let mut command = Command::new("curl");
+    command.args([
+        "-sS",
+        "-i",
+        "--max-time",
+        &left.to_string(),
+        "-X",
+        "POST",
+        "-H",
+        "@-",
+        "--data-binary",
+        &body.to_string(),
+        url,
+    ]);
+    let mut running = Running::spawn(command, Some(header_text.as_bytes()))
+        .map_err(|err| format!("运行 curl 失败：{err}"))?;
+    drop(running.child.stdin.take());
+    let mut session_id = None;
+    let mut status = None;
+    let mut found = None;
+    let mut body_lines = Vec::new();
+    let mut in_body = false;
+    loop {
+        let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+            break;
+        };
+        let line = match running.lines.recv_timeout(left) {
+            Ok(line) => line,
+            Err(_) => break,
+        };
+        let line = line.trim_end_matches('\r').to_string();
+        if !in_body {
+            if line.starts_with("HTTP/") {
+                status = line
+                    .split_whitespace()
+                    .nth(1)
+                    .and_then(|code| code.parse::<u16>().ok());
+            } else if line.is_empty() {
+                // 100 Continue 之后还有一段响应头
+                in_body = status.is_some_and(|code| code >= 200);
+            } else if let Some((name, value)) = line.split_once(':') {
+                if name.trim().eq_ignore_ascii_case("mcp-session-id") {
+                    session_id = Some(value.trim().to_string());
+                }
+            }
+            continue;
+        }
+        if let Some(id) = want {
+            let text = line.strip_prefix("data:").unwrap_or(&line).trim();
+            if let Ok(value) = serde_json::from_str::<Value>(text) {
+                if value.get("id").and_then(Value::as_u64) == Some(id) {
+                    found = Some(value);
+                    break;
+                }
+            }
+        }
+        body_lines.push(line);
+    }
+    if found.is_none() {
+        body_lines.extend(running.drain(Instant::now() + Duration::from_millis(200)));
+    }
+    let stderr = running.finish();
+    let Some(code) = status else {
+        return Err(if stderr.is_empty() {
+            "没有收到响应".to_string()
+        } else {
+            stderr
+        });
+    };
+    if !(200..300).contains(&code) {
+        let body = body_lines.join(" ");
+        let snippet: String = body.chars().take(200).collect();
+        return Err(format!(
+            "HTTP {code}{}",
+            if snippet.trim().is_empty() {
+                String::new()
+            } else {
+                format!("：{}", snippet.trim())
+            }
+        ));
+    }
+    if found.is_none() {
+        if let Some(id) = want {
+            // 普通 JSON 响应可能跨行
+            let body = body_lines.join("\n");
+            found = serde_json::from_str::<Value>(body.trim())
+                .ok()
+                .filter(|value| value.get("id").and_then(Value::as_u64) == Some(id));
+        }
+    }
+    Ok((session_id, found))
+}
+
+fn check_remote(format: &Format, view: &View, raw: &Value) -> (Outcome, Vec<String>) {
+    let mut secrets = Vec::new();
+    if raw.get("type").and_then(Value::as_str) == Some("sse") {
+        return (
+            Outcome::fail("start", "旧的 SSE 传输暂不支持测试，只测 Streamable HTTP"),
+            secrets,
+        );
+    }
+    let url = match expand(format, &view.url, &mut secrets) {
+        Ok(url) => url,
+        Err(var) => {
+            return (
+                Outcome::fail("variables", format!("变量 {var} 没有取值")),
+                secrets,
+            )
+        }
+    };
+    let mut headers = Vec::new();
+    for (name, value) in &view.headers {
+        let resolved = match value {
+            HeaderVal::Ref(var) => resolve_ref(var, &mut secrets),
+            HeaderVal::Lit(text) => expand(format, text, &mut secrets),
+        };
+        match resolved {
+            Ok(value) if !value.contains('\n') && !value.contains('\r') => {
+                headers.push((name.clone(), value))
+            }
+            Ok(_) => {
+                return (
+                    Outcome::fail("variables", format!("请求头 {name} 的取值含换行")),
+                    secrets,
+                )
+            }
+            Err(var) => {
+                return (
+                    Outcome::fail(
+                        "variables",
+                        format!("变量 {var} 没有取值：到「设置 › 密钥」里填上"),
+                    ),
+                    secrets,
+                )
+            }
+        }
+    }
+    let deadline = Instant::now() + HTTP_TIMEOUT;
+    let (session, response) =
+        match http_post(&url, &headers, None, &initialize(), Some(1), deadline) {
+            Ok(result) => result,
+            Err(err) => {
+                return (
+                    Outcome::fail("initialize", format!("初始化失败：{err}")),
+                    secrets,
+                )
+            }
+        };
+    let Some(response) = response else {
+        return (
+            Outcome::fail(
+                "initialize",
+                "响应里没有初始化结果（地址可能不是 MCP 服务）",
+            ),
+            secrets,
+        );
+    };
+    if let Some(error) = rpc_error(&response) {
+        return (
+            Outcome::fail("initialize", format!("初始化被拒绝：{error}")),
+            secrets,
+        );
+    }
+    let server = server_info(&response);
+    let initialized: Value = serde_json::from_str(INITIALIZED).expect("static json");
+    let _ = http_post(
+        &url,
+        &headers,
+        session.as_deref(),
+        &initialized,
+        None,
+        deadline,
+    );
+    let tools = http_post(
+        &url,
+        &headers,
+        session.as_deref(),
+        &request(2, "tools/list", json!({})),
+        Some(2),
+        deadline,
+    )
+    .ok()
+    .and_then(|(_, value)| value)
+    .and_then(|value| tool_names(&value));
+    (
+        Outcome {
+            ok: true,
+            stage: "done",
+            message: match &tools {
+                Some(tools) => format!("连接成功，提供 {} 个工具", tools.len()),
+                None => "连接成功，但没有列出工具".to_string(),
+            },
+            server,
+            tools,
+            detail: None,
+        },
+        secrets,
+    )
+}
+
+/// `mcp:check --only mcp:<name> --agent <账号>`。
+pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
+    let (server, agent) = parse_args(req)?;
+    let inv = inventory::load(ctx)?;
+    let scan = inv
+        .scan(&agent)
+        .ok_or_else(|| anyhow!("没有账号 {agent} 的 MCP 配置"))?;
+    if let Some(error) = &scan.error {
+        bail!("{agent} 的 MCP 配置读不了：{error}");
+    }
+    let entry = scan
+        .entry(&server)
+        .ok_or_else(|| anyhow!("{agent} 里没有 MCP 服务 {server}"))?;
+    let view = entry
+        .view
+        .as_ref()
+        .map_err(|reason| anyhow!("条目无法识别：{reason}"))?;
+    let started = Instant::now();
+    let (outcome, secrets) = match view.transport {
+        Transport::Stdio => check_stdio(ctx, &scan.target.format, view),
+        Transport::Remote => check_remote(&scan.target.format, view, &entry.raw),
+    };
+    let tools = outcome.tools.as_ref();
+    Ok(json!({
+        "domain": "mcp",
+        "action": "check",
+        "server": server,
+        "agent": agent,
+        "ok": outcome.ok,
+        "stage": outcome.stage,
+        "message": scrub(&outcome.message, &secrets),
+        "server_info": outcome.server,
+        "tool_count": tools.map(Vec::len),
+        "tools": tools.map(|names| names.iter().take(TOOL_NAMES).cloned().collect::<Vec<_>>()),
+        "detail": outcome.detail.map(|text| scrub(&text, &secrets)),
+        "elapsed_ms": started.elapsed().as_millis() as u64,
+    }))
+}
