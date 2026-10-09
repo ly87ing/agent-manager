@@ -262,7 +262,11 @@ pub(crate) fn fallback_bin_dirs(home_dir: &Path) -> Vec<PathBuf> {
         return vec![
             home_dir.join(".local").join("bin"),
             // Codex 官方 install.ps1 的入口
-            local.join("Programs").join("OpenAI").join("Codex").join("bin"),
+            local
+                .join("Programs")
+                .join("OpenAI")
+                .join("Codex")
+                .join("bin"),
             appdata.join("npm"),
             local.join("Volta").join("bin"),
             home_dir.join(".bun").join("bin"),
@@ -526,19 +530,13 @@ pub(crate) fn detected_provider(home_dir: &Path, bin_path: &Path) -> &'static st
     {
         return "brew";
     }
+    let home = home_dir.canon().unwrap_or_else(|_| home_dir.to_path_buf());
     // Codex 官方独立安装器把版本放在 ~/.codex/packages/standalone 下；Windows 的 install.ps1
     // 经 %LOCALAPPDATA%\Programs\OpenAI\Codex\bin 的目录联接到达，入口不在 ~/.local/bin
-    if path
-        .replace('\\', "/")
-        .contains("/.codex/packages/standalone/")
-    {
+    if canonical.starts_with(home.join(".codex").join("packages").join("standalone")) {
         return "native";
     }
-    let native_dir = home_dir
-        .canon()
-        .unwrap_or_else(|_| home_dir.to_path_buf())
-        .join(".local")
-        .join("bin");
+    let native_dir = home.join(".local").join("bin");
     // 只 canonicalize launcher 的父目录，保留最终符号链接不展开
     let launcher_dir = bin_path
         .parent()
@@ -1088,6 +1086,12 @@ mod tests {
         std::fs::create_dir_all(&other).unwrap();
         std::fs::write(other.join("codex"), "").unwrap();
         assert_eq!(detected_provider(&home, &other.join("codex")), "system");
+        // 别的用户主目录里的独立安装不算这个账号的官方安装
+        let elsewhere = root.join("other-home");
+        assert_eq!(
+            detected_provider(&elsewhere, &entry_dir.join("codex")),
+            "system"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 }

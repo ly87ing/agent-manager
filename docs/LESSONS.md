@@ -17,6 +17,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - The recent-sessions cap test set file times from `1_800_000_000` (2027). A file written during the test was older than those, so "newest first" picked the wrong one (`750fc6d`, fixed before commit).
 - Seen 1× (2026-10-09).
 
+**A check chained before a commit must fail the chain when a test fails.**
+- `cargo test … | grep 'test result' | awk '{…sum…}' && git commit && git push` printed "1 failed" and still committed and pushed `cdd9369`, because `awk` exited 0. The failure was real: the new Codex standalone rule matched the developer's own `~/.codex` while the test used a temporary HOME, so the rule was narrowed to the account's home in the next commit.
+- End such a summary with `exit f>0` (or run the tests without a pipe) and use `set -o pipefail`.
+- Seen 1× (2026-10-09).
+
 ## Messages that say what happened
 
 **Tell "the program exited" apart from "it timed out".**
