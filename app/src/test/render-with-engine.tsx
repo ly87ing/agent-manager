@@ -43,3 +43,25 @@ export function renderWithEngine(
 }
 
 export { screen, within, userEvent };
+
+/** 打开的下拉弹出层里的选项（components/Select 渲染到 body）。 */
+function openOptions(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>('[role="listbox"] [role="option"]')];
+}
+
+/** 应用的下拉（components/Select）：打开后点值为 value 的一项。 */
+export async function chooseOption(trigger: HTMLElement, value: string): Promise<void> {
+  await userEvent.click(trigger);
+  const option = openOptions().find((item) => item.getAttribute("data-value") === value);
+  if (!option) throw new Error(`下拉里没有 ${value}：${openOptions().map((item) => item.getAttribute("data-value")).join(", ")}`);
+  await userEvent.click(option);
+}
+
+/** 下拉里的全部选项（值与文字）；读完关掉，不改当前值。 */
+export async function readOptions(trigger: HTMLElement): Promise<{ value: string; label: string }[]> {
+  await userEvent.click(trigger);
+  const options = openOptions().map((item) => ({ value: item.getAttribute("data-value") ?? "", label: item.textContent ?? "" }));
+  await userEvent.click(trigger);
+  return options;
+}
+

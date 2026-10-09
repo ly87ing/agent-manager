@@ -35,6 +35,7 @@ import { useBatchApply } from "../lib/useBatchApply";
 import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
+import { Select } from "../components/Select";
 
 const ACTIVE = new Set(["linked", "missing-link", "dead-link", "drifted"]);
 
@@ -286,33 +287,25 @@ export default function SkillsPage({
 
       <div className="flex flex-wrap items-center gap-2">
         <SearchInput value={search} onChange={setSearch} placeholder="搜索技能…" testId="skills-search" />
-        <select
-          aria-label="集合筛选"
-          data-testid="filter-collection-select"
+        <Select
+          label="集合筛选"
+          testId="filter-collection-select"
           value={collectionFilter}
-          onChange={(event) => setCollectionFilter(event.target.value)}
+          onChange={setCollectionFilter}
           className="rounded-md border bg-card px-2 py-1.5 text-sm"
-        >
-          <option value="all">全部集合</option>
-          {collections.map((col) => (
-            <option key={col.id} value={collName(col)}>{collName(col)}</option>
-          ))}
-        </select>
-        <select
-          aria-label="账号筛选"
-          data-testid="filter-agent-select"
+          options={[{ value: "all", label: "全部集合" }, ...collections.map((col) => ({ value: collName(col), label: collName(col) }))]}
+        />
+        <Select
+          label="账号筛选"
+          testId="filter-agent-select"
           value={agentFilter}
-          onChange={(event) => {
-            setAgentFilter(event.target.value);
-            if (event.target.value === "all") onResetAgent?.();
+          onChange={(next) => {
+            setAgentFilter(next);
+            if (next === "all") onResetAgent?.();
           }}
           className="rounded-md border bg-card px-2 py-1.5 text-sm"
-        >
-          <option value="all">全部账号</option>
-          {agentOptions.map((agent) => (
-            <option key={agent} value={agent}>{nameOf(agent)}</option>
-          ))}
-        </select>
+          options={[{ value: "all", label: "全部账号" }, ...agentOptions.map((agent) => ({ value: agent, label: nameOf(agent) }))]}
+        />
         <AttentionOnlyToggle checked={attentionOnly} count={attentionSubjects.size} onChange={setAttentionOnly} />
         <div className="ml-auto flex items-center gap-2">
           {agentFilter === "all" && pendingFill.length > 0 && (

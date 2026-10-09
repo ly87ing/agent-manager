@@ -19,6 +19,7 @@ import { inUseSkillCount } from "../lib/skillFill";
 import { CreatePlan } from "./CreatePlan";
 import type { CreatePreview, useAccountOps } from "../lib/useAccountOps";
 import { cn } from "../lib/utils";
+import { Select } from "./Select";
 
 type Ops = ReturnType<typeof useAccountOps>;
 
@@ -269,12 +270,14 @@ export function AccountDrawer({
 
           {!editing && type === "api" && presets.length > 0 && (
             <Field label="服务商">
-              <select data-testid="account-preset" value={presetId} onChange={(event) => choosePreset(event.target.value)} className={FIELD}>
-                <option value="custom">自定义</option>
-                {presets.map((item) => (
-                  <option key={item.id} value={item.id}>{item.label}</option>
-                ))}
-              </select>
+              <Select
+                label="服务商"
+                testId="account-preset"
+                value={presetId}
+                onChange={choosePreset}
+                className={FIELD}
+                options={[{ value: "custom", label: "自定义" }, ...presets.map((item) => ({ value: item.id, label: item.label }))]}
+              />
             </Field>
           )}
 

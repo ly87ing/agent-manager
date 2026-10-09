@@ -9,7 +9,7 @@ import {
   makePolicyData,
   makeRunEntry,
 } from "./fixtures";
-import { renderWithEngine, screen, userEvent } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent, chooseOption } from "./render-with-engine";
 import { mcpStatusData } from "./mcp-fixtures";
 
 /** 等集合出现，把收起的集合逐个展开（没有待处理的集合默认收起）。 */
@@ -116,7 +116,7 @@ describe("页内搜索：MCP 页", () => {
 
   it("账号筛选与搜索叠加（AND）：只剩该账号上的匹配条目", async () => {
     renderWithEngine(<McpPage />, mcpRoutes());
-    await userEvent.selectOptions(await screen.findByTestId("filter-agent-select"), "codex");
+    await chooseOption(await screen.findByTestId("filter-agent-select"), "codex");
     const input = await screen.findByTestId("mcp-search");
     await userEvent.type(input, "remote");
 
@@ -173,7 +173,7 @@ describe("页内搜索：技能页", () => {
     expect(screen.queryByText("query")).toBeNull();
 
     // 叠加集合筛选为另一集合：搜索词仍生效（AND）→ 无匹配结果
-    await userEvent.selectOptions(screen.getByTestId("filter-collection-select"), "data-libs");
+    await chooseOption(screen.getByTestId("filter-collection-select"), "data-libs");
     expect(await screen.findByTestId("skills-empty-state")).toHaveTextContent("无匹配结果");
 
     await userEvent.click(screen.getByRole("button", { name: "清除搜索关键词" }));

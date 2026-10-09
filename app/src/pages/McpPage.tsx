@@ -28,6 +28,7 @@ import { dependenciesOf } from "../components/DependencyChips";
 import type { ProgramsData } from "../lib/programs";
 import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
 import { encodeShareLink, type SharePayload } from "../lib/shareLink";
+import { Select } from "../components/Select";
 
 function cellsOf(element: EngineElement): Record<string, McpAgentCell> {
   return (element.observed as McpObserved).agents ?? {};
@@ -350,18 +351,14 @@ export default function McpPage({
 
       <div className="flex flex-wrap items-center gap-2">
         <SearchInput value={search} onChange={setSearch} placeholder="搜索服务…" testId="mcp-search" />
-        <select
-          aria-label="账号筛选"
-          data-testid="filter-agent-select"
+        <Select
+          label="账号筛选"
+          testId="filter-agent-select"
           value={agentFilter}
-          onChange={(e) => setAgentFilter(e.target.value)}
+          onChange={setAgentFilter}
           className="rounded-md border bg-card px-2 py-1.5 text-sm"
-        >
-          <option value="all">全部账号</option>
-          {agentColumns.map((agent) => (
-            <option key={agent} value={agent}>{nameOfAgent(agent)}</option>
-          ))}
-        </select>
+          options={[{ value: "all", label: "全部账号" }, ...agentColumns.map((agent) => ({ value: agent, label: nameOfAgent(agent) }))]}
+        />
         <AttentionOnlyToggle checked={attentionOnly} count={attentionSubjects.size} onChange={setAttentionOnly} />
         <div className="ml-auto flex items-center gap-2">
           {fillAllCount > 0 && (

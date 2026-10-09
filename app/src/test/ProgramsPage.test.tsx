@@ -168,7 +168,7 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     const { calls } = renderWithEngine(<ProgramsPage />, routes());
     await userEvent.click(await screen.findByTestId("program-install-npm:json"));
     const dialog = await screen.findByTestId("program-action-dialog");
-    expect(within(dialog).getByTestId("program-entry-dir")).toHaveValue("~/.local/bin");
+    expect(within(dialog).getByTestId("program-entry-dir")).toHaveAttribute("data-value", "~/.local/bin");
     await waitFor(() => expect(calls.filter((call) => call.command === "programs:preview")).toHaveLength(1));
     expect(calls.find((call) => call.command === "programs:preview")!.args).toEqual(["--program", "npm:json", "--action", "install", "--entry-dir", "~/.local/bin"]);
     await userEvent.click(within(dialog).getByTestId("program-allow-scripts"));

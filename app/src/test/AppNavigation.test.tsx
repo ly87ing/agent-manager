@@ -243,12 +243,12 @@ describe("App 顶层导航", () => {
     const skillsNav = within(nav).getByRole("button", { name: "技能" });
     expect(skillsNav).toHaveAttribute("aria-current", "page");
 
-    const agentSelect = (await screen.findByTestId("filter-agent-select")) as HTMLSelectElement;
-    expect(agentSelect.value).toBe("cc-work");
+    const agentSelect = await screen.findByTestId("filter-agent-select");
+    expect(agentSelect).toHaveAttribute("data-value", "cc-work");
 
     // 点击顶栏「技能」，重置为全部账号
     await userEvent.click(skillsNav);
-    expect(agentSelect.value).toBe("all");
+    expect(agentSelect).toHaveAttribute("data-value", "all");
   }, 15000);
 
   it("未实现的 mcp/rules status 返回 ok:false 与 data:{} 时，页面展示错误，顶层导航仍在且可切回账号", async () => {

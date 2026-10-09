@@ -3,7 +3,7 @@ import { fireEvent, waitFor } from "@testing-library/react";
 import SourcesPage from "../pages/SourcesPage";
 import type { Envelope } from "../lib/contract";
 import { makeApplyResult, makeElement, makeEnvelope, makePolicyData } from "./fixtures";
-import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent, within, chooseOption } from "./render-with-engine";
 
 /** 来源行的次要操作在「⋯」里：先打开这一行的菜单再取菜单项。 */
 async function menuItem(testId: string) {
@@ -756,7 +756,7 @@ describe("来源页：版本", () => {
     const { calls } = renderWithEngine(<SourcesPage />, versionRoutes());
     await userEvent.click(await menuItem("source-edit-archify"));
     const dialog = await screen.findByRole("dialog", { name: "编辑来源" });
-    await userEvent.selectOptions(within(dialog).getByTestId("collection-track-mode"), "tag");
+    await chooseOption(within(dialog).getByTestId("collection-track-mode"), "tag");
     await userEvent.type(within(dialog).getByTestId("collection-track-value"), "v*");
     await userEvent.click(within(dialog).getByTestId("collection-track-prerelease"));
     await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
@@ -774,7 +774,7 @@ describe("来源页：版本", () => {
     expect(screen.getByTestId("source-problem-archify")).toHaveTextContent("不认识的跟踪方式：nightly");
     await userEvent.click(await menuItem("source-edit-archify"));
     const dialog = await screen.findByRole("dialog", { name: "编辑来源" });
-    await userEvent.selectOptions(within(dialog).getByTestId("collection-track-mode"), "branch");
+    await chooseOption(within(dialog).getByTestId("collection-track-mode"), "branch");
     await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
     expect(await within(dialog).findByText("填分支名，例如 stable")).toBeInTheDocument();
   });

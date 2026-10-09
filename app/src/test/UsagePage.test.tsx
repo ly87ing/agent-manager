@@ -3,7 +3,7 @@ import { waitFor } from "@testing-library/react";
 import UsagePage from "../pages/UsagePage";
 import { vi } from "vitest";
 import { agentManagementFixture, makeAliasStatus, makeElement, makeEnvelope } from "./fixtures";
-import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent, within, chooseOption, readOptions } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
 function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelope> {
@@ -48,7 +48,7 @@ describe("用量页", () => {
     expect(screen.getByTestId("usage-account-claude")).toHaveTextContent("Claude · 主号");
     expect(screen.getByTestId("usage-trend")).toHaveTextContent("Claude · 主号");
     await userEvent.click(within(screen.getByTestId("usage-account-claude:work")).getByRole("button"));
-    expect(screen.getByTestId("usage-agent-filter")).toHaveValue("claude:work");
+    expect(screen.getByTestId("usage-agent-filter")).toHaveAttribute("data-value", "claude:work");
     expect(screen.queryByTestId("usage-by-account")).toBeNull();
   });
 
@@ -73,17 +73,18 @@ describe("用量页", () => {
     const codexRow = `usage-row-${today}-gpt-5.6-sol`;
 
     await screen.findByTestId(claudeRow);
-    await userEvent.selectOptions(screen.getByTestId("usage-agent-filter"), "codex");
+    await chooseOption(screen.getByTestId("usage-agent-filter"), "codex");
     expect(screen.queryByTestId(claudeRow)).toBeNull();
     expect(screen.getByTestId(codexRow)).toBeInTheDocument();
     expect(screen.getByTestId("usage-total-cost")).toHaveTextContent("$0.00");
     expect(screen.getByTestId("usage-unpriced")).toHaveTextContent("gpt-5.6-sol");
-    expect(screen.getByTestId("usage-model-filter")).toHaveTextContent("gpt-5.6-sol");
+    // 模型下拉只剩这个账号用过的模型
+    expect((await readOptions(screen.getByTestId("usage-model-filter"))).map((option) => option.value)).toEqual(["", "gpt-5.6-sol"]);
 
-    await userEvent.selectOptions(screen.getByTestId("usage-model-filter"), "gpt-5.6-sol");
+    await chooseOption(screen.getByTestId("usage-model-filter"), "gpt-5.6-sol");
     await userEvent.click(screen.getByTestId("usage-range-30"));
-    expect(screen.getByTestId("usage-agent-filter")).toHaveValue("");
-    expect(screen.getByTestId("usage-model-filter")).toHaveValue("");
+    expect(screen.getByTestId("usage-agent-filter")).toHaveAttribute("data-value", "");
+    expect(screen.getByTestId("usage-model-filter")).toHaveAttribute("data-value", "");
     expect(screen.getByTestId(claudeRow)).toBeInTheDocument();
     expect(screen.getByTestId(codexRow)).toBeInTheDocument();
     expect(screen.getByTestId("usage-total-cost")).toHaveTextContent("$10.00");
@@ -104,8 +105,8 @@ describe("用量页", () => {
     });
     renderWithEngine(<UsagePage />, withInstance);
     const filter = await screen.findByTestId("usage-agent-filter");
-    await waitFor(() => expect(filter).toHaveTextContent("Claude · cc-relay"));
-    await userEvent.selectOptions(filter, "claude:cc-relay");
+    await waitFor(async () => expect((await readOptions(filter)).map((option) => option.label)).toContain("Claude · cc-relay"));
+    await chooseOption(filter, "claude:cc-relay");
     expect(screen.getByTestId(`usage-row-${new Date().toISOString().slice(0, 10)}-relay-model`)).toBeInTheDocument();
     expect(screen.queryByTestId(`usage-row-${new Date().toISOString().slice(0, 10)}-claude-opus-5`)).toBeNull();
   });

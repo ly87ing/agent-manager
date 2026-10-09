@@ -3,7 +3,7 @@ import { waitFor } from "@testing-library/react";
 import SkillsPage from "../pages/SkillsPage";
 import type { Envelope } from "../lib/contract";
 import { makeApplyResult, makeElement, makeEnvelope, makePolicyData } from "./fixtures";
-import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent, within, chooseOption } from "./render-with-engine";
 
 /** 等集合出现，把收起的集合逐个展开（没有待处理的集合默认收起）。 */
 async function expandAll() {
@@ -278,20 +278,20 @@ describe("SkillsPage 三级视图", () => {
     status.data.elements.push(makeElement({ id: "skill:team", domain: "skills", spec: { url: "https://example.com/team.git" }, observed: { repo_cached: true, actions: ["update"] } }));
     renderWithEngine(<SkillsPage />, routes);
     expect(await screen.findByTestId("collection-card-team")).toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByTestId("filter-collection-select"), "agent-skills");
+    await chooseOption(screen.getByTestId("filter-collection-select"), "agent-skills");
     expect(screen.queryByTestId("collection-card-team")).toBeNull();
     expect(screen.getByTestId("collection-card-agent-skills")).toBeInTheDocument();
   });
 
   it("从账号页进来只看一个账号：每行直接给这个账号的操作，切回全部账号看汇总", async () => {
     renderWithEngine(<SkillsPage initialAgent="claude-code" />, skillsRoutes());
-    const agentSelect = (await screen.findByTestId("filter-agent-select")) as HTMLSelectElement;
-    expect(agentSelect.value).toBe("claude-code");
+    const agentSelect = await screen.findByTestId("filter-agent-select");
+    expect(agentSelect).toHaveAttribute("data-value", "claude-code");
     expect(await screen.findByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toBeInTheDocument();
     expect(screen.queryByTestId("action-update-skill:agent-skills/alpha-codex")).toBeNull();
 
-    await userEvent.selectOptions(agentSelect, "all");
-    expect(agentSelect.value).toBe("all");
+    await chooseOption(agentSelect, "all");
+    expect(agentSelect).toHaveAttribute("data-value", "all");
     // 链接损坏的行默认展开，codex 的状态可见
     expect(screen.getByTestId("action-update-skill:agent-skills/alpha-codex")).toBeInTheDocument();
     expect(screen.getByTestId("action-enable-skill:agent-skills/beta-codex")).toHaveAttribute("data-tone", "off");

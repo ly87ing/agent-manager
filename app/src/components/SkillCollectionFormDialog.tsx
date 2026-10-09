@@ -5,6 +5,7 @@ import { useDialogFocus } from "../lib/dialogFocus";
 import { type AvailableSkill, canAutoInclude, readScope, toSkillPaths } from "../lib/skillScope";
 import { cn } from "../lib/utils";
 import { TRACK_OPTIONS, trackFromForm, trackToForm, type TrackMode, type TrackSpec } from "../lib/skillTrack";
+import { Select } from "./Select";
 
 const AGENT_LABEL: Record<string, string> = { "claude-code": "Claude", codex: "Codex" };
 
@@ -177,17 +178,15 @@ export function SkillCollectionFormDialog({
                 <p className="mt-1 text-xs text-muted-foreground">推荐 HTTPS；也支持 SSH、git://、file://</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <label htmlFor="collection-track-mode" className="text-xs text-muted-foreground">跟踪</label>
-                  <select
+                  <Select
                     id="collection-track-mode"
-                    data-testid="collection-track-mode"
+                    label="跟踪方式"
+                    testId="collection-track-mode"
                     value={track.mode}
-                    onChange={(e) => setTrack({ mode: e.target.value as TrackMode, value: "", prerelease: false })}
+                    onChange={(next) => setTrack({ mode: next as TrackMode, value: "", prerelease: false })}
                     className="rounded-md border bg-background px-2 py-1 text-xs"
-                  >
-                    {TRACK_OPTIONS.map((option) => (
-                      <option key={option.mode} value={option.mode}>{option.label}</option>
-                    ))}
-                  </select>
+                    options={TRACK_OPTIONS.map((option) => ({ value: option.mode, label: option.label }))}
+                  />
                   {(track.mode === "tag" || track.mode === "branch" || track.mode === "branch-pattern" || track.mode === "pinned") && (
                     <input
                       data-testid="collection-track-value"

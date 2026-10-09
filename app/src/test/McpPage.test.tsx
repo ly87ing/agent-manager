@@ -5,7 +5,7 @@ import McpPage from "../pages/McpPage";
 import type { Envelope, StatusData } from "../lib/contract";
 import { makeApplyResult, makeEnvelope } from "./fixtures";
 import { BASE_CLAUDE_FS, BASE_CLAUDE_SNAPSHOT, BASE_CODEX_FS, BASE_CODEX_REMOTE, mcpStatusData, mcpTargets } from "./mcp-fixtures";
-import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent, within, chooseOption } from "./render-with-engine";
 import { decodeShareLink } from "../lib/shareLink";
 
 /** 等服务列表出现（开关直接在行上，不用再展开）。 */
@@ -123,7 +123,7 @@ describe("McpPage：实际条目为主", () => {
     let dialog = await screen.findByRole("dialog", { name: /编辑 fs/ });
     expect(within(dialog).getByTestId("server-edit-targets")).toHaveTextContent("保存后写入：claude-code、codex");
     // 两个账号内容不同：提示保存后统一，并可切换预填来源
-    await userEvent.selectOptions(within(dialog).getByTestId("server-edit-base"), "codex");
+    await chooseOption(within(dialog).getByTestId("server-edit-base"), "codex");
     dialog = await screen.findByRole("dialog", { name: /编辑 fs/ });
     expect(within(dialog).getByTestId("server-name-input")).toBeDisabled();
     expect(within(dialog).getByTestId("server-transport-remote")).toBeDisabled();

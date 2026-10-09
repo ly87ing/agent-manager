@@ -7,6 +7,7 @@ import { runEngine, engineErrorMessage } from "../lib/engine";
 import { useExecutions } from "../lib/execution";
 import type { ProgramElement, ProgramPlan, ProgramPlanStep } from "../lib/programs";
 import { engineKeys } from "../lib/queries";
+import { Select } from "./Select";
 
 export type ProgramActionKind = "install" | "upgrade" | "switch" | "restore" | "remove" | "adopt" | "unadopt";
 
@@ -161,17 +162,17 @@ export function ProgramActionDialog({
         {withEntry && (
           <label className="block space-y-1">
             <span className="text-xs text-muted-foreground">入口目录（在 PATH 上，本工具只在这里放登记过的链接）</span>
-            <select
-              data-testid="program-entry-dir"
+            <Select
+              label="命令入口放在哪个目录"
+              testId="program-entry-dir"
               value={chosenEntry}
-              onChange={(event) => setChosenEntry(event.target.value)}
-              className="w-full rounded-md border bg-card px-2 py-1.5 font-mono text-xs"
-            >
-              {entryCandidates.length === 0 && <option value="">（PATH 上没有可用的目录）</option>}
-              {entryCandidates.map((dir) => (
-                <option key={dir} value={dir}>{dir}</option>
-              ))}
-            </select>
+              onChange={setChosenEntry}
+              mono
+              className="w-full rounded-md border bg-card px-2 py-1.5 text-xs"
+              options={entryCandidates.length === 0
+                ? [{ value: "", label: "（PATH 上没有可用的目录）" }]
+                : entryCandidates.map((dir) => ({ value: dir, label: dir }))}
+            />
           </label>
         )}
         {program.kind === "npm" && ["install", "upgrade", "adopt"].includes(action) && (

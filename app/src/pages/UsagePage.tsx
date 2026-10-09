@@ -27,6 +27,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "../lib/utils";
 import { useDialogFocus } from "../lib/dialogFocus";
+import { Select } from "../components/Select";
 
 /**
  * 用量：从助手自己的会话记录里累加 token，按模型算花了多少。
@@ -303,32 +304,29 @@ export default function UsagePage() {
         </div>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           账号
-          <select
-            data-testid="usage-agent-filter"
-            aria-label="按账号筛选用量"
+          <Select
+            testId="usage-agent-filter"
+            label="按账号筛选用量"
             value={agent}
-            onChange={(event) => {
-              setAgent(event.target.value);
+            onChange={(next) => {
+              setAgent(next);
               setModel("");
             }}
-            className="rounded-md border border-input bg-card px-2 py-1.5 text-xs text-foreground"
-          >
-            <option value="">全部账号</option>
-            {agents.map((item) => <option key={item} value={item}>{labelOf(item)}</option>)}
-          </select>
+            className="rounded-md border border-input bg-card px-2 py-1.5 text-xs"
+            options={[{ value: "", label: "全部账号" }, ...agents.map((item) => ({ value: item, label: labelOf(item) }))]}
+          />
         </label>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           模型
-          <select
-            data-testid="usage-model-filter"
-            aria-label="按模型筛选用量"
+          <Select
+            testId="usage-model-filter"
+            label="按模型筛选用量"
             value={model}
-            onChange={(event) => setModel(event.target.value)}
-            className="max-w-56 rounded-md border border-input bg-card px-2 py-1.5 font-mono text-xs text-foreground"
-          >
-            <option value="">全部模型</option>
-            {models.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
+            onChange={setModel}
+            mono
+            className="max-w-56 rounded-md border border-input bg-card px-2 py-1.5 text-xs"
+            options={[{ value: "", label: "全部模型" }, ...models.map((item) => ({ value: item, label: item }))]}
+          />
         </label>
         {filtersActive && (
           <button

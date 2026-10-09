@@ -20,6 +20,7 @@
 
 - The Rust toolchain, Node.js, and pnpm are the development tools for the native version. Do not make Python or the old make pipeline prerequisites.
 - Before changing behavior or shared interfaces, read history, callers, and nearby tests, and use `change-discipline`. Use `solution-shaping` for designs and migrations, `verification` for acceptance (including UI), `reader-facing-writing` for documentation, and `artifact-hygiene` for temporary artifacts.
+- UI changes follow [UI rules](docs/UI-RULES.md); check every page a change touches at about 1000 px and 760 px.
 - Run the smallest relevant check first, then the corresponding full checks: `cargo test --manifest-path engine-rs/Cargo.toml`, `cargo test --manifest-path app/src-tauri/Cargo.toml`; in `app/`, run `pnpm test:unit run` and `pnpm build`.
 - For documentation changes, check links, commands, and consistency with the goals. Do not restore retired requirements to satisfy assertions about old wording. State explicitly when verification was not run or did not exercise the change.
 - Do not delete tests, weaken assertions, or skip checks to conceal valid failures. Remove Python-only tests with the retired implementation; migrate still-applicable data safety, scope isolation, and negative cases to Rust.

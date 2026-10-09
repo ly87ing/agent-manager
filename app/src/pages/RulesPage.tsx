@@ -21,6 +21,7 @@ import { type RulesFillRow, rulesFillArgs, rulesFillRows } from "../lib/rulesFil
 import { useAccountNames } from "../lib/useAccountNames";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
+import { Select } from "../components/Select";
 
 const PAGE_NOTE =
   "编辑直接写入规则文件。模板保存在本机，推荐规则来自技能来源；覆盖未知内容前会自动备份。";
@@ -730,19 +731,14 @@ function ApplyContentDialog({
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground">内容来源</span>
           {sources.length > 1 ? (
-            <select
-              aria-label="内容来源"
+            <Select
+              label="内容来源"
               value={source.key}
-              onChange={(event) => setSourceKey(event.target.value)}
+              onChange={setSourceKey}
               disabled={directApply.executing}
               className="w-full rounded border bg-background px-2 py-1.5 text-sm"
-            >
-              {sources.map((item) => (
-                <option key={item.key} value={item.key}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
+              options={sources.map((item) => ({ value: item.key, label: item.label }))}
+            />
           ) : (
             <p className="text-sm font-medium">{source.label}</p>
           )}
@@ -750,19 +746,14 @@ function ApplyContentDialog({
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground">写入目标</span>
           {targets.length > 1 ? (
-            <select
-              aria-label="写入目标"
+            <Select
+              label="写入目标"
               value={target.id}
-              onChange={(event) => setTargetId(event.target.value)}
+              onChange={setTargetId}
               disabled={directApply.executing}
               className="w-full rounded border bg-background px-2 py-1.5 text-sm"
-            >
-              {targets.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {nameOf(item)}
-                </option>
-              ))}
-            </select>
+              options={targets.map((item) => ({ value: item.id, label: nameOf(item) }))}
+            />
           ) : (
             <p className="text-sm font-medium">{nameOf(target)}</p>
           )}

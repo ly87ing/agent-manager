@@ -14,6 +14,7 @@ import {
   renderAliasPreview,
 } from "../lib/aliasCommand";
 import type { AliasFilePreview } from "../lib/useAliasSource";
+import { Select } from "./Select";
 
 /** 下拉里的「自定义…」哨兵值：选中后切到可输入状态。 */
 const CUSTOM_OPTION = "__custom__";
@@ -252,28 +253,26 @@ export function AliasEditorDialog({
                       </button>
                     </div>
                   ) : (
-                    <select
+                    <Select
                       id="alias-timezone"
+                      label="时区"
                       value={timezone}
-                      onChange={(event) => {
-                        if (event.target.value === CUSTOM_OPTION) {
+                      onChange={(next) => {
+                        if (next === CUSTOM_OPTION) {
                           setTzCustom(true);
                           setTimezone("");
                           return;
                         }
-                        setTimezone(event.target.value);
+                        setTimezone(next);
                       }}
-                      data-testid="alias-timezone-select"
+                      testId="alias-timezone-select"
                       className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs"
-                    >
-                      <option value="">不设置</option>
-                      {timeZones.map((zone) => (
-                        <option key={zone} value={zone}>
-                          {zone}
-                        </option>
-                      ))}
-                      <option value={CUSTOM_OPTION}>自定义…</option>
-                    </select>
+                      options={[
+                        { value: "", label: "不设置" },
+                        ...timeZones.map((zone) => ({ value: zone, label: zone })),
+                        { value: CUSTOM_OPTION, label: "自定义…" },
+                      ]}
+                    />
                   )}
                 </div>
                 <div>
@@ -302,28 +301,26 @@ export function AliasEditorDialog({
                       </button>
                     </div>
                   ) : (
-                    <select
+                    <Select
                       id="alias-lang"
+                      label="语言"
                       value={lang}
-                      onChange={(event) => {
-                        if (event.target.value === CUSTOM_OPTION) {
+                      onChange={(next) => {
+                        if (next === CUSTOM_OPTION) {
                           setLangCustom(true);
                           setLang("");
                           return;
                         }
-                        setLang(event.target.value);
+                        setLang(next);
                       }}
-                      data-testid="alias-lang-select"
+                      testId="alias-lang-select"
                       className="w-full rounded border border-input bg-background px-2 py-1.5 text-xs"
-                    >
-                      <option value="">不设置</option>
-                      {LANG_OPTIONS.map((item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ))}
-                      <option value={CUSTOM_OPTION}>自定义…</option>
-                    </select>
+                      options={[
+                        { value: "", label: "不设置" },
+                        ...LANG_OPTIONS.map((item) => ({ value: item, label: item })),
+                        { value: CUSTOM_OPTION, label: "自定义…" },
+                      ]}
+                    />
                   )}
                 </div>
               </div>

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import RulesPage from "../pages/RulesPage";
 import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
 import type { Envelope } from "../lib/contract";
-import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent, within, chooseOption, readOptions } from "./render-with-engine";
 
 const SOURCE_BODY = "- Use Chinese (Simplified).\n- Prefer the simplest local change.\n";
 const SOURCE_RULE = { id: "agent-skills/core", collection: "agent-skills", name: "core", body: SOURCE_BODY, revision: "rev-core", local: false };
@@ -235,13 +235,13 @@ describe("RulesPage：实际文件为准", () => {
     const dialog = screen.getByRole("dialog", { name: "更换 Codex 全局规则 的规则" });
     const sourceSelect = within(dialog).getByRole("combobox", { name: "内容来源" });
     // 来源先列来源规则，再列全部已保存模板
-    expect(within(sourceSelect).getAllByRole("option").map((option) => option.getAttribute("value"))).toEqual([
+    expect((await readOptions(sourceSelect)).map((option) => option.value)).toEqual([
       "rule:agent-skills/core",
       "template:legacy-claude",
       "template:tpl-team",
       "template:tpl-backup",
     ]);
-    await userEvent.selectOptions(sourceSelect, "template:tpl-team");
+    await chooseOption(sourceSelect, "template:tpl-team");
     const diff = within(dialog).getByTestId("rules-diff");
     // 每行是「行号 · 标记 · 正文」三格，只比正文
     const linesOf = (kind: string) => Array.from(diff.querySelectorAll(`[data-kind="${kind}"]`)).map((line) => line.lastElementChild?.textContent);
@@ -263,14 +263,14 @@ describe("RulesPage：实际文件为准", () => {
     // Codex 现在就是来源规则：选它时没有差异，写入按钮不可用
     await userEvent.click(await screen.findByRole("button", { name: "更换 Codex 全局规则 的规则" }));
     let dialog = screen.getByRole("dialog", { name: "更换 Codex 全局规则 的规则" });
-    await userEvent.selectOptions(within(dialog).getByRole("combobox", { name: "内容来源" }), "rule:agent-skills/core");
+    await chooseOption(within(dialog).getByRole("combobox", { name: "内容来源" }), "rule:agent-skills/core");
     expect(within(dialog).getByTestId("rules-diff-same")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "写入" })).toBeDisabled();
     await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
 
     await userEvent.click(screen.getByRole("button", { name: "更换 Claude Code 全局规则 的规则" }));
     dialog = screen.getByRole("dialog", { name: "更换 Claude Code 全局规则 的规则" });
-    await userEvent.selectOptions(within(dialog).getByRole("combobox", { name: "内容来源" }), "rule:agent-skills/core");
+    await chooseOption(within(dialog).getByRole("combobox", { name: "内容来源" }), "rule:agent-skills/core");
     expect(within(dialog).getByTestId("rules-diff")).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: "写入" }));
 
@@ -293,12 +293,12 @@ describe("RulesPage：实际文件为准", () => {
     // 只列可写目标：阻塞与停用的实例不在其中
     const targetSelect = within(dialog).getByRole("combobox", { name: "写入目标" });
     // 与账号页同序：Claude 主号、Claude 其他账号、Codex
-    expect(within(targetSelect).getAllByRole("option").map((option) => option.getAttribute("value"))).toEqual([
+    expect((await readOptions(targetSelect)).map((option) => option.value)).toEqual([
       "rules:claude_global",
       "rules:profile:cc-work",
       "rules:codex_global",
     ]);
-    await userEvent.selectOptions(targetSelect, "rules:profile:cc-work");
+    await chooseOption(targetSelect, "rules:profile:cc-work");
     await userEvent.click(within(dialog).getByRole("button", { name: "写入" }));
 
     await waitFor(() => expect(calls.some((call) => call.command === "rules:apply")).toBe(true));
@@ -388,8 +388,8 @@ describe("RulesPage：实际文件为准", () => {
     await userEvent.click(await screen.findByRole("button", { name: "复制 Claude Code 全局规则 到…" }));
     const dialog = screen.getByRole("dialog", { name: "复制 Claude Code 全局规则 的内容" });
     const targetSelect = within(dialog).getByRole("combobox", { name: "写入目标" });
-    expect(within(targetSelect).queryByRole("option", { name: "Claude Code 全局规则" })).toBeNull();
-    await userEvent.selectOptions(targetSelect, "rules:codex_global");
+    expect((await readOptions(targetSelect)).map((option) => option.label)).not.toContain("Claude Code 全局规则");
+    await chooseOption(targetSelect, "rules:codex_global");
     expect(within(dialog).getByTestId("rules-diff")).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: "写入" }));
 
@@ -407,7 +407,7 @@ describe("RulesPage：实际文件为准", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "更换 Claude Code 全局规则 的规则" }));
     const dialog = screen.getByRole("dialog", { name: "更换 Claude Code 全局规则 的规则" });
-    await userEvent.selectOptions(within(dialog).getByRole("combobox", { name: "内容来源" }), "template:tpl-backup");
+    await chooseOption(within(dialog).getByRole("combobox", { name: "内容来源" }), "template:tpl-backup");
     expect(within(dialog).getByTestId("rules-diff-eol")).toBeInTheDocument();
     const write = within(dialog).getByRole("button", { name: "写入" });
     expect(write).toBeEnabled();

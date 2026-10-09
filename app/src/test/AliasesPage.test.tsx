@@ -3,7 +3,7 @@ import { waitFor } from "@testing-library/react";
 import AliasesPage from "../pages/AliasesPage";
 import type { Envelope } from "../lib/contract";
 import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeElement, makeEnvelope } from "./fixtures";
-import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent, within, chooseOption } from "./render-with-engine";
 
 const CLAUDE = 'TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" claude --dangerously-skip-permissions';
 
@@ -95,7 +95,7 @@ describe("终端快捷命令页", () => {
     await userEvent.paste("codex");
     await userEvent.click(within(dialog).getByTestId("alias-command-input"));
     await userEvent.paste("codex");
-    await userEvent.selectOptions(within(dialog).getByTestId("alias-timezone-select"), "Asia/Shanghai");
+    await chooseOption(within(dialog).getByTestId("alias-timezone-select"), "Asia/Shanghai");
     await userEvent.click(within(dialog).getByTestId("alias-extra-args-input"));
     await userEvent.paste("--full-auto");
     expect(within(dialog).getByTestId("alias-preview")).toHaveTextContent(
@@ -124,8 +124,8 @@ describe("终端快捷命令页", () => {
     renderWithEngine(<AliasesPage />, aliasRoutes());
     await userEvent.click(await screen.findByTestId("add-alias-button"));
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByTestId("alias-timezone-select")).toHaveValue("America/Los_Angeles");
-    expect(within(dialog).getByTestId("alias-lang-select")).toHaveValue("en_US.UTF-8");
+    expect(within(dialog).getByTestId("alias-timezone-select")).toHaveAttribute("data-value", "America/Los_Angeles");
+    expect(within(dialog).getByTestId("alias-lang-select")).toHaveAttribute("data-value", "en_US.UTF-8");
     expect(dialog).not.toHaveTextContent("跟随全局");
     expect(dialog).toHaveTextContent("保存即写入");
   });
@@ -183,8 +183,8 @@ describe("终端快捷命令页", () => {
     expect(within(dialog).getByTestId("alias-name-input")).not.toBeDisabled();
     expect(within(dialog).getByTestId("alias-command-input")).toHaveValue("claude");
     expect(within(dialog).getByTestId("alias-extra-args-input")).toHaveValue("--dangerously-skip-permissions");
-    expect(within(dialog).getByTestId("alias-timezone-select")).toHaveValue("America/Los_Angeles");
-    expect(within(dialog).getByTestId("alias-lang-select")).toHaveValue("en_US.UTF-8");
+    expect(within(dialog).getByTestId("alias-timezone-select")).toHaveAttribute("data-value", "America/Los_Angeles");
+    expect(within(dialog).getByTestId("alias-lang-select")).toHaveAttribute("data-value", "en_US.UTF-8");
   });
 
   it("改名保存是一次写入：带上旧名，由引擎在同一位置替换，旧名不残留", async () => {
@@ -276,7 +276,7 @@ describe("终端快捷命令页", () => {
     const dialog = await screen.findByRole("dialog");
     await userEvent.type(within(dialog).getByTestId("alias-name-input"), "mytool");
     await userEvent.type(within(dialog).getByTestId("alias-command-input"), "mytool");
-    await userEvent.selectOptions(within(dialog).getByTestId("alias-timezone-select"), "__custom__");
+    await chooseOption(within(dialog).getByTestId("alias-timezone-select"), "__custom__");
     await userEvent.type(within(dialog).getByTestId("alias-timezone-input"), "Pacific/Chatham");
     await waitFor(() => expect(within(dialog).getByTestId("alias-form-submit")).not.toBeDisabled());
     await userEvent.click(within(dialog).getByTestId("alias-form-submit"));

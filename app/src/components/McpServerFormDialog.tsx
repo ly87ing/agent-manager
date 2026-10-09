@@ -5,6 +5,7 @@ import type { McpAgentCell, McpSavedDefinition } from "../lib/observed";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { FileDiff } from "./FileDiff";
 import { parsePastedServer } from "../lib/mcpPaste";
+import { Select } from "./Select";
 
 type McpTransport = "stdio" | "remote";
 
@@ -372,17 +373,14 @@ export function McpServerFormDialog({
               {mode.differs && (
                 <div className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-warning">
                   <span>各账号的内容不一样，保存后统一成下面这一份。以哪个账号的为准：</span>
-                  <select
-                    aria-label="以哪个账号的内容为准"
-                    data-testid="server-edit-base"
+                  <Select
+                    label="以哪个账号的内容为准"
+                    testId="server-edit-base"
                     value={mode.agent}
-                    onChange={(e) => onSwitchBase?.(e.target.value)}
-                    className="rounded border bg-card px-1.5 py-0.5 text-foreground"
-                  >
-                    {mode.targets.map((target) => (
-                      <option key={target.agent} value={target.agent}>{nameOf(target.agent)}</option>
-                    ))}
-                  </select>
+                    onChange={(next) => onSwitchBase?.(next)}
+                    className="rounded border bg-card px-1.5 py-0.5"
+                    options={mode.targets.map((target) => ({ value: target.agent, label: nameOf(target.agent) }))}
+                  />
                 </div>
               )}
             </div>

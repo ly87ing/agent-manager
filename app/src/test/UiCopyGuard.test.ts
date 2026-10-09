@@ -54,3 +54,20 @@ describe("界面文案防回归", () => {
     });
   }
 });
+
+/**
+ * 界面规则（docs/UI-RULES.md）：下拉一律用 components/Select，不用原生 `<select>`；
+ * 状态用圆点或色块标，不用彩色左边框条。
+ */
+describe("界面规则防回归", () => {
+  const files = ["components", "pages"].flatMap((dir) => collectFiles(join(SRC_ROOT, dir)));
+
+  for (const file of files) {
+    const rel = file.replace(SRC_ROOT, "src/");
+    it(`${rel} 不用原生下拉、不用彩色左边框条`, () => {
+      const text = stripComments(readFileSync(file, "utf8"));
+      expect(text.match(/<select\b/g) ?? [], `${rel} 用了原生 <select>，改用 components/Select`).toEqual([]);
+      expect(text.match(/\bborder-l-(?:\d|\[)[^\s"]*/g) ?? [], `${rel} 用了彩色左边框条，状态改用圆点或色块`).toEqual([]);
+    });
+  }
+});
