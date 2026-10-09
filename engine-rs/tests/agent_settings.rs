@@ -832,6 +832,41 @@ fn 旧版裸路径状态栏_升级后报旧格式_用状态给的基准即可改
 }
 
 #[test]
+fn 升级后部署的脚本是旧版_报过期_重新应用换成新脚本且不动配置文件() {
+    let (base, ctx) = temp_ctx("statusline-outdated");
+    let applied = configure(
+        &ctx,
+        "claude-code",
+        &["--runtime", r#"{"statusline": "builtin"}"#],
+    );
+    assert!(applied.ok, "{:?}", applied.errors);
+    let script = ctx.data_dir.join("statusline.sh");
+    let current = fs::read(&script).unwrap();
+    let settings = fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap();
+
+    // 旧版本部署的脚本：查询报过期，且查询不替换它
+    fs::write(&script, "#!/bin/bash\necho old\n").unwrap();
+    assert_eq!(claude_observed_statusline(&ctx), json!("builtin-outdated"));
+    assert_eq!(fs::read(&script).unwrap(), b"#!/bin/bash\necho old\n");
+
+    // 界面据此照常再应用一次内置：脚本换成本版本的，settings.json 一个字节不动
+    let refreshed = configure(
+        &ctx,
+        "claude-code",
+        &["--runtime", r#"{"statusline": "builtin"}"#],
+    );
+    assert!(refreshed.ok, "{:?}", refreshed.errors);
+    assert_eq!(fs::read(&script).unwrap(), current);
+    assert_eq!(
+        fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap(),
+        settings
+    );
+    assert_eq!(claude_observed_statusline(&ctx), json!("builtin"));
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
 fn 用户自己的状态栏不被碰_也不算外部修改() {
     let (base, ctx) = temp_ctx("statusline-user");
     // 用户先有自己的状态栏

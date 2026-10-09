@@ -186,6 +186,16 @@ fn claude_observed_config(
         .and_then(Value::as_str)
         .map(|command| {
             match statusline_path.and_then(|path| builtin_statusline_form(command, path)) {
+                // 部署的脚本不是本版本内置的那份（升级带来了新脚本）：同样单独报出来让用户重新应用，
+                // 已是内置时界面不会再写，脚本就一直停在旧版
+                Some(StatuslineForm::Quoted)
+                    if statusline_path
+                        .and_then(|path| std::fs::read(path).ok())
+                        .as_deref()
+                        != Some(STATUSLINE_BODY.as_bytes()) =>
+                {
+                    "builtin-outdated"
+                }
                 Some(StatuslineForm::Quoted) => "builtin",
                 // 旧版写的裸路径：仍是我们的，但不能报成与期望一致，否则用户不会重新应用
                 Some(StatuslineForm::Legacy) => "builtin-legacy",
@@ -2550,6 +2560,7 @@ mod tests {
         std::fs::create_dir_all(&claude).unwrap();
         std::fs::create_dir_all(&codex).unwrap();
         let statusline = root.join("statusline.sh");
+        deploy_statusline(&statusline).unwrap();
         let claude_bytes = serde_json::to_vec(&json!({
             "env": {
                 "ANTHROPIC_BASE_URL": "https://relay.example.com",
@@ -2629,7 +2640,18 @@ stream_idle_timeout_ms = 450000
 
     #[test]
     fn 当前配置区分本工具状态栏与用户状态栏_署名开关必须两项都为空() {
-        let statusline = std::path::Path::new("/tmp/agent-manager/statusline.sh");
+        let dir =
+            std::env::temp_dir().join(format!("am-observed-statusline-{}", std::process::id()));
+        let statusline = &dir.join("statusline.sh");
+        deploy_statusline(statusline).unwrap();
+        let quoted = format!(
+            r#"{{"statusLine":{{"command":"'{}'"}},"attribution":{{"commit":"","pr":""}}}}"#,
+            statusline.display()
+        );
+        let bare = format!(
+            r#"{{"statusLine":{{"command":"{}"}}}}"#,
+            statusline.display()
+        );
         let custom = claude_observed_config(
             br#"{"statusLine":{"command":"/tmp/user/statusline.sh"},"attribution":{"commit":"","pr":"keep"}}"#,
             Some(statusline),
@@ -2638,21 +2660,26 @@ stream_idle_timeout_ms = 450000
         assert_eq!(custom["runtime"]["statusline"], "custom");
         assert_eq!(custom["runtime"]["claude_hide_attribution"], false);
 
-        let builtin = claude_observed_config(
-            br#"{"statusLine":{"command":"'/tmp/agent-manager/statusline.sh'"},"attribution":{"commit":"","pr":""}}"#,
-            Some(statusline),
-        )
-        .unwrap();
+        let builtin = claude_observed_config(quoted.as_bytes(), Some(statusline)).unwrap();
         assert_eq!(builtin["runtime"]["statusline"], "builtin");
         assert_eq!(builtin["runtime"]["claude_hide_attribution"], true);
 
         // 旧版写的裸路径：认得是我们的，但单独报出来，界面据此提示重新应用
-        let legacy = claude_observed_config(
-            br#"{"statusLine":{"command":"/tmp/agent-manager/statusline.sh"}}"#,
-            Some(statusline),
-        )
-        .unwrap();
+        let legacy = claude_observed_config(bare.as_bytes(), Some(statusline)).unwrap();
         assert_eq!(legacy["runtime"]["statusline"], "builtin-legacy");
+
+        // 部署的脚本是旧版本（或被删了）：同样单独报出来；查询不替换脚本
+        std::fs::write(statusline, "#!/bin/bash\necho old\n").unwrap();
+        let outdated = claude_observed_config(quoted.as_bytes(), Some(statusline)).unwrap();
+        assert_eq!(outdated["runtime"]["statusline"], "builtin-outdated");
+        assert_eq!(
+            std::fs::read_to_string(statusline).unwrap(),
+            "#!/bin/bash\necho old\n"
+        );
+        std::fs::remove_file(statusline).unwrap();
+        let missing = claude_observed_config(quoted.as_bytes(), Some(statusline)).unwrap();
+        assert_eq!(missing["runtime"]["statusline"], "builtin-outdated");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[cfg(unix)]

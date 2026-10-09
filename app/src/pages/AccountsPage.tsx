@@ -472,14 +472,14 @@ export default function AccountsPage({
       {quotaNotLive && (
         <div data-testid="accounts-quota-notice" className="flex items-center gap-2 rounded-md border border-info/30 bg-info/5 px-3 py-2 text-xs">
           <Activity className="h-3.5 w-3.5 text-info" aria-hidden />
-          <span>额度还不是实时的：只在 Claude 自己查询时才更新。</span>
+          <span>{mainStatusline === "builtin-outdated" ? "状态栏脚本是旧版本：本版本新增的显示还没生效。" : "额度还不是实时的：只在 Claude 自己查询时才更新。"}</span>
           <button
             type="button"
             data-testid="accounts-enable-live-quota"
             onClick={() => setConfirmQuota(true)}
             className="ml-auto rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/15"
           >
-            开启实时额度
+            {mainStatusline === "builtin-outdated" ? "更新状态栏" : "开启实时额度"}
           </button>
         </div>
       )}

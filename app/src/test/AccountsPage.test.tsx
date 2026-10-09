@@ -463,6 +463,17 @@ describe("账号页", () => {
     expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(1);
   });
 
+  it("部署的状态栏脚本是旧版：提示更新，确认后照常写一次内置状态栏换成新脚本", async () => {
+    const { calls } = renderWithEngine(<AccountsPage />, routes({ statusline: "builtin-outdated" }));
+    expect(await screen.findByTestId("accounts-quota-notice")).toHaveTextContent("状态栏脚本是旧版本");
+    await userEvent.click(screen.getByRole("button", { name: "更新状态栏" }));
+    const dialog = await screen.findByRole("dialog", { name: "为全部 Claude 账号开启实时额度" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "开启" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "agents:configure")).toBe(true));
+    const write = calls.find((call) => call.command === "agents:configure");
+    expect(write?.args).toContain('{"statusline":"builtin"}');
+  });
+
   it("开启实时额度：先按完整文件预览的基准写主账号，再把状态栏同步给其余 Claude 账号", async () => {
     const { calls } = renderWithEngine(<AccountsPage />, routes({ statusline: "custom" }));
     await userEvent.click(await screen.findByTestId("accounts-enable-live-quota"));
