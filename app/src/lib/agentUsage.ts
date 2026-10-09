@@ -80,11 +80,38 @@ export function tightestWindow(
   return live.reduce((worst, item) => (item.used_percent > worst.used_percent ? item : worst));
 }
 
-/** 托盘只放最吃紧的有效窗口；旧记录明确标出，避免把缓存当实时额度。 */
+/** 托盘只放最吃紧的有效窗口和它的重置倒计时；旧记录明确标出，避免把缓存当实时额度。 */
 export function trayUsageSummary(usage: AgentUsage | null | undefined, now: Date = new Date()): string | null {
   const window = tightestWindow(usage, now);
   if (!window) return null;
-  return `${windowLabel(window.window_minutes)}已用 ${Math.round(window.used_percent)}%${isStale(usage?.checked_at ?? null, now) ? "（旧记录）" : "（缓存）"}`;
+  const reset = resetLabel(window.resets_at, now);
+  return `${windowLabel(window.window_minutes)}已用 ${Math.round(window.used_percent)}%${reset ? ` · ${reset}` : ""}${isStale(usage?.checked_at ?? null, now) ? "（旧记录）" : "（缓存）"}`;
+}
+
+export type QuotaSort = "default" | "reset" | "left";
+
+/**
+ * 账号按额度排序，只改显示顺序：
+ * - reset：最吃紧窗口最先重置的排前；
+ * - left：最吃紧窗口剩得最多的排前。
+ * 没有有效额度记录的账号保持原顺序排在最后。
+ */
+export function sortByQuota<T extends { usage: AgentUsage | null }>(items: T[], sort: QuotaSort, now: Date = new Date()): T[] {
+  if (sort === "default") return items;
+  const keyOf = (item: T): number | null => {
+    const window = tightestWindow(item.usage, now);
+    if (!window) return null;
+    if (sort === "left") return window.used_percent;
+    const at = window.resets_at ? new Date(window.resets_at).getTime() : NaN;
+    return Number.isNaN(at) ? null : at;
+  };
+  return items
+    .map((item, index) => ({ item, index, key: keyOf(item) }))
+    .sort((a, b) => {
+      if (a.key === null || b.key === null) return a.key === null ? (b.key === null ? a.index - b.index : 1) : -1;
+      return a.key - b.key || a.index - b.index;
+    })
+    .map((entry) => entry.item);
 }
 
 /** 余额是长小数串（"2443.0204250000"），显示两位就够。 */

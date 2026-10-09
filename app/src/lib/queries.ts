@@ -25,13 +25,16 @@ export function createQueryClient(options?: { retry?: number | false }) {
 export function useEngineQuery<T>(
   command: string,
   args?: string[],
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean; refetchInterval?: number },
 ): UseQueryResult<Envelope<T>> {
   const normalizedArgs = args ? [...args] : [];
   return useQuery({
     queryKey: engineKeys.request(command, normalizedArgs),
     queryFn: () => runEngine<T>(command, normalizedArgs),
     enabled: options?.enabled ?? true,
+    // 窗口隐藏、只剩托盘时也照常按间隔重读
+    refetchInterval: options?.refetchInterval,
+    refetchIntervalInBackground: options?.refetchInterval !== undefined,
   });
 }
 

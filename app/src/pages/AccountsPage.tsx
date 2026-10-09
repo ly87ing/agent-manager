@@ -12,7 +12,7 @@ import { LaunchCommandsDrawer } from "../components/LaunchCommandsDrawer";
 import { PageError, PageLoading } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { buildAccounts, type Account, type AgentAccounts } from "../lib/accounts";
-import { freshnessLabel, isStale, isWindowExpired, resetLabel, usageTone, windowLabel } from "../lib/agentUsage";
+import { freshnessLabel, isStale, isWindowExpired, resetLabel, sortByQuota, usageTone, windowLabel, type QuotaSort } from "../lib/agentUsage";
 import type { ProfileObserved, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import { secretSourceOf } from "../lib/secretSource";
@@ -28,6 +28,12 @@ import { cn } from "../lib/utils";
 /** 表头与每行同宽的列：额度、操作。 */
 const COL_QUOTA = "hidden w-80 shrink-0 md:block";
 const COL_ACTIONS = "flex w-28 shrink-0 items-center justify-end gap-1";
+
+const QUOTA_SORTS: { value: QuotaSort; label: string; title: string }[] = [
+  { value: "default", label: "默认", title: "按账号登记顺序" },
+  { value: "reset", label: "先重置", title: "最吃紧的窗口最先重置的排前面" },
+  { value: "left", label: "剩余多", title: "最吃紧的窗口剩得最多的排前面" },
+];
 
 const TONE_BAR = { ok: "bg-success", warn: "bg-warning", critical: "bg-destructive" } as const;
 
@@ -244,6 +250,7 @@ export default function AccountsPage({
   const [commandsOf, setCommandsOf] = useState<Account | null>(null);
   const [quotaBusy, setQuotaBusy] = useState(false);
   const [keyword, setKeyword] = useState("");
+  const [quotaSort, setQuotaSort] = useState<QuotaSort>("default");
   const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -350,7 +357,7 @@ export default function AccountsPage({
     return query.data?.ok ? query.data.data : null;
   };
 
-  const visibleAccounts = group.accounts.filter((account) => {
+  const visibleAccounts = sortByQuota(group.accounts, quotaSort, now).filter((account) => {
     const auth = authOf(account);
     const identity = auth && auth !== "pending" ? auth.account : null;
     return matchesKeyword(keyword, [account.name, account.command, account.configDir, account.apiHost, account.model,
@@ -461,6 +468,24 @@ export default function AccountsPage({
       <div className="flex flex-wrap items-center gap-2">
         <SearchInput value={keyword} onChange={setKeyword} placeholder="搜索账号、命令、地址或模型" testId="accounts-search" />
         {keyword.trim() && <span className="text-xs text-muted-foreground">{visibleAccounts.length} / {group.accounts.length} 个账号</span>}
+        <div role="group" aria-label="按额度排序" className="inline-flex items-center rounded-lg bg-muted p-0.5 text-xs">
+          {QUOTA_SORTS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={quotaSort === option.value}
+              data-testid={`accounts-sort-${option.value}`}
+              title={option.title}
+              onClick={() => setQuotaSort(option.value)}
+              className={cn(
+                "rounded-md px-2.5 py-1",
+                quotaSort === option.value ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
         <button type="button" data-testid="accounts-refresh" disabled={refreshing}
           onClick={() => void refreshAccounts()}
           title="重新读取本机配置、登录记录与额度缓存；不联网、不运行登录命令"

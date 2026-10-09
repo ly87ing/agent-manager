@@ -196,6 +196,33 @@ describe("账号页", () => {
     }
   });
 
+  it("按额度排序只改显示顺序，不读写任何东西", async () => {
+    const baseRoutes = routes();
+    const profileRoute = baseRoutes["profiles:status"] as (args: string[]) => Promise<Envelope>;
+    const { calls } = renderWithEngine(<AccountsPage />, {
+      ...baseRoutes,
+      "profiles:status": async (args) => {
+        const envelope = await profileRoute(args);
+        const data = envelope.data as { elements: { observed: Record<string, unknown> }[] };
+        data.elements[0].observed.usage = {
+          source: "test-cache", checked_at: new Date().toISOString(),
+          windows: [{ window_minutes: 300, used_percent: 30, resets_at: new Date(Date.now() + 3_600_000).toISOString() }],
+        };
+        return envelope;
+      },
+    });
+    await screen.findByTestId("account-quota-profiles:ds");
+    const order = () => within(screen.getByTestId("accounts-list")).getAllByRole("listitem").map((row) => row.getAttribute("data-testid"));
+    expect(order()).toEqual(["account-row-agents:claude-code", "account-row-profiles:ds"]);
+    const before = calls.length;
+    await userEvent.click(screen.getByTestId("accounts-sort-reset"));
+    expect(order()).toEqual(["account-row-profiles:ds", "account-row-agents:claude-code"]);
+    expect(screen.getByTestId("accounts-sort-reset")).toHaveAttribute("aria-pressed", "true");
+    await userEvent.click(screen.getByTestId("accounts-sort-default"));
+    expect(order()).toEqual(["account-row-agents:claude-code", "account-row-profiles:ds"]);
+    expect(calls.slice(before).some((call) => !call.command.endsWith(":status") && !call.command.endsWith("status"))).toBe(false);
+  });
+
   it("智能体本身只检测：显示装的版本与有没有新版本，「检查新版本」只查不装", async () => {
     const r = routes();
     const status = r["agents:status"] as Envelope<{ elements: ReturnType<typeof makeElement>[] }>;

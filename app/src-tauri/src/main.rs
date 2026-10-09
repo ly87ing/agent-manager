@@ -80,6 +80,8 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // 额度快作废的系统提醒：界面判断时机，插件只负责发通知。
+        .plugin(tauri_plugin_notification::init())
         // 关窗不退出：点击关闭按钮只隐藏窗口，驻留托盘；
         // 托盘「显示主界面」/ macOS Dock 点图标（Reopen）/ 二次启动均可唤回。
         .on_window_event(|window, event| {

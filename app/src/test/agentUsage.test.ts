@@ -5,6 +5,7 @@ import {
   isStale,
   isWindowExpired,
   resetLabel,
+  sortByQuota,
   tightestWindow,
   trayUsageSummary,
   usageTone,
@@ -88,10 +89,12 @@ describe("额度展示口径", () => {
         { window_minutes: 10080, used_percent: 25, resets_at: "2026-09-21T04:00:00Z" },
       ],
     };
-    expect(trayUsageSummary(usage, NOW)).toBe("5 小时已用 82%（缓存）");
-    expect(trayUsageSummary(usage, new Date("2026-09-19T04:00:00Z"))).toBe("7 天已用 25%（旧记录）");
+    expect(trayUsageSummary(usage, NOW)).toBe("5 小时已用 82% · 1 小时后重置（缓存）");
+    expect(trayUsageSummary(usage, new Date("2026-09-19T04:00:00Z"))).toBe("7 天已用 25% · 2 天后重置（旧记录）");
     expect(trayUsageSummary(usage, new Date("2026-09-22T04:00:00Z"))).toBeNull();
     expect(trayUsageSummary(null, NOW)).toBeNull();
+    // 不知道何时重置的窗口只报用量
+    expect(trayUsageSummary({ ...usage, windows: [{ window_minutes: 300, used_percent: 40, resets_at: null }] }, NOW)).toBe("5 小时已用 40%（缓存）");
   });
 
   it("余额只显示两位；颜色档在 80/90 分界", () => {
@@ -100,5 +103,23 @@ describe("额度展示口径", () => {
     expect(usageTone(79)).toBe("ok");
     expect(usageTone(80)).toBe("warn");
     expect(usageTone(90)).toBe("critical");
+  });
+
+  it("按额度排序只改顺序：先重置 / 剩余多，没有记录的保持原序排最后", () => {
+    const at = (resetsAt: string | null, used: number): AgentUsage => ({
+      source: "statusline",
+      checked_at: "2026-09-18T03:50:00Z",
+      windows: [{ window_minutes: 300, used_percent: used, resets_at: resetsAt }],
+    });
+    const items = [
+      { id: "none", usage: null },
+      { id: "late", usage: at("2026-09-18T08:00:00Z", 10) },
+      { id: "soon", usage: at("2026-09-18T04:30:00Z", 70) },
+      { id: "unknown", usage: at(null, 40) },
+      { id: "none2", usage: null },
+    ];
+    expect(sortByQuota(items, "default", NOW)).toBe(items);
+    expect(sortByQuota(items, "reset", NOW).map((item) => item.id)).toEqual(["soon", "late", "none", "unknown", "none2"]);
+    expect(sortByQuota(items, "left", NOW).map((item) => item.id)).toEqual(["late", "unknown", "soon", "none", "none2"]);
   });
 });

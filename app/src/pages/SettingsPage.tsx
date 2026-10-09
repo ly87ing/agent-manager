@@ -17,6 +17,7 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { engineErrorMessage } from "../lib/engine";
 import type { SettingsData, SettingsPreferences } from "../lib/contract";
 import { useSaveSettings, useSettings } from "../lib/settings";
+import { reminderEnabled, setReminderEnabled } from "../lib/quotaReminder";
 import { useTheme, type Theme } from "../lib/theme";
 import { cn } from "../lib/utils";
 import { ConfigBackupSection } from "../components/ConfigBackupSection";
@@ -58,6 +59,35 @@ function ThemeControl() {
 }
 
 /** 设置分组：与其他页的表格同一个样子，灰底表头行加一行一项。 */
+/** 额度快作废提醒：打开时向系统要通知权限，拿不到就保持关闭并说明。 */
+function QuotaReminderControl() {
+  const [enabled, setEnabled] = useState(reminderEnabled);
+  const choose = async (next: boolean) => {
+    if (next === enabled) return;
+    if (await setReminderEnabled(next)) setEnabled(next);
+    else toast.error("系统没有允许通知，请在系统设置里允许 Agent Manager 发通知后重试");
+  };
+  return (
+    <div className="inline-flex rounded-lg border bg-muted p-0.5" role="group" aria-label="额度提醒">
+      {[{ value: false, label: "关" }, { value: true, label: "开" }].map((option) => (
+        <button
+          key={option.label}
+          type="button"
+          aria-pressed={enabled === option.value}
+          data-testid={`quota-reminder-${option.value ? "on" : "off"}`}
+          onClick={() => void choose(option.value)}
+          className={cn(
+            "rounded-md px-3 py-1 text-xs transition-colors",
+            enabled === option.value ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function SettingsGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="overflow-clip rounded-lg border bg-card" aria-label={title}>
@@ -291,6 +321,9 @@ export default function SettingsPage({
       <SettingsGroup title="通用">
         <SettingsRow label="外观" note="立即生效，保存在本机">
           <ThemeControl />
+        </SettingsRow>
+        <SettingsRow label="额度快作废时提醒" note="某个账号的窗口快重置、还剩一半以上没用时发系统通知；只提醒，不做任何操作">
+          <QuotaReminderControl />
         </SettingsRow>
         <SettingsRow label="操作记录保留" note="0 为不自动清理，最多 3650 天">
           <div className="flex items-center gap-2">

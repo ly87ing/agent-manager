@@ -5,6 +5,7 @@ import { buildAccounts } from "../lib/accounts";
 import { trayUsageSummary } from "../lib/agentUsage";
 import type { StatusData } from "../lib/contract";
 import { useEngineQuery, useRefreshUpstream } from "../lib/queries";
+import { sendDueReminders } from "../lib/quotaReminder";
 import { publishTrayAccounts, type TrayAccount } from "../lib/trayActions";
 import { cn } from "../lib/utils";
 import { matchesKeyword } from "./SearchInput";
@@ -19,6 +20,8 @@ export interface CommandItem {
   group: string;
   run: () => void;
 }
+
+const USAGE_REFRESH_MS = 10 * 60_000;
 
 const PAGES: { key: string; label: string; keywords: string }[] = [
   { key: "inbox", label: "待处理", keywords: "inbox 待处理 需要处理 损坏 缺失 更新 偏离 未纳管" },
@@ -74,9 +77,10 @@ export function CommandPalette({
     return () => window.clearInterval(timer);
   }, []);
 
-  // 托盘要在窗口隐藏时也有账号列表，这三份状态保持热缓存（与账号页共享请求）
-  const agents = useEngineQuery<StatusData>("agents:status", [], { enabled: true });
-  const profiles = useEngineQuery<StatusData>("profiles:status", [], { enabled: true });
+  // 托盘要在窗口隐藏时也有账号列表，这三份状态保持热缓存（与账号页共享请求）。
+  // 额度跟着助手记账变化，每 10 分钟重读一次本机文件，托盘数字和额度提醒才不会停在打开时。
+  const agents = useEngineQuery<StatusData>("agents:status", [], { enabled: true, refetchInterval: USAGE_REFRESH_MS });
+  const profiles = useEngineQuery<StatusData>("profiles:status", [], { enabled: true, refetchInterval: USAGE_REFRESH_MS });
   const aliases = useEngineQuery<StatusData>("aliases:status", [], { enabled: true });
   const skills = useEngineQuery<StatusData>("skills:status", [], { enabled: open });
   const mcp = useEngineQuery<StatusData>("mcp:status", [], { enabled: open });
@@ -105,6 +109,18 @@ export function CommandPalette({
     // 三份状态都成功后才替换原生菜单，避免瞬时读取失败清空上一次可用菜单
     if (agents.data?.ok && profiles.data?.ok && aliases.data?.ok) void publishTrayAccounts(trayAccounts);
   }, [agents.data?.ok, profiles.data?.ok, aliases.data?.ok, trayAccounts]);
+
+  useEffect(() => {
+    // 额度快作废提醒（设置里打开才发）：随展示时钟每分钟判断一次，同一轮只发一次
+    sendDueReminders(
+      groups.flatMap((group) => group.accounts.map((account) => ({
+        accountId: account.elementId,
+        label: `${group.label} · ${account.isMain ? "主账号" : account.name}`,
+        usage: account.usage,
+      }))),
+      usageNow,
+    );
+  }, [groups, usageNow]);
 
   useEffect(() => {
     if (open) {
