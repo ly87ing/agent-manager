@@ -1,7 +1,7 @@
 #!/bin/bash
 # Agent Manager 内置状态栏。
 #
-# 显示：模型 · 目录(分支) · 上下文占用 · 本会话增删行 · 花费 · 5h/7d 额度与重置倒计时。
+# 显示：模型 effort · 目录(分支) · 上下文占用 · 本会话增删行 · 花费 · 5h/7d 额度与重置倒计时。
 # 顺带把额度存一份到 Agent Manager 数据目录（即本脚本所在目录）下的
 # usage/<编码后的配置目录>.json：Claude Code 每次渲染状态栏都把 rate_limits 通过 stdin
 # 推给本脚本，但它自己不写任何文件，外部进程读不到；存下来 Agent Manager 才能显示与
@@ -15,10 +15,12 @@
 
 IFS= read -rd '' I   # 读全部 stdin
 
-model=""; cwd=""; transcript=""; ctx=""; added=""; removed=""; cost=""; five=""; week=""
+model=""; effort=""; cwd=""; transcript=""; ctx=""; added=""; removed=""; cost=""; five=""; week=""
 five_reset=""; week_reset=""
 
 re_model='"display_name"[[:space:]]*:[[:space:]]*"([^"]+)"'
+# effort 只在当前模型支持时出现：{"effort":{"level":"xhigh"}}
+re_effort='"effort"[[:space:]]*:[[:space:]]*\{[^}]*"level"[[:space:]]*:[[:space:]]*"([^"]+)"'
 re_cwd='"cwd"[[:space:]]*:[[:space:]]*"([^"]+)"'
 re_transcript='"transcript_path"[[:space:]]*:[[:space:]]*"([^"]+)"'
 # 仅 context_window 段的 used_percentage 后面跟着 remaining_percentage，据此与额度区分
@@ -32,6 +34,7 @@ re_five_reset='"five_hour"[[:space:]]*:[[:space:]]*\{[^}]*"resets_at"[[:space:]]
 re_week_reset='"seven_day"[[:space:]]*:[[:space:]]*\{[^}]*"resets_at"[[:space:]]*:[[:space:]]*([0-9]+)'
 
 [[ $I =~ $re_model      ]] && model=${BASH_REMATCH[1]}
+[[ $I =~ $re_effort     ]] && effort=${BASH_REMATCH[1]}
 [[ $I =~ $re_cwd        ]] && cwd=${BASH_REMATCH[1]}
 [[ $I =~ $re_transcript ]] && transcript=${BASH_REMATCH[1]}
 [[ $I =~ $re_ctx        ]] && ctx=${BASH_REMATCH[1]}
@@ -126,7 +129,10 @@ fmt_dur() {   # 秒 -> 紧凑倒计时，结果写入 REPLY（不开子 shell）
   else                    printf -v REPLY '%dm' "$mm"; fi
 }
 
-[[ -n $model ]] && { sep; printf '\033[1;36m%s\033[0m' "$model"; }
+if [[ -n $model ]]; then
+  sep; printf '\033[1;36m%s\033[0m' "$model"
+  [[ -n $effort ]] && printf ' \033[36m%s\033[0m' "$effort"
+fi
 
 if [[ -n $dir ]]; then
   sep; printf '\033[1m%s\033[0m' "$dir"

@@ -2431,7 +2431,7 @@ mod tests {
                 .take()
                 .unwrap()
                 .write_all(
-                    br#"{"model":{"display_name":"Claude Opus"},"rate_limits":{"five_hour":{"used_percentage":42,"resets_at":4600},"seven_day":{"used_percentage":7,"resets_at":90000}}}"#,
+                    br#"{"model":{"display_name":"Claude Opus"},"effort":{"level":"xhigh"},"rate_limits":{"five_hour":{"used_percentage":42,"resets_at":4600},"seven_day":{"used_percentage":7,"resets_at":90000}}}"#,
                 )
                 .unwrap();
         }
@@ -2443,6 +2443,7 @@ mod tests {
         );
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(stdout.contains("Opus"), "{stdout}");
+        assert!(stdout.contains("xhigh"), "effort 跟在模型名后面：{stdout}");
         let usage = data_dir.join("usage").join("%2Ftmp%2Fam-config.json");
         let saved = std::fs::read_to_string(&usage).unwrap();
         assert!(saved.contains("\"used_percentage\":42"), "{saved}");
