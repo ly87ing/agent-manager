@@ -547,7 +547,7 @@ export default function AccountsPage({
       {confirmQuota && mainElement && (
         <ConfirmModal
           title="为全部 Claude 账号开启实时额度"
-          description={`把状态栏换成 Agent Manager 的用量状态栏（模型、目录、上下文、额度），它每次刷新时把额度记在本工具的数据目录里，账号页据此显示实时额度。${mainStatusline === "custom" ? "主账号现在的自定义状态栏会被替换。" : ""}先写主账号，再同步给其余 Claude 账号；被外部改过的文件不会覆盖。`}
+          description={`把状态栏换成 Agent Manager 的用量状态栏（账号、模型、目录、上下文、提示缓存、额度），它每次刷新时把额度记在本工具的数据目录里，账号页据此显示实时额度。${mainStatusline === "custom" ? "主账号现在的自定义状态栏会被替换。" : ""}先写主账号，再同步给其余 Claude 账号；被外部改过的文件不会覆盖。`}
           risk="write-local"
           confirmLabel="开启"
           executing={quotaBusy}

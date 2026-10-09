@@ -67,7 +67,7 @@ With only the latter, numbers remain at the last check, even after days of use. 
 
 There are two ways to capture live values matching the Claude Code status line:
 
-**Use this tool's status line:** select it in the assistant edit dialog; saving deploys it. It shows model, directory, branch, context, cost, and 5h/7d quota while recording quota. If you want to preserve your own status line, do not select this option: it redirects `statusLine` to this tool's script, and the first write to a populated field requires explicit adoption.
+**Use this tool's status line:** select it in the assistant edit dialog; saving deploys it. It shows the account (non-main), model with effort and fast mode, directory, branch, context, prompt-cache time left, lines changed, cost, and 5h/7d quota while recording quota. If you want to preserve your own status line, do not select this option: it redirects `statusLine` to this tool's script, and the first write to a populated field requires explicit adoption.
 
 **Keep your own status line:** add quota recording to your script. Claude Code supplies `rate_limits` on stdin each render but writes no file for another process to read. Add this after parsing usage:
 

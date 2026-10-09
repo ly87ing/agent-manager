@@ -1,7 +1,8 @@
 #!/bin/bash
 # Agent Manager 内置状态栏。
 #
-# 显示：模型 effort · 目录(分支) · 上下文占用 · 本会话增删行 · 花费 · 5h/7d 额度与重置倒计时。
+# 显示：账号 · 模型 effort fast · 目录(分支) · 上下文占用 · 提示缓存剩余 · 本会话增删行 · 花费 ·
+# 5h/7d 额度与重置倒计时。
 # 顺带把额度存一份到 Agent Manager 数据目录（即本脚本所在目录）下的
 # usage/<编码后的配置目录>.json：Claude Code 每次渲染状态栏都把 rate_limits 通过 stdin
 # 推给本脚本，但它自己不写任何文件，外部进程读不到；存下来 Agent Manager 才能显示与
@@ -9,18 +10,22 @@
 # 配置目录编码：先 % -> %25，再 / -> %2F，不同目录不会撞名；Agent Manager 按同一规则读取。
 #
 # 主体纯 bash 内建（read / [[ =~ ]] / printf / 参数展开），无 jq、无 git、无网络；
-# 仅在有重置时刻时 fork 一次 date、落盘时 fork 一次 mv，usage 目录还不存在时再
+# 仅在有重置或缓存到期时刻时 fork 一次 date、落盘时 fork 一次 mv，usage 目录还不存在时再
 # fork 一次 mkdir。兼容 macOS 自带的 bash 3.2。
 # 任一字段缺失时对应段自动省略。本文件由 Agent Manager 部署，手改会在下次应用时被覆盖。
 
 IFS= read -rd '' I   # 读全部 stdin
 
 model=""; effort=""; cwd=""; transcript=""; ctx=""; added=""; removed=""; cost=""; five=""; week=""
-five_reset=""; week_reset=""
+five_reset=""; week_reset=""; fast=""; cache_warm=""; cache_exp=""
 
 re_model='"display_name"[[:space:]]*:[[:space:]]*"([^"]+)"'
 # effort 只在当前模型支持时出现：{"effort":{"level":"xhigh"}}
 re_effort='"effort"[[:space:]]*:[[:space:]]*\{[^}]*"level"[[:space:]]*:[[:space:]]*"([^"]+)"'
+re_fast='"fast_mode"[[:space:]]*:[[:space:]]*true'
+# 提示缓存：还没发过请求时整段不出现；warm 在渲染时算好，Claude Code 在 expires_at 那一刻会重绘
+re_cache_warm='"prompt_cache"[[:space:]]*:[[:space:]]*\{[^}]*"warm"[[:space:]]*:[[:space:]]*(true|false)'
+re_cache_exp='"prompt_cache"[[:space:]]*:[[:space:]]*\{[^}]*"expires_at"[[:space:]]*:[[:space:]]*([0-9]+)'
 re_cwd='"cwd"[[:space:]]*:[[:space:]]*"([^"]+)"'
 re_transcript='"transcript_path"[[:space:]]*:[[:space:]]*"([^"]+)"'
 # 仅 context_window 段的 used_percentage 后面跟着 remaining_percentage，据此与额度区分
@@ -35,6 +40,9 @@ re_week_reset='"seven_day"[[:space:]]*:[[:space:]]*\{[^}]*"resets_at"[[:space:]]
 
 [[ $I =~ $re_model      ]] && model=${BASH_REMATCH[1]}
 [[ $I =~ $re_effort     ]] && effort=${BASH_REMATCH[1]}
+[[ $I =~ $re_fast       ]] && fast=1
+[[ $I =~ $re_cache_warm ]] && cache_warm=${BASH_REMATCH[1]}
+[[ $I =~ $re_cache_exp  ]] && cache_exp=${BASH_REMATCH[1]}
 [[ $I =~ $re_cwd        ]] && cwd=${BASH_REMATCH[1]}
 [[ $I =~ $re_transcript ]] && transcript=${BASH_REMATCH[1]}
 [[ $I =~ $re_ctx        ]] && ctx=${BASH_REMATCH[1]}
@@ -71,23 +79,33 @@ while [[ -n $d ]]; do
   d=${d%/*}
 done
 
-# 倒计时要当前时刻：仅当存在重置时刻时 fork 一次 date（AM_STATUSLINE_NOW 供测试注入）
+# 倒计时要当前时刻：仅当存在重置或缓存到期时刻时 fork 一次 date（AM_STATUSLINE_NOW 供测试注入）
 now=""
-if [[ -n $five_reset || -n $week_reset ]]; then now=${AM_STATUSLINE_NOW:-$(date +%s 2>/dev/null)}; fi
+if [[ -n $five_reset || -n $week_reset || -n $cache_exp ]]; then now=${AM_STATUSLINE_NOW:-$(date +%s 2>/dev/null)}; fi
+
+# ---- 当前会话的配置目录：额度按它分文件，账号段也看它 ----
+am_dir=$CLAUDE_CONFIG_DIR
+# 开了 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB 时子进程拿不到 CLAUDE_CONFIG_DIR：会话记录在
+# <配置目录>/projects/ 下，从 transcript_path 反推，实例的额度仍记在它自己名下
+if [[ -z $am_dir && $transcript == */projects/* ]]; then am_dir=${transcript%/projects/*}; fi
+[[ -z $am_dir ]] && am_dir=$HOME/.claude
+# 启动命令写成 CLAUDE_CONFIG_DIR="~/..." 时引号里的 ~ 不会被 shell 展开，这里补上，
+# 与 Agent Manager 读取时展开后的路径对得上
+[[ $am_dir == "~" ]] && am_dir=$HOME
+[[ $am_dir == "~/"* ]] && am_dir=$HOME/${am_dir#"~/"}
+
+# 账号名：取目录名，去掉默认命名 ~/.claude-<名称> 的前缀；主账号（.claude）不显示
+account=${am_dir//\\//}
+account=${account%/}
+account=${account##*/}
+account=${account#.}
+account=${account#claude-}
+[[ $account == claude ]] && account=""
 
 # ---- 额度落盘 ----
 # 写临时文件再 mv 覆盖：多个窗口并发也不会让 Agent Manager 读到半截内容。
 # 文件名跟随当前会话的配置目录，实例各存各的。
 if [[ -n $five || -n $week ]]; then
-  am_dir=$CLAUDE_CONFIG_DIR
-  # 开了 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB 时子进程拿不到 CLAUDE_CONFIG_DIR：会话记录在
-  # <配置目录>/projects/ 下，从 transcript_path 反推，实例的额度仍记在它自己名下
-  if [[ -z $am_dir && $transcript == */projects/* ]]; then am_dir=${transcript%/projects/*}; fi
-  [[ -z $am_dir ]] && am_dir=$HOME/.claude
-  # 启动命令写成 CLAUDE_CONFIG_DIR="~/..." 时引号里的 ~ 不会被 shell 展开，这里补上，
-  # 与 Agent Manager 读取时展开后的路径对得上
-  [[ $am_dir == "~" ]] && am_dir=$HOME
-  [[ $am_dir == "~/"* ]] && am_dir=$HOME/${am_dir#"~/"}
   # Windows（Git Bash）：/c/Users/... 与 C:\Users\... 统一成 c:/users/...，与 Agent Manager 一致
   am_win=
   if [[ $am_dir =~ ^/([a-zA-Z])/(.*)$ ]]; then
@@ -129,9 +147,12 @@ fmt_dur() {   # 秒 -> 紧凑倒计时，结果写入 REPLY（不开子 shell）
   else                    printf -v REPLY '%dm' "$mm"; fi
 }
 
+[[ -n $account ]] && { sep; printf '\033[1;35m%s\033[0m' "$account"; }
+
 if [[ -n $model ]]; then
   sep; printf '\033[1;36m%s\033[0m' "$model"
   [[ -n $effort ]] && printf ' \033[36m%s\033[0m' "$effort"
+  [[ -n $fast ]] && printf ' \033[33mfast\033[0m'
 fi
 
 if [[ -n $dir ]]; then
@@ -142,6 +163,15 @@ fi
 if [[ -n $ctx ]]; then                       # 上下文占用：>=85 红 >=60 黄 否则绿
   c=32; (( ctx >= 60 )) && c=33; (( ctx >= 85 )) && c=31
   sep; printf '\033[%dmctx %s%%\033[0m' "$c" "$ctx"
+fi
+
+# 提示缓存：热着显示剩余时间（绿），已过期显示 cold（黄）：下一条消息要整段重建缓存
+if [[ $cache_warm == true && -n $cache_exp && -n $now ]] && (( cache_exp > now )); then
+  fmt_dur $(( cache_exp - now )); sep; printf '\033[32mcache %s\033[0m' "$REPLY"
+elif [[ $cache_warm == true ]]; then
+  sep; printf '\033[32mcache\033[0m'
+elif [[ $cache_warm == false ]]; then
+  sep; printf '\033[33mcache cold\033[0m'
 fi
 
 if (( ${added:-0} > 0 || ${removed:-0} > 0 )); then

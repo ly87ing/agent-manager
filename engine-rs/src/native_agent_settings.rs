@@ -2461,6 +2461,68 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn 状态栏显示账号_fast_与提示缓存剩余时间() {
+        let dir =
+            std::env::temp_dir().join(format!("am-statusline-segments-{}", std::process::id()));
+        let path = dir.join(STATUSLINE_FILE);
+        deploy_statusline(&path).unwrap();
+        // 去掉颜色转义，只比文字
+        let render = |config_dir: Option<&str>, input: &str| -> String {
+            let mut cmd = std::process::Command::new("/bin/bash");
+            cmd.arg(&path)
+                .env("HOME", "/home/u")
+                .env("AM_STATUSLINE_NOW", "1000")
+                .env_remove("CLAUDE_CONFIG_DIR")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped());
+            if let Some(config_dir) = config_dir {
+                cmd.env("CLAUDE_CONFIG_DIR", config_dir);
+            }
+            let mut child = cmd.spawn().unwrap();
+            {
+                use std::io::Write;
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(input.as_bytes())
+                    .unwrap();
+            }
+            let out = child.wait_with_output().unwrap();
+            assert!(out.status.success());
+            let text = String::from_utf8(out.stdout).unwrap();
+            let mut plain = String::new();
+            let mut chars = text.chars();
+            while let Some(c) = chars.next() {
+                if c == '\u{1b}' {
+                    for c in chars.by_ref() {
+                        if c == 'm' {
+                            break;
+                        }
+                    }
+                } else {
+                    plain.push(c);
+                }
+            }
+            plain
+        };
+        let warm = r#"{"model":{"display_name":"Claude Opus 5.5"},"effort":{"level":"xhigh"},"fast_mode":true,"prompt_cache":{"warm":true,"ttl":"1h","expires_at":1300,"requests":3,"last_miss_cause":{"causes":[]}}}"#;
+        assert_eq!(
+            render(Some("~/.claude-relay"), warm),
+            "relay · Opus 5.5 xhigh fast · cache 5m"
+        );
+        // 缓存已凉；会话里拿不到 CLAUDE_CONFIG_DIR 时账号从 transcript_path 反推
+        let cold = r#"{"transcript_path":"/home/u/.claude-team/projects/p/s.jsonl","model":{"display_name":"Claude Opus 5.5"},"fast_mode":false,"prompt_cache":{"warm":false,"expires_at":null}}"#;
+        assert_eq!(render(None, cold), "team · Opus 5.5 · cache cold");
+        // 主账号不显示账号段；还没发过请求时没有 prompt_cache，缓存段也不出现
+        let fresh = r#"{"model":{"display_name":"Claude Opus 5.5"}}"#;
+        assert_eq!(render(Some("/home/u/.claude/"), fresh), "Opus 5.5");
+        assert_eq!(render(None, fresh), "Opus 5.5");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn 用户自己的状态栏不归我们管_不清空也不算冲突() {
         let mine = serde_json::to_vec(&json!({
