@@ -710,3 +710,13 @@ Account-improvement receipt (later desktop/package results below; unpublished):
 - Final frontend 65 files / 619, TypeScript/Vite passed; before push, engine 443/Tauri 23/engine fmt reran successfully.
 - As requested, built local macOS x64 app/DMG and opened native UI. Package passed independent isolated HOME/data/minimal PATH execution. Build identity is b7f6b1e plus workspace changes, not a rebuilt later commit SHA.
 - Local package unsigned/unnotarized/unpublished; no tag/Release. Real login, network model calls, and subscription quotas unverified.
+
+## 2026-10-09: Magpie comparison follow-up
+
+Scope agreed with the user after a source-level comparison with [yetone/magpie](https://github.com/yetone/magpie) at `62b1c99`: borrow display, reminder, and engineering ideas; do not add account switching, a gateway, credential handling, or warm-up requests. Each slice is committed and pushed after its checks.
+
+| Item | Implementation | Acceptance | State |
+| --- | --- | --- | --- |
+| Quota display and reminder | Tray/⌘K summaries carry the reset countdown; Accounts sorts by soonest reset or most left (display order only); opt-in Settings reminder sends one system notification per window round when less than a tenth of the window remains and at most half is used; account status rereads local files every 10 minutes in the background | Unit tests for the rule, de-duplication, sorting, and page order; Settings and Accounts checked at 1000 and 760 px in the mock dev server. A real system notification was not observed | `341b4ee` |
+| Tray panel | Left click on the tray icon (macOS/Windows) toggles a 380×520 webview panel placed under a menu-bar icon or above a taskbar icon and clamped to the work area; it hides on blur and Escape; rows show launch command, quota bars, reset countdown, and Copy; footer opens the main window or quits. Right click and Linux keep the native menu | Placement unit tests; panel component test (copy writes only the clipboard, only `:status` reads). A debug build with a separate identifier, isolated HOME and data directory ran on macOS: real clicks opened the panel centred under the icon, Copy put `claude` on the clipboard, blur and a second click hid it, Open main window and Quit worked, and the user's installed instance kept running. Windows placement and the right-click menu were not exercised | This commit |
+

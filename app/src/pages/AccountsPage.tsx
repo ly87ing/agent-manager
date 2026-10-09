@@ -10,16 +10,17 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { GettingStarted, type StartStep } from "../components/GettingStarted";
 import { LaunchCommandsDrawer } from "../components/LaunchCommandsDrawer";
 import { PageError, PageLoading } from "../components/PageState";
+import { QuotaCells } from "../components/QuotaCells";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { buildAccounts, type Account, type AgentAccounts } from "../lib/accounts";
-import { freshnessLabel, isStale, isWindowExpired, resetLabel, sortByQuota, usageTone, windowLabel, type QuotaSort } from "../lib/agentUsage";
+import { sortByQuota, type QuotaSort } from "../lib/agentUsage";
 import type { ProfileObserved, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import { secretSourceOf } from "../lib/secretSource";
 import { currentConfigOf } from "../lib/agentCurrent";
 import type { SharedStatus } from "../lib/profileShared";
 import { useAccountOps } from "../lib/useAccountOps";
-import type { AgentUsage, OfficialAuthStatus } from "../lib/observed";
+import type { OfficialAuthStatus } from "../lib/observed";
 import { authTerminalCommand, parseProfileDefinition } from "../lib/profileDefinition";
 import { engineKeys, useEngineQuery, useRefreshUpstream } from "../lib/queries";
 import { isCollection } from "../lib/skillCollections";
@@ -35,8 +36,6 @@ const QUOTA_SORTS: { value: QuotaSort; label: string; title: string }[] = [
   { value: "left", label: "剩余多", title: "最吃紧的窗口剩得最多的排前面" },
 ];
 
-const TONE_BAR = { ok: "bg-success", warn: "bg-warning", critical: "bg-destructive" } as const;
-
 async function copyText(text: string, message: string) {
   try {
     await navigator.clipboard.writeText(text);
@@ -44,39 +43,6 @@ async function copyText(text: string, message: string) {
   } catch {
     toast.error("复制失败，请检查剪贴板权限");
   }
-}
-
-/** 一行放得下的额度：每个未过重置点的窗口一小段条。 */
-function QuotaCells({ usage, testId, now }: { usage: AgentUsage | null; testId: string; now: Date }) {
-  const windows = (usage?.windows ?? []).filter((w) => !isWindowExpired(w.resets_at, now));
-  if (!usage || windows.length === 0)
-    return (
-      <span className="text-xs text-muted-foreground" title="额度读自这个账号的使用记录；用它跑过一次后才有">
-        用过后显示
-      </span>
-    );
-  const stale = isStale(usage.checked_at, now);
-  return (
-    <div data-testid={testId} className="flex items-center gap-3" title={`${freshnessLabel(usage.checked_at, now) ?? "更新时间未知"} · 读自 ${usage.source}`}>
-      {windows.map((w) => (
-        <span key={w.window_minutes} className="flex flex-col gap-1 text-xs">
-          <span className="flex items-center gap-1.5">
-            <span className="whitespace-nowrap text-muted-foreground">{windowLabel(w.window_minutes)}</span>
-            <span className="h-1.5 w-14 overflow-hidden rounded bg-muted">
-              <span
-                className={cn("block h-full", stale ? "bg-muted-foreground/40" : TONE_BAR[usageTone(w.used_percent)])}
-                style={{ width: `${Math.min(100, Math.max(0, w.used_percent))}%` }}
-              />
-            </span>
-            <span className={cn("w-9 tabular-nums", stale && "text-muted-foreground")}>
-              {Math.round(w.used_percent)}%{stale ? "?" : ""}
-            </span>
-          </span>
-          <span className="text-[11px] text-muted-foreground">{resetLabel(w.resets_at, now) ?? "重置时间未知"}{stale ? " · 旧记录" : ""}</span>
-        </span>
-      ))}
-    </div>
-  );
 }
 
 /** 账号行尾「⋯」：与技能、MCP 等页同一个菜单（渲染在页面最外层，不被表格裁掉）。 */

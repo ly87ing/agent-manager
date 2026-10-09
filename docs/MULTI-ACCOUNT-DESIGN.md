@@ -165,7 +165,7 @@ team-skills    6 skills                                                       [U
 - **Shared settings:** Settings lets users choose which settings to synchronize from the main account to other accounts (currently permissions, status line, rules, MCP).
 - **Usage:** retain account-specific token statistics as a secondary entry on the right of the top bar.
 - **Scan existing local content:** unregistered assistants appear at the bottom of Accounts; external skill directories, unexpected links, and residual links appear in Unmanaged on Sources. Hide these sections when nothing is actionable.
-- **Tray:** one row per account with its tightest quota window; click to copy its launch command.
+- **Tray:** one row per account with its tightest quota window and reset countdown; left click opens a panel with every account's quota bars and a Copy button for its launch command (2026-10-09). Display and copy only: no switching.
 
 ### 3.6 Layout Rules (Acceptance Criteria)
 

@@ -77,6 +77,8 @@ fn main() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
+                // 托盘面板每次跟着图标定位，不记位置
+                .with_denylist(&[tray::PANEL_LABEL])
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -84,11 +86,13 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         // 关窗不退出：点击关闭按钮只隐藏窗口，驻留托盘；
         // 托盘「显示主界面」/ macOS Dock 点图标（Reopen）/ 二次启动均可唤回。
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 let _ = window.hide();
             }
+            tauri::WindowEvent::Focused(focused) => tray::handle_panel_focus(window, *focused),
+            _ => {}
         })
         .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
@@ -108,6 +112,8 @@ fn main() {
             settings_get,
             settings_save,
             tray::tray_set_accounts,
+            tray::tray_panel_open_main,
+            tray::tray_panel_quit,
             theme::set_window_theme
         ])
         .build(tauri::generate_context!())

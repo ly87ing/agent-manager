@@ -21,7 +21,8 @@ Run several Claude Code and Codex accounts side by side on one Mac. Each account
 
 - Top navigation: Inbox, Accounts, Skills, MCP, Rules, Commands, Sources, and Programs. Search `⌘K`, theme controls, Usage, and Settings are on the right. Each page opens with a list, one item per row.
 - `⌘K` searches pages, accounts, and resources; selecting an account copies its launch command. `⌘⇧K` lists accounts only. `⌘F` searches the current page; `⌘,` opens Settings.
-- The tray groups all accounts by assistant (name · launch command · quota). Click to open the command palette at that account, then press Enter to copy the command. The tray does not write configuration.
+- Left-clicking the tray icon (macOS / Windows) opens a small panel listing every account by assistant with its launch command, quota bars, and reset countdown; Copy puts the launch command on the clipboard. Right-click (and any click on Linux) opens the native menu, which groups accounts the same way and opens the command palette at the chosen one. The tray never switches accounts or writes configuration.
+- Optional quota reminder (Settings): a system notification when an account's window is about to reset with more than half of it unused. It only informs; it takes no action.
 - Light, dark, and system themes; persistent window position and size; single-instance operation; update notifications.
 
 The application UI is in Simplified Chinese.
