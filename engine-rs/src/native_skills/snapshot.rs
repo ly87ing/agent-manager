@@ -364,3 +364,43 @@ pub fn discover_repo_skills(
     }
     Ok((found, duplicates))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 读不了的内容是「未知」，不能给出可比较的指纹：两个读不了的目录若被当成相同，
+    /// 去重或撤回就可能删掉其中一份（Magpie 9fb9a8ab 的教训）。
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_content_is_an_error_not_a_comparable_fingerprint() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("am-hash-unreadable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (a, b) = (root.join("a"), root.join("b"));
+        for (dir, body) in [(&a, "one"), (&b, "two")] {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("SKILL.md"), body).unwrap();
+            std::fs::set_permissions(dir.join("SKILL.md"), std::fs::Permissions::from_mode(0o000))
+                .unwrap();
+        }
+        // root 能无视权限读到内容，这时检查不了
+        if std::fs::read(a.join("SKILL.md")).is_ok() {
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+        assert!(hash_skill_dir(&a).is_err());
+        assert!(hash_skill_dir(&b).is_err());
+        // 读不了的子目录同样报错
+        std::fs::set_permissions(a.join("SKILL.md"), std::fs::Permissions::from_mode(0o644))
+            .unwrap();
+        let sub = a.join("scripts");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o000)).unwrap();
+        assert!(hash_skill_dir(&a).is_err());
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(b.join("SKILL.md"), std::fs::Permissions::from_mode(0o644))
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
