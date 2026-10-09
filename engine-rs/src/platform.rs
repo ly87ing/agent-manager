@@ -8,14 +8,25 @@
 
 use std::path::{Path, PathBuf};
 
-/// 用户主目录。
+/// 用户主目录。没设置、为空或是相对路径时为 None：相对路径会随启动目录变，
+/// 拿它拼路径会把配置和数据写进启动时所在的目录。
 pub fn home_dir() -> Option<PathBuf> {
-    if let Some(home) = std::env::var_os("HOME").filter(|v| !v.is_empty()) {
-        return Some(PathBuf::from(home));
+    home_from(|name| std::env::var_os(name))
+}
+
+fn home_from(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
+    let usable = |name: &str| {
+        var(name)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+    };
+    if let Some(home) = var("HOME").filter(|value| !value.is_empty()) {
+        // HOME 设了但不可用就报不可用，不悄悄改用别的变量
+        return Some(PathBuf::from(home)).filter(|path| path.is_absolute());
     }
-    #[cfg(windows)]
-    if let Some(home) = std::env::var_os("USERPROFILE").filter(|v| !v.is_empty()) {
-        return Some(PathBuf::from(home));
+    if cfg!(windows) {
+        return usable("USERPROFILE");
     }
     None
 }
@@ -345,6 +356,31 @@ pub fn command_link_target(path: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn home_must_be_an_absolute_path() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| std::ffi::OsString::from(*value))
+            }
+        };
+        let absolute = if cfg!(windows) {
+            r"C:\Users\me"
+        } else {
+            "/Users/me"
+        };
+        assert_eq!(
+            home_from(|name| (name == "HOME").then(|| absolute.into())),
+            Some(PathBuf::from(absolute))
+        );
+        assert_eq!(home_from(env(&[("HOME", "relative/home")])), None);
+        assert_eq!(home_from(env(&[("HOME", ".")])), None);
+        assert_eq!(home_from(env(&[("HOME", "")])), None);
+        assert_eq!(home_from(env(&[])), None);
+    }
 
     #[test]
     fn 目录链接_建_读_删只删链接本身() {

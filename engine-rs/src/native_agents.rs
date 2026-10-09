@@ -261,6 +261,8 @@ pub(crate) fn fallback_bin_dirs(home_dir: &Path) -> Vec<PathBuf> {
             .unwrap_or_else(|| home_dir.join("AppData").join("Local"));
         return vec![
             home_dir.join(".local").join("bin"),
+            // Codex 官方 install.ps1 的入口
+            local.join("Programs").join("OpenAI").join("Codex").join("bin"),
             appdata.join("npm"),
             local.join("Volta").join("bin"),
             home_dir.join(".bun").join("bin"),
@@ -523,6 +525,14 @@ pub(crate) fn detected_provider(home_dir: &Path, bin_path: &Path) -> &'static st
         || path.contains("/homebrew/")
     {
         return "brew";
+    }
+    // Codex 官方独立安装器把版本放在 ~/.codex/packages/standalone 下；Windows 的 install.ps1
+    // 经 %LOCALAPPDATA%\Programs\OpenAI\Codex\bin 的目录联接到达，入口不在 ~/.local/bin
+    if path
+        .replace('\\', "/")
+        .contains("/.codex/packages/standalone/")
+    {
+        return "native";
     }
     let native_dir = home_dir
         .canon()
@@ -1052,4 +1062,32 @@ pub(crate) fn discover(ctx: &Context) -> Result<Value> {
         }));
     }
     Ok(Value::Array(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Codex 独立安装：入口在 ~/.local/bin 以外（Windows 的 Programs\OpenAI\Codex\bin），
+    /// 经链接到达 ~/.codex/packages/standalone 下的版本，也是官方安装。
+    #[cfg(unix)]
+    #[test]
+    fn codex_standalone_install_is_native_wherever_its_entry_sits() {
+        let root = std::env::temp_dir().join(format!("am-provider-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let home = root.join("home");
+        let release = home.join(".codex/packages/standalone/releases/0.161.0/bin");
+        std::fs::create_dir_all(&release).unwrap();
+        std::fs::write(release.join("codex"), "").unwrap();
+        let entry_dir = root.join("Programs/OpenAI/Codex/bin");
+        std::fs::create_dir_all(&entry_dir).unwrap();
+        std::os::unix::fs::symlink(release.join("codex"), entry_dir.join("codex")).unwrap();
+        assert_eq!(detected_provider(&home, &entry_dir.join("codex")), "native");
+        // 普通目录里的同名程序仍是 system
+        let other = root.join("usr/bin");
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(other.join("codex"), "").unwrap();
+        assert_eq!(detected_provider(&home, &other.join("codex")), "system");
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

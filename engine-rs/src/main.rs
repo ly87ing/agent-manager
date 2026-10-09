@@ -1,8 +1,12 @@
 use agent_manager_engine::{execute, Context, Request};
 use std::path::PathBuf;
 
+/// 找不到可用的主目录就退出：退回启动目录会把配置和数据写到不该写的地方。
 fn home_dir() -> PathBuf {
-    agent_manager_engine::platform::home_dir().unwrap_or_else(|| PathBuf::from("."))
+    agent_manager_engine::platform::home_dir().unwrap_or_else(|| {
+        eprintln!("找不到用户主目录：HOME（Windows 上为 USERPROFILE）没有设置或不是绝对路径");
+        std::process::exit(2);
+    })
 }
 fn data_dir() -> PathBuf {
     if let Some(path) = std::env::var_os("AGENT_MANAGER_DATA_DIR") {
