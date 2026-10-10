@@ -87,3 +87,12 @@ scripts and login entries need an explicit, ownership-checked removal path.
   Controlled-command queries are also disabled when search closes, including when
   their account metadata is cached. Acceptance is being rerun on this combined tree;
   pre-sync full suites were interrupted and do not establish its acceptance.
+- Skill hashing increment: reuse one 64 KiB content buffer. The existing path,
+  exclusion, symlink, and digest format is retained. A golden digest spanning
+  multiple buffers and an empty file, content mutation, and unreadable-file tests
+  passed (two tests); all 35 Skills integration tests passed.
+- Isolated CLI measurement: a source with one 256 MiB sparse asset plus SKILL.md
+  used 273,883,136 bytes peak RSS before and 6,418,432 after (261.2 vs 6.1 MiB,
+  97.7% lower). The baseline executable came from `9af369a`; its hash source is
+  identical through `a2141cd`. Full `skills:status` data, including fingerprints,
+  matched exactly. This measures that workload, not total desktop/WebKit memory.

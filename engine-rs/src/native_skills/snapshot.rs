@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail, Context as _, Result};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use super::paths::{is_path_within, is_sha256_hex, resolve_loose, validate_symlink_internal};
@@ -10,6 +11,7 @@ use super::EXCLUDED_DIRS;
 pub fn hash_skill_dir(dir: &Path) -> Result<String> {
     let mut entries: Vec<(String, String)> = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
+    let mut buffer = [0u8; 64 * 1024];
     while let Some(current) = stack.pop() {
         let read = std::fs::read_dir(&current)
             .with_context(|| format!("读取目录失败: {}", current.display()))?;
@@ -42,10 +44,21 @@ pub fn hash_skill_dir(dir: &Path) -> Result<String> {
                 h.update(target.to_string_lossy().as_bytes());
                 entries.push((rel, format!("{:x}", h.finalize())));
             } else if meta.is_file() {
-                let bytes = std::fs::read(&child)
+                let mut file = std::fs::File::open(&child)
                     .with_context(|| format!("读取文件失败: {}", child.display()))?;
                 let mut h = Sha256::new();
-                h.update(&bytes);
+                loop {
+                    let count = match file.read(&mut buffer) {
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                        result => {
+                            result.with_context(|| format!("读取文件失败: {}", child.display()))?
+                        }
+                    };
+                    if count == 0 {
+                        break;
+                    }
+                    h.update(&buffer[..count]);
+                }
                 entries.push((rel, format!("{:x}", h.finalize())));
             }
         }
@@ -365,9 +378,36 @@ pub fn discover_repo_skills(
     Ok((found, duplicates))
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunked_hash_preserves_existing_snapshot_digest() {
+        let root = std::env::temp_dir().join(format!(
+            "am-hash-chunks-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("assets")).unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join("SKILL.md"), "# Hash fixture\n").unwrap();
+        std::fs::write(root.join("empty"), []).unwrap();
+        std::fs::write(root.join(".git/ignored"), "excluded content").unwrap();
+        let mut payload: Vec<u8> = (0..131_089).map(|index| (index % 251) as u8).collect();
+        std::fs::write(root.join("assets/payload.bin"), &payload).unwrap();
+        // Golden digest from the existing whole-file format, spanning two full
+        // buffers, a partial buffer, an empty file, and excluded Git metadata.
+        let expected = "9c0097a54c817ee20234af24936f2ffec9dc2e2d91a70a6d6fb65f9eeab99444";
+        assert_eq!(hash_skill_dir(&root).unwrap(), expected);
+        payload[65_536] ^= 1;
+        std::fs::write(root.join("assets/payload.bin"), payload).unwrap();
+        assert_ne!(hash_skill_dir(&root).unwrap(), expected);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     /// 读不了的内容是「未知」，不能给出可比较的指纹：两个读不了的目录若被当成相同，
     /// 去重或撤回就可能删掉其中一份（Magpie 9fb9a8ab 的教训）。

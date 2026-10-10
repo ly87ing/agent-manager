@@ -928,3 +928,11 @@ The unchanged engine's full check passed 240 library tests and failed eight
 subprocess timing/capture tests under heavy concurrent host compilation; integration
 targets were not reached. A no-fail-fast rerun is collecting further evidence.
 This record does not claim a passing full engine suite or completion of the goal.
+
+The next memory increment streams skill contents through a reused 64 KiB buffer.
+Two snapshot tests and all 35 Skills integration tests passed. An isolated
+`skills:status` run on the same 256 MiB asset produced identical status data and
+fingerprints; peak process RSS fell from 261.2 to 6.1 MiB. The baseline hash source
+is unchanged between `9af369a` and `a2141cd`. This is a workload-specific CLI
+measurement, not the entire desktop footprint. Other resource bounds and feature
+retirements remain in progress.
