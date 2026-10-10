@@ -1,6 +1,9 @@
 $ErrorActionPreference = 'Stop'
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
 $trustedSids = @($currentUser.Value, 'S-1-5-18', 'S-1-5-32-544')
+# Public Windows Modules Installer SID; classify it without changing trust rules.
+# https://learn.microsoft.com/archive/msdn-magazine/2008/november/access-control-understanding-windows-file-and-registry-permissions
+$installerSid = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
 $localAppData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
 if (-not [IO.Path]::IsPathFullyQualified($localAppData)) { throw 'Missing OS LocalAppData directory' }
 
@@ -13,10 +16,11 @@ foreach ($source in @(@{ Phase = 'runtime'; Path = $localAppData }, @{ Phase = '
     for ($depth = 0; $depth -lt $ancestors.Count; $depth++) {
         $acl = Get-Acl -LiteralPath $ancestors[$depth].FullName
         $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+        $ownerClass = if ($owner -eq $installerSid) { 'trusted-installer' } elseif ($trustedSids -contains $owner) { 'trusted' } else { 'other' }
         $rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
-            @{ trusted = $trustedSids -contains $_.IdentityReference.Value; type = "$($_.AccessControlType)"; mask = ([long]$_.FileSystemRights -band 0xffffffff); inheritOnly = ($_.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0 }
+            @{ trusted = $trustedSids -contains $_.IdentityReference.Value; type = "$($_.AccessControlType)"; mask = ([long]$_.FileSystemRights -band [long]4294967295); inheritOnly = ($_.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0 }
         })
-        @{ phase = $source.Phase; depth = $depth; root = $depth -eq 0; trustedOwner = $trustedSids -contains $owner; rules = $rules } | ConvertTo-Json -Compress -Depth 4 | Write-Output
+        @{ phase = $source.Phase; depth = $depth; root = $depth -eq 0; trustedOwner = $trustedSids -contains $owner; ownerClass = $ownerClass; rules = $rules } | ConvertTo-Json -Compress -Depth 4 | Write-Output
     }
 }
 
