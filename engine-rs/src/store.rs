@@ -551,26 +551,32 @@ pub fn write_policy(conn: &Connection, value: &Value) -> Result<()> {
 }
 
 pub fn uuid_v4() -> String {
-    // RFC 4122 v4 from /dev/urandom; no external dependency.
-    let mut bytes = [0u8; 16];
-    let filled = std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut bytes))
-        .is_ok();
-    if !filled {
-        // 兜底：时间戳+PID 混合（仅用于日志 id，非安全场景）
-        let nanos = std::time::SystemTime::now()
+    if let Ok(uuid) = new_account_generation() {
+        return uuid;
+    }
+    // General log/template/temp IDs may use this non-cryptographic fallback.
+    // Account generations call the OS-only function directly and fail closed.
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    fallback_uuid(
+        std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        for (i, chunk) in bytes.chunks_mut(8).enumerate() {
-            chunk.copy_from_slice(
-                &(nanos
-                    .wrapping_add((std::process::id() as u128) << 64)
-                    .wrapping_add(i as u128))
-                .to_le_bytes()[..8],
-            );
-        }
-    }
+            .unwrap_or(0),
+        std::process::id(),
+        NEXT_ID.fetch_add(1, Ordering::Relaxed),
+    )
+}
+
+fn fallback_uuid(timestamp: u128, process: u32, sequence: u64) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(timestamp.to_le_bytes());
+    hash.update(process.to_le_bytes());
+    hash.update(sequence.to_le_bytes());
+    let digest = hash.finalize();
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
     format_uuid(bytes)
 }
 
@@ -674,6 +680,28 @@ pub fn record_operation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn general_uuid_fallback_distinguishes_equal_clocks_processes_and_sequences() {
+        let ids: std::collections::BTreeSet<_> = (0..1024)
+            .map(|sequence| fallback_uuid(0, 1, sequence))
+            .collect();
+        assert_eq!(ids.len(), 1024);
+        assert_ne!(fallback_uuid(0, 1, 0), fallback_uuid(0, 2, 0));
+        assert_ne!(fallback_uuid(0, 1, 0), fallback_uuid(1, 1, 0));
+    }
+
+    #[test]
+    fn general_uuid_generation_remains_unique_under_concurrent_calls() {
+        let workers: Vec<_> = (0..8)
+            .map(|_| std::thread::spawn(|| (0..128).map(|_| uuid_v4()).collect::<Vec<_>>()))
+            .collect();
+        let ids: std::collections::BTreeSet<_> = workers
+            .into_iter()
+            .flat_map(|worker| worker.join().unwrap())
+            .collect();
+        assert_eq!(ids.len(), 1024);
+    }
     use crate::native::Context;
 
     fn ctx(name: &str) -> (std::path::PathBuf, Context) {

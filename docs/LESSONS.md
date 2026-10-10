@@ -118,6 +118,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Add a process-wide atomic sequence and retry only exclusive-creation collisions. Authentication and version probes share private atomic directory creation and RAII cleanup. Force the same timestamp in a regression, keep both directories alive, and verify that cleaning one leaves the other unchanged.
 - Seen 1× (2026-10-10).
 
+**General UUIDs also need native Windows randomness.**
+- Windows `3c95a07` passed 231 library tests, then two policy fixtures encountered changed registration snapshots. Those parallel fixtures used `uuid_v4`, which always fell back from `/dev/urandom` on Windows. Its timestamp-only bytes discarded the PID and repeated for equal clock values, so fixtures could share one database.
+- Use the existing OS-random UUID path on Windows too. The general-purpose fallback includes a process-wide sequence and PID; account generations retain OS-only randomness and fail closed. Force equal-clock fallback calls, run concurrent UUID generation, and make policy fixtures create their roots exclusively. Keep the snapshot-conflict and ownership assertions unchanged.
+- Seen 1× (2026-10-10).
+
 **Launch the generated OS entry; a correct-looking string is not startup evidence.**
 - The first Linux autostart entry escaped a literal `%` as `%%` according to the Desktop Entry syntax. Real `gio launch` refused it because GIO checks whether the executable exists before expanding field codes. File readback alone had passed. Such paths now fail before writing; a disposable Linux run executed the exact path containing spaces, quotes, `$`, and a backslash.
 - Seen 1× (2026-10-09).

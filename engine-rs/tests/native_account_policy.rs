@@ -11,6 +11,8 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let root = std::env::temp_dir().join(format!("am-account-policy-{}", store::uuid_v4()));
+        std::fs::create_dir(&root)
+            .expect("each policy fixture must exclusively own a new directory");
         let ctx = Context {
             home_dir: root.join("home"),
             data_dir: root.join("data"),
