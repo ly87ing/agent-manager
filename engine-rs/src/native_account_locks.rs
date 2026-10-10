@@ -576,7 +576,9 @@ mod tests {
         fn legacy(&self, ctx: &Context) -> (PathBuf, File) {
             fs::create_dir_all(&ctx.data_dir).unwrap();
             let directory = ctx.data_dir.join("account-locks");
-            fs::create_dir_all(&directory).unwrap();
+            if !directory.exists() {
+                create_private_directory(&directory).unwrap();
+            }
             let name = crate::native_mcp::model::sha256_hex(
                 &resolved(&self.account).unwrap().to_string_lossy(),
             );
@@ -588,6 +590,13 @@ mod tests {
                 .write(true)
                 .open(&path)
                 .unwrap();
+            #[cfg(windows)]
+            {
+                crate::secret_values::validate_permissions(&directory)
+                    .expect("legacy fixture directory must have a private Windows ACL");
+                crate::secret_values::validate_permissions(&path)
+                    .expect("legacy fixture file must have a private Windows ACL");
+            }
             (path, file)
         }
     }

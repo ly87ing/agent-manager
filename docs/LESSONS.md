@@ -103,6 +103,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Accept that exact SID only as an ancestor owner. Keep private credential/lock owners, ACL grantees, and rejection of deletion/ACL/owner changes strict. Test private-file rejection, nearby service SIDs, and dangerous grants, then rerun the native Windows suite.
 - Seen 1× (2026-10-10).
 
+**Legacy-lock fixtures need explicit private Windows ACLs too.**
+- After the system-owner repair, Windows passed 228 library tests but the known-default legacy-lock test stopped at the private-entry check before testing old-session exclusion. Its fixture created the lock directory recursively with inherited permissions.
+- Create the disposable legacy-lock directory with the same atomic protected-ACL helper used for the runtime directory. Read back both directory and file ACLs before acquiring the simulated old session. Keep production rejection and the expected upgrade-restart assertion unchanged.
+- Seen 1× (2026-10-10).
+
 **Launch the generated OS entry; a correct-looking string is not startup evidence.**
 - The first Linux autostart entry escaped a literal `%` as `%%` according to the Desktop Entry syntax. Real `gio launch` refused it because GIO checks whether the executable exists before expanding field codes. File readback alone had passed. Such paths now fail before writing; a disposable Linux run executed the exact path containing spaces, quotes, `$`, and a backslash.
 - Seen 1× (2026-10-09).
