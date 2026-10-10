@@ -3564,12 +3564,13 @@ fn check_reports_a_failing_server_without_leaking_the_secret_it_was_given() {
     assert!(set.ok, "{}", errors(&set));
     let server = fake_server(
         &ctx,
-        "#!/bin/sh\necho \"auth failed for token $TOKEN\" >&2\nexit 1\n",
+        "#!/bin/sh\nIFS= read -r initialize || exit 2\necho \"auth failed for token $TOKEN\" >&2\nexit 1\n",
     );
     write_claude(
         &ctx,
         json!({"mcpServers": {"fake": {"command": server.to_str().unwrap(), "env": {"TOKEN": "${AM_CHECK_TOKEN}"}}}}),
     );
+    let before_config = read(&claude_path(&ctx));
     let env = run(
         &ctx,
         "mcp:check",
@@ -3580,8 +3581,10 @@ fn check_reports_a_failing_server_without_leaking_the_secret_it_was_given() {
     let text = env.data.to_string();
     assert!(text.contains("auth failed for token"), "{text}");
     assert_eq!(env.data["message"], "命令退出了，没有回应初始化");
+    assert_eq!(env.data["stage"], "initialize");
     assert_eq!(env.data["exit_code"], 1);
     assert!(!text.contains(SECRET), "取值不能出现在结果里：{text}");
+    assert_eq!(read(&claude_path(&ctx)), before_config);
     let _ = std::fs::remove_dir_all(root);
 }
 

@@ -70,6 +70,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - `mcp:check` first reported "no reply to initialize within 30 seconds" for a server that exited after 0.5 s. The wait now returns why it stopped, and the test asserts the exit message (`a97f432`).
 - Seen 1× (2026-10-09).
 
+**A stage-specific subprocess test must reach that protocol stage.**
+- Linux `2d1fcd4` correctly reported an immediate MCP startup exit, but its secret-redaction fixture expected an initialization exit. The fixture exited before reading the request, so the scheduler chose the observed stage.
+- Make the fake server read initialization before exiting. Retain the exact failure message, natural exit code and secret-redaction assertions; also verify the initialization stage and unchanged configuration.
+- Seen 1× (2026-10-10).
+
 **Capture the server's exit status before starting cleanup.**
 - Closing stdin can make an unresponsive MCP server exit normally or return a new error. Capture its status before closing stdin; otherwise a timeout can acquire an unrelated exit code. Cover both forced termination and EOF-driven shutdown in the same failure-stage test.
 - Seen 1× (2026-10-09).
@@ -121,6 +126,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 **General UUIDs also need native Windows randomness.**
 - Windows `3c95a07` passed 231 library tests, then two policy fixtures encountered changed registration snapshots. Those parallel fixtures used `uuid_v4`, which always fell back from `/dev/urandom` on Windows. Its timestamp-only bytes discarded the PID and repeated for equal clock values, so fixtures could share one database.
 - Use the existing OS-random UUID path on Windows too. The general-purpose fallback includes a process-wide sequence and PID; account generations retain OS-only randomness and fail closed. Force equal-clock fallback calls, run concurrent UUID generation, and make policy fixtures create their roots exclusively. Keep the snapshot-conflict and ownership assertions unchanged.
+- Seen 1× (2026-10-10).
+
+**Credential provenance must not change when its directory is created.**
+- Windows `2d1fcd4` passed all policy tests, then three transaction checks rejected the account's own claim as retired. The claim hashed an ordinary missing path before creation, but a native verbatim canonical path afterwards.
+- Resolve existing ancestors with the same native canonical representation before appending absent components. Prove directory/file creation preserves that identity and a distinct path stays distinct. Retain generation and account checks; mismatched historical claims are not rewritten. Legacy-session fixtures must use the historical lock's display-path canonicalization when hashing its name.
 - Seen 1× (2026-10-10).
 
 **Launch the generated OS entry; a correct-looking string is not startup evidence.**

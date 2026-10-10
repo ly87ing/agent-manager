@@ -2,6 +2,7 @@
 #[cfg(windows)]
 mod common;
 
+use agent_manager_engine::platform::Canon;
 use agent_manager_engine::{execute, store, Context, Envelope, Request};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -513,7 +514,7 @@ fn active_account_session_blocks_rotation_without_blocking_another_account() {
         )
         .ok
     );
-    let dir = std::fs::canonicalize(f.config("a").parent().unwrap()).unwrap();
+    let dir = f.config("a").parent().unwrap().canon().unwrap();
     let name = agent_manager_engine::native_mcp::model::sha256_hex(&dir.to_string_lossy());
     // Simulate an existing old-version session; upgraded operations never create legacy files.
     std::fs::create_dir_all(f.ctx.data_dir.join("account-locks")).unwrap();
@@ -741,7 +742,7 @@ fn adopt_accepts_owned_live_identity_but_rejects_mixed_auth_and_active_session()
     std::fs::write(f.config("a"), live.to_string()).unwrap();
     let base = draft_base(&f.ctx, "a", &definition);
     let policy = f.policy();
-    let dir = std::fs::canonicalize(f.config("a").parent().unwrap()).unwrap();
+    let dir = f.config("a").parent().unwrap().canon().unwrap();
     let name = agent_manager_engine::native_mcp::model::sha256_hex(&dir.to_string_lossy());
     // Simulate an existing old-version session; upgraded operations never create legacy files.
     std::fs::create_dir_all(f.ctx.data_dir.join("account-locks")).unwrap();
@@ -1010,7 +1011,7 @@ fn seed_and_shared_settings_preserve_owned_identity_and_refuse_mixed_or_active_a
         "--target-base".into(),
         item["target_base"].as_str().unwrap().into(),
     ];
-    let dir = std::fs::canonicalize(f.config("a").parent().unwrap()).unwrap();
+    let dir = f.config("a").parent().unwrap().canon().unwrap();
     let name = agent_manager_engine::native_mcp::model::sha256_hex(&dir.to_string_lossy());
     // Simulate an existing old-version session; upgraded operations never create legacy files.
     std::fs::create_dir_all(f.ctx.data_dir.join("account-locks")).unwrap();

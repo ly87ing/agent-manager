@@ -190,6 +190,45 @@ fn load_variable_claims(conn: &rusqlite::Connection) -> Result<Vec<(String, Stri
         .map_err(|_| anyhow::anyhow!("持久密钥归属记录已损坏，拒绝操作"))
 }
 
+fn credential_identity_path(path: &std::path::Path) -> Result<std::path::PathBuf> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(std::fs::canonicalize(path)?),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let parent = path
+                .parent()
+                .ok_or_else(|| anyhow::anyhow!("密钥归属路径无法解析"))?;
+            let name = path
+                .file_name()
+                .ok_or_else(|| anyhow::anyhow!("密钥归属路径无法解析"))?;
+            Ok(credential_identity_path(parent)?.join(name))
+        }
+        Err(err) => Err(err.into()),
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn credential_identity_paths_survive_creation_of_missing_components() {
+    let root = std::env::temp_dir().join(format!("am-credential-path-{}", store::uuid_v4()));
+    std::fs::create_dir(&root).unwrap();
+    let directory = root.join("missing/account");
+    let file = directory.join("config.json");
+    let before_directory = credential_identity_path(&directory).unwrap();
+    let before_file = credential_identity_path(&file).unwrap();
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(&file, b"{}").unwrap();
+    assert_eq!(
+        credential_identity_path(&directory).unwrap(),
+        before_directory
+    );
+    assert_eq!(credential_identity_path(&file).unwrap(), before_file);
+    assert_ne!(
+        credential_identity_path(&root.join("other")).unwrap(),
+        before_directory
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 fn credential_claim_binding(
     ctx: &Context,
     policy: &Value,
@@ -269,8 +308,8 @@ fn credential_claim_binding(
         )
     };
     let identity = json!({"version":1,"account":account,"generation":generation,
-        "home":crate::native_mcp::targets::resolved_path(&ctx.home_dir),
-        "location":crate::native_mcp::targets::resolved_path(&location),"kind":kind,"auth_mode":mode});
+        "home":credential_identity_path(&ctx.home_dir)?,
+        "location":credential_identity_path(&location)?,"kind":kind,"auth_mode":mode});
     Ok(Some(crate::native_mcp::model::sha256_hex(
         &serde_json::to_string(&identity)?,
     )))

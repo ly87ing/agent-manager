@@ -25,6 +25,7 @@ Authentication and CLI-version probes use exclusively created private temporary 
 
 - One account cannot share another's directory, final identity file, or credential reference. [Path isolation](account-path-isolation.md) covers symlinks, hardlinks, and overlapping registrations.
 - Removing and recreating an account produces a fresh OS-random generation; old bindings remain invalid. Queries cannot initialize a legacy generation. Explicitly save the definition to initialize its metadata without migrating credentials.
+- Credential claim paths resolve existing ancestors before appending missing components, retaining the same Windows native path representation before and after directory creation. Existing mismatched claims are rejected without rewriting their provenance.
 - The merged effective configuration must match the declared authentication mode, key, and endpoint. Unknown provider/authentication layers and unsupported CLI versions stop before execution.
 - Only the selected account's validated MCP references enter its environment. Copy and automatic fill refuse entries carrying credentials or uncertain fields. MCP connection tests share the account lock and clean-environment contract.
 - Multiple launch sessions may share one account's read lock. Authentication and account configuration writes require its exclusive lock. A and B keep separate locks.
