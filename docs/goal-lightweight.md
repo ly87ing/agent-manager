@@ -160,3 +160,15 @@ scripts and login entries need an explicit, ownership-checked removal path.
 - The account onboarding source-presence check now uses the same collection-only
   view as Sources. It needs no per-skill digest. All 26 account-page tests and the
   production build passed; the full frontend check is running on this final query.
+- Final frontend check: 690 passed with four platform skips. A 65-second browser
+  fixture observation on Sources made no additional engine queries after settling;
+  this measures query scheduling, not native process memory. The isolated native
+  app rendered Accounts, the source collection and Rules through IPC. Closing its
+  window ended its process; the separate verification server was then stopped.
+- CI exposed two real test-contract defects: an old library test still requested
+  retired status-line installation, and a Windows ownership fixture hardcoded a
+  Unix path. The local full-library failures therefore cannot all be classified as
+  host timing failures. The tests now require installation rejection, owned-only
+  cleanup and custom-command preservation, and derive the platform path from the
+  production helper. All four focused retirement tests passed. Full platform CI
+  remains required for this correction.

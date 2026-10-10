@@ -2381,26 +2381,30 @@ mod tests {
     }
 
     #[test]
-    fn 选了内置状态栏就指向本工具部署的那份_不选则不碰() {
-        let out = runtime(None, json!({"statusline": "builtin"}));
-        let parsed: Value = serde_json::from_slice(&out).unwrap();
-        assert_eq!(parsed["statusLine"]["type"], "command");
-        // command 在 shell 里执行：始终按单引号引用，路径含空格也不会被拆开
-        assert_eq!(parsed["statusLine"]["command"], "'/data/statusline.sh'");
-
-        // 从内置切回「不碰」：把我们指过去的那条撤掉，用户之后自己配什么是他的事
-        let back = runtime(Some(&out), json!({"statusline": ""}));
-        let parsed: Value = serde_json::from_slice(&back).unwrap();
-        assert!(parsed.get("statusLine").is_none());
-
-        // 旧版写的裸路径同样是我们的：「不碰」时一并撤掉
-        let legacy = serde_json::to_vec(&json!({
-            "statusLine": {"type": "command", "command": "/data/statusline.sh"}
-        }))
-        .unwrap();
-        let back = runtime(Some(&legacy), json!({"statusline": null}));
-        let parsed: Value = serde_json::from_slice(&back).unwrap();
-        assert!(parsed.get("statusLine").is_none());
+    fn retired_statusline_rejects_install_and_only_cleans_owned_commands() {
+        assert!(parse_runtime_patch(Kind::Claude, &json!({"statusline": "builtin"})).is_err());
+        for command in [statusline_command(&sl()), sl().display().to_string()] {
+            let existing = serde_json::to_vec(&json!({
+                "env": {"KEEP": "unchanged"},
+                "statusLine": {"type": "command", "command": command}
+            }))
+            .unwrap();
+            for clear in [json!(""), Value::Null] {
+                let out = runtime(Some(&existing), json!({"statusline": clear}));
+                let parsed: Value = serde_json::from_slice(&out).unwrap();
+                assert!(parsed.get("statusLine").is_none());
+                assert_eq!(parsed["env"]["KEEP"], "unchanged");
+            }
+            let untouched = runtime(Some(&existing), json!({"default_model": "fixture-model"}));
+            let parsed: Value = serde_json::from_slice(&untouched).unwrap();
+            assert_eq!(parsed["statusLine"]["command"], command);
+        }
+        let custom = json!({"statusLine": {"type": "command", "command": "YOUR_CUSTOM_SCRIPT"}});
+        let out = runtime(
+            Some(&serde_json::to_vec(&custom).unwrap()),
+            json!({"statusline": null}),
+        );
+        assert_eq!(serde_json::from_slice::<Value>(&out).unwrap(), custom);
     }
 
     #[test]

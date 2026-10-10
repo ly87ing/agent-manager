@@ -786,7 +786,9 @@ mod retirement_tests {
             home_dir: PathBuf::from("fixture-home"),
             data_dir: PathBuf::from("fixture-data"),
         };
-        for command in ["fixture-data/statusline.sh", "'fixture-data/statusline.sh'"] {
+        let target = crate::native_agent_settings::statusline_target(&ctx);
+        let raw = target.display().to_string();
+        for command in [raw.clone(), format!("'{raw}'")] {
             let source = json!({"statusLine":{"type":"command", "command":command}});
             let (rows, content) =
                 render_claude_settings(&ctx, source.as_object().unwrap(), None, &["statusline"])

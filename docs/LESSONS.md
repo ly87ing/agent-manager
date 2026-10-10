@@ -185,3 +185,14 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Run TypeScript checking after the final test-fixture edit as well: a passing
   runtime assertion does not validate Testing Library option types. Exact role
   names use an anchored name pattern rather than an unsupported exact option.
+
+### 2026-10-10: inspect every full-suite failure and derive platform fixtures
+
+- Focused runtime integration checks did not exercise an old unit helper that still
+  requested installation of the retired status line. Inspect every failure name
+  and diagnostic before attributing a mixed suite result to host startup delays.
+- Migrate obsolete assertions to the confirmed contract: reject installation,
+  preserve unselected/custom configuration, and explicitly clean owned old entries.
+- Derive ownership fixture paths through the production path helper. A hardcoded
+  Unix separator tested a different command on Windows and missed the intended
+  ownership check. Keep its skip/custom-copy assertions intact.
