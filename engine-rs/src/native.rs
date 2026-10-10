@@ -62,8 +62,8 @@ impl Request {
 }
 
 const KNOWN_DOMAINS: &[&str] = &[
-    "usage", "agents", "mcp", "skills", "rules", "aliases", "profiles", "secrets", "profile",
-    "programs", "policy", "system", "runs", "db", "logs", "config", "accounts",
+    "agents", "mcp", "skills", "rules", "aliases", "profiles", "secrets", "profile", "programs",
+    "policy", "system", "runs", "db", "logs", "config", "accounts",
 ];
 
 fn mode_of(request: &Request) -> Mode {
@@ -131,6 +131,21 @@ fn acquire_apply_lock(ctx: &Context, domain: &str) -> Result<ApplyLock> {
 /// The single native entry point. Pure with respect to process state: no exit
 /// codes here (CLI maps errors to exit codes); status never writes the DB.
 pub fn execute(ctx: &Context, request: &Request) -> Envelope {
+    if request.command.replace('.', ":").split(':').next() == Some("usage") {
+        return Envelope::new(
+            request.command.replacen(':', ".", 1),
+            mode_of(request),
+            lock_from_env(),
+            request.run_id.clone(),
+            Value::Object(Map::new()),
+            vec![],
+            vec![diagnostic(
+                "FEATURE_RETIRED",
+                None,
+                "用量、费用、额度与最近会话已移除；本工具仅管理配置。".into(),
+            )],
+        );
+    }
     // 每次执行重新读取本机保存的凭据取值。必须在这里、而不是在 dispatch 里：
     // apply 的 preflight 在取锁前就跑了，比 dispatch 更早要用到取值。
     // 桌面端一个进程会连续执行很多次命令，用户刚填的值要当场生效。
@@ -487,14 +502,6 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("agents", "status" | "apply") => crate::native_agents::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
-        // 用量：status 只读已聚合的结果，scan 才去读会话文件并写库
-        ("usage", "status" | "scan" | "clear") => {
-            crate::native_usage::handle(ctx, request).map(|d| (d, vec![]))
-        }
-        // 最近会话：只读会话文件开头，不写库
-        ("usage", "sessions") => {
-            crate::native_sessions::sessions(ctx, request).map(|d| (d, vec![]))
-        }
         // 运行参数落到助手自己的配置文件；与装卸升级分开，那条走 shell 命令，这条写文件
         ("agents", "configure") => {
             crate::native_agent_settings::apply(ctx, request).map(|data| (data, vec![]))

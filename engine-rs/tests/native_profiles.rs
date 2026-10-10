@@ -2043,7 +2043,7 @@ fn codex_profile_directory_gets_no_rules_or_hooks_file() {
 }
 
 #[test]
-fn 实例的额度读它自己的配置目录_不是默认那份() {
+fn profile_status_does_not_collect_legacy_quota() {
     let (root, ctx) = temp_ctx("usage");
     // 默认位置放一份「别人的」额度：读串了就会看到 99
     std::fs::write(
@@ -2070,11 +2070,7 @@ fn 实例的额度读它自己的配置目录_不是默认那份() {
     let env = execute(&ctx, &request("profiles:status", &[]));
     assert!(env.ok, "profiles:status 失败: {:?}", env.errors);
     let usage = &element(&env, "cc-usage")["observed"]["usage"];
-    assert_eq!(usage["windows"][0]["used_percent"], serde_json::json!(7.0));
-    assert_eq!(
-        usage["source"],
-        serde_json::json!(instance.join(".claude.json").display().to_string())
-    );
+    assert!(usage.is_null());
 
     std::env::remove_var("AM_TEST_TOKEN_USAGE");
     let _ = std::fs::remove_dir_all(&root);

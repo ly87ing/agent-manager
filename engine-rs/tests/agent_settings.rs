@@ -659,97 +659,18 @@ fn 主配置拒绝写入第三方接入_文件与库都不动() {
     let _ = fs::remove_dir_all(&base);
 }
 #[test]
-fn 内置状态栏会部署脚本并指过去_切回不碰只撤自己那条() {
-    let (base, ctx) = temp_ctx("statusline");
-
+fn retired_statusline_install_is_rejected_without_creating_files() {
+    let (base, ctx) = temp_ctx("retired-statusline");
     let env = configure(
         &ctx,
         "claude-code",
-        &["--runtime", r#"{"statusline": "builtin"}"#],
+        &["--runtime", r#"{"statusline":"builtin"}"#],
     );
-    assert!(env.ok, "{:?}", env.errors);
-    assert_eq!(env.data["statusline"], true);
-
-    let script = ctx.data_dir.join("statusline.sh");
-    assert!(script.is_file(), "脚本要落到数据目录");
-    let body = fs::read_to_string(&script).unwrap();
-    assert!(body.starts_with("#!/bin/bash"));
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mode = fs::metadata(&script).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o755, "状态栏脚本要可执行");
-    }
-    // command 在 shell 里执行：按单引号引用，数据目录含空格也不会被拆开
-    assert_eq!(
-        settings_file(&ctx)["statusLine"]["command"],
-        format!("'{}'", script.display())
-    );
-
-    // 落盘是它存在的理由：像 Claude Code 那样按绝对路径跑一次，额度落在数据目录下，
-    // 助手配置目录里不多出任何文件，agents:status 能读回
-    #[cfg(unix)]
-    {
-        use std::io::Write;
-        let claude_dir = ctx.home_dir.join(".claude");
-        let before: Vec<_> = fs::read_dir(&claude_dir)
-            .unwrap()
-            .map(|e| e.unwrap().file_name())
-            .collect();
-        let mut child = std::process::Command::new(&script)
-            .env("HOME", &ctx.home_dir)
-            .env_remove("CLAUDE_CONFIG_DIR")
-            .env("AM_STATUSLINE_NOW", "1789871000")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(
-                br#"{"rate_limits":{"five_hour":{"used_percentage":23,"resets_at":1789900000}}}"#,
-            )
-            .unwrap();
-        assert!(child.wait().unwrap().success());
-
-        let key = claude_dir
-            .display()
-            .to_string()
-            .replace('%', "%25")
-            .replace('/', "%2F");
-        let usage_file = ctx.data_dir.join("usage").join(format!("{key}.json"));
-        assert!(usage_file.is_file(), "额度要落到数据目录的 usage/ 下");
-        let after: Vec<_> = fs::read_dir(&claude_dir)
-            .unwrap()
-            .map(|e| e.unwrap().file_name())
-            .collect();
-        assert_eq!(after, before, "助手配置目录里不能多出文件");
-
-        let status = execute(&ctx, &request("agents:status", &[]));
-        assert!(status.ok, "{:?}", status.errors);
-        let claude = status.data["elements"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|element| element["id"] == "agents:claude-code")
-            .unwrap();
-        assert_eq!(
-            claude["observed"]["usage"]["source"],
-            json!(usage_file.display().to_string())
-        );
-        assert_eq!(
-            claude["observed"]["usage"]["windows"][0]["used_percent"],
-            json!(23.0)
-        );
-    }
-
-    // 切回「不碰」：只撤掉我们指过去的那条
-    assert!(configure(&ctx, "claude-code", &["--runtime", r#"{"statusline": ""}"#]).ok);
-    assert!(settings_file(&ctx).get("statusLine").is_none());
-
-    let _ = fs::remove_dir_all(&base);
+    assert!(!env.ok);
+    assert!(env.errors[0].message.contains("用量状态栏已移除"));
+    assert!(!ctx.data_dir.join("statusline.sh").exists());
+    assert!(!ctx.home_dir.join(".claude/settings.json").exists());
+    let _ = fs::remove_dir_all(base);
 }
 
 /// 模拟旧版本写下的状态：settings.json 里是裸路径的状态栏，库里的摘要按旧版口径
@@ -790,7 +711,7 @@ fn claude_observed_statusline(ctx: &Context) -> Value {
 }
 
 #[test]
-fn 旧版裸路径状态栏_升级后报旧格式_用状态给的基准即可改成引用形式() {
+fn legacy_statusline_is_read_only_and_explicit_cleanup_preserves_custom_commands() {
     let (base, ctx) = temp_ctx("statusline-legacy");
     define_settings(&ctx, json!({"statusline": "builtin"}));
     let bare = seed_legacy_statusline(&ctx, json!({"env": {"MY_OWN": "keep-me"}}));
@@ -803,17 +724,17 @@ fn 旧版裸路径状态栏_升级后报旧格式_用状态给的基准即可改
         legacy_bytes
     );
 
-    // 旧库里的摘要记录不参与判定：用 status 给的基准写即可
-    let applied = configure(
+    let rejected = configure(
         &ctx,
         "claude-code",
-        &["--runtime", r#"{"statusline": "builtin"}"#],
+        &["--runtime", r#"{"statusline":"builtin"}"#],
     );
-    assert!(applied.ok, "{:?}", applied.errors);
-    let after = settings_file(&ctx);
-    assert_eq!(after["statusLine"]["command"], format!("'{bare}'"));
-    assert_eq!(after["env"]["MY_OWN"], "keep-me");
-    assert_eq!(claude_observed_statusline(&ctx), json!("builtin"));
+    assert!(!rejected.ok);
+    assert_eq!(
+        fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap(),
+        legacy_bytes
+    );
+    assert_eq!(settings_file(&ctx)["statusLine"]["command"], bare);
 
     // 「不碰」：引用形式被撤掉
     let cleared = configure(&ctx, "claude-code", &["--runtime", r#"{"statusline": ""}"#]);
@@ -839,38 +760,27 @@ fn 旧版裸路径状态栏_升级后报旧格式_用状态给的基准即可改
 }
 
 #[test]
-fn 升级后部署的脚本是旧版_报过期_重新应用换成新脚本且不动配置文件() {
+fn outdated_statusline_is_preserved_until_explicit_configuration_cleanup() {
     let (base, ctx) = temp_ctx("statusline-outdated");
-    let applied = configure(
-        &ctx,
-        "claude-code",
-        &["--runtime", r#"{"statusline": "builtin"}"#],
-    );
-    assert!(applied.ok, "{:?}", applied.errors);
+    define_settings(&ctx, json!({"statusline": "builtin"}));
+    seed_legacy_statusline(&ctx, json!({"env":{"MY_OWN":"keep-me"}}));
     let script = ctx.data_dir.join("statusline.sh");
-    let current = fs::read(&script).unwrap();
-    let settings = fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap();
-
-    // 旧版本部署的脚本：查询报过期，且查询不替换它
     fs::write(&script, "#!/bin/bash\necho old\n").unwrap();
-    assert_eq!(claude_observed_statusline(&ctx), json!("builtin-outdated"));
-    assert_eq!(fs::read(&script).unwrap(), b"#!/bin/bash\necho old\n");
-
-    // 界面据此照常再应用一次内置：脚本换成本版本的，settings.json 一个字节不动
-    let refreshed = configure(
+    let file = ctx.home_dir.join(".claude/settings.json");
+    let before = fs::read(&file).unwrap();
+    assert_eq!(claude_observed_statusline(&ctx), json!("builtin-legacy"));
+    let rejected = configure(
         &ctx,
         "claude-code",
-        &["--runtime", r#"{"statusline": "builtin"}"#],
+        &["--runtime", r#"{"statusline":"builtin"}"#],
     );
-    assert!(refreshed.ok, "{:?}", refreshed.errors);
-    assert_eq!(fs::read(&script).unwrap(), current);
-    assert_eq!(
-        fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap(),
-        settings
-    );
-    assert_eq!(claude_observed_statusline(&ctx), json!("builtin"));
-
-    let _ = fs::remove_dir_all(&base);
+    assert!(!rejected.ok);
+    assert_eq!(fs::read(&file).unwrap(), before);
+    assert!(configure(&ctx, "claude-code", &["--runtime", r#"{"statusline":""}"#]).ok);
+    assert!(settings_file(&ctx).get("statusLine").is_none());
+    assert_eq!(settings_file(&ctx)["env"]["MY_OWN"], "keep-me");
+    assert_eq!(fs::read(&script).unwrap(), b"#!/bin/bash\necho old\n");
+    let _ = fs::remove_dir_all(base);
 }
 
 #[test]

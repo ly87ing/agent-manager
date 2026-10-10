@@ -10,7 +10,12 @@ The current executable's location determines whether macOS needs an installation
 
 [`settings_data`](../../app/src-tauri/src/settings.rs) includes an optional `runtimeWarning`. [`App`](../../app/src/App.tsx) displays it above the current page. The [Settings page](../../app/src/pages/SettingsPage.tsx) suppresses manual update checks and installation while the warning is present. There is no automatic update check. Closing the main window uses Tauri's normal close/exit flow; no tray or second webview is created.
 
-Settings reads `autostart_get` on opening. Only an explicit switch click calls `autostart_set`; the backend reads back the result before returning, and the [frontend query](../../app/src/lib/autostart.ts) refreshes even after a failed write. macOS uses a plist serializer and `AbandonProcessGroup` so an updater's replacement process can survive its launchd parent's exit. Windows quotes the executable path; Linux uses Desktop Entry quoting rather than a shell command.
+Settings reads `autostart_get` on opening. Enabling is retired in the UI and
+backend. The explicit Remove old login entry action calls `autostart_set(false)`;
+the backend reads back the result and the frontend refreshes after failures too.
+The removal action remains available for an OS-disabled Windows entry, since a
+false enabled state does not prove the Run value is absent. Existing entry formats
+are recognized only for ownership-checked removal.
 
 ### Share links and authentication commands
 
@@ -23,7 +28,7 @@ The Accounts page explicitly chooses the shell for copied authentication command
 - Detection only reads the executable path and mount flags; it does not move the app or write configuration.
 - The message asks the user to quit, drag the app into Applications and reopen it.
 - Other platforms omit the macOS-specific warning.
-- A launch warning blocks enabling autostart in both the UI and backend; disabling remains possible.
+- Enabling autostart is rejected before creating directories or registry values, regardless of launch location.
 - Reading login state creates no directory or file. File entries must be regular files with exactly the expected contents; registry values must point to this executable. External changes and symlinks are refused, including before deletion. Errors remain visible with a reread action.
 - macOS/Linux registration uses the current executable (the original AppImage on Linux), and no software or assistant resource is installed. Moving the app can leave an old entry that must be reviewed manually.
 - Linux refuses executable paths with `%`, `=`, control characters or invalid UTF-8. GIO validates the executable before expanding `%%`, and the specification forbids `=` in executable names; do not report registration success for an unusable path. See the [Desktop Entry specification](https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html) and [GIO loader](https://github.com/GNOME/glib/blob/main/gio/gdesktopappinfo.c).

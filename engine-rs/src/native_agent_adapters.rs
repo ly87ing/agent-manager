@@ -131,10 +131,9 @@ fn claude_fields() -> Vec<Value> {
         }),
         json!({
             "key": "statusline", "type": "enum", "section": "界面与模型行为",
-            "label": "状态栏", "description": "选择是否使用 Agent Manager 提供的本地用量状态栏。",
+            "label": "旧版用量状态栏", "description": "仅移除指向本工具旧脚本的配置；用户自定义状态栏保持原样。",
             "options": [
-                {"value": "", "label": "保持现有状态栏"},
-                {"value": "builtin", "label": "使用 Agent Manager 用量状态栏"}
+                {"value": "", "label": "移除本工具旧状态栏"}
             ],
             "targets": [{"key": "statusLine.command", "enabled_value": "<Agent Manager statusline.sh>"}],
             "summary": {"label": "状态栏", "values": {"builtin": "用量状态栏"}, "default": "保持现状"}

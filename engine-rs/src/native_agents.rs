@@ -590,17 +590,8 @@ fn status_element(
         version.clone().map(Value::String).unwrap_or(Value::Null),
     );
     observed.insert("definition_origin".into(), json!(def.origin.as_str()));
-    // 额度读助手自己写在本机的记账文件，不联网；没有这类记录的助手为 null
-    observed.insert(
-        "usage".into(),
-        crate::agent_usage::read(
-            &ctx.home_dir,
-            &ctx.data_dir,
-            &def.bin,
-            def.mcp_config.as_deref(),
-        )
-        .unwrap_or(Value::Null),
-    );
+    // Keep the response shape without collecting quota or opening sessions.
+    observed.insert("usage".into(), Value::Null);
     observed.insert("command_sources".into(), command_sources(&def.commands));
     // 实际检测到的安装来源：一个值说清「它是怎么装的」。是否可管由 state 表达
     // （managed 之外 → unmanaged-detected），不再另发分类桶与首选对照。

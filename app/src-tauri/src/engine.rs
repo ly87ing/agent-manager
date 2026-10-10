@@ -74,8 +74,6 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         // 官方账号登录状态：只读，用官方命令查一次
         ("agents", "auth-status") => true,
         ("agents", "status") => true,
-        // 用量：status 只读，scan 读会话文件后写聚合，clear 清空重来
-        ("usage", "status" | "scan" | "clear" | "sessions") => true,
         // 「改成我的版本」：把技能复制到用户目录并登记为用户的本机集合
         ("skills", "fork") => true,
         // 列出 git 来源可选的版本：只读网络，不写库、不动镜像
@@ -872,9 +870,6 @@ mod tests {
             "agents:configure",
             "agents:preview-runtime",
             "agents:auth-status",
-            "usage:status",
-            "usage:scan",
-            "usage:sessions",
             "mcp:status",
             "mcp:preview",
             "mcp:check",
@@ -919,6 +914,10 @@ mod tests {
         }
 
         for command in [
+            "usage:status",
+            "usage:scan",
+            "usage:clear",
+            "usage:sessions",
             "agents:apply",
             "agents:update",
             "agents:plan",

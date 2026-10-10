@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, onTestFinished } from "vitest";
-import { act, waitFor } from "@testing-library/react";
+import { waitFor } from "@testing-library/react";
 import AccountsPage from "../pages/AccountsPage";
 import type { Envelope } from "../lib/contract";
 import { accountCommandRoute, controlledCommand, agentManagementFixture, makeAliasStatus, makeApplyResult, makeElement, makeEnvelope } from "./fixtures";
@@ -192,7 +192,7 @@ describe("账号页", () => {
     expect(calls.every((call) => call.command.endsWith(":status") || call.command.endsWith(":auth-status") || ["profiles:shared-status", "system:discover"].includes(call.command))).toBe(true);
   });
 
-  it("刷新重读配置和额度，保留搜索，不调用官方探测或写入", async () => {
+  it("refreshes configuration and keeps search without probing or writing", async () => {
     const { calls } = renderWithEngine(<AccountsPage />, routes());
     await userEvent.type(await screen.findByTestId("accounts-search"), "ds");
     await userEvent.click(screen.getByTestId("accounts-refresh"));
@@ -204,36 +204,7 @@ describe("账号页", () => {
     expect(calls.some((call) => call.args.includes("--probe") || call.command.endsWith(":apply") || call.command.endsWith(":set"))).toBe(false);
   });
 
-  it("额度显示重置时间，窗口结束后自动移除旧百分比", async () => {
-    const baseRoutes = routes();
-    const profileRoute = baseRoutes["profiles:status"] as (args: string[]) => Promise<Envelope>;
-    const at = new Date("2026-10-07T12:00:00Z");
-    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
-    vi.setSystemTime(at);
-    try {
-      renderWithEngine(<AccountsPage />, {
-        ...baseRoutes,
-        "profiles:status": async (args) => {
-          const envelope = await profileRoute(args);
-          const data = envelope.data as { elements: { observed: Record<string, unknown> }[] };
-          data.elements[0].observed.usage = {
-            source: "test-cache", checked_at: at.toISOString(),
-            windows: [{ window_minutes: 300, used_percent: 82, resets_at: new Date(at.getTime() + 60_000).toISOString() }],
-          };
-          return envelope;
-        },
-      });
-      expect(await screen.findByText("1 分钟后重置")).toBeInTheDocument();
-      expect(screen.getByText("82%")).toBeInTheDocument();
-      await act(async () => { vi.advanceTimersByTime(60_000); });
-      expect(screen.queryByText("82%")).toBeNull();
-      expect(screen.queryByTestId("account-quota-profiles:ds")).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("按额度排序只改显示顺序，不读写任何东西", async () => {
+  it("does not display or sort quota from old cached responses", async () => {
     const baseRoutes = routes();
     const profileRoute = baseRoutes["profiles:status"] as (args: string[]) => Promise<Envelope>;
     const { calls } = renderWithEngine(<AccountsPage />, {
@@ -243,21 +214,18 @@ describe("账号页", () => {
         const data = envelope.data as { elements: { observed: Record<string, unknown> }[] };
         data.elements[0].observed.usage = {
           source: "test-cache", checked_at: new Date().toISOString(),
-          windows: [{ window_minutes: 300, used_percent: 30, resets_at: new Date(Date.now() + 3_600_000).toISOString() }],
+          windows: [{ window_minutes: 300, used_percent: 82, resets_at: new Date(Date.now() + 3_600_000).toISOString() }],
         };
         return envelope;
       },
     });
-    await screen.findByTestId("account-quota-profiles:ds");
-    const order = () => within(screen.getByTestId("accounts-list")).getAllByRole("listitem").map((row) => row.getAttribute("data-testid"));
-    expect(order()).toEqual(["account-row-agents:claude-code", "account-row-profiles:ds"]);
-    const before = calls.length;
-    await userEvent.click(screen.getByTestId("accounts-sort-reset"));
-    expect(order()).toEqual(["account-row-profiles:ds", "account-row-agents:claude-code"]);
-    expect(screen.getByTestId("accounts-sort-reset")).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(screen.getByTestId("accounts-sort-default"));
-    expect(order()).toEqual(["account-row-agents:claude-code", "account-row-profiles:ds"]);
-    expect(calls.slice(before).some((call) => !call.command.endsWith(":status") && !call.command.endsWith("status"))).toBe(false);
+    await screen.findByTestId("account-row-profiles:ds");
+    expect(screen.queryByTestId("account-quota-profiles:ds")).toBeNull();
+    expect(screen.queryByText("82%")).toBeNull();
+    expect(screen.queryByRole("group", { name: "按额度排序" })).toBeNull();
+    expect(within(screen.getByTestId("accounts-list")).getAllByRole("listitem").map((row) => row.getAttribute("data-testid")))
+      .toEqual(["account-row-agents:claude-code", "account-row-profiles:ds"]);
+    expect(calls.some((call) => call.command.startsWith("usage:") || call.command === "profiles:shared-status")).toBe(false);
   });
 
   it("智能体本身只检测：显示装的版本与有没有新版本，「检查新版本」只查不装", async () => {
@@ -526,10 +494,12 @@ describe("账号页", () => {
     expect(calls.some((call) => call.command.startsWith("profiles:apply"))).toBe(false);
   });
 
-  it("主账号的状态栏已是本工具的、各账号也一致：不提示", async () => {
-    renderWithEngine(<AccountsPage />, routes());
+  it.each(["builtin", "builtin-outdated", "custom"])("does not install or synchronize quota status lines: %s", async (statusline) => {
+    const { calls } = renderWithEngine(<AccountsPage />, routes({ statusline }));
     await screen.findByTestId("account-row-profiles:ds");
     expect(screen.queryByTestId("accounts-quota-notice")).toBeNull();
+    expect(screen.queryByTestId("accounts-enable-live-quota")).toBeNull();
+    expect(calls.some((call) => ["agents:configure", "profiles:shared-status", "profiles:shared-apply"].includes(call.command))).toBe(false);
   });
 
   it("移除账号时命令删除失败：明确说明剩余动作，不报全部成功", async () => {
@@ -548,32 +518,6 @@ describe("账号页", () => {
     expect(screen.getByText("到「命令」页检查后删除；目录、登录与会话仍保留。")).toBeInTheDocument();
     expect(screen.queryByText("已移除账号 ds")).toBeNull();
     expect(calls.filter((call) => call.command === "policy:set")).toHaveLength(1);
-  });
-
-  it("部署的状态栏脚本是旧版：提示更新，确认后照常写一次内置状态栏换成新脚本", async () => {
-    const { calls } = renderWithEngine(<AccountsPage />, routes({ statusline: "builtin-outdated" }));
-    expect(await screen.findByTestId("accounts-quota-notice")).toHaveTextContent("状态栏脚本是旧版本");
-    await userEvent.click(screen.getByRole("button", { name: "更新状态栏" }));
-    const dialog = await screen.findByRole("dialog", { name: "为全部 Claude 账号开启实时额度" });
-    await userEvent.click(within(dialog).getByRole("button", { name: "开启" }));
-    await waitFor(() => expect(calls.some((call) => call.command === "agents:configure")).toBe(true));
-    const write = calls.find((call) => call.command === "agents:configure");
-    expect(write?.args).toContain('{"statusline":"builtin"}');
-  });
-
-  it("开启实时额度：先按完整文件预览的基准写主账号，再把状态栏同步给其余 Claude 账号", async () => {
-    const { calls } = renderWithEngine(<AccountsPage />, routes({ statusline: "custom" }));
-    await userEvent.click(await screen.findByTestId("accounts-enable-live-quota"));
-    const dialog = await screen.findByRole("dialog", { name: "为全部 Claude 账号开启实时额度" });
-    expect(dialog).toHaveTextContent("主账号现在的自定义状态栏会被替换");
-    expect(calls.some((call) => call.command === "agents:configure")).toBe(false);
-    await userEvent.click(within(dialog).getByRole("button", { name: "开启" }));
-    await waitFor(() => expect(calls.some((call) => call.command === "profiles:shared-apply")).toBe(true));
-
-    const writes = calls.filter((call) => ["agents:configure", "profiles:shared-apply"].includes(call.command));
-    expect(writes.map((call) => call.command)).toEqual(["agents:configure", "profiles:shared-apply"]);
-    expect(writes[0].args).toEqual(["--only", "agents:claude-code", "--base", "main-base", "--preview-file-base", "preview-main", "--runtime", '{"statusline":"builtin"}']);
-    expect(writes[1].args).toEqual(["--only", "profiles:ds", "--item", "statusline", "--source-base", "src-base", "--target-base", "dst-base"]);
   });
 
   it("账号的启动命令：主账号列出直接调用 claude 的命令（区块外的只读），独立账号只列指向自己目录的", async () => {

@@ -19,9 +19,9 @@ and residency requirements in earlier acceptance records.
 
 - [x] Foreground lifecycle: close exits, no tray webview, no global Inbox queries,
       no closed-palette polling, no automatic application update check.
-- [ ] Retire usage/cost/session collection and quota display/reminders. Preserve
+- [x] Retire usage/cost/session collection and quota display/reminders. Preserve
       existing assistant files and database data; retired commands fail explicitly.
-- [ ] Retire enabling OS login entries; retain safe removal of an existing owned
+- [x] Retire enabling OS login entries; retain safe removal of an existing owned
       entry. Do not silently remove externally changed entries.
 - [ ] Bound execution summaries and refresh only affected domains; keep necessary
       cross-domain invalidation after source, account, and dependency operations.
@@ -96,3 +96,20 @@ scripts and login entries need an explicit, ownership-checked removal path.
   97.7% lower). The baseline executable came from `9af369a`; its hash source is
   identical through `a2141cd`. Full `skills:status` data, including fingerprints,
   matched exactly. This measures that workload, not total desktop/WebKit memory.
+
+- Retirement slice: Usage navigation, quota cells/sorting/installation actions, and
+  OS-login enabling are removed. Retired engine commands fail without data access;
+  legacy database rows and assistant files are preserved. The built-in quota
+  status line cannot be installed or copied. Main-account cleanup remains explicit
+  and ownership checked; custom status lines are preserved.
+- Retirement checks: 27 runtime-settings tests, two account quota-retirement tests,
+  the seed guard test, 67 affected frontend tests, all 27 Tauri tests, and the
+  frontend production build passed. The profile suite passed 64/66; two refused
+  writes because fixture CLI version checks timed out. Full frontend passed 757
+  with four platform skips and one temporary-script spawn timeout. A standalone
+  newly written shell script containing only exit 0 also timed out after five
+  seconds, without project code. These are recorded failures, not full-suite passes.
+- Actual native retirement UI, under isolated HOME/data and a separate identifier,
+  rendered Accounts without quota and Settings with only legacy login-entry removal.
+  The removal action returned the read-back disabled state. All eight retained
+  pages passed 1000/760 px overflow checks; Accounts and Settings pixels were viewed.

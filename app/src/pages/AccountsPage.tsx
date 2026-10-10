@@ -1,6 +1,6 @@
 import { useQueries, useQueryClient } from "@tanstack/react-query";
-import { Activity, Copy, LogIn, Plus, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Copy, LogIn, Plus, RefreshCw } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { AccountDrawer, type DrawerMode } from "../components/AccountDrawer";
 import { ActionMenu, type MenuAction } from "../components/AccountGrid";
@@ -10,15 +10,11 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { GettingStarted, type StartStep } from "../components/GettingStarted";
 import { LaunchCommandsDrawer } from "../components/LaunchCommandsDrawer";
 import { PageError, PageLoading } from "../components/PageState";
-import { QuotaCells } from "../components/QuotaCells";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { buildAccounts, type Account, type AgentAccounts } from "../lib/accounts";
-import { sortByQuota, type QuotaSort } from "../lib/agentUsage";
 import type { ProfileObserved, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import { secretSourceOf } from "../lib/secretSource";
-import { currentConfigOf } from "../lib/agentCurrent";
-import type { SharedStatus } from "../lib/profileShared";
 import { useAccountOps } from "../lib/useAccountOps";
 import type { OfficialAuthStatus } from "../lib/observed";
 import { authShellLabel, defaultAuthShell, type AuthShell } from "../lib/profileDefinition";
@@ -28,15 +24,8 @@ import { isCollection } from "../lib/skillCollections";
 import { cn } from "../lib/utils";
 import { Select } from "../components/Select";
 
-/** 表头与每行同宽的列：额度、操作。 */
-const COL_QUOTA = "hidden w-80 shrink-0 md:block";
+/** Keep the action column aligned with the table header. */
 const COL_ACTIONS = "flex w-28 shrink-0 items-center justify-end gap-1";
-
-const QUOTA_SORTS: { value: QuotaSort; label: string; title: string }[] = [
-  { value: "default", label: "默认", title: "按账号登记顺序" },
-  { value: "reset", label: "先重置", title: "最吃紧的窗口最先重置的排前面" },
-  { value: "left", label: "剩余多", title: "最吃紧的窗口剩得最多的排前面" },
-];
 
 async function copyText(text: string, message: string) {
   try {
@@ -77,14 +66,12 @@ function AccountRow({
   account,
   auth,
   actions,
-  now,
   authShell,
 }: {
   account: Account;
   group: AgentAccounts;
   auth: OfficialAuthStatus | "pending" | null;
   actions: RowActions;
-  now: Date;
   authShell: AuthShell;
 }) {
   const id = account.elementId;
@@ -155,9 +142,6 @@ function AccountRow({
           )}
           {account.model && <span className="truncate">· {account.model}</span>}
         </div>
-      </div>
-      <div className={COL_QUOTA}>
-        <QuotaCells usage={account.usage} testId={`account-quota-${id}`} now={now} />
       </div>
       <div className={COL_ACTIONS}>
         {loggedOut ? (
@@ -230,19 +214,10 @@ export default function AccountsPage({
   const [drawer, setDrawer] = useState<DrawerMode | null>(null);
   const [removing, setRemoving] = useState<{ id: string; name: string; definition: Record<string, unknown> } | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
-  const [confirmQuota, setConfirmQuota] = useState(false);
   const [commandsOf, setCommandsOf] = useState<Account | null>(null);
-  const [quotaBusy, setQuotaBusy] = useState(false);
   const [keyword, setKeyword] = useState("");
   const [authShell, setAuthShell] = useState<AuthShell>(() => defaultAuthShell());
-  const [quotaSort, setQuotaSort] = useState<QuotaSort>("default");
   const [refreshing, setRefreshing] = useState(false);
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    // 只更新展示时钟，不运行官方命令或扫描文件。
-    const timer = window.setInterval(() => setNow(new Date()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   const groups =
     agentsQuery.data?.ok
@@ -259,17 +234,6 @@ export default function AccountsPage({
       queryKey: engineKeys.request("agents:auth-status", ["--only", only]),
       queryFn: () => runEngine<OfficialAuthStatus>("agents:auth-status", ["--only", only]),
       staleTime: 5 * 60_000,
-    })),
-  });
-
-  // 实时额度：只看 Claude 账号（Codex 没有状态栏，额度直接读它自己的会话记录）
-  const claudeProfileIds = group?.kind === "claude"
-    ? group.accounts.filter((account) => !account.isMain).map((account) => account.elementId.replace(/^profiles:/, ""))
-    : [];
-  const sharedQueries = useQueries({
-    queries: claudeProfileIds.map((id) => ({
-      queryKey: engineKeys.request("profiles:shared-status", ["--only", `profiles:${id}`]),
-      queryFn: () => runEngine<SharedStatus>("profiles:shared-status", ["--only", `profiles:${id}`]),
     })),
   });
 
@@ -325,15 +289,6 @@ export default function AccountsPage({
     };
   };
 
-  const mainElement = agentElements.find((item) => item.id === `agents:${group.agentId}`);
-  const mainStatusline = mainElement
-    ? (currentConfigOf(mainElement)?.config?.runtime as { statusline?: string } | undefined)?.statusline
-    : undefined;
-  const quotaNotLive = group.kind === "claude" && Boolean(mainElement) && (
-    mainStatusline !== "builtin"
-    || sharedQueries.some((query) => query.data?.ok && query.data.data.items.some((item) => item.item === "statusline" && item.state !== "same"))
-  );
-
   const authOf = (account: Account): OfficialAuthStatus | "pending" | null => {
     const index = officialIds.indexOf(account.elementId);
     if (index < 0) return null;
@@ -343,7 +298,7 @@ export default function AccountsPage({
     return { element: account.elementId, state: "unknown", logged_in: null, method: null, third_party: account.type === "api", mixed: false, isolation_blocked: true, reason: query.data?.errors[0]?.message ?? "无法读取账号配置，请刷新后检查" };
   };
 
-  const visibleAccounts = sortByQuota(group.accounts, quotaSort, now).filter((account) => {
+  const visibleAccounts = group.accounts.filter((account) => {
     const auth = authOf(account);
     const identity = auth && auth !== "pending" ? auth.account : null;
     return matchesKeyword(keyword, [account.name, account.command, account.configDir, account.apiHost, account.model,
@@ -357,7 +312,6 @@ export default function AccountsPage({
         agentsQuery.refetch(), profilesQuery.refetch(), aliasSource.query.refetch(),
         ...authQueries.map((query) => query.refetch()),
       ]);
-      setNow(new Date());
       if (results.some((result) => result.isError || !result.data?.ok)) toast.error("部分账号状态读取失败，请重试");
       else toast.success("已从本机重新读取账号状态");
     } finally {
@@ -464,46 +418,14 @@ export default function AccountsPage({
       <div className="flex flex-wrap items-center gap-2">
         <SearchInput value={keyword} onChange={setKeyword} placeholder="搜索账号、命令、地址或模型" testId="accounts-search" />
         {keyword.trim() && <span className="text-xs text-muted-foreground">{visibleAccounts.length} / {group.accounts.length} 个账号</span>}
-        <div role="group" aria-label="按额度排序" className="inline-flex items-center rounded-lg bg-muted p-0.5 text-xs">
-          {QUOTA_SORTS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              aria-pressed={quotaSort === option.value}
-              data-testid={`accounts-sort-${option.value}`}
-              title={option.title}
-              onClick={() => setQuotaSort(option.value)}
-              className={cn(
-                "rounded-md px-2.5 py-1",
-                quotaSort === option.value ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
         <button type="button" data-testid="accounts-refresh" disabled={refreshing}
           onClick={() => void refreshAccounts()}
-          title="重新读取本机配置、登录记录与额度缓存；不联网、不运行登录命令"
+          title="重新读取本机配置与登录记录；不联网、不运行登录命令"
           className="ml-auto inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs hover:bg-accent disabled:opacity-40">
           <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} aria-hidden />
           {refreshing ? "读取中…" : "刷新状态"}
         </button>
       </div>
-      {quotaNotLive && (
-        <div data-testid="accounts-quota-notice" className="flex items-center gap-2 rounded-md border border-info/30 bg-info/5 px-3 py-2 text-xs">
-          <Activity className="h-3.5 w-3.5 text-info" aria-hidden />
-          <span>{mainStatusline === "builtin-outdated" ? "状态栏脚本是旧版本：本版本新增的显示还没生效。" : "额度还不是实时的：只在 Claude 自己查询时才更新。"}</span>
-          <button
-            type="button"
-            data-testid="accounts-enable-live-quota"
-            onClick={() => setConfirmQuota(true)}
-            className="ml-auto rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-primary hover:bg-primary/15"
-          >
-            {mainStatusline === "builtin-outdated" ? "更新状态栏" : "开启实时额度"}
-          </button>
-        </div>
-      )}
       {(() => {
         const account = readiness && group.accounts.find((item) => item.elementId === readiness.id);
         if (!account) return null;
@@ -525,7 +447,6 @@ export default function AccountsPage({
       <section aria-label="账号列表" className="overflow-clip rounded-lg border bg-card">
         <div className="flex items-center gap-4 border-b bg-muted px-4 py-2 text-xs text-muted-foreground">
           <span className="min-w-0 flex-1 font-medium text-foreground">账号、启动命令与登录</span>
-          <span className={COL_QUOTA}>额度</span>
           <span className={COL_ACTIONS} />
         </div>
         <ul data-testid="accounts-list" className="divide-y">
@@ -536,7 +457,6 @@ export default function AccountsPage({
               group={group}
               auth={authOf(account)}
               actions={actionsOf(account)}
-              now={now}
               authShell={authShell}
             />
           ))}
@@ -561,25 +481,6 @@ export default function AccountsPage({
           group={group}
           aliasSource={aliasSource}
           onClose={() => setCommandsOf(null)}
-        />
-      )}
-      {confirmQuota && mainElement && (
-        <ConfirmModal
-          title="为全部 Claude 账号开启实时额度"
-          description={`把状态栏换成 Agent Manager 的用量状态栏（账号、模型、目录、上下文、提示缓存、额度），它每次刷新时把额度记在本工具的数据目录里，账号页据此显示实时额度。${mainStatusline === "custom" ? "主账号现在的自定义状态栏会被替换。" : ""}先写主账号，再同步给其余 Claude 账号；被外部改过的文件不会覆盖。`}
-          risk="write-local"
-          confirmLabel="开启"
-          executing={quotaBusy}
-          onConfirm={async () => {
-            setQuotaBusy(true);
-            try {
-              await ops.enableLiveQuota(mainElement, claudeProfileIds);
-              setConfirmQuota(false);
-            } finally {
-              setQuotaBusy(false);
-            }
-          }}
-          onClose={() => setConfirmQuota(false)}
         />
       )}
       {removing && (

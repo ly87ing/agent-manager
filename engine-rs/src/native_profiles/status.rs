@@ -259,14 +259,8 @@ fn element(ctx: &Context, def: &ProfileDef, raw: &Value) -> Value {
         json!(format!("{}/{}", def.config_dir_raw, def.kind.target_file())),
     );
     observed.insert("target_exists".into(), json!(any_present));
-    // 实例多半是另一个账号，额度得从它自己的配置目录读，不能用默认那份
-    observed.insert(
-        "usage".into(),
-        config_dir
-            .as_deref()
-            .and_then(|dir| crate::agent_usage::read_profile(def.kind.as_str(), dir, &ctx.data_dir))
-            .unwrap_or(Value::Null),
-    );
+    // Keep the response shape without collecting quota or opening sessions.
+    observed.insert("usage".into(), Value::Null);
     observed.insert("files".into(), Value::Array(files));
     observed.insert("base".into(), json!(base));
     if base.is_some() {

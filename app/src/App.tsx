@@ -1,4 +1,4 @@
-import { Library, Package, ScrollText, Server, Settings, Sparkles, SquareTerminal, Users, Wallet } from "lucide-react";
+import { Library, Package, ScrollText, Server, Settings, Sparkles, SquareTerminal, Users } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
@@ -13,7 +13,6 @@ const RulesPage = lazy(() => import("./pages/RulesPage"));
 const RunsPage = lazy(() => import("./pages/RunsPage"));
 const SkillsPage = lazy(() => import("./pages/SkillsPage"));
 const AliasesPage = lazy(() => import("./pages/AliasesPage"));
-const UsagePage = lazy(() => import("./pages/UsagePage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SourcesPage = lazy(() => import("./pages/SourcesPage"));
 const ProgramsPage = lazy(() => import("./pages/ProgramsPage"));
@@ -29,7 +28,6 @@ const NAV: NavItem[] = [
   { key: "programs", label: "程序", icon: Package },
 ];
 const SECONDARY_NAV: NavItem[] = [
-  { key: "usage", label: "用量", icon: Wallet, iconOnly: true },
   { key: "settings", label: "设置", icon: Settings, iconOnly: true },
 ];
 
@@ -193,7 +191,6 @@ export default function App() {
             />
           )}
           {activePage === "rules" && <RulesPage onOpenSource={(name) => handleNavigate(name ? `sources:${name}` : "sources")} />}
-          {activePage === "usage" && <UsagePage />}
           {activePage === "runs" && <RunsPage />}
           {activePage.startsWith("settings") && (
             <SettingsPage

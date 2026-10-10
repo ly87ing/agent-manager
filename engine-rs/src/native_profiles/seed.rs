@@ -190,6 +190,7 @@ fn parse_json_object(bytes: Option<&[u8]>, what: &str) -> Result<Map<String, Val
 
 /// Claude settings.json 里的两段（主配置有、实例没有才补）。
 fn render_claude_settings(
+    ctx: &Context,
     source: &Map<String, Value>,
     previous: Option<&[u8]>,
     items: &[&str],
@@ -204,6 +205,15 @@ fn render_claude_settings(
         };
         match source.get(key) {
             None => out.push(result(item, "absent", format!("默认环境没有设置{label}"))),
+            Some(value)
+                if *item == "statusline"
+                    && crate::native_agent_settings::owned_statusline(
+                        value,
+                        &ctx.data_dir.join("statusline.sh"),
+                    ) =>
+            {
+                out.push(result(item, "skipped", "旧版用量状态栏已移除，不再复制"));
+            }
             Some(_) if target.contains_key(key) => out.push(result(
                 item,
                 "exists",
@@ -237,7 +247,7 @@ fn seed_claude_settings(
         "默认环境的 settings.json",
     )?;
     let (real, previous) = read_target(ctx, def, &dir.join("settings.json"))?;
-    let (out, content) = render_claude_settings(&source, previous.as_deref(), items)?;
+    let (out, content) = render_claude_settings(ctx, &source, previous.as_deref(), items)?;
     if let Some(bytes) = content {
         model::validate_effective_config(def, &bytes, &|name| {
             crate::secret_values::lookup_account(name).ok()
@@ -400,7 +410,7 @@ pub(super) fn preview_settings(
                 read_source(&ctx.home_dir.join(".claude/settings.json")).as_deref(),
                 "默认环境的 settings.json",
             )?;
-            render_claude_settings(&source, Some(&after_profile), &selected)?
+            render_claude_settings(ctx, &source, Some(&after_profile), &selected)?
         }
         ProfileKind::Codex => {
             let source = match read_source(&ctx.home_dir.join(".codex/config.toml")) {
@@ -763,5 +773,33 @@ mod tests {
         let mut bearer = view(&[], vec![], "https://mcp.example.com");
         bearer.extra.insert("bearer_token".into(), json!("x"));
         assert!(cannot_share_account_entry(&Format::CodexToml, &bearer));
+    }
+}
+
+#[cfg(test)]
+mod retirement_tests {
+    use super::*;
+
+    #[test]
+    fn retired_quota_statusline_is_not_copied_but_custom_statusline_is() {
+        let ctx = Context {
+            home_dir: PathBuf::from("fixture-home"),
+            data_dir: PathBuf::from("fixture-data"),
+        };
+        for command in ["fixture-data/statusline.sh", "'fixture-data/statusline.sh'"] {
+            let source = json!({"statusLine":{"type":"command", "command":command}});
+            let (rows, content) =
+                render_claude_settings(&ctx, source.as_object().unwrap(), None, &["statusline"])
+                    .unwrap();
+            assert_eq!(rows[0]["state"], "skipped");
+            assert!(content.is_none());
+        }
+        let source = json!({"statusLine":{"type":"command", "command":"YOUR_CUSTOM_SCRIPT"}});
+        let (rows, content) =
+            render_claude_settings(&ctx, source.as_object().unwrap(), None, &["statusline"])
+                .unwrap();
+        assert_eq!(rows[0]["state"], "copied");
+        let after: Value = serde_json::from_slice(&content.unwrap()).unwrap();
+        assert_eq!(after["statusLine"], source["statusLine"]);
     }
 }

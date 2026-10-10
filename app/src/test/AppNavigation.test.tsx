@@ -55,7 +55,7 @@ describe("App 顶层导航", () => {
     const nav = await screen.findByRole("navigation");
     const navButtons = within(nav).getAllByRole("button");
 
-    // 用量、设置只显示图标，按无障碍名称核对
+    // Settings uses an icon; check its accessible name.
     expect(navButtons.map((b) => b.getAttribute("aria-label") ?? b.textContent?.trim())).toEqual([
       "账号",
       "技能",
@@ -66,7 +66,6 @@ describe("App 顶层导航", () => {
       "程序",
       `搜索（${MOD}K）`,
       "切换到深色",
-      "用量",
       "设置",
     ]);
 
@@ -90,6 +89,7 @@ describe("App 顶层导航", () => {
     expect(screen.queryByTestId("advanced-entry-import-link")).toBeNull();
 
     expect(within(nav).queryByRole("button", { name: "待处理" })).toBeNull();
+    expect(within(nav).queryByRole("button", { name: "用量" })).toBeNull();
 
     const rulesNav = within(nav).getByRole("button", { name: "规则" });
     await userEvent.click(rulesNav);

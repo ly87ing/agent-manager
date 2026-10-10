@@ -67,21 +67,18 @@ function SettingsGroup({ title, children }: { title: string; children: ReactNode
   );
 }
 
-function AutostartControl({ allowEnable }: { allowEnable: boolean }) {
+function AutostartControl() {
   const state = useAutostart();
   const change = useSetAutostart();
   const error = state.error ?? change.error;
   return (
     <>
-      <div className="inline-flex rounded-lg border bg-muted p-0.5" role="group" aria-label="开机启动">
-        {[{ value: false, label: "关" }, { value: true, label: "开" }].map((option) => (
-          <button key={option.label} type="button" aria-pressed={state.data === option.value}
-            disabled={state.isPending || state.isError || change.isPending || (option.value && !allowEnable)}
-            onClick={() => { if (state.data !== option.value) change.mutate(option.value); }}
-            className={cn("rounded-md px-3 py-1 text-xs transition-colors disabled:opacity-50", state.data === option.value ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-            {option.label}
-          </button>
-        ))}
+      <div className="flex items-center gap-2 text-xs" role="group" aria-label="旧版登录项">
+        {!state.isPending && !state.isError && <span className="text-muted-foreground">{state.data ? "已启用旧登录项" : "未启用开机启动"}</span>}
+        <button type="button" disabled={state.isPending || state.isError || change.isPending}
+          onClick={() => change.mutate(false)} className="rounded-md border px-3 py-1 hover:bg-accent disabled:opacity-50">
+          移除旧登录项
+        </button>
       </div>
       {state.isPending && <p role="status" className="text-xs text-muted-foreground">正在读取登录项…</p>}
       {error && <div className="flex w-full flex-wrap items-center gap-2 text-xs text-destructive">
@@ -317,8 +314,8 @@ export default function SettingsPage({
         <SettingsRow label="外观" note="立即生效，保存在本机">
           <ThemeControl />
         </SettingsRow>
-        <SettingsRow label="开机启动" note="登录系统后启动 Agent Manager；读取系统实际设置，点击后立即生效">
-          <AutostartControl allowEnable={!data.runtimeWarning} />
+        <SettingsRow label="旧版开机启动" note="当前版本不设置开机启动；可移除以前创建且未被改动的登录项">
+          <AutostartControl />
         </SettingsRow>
         <SettingsRow label="操作记录保留" note="0 为不自动清理，最多 3650 天">
           <div className="flex items-center gap-2">

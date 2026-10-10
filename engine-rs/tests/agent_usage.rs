@@ -1,359 +1,141 @@
+//! Account status retains its nullable field but never collects local quota.
+
+#[cfg(windows)]
+mod common;
+
+use agent_manager_engine::platform::Canon;
 use agent_manager_engine::{execute, Context, Request};
-use serde_json::json;
-use std::fs;
-use std::path::PathBuf;
+use serde_json::{json, Value};
+use std::{fs, path::PathBuf};
 
-/// 额度经 agents:status 的 observed.usage 对外，这里按契约从那里断言。
-fn temp_ctx(tag: &str) -> (PathBuf, Context) {
-    let base = std::env::temp_dir().join(format!("am-usage-test-{}-{}", std::process::id(), tag));
-    let _ = fs::remove_dir_all(&base);
-    fs::create_dir_all(base.join("home")).unwrap();
+fn fixture(tag: &str) -> (PathBuf, Context) {
+    let root = std::env::temp_dir().canon().unwrap().join(format!(
+        "am-no-quota-{}-{tag}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    #[cfg(windows)]
+    common::private_fixture_root(&root);
+    #[cfg(not(windows))]
+    fs::create_dir(&root).unwrap();
     let ctx = Context {
-        data_dir: base.join("data"),
-        home_dir: base.join("home"),
+        home_dir: root.join("home"),
+        data_dir: root.join("data"),
     };
-    (base, ctx)
+    fs::create_dir(&ctx.home_dir).unwrap();
+    (root, ctx)
 }
 
-/// 状态栏脚本存额度的位置：`<数据目录>/usage/<配置目录按 % -> %25、/ -> %2F 编码>.json`。
-fn snapshot_path(ctx: &Context, config_dir: &std::path::Path) -> PathBuf {
-    // 与引擎、状态栏脚本同一规则：Windows 先统一成小写的 c:/…，`:` 也转义
-    let dir = config_dir.display().to_string();
-    let dir = if cfg!(windows) {
-        dir.replace('\\', "/").to_lowercase()
-    } else {
-        dir
-    };
-    let mut key = dir.replace('%', "%25").replace('/', "%2F");
-    if cfg!(windows) {
-        key = key.replace(':', "%3A");
-    }
-    ctx.data_dir.join("usage").join(format!("{key}.json"))
-}
-
-fn request(command: &str, args: &[&str]) -> Request {
+fn request(command: &str, args: Vec<String>) -> Request {
     Request {
-        command: command.to_string(),
-        args: args.iter().map(|s| s.to_string()).collect(),
-        run_id: "usage-test".to_string(),
+        command: command.into(),
+        args,
+        run_id: "no-quota".into(),
     }
 }
 
-/// 自定义助手：id 随便取，bin 决定按哪家格式读，config 指向它自己的配置文件。
-fn define_agent_with(ctx: &Context, id: &str, bin: &str, config: Option<&str>) {
-    let mut value = json!({
-        "display_name": id,
-        "bin": bin,
-        "preferred_provider": "local-test",
-        "providers": {"local-test": {"install": "true"}}
-    });
-    if let Some(path) = config {
-        value["mcp_config"] = json!({"path": path, "format": "json"});
-        if bin == "claude" {
-            let directory = path.rsplit_once('/').unwrap().0;
-            value["profile"] = json!({"base_agent":"claude-code","config_dir":directory});
-        }
-    }
-    let env = execute(
+fn define(ctx: &Context, id: &str, definition: Value) {
+    let result = execute(
         ctx,
         &request(
             "policy:set",
-            &[
-                "--layer",
-                "local",
-                "--key",
-                &format!("agents.definitions.{id}"),
-                "--value",
-                &serde_json::to_string(&value).unwrap(),
+            vec![
+                "--layer".into(),
+                "local".into(),
+                "--key".into(),
+                format!("agents.definitions.{id}"),
+                "--value".into(),
+                definition.to_string(),
             ],
         ),
     );
-    assert!(env.ok, "定义 agent 失败: {:?}", env.errors);
+    assert!(result.ok, "{:?}", result.errors);
 }
 
-fn usage_of(ctx: &Context, id: &str) -> serde_json::Value {
-    let env = execute(ctx, &request("agents:status", &[]));
-    assert!(env.ok, "agents:status 失败: {:?}", env.errors);
-    let elements = env.data["elements"].as_array().unwrap();
-    let element = elements
-        .iter()
-        .find(|el| el["id"] == json!(format!("agents:{id}")))
-        .unwrap_or_else(|| panic!("没有 agents:{id}"));
-    element["observed"]["usage"].clone()
-}
-
-#[test]
-fn claude_额度取自_claude_json_的缓存并跳过没有的窗口() {
-    let (base, ctx) = temp_ctx("claude");
-    fs::write(
-        ctx.home_dir.join(".claude.json"),
-        serde_json::to_string(&json!({
-            "cachedUsageUtilization": {
-                "fetchedAtMs": 1_789_605_697_689i64,
-                "utilization": {
-                    "five_hour": {"utilization": 8, "resets_at": "2026-09-17T05:30:00.770741+00:00"},
-                    "seven_day": {"utilization": 13, "resets_at": "2026-09-21T15:00:00.770771+00:00"},
-                    "seven_day_opus": null
-                }
-            }
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    define_agent_with(&ctx, "claude-code", "claude", None);
-
-    let usage = usage_of(&ctx, "claude-code");
-    assert_eq!(
-        usage["source"],
-        json!(ctx.home_dir.join(".claude.json").display().to_string())
-    );
-    assert_eq!(usage["checked_at"], json!("2026-09-17T00:41:37Z"));
-    assert_eq!(
-        usage["windows"],
-        json!([
-            {"window_minutes": 300, "used_percent": 8.0, "resets_at": "2026-09-17T05:30:00Z"},
-            {"window_minutes": 10080, "used_percent": 13.0, "resets_at": "2026-09-21T15:00:00Z"}
-        ])
-    );
-    let _ = fs::remove_dir_all(&base);
-}
-
-#[test]
-fn codex_取最新会话文件的最后一条额度_并能从大文件尾部读到() {
-    let (base, ctx) = temp_ctx("codex");
-    let day = ctx.home_dir.join(".codex/sessions/2026/09/17");
-    fs::create_dir_all(&day).unwrap();
-
-    // 旧会话：不该被选中
-    fs::write(
-        day.join("rollout-2026-09-17T01-00-00-old.jsonl"),
-        format!("{}\n", json!({"payload": {"info": {"rate_limits": {"primary": {"used_percent": 1.0, "window_minutes": 300, "resets_at": 1_789_000_000i64}}}}})),
-    )
-    .unwrap();
-
-    // 新会话：同一文件里有先后两条，取后一条；中间垫超过尾部扫描窗口的内容，
-    // 逼着走「从文件尾部 seek 回读」这条路径
-    let mut newer = String::new();
-    newer.push_str(&format!("{}\n", json!({"payload": {"info": {"rate_limits": {"primary": {"used_percent": 20.0, "window_minutes": 300, "resets_at": 1i64}}}}})));
-    let padding = json!({"payload": {"note": "x".repeat(4096)}}).to_string();
-    for _ in 0..400 {
-        newer.push_str(&padding);
-        newer.push('\n');
-    }
-    newer.push_str(&format!(
-        "{}\n",
-        json!({"timestamp": "2026-09-17T09:29:42.648Z", "payload": {"info": {"rate_limits": {
-            "primary": {"used_percent": 65.0, "window_minutes": 10080, "resets_at": 1_789_882_199i64},
-            "secondary": null,
-            "credits": {"balance": "2443.02"},
-            "plan_type": "prolite"
-        }}}})
-    ));
-    let newest = day.join("rollout-2026-09-17T09-00-00-new.jsonl");
-    fs::write(&newest, &newer).unwrap();
-    assert!(
-        fs::metadata(&newest).unwrap().len() > 1 << 20,
-        "垫料不足以触发尾部回读"
-    );
-
-    define_agent_with(&ctx, "codex", "codex", None);
-
-    let usage = usage_of(&ctx, "codex");
-    assert_eq!(
-        usage["source"],
-        json!(ctx
-            .home_dir
-            .join(".codex")
-            .join("sessions")
-            .display()
-            .to_string())
-    );
-    assert_eq!(usage["plan"], json!("prolite"));
-    assert_eq!(usage["credits"], json!("2443.02"));
-    assert_eq!(
-        usage["windows"],
-        json!([{"window_minutes": 10080, "used_percent": 65.0, "resets_at": "2026-09-20T05:29:59Z"}])
-    );
-    // 记账时刻取事件自带的 timestamp，而不是会被后续写入顶新的文件 mtime
-    assert_eq!(usage["checked_at"], json!("2026-09-17T09:29:42Z"));
-    let _ = fs::remove_dir_all(&base);
-}
-
-#[test]
-fn 没有本地额度记录的助手为_null_且_status_不写任何文件() {
-    let (base, ctx) = temp_ctx("none");
-    define_agent_with(&ctx, "opencode", "opencode", None);
-    assert_eq!(usage_of(&ctx, "opencode"), json!(null));
-    // status 只读：不得凭空生成这些目录
-    assert!(!ctx.home_dir.join(".codex").exists());
-    assert!(!ctx.home_dir.join(".claude.json").exists());
-    let _ = fs::remove_dir_all(&base);
-}
-
-#[test]
-fn 用户新建的助手_按_bin_认种类_按它自己的配置路径读() {
-    let (base, ctx) = temp_ctx("custom");
-    // 实例式：配置不在 ~ 下，而在自己的目录里（CLAUDE_CONFIG_DIR 指过去的那种）
-    let instance = ctx.home_dir.join(".claude-work");
-    fs::create_dir_all(&instance).unwrap();
-    fs::write(
-        instance.join(".claude.json"),
-        serde_json::to_string(&json!({
-            "cachedUsageUtilization": {
-                "fetchedAtMs": 1_789_605_697_689i64,
-                "utilization": {"five_hour": {"utilization": 42, "resets_at": "2026-09-17T05:30:00+00:00"}}
-            }
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-
-    // id 完全是用户自己取的，跟内置的 claude-code 无关
-    define_agent_with(
-        &ctx,
-        "my-work-claude",
-        "claude",
-        Some("~/.claude-work/.claude.json"),
-    );
-
-    let usage = usage_of(&ctx, "my-work-claude");
-    assert_eq!(usage["windows"][0]["used_percent"], json!(42.0));
-    // 来源给完整路径：多个实例只说「.claude.json」分不清是哪个
-    assert_eq!(
-        usage["source"],
-        json!(instance.join(".claude.json").display().to_string())
-    );
-    let _ = fs::remove_dir_all(&base);
-}
-
-#[test]
-fn bin_写成绝对路径也认得出来_不认识的_bin_为_null() {
-    let (base, ctx) = temp_ctx("binpath");
-    fs::write(
-        ctx.home_dir.join(".claude.json"),
-        serde_json::to_string(&json!({
-            "cachedUsageUtilization": {
-                "fetchedAtMs": 1_789_605_697_689i64,
-                "utilization": {"five_hour": {"utilization": 5, "resets_at": null}}
-            }
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-
-    define_agent_with(&ctx, "abs-claude", "/opt/homebrew/bin/claude", None);
-    define_agent_with(&ctx, "something-else", "my-own-cli", None);
-
-    assert_eq!(
-        usage_of(&ctx, "abs-claude")["windows"][0]["used_percent"],
-        json!(5.0)
-    );
-    assert_eq!(usage_of(&ctx, "something-else"), json!(null));
-    let _ = fs::remove_dir_all(&base);
-}
-
-#[test]
-fn claude_优先用状态栏落盘的实时额度_缓存更新时才回头用缓存() {
-    let (base, ctx) = temp_ctx("statusline-snapshot");
-    let claude_dir = ctx.home_dir.join(".claude");
-    fs::create_dir_all(&claude_dir).unwrap();
-    // 三天前的缓存：Claude Code 只在主动查额度时刷新它
-    fs::write(
-        ctx.home_dir.join(".claude.json"),
-        serde_json::to_string(&json!({
-            "cachedUsageUtilization": {
-                "fetchedAtMs": 1_789_605_697_689i64,
-                "utilization": {
-                    "five_hour": {"utilization": 8, "resets_at": "2026-09-17T05:30:00.770741+00:00"}
-                }
-            }
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    // 状态栏刚存下的实时额度（字段名与 Claude Code 推给状态栏的一致），存在数据目录下
-    let snapshot = snapshot_path(&ctx, &claude_dir);
-    fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
-    fs::write(
-        &snapshot,
-        json!({
-            "at": 1_789_871_000i64,
-            "five_hour": {"used_percentage": 23, "resets_at": 1_789_900_000i64},
-            "seven_day": {"used_percentage": 41, "resets_at": 1_790_400_000i64}
+fn quota_files(ctx: &Context, claude: &str, codex: &str) -> Vec<(PathBuf, Vec<u8>)> {
+    let claude = ctx.home_dir.join(claude);
+    let session = ctx
+        .home_dir
+        .join(codex)
+        .join("sessions/rollout-fixture.jsonl");
+    fs::create_dir_all(claude.parent().unwrap()).unwrap();
+    fs::create_dir_all(session.parent().unwrap()).unwrap();
+    let cache = json!({"cachedUsageUtilization": {"fetchedAtMs": 1789605697689_i64,
+        "utilization": {"five_hour": {"utilization": 82, "resets_at": "2026-10-11T00:00:00Z"}}}});
+    let event = json!({"timestamp": "2026-10-10T00:00:00Z", "payload": {"info": {"rate_limits": {
+        "primary": {"used_percent": 82, "window_minutes": 300, "resets_at": 1791676800_i64}}}}});
+    fs::write(&claude, cache.to_string()).unwrap();
+    fs::write(&session, format!("{event}\n")).unwrap();
+    vec![claude, session]
+        .into_iter()
+        .map(|path| {
+            let bytes = fs::read(&path).unwrap();
+            (path, bytes)
         })
-        .to_string(),
-    )
-    .unwrap();
-    // 旧版本放在配置目录里的落盘文件不再读取，也不去删它
-    let legacy = claude_dir.join(".agent-manager-usage.json");
-    let legacy_body = json!({
-        "at": 1_799_999_999i64,
-        "five_hour": {"used_percentage": 99, "resets_at": 1_800_000_000i64}
-    })
-    .to_string();
-    fs::write(&legacy, &legacy_body).unwrap();
-    define_agent_with(&ctx, "claude-code", "claude", None);
+        .collect()
+}
 
-    let usage = usage_of(&ctx, "claude-code");
-    assert_eq!(usage["source"], json!(snapshot.display().to_string()));
-    assert_eq!(usage["checked_at"], json!("2026-09-20T02:23:20Z"));
-    assert_eq!(
-        usage["windows"],
-        json!([
-            {"window_minutes": 300, "used_percent": 23.0, "resets_at": "2026-09-20T10:26:40Z"},
-            {"window_minutes": 10080, "used_percent": 41.0, "resets_at": "2026-09-26T05:20:00Z"}
-        ])
-    );
-
-    // 缓存反而更新时（刚在 Claude Code 里查过额度）用缓存那份
-    fs::write(
-        &snapshot,
-        json!({"at": 1_700_000_000i64, "five_hour": {"used_percentage": 1, "resets_at": 1_700_001_000i64}})
-            .to_string(),
-    )
-    .unwrap();
-    let usage = usage_of(&ctx, "claude-code");
-    assert_eq!(usage["checked_at"], json!("2026-09-17T00:41:37Z"));
-    assert_eq!(usage["windows"][0]["used_percent"], json!(8.0));
-    assert_eq!(fs::read_to_string(&legacy).unwrap(), legacy_body);
-
-    let _ = fs::remove_dir_all(&base);
+fn assert_no_quota(ctx: &Context, command: &str, ids: &[&str]) {
+    let result = execute(ctx, &request(command, vec![]));
+    assert!(result.ok, "{:?}", result.errors);
+    let elements = result.data["elements"].as_array().unwrap();
+    for id in ids {
+        let element = elements
+            .iter()
+            .find(|element| element["id"] == *id)
+            .expect("account is present");
+        assert_eq!(element["observed"].get("usage"), Some(&Value::Null));
+    }
 }
 
 #[test]
-fn 没有状态栏落盘时行为与从前一致_畸形快照不影响回退() {
-    let (base, ctx) = temp_ctx("snapshot-fallback");
-    let claude_dir = ctx.home_dir.join(".claude");
-    fs::create_dir_all(&claude_dir).unwrap();
-    fs::write(
-        ctx.home_dir.join(".claude.json"),
-        serde_json::to_string(&json!({
-            "cachedUsageUtilization": {
-                "fetchedAtMs": 1_789_605_697_689i64,
-                "utilization": {"five_hour": {"utilization": 8, "resets_at": "2026-09-17T05:30:00Z"}}
-            }
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    define_agent_with(&ctx, "claude-code", "claude", None);
-
-    // 没有落盘文件
-    assert_eq!(
-        usage_of(&ctx, "claude-code")["windows"][0]["used_percent"],
-        json!(8.0)
+fn main_status_does_not_collect_existing_quota() {
+    let (root, ctx) = fixture("main");
+    let files = quota_files(&ctx, ".claude.json", ".codex");
+    for (id, bin) in [("claude-code", "claude"), ("codex", "codex")] {
+        define(
+            &ctx,
+            id,
+            json!({"_replace": true, "display_name": id, "bin": format!("/missing/{bin}"),
+                "preferred_provider": "local-test", "providers": {"local-test": {"install": "true"}}}),
+        );
+    }
+    assert_no_quota(
+        &ctx,
+        "agents:status",
+        &["agents:claude-code", "agents:codex"],
     );
+    for (path, before) in files {
+        assert_eq!(fs::read(path).unwrap(), before);
+    }
+    fs::remove_dir_all(root).unwrap();
+}
 
-    // 写了半截的落盘文件（多窗口并发写被打断）不能让整块额度消失
-    let snapshot = snapshot_path(&ctx, &claude_dir);
-    fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
-    fs::write(&snapshot, "{\"at\":178987").unwrap();
-    let usage = usage_of(&ctx, "claude-code");
-    assert_eq!(
-        usage["windows"][0]["used_percent"],
-        json!(8.0),
-        "畸形快照要回退到缓存"
+#[test]
+fn profile_status_does_not_collect_existing_quota() {
+    let (root, ctx) = fixture("profile");
+    let files = quota_files(&ctx, ".claude-work/.claude.json", ".codex-work");
+    for (id, bin, base, dir) in [
+        ("claude-work", "claude", "claude-code", "~/.claude-work"),
+        ("codex-work", "codex", "codex", "~/.codex-work"),
+    ] {
+        define(
+            &ctx,
+            id,
+            json!({"display_name": id, "bin": format!("/missing/{bin}"),
+            "profile": {"base_agent": base, "kind": bin, "config_dir": dir}}),
+        );
+    }
+    assert_no_quota(
+        &ctx,
+        "profiles:status",
+        &["profiles:claude-work", "profiles:codex-work"],
     );
-
-    let _ = fs::remove_dir_all(&base);
+    for (path, before) in files {
+        assert_eq!(fs::read(path).unwrap(), before);
+    }
+    fs::remove_dir_all(root).unwrap();
 }

@@ -936,3 +936,20 @@ fingerprints; peak process RSS fell from 261.2 to 6.1 MiB. The baseline hash sou
 is unchanged between `9af369a` and `a2141cd`. This is a workload-specific CLI
 measurement, not the entire desktop footprint. Other resource bounds and feature
 retirements remain in progress.
+
+### 2026-10-10: retire monitoring and OS-login enabling
+
+Usage/cost/session commands fail before data access. Accounts retains configuration,
+login, and controlled launch actions, with no quota columns or installation prompt.
+The built-in quota script cannot be installed or copied; explicit main-account
+cleanup preserves custom status lines. OS-login entries can only be removed after
+ownership checks. Existing database/session/script contents are preserved.
+
+Runtime settings: 27 passed; account quota retirement: two passed; seed guard: one
+passed; affected frontend: 67 passed; Tauri: 27 passed; production build passed.
+All eight retained pages passed layout checks at 1000/760 px. Native isolated
+Accounts/Settings IPC was exercised. Full frontend: 757 passed, four existing skips,
+one shell-fixture startup timeout. Profiles: 64 passed, two CLI-version fixture
+timeouts; the safety guard refused writes. A standalone new exit-0 shell fixture
+also timed out without application code. Full-suite acceptance remains unresolved;
+no timeout or authentication assertion was weakened.

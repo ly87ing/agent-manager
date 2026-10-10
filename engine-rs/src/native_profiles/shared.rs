@@ -382,7 +382,18 @@ fn settings_rows(ctx: &Context, def: &ProfileDef, dir: &Path) -> Result<Vec<Valu
         .map(|item| {
             let from = setting_part(def.kind, source.as_deref(), item)?;
             let to = setting_part(def.kind, target.as_deref(), item)?;
-            Ok(row(item, from.as_ref(), to.as_ref(), None, None, None))
+            let blocked = (def.kind == ProfileKind::Claude && *item == "statusline")
+                .then(|| {
+                    from.as_ref().is_some_and(|value| {
+                        crate::native_agent_settings::owned_statusline(
+                            value,
+                            &ctx.data_dir.join("statusline.sh"),
+                        )
+                    })
+                })
+                .unwrap_or(false)
+                .then(|| "旧版用量状态栏已移除，不再复制".to_string());
+            Ok(row(item, from.as_ref(), to.as_ref(), None, None, blocked))
         })
         .collect()
 }

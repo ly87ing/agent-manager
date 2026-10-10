@@ -567,7 +567,13 @@ fn builtin_statusline_form(
 }
 
 fn statusline_is_ours(root: &Value, statusline_path: &std::path::Path) -> bool {
-    path_get(root, &["statusLine", "command"])
+    root.get("statusLine")
+        .is_some_and(|value| owned_statusline(value, statusline_path))
+}
+
+pub(crate) fn owned_statusline(value: &Value, statusline_path: &std::path::Path) -> bool {
+    value
+        .get("command")
         .and_then(Value::as_str)
         .is_some_and(|cmd| builtin_statusline_form(cmd, statusline_path).is_some())
 }
@@ -1122,10 +1128,16 @@ fn parse_runtime_patch(kind: Kind, raw: &Value) -> Result<RuntimePatch> {
                 Some("full") => AutomationMode::Full,
                 _ => bail!("automation_mode 只能是 manual / auto / full"),
             }),
-            FieldKind::Statusline => RuntimeValue::Statusline(match value {
-                Value::Null => StatusLine::Untouched,
-                other => StatusLine::parse(Some(other))?,
-            }),
+            FieldKind::Statusline => {
+                let statusline = match value {
+                    Value::Null => StatusLine::Untouched,
+                    other => StatusLine::parse(Some(other))?,
+                };
+                if statusline == StatusLine::Builtin {
+                    bail!("用量状态栏已移除；仅支持移除本工具的旧状态栏配置");
+                }
+                RuntimeValue::Statusline(statusline)
+            }
             FieldKind::Flag => RuntimeValue::Flag(match value {
                 Value::Bool(on) => *on,
                 Value::Null => false,
@@ -2863,11 +2875,12 @@ stream_idle_timeout_ms = 450000
 
         let patch = parse_runtime_patch(
             Kind::Claude,
-            &json!({"automation_mode": "full", "statusline": "builtin", "claude_effort_level": ""}),
+            &json!({"automation_mode": "full", "statusline": "untouched", "claude_effort_level": ""}),
         )
         .unwrap();
         assert!(patch.sets_full());
-        assert!(patch.sets_builtin_statusline());
+        assert!(!patch.sets_builtin_statusline());
+        assert!(parse_runtime_patch(Kind::Claude, &json!({"statusline":"builtin"})).is_err());
         assert_eq!(
             patch.keys(),
             vec!["automation_mode", "claude_effort_level", "statusline"]
