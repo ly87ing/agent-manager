@@ -5,11 +5,12 @@ import { useState } from "react";
 import { check } from "@tauri-apps/plugin-updater";
 import SettingsPage from "../pages/SettingsPage";
 import App from "../App";
-import { renderWithEngine, screen, userEvent } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import type { SettingsData } from "../lib/contract";
 
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn() }));
 import { setSettingsClient, settingsSchema } from "../lib/settings";
+import { setAutostartClient } from "../lib/autostart";
 
 const settings: SettingsData = {
   preferences: { logRetentionDays: 30 },
@@ -21,6 +22,56 @@ const settings: SettingsData = {
 };
 
 describe("SettingsPage", () => {
+  it("reads the OS login state without writing, then reads back an explicit change", async () => {
+    let enabled = false;
+    const set = vi.fn(async (next: boolean) => (enabled = next));
+    setAutostartClient({ get: async () => enabled, set });
+    setSettingsClient({ get: async () => settings, save: async () => settings });
+    renderWithEngine(<SettingsPage />, {});
+    const group = await screen.findByRole("group", { name: "开机启动" });
+    const on = within(group).getByRole("button", { name: "开" });
+    await vi.waitFor(() => expect(on).not.toBeDisabled());
+    expect(within(group).getByRole("button", { name: "关" })).toHaveAttribute("aria-pressed", "true");
+    expect(set).not.toHaveBeenCalled();
+    await userEvent.click(on);
+    await vi.waitFor(() => expect(on).toHaveAttribute("aria-pressed", "true"));
+    expect(set).toHaveBeenCalledWith(true);
+    await vi.waitFor(() => expect(within(group).getByRole("button", { name: "关" })).not.toBeDisabled());
+    await userEvent.click(within(group).getByRole("button", { name: "关" }));
+    await vi.waitFor(() => expect(on).toHaveAttribute("aria-pressed", "false"));
+  });
+
+  it("keeps the actual state visible when an OS write fails", async () => {
+    setAutostartClient({ get: async () => false, set: async () => { throw new Error("OS denied write"); } });
+    setSettingsClient({ get: async () => settings, save: async () => settings });
+    renderWithEngine(<SettingsPage />, {});
+    const group = await screen.findByRole("group", { name: "开机启动" });
+    const on = within(group).getByRole("button", { name: "开" });
+    await vi.waitFor(() => expect(on).not.toBeDisabled());
+    await userEvent.click(on);
+    expect(await screen.findByRole("alert")).toHaveTextContent("OS denied write");
+    expect(within(group).getByRole("button", { name: "关" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("blocks enabling login launch from a read-only location but allows disabling it", async () => {
+    let enabled = true;
+    const set = vi.fn(async (next: boolean) => (enabled = next));
+    setAutostartClient({ get: async () => enabled, set });
+    setSettingsClient({ get: async () => ({ ...settings, runtimeWarning: "Install the app first" }), save: async () => settings });
+    renderWithEngine(<SettingsPage />, {});
+    const group = await screen.findByRole("group", { name: "开机启动" });
+    const on = within(group).getByRole("button", { name: "开" });
+    const off = within(group).getByRole("button", { name: "关" });
+    await vi.waitFor(() => expect(off).not.toBeDisabled());
+    expect(on).toBeDisabled();
+    await userEvent.click(on);
+    expect(set).not.toHaveBeenCalled();
+    await userEvent.click(off);
+    await vi.waitFor(() => expect(off).toHaveAttribute("aria-pressed", "true"));
+    expect(set).toHaveBeenCalledWith(false);
+    expect(on).toBeDisabled();
+  });
+
   it("warns about a read-only launch location and prevents manual update checks", async () => {
     const runtimeWarning = "请先退出应用，将 Agent Manager 拖到应用程序后再打开。";
     setSettingsClient({ get: async () => ({ ...settings, updaterConfigured: true, runtimeWarning }), save: async () => settings });

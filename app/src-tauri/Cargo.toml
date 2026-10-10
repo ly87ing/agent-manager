@@ -24,6 +24,10 @@ tauri-plugin-notification = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
+plist = "1.10"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
 
 [profile.dev]
 incremental = true

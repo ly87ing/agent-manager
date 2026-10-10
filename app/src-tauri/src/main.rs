@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod autostart;
 mod engine;
 mod settings;
 mod startup;
@@ -22,6 +23,16 @@ fn settings_save(
     preferences: settings::SettingsPreferences,
 ) -> Result<settings::SettingsData, String> {
     settings::save_preferences(&app, preferences)
+}
+
+#[tauri::command]
+fn autostart_get(app: tauri::AppHandle) -> Result<bool, String> {
+    autostart::get(&app)
+}
+
+#[tauri::command]
+fn autostart_set(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    autostart::set(&app, enabled)
 }
 
 /// 跨会话持久化的窗口状态：位置/尺寸/最大化。
@@ -112,6 +123,8 @@ fn main() {
             engine::engine_invoke,
             settings_get,
             settings_save,
+            autostart_get,
+            autostart_set,
             tray::tray_set_accounts,
             tray::tray_panel_open_main,
             tray::tray_panel_quit,

@@ -41,6 +41,14 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Acceptance on the real desktop
 
+**Launch the generated OS entry; a correct-looking string is not startup evidence.**
+- The first Linux autostart entry escaped a literal `%` as `%%` according to the Desktop Entry syntax. Real `gio launch` refused it because GIO checks whether the executable exists before expanding field codes. File readback alone had passed. Such paths now fail before writing; a disposable Linux run executed the exact path containing spaces, quotes, `$`, and a backslash.
+- Seen 1× (2026-10-09).
+
+**Canonicalize a temporary native executable's launch path on macOS.**
+- Launching the warning fixture through `/var/...` produced Tauri's `unknown path`, since `/var` is a symlink and Tauri rejects symlinks in its cached executable path. Launching the same fixture through `/private/var/...` with its resource directory present exercised the native warning. Do not weaken Tauri's protection to repair a test fixture.
+- Seen 1× (2026-10-09).
+
 **A development build next to the installed app needs its own identifier.**
 - The single-instance plugin hands a second launch to the running instance, so a debug build with the default identifier would only have focused the user's installed app. The tray panel was accepted with `TAURI_CONFIG='{"identifier":"io.github.ly87ing.agent-manager.devcheck"}'`, an isolated `HOME` and `AGENT_MANAGER_DATA_DIR`, and the installed instance kept running (`09675b5`).
 - Seen 1× (2026-10-09).

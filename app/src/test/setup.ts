@@ -19,6 +19,10 @@ afterEach(() => {
 });
 import { setEngineClient } from "../lib/engine";
 import { setSettingsClient, type SettingsClient } from "../lib/settings";
+import { setAutostartClient } from "../lib/autostart";
+
+const defaultAutostartClient = { get: async () => false, set: async (enabled: boolean) => enabled };
+setAutostartClient(defaultAutostartClient);
 
 const defaultSettingsClient: SettingsClient = {
   get: async () => ({ preferences: { logRetentionDays: 30 }, appVersion: "test", contractVersion: "agent-manager/engine/v1", resourceDir: "/resources", dataDir: "/data", updaterConfigured: false, }),
@@ -65,4 +69,5 @@ afterEach(async () => {
   await settleTimers(0);
   setEngineClient(null);
   setSettingsClient(defaultSettingsClient);
+  setAutostartClient(defaultAutostartClient);
 });

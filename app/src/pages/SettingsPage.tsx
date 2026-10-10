@@ -17,6 +17,7 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { engineErrorMessage } from "../lib/engine";
 import type { SettingsData, SettingsPreferences } from "../lib/contract";
 import { useSaveSettings, useSettings } from "../lib/settings";
+import { useAutostart, useSetAutostart } from "../lib/autostart";
 import { reminderEnabled, setReminderEnabled } from "../lib/quotaReminder";
 import { useTheme, type Theme } from "../lib/theme";
 import { cn } from "../lib/utils";
@@ -94,6 +95,31 @@ function SettingsGroup({ title, children }: { title: string; children: ReactNode
       <h2 className="border-b bg-muted px-4 py-2 text-xs font-medium text-foreground">{title}</h2>
       <div className="divide-y">{children}</div>
     </section>
+  );
+}
+
+function AutostartControl({ allowEnable }: { allowEnable: boolean }) {
+  const state = useAutostart();
+  const change = useSetAutostart();
+  const error = state.error ?? change.error;
+  return (
+    <>
+      <div className="inline-flex rounded-lg border bg-muted p-0.5" role="group" aria-label="开机启动">
+        {[{ value: false, label: "关" }, { value: true, label: "开" }].map((option) => (
+          <button key={option.label} type="button" aria-pressed={state.data === option.value}
+            disabled={state.isPending || state.isError || change.isPending || (option.value && !allowEnable)}
+            onClick={() => { if (state.data !== option.value) change.mutate(option.value); }}
+            className={cn("rounded-md px-3 py-1 text-xs transition-colors disabled:opacity-50", state.data === option.value ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+            {option.label}
+          </button>
+        ))}
+      </div>
+      {state.isPending && <p role="status" className="text-xs text-muted-foreground">正在读取登录项…</p>}
+      {error && <div className="flex w-full flex-wrap items-center gap-2 text-xs text-destructive">
+        <p role="alert">开机启动设置失败：{engineErrorMessage(error)}</p>
+        <button type="button" onClick={() => { change.reset(); void state.refetch(); }} className="rounded border px-2 py-1">重新读取</button>
+      </div>}
+    </>
   );
 }
 
@@ -324,6 +350,9 @@ export default function SettingsPage({
         </SettingsRow>
         <SettingsRow label="额度快作废时提醒" note="某个账号的窗口快重置、还剩一半以上没用时发系统通知；只提醒，不做任何操作">
           <QuotaReminderControl />
+        </SettingsRow>
+        <SettingsRow label="开机启动" note="登录系统后启动 Agent Manager；读取系统实际设置，点击后立即生效">
+          <AutostartControl allowEnable={!data.runtimeWarning} />
         </SettingsRow>
         <SettingsRow label="操作记录保留" note="0 为不自动清理，最多 3650 天">
           <div className="flex items-center gap-2">
