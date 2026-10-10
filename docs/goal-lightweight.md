@@ -5,6 +5,9 @@ Rules, Commands, Sources, dependency programs, and essential settings. Desktop
 and CLI continue to share the Rust engine. This scope supersedes the monitoring
 and residency requirements in earlier acceptance records.
 
+The implementation is on main. See [final verification](#final-verification-2026-10-10)
+for measured results and the existing Windows acceptance failure.
+
 ## Constraints
 
 | Constraint | Source | Consequence |
@@ -47,7 +50,37 @@ Rollback uses the previous executable/source revision. No destructive database
 migration or user-data cleanup is part of this goal. Existing deployed status-line
 scripts and login entries need an explicit, ownership-checked removal path.
 
-## Progress
+## Final verification (2026-10-10)
+
+Verified implementation: `f9b2c94`. Later acceptance-only documentation does not
+change the executable source.
+
+| Check | Result and boundary |
+| --- | --- |
+| Linux and macOS full CI | [CI 38052651713](https://github.com/ly87ing/agent-manager/actions/runs/38052651713) passed engine/Tauri tests and checks, script checks, frontend tests, typecheck and production build. macOS ran 619 Rust tests across engine/Tauri and 690 frontend tests, with four platform skips. |
+| Windows retirement checks | All 226 library tests passed, including both corrected retirement tests; the retired-install integration test also passed. The overall Windows job failed later in the unchanged controlled-command test. |
+| Native macOS and actual files | A distinct app identifier with isolated HOME/data rendered Accounts, Sources and Rules through IPC; closing the window ended its process. CLI MCP/rules/command writes were read back, a stale rule write was rejected, and dependency discovery succeeded. |
+| Layout and idle queries | Eight retained pages passed 1000/760 px checks. A browser fixture on Sources made zero additional engine queries during 65 settled idle seconds. This is query-scheduling evidence. |
+| Large skill file | A 256 MiB sparse asset produced identical full status/fingerprints; CLI peak RSS fell from 261.2 to 6.1 MiB. This measures that hashing workload, not the entire desktop/WebKit footprint. |
+
+The Windows failure is reproduced in both the
+[pre-change run at f10d71d](https://github.com/ly87ing/agent-manager/actions/runs/38040239536/job/114178852419)
+and the [current run](https://github.com/ly87ing/agent-manager/actions/runs/38052651772/job/114214758658):
+native_aliases_windows fails at line 398 because the isolated engine process cannot
+locate the OS user's lock directory. The production account context, lock code and
+test are unchanged. The lock guard remains intact; Windows full-suite and physical
+Windows/Linux desktop acceptance remain unconfirmed.
+
+The pre-correction local full run completed with 228 library passes and ten
+failures: one obsolete status-line expectation, now corrected, and nine subprocess
+capture/timing failures. All 354 subsequent integration tests passed. That local
+run failed; it is not counted as a full pass. Current Linux/macOS CI supplies the
+passing full-suite evidence without relaxed deadlines or safety assertions.
+
+## Implementation record
+
+<details>
+<summary>Intermediate checks and corrections</summary>
 
 - Baseline: `9af369a`; clean main. The 65 relevant frontend tests passed before
   the first change. Implementation and acceptance are in progress.
@@ -172,3 +205,5 @@ scripts and login entries need an explicit, ownership-checked removal path.
   cleanup and custom-command preservation, and derive the platform path from the
   production helper. All four focused retirement tests passed. Full platform CI
   remains required for this correction.
+
+</details>

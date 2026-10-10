@@ -974,3 +974,17 @@ failure. Explicit dynamic preloading of both lazy modules then passed all 25
 Settings tests without changed assertions/timeouts. Isolated CLI wrote MCP, rules,
 and commands and read actual files back; stale rule writes were rejected. Full
 engine acceptance and final native UI results are still being collected.
+
+### 2026-10-10: lightweight implementation acceptance
+
+The final source at `f9b2c94` passed full Linux/macOS CI, including engine, Tauri,
+frontend and production-build checks. Local frontend passed 690 tests with four
+platform skips. Isolated native IPC, close-to-exit, actual configuration write
+readback and all 16 retained-page layout cases passed. The 65-second browser idle
+observation made no additional engine queries.
+
+Windows retirement tests passed; the unchanged controlled-command test still
+fails to locate the OS-user lock directory, exactly as on the pre-change `f10d71d`.
+The failed local full engine run and this existing Windows failure remain explicit
+acceptance limits. See the [final lightweight verification](goal-lightweight.md#final-verification-2026-10-10)
+for CI links, counts and workload-specific memory evidence.
