@@ -7,6 +7,7 @@ Each page describes how one subsystem works now: what it is responsible for, whe
 | Quota readings, tray summary and panel, quota reminder | [Quota and tray](quota-and-tray.md) |
 | Recent sessions and resume commands | [Recent sessions](recent-sessions.md) |
 | MCP test connection | [MCP test connection](mcp-check.md) |
+| External commands, timeout groups and system proxy fallback | [External commands](external-commands.md) |
 
 Product scope stays in [Concurrent Accounts](../MULTI-ACCOUNT-DESIGN.md) and data semantics in [GUI Redesign](../GUI-REDESIGN.md); implementation history and acceptance stay in [goal-rust-gui.md](../goal-rust-gui.md). A reference page is not a design proposal: proposals go in the task document.
 

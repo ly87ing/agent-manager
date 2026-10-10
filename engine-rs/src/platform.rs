@@ -137,7 +137,7 @@ pub fn join_slash(base: &Path, rel: &str) -> PathBuf {
 /// 调用生效，不改用户的 git 配置）。Git for Windows 默认检出时把 LF 改成 CRLF，下载的技能与上游不再逐字节一致，
 /// 技能里的 `.sh` 在 Git Bash 里也会因为多出的 `\r` 跑不起来。
 pub fn git_command() -> std::process::Command {
-    let mut command = std::process::Command::new("git");
+    let mut command = crate::process::command("git");
     command
         .env("GIT_CONFIG_COUNT", "1")
         .env("GIT_CONFIG_KEY_0", "core.autocrlf")

@@ -38,21 +38,23 @@ pub struct UserPath {
 
 #[cfg(not(windows))]
 fn shell_path(shell: &str, flag: &str, home: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut child = Command::new(shell)
+    let mut command = Command::new(shell);
+    command
         .arg(flag)
         .arg(format!("printf '\\n{PATH_MARKER}%s\\n' \"$PATH\""))
         .env("HOME", home)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("启动 {shell} 失败：{e}"))?;
+        .stderr(Stdio::null());
+    // 登录 shell 的配置可能起后台进程：超时时整组结束
+    let (mut child, group) =
+        crate::process::spawn_group(&mut command).map_err(|e| format!("启动 {shell} 失败：{e}"))?;
     let start = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) if start.elapsed() > PROBE_TIMEOUT => {
-                let _ = child.kill();
+                group.kill(&mut child);
                 let _ = child.wait();
                 return Err(format!("{shell} {flag} 超时"));
             }

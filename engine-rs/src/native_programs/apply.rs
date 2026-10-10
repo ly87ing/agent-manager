@@ -90,12 +90,9 @@ fn run(mut command: Command, timeout: Duration) -> Result<Output> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command.spawn().with_context(|| "启动命令失败")?;
+    // 一组启动：超时时 npm、uv 再拉起的进程一起结束
+    let (mut child, group) =
+        crate::process::spawn_group(&mut command).with_context(|| "启动命令失败")?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let out_handle = std::thread::spawn(move || {
@@ -120,7 +117,7 @@ fn run(mut command: Command, timeout: Duration) -> Result<Output> {
             break status;
         }
         if start.elapsed() > timeout {
-            let _ = child.kill();
+            group.kill(&mut child);
             let _ = child.wait();
             bail!("命令超时（{} 秒）", timeout.as_secs());
         }
@@ -152,7 +149,7 @@ fn which(bin: &str, user_path: &super::locate::UserPath) -> Option<PathBuf> {
 
 /// npm 上某个包的最新版本（联网）。
 fn npm_latest(npm: &Path, package: &str) -> Result<String> {
-    let mut cmd = Command::new(npm);
+    let mut cmd = crate::process::command(npm);
     cmd.args(["view", package, "version"]);
     let out = run(cmd, Duration::from_secs(60))?;
     let version = out
@@ -171,7 +168,7 @@ fn npm_latest(npm: &Path, package: &str) -> Result<String> {
 
 /// PyPI 上某个包的最新版本（联网）。
 fn pypi_latest(package: &str) -> Result<String> {
-    let mut cmd = Command::new("/usr/bin/curl");
+    let mut cmd = crate::process::command("/usr/bin/curl");
     cmd.args([
         "-fsSL",
         "--max-time",
@@ -1547,11 +1544,12 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                     env,
                     cwd,
                 } => {
-                    let mut cmd = Command::new(program);
+                    let mut cmd = crate::process::command_with_env(
+                        program,
+                        env.iter()
+                            .map(|(key, value)| (key.as_str(), value.as_str())),
+                    );
                     cmd.args(args);
-                    for (k, v) in env {
-                        cmd.env(k, v);
-                    }
                     if let Some(cwd) = cwd {
                         cmd.current_dir(cwd);
                     }

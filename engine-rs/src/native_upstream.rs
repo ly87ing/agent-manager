@@ -384,23 +384,6 @@ fn collect_targets(ctx: &Context) -> Result<Vec<ProbeTarget>> {
 // 探测器（有界捕获 + 超时终止进程组，失败 → None，由上层归 unknown+error）
 // ---------------------------------------------------------------------------
 
-#[cfg(unix)]
-fn terminate_child(child: &mut std::process::Child) {
-    extern "C" {
-        fn kill(pid: i32, sig: i32) -> i32;
-    }
-    const SIGKILL: i32 = 9;
-    let pgid = child.id() as i32; // process_group(0) 使 pgid == pid
-    if unsafe { kill(-pgid, SIGKILL) } != 0 {
-        let _ = child.kill();
-    }
-}
-
-#[cfg(not(unix))]
-fn terminate_child(child: &mut std::process::Child) {
-    let _ = child.kill();
-}
-
 fn spawn_capture_reader(
     mut pipe: impl Read + Send + 'static,
     limit: usize,
@@ -430,7 +413,7 @@ fn run_capture(
     ctx: &Context,
     timeout: Duration,
 ) -> Option<String> {
-    let mut command = Command::new(program);
+    let mut command = crate::process::command(program);
     command.args(args).env("HOME", &ctx.home_dir);
     if let Some(dir) = cwd {
         command.current_dir(dir);
@@ -458,12 +441,7 @@ fn capture_exit_limited(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command.spawn().ok()?;
+    let (mut child, group) = crate::process::spawn_group(&mut command).ok()?;
     let stdout_rx = spawn_capture_reader(child.stdout.take()?, limit);
     let stderr_rx = spawn_capture_reader(child.stderr.take()?, 256);
     let start = Instant::now();
@@ -480,7 +458,7 @@ fn capture_exit_limited(
             }
             Ok(None) => {
                 if start.elapsed() > timeout {
-                    terminate_child(&mut child);
+                    group.kill(&mut child);
                     let _ = child.wait();
                     return None;
                 }

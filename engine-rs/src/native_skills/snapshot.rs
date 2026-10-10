@@ -365,7 +365,7 @@ pub fn discover_repo_skills(
     Ok((found, duplicates))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

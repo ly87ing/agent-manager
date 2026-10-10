@@ -13,7 +13,7 @@ use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Map, Value};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use crate::native::{Context, Request};
@@ -359,6 +359,7 @@ fn spawn_capture_reader(
 /// 等待子进程并并发有界读取输出；读取端 recv_timeout 兜底（孙进程持管道不阻塞主流程）。
 fn wait_bounded(
     mut child: std::process::Child,
+    group: crate::process::Group,
     timeout: Duration,
     action: &str,
 ) -> Result<CmdOutput> {
@@ -373,7 +374,7 @@ fn wait_bounded(
             break status;
         }
         if start.elapsed() > timeout {
-            terminate_child(&mut child);
+            group.kill(&mut child);
             let _ = child.wait();
             bail!(
                 "Agent 动作执行超时（{} 秒上限），已终止（{}）",
@@ -391,43 +392,21 @@ fn wait_bounded(
     })
 }
 
-/// unix：子进程独立进程组（std process_group(0)），超时经平台 kill API 终止整个进程组，
-/// 不只 kill shell 留下安装器，也不依赖 PATH 里的外部 kill 命令。
-#[cfg(unix)]
-fn terminate_child(child: &mut std::process::Child) {
-    extern "C" {
-        fn kill(pid: i32, sig: i32) -> i32;
-    }
-    const SIGKILL: i32 = 9;
-    let pgid = child.id() as i32; // process_group(0) 使 pgid == pid
-                                  // 先整组；组不存在（已退出）时退回直接子进程
-    if unsafe { kill(-pgid, SIGKILL) } != 0 {
-        let _ = child.kill();
-    }
-}
-
-#[cfg(not(unix))]
-fn terminate_child(child: &mut std::process::Child) {
-    let _ = child.kill();
-}
-
 /// 经 sh -c 执行（POSIX），HOME 注入 home_dir。非 unix 平台明确拒绝而非编译失败。
 #[cfg(unix)]
 fn run_shell(home_dir: &Path, cmd: &str, timeout: Duration, action: &str) -> Result<CmdOutput> {
-    use std::os::unix::process::CommandExt;
-    let mut command = Command::new("sh");
+    let mut command = crate::process::command("sh");
     command
         .arg("-c")
         .arg(cmd)
         .env("HOME", home_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
-    let child = command
-        .spawn()
+        .stderr(Stdio::piped());
+    // 独立进程组：超时时连同安装器拉起的进程一起结束
+    let (child, group) = crate::process::spawn_group(&mut command)
         .map_err(|e| anyhow!("无法启动 Agent 动作（{}）: {}", action, e))?;
-    wait_bounded(child, timeout, action)
+    wait_bounded(child, group, timeout, action)
 }
 
 #[cfg(not(unix))]
@@ -442,7 +421,7 @@ fn run_shell(_home_dir: &Path, _cmd: &str, _timeout: Duration, action: &str) -> 
 pub(crate) fn probe_version(bin_path: &Path) -> Option<String> {
     let scratch = std::env::temp_dir().join("agent-manager-version-probe");
     let _ = std::fs::create_dir_all(&scratch);
-    let mut command = Command::new(bin_path);
+    let mut command = crate::process::command(bin_path);
     command
         .arg("--version")
         .env("PATH", path_for_command(bin_path))
@@ -451,12 +430,7 @@ pub(crate) fn probe_version(bin_path: &Path) -> Option<String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = command.spawn().ok()?;
+    let (mut child, group) = crate::process::spawn_group(&mut command).ok()?;
     let stdout_rx = spawn_capture_reader(child.stdout.take()?, 256);
     let stderr_rx = spawn_capture_reader(child.stderr.take()?, 256);
     let start = Instant::now();
@@ -482,7 +456,7 @@ pub(crate) fn probe_version(bin_path: &Path) -> Option<String> {
                 .map(str::to_string);
         }
         if start.elapsed() > Duration::from_secs(10) {
-            terminate_child(&mut child);
+            group.kill(&mut child);
             let _ = child.wait();
             return None;
         }
@@ -1062,7 +1036,7 @@ pub(crate) fn discover(ctx: &Context) -> Result<Value> {
     Ok(Value::Array(out))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

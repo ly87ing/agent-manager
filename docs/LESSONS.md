@@ -24,6 +24,10 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Messages that say what happened
 
+**Cargo accepts one test-name filter; an invalid command is not a passing test.**
+- The interrupted cross-platform follow-up ran `cargo test ... codex_standalone unreadable_content`, then filtered away Cargo's argument error. Run each filter separately or run the full suite, retain the original exit status, and read the result after the final edit.
+- Seen 1× (2026-10-09).
+
 **Tell "the program exited" apart from "it timed out".**
 - `mcp:check` first reported "no reply to initialize within 30 seconds" for a server that exited after 0.5 s. The wait now returns why it stopped, and the test asserts the exit message (`a97f432`).
 - Seen 1× (2026-10-09).

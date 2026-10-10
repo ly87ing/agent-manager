@@ -18,6 +18,7 @@ Starts one account's MCP entry once, the way its assistant would, and reports wh
 - Resolved values are replaced with `***` in the message and stderr, then the usual diagnostic sanitizer runs.
 - stdio waits for the entry's `startup_timeout_sec`, else 30 s; HTTP waits 20 s. The result says whether the program exited or the wait timed out.
 - Afterwards stdin is closed and, if the server is still running after 0.5 s, the whole process group is killed.
+- Commands use the shared [external-command layer](external-commands.md) for Windows console flags, timeout jobs and manual system proxy fallback; explicit entry environment variables take precedence.
 - Legacy SSE transports are refused with a reason.
 - The command takes no apply lock and writes neither files nor the database.
 

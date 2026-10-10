@@ -417,7 +417,7 @@ pub(crate) fn official_status(
     }
     let cli = resolve_cli(home_dir, bin)
         .ok_or_else(|| format!("找不到 {bin} 命令，无法用官方命令确认登录状态"))?;
-    let mut command = std::process::Command::new(&cli);
+    let mut command = crate::process::command(&cli);
     command
         .env("HOME", home_dir)
         .env("PATH", crate::native_agents::path_for_command(&cli));

@@ -4,6 +4,7 @@
 //!   `notifications/initialized`、`tools/list`，拿到工具清单后关掉进程。
 //! - 地址型（Streamable HTTP）：用系统的 curl 依次 POST 同样三条消息，带上条目的请求头；
 //!   请求头经 stdin 交给 curl（`-H @-`），不出现在进程参数里。旧的 SSE 传输不检测。
+//! - 命令经 `crate::process` 启动：Windows 上不弹窗、超时整组结束，没有代理变量时带上系统代理。
 //!
 //! 变量引用按各助手的写法取值（本工具的密钥文件优先，其次进程环境）；有变量取不到值就不启动，
 //! 直接说缺哪个。命令可能自己下载依赖（如 npx），所以只在用户点「测试连接」时运行。
@@ -166,6 +167,7 @@ enum Waited {
 /// 一个子进程：stdout 按行进通道，stderr 只留结尾一段。
 struct Running {
     child: Child,
+    group: crate::process::Group,
     lines: Receiver<String>,
     stderr: Receiver<Vec<u8>>,
 }
@@ -176,12 +178,7 @@ impl Running {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-        }
-        let mut child = command.spawn()?;
+        let (mut child, group) = crate::process::spawn_group(&mut command)?;
         if let Some(data) = stdin {
             if let Some(mut pipe) = child.stdin.take() {
                 let _ = pipe.write_all(data);
@@ -215,6 +212,7 @@ impl Running {
         });
         Ok(Self {
             child,
+            group,
             lines,
             stderr,
         })
@@ -278,7 +276,7 @@ impl Running {
             std::thread::sleep(Duration::from_millis(20));
         }
         if !matches!(self.child.try_wait(), Ok(Some(_))) {
-            terminate(&mut self.child);
+            self.group.kill(&mut self.child);
         }
         let _ = self.child.wait();
         let tail = self
@@ -294,21 +292,6 @@ impl Running {
             .unwrap_or(0);
         text[start..].trim().to_string()
     }
-}
-
-#[cfg(unix)]
-fn terminate(child: &mut Child) {
-    extern "C" {
-        fn kill(pid: i32, sig: i32) -> i32;
-    }
-    if unsafe { kill(-(child.id() as i32), 9) } != 0 {
-        let _ = child.kill();
-    }
-}
-
-#[cfg(not(unix))]
-fn terminate(child: &mut Child) {
-    let _ = child.kill();
 }
 
 fn rpc_error(response: &Value) -> Option<String> {
@@ -416,15 +399,16 @@ fn check_stdio(ctx: &Context, format: &Format, view: &View) -> (Outcome, Vec<Str
             secrets,
         );
     };
-    let mut command = Command::new(&program);
+    let mut command = crate::process::command_with_env(
+        &program,
+        env.iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    );
     command
         .args(&args)
         .env("PATH", &path)
         .env("HOME", &ctx.home_dir)
         .current_dir(&ctx.home_dir);
-    for (key, value) in &env {
-        command.env(key, value);
-    }
     let timeout = view
         .startup_timeout_sec
         .filter(|sec| *sec > 0)
@@ -506,7 +490,7 @@ fn http_post(
     if let Some(id) = session {
         header_text.push_str(&format!("Mcp-Session-Id: {id}\n"));
     }
-    let mut command = Command::new("curl");
+    let mut command = crate::process::command("curl");
     command.args([
         "-sS",
         "-i",
