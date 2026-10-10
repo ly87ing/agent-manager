@@ -8,6 +8,21 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Do not kernel-execute a newly written shell fixture to bootstrap another test.**
+- A concurrent fork can retain a writable descriptor until exec, so Linux rejects an immediate script launch with `ETXTBSY` even after the writer in the parent has closed. The fake npm bootstrap now reads the exact script through `/bin/sh`; real product discovery, installation, and rollback still execute the fixture normally.
+- A held-writer regression reproduces the old helper failure deterministically and checks the resulting package, symlink, script bytes, and executable permission after the fix.
+- Seen 1× (2026-10-10).
+
+**Read-only probes need runtime locks without initializing application data.**
+- Moving account locks into the manager data directory made successful MCP connection checks create that directory. Keep runtime locks in a private OS-user namespace and verify both the read-only filesystem boundary and real cross-process exclusion across different data directories. Exercise missing HOME as well as missing data directories, so a safety check does not reject valid first-use writes.
+- Moving the lock name alone also loses old-version sessions. Test existing legacy shared locks, first-reader migration rejection, parallel upgraded readers, all known old/new aliases, and release after a failed bridge. Arbitrary unknown old data directories remain an explicit stop-old-programs upgrade prerequisite.
+- Seen 1× (2026-10-10).
+
+**Serialize test configuration and synchronize the phase being exercised.**
+- Windows path interpolation made a statusline fixture invalid JSON despite successful cross-linking. The regression now forces backslash, space, and apostrophe paths on every host and serializes its JSON.
+- A 500 ms transaction fixture could reject before its plan. Ready/release signaling at the real authentication probe plus exact CAS/audit diagnostics now proves the intended race. Old JSON interpolation and removed CAS guards fail separately named negative-control packages.
+- Seen 1× (2026-10-10).
+
 **Cross-linking does not prove a Windows fixture satisfies the runtime contract.**
 - The new account preflight requires a native assistant executable and private credential-source ACLs. Existing Windows fixtures still installed `.cmd` helpers and relied on inherited temporary-directory permissions; successful compilation could not reveal those runtime mismatches. The fixtures now compile a std-only fake `.exe` and protect only new temporary roots with inheritable current-user ACLs, including atomic credential replacement.
 - Keep explicit native-executable, private-source rotation, and broad-ACL rejection cases. Cross-compiled test executables remain build evidence until those cases run on Windows.
@@ -61,12 +76,22 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Dependencies and lockfiles
 
+**Separate Rust and frontend passes do not prove a Tauri installer can be built.**
+- Rust notification 2.4.0 and JavaScript notification 2.5.1 passed their own test suites, but Tauri rejected all four installer targets before bundling. Pin both notification dependencies to the same tested version and check the resolved plugin major/minor versions in CI.
+- Keep installer construction and native package startup separate from compile evidence. The lockfile regression must fail when the original mismatched JavaScript version is restored.
+- Seen 1× (2026-10-10).
+
 **Pin a dependency to a known-compatible version in one step; do not probe versions in a loop.**
 - `tauri-plugin-notification` pulled `notify-rust` 4.18.2, which needs rustc 1.89 (local toolchain 1.88). Trying versions with repeated `cargo update --precise` rewrote unrelated Windows dependency edges in `Cargo.lock`. The lockfile was restored from `HEAD` and only the plugin plus `notify-rust` 4.17.0 were added (`341b4ee`).
 - Check `git diff --stat Cargo.lock` and the changed `version =` lines before committing a dependency change.
 - Seen 1× (2026-10-09).
 
 ## Acceptance on the real desktop
+
+**Temporary-path fixtures must reach the intended ancestor permission check.**
+- The runtime sticky-parent test used macOS's `/tmp` symlink and failed before checking its disposable parent's mode. Canonicalize the fixture root; retain the rejection of untrusted ancestor links in production.
+- Absolute Windows volume/share roots need ACL checks too. Skip only drive-relative prefixes; permitting new root children must not permit replacing existing children or changing their ACL/owner.
+- Seen 1× (2026-10-10).
 
 **Launch the generated OS entry; a correct-looking string is not startup evidence.**
 - The first Linux autostart entry escaped a literal `%` as `%%` according to the Desktop Entry syntax. Real `gio launch` refused it because GIO checks whether the executable exists before expanding field codes. File readback alone had passed. Such paths now fail before writing; a disposable Linux run executed the exact path containing spaces, quotes, `$`, and a backslash.

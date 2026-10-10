@@ -97,6 +97,17 @@ fn main() {
         std::fs::write(home.join(".fake-cli-env"), format!("{{{fields}}}\n")).unwrap();
         return;
     }
+    if home.join(".fake-probe-hold").exists() {
+        std::fs::write(home.join(".fake-probe-ready"), b"").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while !home.join(".fake-probe-release").exists() {
+            if std::time::Instant::now() >= deadline {
+                eprintln!("fake authentication probe was not released");
+                std::process::exit(70);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
     let directory = PathBuf::from(
         std::env::var_os(if codex {
             "CODEX_HOME"

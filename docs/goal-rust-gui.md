@@ -851,3 +851,60 @@ changes to `main`. Publication therefore proceeds without claiming acceptance or
 waiting for another full run. The newer remote MCP commit must be preserved; no
 force push, branch-protection bypass, PR, tag, release, or billing change is authorized.
 
+## 2026-10-10: Cloud follow-up verification before publication
+
+The follow-up starts from `753ae821` and retains `9af369a`. Notification is
+pinned to 2.4.0 in both manifests, with resolved-version CI guards. Statusline
+fixtures serialize unusual paths correctly, transaction fixtures synchronize at
+the real authentication probe, and the fake npm bootstrap avoids Linux's
+inherited-writer `ETXTBSY` without changing production executable dispatch.
+
+Account locks now use one private OS-user runtime namespace across manager data
+directories. The bounded legacy bridge preserves existing inodes, verifies the
+first upgraded reader exclusively, and retains known old/new path spellings.
+Fresh homes, absent optional defaults, unsafe lock ancestors, Windows drive
+prefixes, multiple upgraded readers, and failed acquisition are covered. Upgrades
+still require stopping all old sessions and older binaries; unknown historical
+locations and later old-version starts are outside this protocol. See
+[the migration contract](subsystems/account-context.md#upgrading-from-data-directory-locks).
+
+Cloud evidence from input tree `786ea2f2`, before the local publication repairs:
+
+- Two complete Linux engine runs each passed **606 tests, zero failures**, plus
+  the portable program-lifecycle harness. Every previously recorded group of 14
+  failures passed. A subsequent all-target check and formatting check passed.
+- Tauri passed **31 tests**, formatting, and all-target checking. Frontend passed
+  **756 tests** across 72 files, with **4 existing platform-conditional skips**;
+  type checking and the production frontend build passed. Script tests passed
+  **15**, including both JavaScript/Rust plugin-version guards.
+- Windows GNU all-target checking passed. Relevant fixture targets had also
+  cross-linked; neither result is native Windows execution.
+- Actual release-mode Linux **DEB and AppImage bundles were built** using the
+  existing user-space system-library tree. The AppImage builder needed its
+  documented GTK library-path override for that layout; no system installation
+  or permission change was made. Bundling does not establish desktop startup.
+- Separate-package negative controls fail with the old cross-data-directory
+  locks, old JSON interpolation, and removed transaction CAS guards. The original
+  fake npm bootstrap also fails deterministically with a held writable descriptor;
+  an inherited-descriptor reproduction confirms the Linux mechanism. The exact
+  child responsible for the earlier intermittent failure was not traced.
+- Independent source review found and closed fresh-HOME, optional-default,
+  runtime-parent replacement, and Windows drive-prefix edge cases. No generated
+  binary, credentials, local pnpm policy file, or test data is part of the change.
+
+These are pre-publication local results. Native CI must be checked against the
+exact published commit, including all four installer targets. Physical desktop
+interaction, real upstream account login, and signed update/restart acceptance
+remain distinct from these fake-account tests and package builds. No Release or
+tag is authorized by this follow-up.
+
+The Mac publication check found one temporary-path fixture failure: `/tmp` was
+still a symlink when the sticky-parent assertion ran. The fixture now uses its
+canonical temporary root. Review also found that absolute Windows volume/share
+roots skipped ancestor ACL validation. Roots are now checked, permitting only
+new-child creation while rejecting replacement, deletion and ACL/owner changes;
+private credential checks remain unchanged. After these bounded repairs, the
+isolated Mac library run passed **243 tests**, account-transaction integration
+passed **15**, and script tests passed **15**, all with zero failures. Formatting
+and Windows GNU library checking also passed. Cross-checking does not establish
+physical Windows desktop operation.

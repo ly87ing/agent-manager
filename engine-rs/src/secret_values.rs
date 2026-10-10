@@ -66,7 +66,26 @@ fn validate_permissions(path: &Path) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn validate_permissions(path: &Path) -> Result<()> {
+pub(crate) fn validate_permissions(path: &Path) -> Result<()> {
+    validate_windows_acl(path, true)
+}
+
+/// Lock ancestors may be publicly readable, but another user must not be able
+/// to replace their children. Secret sources and runtime locks remain private.
+#[cfg(any(windows, test))]
+fn windows_acl_grants_untrusted_access(mask: u32, private: bool, root: bool) -> bool {
+    if private {
+        return mask != 0;
+    }
+    // A volume/share root may let users add new children. This does not permit
+    // replacing an existing, independently validated ancestor. Delete-child,
+    // deletion, ACL/owner changes and generic mutation rights still fail closed.
+    let mutation = if root { 0x0000_0150 } else { 0x0000_0156 };
+    mask & (mutation | 0x000D_0000 | 0x5000_0000) != 0
+}
+
+#[cfg(windows)]
+pub(crate) fn validate_windows_acl(path: &Path, private: bool) -> Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::{
         Foundation::CloseHandle,
@@ -196,7 +215,9 @@ fn validate_permissions(path: &Path) -> Result<()> {
             let ace = raw.cast::<ACCESS_ALLOWED_ACE>();
             let mask = std::ptr::read_unaligned(std::ptr::addr_of!((*ace).Mask));
             let sid = std::ptr::addr_of_mut!((*ace).SidStart).cast();
-            if mask != 0 && !trusted(sid) {
+            let dangerous =
+                windows_acl_grants_untrusted_access(mask, private, path.parent().is_none());
+            if dangerous && !trusted(sid) {
                 bail!("外部密钥文件 Windows ACL 允许其他用户访问，请先限制权限");
             }
         }
@@ -807,6 +828,30 @@ pub fn migrate_legacy(ctx: &Context) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_root_acl_allows_new_children_but_rejects_replacement_rights() {
+        let read_traverse = 0x0012_00A9;
+        assert!(!windows_acl_grants_untrusted_access(
+            read_traverse,
+            false,
+            true
+        ));
+        assert!(!windows_acl_grants_untrusted_access(0x6, false, true));
+        assert!(windows_acl_grants_untrusted_access(0x6, false, false));
+        for right in [0x40, 0x10000, 0x40000, 0x80000, 0x10000000, 0x40000000] {
+            assert!(windows_acl_grants_untrusted_access(right, false, true));
+        }
+        for root in [false, true] {
+            assert!(windows_acl_grants_untrusted_access(
+                read_traverse,
+                true,
+                root
+            ));
+            assert!(windows_acl_grants_untrusted_access(0x6, true, root));
+            assert!(!windows_acl_grants_untrusted_access(0, true, root));
+        }
+    }
 
     #[test]
     fn var_name_rules_match_placeholder_shape() {

@@ -86,7 +86,12 @@ fn skill(env: &Env, name: &str, frontmatter_meta: &str) {
 
 /// 用假 npm 在「全局」前缀里装一个包（模拟用户自己 npm install -g 过）。
 fn global_install(env: &Env, spec: &str) {
-    let status = Command::new(env.base.join("tools/npm"))
+    // Bootstrap only: another test's fork can briefly retain the newly written
+    // script's writable FD, making Linux exec fail with ETXTBSY. Read this exact
+    // fixture through its interpreter; engine operations still discover and
+    // execute the executable npm fixture through the production code path.
+    let status = Command::new("/bin/sh")
+        .arg(env.base.join("tools/npm"))
         .args([
             "install",
             "-g",
@@ -97,6 +102,33 @@ fn global_install(env: &Env, spec: &str) {
         .status()
         .unwrap();
     assert!(status.success());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn global_install_bootstrap_reads_fixture_with_open_writer() {
+    let env = setup("open-writer");
+    let npm = env.base.join("tools/npm");
+    // A concurrent fork can inherit the fixture's writer before std::fs::write
+    // closes it. Hold an equivalent writer to make Linux's ETXTBSY deterministic.
+    let writer = std::fs::OpenOptions::new().write(true).open(&npm).unwrap();
+    let error = Command::new(&npm).arg("view").output().unwrap_err();
+    assert_eq!(error.raw_os_error(), Some(libc::ETXTBSY));
+
+    global_install(&env, "tool-a@1.2.0");
+    let global = env.home.join(".npm-global");
+    assert_eq!(version_at(&global.join("lib/node_modules/tool-a")), "1.2.0");
+    assert_eq!(
+        std::fs::read_link(global.join("bin/tool-a")).unwrap(),
+        Path::new("../lib/node_modules/tool-a/bin/cli.js")
+    );
+    assert_eq!(std::fs::read_to_string(&npm).unwrap(), FAKE_NPM);
+    assert_ne!(
+        std::fs::metadata(&npm).unwrap().permissions().mode() & 0o111,
+        0
+    );
+    drop(writer);
+    let _ = std::fs::remove_dir_all(&env.base);
 }
 
 fn run(env: &Env, command: &str, args: &[&str]) -> Value {

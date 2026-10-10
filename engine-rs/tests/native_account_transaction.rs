@@ -515,7 +515,11 @@ fn active_account_session_blocks_rotation_without_blocking_another_account() {
     );
     let dir = std::fs::canonicalize(f.config("a").parent().unwrap()).unwrap();
     let name = agent_manager_engine::native_mcp::model::sha256_hex(&dir.to_string_lossy());
+    // Simulate an existing old-version session; upgraded operations never create legacy files.
+    std::fs::create_dir_all(f.ctx.data_dir.join("account-locks")).unwrap();
     let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(f.ctx.data_dir.join("account-locks").join(name))
@@ -613,7 +617,19 @@ fn source_change_after_plan_fails_cas_without_overwriting_external_bytes() {
     let f = Fixture::new("source-cas");
     std::fs::create_dir_all(f.config("a").parent().unwrap()).unwrap();
     let cli = f.ctx.home_dir.join(".local/bin/claude");
-    std::fs::write(&cli, "#!/bin/sh\nif [ \"$1\" = --version ]; then echo '2.1.285 (Claude Code)'; exit 0; fi\ntouch \"$HOME/probe-started\"\nwhile [ ! -e \"$HOME/probe-release\" ]; do sleep 0.02; done\necho '{\"loggedIn\":false,\"authMethod\":\"none\"}'\nexit 1\n").unwrap();
+    std::fs::write(
+        &cli,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then echo '2.1.285 (Claude Code)'; exit 0; fi
+[ "$1" = --settings ] && shift 2
+[ "$1" = auth ] && [ "$2" = status ] || exit 64
+: > "$HOME/probe-started"
+while [ ! -e "$HOME/probe-release" ]; do sleep 0.02; done
+echo '{"loggedIn":false,"authMethod":"none"}'
+exit 1
+"#,
+    )
+    .unwrap();
     std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
     let policy = f.policy();
     let ctx = Context {
@@ -638,7 +654,9 @@ fn source_change_after_plan_fails_cas_without_overwriting_external_bytes() {
     }
     let reached_probe = f.ctx.home_dir.join("probe-started").exists();
     let external = b"TXN_SOURCE_CAS=\"fixture-external-source\"\n";
-    std::fs::write(&f.source, external).unwrap();
+    if reached_probe {
+        std::fs::write(&f.source, external).unwrap();
+    }
     std::fs::write(f.ctx.home_dir.join("probe-release"), b"").unwrap();
     let result = worker.join().unwrap();
     assert!(
@@ -647,6 +665,14 @@ fn source_change_after_plan_fails_cas_without_overwriting_external_bytes() {
         result.errors
     );
     assert!(!result.ok);
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|err| err.message.contains("外部密钥来源已变化，没有写入")),
+        "must reject the planned source at commit: {:?}",
+        result.errors
+    );
     assert_eq!(f.source_bytes(), external);
     assert_eq!(f.policy(), policy);
     assert!(!f.config("a").exists());
@@ -717,7 +743,11 @@ fn adopt_accepts_owned_live_identity_but_rejects_mixed_auth_and_active_session()
     let policy = f.policy();
     let dir = std::fs::canonicalize(f.config("a").parent().unwrap()).unwrap();
     let name = agent_manager_engine::native_mcp::model::sha256_hex(&dir.to_string_lossy());
+    // Simulate an existing old-version session; upgraded operations never create legacy files.
+    std::fs::create_dir_all(f.ctx.data_dir.join("account-locks")).unwrap();
     let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(f.ctx.data_dir.join("account-locks").join(name))
@@ -982,7 +1012,11 @@ fn seed_and_shared_settings_preserve_owned_identity_and_refuse_mixed_or_active_a
     ];
     let dir = std::fs::canonicalize(f.config("a").parent().unwrap()).unwrap();
     let name = agent_manager_engine::native_mcp::model::sha256_hex(&dir.to_string_lossy());
+    // Simulate an existing old-version session; upgraded operations never create legacy files.
+    std::fs::create_dir_all(f.ctx.data_dir.join("account-locks")).unwrap();
     let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(f.ctx.data_dir.join("account-locks").join(name))

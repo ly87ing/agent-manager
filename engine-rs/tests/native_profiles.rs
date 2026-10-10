@@ -63,6 +63,10 @@ if [ "$1" = --version ]; then echo "2.1.285 (Claude Code)"; exit 0; fi
 settings=none
 if [ "$1" = --settings ]; then settings="$2"; shift 2; fi
 [ "$1" = auth ] && [ "$2" = status ] || exit 64
+if [ -f "$HOME/.fake-probe-hold" ]; then
+  : > "$HOME/.fake-probe-ready"
+  while [ ! -f "$HOME/.fake-probe-release" ]; do sleep 0.01; done
+fi
 printf 'claude|%s|%s\n' "$CLAUDE_CONFIG_DIR" "${CLAUDE_CODE_OAUTH_TOKEN-unset}" >> "$HOME/.probe-log"
 printf '%s|%s|%s\n' "$settings" "${ANTHROPIC_CONFIG_DIR-unset}" "${ANTHROPIC_PROFILE-unset}" >> "$HOME/.probe-args"
 if [ -f "$HOME/.fake-garbage" ]; then echo 'not json'; exit 0; fi
@@ -181,12 +185,15 @@ fn failed_profile_commit_restores_only_its_own_write() {
         ("rollback-external-created", false, true),
     ] {
         let (root, ctx) = temp_ctx(tag);
+        set_test_secret(&ctx, "PROFILE_ROLLBACK_KEY", "fixture-rollback-key");
         assert!(save_definition(
             &ctx,
             "work",
             r#"{
             "bin":"claude", "profile":{"base_agent":"claude-code","kind":"claude",
-            "config_dir":"~/.claude-work","model":"new-model"}
+            "config_dir":"~/.claude-work","model":"new-model","env":{
+            "ANTHROPIC_BASE_URL":"https://rollback.example.invalid",
+            "ANTHROPIC_AUTH_TOKEN":"${PROFILE_ROLLBACK_KEY}"}}
         }"#
         ));
         let target = ctx.home_dir.join(".claude-work/settings.json");
@@ -196,16 +203,18 @@ fn failed_profile_commit_restores_only_its_own_write() {
             std::fs::write(&target, before).unwrap();
         }
         let base = base_of(&ctx, "work");
-        let mut conn = agent_manager_engine::store::open_write(&ctx).unwrap();
+        let conn = agent_manager_engine::store::open_write(&ctx).unwrap();
         conn.execute_batch(
             "CREATE TRIGGER reject_profile_audit BEFORE INSERT ON operation_logs
             BEGIN SELECT RAISE(FAIL, 'test audit failure'); END;",
         )
         .unwrap();
-        // Hold the DB writer: account changes must acquire it before writing files.
-        let tx = conn
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .unwrap();
+        // The real authentication probe runs after the lock-held plan is built and
+        // before the transaction touches files. Pause there, rather than guessing
+        // that the worker reached its plan after a fixed amount of time.
+        let ready = ctx.home_dir.join(".fake-probe-ready");
+        let release = ctx.home_dir.join(".fake-probe-release");
+        std::fs::write(ctx.home_dir.join(".fake-probe-hold"), b"").unwrap();
         let worker_ctx = Context {
             home_dir: ctx.home_dir.clone(),
             data_dir: ctx.data_dir.clone(),
@@ -219,24 +228,29 @@ fn failed_profile_commit_restores_only_its_own_write() {
                 ),
             )
         });
-        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
-        let written = loop {
-            let bytes = std::fs::read(&target).unwrap_or_default();
-            if String::from_utf8_lossy(&bytes).contains("new-model") {
-                break true;
-            }
-            if worker.is_finished() || std::time::Instant::now() >= deadline {
-                break false;
-            }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !ready.exists() && !worker.is_finished() && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(10));
-        };
+        }
+        let reached_probe = ready.exists();
+        let at_probe = std::fs::read(&target).ok();
         let external = b"{\"model\":\"external-model\",\"theme\":\"external\"}\n";
-        assert!(!written, "事务取得数据库写锁前不得修改账号文件");
-        if external_change {
+        if reached_probe && external_change {
             std::fs::write(&target, external).unwrap();
         }
-        tx.commit().unwrap();
+        // Always release and join before asserting, including fixture failures.
+        std::fs::write(release, b"").unwrap();
         let result = worker.join().unwrap();
+        assert!(
+            reached_probe,
+            "fixture must reach the post-plan authentication probe: {:?}",
+            result.errors
+        );
+        assert_eq!(
+            at_probe.as_deref(),
+            existed.then_some(before.as_slice()),
+            "account files must remain unchanged until the probe completes"
+        );
         assert!(!result.ok, "审计失败不能报成功");
         if external_change {
             assert_eq!(
@@ -244,10 +258,28 @@ fn failed_profile_commit_restores_only_its_own_write() {
                 external,
                 "回滚不得覆盖外部修改"
             );
-        } else if existed {
-            assert_eq!(std::fs::read(&target).unwrap(), before);
+            assert!(
+                result
+                    .errors
+                    .iter()
+                    .any(|err| err.message.contains("账号配置已在外部修改，没有写入")),
+                "must reject at the transaction CAS, not preflight: {:?}",
+                result.errors
+            );
         } else {
-            assert!(!target.exists(), "失败时移除本次创建且未被外部改过的文件");
+            assert!(
+                result
+                    .errors
+                    .iter()
+                    .any(|err| err.message.contains("test audit failure")),
+                "must reach the audit failure after writing: {:?}",
+                result.errors
+            );
+            if existed {
+                assert_eq!(std::fs::read(&target).unwrap(), before);
+            } else {
+                assert!(!target.exists(), "失败时移除本次创建且未被外部改过的文件");
+            }
         }
         let count: i64 = conn
             .query_row(

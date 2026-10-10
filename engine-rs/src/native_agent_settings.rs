@@ -2741,18 +2741,22 @@ stream_idle_timeout_ms = 450000
 
     #[test]
     fn 当前配置区分本工具状态栏与用户状态栏_署名开关必须两项都为空() {
+        // Exercise JSON and shell escaping even when the host uses forward slashes.
         let dir =
             std::env::temp_dir().join(format!("am-observed-statusline-{}", std::process::id()));
-        let statusline = &dir.join("statusline.sh");
+        let statusline = &dir
+            .join(r"space and apostrophe's\path")
+            .join("statusline.sh");
         deploy_statusline(statusline).unwrap();
-        let quoted = format!(
-            r#"{{"statusLine":{{"command":"'{}'"}},"attribution":{{"commit":"","pr":""}}}}"#,
-            statusline.display()
-        );
-        let bare = format!(
-            r#"{{"statusLine":{{"command":"{}"}}}}"#,
-            statusline.display()
-        );
+        let quoted = serde_json::to_vec(&json!({
+            "statusLine": {"command": statusline_command(statusline)},
+            "attribution": {"commit": "", "pr": ""},
+        }))
+        .unwrap();
+        let bare = serde_json::to_vec(&json!({
+            "statusLine": {"command": statusline.display().to_string()},
+        }))
+        .unwrap();
         let custom = claude_observed_config(
             br#"{"statusLine":{"command":"/tmp/user/statusline.sh"},"attribution":{"commit":"","pr":"keep"}}"#,
             Some(statusline),
@@ -2761,24 +2765,24 @@ stream_idle_timeout_ms = 450000
         assert_eq!(custom["runtime"]["statusline"], "custom");
         assert_eq!(custom["runtime"]["claude_hide_attribution"], false);
 
-        let builtin = claude_observed_config(quoted.as_bytes(), Some(statusline)).unwrap();
+        let builtin = claude_observed_config(&quoted, Some(statusline)).unwrap();
         assert_eq!(builtin["runtime"]["statusline"], "builtin");
         assert_eq!(builtin["runtime"]["claude_hide_attribution"], true);
 
         // 旧版写的裸路径：认得是我们的，但单独报出来，界面据此提示重新应用
-        let legacy = claude_observed_config(bare.as_bytes(), Some(statusline)).unwrap();
+        let legacy = claude_observed_config(&bare, Some(statusline)).unwrap();
         assert_eq!(legacy["runtime"]["statusline"], "builtin-legacy");
 
         // 部署的脚本是旧版本（或被删了）：同样单独报出来；查询不替换脚本
         std::fs::write(statusline, "#!/bin/bash\necho old\n").unwrap();
-        let outdated = claude_observed_config(quoted.as_bytes(), Some(statusline)).unwrap();
+        let outdated = claude_observed_config(&quoted, Some(statusline)).unwrap();
         assert_eq!(outdated["runtime"]["statusline"], "builtin-outdated");
         assert_eq!(
             std::fs::read_to_string(statusline).unwrap(),
             "#!/bin/bash\necho old\n"
         );
         std::fs::remove_file(statusline).unwrap();
-        let missing = claude_observed_config(quoted.as_bytes(), Some(statusline)).unwrap();
+        let missing = claude_observed_config(&quoted, Some(statusline)).unwrap();
         assert_eq!(missing["runtime"]["statusline"], "builtin-outdated");
         let _ = std::fs::remove_dir_all(dir);
     }

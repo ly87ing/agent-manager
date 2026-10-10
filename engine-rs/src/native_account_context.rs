@@ -2,9 +2,8 @@
 //! The launcher re-reads registration on every invocation; it never contains a key.
 
 use anyhow::{anyhow, bail, Context as _, Result};
-use fs2::FileExt;
 use serde_json::{json, Value};
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -77,36 +76,7 @@ pub(crate) fn resolve_account(ctx: &Context, only: &str) -> Result<Account> {
     }
 }
 
-/// Held for the child lifetime. Shared launch locks allow parallel sessions;
-/// exclusive authentication/configuration locks refuse changes to a running account.
-pub(crate) struct AccountLock {
-    _file: File,
-}
-
-pub(crate) fn lock_directory(ctx: &Context, dir: &Path, write: bool) -> Result<AccountLock> {
-    let dir = resolve_missing(dir)?;
-    let locks = ctx.data_dir.join("account-locks");
-    std::fs::create_dir_all(&locks)?;
-    let name = crate::native_mcp::model::sha256_hex(&dir.to_string_lossy());
-    let path = locks.join(name);
-    if let Ok(meta) = std::fs::symlink_metadata(&path) {
-        if !meta.is_file() || meta.file_type().is_symlink() {
-            bail!("账号锁路径不安全，拒绝操作");
-        }
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .open(path)?;
-    let result = if write {
-        file.try_lock_exclusive()
-    } else {
-        FileExt::try_lock_shared(&file)
-    };
-    result.map_err(|_| anyhow!("该账号有正在运行的会话或认证/配置操作，拒绝并发修改"))?;
-    Ok(AccountLock { _file: file })
-}
+pub(crate) use crate::native_account_locks::{lock_directory, AccountLock};
 
 pub(crate) fn lock_account_write(ctx: &Context, only: &str) -> Result<AccountLock> {
     let account = resolve_account(ctx, only)?;
@@ -132,7 +102,8 @@ pub(crate) fn lock_policy_account_changes(
         .chain(after)
         .flat_map(|defs| defs.keys())
         .collect();
-    let mut directories = std::collections::BTreeSet::new();
+    let mut directories: std::collections::BTreeMap<String, std::collections::BTreeSet<PathBuf>> =
+        std::collections::BTreeMap::new();
     for id in ids {
         let old = before.and_then(|defs| defs.get(id));
         let new = after.and_then(|defs| defs.get(id));
@@ -154,19 +125,28 @@ pub(crate) fn lock_policy_account_changes(
                 continue;
             }
             if let Ok(real) = resolve_missing(&dir) {
-                directories.insert(real);
+                directories
+                    .entry(crate::native_account_locks::account_key(&real)?)
+                    .or_default()
+                    .insert(real);
             }
         }
     }
     directories
         .into_iter()
-        .map(|dir| lock_directory(ctx, &dir, true))
+        .map(|(_, dirs)| {
+            crate::native_account_locks::lock_aliases(
+                ctx,
+                &dirs.into_iter().collect::<Vec<_>>(),
+                true,
+            )
+        })
         .collect()
 }
 
 fn resolve_missing(path: &Path) -> Result<PathBuf> {
-    match path.canon() {
-        Ok(path) => Ok(path),
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(path.canon()?),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             let parent = path.parent().ok_or_else(|| anyhow!("账号路径无法解析"))?;
             Ok(resolve_missing(parent)?.join(

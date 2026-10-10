@@ -33,8 +33,8 @@ serde_norway = "0.9"
 # Windows 上 canonicalize 不带 `\\?\` 前缀（能安全去掉时），与普通路径可比较；Unix 上同标准库。
 dunce = "1"
 
-[target.'cfg(target_os = "macos")'.dependencies]
-# Read-only mount metadata distinguishes transient disk images from installed apps.
+[target.'cfg(unix)'.dependencies]
+# Account-lock ownership/no-follow opens, and macOS read-only mount metadata.
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
@@ -43,4 +43,4 @@ junction = "1"
 # 只读注册表里的系统与用户 PATH，判断命令在不在 PATH 上；不写注册表。
 winreg = "0.55"
 # Hide desktop child consoles and terminate timeout trees with Windows job objects.
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_Shell"] }
