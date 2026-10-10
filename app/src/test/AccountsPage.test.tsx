@@ -568,8 +568,9 @@ describe("账号页", () => {
     const r = routes({ statusline: "custom" });
     r["skills:status"] = makeEnvelope({ domain: "skills", elements: [], recommendations: [] }, { command: "skills.status" });
     let opened = 0;
-    renderWithEngine(<AccountsPage onOpenSources={() => opened++} />, r);
+    const { calls } = renderWithEngine(<AccountsPage onOpenSources={() => opened++} />, r);
     const card = await screen.findByTestId("getting-started");
+    expect(calls.find((call) => call.command === "skills:status")?.args).toEqual(["--collections-only"]);
     await waitFor(() => expect(screen.getByTestId("start-step-login")).toHaveAttribute("data-done", "true"));
     // 添加账号不是必须的，不在引导里
     expect(screen.queryByTestId("start-step-account")).toBeNull();

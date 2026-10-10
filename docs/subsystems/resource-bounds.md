@@ -44,7 +44,8 @@ progress polls cannot overlap.
 
 Account selectors use agents:status --metadata-only, which skips CLI version
 processes. Accounts and controlled launch compatibility checks keep their normal
-version validation. Sources uses skills:status --collections-only: it discovers
+version validation. Sources and the account onboarding source-presence check use
+skills:status --collections-only: it discovers
 names and source metadata without building skill fingerprints. Per-skill health is
 deferred (discovery_inbox is omitted); update/copy actions fetch full status before
 planning writes. Dependency status runs only when its owning page is mounted and

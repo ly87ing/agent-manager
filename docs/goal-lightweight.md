@@ -157,3 +157,6 @@ scripts and login entries need an explicit, ownership-checked removal path.
   isolated assistant/shell files and read them back. A stale rule write was rejected
   with the file preserved; dependency discovery succeeded and usage returned
   FEATURE_RETIRED. Native UI acceptance and the final full-suite results follow.
+- The account onboarding source-presence check now uses the same collection-only
+  view as Sources. It needs no per-skill digest. All 26 account-page tests and the
+  production build passed; the full frontend check is running on this final query.

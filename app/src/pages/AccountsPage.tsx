@@ -202,7 +202,7 @@ export default function AccountsPage({
 }) {
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
   const refreshUpstream = useRefreshUpstream();
-  const skillsQuery = useEngineQuery<StatusData>("skills:status");
+  const skillsQuery = useEngineQuery<StatusData>("skills:status", ["--collections-only"]);
   const profilesQuery = useEngineQuery<StatusData>("profiles:status");
   const secretsQuery = useEngineQuery<StatusData>("secrets:status");
   const ops = useAccountOps();
