@@ -968,17 +968,6 @@ fn write_claude_runtime(
                     Value::String(literal.into()),
                 );
             }
-            // 状态栏：选内置就指过去；选「不碰」时只撤掉我们自己指过去的那条，
-            // 用户手配的原样留着——它本来就不归我们管。
-            ("statusline", RuntimeValue::Statusline(StatusLine::Builtin)) => {
-                let mut entry = Map::new();
-                entry.insert("type".into(), Value::String("command".into()));
-                entry.insert(
-                    "command".into(),
-                    Value::String(statusline_command(statusline_path)),
-                );
-                path_set(root, STATUSLINE_PATH, Value::Object(entry));
-            }
             ("statusline", RuntimeValue::Statusline(StatusLine::Untouched)) => {
                 if statusline_is_ours(&Value::Object(root.clone()), statusline_path) {
                     path_remove(root, STATUSLINE_PATH);
@@ -1054,10 +1043,6 @@ pub(crate) struct RuntimePatch(BTreeMap<&'static str, RuntimeValue>);
 impl RuntimePatch {
     fn sets_full(&self) -> bool {
         self.0.get("automation_mode") == Some(&RuntimeValue::Mode(AutomationMode::Full))
-    }
-
-    fn sets_builtin_statusline(&self) -> bool {
-        self.0.get("statusline") == Some(&RuntimeValue::Statusline(StatusLine::Builtin))
     }
 
     fn keys(&self) -> Vec<&'static str> {
@@ -1435,6 +1420,7 @@ pub(crate) fn statusline_target(ctx: &Context) -> std::path::PathBuf {
 }
 
 /// 部署内置状态栏脚本；内容没变就不重写，避免每次应用都动文件时间。
+#[cfg(test)]
 fn deploy_statusline(path: &std::path::Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -2057,10 +2043,6 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
     });
     let final_bytes = file_write.clone().unwrap_or_else(|| bytes.clone());
     let new_base = base_digest(kind, &final_bytes, &owned_after, &statusline_path);
-    let deploy = kind == Kind::Claude
-        && patch
-            .as_ref()
-            .is_some_and(RuntimePatch::sets_builtin_statusline);
     let changed = patch.as_ref().map(RuntimePatch::keys).unwrap_or_default();
     let owned_json = serde_json::to_string(&owned_after).map_err(|err| agent_error(err.into()))?;
 
@@ -2079,10 +2061,6 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
             bail!("账号配置目标在规划后发生变化，拒绝写入");
         }
         ensure_table(&tx)?;
-        // 脚本先就位再写 settings.json：反过来的话中途失败会留下一个指向不存在文件的状态栏
-        if deploy {
-            deploy_statusline(&statusline_path)?;
-        }
         if let Some(content) = &file_write {
             // 替换前再按读到的字节比对一次，堵住读与写之间的外部修改
             atomic_write_bytes_checked(&real, content, existing.as_deref())?;
@@ -2137,7 +2115,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
                 "mode": "runtime",
                 "target": Value::Null,
                 "changed": changed,
-                "statusline": deploy,
+                "statusline": false,
             })),
         )?;
         Ok(())
@@ -2170,7 +2148,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         "mode": "runtime",
         "changed": changed,
         "base": new_base,
-        "statusline": deploy,
+        "statusline": false,
     }))
 }
 
@@ -2879,7 +2857,6 @@ stream_idle_timeout_ms = 450000
         )
         .unwrap();
         assert!(patch.sets_full());
-        assert!(!patch.sets_builtin_statusline());
         assert!(parse_runtime_patch(Kind::Claude, &json!({"statusline":"builtin"})).is_err());
         assert_eq!(
             patch.keys(),

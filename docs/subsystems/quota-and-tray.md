@@ -26,8 +26,9 @@ and MCP derive attention items from their own already-requested status results.
 - One main webview is created. Closing it uses normal Tauri exit behavior.
 - No tray setup, notification plugin, or automatic app-update check runs.
 - Settings retains manual updates and explicit cleanup of an owned old login entry.
-- Retired collectors and presentation files are temporarily retained for a separate
-  cleanup commit. Their presence does not activate them.
+- Retired collectors, presentation files, notification dependencies, and tray-only
+  features are removed. Frozen status-line bytes remain only for legacy recognition
+  and tests; no production path deploys them.
 - No database migration or deletion of installed scripts is performed.
 
 ## Verification

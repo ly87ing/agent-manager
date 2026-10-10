@@ -15,7 +15,7 @@ Actual assistant files hold active authentication and configuration. Registratio
 
 ## Runtime path
 
-`accounts:command --only <agents:reserved-id|profiles:id> --operation <launch|login|logout|status> --shell <posix|powershell>` returns a controlled command without secret values. A draft `--definition` is a preview only. The executable's early `--account-launch` path validates the account binding, holds a session lock, checks local/project/managed configuration, resolves the assistant's absolute executable, and starts it with a clean environment. Accounts, authentication actions, tray copy, the palette, and recent-session resume request this command instead of using stored raw aliases.
+`accounts:command --only <agents:reserved-id|profiles:id> --operation <launch|login|logout|status> --shell <posix|powershell>` returns a controlled command without secret values. A draft `--definition` is a preview only. The executable's early `--account-launch` path validates the account binding, holds a session lock, checks local/project/managed configuration, resolves the assistant's absolute executable, and starts it with a clean environment. Accounts, authentication actions, and the palette request this command instead of using stored raw aliases.
 
 Authentication and CLI-version probes use exclusively created private temporary directories with a process-wide sequence in addition to the timestamp. Collisions are retried without adopting an existing directory; each probe cleans up only its own directory. Windows security APIs retain canonical verbatim paths to inspect long lock/credential paths with the same ACL policy.
 

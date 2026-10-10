@@ -90,30 +90,12 @@ fn set_file_status(path: &Path, expected: &[u8], enabled: bool) -> std::io::Resu
     if enabled {
         return Err(std::io::Error::other("开机启动已移除，仅支持移除旧登录项"));
     }
-    use std::io::Write;
-    let current = file_status(path, expected)?;
-    if current == enabled {
+    if !file_status(path, expected)? {
         return Ok(());
     }
-    if enabled {
-        std::fs::create_dir_all(path.parent().unwrap())?;
-        let mut options = std::fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(path)?;
-        if let Err(error) = file.write_all(expected).and_then(|_| file.sync_all()) {
-            let _ = std::fs::remove_file(path);
-            return Err(error);
-        }
-    } else {
-        // Re-read immediately before deletion; never remove an externally replaced entry.
-        if file_status(path, expected)? {
-            std::fs::remove_file(path)?;
-        }
+    // Re-read immediately before deletion; never remove an externally replaced entry.
+    if file_status(path, expected)? {
+        std::fs::remove_file(path)?;
     }
     Ok(())
 }
@@ -205,29 +187,12 @@ fn set_status(identifier: &str, executable: &Path, enabled: bool) -> std::io::Re
         return Err(std::io::Error::other("开机启动已移除，仅支持移除旧登录项"));
     }
     use winreg::{
-        enums::{HKEY_CURRENT_USER, KEY_SET_VALUE, REG_BINARY},
-        RegKey, RegValue,
+        enums::{HKEY_CURRENT_USER, KEY_SET_VALUE},
+        RegKey,
     };
     let current = registered(identifier, executable)?;
     let user = RegKey::predef(HKEY_CURRENT_USER);
-    if enabled {
-        if current && status(identifier, executable)? {
-            return Ok(());
-        }
-        let (key, _) = user.create_subkey(RUN)?;
-        key.set_value(identifier, &format!("\"{}\"", executable.display()))?;
-        match user.open_subkey_with_flags(APPROVED, KEY_SET_VALUE) {
-            Ok(key) => key.set_raw_value(
-                identifier,
-                &RegValue {
-                    vtype: REG_BINARY,
-                    bytes: vec![2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                },
-            )?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-    } else if current {
+    if current {
         user.open_subkey_with_flags(RUN, KEY_SET_VALUE)?
             .delete_value(identifier)?;
     }

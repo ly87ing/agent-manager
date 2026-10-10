@@ -2,6 +2,11 @@
 
 This directory contains the Tauri 2 app. The React UI calls `engine-rs` through the bridge; CLI and desktop share one native Rust library. Runtime does not depend on Python, `manage.sh`, or source-tree resources.
 
+Current scope: [the lightweight goal](../docs/goal-lightweight.md). Accounts, Skills,
+MCP, Rules, Commands, Sources, and dependency programs remain. The app exits on
+window close, loads resource queries on demand, and has no quota/session collector,
+tray webview, notifications, automatic update check, or OS-login enabling.
+
 The following records describe earlier implementation milestones. For the current product model, active configuration is authoritative as specified in [the multi-account design](../docs/MULTI-ACCOUNT-DESIGN.md) and [GUI redesign](../docs/GUI-REDESIGN.md).
 
 `native-manager.db` is the source of truth for this tool's definitions, assignments, and preferences; settings are in `app_settings`. Queries and status perform zero writes; saving definitions writes only SQLite.

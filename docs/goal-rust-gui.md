@@ -953,3 +953,24 @@ one shell-fixture startup timeout. Profiles: 64 passed, two CLI-version fixture
 timeouts; the safety guard refused writes. A standalone new exit-0 shell fixture
 also timed out without application code. Full-suite acceptance remains unresolved;
 no timeout or authentication assertion was weakened.
+
+### 2026-10-10: resource bounds and retired-code cleanup
+
+Completed in-memory execution summaries retain 50 records; caller results remain
+unchanged. Batch/domain invalidation, non-overlapping progress polling, active-only
+audit polling, and inactive query expiry reduce repeated work. Account selectors
+skip CLI version probes; source lists defer per-skill fingerprints. MCP output
+and Git blob previews have bounded capture. See [resource bounds](subsystems/resource-bounds.md).
+
+The separate cleanup removes 24 retired source/test files plus notification/tray
+dependencies and unreachable installation branches. Legacy recognition, retirement
+rejections, account isolation, actual configuration, installed programs, and
+ownership/CAS cleanup remain. No destructive migration is included.
+
+Cleanup checks: production build and Tauri's 27 tests passed; updater compatibility,
+shell syntax, local links, and all eight retained pages at 1000/760 px passed.
+Full frontend: 689 passed, four platform skips, one lazy Settings navigation wait
+failure. Explicit dynamic preloading of both lazy modules then passed all 25
+Settings tests without changed assertions/timeouts. Isolated CLI wrote MCP, rules,
+and commands and read actual files back; stale rule writes were rejected. Full
+engine acceptance and final native UI results are still being collected.

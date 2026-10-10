@@ -12,7 +12,7 @@ or opening the database. Assistant sessions remain the assistant's own data.
 
 Retired commands return FEATURE_RETIRED. They do not create application data,
 scan conversations, or delete existing database rows or session files.
-Unreachable collector code is removed separately from this behavior change.
+The retired collector implementation is removed; retirement tests remain.
 
 ## Verification
 

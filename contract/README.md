@@ -12,6 +12,19 @@ MCP uses actual entries in assistant configuration files. `mcp:status.targets` l
 
 Public `*:plan` and `--dry-run` entry points are retired and rejected.
 
+The lightweight desktop retires every `usage:*` command (including dotted aliases)
+with `FEATURE_RETIRED`, before database, secrets, or assistant-file access. Legacy
+account usage fields are null. Runtime patches reject `statusline: "builtin"`;
+explicit main-account cleanup preserves custom commands and uses the normal CAS
+baseline. Existing sessions and database rows are preserved.
+
+`agents:status --metadata-only` returns normal account metadata with a null version
+and does not execute assistant version probes. `skills:status --collections-only`
+returns collection metadata and installed/unmanaged discovery without constructing
+per-skill elements or fingerprints; it omits the deferred `discovery_inbox` health
+field. Both flags are read-only and can be combined with `--offline`. Full status
+remains available for explicit validation and write planning.
+
 Read-only `system:discover` scans existing local agents / skills not yet managed. It supports `--only agents|skills`, performs zero writes and network requests, and does not take the apply lock. MCP entries appear directly in `mcp:status` and do not use discovery/import. Each candidate has a `manage` classification: `native` (identify official paths and native installations without taking over), `symlink` (manage an external resource through a symlink), `collection` (use an existing collection's adoption workflow), `register` (register an assistant CLI definition), or `cleanup` (suggest removal of residues such as broken links). Like `system:audit`, this is a read-only aggregate; frontend types currently fix its data shape, to be formally specified in contract v2.
 
 `profiles:status/apply/adopt` manages assistant instances. An instance is an `agents.definitions.<id>` entry with a `profile` section in the saved layer; the real environment has only a directory and launch command. Skill assignments and per-assistant MCP entries therefore apply directly. Actual contents are authoritative for generated instance files. Read-only status returns `observed.base`: Claude hashes the `env` and `model` fields in settings.json; Codex hashes the bytes of `agent-manager.config.toml`; a missing file is `missing`. `fields` compares definition and actual values per field (`same`/`differs`/`missing`/`unresolved`), with credentials `<hidden>`. Differences produce `drifted` and an `adopt` action. `apply --only profiles:<id> --base <base>` writes the definition to actual files: Claude changes only declared env variables and `model`, preserving user-added env, root fields, and hooks, and removing formerly owned variables removed from the definition. Codex writes the whole `agent-manager.config.toml`, layered by launch argument `-p` to avoid MCP-owned `config.toml`. Baseline mismatches are rejected as external modifications; `--allow-takeover` is retired. Symlink targets are written through to the final file. `adopt --only profiles:<id> --base <base>` reverses the direction, writing actual values to the instance definition in the database only; if credentials differ from referenced variable values, it reports the mismatch without storing plaintext. Directories use mode 0700, files 0600, with atomic replacement and rollback on transaction failure. Authentication persists only `${VAR}`: Claude resolves it during apply because its client does not expand references, with file permissions protecting values; Codex writes only the `env_key` variable name. Configuration directories must be under HOME, outside the main-instance and data directories, and not symlinks. Endpoints allow https and http, matching connection configuration. For instance definitions, `agents:status` does not read the main directory's configuration or login; `profiles:status` reports the instance's own status.

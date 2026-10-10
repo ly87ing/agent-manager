@@ -19,11 +19,18 @@ React UI ── Tauri commands
 
 The entry point is `execute(Context, Request) -> Envelope`. Tauri validates the command, arguments, and run id, then calls the shared library on a blocking thread.
 
+The desktop is a foreground configuration tool. Closing the window exits; it has
+no tray webview, quota/session collector, notification plugin, automatic updater
+check, or OS-login enabling. Page queries and explicit actions drive refresh.
+Account selectors use `agents:status --metadata-only`; Sources uses
+`skills:status --collections-only` to defer per-skill hashing. Resource and buffer
+limits are documented in [resource bounds](subsystems/resource-bounds.md).
+
 ## Saving and execution
 
 Saving definitions updates only SQLite; it neither links resources nor performs external actions. `status` reads state without writes. Resource execution triggers real `apply`, including preflight/write validation, exact scope, an exclusive lock, external-change detection, CAS/conditional rollback, auditing, and an operation log.
 
-Skills, MCP, and other resources and their per-assistant assignments support add, edit/update, enable, disable, and remove. The assistant UI manages only accounts (separate configuration directory + launch command) and the main account's live-quota status line. Installation, upgrades, uninstallation, and full definition editing are no longer product entry points; software lifecycle belongs to the original installation channel. Existing lifecycle fields and engine capabilities remain for compatibility in phase one.
+Skills, MCP, and other resources and their per-assistant assignments support add, edit/update, enable, disable, and remove. The assistant UI manages accounts (separate configuration directory + launch command). Assistant installation, upgrades, uninstallation, and full definition editing belong to the original installation channel. The Programs page retains explicit dependency installation and upgrades. Legacy status-line configuration can be removed explicitly from a main account after ownership and baseline checks; the app cannot install that collector.
 
 Public `*:plan` and `--dry-run` entry points are retired and rejected.
 

@@ -12,9 +12,7 @@ import type {
   SkillObserved,
   SkillSpec,
 } from "./observed";
-import { ignoreKey, useIgnored } from "./inboxIgnore";
-import { useEngineQuery } from "./queries";
-import { displayName, type ProgramElement, type ProgramsData } from "./programs";
+import { displayName, type ProgramElement } from "./programs";
 import { rulesFillRows, type RulesFillRow } from "./rulesFill";
 import { isCollection } from "./skillCollections";
 import { addToAllRows, fillRows, versionUpdateRows } from "./skillFill";
@@ -355,35 +353,4 @@ export function countByPage(items: InboxItem[]): Record<string, number> {
   const counts: Record<string, number> = Object.fromEntries(Object.entries(subjects).map(([page, set]) => [page, set.size]));
   counts.inbox = items.length;
   return counts;
-}
-
-/** 全应用的待处理项（已去掉用户忽略的，另给忽略的）；查询还没回来的领域按没有。 */
-export function useInbox(nameOf?: (agent: string) => string): { items: InboxItem[]; ignored: InboxItem[]; loading: boolean } {
-  const ignoredKeys = useIgnored();
-  const skills = useEngineQuery<StatusData>("skills:status");
-  const mcp = useEngineQuery<StatusData>("mcp:status");
-  const rules = useEngineQuery<StatusData>("rules:status");
-  const agents = useEngineQuery<StatusData>("agents:status");
-  const profiles = useEngineQuery<StatusData>("profiles:status");
-  const aliases = useEngineQuery<StatusData>("aliases:status");
-  const programs = useEngineQuery<ProgramsData>("programs:status");
-  const elementsOf = (query: { data?: { ok: boolean; data: StatusData } }) => (query.data?.ok ? query.data.data.elements ?? [] : []);
-  const items = buildInbox({
-    skills: elementsOf(skills),
-    unmanaged: skills.data?.ok ? skills.data.data.unmanaged ?? null : null,
-    mcp: elementsOf(mcp),
-    mcpTargets: mcp.data?.ok ? mcp.data.data.targets ?? [] : [],
-    rules: elementsOf(rules),
-    agents: elementsOf(agents),
-    profiles: elementsOf(profiles),
-    aliases: elementsOf(aliases),
-    programs: programs.data?.ok ? programs.data.data.elements : [],
-    nameOf,
-  });
-  const loading = [skills, mcp, rules, agents, profiles, aliases].some((query) => query.isPending);
-  return {
-    items: items.filter((item) => !ignoredKeys.has(ignoreKey(item))),
-    ignored: items.filter((item) => ignoredKeys.has(ignoreKey(item))),
-    loading,
-  };
 }

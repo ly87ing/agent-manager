@@ -10,7 +10,6 @@
 //! Resource domains not yet implemented return an explicit
 //! `DOMAIN_NOT_IMPLEMENTED` error; this core never fabricates success.
 
-pub(crate) mod agent_usage;
 pub mod envelope;
 pub mod native;
 pub mod native_account_context;
@@ -28,11 +27,9 @@ pub(crate) mod native_programs;
 pub(crate) mod native_rules;
 pub(crate) mod native_runs;
 pub(crate) mod native_secrets;
-pub(crate) mod native_sessions;
 pub mod native_skills;
 pub(crate) mod native_system;
 pub(crate) mod native_upstream;
-pub(crate) mod native_usage;
 pub mod platform;
 pub(crate) mod process;
 pub(crate) mod progress;

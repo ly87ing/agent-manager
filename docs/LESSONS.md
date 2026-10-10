@@ -182,3 +182,6 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Evidence: the first focused summary/Skills/MCP checks passed without exercising
   Programs. Full frontend checks caught the failure; a program-step regression and
   the existing program-upgrade/refresh test cover the correction.
+- Run TypeScript checking after the final test-fixture edit as well: a passing
+  runtime assertion does not validate Testing Library option types. Exact role
+  names use an anchored name pattern rather than an unsupported exact option.

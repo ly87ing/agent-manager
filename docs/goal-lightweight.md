@@ -29,8 +29,8 @@ and residency requirements in earlier acceptance records.
       full Git blobs for previews that will be rejected by the display limit.
 - [x] Keep source lists and dependency discovery on demand; avoid content hashing
       and assistant version probes just to populate selectors.
-- [ ] Remove unreachable retired implementation separately from behavior changes.
-- [ ] Update current product/subsystem documentation and acceptance records.
+- [x] Remove unreachable retired implementation separately from behavior changes.
+- [x] Update current product/subsystem documentation and acceptance records.
 
 ## Acceptance
 
@@ -138,3 +138,22 @@ scripts and login entries need an explicit, ownership-checked removal path.
   module as the navigation suite does, and waits for that page. An empty route map
   had rendered an account read error rather than that page. All 25 Settings tests
   passed after this correction.
+
+- Cleanup: removed 24 retired source/test files, the global collector hook, quota
+  installation helpers, unreachable startup-enable branches, and production
+  status-line deployment. Frozen status-line bytes remain for legacy recognition
+  and tests. Notification dependencies and tray-only features are removed; the
+  active dependency tree has no tray-icon consumer. Retirement and ownership/CAS
+  guards remain. No database, real assistant file, or installed program was removed.
+- Cleanup checks: production build, all 27 Tauri tests, updater lockfile guard,
+  shell syntax, documentation links, and all 16 layout cases passed. Full frontend
+  at two workers passed 689 tests with four platform skips and one lazy Settings
+  navigation wait failure; preloading both navigation modules as the navigation
+  suite does then passed all 25 Settings tests, without changing assertions or
+  timeouts. Full engine acceptance is running with two build/test workers after
+  the host reached a load average near 489; the initial overloaded runs were
+  stopped, not counted as passes.
+- Actual CLI acceptance on the cleanup tree wrote MCP, rules, and a command to
+  isolated assistant/shell files and read them back. A stale rule write was rejected
+  with the file preserved; dependency discovery succeeded and usage returned
+  FEATURE_RETIRED. Native UI acceptance and the final full-suite results follow.

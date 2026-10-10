@@ -13,9 +13,7 @@ import { ALL_SEED_ITEMS, seedArgs, summarizeSeed, type SeedResult } from "./prof
 import { engineKeys } from "./queries";
 import { fillRows } from "./skillFill";
 import { mcpFillArgs, mcpFillRows } from "./mcpFill";
-import type { EngineElement, McpTarget } from "./contract";
-import { configureArgs, currentConfigOf } from "./agentCurrent";
-import { sharedApplyArgs, type SharedStatus } from "./profileShared";
+import type { McpTarget } from "./contract";
 import { accountCommand } from "./accountCommand";
 import { useAliasSource, type AliasFilePreview } from "./useAliasSource";
 import { sameJson } from "./utils";
@@ -305,55 +303,5 @@ export function useAccountOps() {
     return result?.ok === true;
   };
 
-  /**
-   * 实时额度（决策 1：每个 Claude 账号都装）：主账号的状态栏换成 Agent Manager 的用量状态栏，
-   * 再把它同步给其余 Claude 账号。主账号按完整文件预览的基准写入；各账号按共用设置的两份基准写入，
-   * 外部改过就拒绝。Codex 没有状态栏，额度直接读它自己的会话记录。
-   */
-  const enableLiveQuota = async (main: EngineElement, profileIds: string[]): Promise<boolean> => {
-    const agentId = main.id.replace(/^agents:/, "");
-    const current = currentConfigOf(main);
-    if ((current?.config?.runtime as { statusline?: string } | undefined)?.statusline !== "builtin") {
-      const base = current?.base;
-      if (!base) {
-        toast.error("主账号的 settings.json 读不了，没有写入");
-        return false;
-      }
-      const runtime = { statusline: "builtin" };
-      const preview = await runEngine<{ file_base?: string }>("agents:preview-runtime", ["--only", main.id, "--base", base, "--runtime", JSON.stringify(runtime)]);
-      if (!preview.ok || !preview.data.file_base) {
-        toast.error(`没有写入：${preview.ok ? "预览没有完成，请重试" : preview.errors[0]?.message ?? "预览失败"}`);
-        return false;
-      }
-      const written = await execute({
-        command: "agents:configure",
-        label: `${agentId} 开启实时额度状态栏`,
-        args: configureArgs({ agentId, base, previewFileBase: preview.data.file_base, runtime }),
-        silent: true,
-      });
-      if (!written?.ok) {
-        toast.error(`主账号没有写入：${written?.errors[0]?.message ?? "详见任务记录"}`);
-        await refresh();
-        return false;
-      }
-    }
-    let failed = 0;
-    for (const id of profileIds) {
-      const status = await runEngine<SharedStatus>("profiles:shared-status", ["--only", `profiles:${id}`]).catch(() => null);
-      const item = status?.ok ? status.data.items.find((entry) => entry.item === "statusline") : undefined;
-      if (!item || item.state === "same") continue;
-      if (item.state === "blocked" || item.state === "absent") {
-        failed += 1;
-        continue;
-      }
-      const applied = await execute({ command: "profiles:shared-apply", label: `${id} 同步实时额度状态栏`, args: sharedApplyArgs(id, item), silent: true });
-      if (!applied?.ok) failed += 1;
-    }
-    await refresh();
-    if (failed) toast.warning(`实时额度已开启，${failed} 个账号没同步上`, { description: "原因见任务记录。" });
-    else toast.success("所有 Claude 账号已开启实时额度", { description: "下次打开会话后额度会随状态栏刷新。" });
-    return failed === 0;
-  };
-
-  return { aliasSource, enableLiveQuota, previewCreate, addLaunch, adopt, create, rename, updateConnection, remove, mainExtraArgs, launchValue, ready: Boolean(aliasSource.source) };
+  return { aliasSource, previewCreate, addLaunch, adopt, create, rename, updateConnection, remove, mainExtraArgs, launchValue, ready: Boolean(aliasSource.source) };
 }
