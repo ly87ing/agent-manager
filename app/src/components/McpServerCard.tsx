@@ -45,7 +45,7 @@ function mcpChip(cell: McpAgentCell | undefined, canAddHere: boolean): { tone: C
 
 /** 给还没有这个服务的账号复制时用哪一份：优先同格式（同一助手）的，其次任何能复制的。 */
 export function copySource(cells: Record<string, McpAgentCell>, formatOf: (agent: string) => string | undefined, to: string): string | null {
-  const candidates = Object.entries(cells).filter(([, cell]) => cell.source === "file" && cell.actions.includes("copy"));
+  const candidates = Object.entries(cells).filter(([, cell]) => cell.source === "file" && cell.copy_safe === true && cell.actions.includes("copy"));
   const same = candidates.find(([agent]) => formatOf(agent) === formatOf(to));
   return (same ?? candidates[0])?.[0] ?? null;
 }

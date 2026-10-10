@@ -13,7 +13,8 @@ import {
 import { DEFAULT_SECRETS_PATH, type SecretSourceState } from "../lib/secretSource";
 import type { ProfileObserved, StatusData } from "../lib/contract";
 import { mcpInUseElsewhere } from "../lib/mcpFill";
-import { authTerminalCommand } from "../lib/profileDefinition";
+import { authShellLabel, type AuthShell } from "../lib/profileDefinition";
+import { accountSecretVariable } from "../lib/accountCommand";
 import { useEngineQuery } from "../lib/queries";
 import { inUseSkillCount } from "../lib/skillFill";
 import { CreatePlan } from "./CreatePlan";
@@ -44,14 +45,14 @@ function hostOf(url: string): string | null {
   }
 }
 
-const FIELD = "mt-1 w-full rounded-md border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
+const FIELD = "mt-1 min-w-0 w-full rounded-md border bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring";
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <label className="block text-sm">
+    <label className="block min-w-0 text-sm">
       <span className="font-medium">{label}</span>
       {children}
-      {hint && <span className="mt-1 block text-xs text-muted-foreground">{hint}</span>}
+      {hint && <span className="mt-1 block text-xs text-muted-foreground [overflow-wrap:anywhere]">{hint}</span>}
     </label>
   );
 }
@@ -64,19 +65,23 @@ function suggestId(name: string): string {
 /** 右侧抽屉：添加或编辑一个账号。只问必要的几项，其余（目录、共用设置、启动参数）自动就位。 */
 export function AccountDrawer({
   mode,
+  authShell,
   ops,
   secretSource,
   reservedNames,
   onCreated,
+  onOpenSecrets,
   onClose,
 }: {
   mode: DrawerMode;
+  authShell: AuthShell;
   ops: Ops;
   secretSource: SecretSourceState | null;
   /** 不能用作启动命令的名字：助手命令本身与已登记的账号。 */
   reservedNames: string[];
   /** 新建成功：给出新账号的实例 id，账号页据此显示它的准备情况。 */
   onCreated?: (profileId: string) => void;
+  onOpenSecrets?: () => void;
   onClose: () => void;
 }) {
   const { group } = mode;
@@ -96,6 +101,7 @@ export function AccountDrawer({
   const [model, setModel] = useState(editing?.model ?? "");
   const [tokenVar, setTokenVar] = useState(editing?.tokenVar ?? "");
   const [apiKey, setApiKey] = useState("");
+  const [credentialNonce] = useState(() => [...crypto.getRandomValues(new Uint8Array(16))].map((byte) => byte.toString(16).padStart(2, "0")).join(""));
   const [extraArgs, setExtraArgs] = useState(editing?.extraArgs ?? ops.mainExtraArgs(bin));
   const [preview, setPreview] = useState<{ key: string; result: CreatePreview | string } | null>(null);
   const skillsQuery = useEngineQuery<StatusData>("skills:status", [], { enabled: !editing });
@@ -106,6 +112,7 @@ export function AccountDrawer({
 
   const preset = presets.find((item) => item.id === presetId) ?? null;
   const effectiveId = idTouched ? id : suggestId(name);
+  const effectiveTokenVar = editing ? tokenVar.trim() : accountSecretVariable(effectiveId || "NEW", credentialNonce);
 
   const choosePreset = (next: string) => {
     setPresetId(next);
@@ -113,7 +120,7 @@ export function AccountDrawer({
     if (!chosen) return;
     setBaseUrl(chosen.baseUrl);
     setModel(chosen.model ?? "");
-    setTokenVar(chosen.tokenVar);
+    if (editing) setTokenVar(chosen.tokenVar);
     if (!name) setName(chosen.label);
   };
 
@@ -140,14 +147,14 @@ export function AccountDrawer({
     input = {
       ...input,
       baseUrl: api ? baseUrl.trim() : "",
-      tokenVar: api ? tokenVar.trim() : "",
+      tokenVar: api ? effectiveTokenVar : "",
       model: api ? model.trim() : input.model,
     };
     return input;
   };
 
   const input = buildInput();
-  const keyKnown = Boolean(tokenVar.trim()) && (secretSource?.names ?? []).includes(tokenVar.trim());
+  const keyKnown = Boolean(editing) && Boolean(effectiveTokenVar) && (secretSource?.names ?? []).includes(effectiveTokenVar);
   const idError = !effectiveId
     ? "填一个命令名，只能用小写字母、数字和连字符"
     : !PROFILE_ID_RE.test(effectiveId)
@@ -155,12 +162,13 @@ export function AccountDrawer({
       : !editing && reservedNames.includes(effectiveId)
         ? `${effectiveId} 已被占用`
         : null;
-  const apiError = !editBlocked && type === "api" && (!baseUrl.trim() ? "填接口地址" : !tokenVar.trim() ? "填密钥变量名" : !apiKey && !keyKnown ? "填 API Key" : null);
+  const apiError = !editBlocked && type === "api" && (!baseUrl.trim() ? "填接口地址" : !effectiveTokenVar ? "填密钥变量名" : !apiKey && !keyKnown ? "填此账号自己的 API Key" : !secretSource?.configured || !secretSource.ready ? "先到设置页配置可读取的外部密钥文件，再创建 API 账号" : null);
+  const argsError = !editing && /[;|&<>`$\r\n]/.test(extraArgs) ? "启动参数不能包含终端执行符或环境展开；只填写助手参数" : null;
   const previewKey = JSON.stringify(input);
 
   // 新建：输入稳定后自动预览将写入的文件；保存时引擎会再比对一次
   useEffect(() => {
-    if (editing || idError || (type === "api" && (!baseUrl.trim() || !tokenVar.trim()))) return;
+    if (editing || idError || argsError || (type === "api" && (!baseUrl.trim() || !effectiveTokenVar))) return;
     const current = ++serial.current;
     const timer = window.setTimeout(() => {
       void ops.previewCreate(input, bin).then((result) => {
@@ -173,13 +181,13 @@ export function AccountDrawer({
 
   const previewReady = preview?.key === previewKey && typeof preview.result !== "string" ? preview.result : null;
   const previewError = preview?.key === previewKey && typeof preview.result === "string" ? preview.result : null;
-  const canSave = !saving && !idError && !apiError && (editing ? true : Boolean(previewReady));
+  const canSave = !saving && !idError && !apiError && !argsError && (editing ? true : Boolean(previewReady));
 
   const submit = async () => {
     if (!canSave) return;
     setSaving(true);
     try {
-      const secret = type === "api" && apiKey ? { variable: tokenVar.trim(), value: apiKey } : undefined;
+      const secret = type === "api" && apiKey ? { variable: effectiveTokenVar, value: apiKey } : undefined;
       if (mode.type === "create") {
         if (await ops.create(input, bin, previewReady!, reservedNames, secret)) {
           onCreated?.(input.id);
@@ -204,7 +212,7 @@ export function AccountDrawer({
     ? {
         configDir: input.configDir,
         mainDir: group.kind === "codex" ? "~/.codex" : "~/.claude",
-        command: ops.launchValue(input, bin),
+        command: previewReady.launchValue,
         commandName: input.id,
         api: type === "api"
           ? {
@@ -216,7 +224,8 @@ export function AccountDrawer({
           : null,
         skills: skillsQuery.data?.ok ? inUseSkillCount(skillsQuery.data.data.elements) : 0,
         extraMcp: mcpQuery.data?.ok ? mcpInUseElsewhere(mcpQuery.data.data.elements, mcpQuery.data.data.targets ?? [], group.agentId) : [],
-        loginCommand: type === "official" ? authTerminalCommand(group.kind, bin, "login", input.configDir) : null,
+        loginShellLabel: authShellLabel(authShell),
+        loginCommand: type === "official" ? "受控登录命令（创建后生成）" : null,
       }
     : null;
 
@@ -304,12 +313,13 @@ export function AccountDrawer({
           </Field>
 
           {type === "api" && (
-            <fieldset disabled={Boolean(editBlocked)} className="space-y-4">
+            <fieldset disabled={Boolean(editBlocked)} className="min-w-0 space-y-4">
               {editBlocked && <p role="status" className="text-xs text-muted-foreground">暂不能编辑接入参数：{editBlocked}。仍可修改名称。</p>}
+              {(!secretSource?.configured || !secretSource.ready) && <p data-testid="account-secret-source-warning" role="status" className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs">先到「设置 → 密钥」选择或新建外部密钥文件，再填写此账号自己的 API Key。{secretSource?.error && <span className="block">{secretSource.error}</span>}{onOpenSecrets && <button type="button" onClick={() => { onClose(); onOpenSecrets(); }} className="mt-1 text-primary hover:underline">设置密钥文件</button>}</p>}
               <Field label="接口地址">
                 <input data-testid="account-base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://" className={FIELD} />
               </Field>
-              <Field label="API Key" hint={`保存到外部密钥文件的 ${tokenVar || "变量"}，应用时也会写入此账号的助手配置，不进本应用数据库${keyKnown ? "；已有值，留空则不改" : ""}`}>
+              <Field label="API Key" hint={`保存到外部密钥文件的 ${effectiveTokenVar}，应用时也会写入此账号的助手配置，不进本应用数据库${keyKnown ? "；已有值，留空则不改" : "；须单独填写此账号的密钥"}`}>
                 <input data-testid="account-api-key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" className={FIELD} />
               </Field>
               {hostOf(baseUrl) && (
@@ -322,14 +332,16 @@ export function AccountDrawer({
                 <input data-testid="account-model" value={model} onChange={(event) => setModel(event.target.value)} className={FIELD} />
               </Field>
               <Field label="密钥变量名">
-                <input data-testid="account-token-var" value={tokenVar} onChange={(event) => setTokenVar(event.target.value)} placeholder="DEEPSEEK_API_KEY" className={cn(FIELD, "font-mono")} />
+                <input data-testid="account-token-var" value={effectiveTokenVar} readOnly={!editing} onChange={(event) => setTokenVar(event.target.value)} className={cn(FIELD, "font-mono")} />
               </Field>
+              {apiError && <p role="status" className="text-xs text-warning">{apiError}</p>}
             </fieldset>
           )}
 
           {!editing && (
             <Field label="启动参数" hint="沿用主账号命令里的参数，可以改">
               <input data-testid="account-extra-args" value={extraArgs} onChange={(event) => setExtraArgs(event.target.value)} className={cn(FIELD, "font-mono")} />
+              {argsError && <span role="status" className="mt-1 block text-xs text-destructive">{argsError}</span>}
             </Field>
           )}
 
@@ -338,7 +350,7 @@ export function AccountDrawer({
               <CreatePlan preview={previewReady} facts={planFacts} />
             ) : (
               <p data-testid="account-preview-state" className="rounded-md border px-3 py-2 text-xs text-muted-foreground">
-                {previewError ? `没法预览要写的内容，暂不能创建：${previewError}` : idError || apiError ? "填好上面几项后，这里会逐条列出创建时要做的事。" : "正在计算创建时要做的事…"}
+                {previewError ? `没法预览要写的内容，暂不能创建：${previewError}` : idError || apiError || argsError ? "填好上面几项后，这里会逐条列出创建时要做的事。" : "正在计算创建时要做的事…"}
               </p>
             )
           )}

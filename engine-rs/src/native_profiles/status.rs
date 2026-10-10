@@ -22,8 +22,9 @@ pub(crate) fn definition_base(raw: &Value) -> Result<String> {
 fn editable_profile(def: &ProfileDef, raw: &Value, bytes: Option<&[u8]>) -> Result<Value> {
     let original = raw["profile"].as_object().expect("validated profile");
     let profile = if bytes.is_some() {
-        let (profile, notes) =
-            model::adopt_profile(def, original, bytes, &crate::secret_values::lookup)?;
+        let (profile, notes) = model::adopt_profile(def, original, bytes, &|name| {
+            crate::secret_values::lookup_account(name).ok()
+        })?;
         if !notes.is_empty() {
             anyhow::bail!("{}", notes.join("；"));
         }
@@ -110,7 +111,7 @@ fn invalid_element(id: &str, raw: &Value, err: &anyhow::Error) -> Value {
 }
 
 fn element(ctx: &Context, def: &ProfileDef, raw: &Value) -> Value {
-    let dir_check = model::validate_config_dir(def, &ctx.home_dir, &ctx.data_dir);
+    let dir_check = super::paths::config_dir(ctx, def);
     let (config_dir, blocked) = match dir_check {
         Ok(path) => (Some(path), None),
         Err(err) => (None, Some(format!("{err:#}"))),
@@ -123,14 +124,9 @@ fn element(ctx: &Context, def: &ProfileDef, raw: &Value) -> Value {
     let mut file_blocked: Option<String> = None;
     let mut bytes: Option<Vec<u8>> = None;
     if let Some(dir) = config_dir.as_ref() {
-        match crate::native_agent_settings::resolve_write_target(&dir.join(file)) {
-            Ok(real) => match std::fs::symlink_metadata(&real) {
-                Ok(meta) if meta.is_file() => match std::fs::read(&real) {
-                    Ok(read) => bytes = Some(read),
-                    Err(err) => file_blocked = Some(format!("无法读取 {file}: {err}")),
-                },
-                Ok(_) => file_blocked = Some(format!("{file} 不是普通文件")),
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        match super::paths::target(ctx, def, &dir.join(file)) {
+            Ok(real) => match model::read_account_file(&real) {
+                Ok(read) => bytes = read,
                 Err(err) => file_blocked = Some(format!("无法读取 {file}: {err}")),
             },
             Err(err) => file_blocked = Some(format!("{err:#}")),
@@ -147,9 +143,31 @@ fn element(ctx: &Context, def: &ProfileDef, raw: &Value) -> Value {
     } else {
         None
     };
+    if file_blocked.is_none() {
+        let auth = (|| -> Result<()> {
+            model::validate_secret_ownership(ctx, def)?;
+            if let Some(dir) = config_dir.as_deref() {
+                model::validate_local_auth(
+                    &ctx.home_dir,
+                    def.kind,
+                    Some(dir),
+                    model::account_auth_mode(def),
+                )?;
+            }
+            if let Some(bytes) = bytes.as_deref() {
+                model::validate_auth_shape(def, bytes)?;
+            }
+            Ok(())
+        })();
+        if let Err(err) = auth {
+            file_blocked = Some(format!("{err:#}"));
+        }
+    }
     let fields = if file_blocked.is_none() && config_dir.is_some() {
-        model::compare_fields(def, bytes.as_deref(), &crate::secret_values::lookup)
-            .unwrap_or_default()
+        model::compare_fields(def, bytes.as_deref(), &|name| {
+            crate::secret_values::lookup_account(name).ok()
+        })
+        .unwrap_or_default()
     } else {
         Vec::new()
     };
@@ -272,10 +290,19 @@ fn element(ctx: &Context, def: &ProfileDef, raw: &Value) -> Value {
     }
     observed.insert("fields".into(), Value::Array(fields));
     observed.insert("env_refs".into(), Value::Array(env_refs));
-    observed.insert(
-        "launch_value".into(),
-        json!(model::launch_value(def, base_bin(ctx, def).as_str(), "")),
-    );
+    match crate::native_account_context::launch_value(
+        ctx,
+        &format!("profiles:{}", def.id),
+        "launch",
+    ) {
+        Ok(value) => {
+            observed.insert("launch_value".into(), json!(value));
+        }
+        Err(err) => {
+            observed.insert("launch_value".into(), Value::Null);
+            observed.insert("launch_blocked_reason".into(), json!(format!("{err:#}")));
+        }
+    }
     observed.insert(
         "blocked_reason".into(),
         blocked

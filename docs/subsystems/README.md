@@ -9,6 +9,10 @@ Each page describes how one subsystem works now: what it is responsible for, whe
 | MCP test connection | [MCP test connection](mcp-check.md) |
 | External commands, timeout groups and system proxy fallback | [External commands](external-commands.md) |
 | Desktop installation warning and OS login entries | [Desktop startup](desktop-startup.md) |
+| Independent account directories and settings targets | [Account path isolation](account-path-isolation.md) |
+| Controlled launch, authentication, credential ownership, and update transactions | [Account context](account-context.md) |
+| Signed updater artifacts and platform selection | [Updater manifest](updater-manifest.md) |
+| Managed program versions, npm layouts and executable discovery | [Programs](programs.md) |
 
 Product scope stays in [Concurrent Accounts](../MULTI-ACCOUNT-DESIGN.md) and data semantics in [GUI Redesign](../GUI-REDESIGN.md); implementation history and acceptance stay in [goal-rust-gui.md](../goal-rust-gui.md). A reference page is not a design proposal: proposals go in the task document.
 

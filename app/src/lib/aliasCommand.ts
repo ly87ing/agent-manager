@@ -98,9 +98,8 @@ export function parseAliasValue(value: string): ParsedAlias {
   const trimmedRest = rest.trim();
   if (!trimmedRest) return { ...empty, otherEnv: env };
 
-  const spaceIdx = trimmedRest.search(/\s/);
-  const command = spaceIdx === -1 ? trimmedRest : trimmedRest.slice(0, spaceIdx);
-  const extraArgs = spaceIdx === -1 ? "" : trimmedRest.slice(spaceIdx).trim();
+  const command = /^(?:"(?:[^"\\]|\\.)*"|'[^']*'|[^\s]+)/.exec(trimmedRest)?.[0] ?? "";
+  const extraArgs = trimmedRest.slice(command.length).trim();
 
   const { TZ, LANG, LC_ALL, ...otherEnv } = env;
   // LANG 与 LC_ALL 不一致时不做结构化归并，避免保存时悄悄改掉其中一个
@@ -116,6 +115,14 @@ export function parseAliasValue(value: string): ParsedAlias {
     otherEnv,
     structured: langConsistent && !command.includes("=") && !envInsideArgs,
   };
+}
+
+/** Only arguments after the engine's `--` belong to the assistant CLI. */
+export function assistantExtraArgs(value: string): string {
+  const parsed = parseAliasValue(value);
+  if (!/(^|\s)--account-launch(?:\s|$)/.test(parsed.extraArgs)) return parsed.extraArgs;
+  const boundary = /(?:^|\s)--(?:\s|$)/.exec(parsed.extraArgs);
+  return boundary ? parsed.extraArgs.slice(boundary.index + boundary[0].length).trim() : "";
 }
 
 export interface BuildAliasInput {

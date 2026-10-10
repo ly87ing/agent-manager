@@ -74,14 +74,6 @@ impl ProfileKind {
         }
     }
 
-    /// 主实例的默认配置目录（HOME 相对），profile 不得指向它。
-    fn primary_dir(self) -> &'static str {
-        match self {
-            ProfileKind::Claude => ".claude",
-            ProfileKind::Codex => ".codex",
-        }
-    }
-
     fn parse(raw: &str) -> Option<Self> {
         match raw {
             "claude" | "claude-code" => Some(ProfileKind::Claude),
@@ -112,6 +104,9 @@ pub(crate) struct ProfileDef {
 
 /// profile id 规则：与 alias 名一致（它同时就是启动命令名）。
 pub(crate) fn valid_profile_id(id: &str) -> bool {
+    if matches!(id, "claude" | "claude-code" | "codex" | "opencode") {
+        return false;
+    }
     let mut chars = id.chars();
     let Some(first) = chars.next() else {
         return false;
@@ -159,6 +154,12 @@ fn validate_base_url(url: &str) -> Result<()> {
         Some(host) if !host.is_empty() && !host.starts_with('/') => {}
         _ => bail!("接口地址只允许 https:// 或 http:// 开头的完整地址"),
     }
+    if url
+        .chars()
+        .any(|character| character.is_control() || character.is_whitespace())
+    {
+        bail!("接口地址包含非法空白或控制字符");
+    }
     if crate::native::url_has_userinfo(url) {
         bail!("接口地址里不能带账号密码：凭据请用令牌变量");
     }
@@ -176,55 +177,20 @@ pub(crate) fn expand_home(path: &str, home_dir: &Path) -> PathBuf {
     PathBuf::from(path)
 }
 
-/// 配置目录安全校验：必须在 HOME 下、不是主实例目录、不在数据目录内、不是符号链接。
+/// Validate the actual directory, including existing ancestors and protected boundaries.
 pub(crate) fn validate_config_dir(
     def: &ProfileDef,
     home_dir: &Path,
     data_dir: &Path,
 ) -> Result<PathBuf> {
-    let raw = def.config_dir_raw.trim();
-    if raw.is_empty() {
-        bail!("[{}] 配置目录不能为空", def.id);
-    }
-    if raw.contains('\0') || raw.contains('\n') {
-        bail!("[{}] 配置目录含非法字符", def.id);
-    }
-    let path = expand_home(raw, home_dir);
-    if !path.is_absolute() {
-        bail!("[{}] 配置目录必须是绝对路径或以 ~/ 开头", def.id);
-    }
-    if path.components().any(|c| c.as_os_str() == "..") {
-        bail!("[{}] 配置目录不允许包含 ..", def.id);
-    }
-    if !path.starts_with(home_dir) {
-        bail!("[{}] 配置目录必须位于用户主目录下", def.id);
-    }
-    if path == home_dir {
-        bail!("[{}] 配置目录不能是主目录本身", def.id);
-    }
-    if path == home_dir.join(def.kind.primary_dir()) {
-        bail!(
-            "[{}] 配置目录不能是主实例目录本身（那会改到你正在用的那套配置）",
-            def.id
-        );
-    }
-    if path.starts_with(data_dir) {
-        bail!("[{}] 配置目录不能放在本工具的数据目录里", def.id);
-    }
-    if std::fs::symlink_metadata(&path)
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false)
-    {
-        bail!("[{}] 配置目录不能是符号链接", def.id);
-    }
-    if path.exists() && !path.is_dir() {
-        bail!("[{}] 配置目录已被一个同名文件占用", def.id);
-    }
-    Ok(path)
+    super::paths::validate_config_dir(def, home_dir, data_dir)
 }
 
 /// 解析单个 profile 定义；结构非法即 fail-closed，消息不含取值正文。
 pub(crate) fn parse_definition(id: &str, raw: &Value, enabled: bool) -> Result<ProfileDef> {
+    if matches!(id, "claude" | "claude-code" | "codex" | "opencode") {
+        bail!("该名称保留给主账号或内置助手，拒绝登记为独立账号");
+    }
     if !valid_profile_id(id) {
         bail!("profile 名只能用小写字母、数字与连字符，且以字母或数字开头");
     }
@@ -248,6 +214,13 @@ pub(crate) fn parse_definition(id: &str, raw: &Value, enabled: bool) -> Result<P
     let kind = ProfileKind::parse(kind_raw).ok_or_else(|| {
         anyhow::anyhow!("[{}] 暂不支持该助手的实例（只支持 Claude 与 Codex）", id)
     })?;
+    let canonical_base = match kind {
+        ProfileKind::Claude => base_agent == "claude-code" || base_agent == "claude",
+        ProfileKind::Codex => base_agent == "codex",
+    };
+    if !canonical_base {
+        bail!("[{}] 基础助手与账号类型不一致，拒绝操作", id);
+    }
     let config_dir_raw = profile
         .get("config_dir")
         .and_then(Value::as_str)
@@ -262,6 +235,25 @@ pub(crate) fn parse_definition(id: &str, raw: &Value, enabled: bool) -> Result<P
         for (name, value) in map {
             if !valid_env_name(name) {
                 bail!("[{}] 环境变量名不合法（只允许字母、数字与下划线）", id);
+            }
+            if crate::native_account_context::process_override_env(name)
+                || [
+                    "HOME",
+                    "USERPROFILE",
+                    "HOMEDRIVE",
+                    "HOMEPATH",
+                    "PATH",
+                    "NODE_OPTIONS",
+                    "LD_PRELOAD",
+                    "DYLD_INSERT_LIBRARIES",
+                    "CLAUDE_CONFIG_DIR",
+                    "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+                    "ANTHROPIC_CONFIG_DIR",
+                    "CODEX_HOME",
+                ]
+                .contains(&name.to_ascii_uppercase().as_str())
+            {
+                bail!("[{}] 定义不能覆盖受控账号目录或运行时上下文", id);
             }
             let text = value
                 .as_str()
@@ -302,6 +294,21 @@ pub(crate) fn parse_definition(id: &str, raw: &Value, enabled: bool) -> Result<P
         if base_url.is_none() {
             bail!("[{}] Codex 实例的凭据要和接口地址一起设置", id);
         }
+    }
+    if kind == ProfileKind::Codex && !env.is_empty() {
+        bail!(
+            "[{}] Codex 账号只允许通过 env_key 声明凭据，不能叠加 env 认证来源",
+            id
+        );
+    }
+    if kind == ProfileKind::Claude && (base_url.is_some() || env_key.is_some()) {
+        bail!(
+            "[{}] Claude 账号必须在 env 中明确声明接口与凭据，不能混用 Codex 接入字段",
+            id
+        );
+    }
+    if kind == ProfileKind::Codex && base_url.is_some() && env_key.is_none() {
+        bail!("[{}] Codex API 账号必须同时声明接口地址与独占凭据变量", id);
     }
     let wire_api = profile
         .get("wire_api")
@@ -375,13 +382,11 @@ fn check_claude_credentials(id: &str, env: &Map<String, Value>) -> Result<()> {
         bail!("[{id}] {CLAUDE_OFFICIAL_TOKEN} 是官方账号凭据，不能和第三方凭据放在同一个实例");
     }
     if let Some(name) = CLAUDE_CLOUD_PROVIDER_SWITCHES.into_iter().find(|name| {
-        third_party
-            && env
-                .get(*name)
-                .and_then(Value::as_str)
-                .is_some_and(|value| !value.is_empty())
+        env.get(*name)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.is_empty())
     }) {
-        bail!("[{id}] {name} 会让 Claude 改走云厂商、不用这个实例的第三方凭据，两者不能放在同一个实例");
+        bail!("[{id}] {name} 会改变认证服务商；当前受控账号入口不能可靠绑定该模式，拒绝操作");
     }
     Ok(())
 }
@@ -520,6 +525,9 @@ pub(crate) fn live_base(kind: ProfileKind, bytes: Option<&[u8]>) -> Result<Strin
 
 /// 解析实例 settings.json：必须是 JSON 对象，`env` 若存在必须是对象。不当成空文件覆盖。
 fn parse_settings(bytes: &[u8]) -> Result<Map<String, Value>> {
+    if bytes.len() > MAX_ACCOUNT_CONFIG_BYTES {
+        bail!("账号配置超过安全读取上限");
+    }
     let root = serde_json::from_slice::<Value>(bytes)
         .ok()
         .and_then(|value| value.as_object().cloned())
@@ -536,6 +544,9 @@ fn parse_settings(bytes: &[u8]) -> Result<Map<String, Value>> {
 
 /// 解析实例 config.toml：必须是合法 TOML。不当成空文件覆盖。
 fn parse_codex_config(bytes: &[u8]) -> Result<toml::Table> {
+    if bytes.len() > MAX_ACCOUNT_CONFIG_BYTES {
+        bail!("账号配置超过安全读取上限");
+    }
     std::str::from_utf8(bytes)
         .ok()
         .and_then(|text| text.parse::<toml::Table>().ok())
@@ -1011,6 +1022,9 @@ pub(crate) fn render_all(
             });
         }
     }
+    for target in &out {
+        validate_effective_config(def, &target.content, resolve)?;
+    }
     Ok(out)
 }
 
@@ -1086,22 +1100,533 @@ fn codex_provider_table(
     Ok(Some(table))
 }
 
-/// 启动命令取值：`<配置目录变量>="<目录>" <命令> <扩展参数>`，与别名域的取值格式一致。
-/// 只处理本工具自己的变更：不再替用户在前面加清空凭据变量的赋值（2026-09-30 用户裁决）。
-pub(crate) fn launch_value(def: &ProfileDef, bin: &str, extra_args: &str) -> String {
-    let mut out = String::new();
-    out.push_str(&format!(
-        "{}=\"{}\" {}",
-        def.kind.config_env(),
-        def.config_dir_raw,
-        bin
-    ));
-    let extra = extra_args.trim();
-    if !extra.is_empty() {
-        out.push(' ');
-        out.push_str(extra);
+/// Authentication is selected explicitly; stored account labels are display metadata only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AccountAuthMode {
+    Official,
+    Api,
+    OfficialToken,
+}
+
+pub(crate) const MAX_ACCOUNT_CONFIG_BYTES: usize = 1024 * 1024;
+
+pub(crate) fn account_auth_mode(def: &ProfileDef) -> AccountAuthMode {
+    if is_third_party(def) {
+        AccountAuthMode::Api
+    } else if def.kind == ProfileKind::Claude
+        && def
+            .env
+            .get(CLAUDE_OFFICIAL_TOKEN)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.is_empty())
+    {
+        AccountAuthMode::OfficialToken
+    } else {
+        AccountAuthMode::Official
     }
-    out
+}
+
+pub(crate) fn account_secret_names(def: &ProfileDef) -> std::collections::BTreeSet<String> {
+    let mut names: std::collections::BTreeSet<String> = def
+        .env
+        .values()
+        .filter_map(Value::as_str)
+        .filter_map(|text| text.strip_prefix("${")?.strip_suffix('}'))
+        .map(str::to_string)
+        .collect();
+    names.extend(def.env_key.clone());
+    names
+}
+
+pub(crate) fn validate_secret_ownership(
+    ctx: &crate::native::Context,
+    def: &ProfileDef,
+) -> Result<()> {
+    let policy = crate::store::effective_policy(ctx)?;
+    let mut names = crate::native_secrets::account_reference_names(ctx, &def.id, &policy)?;
+    names.extend(account_secret_names(def));
+    if !names.is_empty() {
+        crate::secret_values::ensure_source_ready()?;
+    }
+    validate_secret_ownership_in_policy(ctx, def, &policy)
+}
+
+pub(crate) fn validate_secret_ownership_in_policy(
+    ctx: &crate::native::Context,
+    def: &ProfileDef,
+    policy: &Value,
+) -> Result<()> {
+    let mut names = crate::native_secrets::account_reference_names(ctx, &def.id, policy)?;
+    names.extend(account_secret_names(def));
+    if names.is_empty() {
+        return Ok(());
+    }
+    let owners = crate::native_secrets::account_secret_owners_in_policy(ctx, policy)?;
+    for name in names {
+        if owners
+            .get(&name.to_ascii_uppercase())
+            .is_some_and(|ids| ids.iter().any(|id| id != &def.id))
+        {
+            bail!(
+                "[{}] 密钥变量被另一账号或已退役代际引用，拒绝操作；请显式使用账号独占变量",
+                def.id
+            );
+        }
+    }
+    Ok(())
+}
+
+fn nonempty(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) => false,
+        Some(Value::String(s)) => !s.is_empty(),
+        Some(Value::Object(m)) => !m.is_empty(),
+        Some(Value::Array(a)) => !a.is_empty(),
+        Some(Value::Bool(b)) => *b,
+        _ => true,
+    }
+}
+
+fn claude_identity_env(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    upper.starts_with("ANTHROPIC_")
+        || upper.starts_with("CLAUDE_")
+        || upper == "CODEX_HOME"
+        || upper == "OPENAI_API_KEY"
+        || upper == "CODEX_API_KEY"
+        || upper == "CODEX_ACCESS_TOKEN"
+        || upper == "OPENAI_BASE_URL"
+}
+
+fn claude_auth_env(name: &str) -> bool {
+    let name = name.to_ascii_uppercase();
+    claude_identity_env(&name)
+        && (crate::native::credential_like_name(&name)
+            || name.contains("BASE_URL")
+            || name.contains("CONFIG_DIR")
+            || name.contains("PROFILE")
+            || name.contains("HEADER")
+            || name.contains("USE_")
+            || name.contains("PROVIDER")
+            || name.contains("FEDERATION")
+            || name.contains("ORGANIZATION")
+            || name.contains("WORKSPACE")
+            || name.contains("SERVICE_ACCOUNT")
+            || name.contains("IDENTITY")
+            || name == "CLAUDE_CODE_SIMPLE")
+}
+
+/// Validate the complete merged configuration, including fields the manager does not own.
+/// No credential or endpoint value is included in errors.
+pub(crate) fn validate_effective_config(
+    def: &ProfileDef,
+    bytes: &[u8],
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> Result<()> {
+    validate_auth_config(def.kind, account_auth_mode(def), Some(def), bytes, resolve)
+}
+
+fn validate_auth_config(
+    kind: ProfileKind,
+    mode: AccountAuthMode,
+    def: Option<&ProfileDef>,
+    bytes: &[u8],
+    resolve: &dyn Fn(&str) -> Option<String>,
+) -> Result<()> {
+    match kind {
+        ProfileKind::Claude => {
+            let settings = parse_settings(bytes)?;
+            for name in ["apiKeyHelper", "forceLoginMethod", "forceLoginOrgUUID"] {
+                if nonempty(settings.get(name)) {
+                    bail!("账号配置存在不受控的认证覆盖，拒绝操作");
+                }
+            }
+            let env = settings
+                .get("env")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            let expected = def
+                .map(|d| resolved_env(d, resolve))
+                .transpose()?
+                .unwrap_or_default();
+            for (name, value) in &env {
+                let text = value
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("账号环境变量值不是字符串，拒绝操作"))?;
+                if text.is_empty() || !claude_auth_env(name) {
+                    continue;
+                }
+                let allowed = match mode {
+                    AccountAuthMode::Api => {
+                        CLAUDE_THIRD_PARTY_CREDENTIALS.contains(&name.as_str())
+                            || name == CLAUDE_BASE_URL
+                    }
+                    AccountAuthMode::OfficialToken => name == CLAUDE_OFFICIAL_TOKEN,
+                    AccountAuthMode::Official => false,
+                };
+                if !allowed || expected.get(name) != Some(value) {
+                    bail!("账号配置存在未声明、冲突或已变化的认证/服务商/接口设置，拒绝操作");
+                }
+            }
+            let count = CLAUDE_THIRD_PARTY_CREDENTIALS
+                .iter()
+                .filter(|name| nonempty(env.get(**name)))
+                .count();
+            match mode {
+                AccountAuthMode::Api if count != 1 => {
+                    bail!("API 账号必须只有一个非空凭据来源，拒绝操作")
+                }
+                AccountAuthMode::OfficialToken if !nonempty(env.get(CLAUDE_OFFICIAL_TOKEN)) => {
+                    bail!("官方令牌账号缺少声明的凭据，拒绝操作")
+                }
+                _ => {}
+            }
+            if mode == AccountAuthMode::Api {
+                if let Some(url) = env.get(CLAUDE_BASE_URL).and_then(Value::as_str) {
+                    validate_base_url(url)?;
+                }
+            }
+            for (name, value) in &expected {
+                if claude_auth_env(name)
+                    && !value.as_str().is_some_and(str::is_empty)
+                    && env.get(name) != Some(value)
+                {
+                    bail!("账号配置缺少声明的认证或接口设置，拒绝操作");
+                }
+            }
+        }
+        ProfileKind::Codex => {
+            let doc = parse_codex_config(bytes)?;
+            for name in [
+                "openai_base_url",
+                "chatgpt_base_url",
+                "forced_login_method",
+                "forced_chatgpt_workspace_id",
+                "profile",
+                "auth",
+                "gateway_oauth",
+                "aws",
+                "model_catalog_url",
+                "query_params",
+            ] {
+                if doc.contains_key(name) {
+                    bail!("Codex 配置存在不受控的认证或接口覆盖，拒绝操作");
+                }
+            }
+            if doc
+                .get("cli_auth_credentials_store")
+                .is_some_and(|v| v.as_str() != Some("file"))
+            {
+                bail!("Codex 账号必须使用目录内的 file 凭据存储，拒绝共享系统凭据存储");
+            }
+            if mode == AccountAuthMode::Api {
+                let def = def.ok_or_else(|| anyhow::anyhow!("API 账号缺少定义"))?;
+                if doc.get(CODEX_MODEL_PROVIDER).and_then(toml::Value::as_str)
+                    != Some(CODEX_PROVIDER_ID)
+                {
+                    bail!("Codex API 账号的有效服务商与定义不一致，拒绝操作");
+                }
+                let provider = doc
+                    .get("model_providers")
+                    .and_then(|v| v.get(CODEX_PROVIDER_ID))
+                    .and_then(toml::Value::as_table)
+                    .ok_or_else(|| anyhow::anyhow!("Codex API 账号缺少声明的服务商配置"))?;
+                if provider.get("base_url").and_then(toml::Value::as_str) != def.base_url.as_deref()
+                {
+                    bail!("Codex API 账号接口地址与定义不一致，拒绝操作");
+                }
+                let var = def
+                    .env_key
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("Codex API 账号必须显式声明独占凭据变量"))?;
+                let token = resolve(var)
+                    .ok_or_else(|| anyhow::anyhow!("Codex API 账号凭据来源不可用，拒绝操作"))?;
+                if token.is_empty()
+                    || provider
+                        .get(CODEX_BEARER_TOKEN)
+                        .and_then(toml::Value::as_str)
+                        != Some(token.as_str())
+                {
+                    bail!("Codex API 账号凭据与声明的来源不一致，拒绝操作");
+                }
+                const SAFE_PROVIDER_KEYS: &[&str] = &[
+                    "name",
+                    "base_url",
+                    CODEX_BEARER_TOKEN,
+                    "wire_api",
+                    "requires_openai_auth",
+                    "request_max_retries",
+                    "stream_max_retries",
+                    "stream_idle_timeout_ms",
+                    "request_timeout_ms",
+                    "supports_websockets",
+                ];
+                if provider
+                    .keys()
+                    .any(|name| !SAFE_PROVIDER_KEYS.contains(&name.as_str()))
+                {
+                    bail!("Codex API 服务商配置包含不受控字段，拒绝额外认证或接口来源");
+                }
+                for name in [
+                    "request_max_retries",
+                    "stream_max_retries",
+                    "stream_idle_timeout_ms",
+                    "request_timeout_ms",
+                ] {
+                    if provider
+                        .get(name)
+                        .is_some_and(|value| !value.as_integer().is_some_and(|number| number >= 0))
+                    {
+                        bail!("Codex API 服务商重试或超时配置不可确认，拒绝操作");
+                    }
+                }
+                if provider
+                    .get("supports_websockets")
+                    .is_some_and(|value| value.as_bool().is_none())
+                {
+                    bail!("Codex API 服务商配置类型不可确认，拒绝操作");
+                }
+                if provider
+                    .get("requires_openai_auth")
+                    .is_some_and(|v| v.as_bool() != Some(false))
+                {
+                    bail!("Codex API 服务商会使用官方账号认证，拒绝操作");
+                }
+                if provider
+                    .get("wire_api")
+                    .is_some_and(|v| v.as_str() != Some(CODEX_WIRE_API))
+                {
+                    bail!("Codex API 服务商协议不可确认，拒绝操作");
+                }
+            } else {
+                if doc
+                    .get(CODEX_MODEL_PROVIDER)
+                    .is_some_and(|v| v.as_str() != Some("openai"))
+                {
+                    bail!("官方 Codex 账号目录存在第三方服务商，拒绝操作");
+                }
+            }
+            if let Some(providers) = doc.get("model_providers") {
+                let table = providers
+                    .as_table()
+                    .ok_or_else(|| anyhow::anyhow!("Codex 服务商配置不是表"))?;
+                for (name, provider) in table {
+                    if mode == AccountAuthMode::Api && name == CODEX_PROVIDER_ID {
+                        continue;
+                    }
+                    let provider = provider
+                        .as_table()
+                        .ok_or_else(|| anyhow::anyhow!("Codex 服务商配置不是表"))?;
+                    if provider.keys().any(|key| {
+                        key == "base_url"
+                            || key.contains("token")
+                            || key.contains("key")
+                            || key.contains("header")
+                            || key == "requires_openai_auth"
+                            || [
+                                "auth",
+                                "gateway_oauth",
+                                "aws",
+                                "model_catalog_url",
+                                "query_params",
+                            ]
+                            .contains(&key.as_str())
+                    }) {
+                        bail!("账号目录包含额外服务商或凭据配置，拒绝操作");
+                    }
+                }
+            }
+            if let Some(profiles) = doc.get("profiles") {
+                let serialized = serde_json::to_value(profiles)?;
+                if contains_auth_override(&serialized) {
+                    bail!("Codex profile 配置包含认证或接口覆盖，拒绝操作");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A status read can distinguish ordinary declared-field drift from ambiguous authentication.
+/// It does not approve the current key or endpoint for launching.
+pub(crate) fn validate_auth_shape(def: &ProfileDef, bytes: &[u8]) -> Result<()> {
+    // Rehearse only the declared fields. An absent or drifted declared value is repairable;
+    // undeclared credentials, helpers, cloud providers and alternate auth modes remain errors.
+    if def.kind == ProfileKind::Codex && account_auth_mode(def) == AccountAuthMode::Api {
+        let doc = parse_codex_config(bytes)?;
+        if doc
+            .get(CODEX_MODEL_PROVIDER)
+            .is_some_and(|v| v.as_str() != Some(CODEX_PROVIDER_ID))
+        {
+            bail!("Codex API 账号配置存在另一活动服务商，拒绝操作");
+        }
+    }
+    render_all(
+        def,
+        &|_| Some(bytes.to_vec()),
+        &|name| Some(format!("pending-account-value-{name}")),
+        &[],
+    )?;
+    Ok(())
+}
+
+fn contains_auth_override(value: &Value) -> bool {
+    match value {
+        Value::Object(map) => map.iter().any(|(key, value)| {
+            key == "model_provider"
+                || key.contains("base_url")
+                || key.contains("credentials_store")
+                || key.contains("login")
+                || crate::native::credential_like_name(key)
+                || contains_auth_override(value)
+        }),
+        Value::Array(items) => items.iter().any(contains_auth_override),
+        _ => false,
+    }
+}
+
+pub(crate) fn read_account_file(path: &Path) -> Result<Option<Vec<u8>>> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => bail!("账号配置或认证文件不可读取，拒绝操作"),
+    };
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > MAX_ACCOUNT_CONFIG_BYTES as u64
+    {
+        bail!("账号配置或认证文件不是普通文件或超过安全读取上限，拒绝操作");
+    }
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .map_err(|_| anyhow::anyhow!("账号配置或认证文件不可读取，拒绝操作"))?
+        .take(MAX_ACCOUNT_CONFIG_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| anyhow::anyhow!("账号配置或认证文件不可读取，拒绝操作"))?;
+    if bytes.len() > MAX_ACCOUNT_CONFIG_BYTES {
+        bail!("账号配置或认证文件超过安全读取上限，拒绝操作");
+    }
+    Ok(Some(bytes))
+}
+
+fn account_json(path: &Path) -> Result<Option<Value>> {
+    read_account_file(path)?
+        .map(|bytes| {
+            serde_json::from_slice::<Value>(&bytes)
+                .ok()
+                .filter(Value::is_object)
+                .ok_or_else(|| anyhow::anyhow!("账号认证文件不是合法 JSON 对象，拒绝操作"))
+        })
+        .transpose()
+}
+
+/// Reject local records that would introduce a second authentication mode.
+/// No CLI is run and no file is written. Main Claude uses HOME/.claude.json.
+pub(crate) fn validate_local_auth(
+    home: &Path,
+    kind: ProfileKind,
+    config_dir: Option<&Path>,
+    mode: AccountAuthMode,
+) -> Result<()> {
+    let dir = config_dir.map(Path::to_path_buf).unwrap_or_else(|| {
+        home.join(match kind {
+            ProfileKind::Claude => ".claude",
+            ProfileKind::Codex => ".codex",
+        })
+    });
+    match kind {
+        ProfileKind::Claude => {
+            let record = config_dir
+                .map(|dir| dir.join(".claude.json"))
+                .unwrap_or_else(|| home.join(".claude.json"));
+            let account = account_json(&record)?;
+            let credentials = account_json(&dir.join(".credentials.json"))?;
+            let login = account.as_ref().is_some_and(|v| {
+                nonempty(v.get("oauthAccount")) || nonempty(v.get("primaryApiKey"))
+            }) || credentials
+                .as_ref()
+                .is_some_and(|v| nonempty(v.get("claudeAiOauth")));
+            if mode != AccountAuthMode::Official && login {
+                bail!("目录已有官方账号登录记录，不能与声明的 API 或官方令牌共用，拒绝操作");
+            }
+        }
+        ProfileKind::Codex => {
+            if let Some(auth) = account_json(&dir.join("auth.json"))? {
+                if mode == AccountAuthMode::Api
+                    && (nonempty(auth.get("tokens")) || nonempty(auth.get("OPENAI_API_KEY")))
+                {
+                    bail!("API 账号目录已有另一份官方或 API 登录记录，拒绝操作");
+                }
+                if mode == AccountAuthMode::Official && nonempty(auth.get("OPENAI_API_KEY")) {
+                    bail!("官方 Codex 账号目录已有 API 登录记录，拒绝操作");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Shared read-only preflight for launch, login/logout, and explicit status probes.
+pub(crate) fn validate_account_auth(
+    ctx: &crate::native::Context,
+    id: &str,
+    kind: ProfileKind,
+    config_dir: Option<&Path>,
+    mode: AccountAuthMode,
+) -> Result<()> {
+    let def = if config_dir.is_some() {
+        let policy = crate::store::effective_policy(ctx)?;
+        let short = id.strip_prefix("profiles:").unwrap_or(id);
+        let raw = policy
+            .get("agents")
+            .and_then(|v| v.get("definitions"))
+            .and_then(|v| v.get(short))
+            .filter(|raw| raw.get("_delete") != Some(&Value::Bool(true)))
+            .ok_or_else(|| anyhow::anyhow!("账号定义已移除，拒绝操作"))?;
+        let def = parse_definition(short, raw, true)?;
+        if def.kind != kind
+            || account_auth_mode(&def) != mode
+            || super::paths::config_dir(ctx, &def)?.as_path() != config_dir.unwrap()
+        {
+            bail!("账号上下文与登记不一致，拒绝操作");
+        }
+        validate_secret_ownership(ctx, &def)?;
+        Some(def)
+    } else {
+        if mode != AccountAuthMode::Official {
+            bail!("主账号只允许官方目录登录");
+        }
+        None
+    };
+    let dir = config_dir.map(Path::to_path_buf).unwrap_or_else(|| {
+        ctx.home_dir.join(match kind {
+            ProfileKind::Claude => ".claude",
+            ProfileKind::Codex => ".codex",
+        })
+    });
+    let target = if let Some(def) = &def {
+        super::paths::target(ctx, def, &dir.join(kind.target_file()))?
+    } else {
+        dir.join(kind.target_file())
+    };
+    let bytes = read_account_file(&target)?;
+    if bytes.is_none() && mode != AccountAuthMode::Official {
+        bail!("账号认证配置尚未写入，拒绝操作");
+    }
+    let empty: &[u8] = match kind {
+        ProfileKind::Claude => b"{}",
+        ProfileKind::Codex => b"",
+    };
+    validate_auth_config(
+        kind,
+        mode,
+        def.as_ref(),
+        bytes.as_deref().unwrap_or(empty),
+        &|name| crate::secret_values::lookup_account(name).ok(),
+    )?;
+    validate_local_auth(&ctx.home_dir, kind, config_dir, mode)
 }
 
 #[cfg(test)]
@@ -1247,7 +1772,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_official_instance_leaves_provider_alone_and_drops_what_it_wrote_before() {
+    fn codex_official_instance_rejects_unowned_provider_and_cleans_explicitly_owned_fields() {
         let official = parse_definition(
             "cx-work",
             &json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-work"}}),
@@ -1255,9 +1780,11 @@ mod tests {
         )
         .unwrap();
         assert!(owned_paths(&official).is_empty());
-        let existing = b"model_provider = \"agent-manager\"\n\n[model_providers.agent-manager]\nbase_url = \"https://a.example.com\"\n\n[model_providers.other]\nbase_url = \"https://b.example.com\"\n".to_vec();
-        let untouched = render_all(&official, &|_| Some(existing.clone()), &|_| None, &[]).unwrap();
-        assert_eq!(untouched[0].content, existing, "没写过的不碰");
+        let existing = b"model_provider = \"agent-manager\"\n\n[model_providers.agent-manager]\nbase_url = \"https://a.example.com\"\n\n[model_providers.other]\nname = \"other\"\n".to_vec();
+        assert!(render_all(&official, &|_| Some(existing.clone()), &|_| None, &[]).is_err());
+        assert!(existing
+            .windows(b"base_url".len())
+            .any(|part| part == b"base_url"));
         let recorded = [
             "model_provider".to_string(),
             "model_providers.agent-manager".to_string(),
@@ -1315,33 +1842,6 @@ mod tests {
                 "{bad} 必须被拒绝"
             );
         }
-    }
-
-    #[test]
-    fn codex_launch_value_only_points_codex_home_at_the_instance() {
-        let codex = parse_definition(
-            "cx-work",
-            &json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-work"}}),
-            true,
-        )
-        .unwrap();
-        assert_eq!(codex.kind.target_file(), "config.toml");
-        assert_eq!(
-            launch_value(&codex, "codex", ""),
-            "CODEX_HOME=\"~/.codex-work\" codex"
-        );
-    }
-
-    #[test]
-    fn launch_value_matches_alias_format() {
-        let parsed = def(json!({
-            "profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly"}
-        }))
-        .unwrap();
-        assert_eq!(
-            launch_value(&parsed, "claude", "--dangerously-skip-permissions"),
-            "CLAUDE_CONFIG_DIR=\"~/.claude-ly\" claude --dangerously-skip-permissions"
-        );
     }
 
     #[test]
@@ -1424,10 +1924,6 @@ mod tests {
             settings.get("env").is_none(),
             "没声明就不写 env：{settings}"
         );
-        assert_eq!(
-            launch_value(&official, "claude", ""),
-            "CLAUDE_CONFIG_DIR=\"~/.claude-ly\" claude"
-        );
 
         let token = def(
             json!({"profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly",
@@ -1486,47 +1982,20 @@ mod tests {
             format!("{err:#}").contains("CLAUDE_CODE_USE_MANTLE"),
             "{err:#}"
         );
-        // 显式置空是允许的；不带第三方凭据的 Bedrock 实例也照常
+        // An explicit blank switch is inert. Cloud authentication is not inferred as official.
         assert!(claude(json!({"ANTHROPIC_BASE_URL": "https://a.example.com",
             "ANTHROPIC_AUTH_TOKEN": "${A}", "CLAUDE_CODE_USE_BEDROCK": ""}))
         .is_ok());
-        let bedrock = claude(json!({"CLAUDE_CODE_USE_BEDROCK": "1"})).unwrap();
-        let rendered = render_all(&bedrock, &|_| None, &|_| None, &[]).unwrap();
-        let settings: Value = serde_json::from_slice(&rendered[0].content).unwrap();
-        assert_eq!(
-            settings["env"]["CLAUDE_CODE_USE_BEDROCK"], "1",
-            "自己声明的开关照写"
-        );
-        assert!(
-            settings["env"].get("CLAUDE_CODE_USE_VERTEX").is_none(),
-            "没声明的开关不替用户加"
-        );
-    }
-
-    /// 只写本工具自己的变更：Codex 启动命令不替用户加清空凭据变量的赋值。
-    #[test]
-    fn codex_launch_adds_nothing_the_user_did_not_configure() {
-        let third = def(
-            json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-w",
-            "base_url": "http://127.0.0.1:11434/v1"}}),
-        )
-        .unwrap();
-        assert_eq!(
-            launch_value(&third, "codex", ""),
-            "CODEX_HOME=\"~/.codex-w\" codex"
-        );
-        let official =
-            def(json!({"profile": {"base_agent": "codex", "config_dir": "~/.codex-w"}})).unwrap();
-        assert_eq!(
-            launch_value(&official, "codex", "--full-auto"),
-            "CODEX_HOME=\"~/.codex-w\" codex --full-auto"
-        );
+        assert!(claude(json!({"CLAUDE_CODE_USE_BEDROCK": "1"})).is_err());
     }
 
     #[test]
     fn profile_id_rules() {
         assert!(valid_profile_id("cc-ly"));
         assert!(valid_profile_id("work2"));
+        for id in ["claude", "claude-code", "codex", "opencode"] {
+            assert!(!valid_profile_id(id));
+        }
         assert!(!valid_profile_id("-bad"));
         assert!(!valid_profile_id("Bad"));
         assert!(!valid_profile_id("has_underscore"));
@@ -1709,11 +2178,12 @@ mod live_tests {
             let def = parse_definition(
                 "cx-relay",
                 &json!({"display_name": display, "profile": {"base_agent": "codex", "config_dir": "~/.codex-relay",
-                    "base_url": "https://a.example.com/v1"}}),
+                    "base_url": "https://a.example.com/v1", "env_key": "PROVIDER_NAME_KEY"}}),
                 true,
             )
             .unwrap();
-            let rendered = render_all(&def, &|_| None, &|_| None, &[]).unwrap();
+            let rendered =
+                render_all(&def, &|_| None, &|_| Some("own-test-value".into()), &[]).unwrap();
             let doc: toml::Value = std::str::from_utf8(&rendered[0].content)
                 .unwrap()
                 .parse()

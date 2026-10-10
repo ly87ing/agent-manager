@@ -1,9 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, onTestFinished } from "vitest";
 import { act, waitFor } from "@testing-library/react";
 import AccountsPage from "../pages/AccountsPage";
 import type { Envelope } from "../lib/contract";
-import { agentManagementFixture, makeAliasStatus, makeApplyResult, makeElement, makeEnvelope } from "./fixtures";
-import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { accountCommandRoute, controlledCommand, agentManagementFixture, makeAliasStatus, makeApplyResult, makeElement, makeEnvelope } from "./fixtures";
+import { renderWithEngine, screen, userEvent, within, chooseOption } from "./render-with-engine";
 
 type Route = Envelope | ((args: string[]) => Promise<Envelope>);
 
@@ -39,6 +39,7 @@ function routes(options: { previewVersion?: () => number; statusline?: string } 
   /** 登记成功后状态里才有新账号，目录文件还不存在（base = missing）。 */
   const registered: string[] = [];
   return {
+    "accounts:command": accountCommandRoute,
     "agents:status": makeEnvelope({
       domain: "agents",
       elements: [
@@ -84,6 +85,7 @@ function routes(options: { previewVersion?: () => number; statusline?: string } 
       path: `/isolated/${valueOf(args, "--only")}/settings.json`,
       content: `{"v":${options.previewVersion?.() ?? 1}}`,
       exists: false,
+      base: "missing",
       file_base: "preview-file-base",
       content_base: "preview-content-base",
     }, { command: "profiles.preview" }),
@@ -93,6 +95,10 @@ function routes(options: { previewVersion?: () => number; statusline?: string } 
       return makeEnvelope({}, { command: "policy.set" });
     },
     "profiles:apply": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply" }),
+    "profiles:create": async (args) => {
+      registered.push(valueOf(args, "--only")!.replace(/^profiles:/, ""));
+      return makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.create" });
+    },
     "profiles:apply-definition": makeEnvelope(makeApplyResult({ domain: "profiles" }), { command: "profiles.apply-definition" }),
     "profiles:seed": makeEnvelope({ results: [{ item: "permissions", state: "copied", detail: "" }] }, { command: "profiles.seed" }),
     // 在用技能 alpha：主账号已链接；新登记的账号还没分配。beta 从没被选用，不自动加。
@@ -118,7 +124,7 @@ function routes(options: { previewVersion?: () => number; statusline?: string } 
       elements: [makeElement({
         id: "mcp:only-ds",
         domain: "mcp",
-        observed: { agents: { ds: { state: "enabled", source: "file", base: "ds-base", actions: ["edit", "copy", "disable", "remove"] } } },
+        observed: { agents: { ds: { state: "enabled", source: "file", copy_safe: true, base: "ds-base", actions: ["edit", "copy", "disable", "remove"] } } },
       })],
     }, { command: "mcp.status" }),
     "mcp:apply": makeEnvelope(makeApplyResult({ domain: "mcp" }), { command: "mcp.apply" }),
@@ -137,6 +143,37 @@ async function openCreate() {
 }
 
 describe("账号页", () => {
+  it("所选终端用于主账号、新账号预览与复制入口；cmd 提示先进入 PowerShell", async () => {
+    const clipboard = { writeText: vi.fn(async (_text: string) => {}) };
+    const previousClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, get: () => clipboard });
+    onTestFinished(() => {
+      if (previousClipboard) Object.defineProperty(navigator, "clipboard", previousClipboard);
+      else Reflect.deleteProperty(navigator, "clipboard");
+    });
+    renderWithEngine(<AccountsPage />, {
+      ...routes(),
+      "agents:auth-status": makeEnvelope({ element: "agents:claude-code", state: "logged-out", logged_in: false, third_party: false, mixed: false }),
+    });
+    const shell = await screen.findByTestId("accounts-auth-shell");
+    await chooseOption(shell, "powershell");
+    expect(screen.getByText("在 cmd 中请先输入 powershell，再粘贴登录命令。")).toBeInTheDocument();
+    await userEvent.click(await screen.findByTestId("account-login-agents:claude-code"));
+    await waitFor(() => expect(clipboard.writeText).toHaveBeenLastCalledWith(controlledCommand("agents:claude-code", "login", "powershell")));
+    const drawer = await openCreate();
+    await userEvent.type(within(drawer).getByTestId("account-name"), "Work");
+    const plan = await within(drawer).findByTestId("account-create-plan");
+    expect(plan).toHaveTextContent('--only "profiles:work"');
+    expect(plan).toHaveTextContent("到 PowerShell 运行");
+    await userEvent.click(within(drawer).getByTestId("account-save"));
+    const readiness = await screen.findByTestId("account-readiness-profiles:work");
+    await userEvent.click(await within(readiness).findByTestId("readiness-action-login"));
+    await waitFor(() => expect(clipboard.writeText).toHaveBeenLastCalledWith(controlledCommand("profiles:work", "login", "powershell")));
+    await chooseOption(shell, "posix");
+    await userEvent.click(screen.getByTestId("account-login-profiles:work"));
+    await waitFor(() => expect(clipboard.writeText).toHaveBeenLastCalledWith(controlledCommand("profiles:work", "login")));
+  });
+
 
   it("按地址、命令和身份搜索；无结果可清除，不写配置", async () => {
     const { calls } = renderWithEngine(<AccountsPage />, routes());
@@ -284,7 +321,7 @@ describe("账号页", () => {
     ]);
   });
 
-  it("新建官方账号：预览通过后依次登记、写目录、写启动命令（沿用主账号时区与参数）、带上全部共用设置", async () => {
+  it("新建官方账号：预览通过后依次登记、写目录、写启动命令（仅沿用主账号CLI参数）、带上全部共用设置", async () => {
     const { calls } = renderWithEngine(<AccountsPage />, routes());
     const drawer = await openCreate();
     await userEvent.type(within(drawer).getByTestId("account-name"), "Work");
@@ -295,28 +332,44 @@ describe("账号页", () => {
     expect(plan).toHaveTextContent("新建目录 ~/.claude-work");
     expect(plan).toHaveTextContent("另从其他账号复制在用的 MCP：only-ds");
     expect(plan).toHaveTextContent("链接 1 个在用的技能");
-    expect(plan).toHaveTextContent(`alias work='TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude --dangerously-skip-permissions'`);
+    expect(plan).toHaveTextContent(`alias work='${controlledCommand("profiles:work")} --dangerously-skip-permissions'`);
     expect(plan).toHaveTextContent("不会改动主账号 ~/.claude");
-    expect(plan).toHaveTextContent('CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude auth login');
+    expect(plan).toHaveTextContent("受控登录命令（创建后生成）");
     await userEvent.click(within(drawer).getByTestId("account-save"));
     await waitFor(() => expect(screen.queryByTestId("account-drawer")).toBeNull());
 
-    const writes = calls.filter((call) => ["policy:set", "profiles:apply", "aliases:apply", "profiles:seed", "skills:apply", "mcp:apply"].includes(call.command));
-    expect(writes.map((call) => call.command)).toEqual(["policy:set", "profiles:apply", "aliases:apply", "profiles:seed", "skills:apply", "mcp:apply"]);
-    expect(writes[5].args).toEqual(["--only", "mcp:only-ds", "--agent", "ds", "--to", "work", "--action", "copy", "--base", "ds-base"]);
+    const writes = calls.filter((call) => ["profiles:create", "policy:set", "secrets:set", "profiles:apply", "aliases:apply", "profiles:seed", "skills:apply", "mcp:apply"].includes(call.command));
+    expect(writes.map((call) => call.command)).toEqual(["profiles:create", "aliases:apply", "profiles:seed", "skills:apply", "mcp:apply"]);
+    expect(writes[4].args).toEqual(["--only", "mcp:only-ds", "--agent", "ds", "--to", "work", "--action", "copy", "--base", "ds-base"]);
     // 只把在用的 alpha 链接给新账号
-    expect(writes[4].args).toEqual(["--only", "skill:repo/alpha", "--action", "add", "--agent", "work"]);
-    const definition = JSON.parse(valueOf(writes[0].args, "--value")!);
+    expect(writes[3].args).toEqual(["--only", "skill:repo/alpha", "--action", "add", "--agent", "work"]);
+    const definition = JSON.parse(valueOf(writes[0].args, "--definition")!);
     expect(definition.profile).toMatchObject({ base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-work" });
-    expect(valueOf(writes[0].args, "--expect-definition")).toBe("null");
-    expect(valueOf(writes[1].args, "--base")).toBe("missing");
-    expect(valueOf(writes[2].args, "--set")).toBe("work");
-    expect(valueOf(writes[2].args, "--value")).toBe(
-      'TZ="America/Los_Angeles" LANG="en_US.UTF-8" LC_ALL="en_US.UTF-8" CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude --dangerously-skip-permissions',
+    expect(valueOf(writes[0].args, "--base")).toBe("missing");
+    expect(valueOf(writes[1].args, "--set")).toBe("work");
+    expect(valueOf(writes[1].args, "--value")).toBe(
+      `${controlledCommand("profiles:work")} --dangerously-skip-permissions`,
     );
-    expect(valueOf(writes[3].args, "--items")).toBe("permissions,statusline,rules,mcp");
+    expect(valueOf(writes[2].args, "--items")).toBe("permissions,statusline,rules,mcp");
     // 建好后直接给出新账号的准备情况
     expect(await screen.findByTestId("account-readiness-profiles:work")).toHaveTextContent("新账号「");
+  });
+
+  it("受控主号创建新账号：只沿用CLI参数，重新绑定新账号", async () => {
+    const base = routes();
+    base["aliases:status"] = makeEnvelope(makeAliasStatus({ claude: `${controlledCommand("agents:claude-code")} --verbose`, ds: 'CLAUDE_CONFIG_DIR="$HOME/.claude-ds" claude' }), { command: "aliases.status" });
+    const { calls } = renderWithEngine(<AccountsPage />, base);
+    const drawer = await openCreate();
+    await userEvent.type(within(drawer).getByTestId("account-name"), "Work");
+    expect(within(drawer).getByTestId("account-extra-args")).toHaveValue("--verbose");
+    const plan = await within(drawer).findByTestId("account-create-plan");
+    expect(plan).toHaveTextContent(`${controlledCommand("profiles:work")} --verbose`);
+    await userEvent.click(within(drawer).getByTestId("account-save"));
+    await waitFor(() => expect(calls.some((call) => call.command === "profiles:create")).toBe(true));
+    await waitFor(() => expect(calls.some((call) => call.command === "aliases:apply")).toBe(true));
+    const written = calls.find((call) => call.command === "aliases:apply");
+    expect(valueOf(written!.args, "--value")).toBe(`${controlledCommand("profiles:work")} --verbose`);
+    expect(valueOf(written!.args, "--value")).not.toContain("agents:claude-code");
   });
 
   it("预览之后目标文件变了：不登记、不写任何文件", async () => {
@@ -328,7 +381,7 @@ describe("账号页", () => {
     version = 2;
     await userEvent.click(within(drawer).getByTestId("account-save"));
     expect(await screen.findByText(/目标文件在预览后变了/)).toBeInTheDocument();
-    expect(calls.some((call) => ["policy:set", "profiles:apply", "aliases:apply", "secrets:set"].includes(call.command))).toBe(false);
+    expect(calls.some((call) => ["profiles:create", "policy:set", "profiles:apply", "aliases:apply", "secrets:set"].includes(call.command))).toBe(false);
   });
 
   it("新建 API 账号：API Key 只进密钥文件，登记里只有变量引用", async () => {
@@ -337,7 +390,9 @@ describe("账号页", () => {
     await userEvent.click(within(drawer).getByTestId("account-type-choice-api"));
     await userEvent.type(within(drawer).getByTestId("account-name"), "Relay");
     await userEvent.type(within(drawer).getByTestId("account-base-url"), "https://relay.example.com");
-    await userEvent.type(within(drawer).getByTestId("account-token-var"), "RELAY_KEY");
+    const ownVariable = (within(drawer).getByTestId("account-token-var") as HTMLInputElement).value;
+    expect(ownVariable).toMatch(/^AGENT_MANAGER_ACCOUNT_RELAY_[A-F0-9]{32}_API_KEY$/);
+    expect(within(drawer).getByTestId("account-token-var")).toHaveAttribute("readonly");
     await userEvent.type(within(drawer).getByTestId("account-api-key"), "sk-secret-value");
     // 说清楚内容发往哪、Key 明文写在哪个文件
     const risk = within(drawer).getByTestId("account-api-risk");
@@ -348,14 +403,13 @@ describe("账号页", () => {
     await userEvent.click(within(drawer).getByTestId("account-save"));
     await waitFor(() => expect(screen.queryByTestId("account-drawer")).toBeNull());
 
-    const secret = calls.findIndex((call) => call.command === "secrets:set");
-    const policy = calls.findIndex((call) => call.command === "policy:set");
-    expect(secret).toBeGreaterThanOrEqual(0);
-    expect(secret).toBeLessThan(policy);
-    expect(calls[secret].args).toEqual(["--var", "RELAY_KEY", "--value", "sk-secret-value"]);
-    const value = valueOf(calls[policy].args, "--value")!;
+    const created = calls.find((call) => call.command === "profiles:create")!;
+    expect(valueOf(created.args, "--secret-var")).toBe(ownVariable);
+    expect(valueOf(created.args, "--secret-value")).toBe("sk-secret-value");
+    expect(calls.some((call) => ["secrets:set", "policy:set", "profiles:apply"].includes(call.command))).toBe(false);
+    const value = valueOf(created.args, "--definition")!;
     expect(value).not.toContain("sk-secret-value");
-    expect(JSON.parse(value).profile.env).toMatchObject({ ANTHROPIC_BASE_URL: "https://relay.example.com", ANTHROPIC_AUTH_TOKEN: "${RELAY_KEY}" });
+    expect(JSON.parse(value).profile.env).toMatchObject({ ANTHROPIC_BASE_URL: "https://relay.example.com", ANTHROPIC_AUTH_TOKEN: `\${${ownVariable}}` });
   });
 
   it("编辑 API 账号的模型：登记与目录文件一起写，带文件和登记的基准", async () => {
@@ -435,7 +489,7 @@ describe("账号页", () => {
     expect(calls.some((call) => call.command === "profiles:apply-definition")).toBe(false);
   });
 
-  it("新密钥在精确预览后保存，后续配置失败时明确提示部分成功", async () => {
+  it("新密钥与配置一起提交，失败不会先写密钥或关闭表单", async () => {
     const api = routes();
     api["profiles:apply-definition"] = { ...makeEnvelope({}), ok: false, errors: [{ code: "conflict", message: "预览后文件又变了", element: "profiles:ds" }] };
     const { calls } = renderWithEngine(<AccountsPage />, api);
@@ -445,12 +499,13 @@ describe("账号页", () => {
     const drawer = await screen.findByTestId("account-drawer");
     await userEvent.type(within(drawer).getByTestId("account-api-key"), "YOUR_NEW_TEST_KEY");
     await userEvent.click(within(drawer).getByTestId("account-save"));
-    await screen.findByText("API Key 已保存，但账号配置未更新");
+    await screen.findByText("没有保存：预览后文件又变了");
     const preview = calls.findIndex((call) => call.command === "profiles:preview");
     const secret = calls.findIndex((call) => call.command === "secrets:set");
     const apply = calls.findIndex((call) => call.command === "profiles:apply-definition");
-    expect(secret).toBeGreaterThan(preview);
-    expect(apply).toBeGreaterThan(secret);
+    expect(secret).toBe(-1);
+    expect(apply).toBeGreaterThan(preview);
+    expect(valueOf(calls[apply].args, "--secret-value")).toBe("YOUR_NEW_TEST_KEY");
     expect(valueOf(calls[apply].args, "--candidate")).not.toContain("YOUR_NEW_TEST_KEY");
     expect(JSON.parse(valueOf(calls[apply].args, "--candidate")!)).not.toHaveProperty("display_name");
     expect(screen.getByTestId("account-drawer")).toBeVisible();

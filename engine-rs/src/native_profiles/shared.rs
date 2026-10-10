@@ -6,7 +6,7 @@ use rusqlite::TransactionBehavior;
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 
-use super::model::{ProfileDef, ProfileKind};
+use super::model::{self, ProfileDef, ProfileKind};
 use super::seed;
 use crate::native::{Context, Request};
 use crate::native_mcp::model::sha256_hex_bytes;
@@ -376,7 +376,7 @@ fn settings_rows(ctx: &Context, def: &ProfileDef, dir: &Path) -> Result<Vec<Valu
         bail!("独立环境尚未写入配置，先在环境卡片写入一次");
     }
     let source = read_source(&settings_file(ctx, def))?;
-    let (_, target) = seed::read_target(&dir.join(def.kind.target_file()))?;
+    let (_, target) = seed::read_target(ctx, def, &dir.join(def.kind.target_file()))?;
     SETTINGS
         .iter()
         .map(|item| {
@@ -457,8 +457,8 @@ fn mcp_rows(ctx: &Context, def: &ProfileDef) -> Result<Vec<Value>> {
         .map(|entry| {
             let dest = target.entry(&entry.name);
             let mut blocked = match &entry.view {
-                Ok(view) if seed::has_literal_credentials(&source.target.format, view) => {
-                    Some("来源条目含明文凭据，请在 MCP 页逐条处理".to_string())
+                Ok(view) if seed::cannot_share_account_entry(&source.target.format, view) => {
+                    Some("来源条目的凭据归属无法确认，请在目标账号单独配置".to_string())
                 }
                 Err(_) => Some("来源条目结构无法识别".to_string()),
                 _ if dest.is_some_and(|entry| entry.view.is_err()) => {
@@ -615,7 +615,7 @@ fn write_setting(
 ) -> Result<()> {
     let dir = seed::config_dir(ctx, def)?;
     let source = read_source(&settings_file(ctx, def))?;
-    let (path, previous) = seed::read_target(&dir.join(def.kind.target_file()))?;
+    let (path, previous) = seed::read_target(ctx, def, &dir.join(def.kind.target_file()))?;
     let from = setting_part(def.kind, source.as_deref(), item)?;
     let before = setting_part(def.kind, previous.as_deref(), item)?;
     if from.is_none()
@@ -625,13 +625,16 @@ fn write_setting(
         bail!("来源或环境设置已变化，请刷新差异后重试");
     }
     let next = render_setting(def.kind, source.as_deref(), previous.as_deref(), item)?;
+    model::validate_effective_config(def, &next, &|name| {
+        crate::secret_values::lookup_account(name).ok()
+    })?;
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     crate::native_mcp::rollback::atomic_write_bytes_checked(&path, &next, previous.as_deref())?;
     let mut guard = RollbackGuard::new();
     guard.record_written(&path, previous, next.clone());
     let finish = (|| -> Result<()> {
-        let (_, written) = seed::read_target(&dir.join(def.kind.target_file()))?;
+        let (_, written) = seed::read_target(ctx, def, &dir.join(def.kind.target_file()))?;
         if setting_part(def.kind, written.as_deref(), item)?
             != setting_part(def.kind, source.as_deref(), item)?
         {
@@ -669,6 +672,26 @@ pub(super) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     let (id, selection) = only(req, true)?;
     let (item, source_base, target_base) = selection.ok_or_else(|| anyhow!("缺少要更新的项"))?;
     let def = seed::find_def(ctx, &id)?;
+    let dir = seed::config_dir(ctx, &def)?;
+    let _account_lock = if matches!(item.as_str(), "permissions" | "statusline" | "rules") {
+        Some(crate::native_account_context::lock_directory(
+            ctx, &dir, true,
+        )?)
+    } else {
+        // Delegated MCP operations acquire their own destination lock.
+        None
+    };
+    let def = seed::find_def(ctx, &id)?;
+    if seed::config_dir(ctx, &def)? != dir {
+        bail!("账号目录在取得锁前已变化，拒绝更新共用设置");
+    }
+    model::validate_account_auth(
+        ctx,
+        &id,
+        def.kind,
+        Some(&dir),
+        model::account_auth_mode(&def),
+    )?;
     let old = preview(ctx, req, &def);
     let current = old
         .iter()

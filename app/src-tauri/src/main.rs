@@ -2,13 +2,14 @@
 
 mod autostart;
 mod engine;
+mod import_links;
 mod settings;
 mod startup;
 mod theme;
 mod tray;
 
-use tauri::Emitter;
 use tauri::RunEvent;
+use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_window_state::StateFlags;
 
@@ -68,20 +69,26 @@ fn classify_exit_request(code: Option<i32>) -> ExitRequestAction {
     }
 }
 
-const IMPORT_LINK_PREFIX: &str = "agentmanager://import";
-
-/// 把分享链接交给界面（唤起主窗口后发 `import-link` 事件）；不是导入链接的忽略。
-fn forward_import_link(app: &tauri::AppHandle, url: &str) {
-    if !url.starts_with(IMPORT_LINK_PREFIX) || url.len() > 64 * 1024 {
-        return;
-    }
-    tray::show_main_window(app);
-    let _ = app.emit("import-link", url.to_string());
-}
-
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "--account-launch") {
+        let code = match agent_manager_engine::native_account_context::run_cli(&args[1..]) {
+            Ok(code) => code,
+            Err(err) => {
+                eprintln!(
+                    "{}",
+                    agent_manager_engine::sanitize::sanitize_diagnostic_message(&format!(
+                        "{err:#}"
+                    ))
+                );
+                2
+            }
+        };
+        std::process::exit(code);
+    }
     let app = tauri::Builder::default()
         .manage(tray::TrayState::default())
+        .manage(import_links::ImportLinkState::default())
         // 单实例须最先注册：二次启动时把已有主窗口唤到前台，不再起第二份进程。
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
@@ -113,14 +120,33 @@ fn main() {
             // 由界面校验、展示并等用户确认；这里不解析、不写任何东西。其他链接一律忽略。
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
-                for url in event.urls() {
-                    forward_import_link(&handle, url.as_str());
+                let links = handle.state::<import_links::ImportLinkState>().record(
+                    event
+                        .urls()
+                        .into_iter()
+                        .map(|url| url.to_string())
+                        .collect(),
+                    false,
+                );
+                if !links.is_empty() {
+                    tray::show_main_window(&handle);
+                    for link in links {
+                        let _ = handle.emit("import-link", link);
+                    }
                 }
             });
+            // The plugin reads Windows/Linux launch arguments before this setup
+            // hook. Keep its snapshot for the frontend's listener-first read.
+            let initial = app.deep_link().get_current()?.unwrap_or_default();
+            app.state::<import_links::ImportLinkState>().record(
+                initial.into_iter().map(|url| url.to_string()).collect(),
+                true,
+            );
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             engine::engine_invoke,
+            import_links::import_links_current,
             settings_get,
             settings_save,
             autostart_get,

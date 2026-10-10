@@ -3,7 +3,7 @@ import { agentManagementOf, connectionKindOf } from "./agentManagement";
 import { isOfficial } from "./defaultEnvironment";
 import { parseAliasValue } from "./aliasCommand";
 import type { AgentsObserved, AgentsSpec, AgentUsage } from "./observed";
-import { launchCommandsForProfile, profileKindOf, type ProfileKind } from "./profileDefinition";
+import { controlledAccountOf, launchCommandsForProfile, profileKindOf, type ProfileKind } from "./profileDefinition";
 
 /**
  * 账号 = 一个配置目录 + 一条启动命令（见 docs/MULTI-ACCOUNT-DESIGN.md）。
@@ -106,6 +106,7 @@ export function buildAccounts(
             profileKindOf(pSpec.base_agent),
             configDir,
             (value) => parseAliasValue(value).otherEnv,
+            profile.id.replace(/^profiles:/, ""),
           );
           const api = pObserved.third_party ?? Boolean(pSpec.base_url);
           return {
@@ -172,11 +173,12 @@ export function launchCommandsOfAccount(
       return entries
         .filter(([, value]) => {
           const parsed = parseAliasValue(value);
+          if (controlledAccountOf(value) === account.elementId) return true;
           return (parsed.command.split("/").pop() ?? parsed.command) === binName && parsed.otherEnv[envName] === undefined;
         })
         .map(([name, value]) => ({ name, value, managed: isManaged, needsTildeFix: false }));
     }
-    return launchCommandsForProfile(Object.fromEntries(entries), group.kind, account.configDir, (value) => parseAliasValue(value).otherEnv)
+    return launchCommandsForProfile(Object.fromEntries(entries), group.kind, account.configDir, (value) => parseAliasValue(value).otherEnv, account.elementId.replace(/^profiles:/, ""))
       .map((command) => ({ ...command, managed: isManaged }));
   };
   const externalEntries = external

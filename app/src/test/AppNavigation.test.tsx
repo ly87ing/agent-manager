@@ -1,11 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { MOD } from "../lib/platform";
 import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import { setSettingsClient } from "../lib/settings";
+import * as shareLinks from "../lib/shareLink";
 import { encodeShareLink, SHARE_PREFIX } from "../lib/shareLink";
-import { fireEvent } from "@testing-library/react";
+import { act, fireEvent } from "@testing-library/react";
 import type { SettingsData } from "../lib/contract";
 
 const dummySettings: SettingsData = {
@@ -128,6 +129,30 @@ describe("App 顶层导航", () => {
     const form = await screen.findByRole("dialog", { name: "新增服务" });
     expect(within(form).getByTestId("server-name-input")).toHaveValue("shared-srv");
   }, 15000);
+
+  it("桌面冷启动打开导入框，新链接更新内容，关闭后同一链接可再次打开", async () => {
+    const cold = encodeShareLink({ kind: "mcp", name: "cold", spec: { command: "example" } });
+    const warm = encodeShareLink({ kind: "mcp", name: "warm", spec: { command: "example" } });
+    let onOpen!: (url: string) => void;
+    const stop = vi.fn();
+    vi.spyOn(shareLinks, "subscribeImportLinks").mockImplementation((onLink) => {
+      onOpen = onLink;
+      onLink(cold);
+      return stop;
+    });
+    const { calls, unmount } = renderWithEngine(<App />, routes());
+    expect(await screen.findByTestId("import-link-summary")).toHaveTextContent("cold");
+    act(() => onOpen(warm));
+    expect(screen.getByTestId("import-link-summary")).toHaveTextContent("warm");
+    const dialog = screen.getByRole("dialog", { name: "从分享链接导入" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "从分享链接导入" })).toBeNull();
+    act(() => onOpen(warm));
+    expect(screen.getByTestId("import-link-summary")).toHaveTextContent("warm");
+    expect(calls.some((call) => call.command.includes(":apply") || call.command === "policy:set")).toBe(false);
+    unmount();
+    expect(stop).toHaveBeenCalledOnce();
+  });
 
   it("从账号行进入技能页并预选对应账号，点击顶栏「技能」重置为全部助手", async () => {
     setSettingsClient({

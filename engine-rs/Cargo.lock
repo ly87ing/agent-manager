@@ -11,6 +11,7 @@ dependencies = [
  "dunce",
  "fs2",
  "junction",
+ "libc",
  "regex",
  "rusqlite",
  "serde",

@@ -6,6 +6,12 @@ description = "Shared Rust engine library and CLI for Agent Manager"
 license = "MIT"
 repository = "https://github.com/ly87ing/agent-manager"
 
+# Self-spawning fixtures exercise real executable resolution without external runtimes.
+[[test]]
+name = "native_program_lifecycle"
+path = "tests/native_program_lifecycle.rs"
+harness = false
+
 [lib]
 name = "agent_manager_engine"
 path = "src/lib.rs"
@@ -27,10 +33,14 @@ serde_norway = "0.9"
 # Windows 上 canonicalize 不带 `\\?\` 前缀（能安全去掉时），与普通路径可比较；Unix 上同标准库。
 dunce = "1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Read-only mount metadata distinguishes transient disk images from installed apps.
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 # Windows 普通用户建不了符号链接时，目录链接改用联接（junction）。
 junction = "1"
 # 只读注册表里的系统与用户 PATH，判断命令在不在 PATH 上；不写注册表。
 winreg = "0.55"
 # Hide desktop child consoles and terminate timeout trees with Windows job objects.
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }

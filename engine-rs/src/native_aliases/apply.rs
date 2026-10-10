@@ -128,6 +128,7 @@ fn prepare(
     ctx: &Context,
     row: Option<&Map<String, Value>>,
     parsed: &ApplyArgs,
+    preview: bool,
 ) -> Result<Prepared> {
     let views = status::observe(ctx);
     let mut present: HashSet<(String, String)> = HashSet::new();
@@ -158,6 +159,13 @@ fn prepare(
     }
     let source = super::sources::load(ctx)?;
     let (edit, origin) = edit_of(&parsed.op, &views, row, &source)?;
+    if let Edit::Set { value, .. } = &edit {
+        if preview {
+            crate::native_account_context::validate_alias_for_preview(ctx, value)?;
+        } else {
+            crate::native_account_context::validate_alias(ctx, value)?;
+        }
+    }
 
     let mut writes = Vec::new();
     let mut skipped = Vec::new();
@@ -231,7 +239,7 @@ fn prepare(
 pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     let parsed = args::parse_apply_args(req)?;
     let row = legacy::read_row_readonly(ctx)?;
-    prepare(ctx, row.as_ref(), &parsed)?;
+    prepare(ctx, row.as_ref(), &parsed, false)?;
     Ok(())
 }
 
@@ -239,7 +247,7 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
 pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
     let parsed = args::parse_apply_args(req)?;
     let row = legacy::read_row_readonly(ctx)?;
-    let prep = prepare(ctx, row.as_ref(), &parsed)?;
+    let prep = prepare(ctx, row.as_ref(), &parsed, true)?;
     let mut files = Vec::new();
     for write in &prep.writes {
         if let Some(changes) = &write.cmd_changes {
@@ -295,7 +303,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     // 锁内基于同一 snapshot 重新读取并重检，不沿用锁前的结果。
     let row = legacy::read_row(&tx);
-    let prep = prepare(ctx, row.as_ref(), &parsed)?;
+    let prep = prepare(ctx, row.as_ref(), &parsed, false)?;
 
     if prep.writes.is_empty() {
         tx.commit()?;

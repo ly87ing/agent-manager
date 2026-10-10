@@ -22,6 +22,7 @@ export interface PlanFacts {
   extraMcp: string[];
   /** 官方账号建好后的登录命令。 */
   loginCommand: string | null;
+  loginShellLabel?: string;
 }
 
 const SEED_TEXT: Record<string, string> = {
@@ -124,7 +125,7 @@ export function CreatePlan({ preview, facts }: { preview: CreatePreview; facts: 
         {facts.loginCommand && (
           <>
             {" "}建好后还要登录一次：在账号行点「登录」复制
-            <code className="mx-1 break-all font-mono">{facts.loginCommand}</code>到终端运行。
+            <code className="mx-1 break-all font-mono">{facts.loginCommand}</code>到 {facts.loginShellLabel ?? "Bash / Zsh / Git Bash"} 运行。
           </>
         )}
       </p>

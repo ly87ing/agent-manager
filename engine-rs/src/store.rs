@@ -145,6 +145,63 @@ pub fn is_legacy_builtin_skill_repo(name: &str, value: &Value) -> bool {
         })
 }
 
+/// Read-only projection shared by the existing migration and policy CAS checks.
+fn projected_builtin_skill_retirement(conn: &Connection, skills: &Value) -> Result<Option<Value>> {
+    let name = LEGACY_BUILTIN_SKILL_COLLECTION;
+    let Some(repo) = skills.get("repositories").and_then(|repos| repos.get(name)) else {
+        return Ok(None);
+    };
+    if !is_legacy_builtin_skill_repo(name, repo) {
+        return Ok(None);
+    }
+    let has_bindings_table: bool = conn.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='skill_bindings'",
+        [],
+        |row| row.get::<_, i64>(0),
+    )? > 0;
+    if has_bindings_table {
+        let bindings: i64 = conn.query_row(
+            "SELECT count(*) FROM skill_bindings WHERE collection = ?1",
+            [name],
+            |row| row.get(0),
+        )?;
+        if bindings > 0 {
+            return Ok(None);
+        }
+    }
+    let mut skills = skills.clone();
+    let object = skills
+        .as_object_mut()
+        .ok_or_else(|| anyhow!("skills 配置不是对象"))?;
+    object.remove(name);
+    if let Some(repos) = object
+        .get_mut("repositories")
+        .and_then(Value::as_object_mut)
+    {
+        repos.remove(name);
+    }
+    Ok(Some(skills))
+}
+
+/// Permit only the exact automatic retirement performed by `open_write`.
+/// All account, source, and other user policy changes still invalidate the snapshot.
+pub(crate) fn policy_matches_write_snapshot(
+    conn: &Connection,
+    current: &Value,
+    before: &Value,
+) -> Result<bool> {
+    if current == before {
+        return Ok(true);
+    }
+    let mut expected = before.clone();
+    if let Some(skills) = before.get("skills") {
+        if let Some(retired) = projected_builtin_skill_retirement(conn, skills)? {
+            expected["skills"] = retired;
+        }
+    }
+    Ok(current == &expected)
+}
+
 /// 写路径迁移：旧库里固化、仍为原值且从未在任何助手生效（该集合没有任何
 /// skill_bindings 行）的内置集合，从 policy 移除（连同它的集合开关）并记操作日志。
 /// 有 bindings 或被改过的保持为用户集合不动；已下载的仓库镜像不删。幂等：
@@ -160,42 +217,14 @@ fn retire_unadopted_builtin_skill_repo(conn: &Connection) -> Result<()> {
     let Some(raw) = raw else {
         return Ok(());
     };
-    let Ok(mut skills) = serde_json::from_str::<Value>(&raw) else {
+    let Ok(skills) = serde_json::from_str::<Value>(&raw) else {
         // 损坏的 skills 行交给读路径 fail-closed 报错，迁移不碰它
         return Ok(());
     };
-    let name = LEGACY_BUILTIN_SKILL_COLLECTION;
-    let Some(repo) = skills.get("repositories").and_then(|repos| repos.get(name)) else {
+    let Some(skills) = projected_builtin_skill_retirement(conn, &skills)? else {
         return Ok(());
     };
-    if !is_legacy_builtin_skill_repo(name, repo) {
-        return Ok(());
-    }
-    let has_bindings_table: bool = conn.query_row(
-        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='skill_bindings'",
-        [],
-        |row| row.get::<_, i64>(0),
-    )? > 0;
-    if has_bindings_table {
-        let bindings: i64 = conn.query_row(
-            "SELECT count(*) FROM skill_bindings WHERE collection = ?1",
-            [name],
-            |row| row.get(0),
-        )?;
-        if bindings > 0 {
-            return Ok(());
-        }
-    }
-    let object = skills
-        .as_object_mut()
-        .ok_or_else(|| anyhow!("skills 配置不是对象"))?;
-    object.remove(name);
-    if let Some(repos) = object
-        .get_mut("repositories")
-        .and_then(Value::as_object_mut)
-    {
-        repos.remove(name);
-    }
+    let name = LEGACY_BUILTIN_SKILL_COLLECTION;
     conn.execute(
         "UPDATE policy_entries SET value_json = ?1, updated_at = ?2 WHERE key = 'skills'",
         rusqlite::params![serde_json::to_string(&skills)?, now_iso()],
@@ -542,6 +571,38 @@ pub fn uuid_v4() -> String {
             );
         }
     }
+    format_uuid(bytes)
+}
+
+/// A launcher incarnation must not reuse a predictable clock fallback. Failure
+/// to obtain OS randomness leaves registration unchanged on every platform.
+pub(crate) fn new_account_generation() -> Result<String> {
+    let mut bytes = [0u8; 16];
+    #[cfg(not(windows))]
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut bytes))
+        .map_err(|_| anyhow!("无法取得账号代际随机值，没有修改账号登记"))?;
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Security::Cryptography::{
+            BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+        };
+        let status = unsafe {
+            BCryptGenRandom(
+                std::ptr::null_mut(),
+                bytes.as_mut_ptr(),
+                bytes.len() as u32,
+                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
+            )
+        };
+        if status != 0 {
+            return Err(anyhow!("无法取得账号代际随机值，没有修改账号登记"));
+        }
+    }
+    Ok(format_uuid(bytes))
+}
+
+fn format_uuid(mut bytes: [u8; 16]) -> String {
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     format!(
@@ -648,6 +709,63 @@ mod tests {
             builtin_policy()["skills"],
             serde_json::json!({"repositories": {}})
         );
+    }
+
+    #[test]
+    fn policy_write_snapshot_allows_only_unused_builtin_retirement_without_writing() {
+        let (root, context) = ctx("policy-migration-snapshot");
+        let conn = open_write(&context).unwrap();
+        let mut before = builtin_policy();
+        before["skills"] = serde_json::json!({
+            "agent-skills": {"enabled": true},
+            "repositories": {
+                "agent-skills": serde_json::from_str::<Value>(LEGACY_BUILTIN_SKILL_REPOS[0]).unwrap(),
+                "user-repo": {"url": "https://example.invalid/user-skills.git"}
+            }
+        });
+        before["rules"] = serde_json::json!({"claude_global": {"source": "~/fixture/original.md"}});
+        let mut retired = before.clone();
+        retired["skills"]
+            .as_object_mut()
+            .unwrap()
+            .remove("agent-skills");
+        retired["skills"]["repositories"]
+            .as_object_mut()
+            .unwrap()
+            .remove("agent-skills");
+        let stored = policy_from_connection(&conn).unwrap();
+        let operations: i64 = conn
+            .query_row("SELECT COUNT(*) FROM operation_logs", [], |row| row.get(0))
+            .unwrap();
+        assert!(policy_matches_write_snapshot(&conn, &retired, &before).unwrap());
+        let mut changed_account = retired.clone();
+        changed_account["agents"]["definitions"]["claude-code"]["bin"] =
+            Value::String("externally-changed".into());
+        assert!(!policy_matches_write_snapshot(&conn, &changed_account, &before).unwrap());
+        let mut changed_source = retired.clone();
+        changed_source["rules"]["claude_global"]["source"] =
+            Value::String("~/fixture/external.md".into());
+        assert!(!policy_matches_write_snapshot(&conn, &changed_source, &before).unwrap());
+        let mut changed_user_skills = retired.clone();
+        changed_user_skills["skills"]["repositories"]["user-repo"]["url"] =
+            Value::String("https://example.invalid/external.git".into());
+        assert!(!policy_matches_write_snapshot(&conn, &changed_user_skills, &before).unwrap());
+        assert_eq!(policy_from_connection(&conn).unwrap(), stored);
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM operation_logs", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            operations
+        );
+
+        conn.execute_batch("CREATE TABLE skill_bindings (collection TEXT NOT NULL); INSERT INTO skill_bindings VALUES ('agent-skills');").unwrap();
+        assert!(
+            !policy_matches_write_snapshot(&conn, &retired, &before).unwrap(),
+            "an adopted collection cannot be normalized away"
+        );
+        assert_eq!(policy_from_connection(&conn).unwrap(), stored);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

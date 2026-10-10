@@ -82,6 +82,86 @@ pub fn spawn_group(command: &mut Command) -> std::io::Result<(Child, Group)> {
     }
 }
 
+/// Capture piped output under one deadline, including EOF after the parent exits.
+/// Keep draining after the retention limit so a verbose child never blocks on a full pipe.
+pub fn capture_group(
+    command: &mut Command,
+    timeout: Duration,
+    limit: usize,
+) -> std::io::Result<std::process::Output> {
+    let start = Instant::now();
+    let (mut child, group) = spawn_group(command)?;
+    let stdout = capture_pipe(child.stdout.take(), limit);
+    let stderr = capture_pipe(child.stderr.take(), limit);
+    let mut status = None;
+    let result = loop {
+        if status.is_none() {
+            match child.try_wait() {
+                Ok(value) => status = value,
+                Err(error) => break Err(error),
+            }
+        }
+        if let Some(status) = status {
+            if stdout.is_finished() && stderr.is_finished() {
+                break Ok(status);
+            }
+        }
+        if start.elapsed() >= timeout {
+            break Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Command or its output pipes timed out",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10).min(timeout.saturating_sub(start.elapsed())));
+    };
+    if result.is_err() {
+        // The parent may already have exited; kill the group/job anyway to close inherited pipes.
+        group.kill(&mut child);
+        let cleanup = Instant::now();
+        loop {
+            let reaped = child.try_wait().map_or(true, |status| status.is_some());
+            if (reaped && stdout.is_finished() && stderr.is_finished())
+                || cleanup.elapsed() >= Duration::from_millis(250)
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        // Never join unfinished readers: even a descendant that escaped the group must not
+        // make a timeout unbounded. Dropping their handles detaches them until their pipes close.
+    }
+    let status = result?;
+    Ok(std::process::Output {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
+}
+
+fn capture_pipe<R: std::io::Read + Send + 'static>(
+    pipe: Option<R>,
+    limit: usize,
+) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut output = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let mut buffer = [0; 8192];
+            loop {
+                match pipe.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(len) => {
+                        let retained = len.min(limit.saturating_sub(output.len()));
+                        output.extend_from_slice(&buffer[..retained]);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(_) => break,
+                }
+            }
+        }
+        output
+    })
+}
+
 #[cfg(windows)]
 fn windows_job() -> std::io::Result<Group> {
     use windows_sys::Win32::Foundation::CloseHandle;
@@ -399,6 +479,102 @@ fn bypass_hosts<'a>(hosts: impl Iterator<Item = &'a str>) -> Option<Option<Strin
         out.push(host);
     }
     Some((!out.is_empty()).then(|| out.join(",")))
+}
+
+#[cfg(test)]
+pub(crate) mod capture_test_support {
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    pub fn root(label: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "am-capture-{label}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        root
+    }
+
+    pub fn command(root: &Path, mode: &str) -> Command {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "process::capture_test_support::helper",
+                "--nocapture",
+            ])
+            .env("AM_CAPTURE_MODE", mode)
+            .env("AM_CAPTURE_ROOT", root);
+        command
+    }
+
+    pub fn assert_descendant_stopped(root: &Path, start: Instant) {
+        assert!(root.join("ready").exists(), "Descendant never started");
+        assert!(root.join("parent-exited").exists(), "Parent did not finish");
+        std::thread::sleep(Duration::from_secs(6).saturating_sub(start.elapsed()));
+        assert!(
+            !root.join("late").exists(),
+            "Descendant survived the timeout"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    // Execute the test binary itself, so the same inherited-pipe regression runs on Windows.
+    #[test]
+    fn helper() {
+        let Ok(mode) = std::env::var("AM_CAPTURE_MODE") else {
+            return;
+        };
+        let root = PathBuf::from(std::env::var_os("AM_CAPTURE_ROOT").unwrap());
+        match mode.as_str() {
+            "stdout" | "stderr" | "delayed-stdout" => {
+                let mut command = command(&root, "hold");
+                command.stdin(Stdio::null());
+                if mode != "stderr" {
+                    command.stdout(Stdio::inherit()).stderr(Stdio::null());
+                } else {
+                    command.stdout(Stdio::null()).stderr(Stdio::inherit());
+                }
+                let _descendant = command.spawn().unwrap();
+                let start = Instant::now();
+                while !root.join("ready").exists() {
+                    assert!(start.elapsed() < Duration::from_secs(5));
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                if mode == "delayed-stdout" {
+                    std::thread::sleep(Duration::from_secs(2));
+                }
+                std::fs::write(root.join("parent-exited"), "done").unwrap();
+            }
+            "hold" => {
+                std::fs::write(root.join("ready"), "ready").unwrap();
+                std::thread::sleep(Duration::from_secs(5));
+                std::fs::write(root.join("late"), "survived").unwrap();
+            }
+            "large-output" => {
+                let stdout = [b'o'; 8192];
+                let stderr = [b'e'; 8192];
+                for _ in 0..640 {
+                    std::io::stdout().write_all(&stdout).unwrap();
+                    std::io::stderr().write_all(&stderr).unwrap();
+                }
+            }
+            "output" => {
+                println!("retained standard output");
+                for line in 0..10 {
+                    eprintln!("diagnostic-{line}");
+                }
+                std::process::exit(7);
+            }
+            _ => panic!("Unknown capture fixture mode"),
+        }
+    }
 }
 
 #[cfg(test)]

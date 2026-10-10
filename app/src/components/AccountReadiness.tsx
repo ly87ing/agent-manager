@@ -32,7 +32,7 @@ export function AccountReadiness({
   group,
   auth,
   isNew,
-  loginCommand,
+  onCopyLogin,
   onAddLaunch,
   onProbeAuth,
   onClose,
@@ -42,7 +42,8 @@ export function AccountReadiness({
   auth: OfficialAuthStatus | "pending" | null;
   /** 刚建好的账号：标题这样说。 */
   isNew: boolean;
-  loginCommand: string;
+  onCopyLogin: () => void;
+  loginShellLabel?: string;
   onAddLaunch: () => void;
   onProbeAuth: () => void;
   onClose: () => void;
@@ -73,7 +74,10 @@ export function AccountReadiness({
   };
 
   const items: Item[] = [];
-  if (account.type === "official") {
+  const unsafe = auth !== "pending" && Boolean(auth?.mixed || auth?.isolation_blocked || account.blockedReason || account.mainHasThirdParty);
+  if (unsafe) {
+    items.push({ key: "login", label: "账号检查", tone: "warn", text: (typeof auth === "object" && auth?.reason) || account.blockedReason || "登录与 API 设置混在同一个目录，已阻止操作" });
+  } else if (account.type === "official") {
     items.push(
       auth === "pending"
         ? { key: "login", label: "登录", tone: "muted", text: "检查中…" }
@@ -88,18 +92,16 @@ export function AccountReadiness({
                 text: "还没登录",
                 action: {
                   label: "复制登录命令",
-                  run: () =>
-                    void navigator.clipboard
-                      ?.writeText(loginCommand)
-                      .then(() => toast.success("已复制登录命令，到终端里运行"))
-                      .catch(() => toast.error(`复制失败，请手动运行：${loginCommand}`)),
+                  run: onCopyLogin,
                 },
               },
     );
   }
   items.push(
-    account.isMain
-      ? { key: "launch", label: "启动命令", tone: "ok", text: `直接用 ${group.bin}` }
+    unsafe
+      ? { key: "launch", label: "启动命令", tone: "warn", text: "账号检查通过后才能使用" }
+      : account.isMain
+      ? { key: "launch", label: "启动命令", tone: "ok", text: "从账号行复制受控启动命令" }
       : account.command
         ? { key: "launch", label: "启动命令", tone: "ok", text: account.command }
         : { key: "launch", label: "启动命令", tone: "warn", text: "还没有", action: { label: "写入启动命令", run: onAddLaunch } },

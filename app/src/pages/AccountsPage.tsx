@@ -21,10 +21,12 @@ import { currentConfigOf } from "../lib/agentCurrent";
 import type { SharedStatus } from "../lib/profileShared";
 import { useAccountOps } from "../lib/useAccountOps";
 import type { OfficialAuthStatus } from "../lib/observed";
-import { authTerminalCommand, parseProfileDefinition } from "../lib/profileDefinition";
+import { authShellLabel, defaultAuthShell, type AuthShell } from "../lib/profileDefinition";
+import { accountCommand } from "../lib/accountCommand";
 import { engineKeys, useEngineQuery, useRefreshUpstream } from "../lib/queries";
 import { isCollection } from "../lib/skillCollections";
 import { cn } from "../lib/utils";
+import { Select } from "../components/Select";
 
 /** 表头与每行同宽的列：额度、操作。 */
 const COL_QUOTA = "hidden w-80 shrink-0 md:block";
@@ -42,6 +44,15 @@ async function copyText(text: string, message: string) {
     toast.success(message);
   } catch {
     toast.error("复制失败，请检查剪贴板权限");
+  }
+}
+
+async function copyAccountCommand(element: string, operation: "login" | "logout" | "launch", shell: AuthShell) {
+  try {
+    const command = await accountCommand(element, operation, shell);
+    await copyText(command.terminal_command, `已复制${operation === "login" ? "登录" : operation === "logout" ? "退出" : "启动"}命令，到 ${authShellLabel(shell)} 里运行`);
+  } catch (error) {
+    toast.error(`账号检查未通过：${String(error)}`);
   }
 }
 
@@ -64,19 +75,20 @@ interface RowActions {
 
 function AccountRow({
   account,
-  group,
   auth,
   actions,
   now,
+  authShell,
 }: {
   account: Account;
   group: AgentAccounts;
   auth: OfficialAuthStatus | "pending" | null;
   actions: RowActions;
   now: Date;
+  authShell: AuthShell;
 }) {
   const id = account.elementId;
-  const loginCommand = authTerminalCommand(group.kind, group.bin, "login", account.isMain ? undefined : account.configDir);
+  const blocked = Boolean(account.blockedReason || account.mainHasThirdParty || auth !== "pending" && auth && (auth.mixed || auth.isolation_blocked));
   const loggedOut = account.type === "official" && auth !== "pending" && auth?.state === "logged-out";
   // 登录了哪个账号：Claude 给出邮箱与档位；Codex 官方命令只说登录方式
   const identity = auth && auth !== "pending" && auth.state === "logged-in"
@@ -101,6 +113,8 @@ function AccountRow({
   if (account.drifted) badges.push({ text: "目录被外部改过", tone: "warn" });
   if (account.mainHasThirdParty) badges.push({ text: "主账号含第三方接入", tone: "warn" });
   if (account.blockedReason) badges.push({ text: "登记读不了", tone: "warn" });
+  if (auth !== "pending" && auth?.mixed) badges.push({ text: "登录与 API 混用，已阻止操作", tone: "warn" });
+  else if (auth !== "pending" && auth?.isolation_blocked) badges.push({ text: "账号检查未通过", tone: "warn" });
 
   return (
     <li data-testid={`account-row-${id}`} className="flex items-center gap-4 px-4 py-2.5">
@@ -150,7 +164,8 @@ function AccountRow({
           <button
             type="button"
             data-testid={`account-login-${id}`}
-            onClick={() => void copyText(loginCommand, "已复制登录命令，到终端里运行")}
+            disabled={blocked}
+            onClick={() => void copyAccountCommand(id, "login", authShell)}
             className="inline-flex w-20 items-center justify-center gap-1 rounded-md bg-primary px-2.5 py-1.5 text-xs text-primary-foreground hover:bg-primary/90"
           >
             <LogIn className="h-3.5 w-3.5" aria-hidden /> 登录
@@ -159,8 +174,8 @@ function AccountRow({
           <button
             type="button"
             data-testid={`account-copy-${id}`}
-            disabled={!account.command}
-            onClick={() => account.command && void copyText(account.command, `已复制启动命令 ${account.command}`)}
+            disabled={blocked || auth === "pending"}
+            onClick={() => void copyAccountCommand(id, "launch", authShell)}
             className="inline-flex w-20 items-center justify-center gap-1 rounded-md border px-2.5 py-1.5 text-xs hover:bg-accent disabled:opacity-40"
           >
             <Copy className="h-3.5 w-3.5" aria-hidden /> 复制
@@ -177,7 +192,8 @@ function AccountRow({
               ? [{ label: "采用目录里的内容", testId: `account-menu-adopt-${id}`, onSelect: actions.onAdopt }]
               : []),
             ...(account.type === "official"
-              ? [{ label: "复制登录命令", testId: `account-menu-login-${id}`, onSelect: () => void copyText(loginCommand, "已复制登录命令") }]
+              ? [{ label: "复制登录命令", testId: `account-menu-login-${id}`, disabled: blocked, onSelect: () => void copyAccountCommand(id, "login", authShell) },
+                { label: "复制退出命令", testId: `account-menu-logout-${id}`, disabled: blocked, onSelect: () => void copyAccountCommand(id, "logout", authShell) }]
               : []),
             { label: "准备情况", testId: `account-menu-readiness-${id}`, onSelect: actions.onReadiness },
             { label: "技能", testId: `account-menu-skills-${id}`, onSelect: actions.onManageSkills },
@@ -194,9 +210,11 @@ function AccountRow({
 export default function AccountsPage({
   onManageSkills,
   onOpenSources,
+  onOpenSecrets,
 }: {
   onManageSkills?: (accountId: string) => void;
   onOpenSources?: () => void;
+  onOpenSecrets?: () => void;
 }) {
   const agentsQuery = useEngineQuery<StatusData>("agents:status");
   const refreshUpstream = useRefreshUpstream();
@@ -216,6 +234,7 @@ export default function AccountsPage({
   const [commandsOf, setCommandsOf] = useState<Account | null>(null);
   const [quotaBusy, setQuotaBusy] = useState(false);
   const [keyword, setKeyword] = useState("");
+  const [authShell, setAuthShell] = useState<AuthShell>(() => defaultAuthShell());
   const [quotaSort, setQuotaSort] = useState<QuotaSort>("default");
   const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(() => new Date());
@@ -234,7 +253,7 @@ export default function AccountsPage({
         )
       : [];
   const group = groups.find((item) => item.agentId === selected) ?? groups[0];
-  const officialIds = (group?.accounts ?? []).filter((a) => a.type === "official").map((a) => a.elementId);
+  const officialIds = (group?.accounts ?? []).map((a) => a.elementId);
   const authQueries = useQueries({
     queries: officialIds.map((only) => ({
       queryKey: engineKeys.request("agents:auth-status", ["--only", only]),
@@ -320,7 +339,8 @@ export default function AccountsPage({
     if (index < 0) return null;
     const query = authQueries[index];
     if (query.isPending) return "pending";
-    return query.data?.ok ? query.data.data : null;
+    if (query.data?.ok) return query.data.data;
+    return { element: account.elementId, state: "unknown", logged_in: null, method: null, third_party: account.type === "api", mixed: false, isolation_blocked: true, reason: query.data?.errors[0]?.message ?? "无法读取账号配置，请刷新后检查" };
   };
 
   const visibleAccounts = sortByQuota(group.accounts, quotaSort, now).filter((account) => {
@@ -358,7 +378,7 @@ export default function AccountsPage({
           ? undefined
           : mainAuth?.state === "unknown"
             ? { label: "确认", onClick: actionsOf(mainAccount).onProbeAuth }
-            : { label: "复制登录命令", onClick: () => void copyText(authTerminalCommand(group.kind, group.bin, "login"), "已复制登录命令，到终端里运行") },
+            : { label: "复制登录命令", onClick: () => void copyAccountCommand(mainAccount.elementId, "login", authShell) },
     },
     {
       id: "source",
@@ -373,6 +393,16 @@ export default function AccountsPage({
   return (
     <div className="space-y-3">
       <h1 className="text-lg font-semibold tracking-tight">账号</h1>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <span>登录命令使用</span>
+        <Select label="登录命令使用的终端" testId="accounts-auth-shell" value={authShell}
+          onChange={(value) => setAuthShell(value as AuthShell)}
+          options={[{ value: "powershell", label: "PowerShell" }, { value: "posix", label: "Bash / Zsh / Git Bash" }]}
+          className="rounded-md border bg-background px-2 py-1 text-xs" />
+        <span className="text-muted-foreground">
+          {authShell === "powershell" ? "在 cmd 中请先输入 powershell，再粘贴登录命令。" : "请在 Bash、Zsh 或 Git Bash 中运行。"}
+        </span>
+      </div>
       <GettingStarted steps={startSteps} />
       <div className="flex flex-wrap items-center gap-3">
         <div role="tablist" className="inline-flex rounded-lg bg-muted p-1">
@@ -484,7 +514,8 @@ export default function AccountsPage({
             group={group}
             auth={authOf(account)}
             isNew={readiness!.isNew}
-            loginCommand={authTerminalCommand(group.kind, group.bin, "login", account.isMain ? undefined : account.configDir)}
+            loginShellLabel={authShellLabel(authShell)}
+            onCopyLogin={() => void copyAccountCommand(account.elementId, "login", authShell)}
             onAddLaunch={actions.onAddLaunch}
             onProbeAuth={actions.onProbeAuth}
             onClose={() => setReadiness(null)}
@@ -506,6 +537,7 @@ export default function AccountsPage({
               auth={authOf(account)}
               actions={actionsOf(account)}
               now={now}
+              authShell={authShell}
             />
           ))}
         </ul>
@@ -514,10 +546,12 @@ export default function AccountsPage({
       {drawer && (
         <AccountDrawer
           mode={drawer}
+          authShell={authShell}
           ops={ops}
           secretSource={secretSourceOf(secretsQuery.data?.ok ? secretsQuery.data.data : null)}
           reservedNames={reservedNames}
           onCreated={(profileId) => setReadiness({ id: `profiles:${profileId}`, isNew: true })}
+          onOpenSecrets={onOpenSecrets}
           onClose={() => setDrawer(null)}
         />
       )}
@@ -526,12 +560,6 @@ export default function AccountsPage({
           account={commandsOf}
           group={group}
           aliasSource={aliasSource}
-          defaultValue={(() => {
-            if (commandsOf.isMain) return group.bin;
-            const definition = definitionOf(commandsOf);
-            const id = commandsOf.elementId.replace(/^profiles:/, "");
-            return definition ? ops.launchValue(parseProfileDefinition(id, definition), group.bin) : group.bin;
-          })()}
           onClose={() => setCommandsOf(null)}
         />
       )}

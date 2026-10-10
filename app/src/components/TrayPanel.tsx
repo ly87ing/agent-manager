@@ -6,6 +6,8 @@ import type { StatusData } from "../lib/contract";
 import { useEngineQuery } from "../lib/queries";
 import { cn } from "../lib/utils";
 import { QuotaCells } from "./QuotaCells";
+import { accountCommand } from "../lib/accountCommand";
+import { defaultAuthShell } from "../lib/profileDefinition";
 
 const REFRESH_MS = 10 * 60_000;
 
@@ -60,12 +62,13 @@ export function TrayPanel() {
     ? buildAccounts(agents.data.data.elements, profiles.data?.ok ? profiles.data.data.elements : [], aliasValues)
     : [];
 
-  const copy = async (command: string) => {
+  const copy = async (element: string) => {
     try {
-      await navigator.clipboard.writeText(command);
+      const command = await accountCommand(element, "launch", defaultAuthShell());
+      await navigator.clipboard.writeText(command.terminal_command);
       setFailed(false);
-      setCopied(command);
-      window.setTimeout(() => setCopied((value) => (value === command ? null : value)), 1500);
+      setCopied(element);
+      window.setTimeout(() => setCopied((value) => (value === element ? null : value)), 1500);
     } catch {
       setFailed(true);
     }
@@ -111,11 +114,11 @@ export function TrayPanel() {
                     <button
                       type="button"
                       data-testid={`tray-panel-copy-${account.elementId}`}
-                      disabled={!account.command}
-                      onClick={() => account.command && void copy(account.command)}
+                      disabled={Boolean(account.blockedReason || account.mainHasThirdParty)}
+                      onClick={() => void copy(account.elementId)}
                       className="inline-flex w-16 shrink-0 items-center justify-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent disabled:opacity-40"
                     >
-                      {copied === account.command && account.command ? (
+                      {copied === account.elementId ? (
                         <><Check className="h-3.5 w-3.5 text-success" aria-hidden /> 已复制</>
                       ) : (
                         <><Copy className="h-3.5 w-3.5" aria-hidden /> 复制</>

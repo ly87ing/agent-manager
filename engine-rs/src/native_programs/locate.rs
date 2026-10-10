@@ -10,8 +10,6 @@
 use crate::platform::Canon;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-#[cfg(not(windows))]
-use std::io::Read;
 use std::path::{Path, PathBuf};
 #[cfg(not(windows))]
 use std::process::{Command, Stdio};
@@ -46,27 +44,16 @@ fn shell_path(shell: &str, flag: &str, home: &Path) -> Result<Vec<PathBuf>, Stri
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    // 登录 shell 的配置可能起后台进程：超时时整组结束
-    let (mut child, group) =
-        crate::process::spawn_group(&mut command).map_err(|e| format!("启动 {shell} 失败：{e}"))?;
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if start.elapsed() > PROBE_TIMEOUT => {
-                group.kill(&mut child);
-                let _ = child.wait();
-                return Err(format!("{shell} {flag} 超时"));
+    let output = crate::process::capture_group(&mut command, PROBE_TIMEOUT, 256 * 1024).map_err(
+        |error| {
+            if error.kind() == std::io::ErrorKind::TimedOut {
+                format!("{shell} {flag} 超时")
+            } else {
+                format!("启动 {shell} 失败：{error}")
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
-            Err(e) => return Err(e.to_string()),
-        }
-    }
-    let mut out = String::new();
-    if let Some(mut stdout) = child.stdout.take() {
-        let mut limited = (&mut stdout).take(256 * 1024);
-        let _ = limited.read_to_string(&mut out);
-    }
+        },
+    )?;
+    let out = String::from_utf8(output.stdout).unwrap_or_default();
     let line = out
         .lines()
         .rev()
@@ -414,5 +401,63 @@ impl Located {
             "app": self.app,
             "package_dir": self.package_dir.as_ref().map(|d| tilde(d)),
         })
+    }
+}
+
+#[cfg(all(test, unix))]
+mod capture_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn shell_path_deadline_covers_descendant_output_after_shell_exit() {
+        let root = crate::process::capture_test_support::root("shell-path");
+        let shell = root.join("shell");
+        std::fs::write(
+            &shell,
+            r#"#!/bin/sh
+(printf ready > "$HOME/ready"; sleep 11; printf survived > "$HOME/late") &
+printf exited > "$HOME/parent-exited"
+printf '\n__AGENT_MANAGER_PATH__/usr/bin:/bin\n'
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let start = Instant::now();
+        let result = shell_path(shell.to_str().unwrap(), "-c", &root);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "PATH probe waited for descendant: {elapsed:?}"
+        );
+        assert!(result.unwrap_err().contains("超时"));
+        assert!(root.join("ready").exists());
+        assert!(root.join("parent-exited").exists());
+        std::thread::sleep(Duration::from_secs(12).saturating_sub(start.elapsed()));
+        assert!(
+            !root.join("late").exists(),
+            "PATH probe left its descendant running"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn shell_path_drains_verbose_shell_output_without_blocking() {
+        let root = crate::process::capture_test_support::root("shell-output");
+        let shell = root.join("shell");
+        std::fs::write(
+            &shell,
+            r#"#!/bin/sh
+printf '\n__AGENT_MANAGER_PATH__/usr/bin:/bin\n'
+head -c 524288 /dev/zero
+"#,
+        )
+        .unwrap();
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            shell_path(shell.to_str().unwrap(), "-c", &root).unwrap(),
+            vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")]
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

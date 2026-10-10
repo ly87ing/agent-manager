@@ -63,7 +63,7 @@ impl Request {
 
 const KNOWN_DOMAINS: &[&str] = &[
     "usage", "agents", "mcp", "skills", "rules", "aliases", "profiles", "secrets", "profile",
-    "programs", "policy", "system", "runs", "db", "logs", "config",
+    "programs", "policy", "system", "runs", "db", "logs", "config", "accounts",
 ];
 
 fn mode_of(request: &Request) -> Mode {
@@ -170,7 +170,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     let is_alias_apply = request.command.replace('.', ":") == "aliases:apply";
     let is_profile_apply = matches!(
         request.command.replace('.', ":").as_str(),
-        "profiles:apply" | "profiles:apply-definition"
+        "profiles:apply" | "profiles:apply-definition" | "profiles:create"
     );
     let is_profile_seed = request.command.replace('.', ":") == "profiles:seed";
     let is_profile_shared_apply = request.command.replace('.', ":") == "profiles:shared-apply";
@@ -481,6 +481,9 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ));
     }
     match (domain, verb) {
+        ("accounts", "command") => crate::native_account_context::command_request(ctx, request)
+            .map(|data| (data, vec![]))
+            .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}"))),
         ("agents", "status" | "apply") => crate::native_agents::handle(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
@@ -528,7 +531,7 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         }
         (
             "profiles",
-            "status" | "preview" | "apply" | "apply-definition" | "adopt" | "seed"
+            "status" | "preview" | "apply" | "apply-definition" | "create" | "adopt" | "seed"
             | "shared-status" | "shared-apply",
         ) => crate::native_profiles::handle(ctx, request)
             .map(|data| (data, vec![]))
@@ -1062,6 +1065,177 @@ fn check_expected_agent_definition(
     Ok(())
 }
 
+/// Account incarnations are local registration metadata, never credentials. Only
+/// an explicit registration/update initializes a legacy profile; queries stay read-only.
+pub(crate) fn prepare_account_generations(
+    before: &Value,
+    after: &mut Value,
+    imported: bool,
+    explicit_key: Option<&str>,
+) -> anyhow::Result<()> {
+    let old = before
+        .pointer("/agents/definitions")
+        .and_then(Value::as_object);
+    let Some(definitions) = after
+        .pointer_mut("/agents/definitions")
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    for (id, raw) in definitions {
+        let previous = old.and_then(|definitions| definitions.get(id));
+        let explicitly_saved = imported
+            || explicit_key.is_some_and(|key| {
+                key == "agents"
+                    || key == "agents.definitions"
+                    || key == format!("agents.definitions.{id}")
+                    || key.starts_with(&format!("agents.definitions.{id}."))
+            });
+        let initialize_legacy = explicitly_saved && raw.get("account_generation").is_none();
+        let independent = raw.get("profile").is_some()
+            || (raw.get("mcp_config").is_some()
+                && !matches!(id.as_str(), "claude-code" | "codex" | "opencode"));
+        if (previous == Some(raw) && !initialize_legacy)
+            || !independent
+            || raw.get("_delete") == Some(&Value::Bool(true))
+        {
+            continue;
+        }
+        let registered = previous.filter(|previous| {
+            (previous.get("profile").is_some() || previous.get("mcp_config").is_some())
+                && previous.get("profile").is_some() == raw.get("profile").is_some()
+                && previous.get("_delete") != Some(&Value::Bool(true))
+        });
+        let generation = registered.and_then(|raw| raw.get("account_generation"));
+        let inherited_stale = registered.is_none()
+            && raw.get("account_generation")
+                == previous.and_then(|raw| raw.get("account_generation"));
+        if !imported && raw.get("account_generation") != generation && !inherited_stale {
+            anyhow::bail!("账号代际由本工具维护，拒绝更改或提交自定义代际；请刷新定义后重试");
+        }
+        let generation = match generation {
+            Some(generation) => generation.clone(),
+            None => Value::String(store::new_account_generation()?),
+        };
+        raw.as_object_mut()
+            .ok_or_else(|| anyhow::anyhow!("账号定义必须是对象"))?
+            .insert("account_generation".into(), generation);
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_account_policy_change(
+    ctx: &Context,
+    before: &Value,
+    after: &Value,
+) -> anyhow::Result<()> {
+    let old = before
+        .pointer("/agents/definitions")
+        .and_then(Value::as_object);
+    if let Some(definitions) = after
+        .pointer("/agents/definitions")
+        .and_then(Value::as_object)
+    {
+        for (id, raw) in definitions {
+            if old.and_then(|definitions| definitions.get(id)) == Some(raw)
+                || raw.get("_delete") == Some(&Value::Bool(true))
+            {
+                continue;
+            }
+            if let Some(mcp) = raw.get("mcp_config") {
+                let path = mcp
+                    .as_str()
+                    .or_else(|| mcp.get("path").and_then(Value::as_str))
+                    .filter(|path| !path.is_empty())
+                    .ok_or_else(|| anyhow::anyhow!("账号 MCP 配置路径为空或格式不正确"))?;
+                let path = crate::native_mcp::targets::expand_home(path, &ctx.home_dir);
+                crate::native_profiles::paths::validate_account_resource_path(
+                    ctx, after, id, &path,
+                )?;
+            }
+            if raw.get("profile").is_none() {
+                if raw.get("mcp_config").is_some() {
+                    let names = crate::native_secrets::account_reference_names(ctx, id, after)?;
+                    if !names.is_empty() {
+                        let owners =
+                            crate::native_secrets::account_secret_owners_in_policy(ctx, after)?;
+                        for name in names {
+                            if owners
+                                .get(&name.to_ascii_uppercase())
+                                .is_some_and(|ids| ids.iter().any(|owner| owner != id))
+                            {
+                                anyhow::bail!(
+                                    "账号 MCP 密钥变量属于另一账号或已退役登记，拒绝保存定义"
+                                );
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            let enabled = raw.get("enabled").and_then(Value::as_bool).unwrap_or(true);
+            let def = crate::native_profiles::model::parse_definition(id, raw, enabled)?;
+            crate::native_profiles::paths::config_dir_in_policy(ctx, &def, after)?;
+            crate::native_profiles::model::validate_secret_ownership_in_policy(ctx, &def, after)?;
+        }
+    }
+    Ok(())
+}
+
+fn changed_account_ids(before: &Value, after: &Value) -> std::collections::BTreeSet<String> {
+    let old = before
+        .pointer("/agents/definitions")
+        .and_then(Value::as_object);
+    let new = after
+        .pointer("/agents/definitions")
+        .and_then(Value::as_object);
+    old.into_iter()
+        .flat_map(|defs| defs.keys())
+        .chain(new.into_iter().flat_map(|defs| defs.keys()))
+        .filter(|id| old.and_then(|defs| defs.get(*id)) != new.and_then(|defs| defs.get(*id)))
+        .cloned()
+        .collect()
+}
+
+/// Reserve the old reference graph before replacing or deleting its definition.
+/// The caller includes both reservation and registration in one SQL transaction.
+pub(crate) fn reserve_changed_account_references(
+    ctx: &Context,
+    conn: &rusqlite::Connection,
+    before: &Value,
+    after: &Value,
+) -> anyhow::Result<()> {
+    for id in changed_account_ids(before, after) {
+        if before
+            .pointer("/agents/definitions")
+            .and_then(|defs| defs.get(&id))
+            .is_some_and(|raw| raw.get("_delete") != Some(&Value::Bool(true)))
+        {
+            crate::native_secrets::reserve_account_references(ctx, conn, &id, before, Some(after))?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn claim_changed_account_references(
+    ctx: &Context,
+    conn: &rusqlite::Connection,
+    before: &Value,
+    after: &Value,
+) -> anyhow::Result<()> {
+    for id in changed_account_ids(before, after) {
+        if after
+            .pointer("/agents/definitions")
+            .and_then(|defs| defs.get(&id))
+            .is_some_and(|raw| raw.get("_delete") != Some(&Value::Bool(true)))
+        {
+            let names = crate::native_secrets::account_reference_names(ctx, &id, after)?;
+            crate::native_secrets::claim_variable_ownership(ctx, conn, &id, &names)?;
+        }
+    }
+    Ok(())
+}
+
 fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
     reject_unrecognized_args(
         request,
@@ -1115,12 +1289,23 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
         }
     }
 
-    let mut candidate_policy = store::effective_policy(ctx).map_err(DispatchError::from)?;
+    let before_policy = store::effective_policy(ctx).map_err(DispatchError::from)?;
+    let mut candidate_policy = before_policy.clone();
     if let Some(expected) = &expected_definition {
         check_expected_agent_definition(&candidate_policy, &segments, expected)?;
     }
     set_dot_path(&mut candidate_policy, &segments, value.clone())?;
+    prepare_account_generations(&before_policy, &mut candidate_policy, false, Some(key))
+        .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}")))?;
     validate_mcp_policy_candidate(key, &value, &candidate_policy)?;
+    validate_account_policy_change(ctx, &before_policy, &candidate_policy)
+        .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}")))?;
+    let _account_locks = crate::native_account_context::lock_policy_account_changes(
+        ctx,
+        &before_policy,
+        &candidate_policy,
+    )
+    .map_err(DispatchError::from)?;
 
     // 首次明确保存即初始化库并固化内置默认；同连接同事务完成读-改-写。
     let mut conn = store::open_write(ctx).map_err(DispatchError::from)?;
@@ -1128,15 +1313,32 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(DispatchError::from)?;
     let mut policy = store::policy_from_connection(&tx).map_err(DispatchError::from)?;
+    if !store::policy_matches_write_snapshot(&tx, &policy, &before_policy)
+        .map_err(DispatchError::from)?
+    {
+        return Err(DispatchError::new(
+            "POLICY_CONFLICT",
+            "账号登记在预检后发生变化，未保存；请刷新后重试",
+        ));
+    }
+    let before = policy.clone();
     if let Some(expected) = &expected_definition {
         check_expected_agent_definition(&policy, &segments, expected)?;
     }
     set_dot_path(&mut policy, &segments, value.clone())?;
+    prepare_account_generations(&before, &mut policy, false, Some(key))
+        .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}")))?;
     validate_mcp_policy_candidate(key, &value, &policy)?;
+    validate_account_policy_change(ctx, &before, &policy)
+        .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}")))?;
+    reserve_changed_account_references(ctx, &tx, &before, &policy)
+        .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}")))?;
     store::write_policy(&tx, &policy).map_err(DispatchError::from)?;
+    claim_changed_account_references(ctx, &tx, &before, &policy)
+        .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}")))?;
     // MCP 定义不再留在策略里：同一事务里转成「未分配的已保存定义」（mcp_saved）。
     if key == "mcp" || key.starts_with("mcp.") {
-        let scans = crate::native_mcp::inventory::scan_targets(&policy, &ctx.home_dir);
+        let scans = crate::native_mcp::inventory::scan_targets_checked(ctx, &policy);
         crate::native_mcp::legacy::migrate(&tx, &scans, Some(&request.run_id))
             .map_err(|err| DispatchError::new("USAGE_ERROR", format!("{err:#}")))?;
     }
@@ -1172,6 +1374,14 @@ fn policy_delete(ctx: &Context, request: &Request) -> DispatchResult {
         .value("--key")
         .ok_or_else(|| DispatchError::new("USAGE_ERROR", "policy:delete 需要 --key <dot.path>"))?;
     let segments = validate_key(key)?;
+    let before = store::effective_policy(ctx).map_err(DispatchError::from)?;
+    let mut after = before.clone();
+    delete_dot_path(&mut after, &segments)?;
+    prepare_account_generations(&before, &mut after, false, None)
+        .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}")))?;
+    let _account_locks =
+        crate::native_account_context::lock_policy_account_changes(ctx, &before, &after)
+            .map_err(DispatchError::from)?;
     let mut conn = match store::open_readonly(ctx).map_err(DispatchError::from)? {
         // 无库即无键：删除不建库
         None => {
@@ -1186,7 +1396,15 @@ fn policy_delete(ctx: &Context, request: &Request) -> DispatchResult {
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(DispatchError::from)?;
     let mut policy = store::policy_from_connection(&tx).map_err(DispatchError::from)?;
+    if !store::policy_matches_write_snapshot(&tx, &policy, &before).map_err(DispatchError::from)? {
+        return Err(DispatchError::new(
+            "POLICY_CONFLICT",
+            "账号登记在预检后发生变化，未删除；请刷新后重试",
+        ));
+    }
     delete_dot_path(&mut policy, &segments)?;
+    reserve_changed_account_references(ctx, &tx, &before, &policy)
+        .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}")))?;
     store::write_policy(&tx, &policy).map_err(DispatchError::from)?;
     store::record_operation(&tx, Some(&request.run_id), "policy:delete", Some(key), None)
         .map_err(DispatchError::from)?;

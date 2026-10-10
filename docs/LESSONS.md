@@ -8,6 +8,29 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Cross-linking does not prove a Windows fixture satisfies the runtime contract.**
+- The new account preflight requires a native assistant executable and private credential-source ACLs. Existing Windows fixtures still installed `.cmd` helpers and relied on inherited temporary-directory permissions; successful compilation could not reveal those runtime mismatches. The fixtures now compile a std-only fake `.exe` and protect only new temporary roots with inheritable current-user ACLs, including atomic credential replacement.
+- Keep explicit native-executable, private-source rotation, and broad-ACL rejection cases. Cross-compiled test executables remain build evidence until those cases run on Windows.
+- Seen 1× (2026-10-10).
+
+**Policy CAS must distinguish its own known migration from external changes.**
+- `open_write` retires unused historical builtin skill definitions before a command's transaction. Comparing the resulting full policy with the raw preflight snapshot rejected legitimate `policy:set`, `policy:delete`, and `config:import` operations. The CAS now uses the same read-only retirement projection as the migration, while every account, source, and other user policy field must still match exactly.
+- Keep the legacy retirement integration test, and test that account/source changes and adopted collections are still rejected without writes.
+- Seen 1× (2026-10-10).
+
+**A process timeout test must cover pipe EOF after the parent exits.**
+- Killing a still-running parent did not exercise the unbounded reader joins or post-exit PATH reads. The program-capture regressions now keep stdout or stderr inherited by a descendant, assert one shared parent/reader deadline, and check that no delayed descendant marker is written. Restoring the original function bodies fails these regressions; the unchanged output/exit-status test still passes.
+- Check every capture caller. Version/auth/upstream probes still replaced unfinished pipe reads with empty buffers after a separate two-second wait. Their Rust pipe-holder regression failed with `Some((0, [], []))` before these callers adopted the same shared deadline and cleanup.
+- Seen 1× (2026-10-10).
+
+**Startup snapshots must not replace newer runtime events.**
+- A first cold-link fix deduplicated delivery IDs but still replayed an older initial snapshot after a newer runtime event, replacing the import dialog's latest URL. The regression now delays the startup read, delivers a newer event first, and verifies that the stale snapshot cannot overwrite it.
+- Seen 1× (2026-10-10).
+
+**Negative controls need distinct build artifacts.**
+- A before-fix timeout check in a temporary checkout initially reused the shared Cargo target's same-package artifact. Renaming the temporary package forced the original function bodies to compile; six new behavior regressions then failed for the intended reasons. A copied source tree alone is not proof that Cargo executed that copy.
+- Seen 1× (2026-10-10).
+
 **A test for masking must use a value the generic sanitizer does not already mask.**
 - `mcp:check` masks resolved variable values in its output. The first test used `sk-am-check-…`; it still passed with the masking removed, because `sanitize_diagnostic_message` already masks `sk-` keys. With a plain value (`plainvalue-qq83hz-moonlight`) it failed without the masking and passed with it (`a97f432`).
 - Before trusting a new test, put the old code back and see it fail for the reason it names.
@@ -56,3 +79,17 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 **A development build next to the installed app needs its own identifier.**
 - The single-instance plugin hands a second launch to the running instance, so a debug build with the default identifier would only have focused the user's installed app. The tray panel was accepted with `TAURI_CONFIG='{"identifier":"io.github.ly87ing.agent-manager.devcheck"}'`, an isolated `HOME` and `AGENT_MANAGER_DATA_DIR`, and the installed instance kept running (`09675b5`).
 - Seen 1× (2026-10-09).
+
+**Status and actual startup must use the same explicit account context.**
+- Cleaning a status probe while a launch command inherits its shell's tokens, endpoint, or `claude` alias can display one identity and start another. Resolve the executable, clear the child environment, and validate the same directory, authentication mode, endpoint, and owned references for status, launch, login, and logout.
+- Run the exact generated command under an interfering shell alias and fake parent credentials; read back the fake child's environment and main/A/B files. A string assertion alone cannot prove isolation.
+- Seen 1× (2026-10-10).
+
+**Deleting a reference must not transfer credential ownership.**
+- Rendering a referenced MCP credential into its native file can erase the variable name from that file. Removing an account or an MCP entry can erase its remaining ownership evidence. Preserve variable names and account registration bindings in the same transaction as the change; never persist the values.
+- Include metadata-only registration, native MCP removal, disabled snapshots, and account recreation in both rejection and legitimate account-owned rotation tests.
+- Seen 1× (2026-10-10).
+
+**A rejection test must reach the security check it names.**
+- A missing generated-command binding or an unsupported argument can reject a request before its intended alias or account test runs. Build fixtures through the actual command interface and assert the relevant diagnostic. Compare critical tests with the previous source using the same fixtures.
+- Seen 1× (2026-10-10).

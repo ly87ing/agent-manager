@@ -423,7 +423,163 @@ pub fn referenced_vars(format: &Format, view: &View) -> Vec<(String, &'static st
             out.push((name.clone(), "header", var.clone()));
         }
     }
+    // Codex uses bare environment-variable names for these native fields.
+    for key in ["bearer_token_env_var", "env_vars"] {
+        if let Some(value) = view.extra.get(key) {
+            if let Some(name) = value.as_str() {
+                out.push((key.to_string(), "env", name.to_string()));
+            }
+            if let Some(names) = value.as_array() {
+                for name in names.iter().filter_map(Value::as_str) {
+                    out.push((key.to_string(), "env", name.to_string()));
+                }
+            }
+        }
+    }
     out
+}
+
+/// Every supported expansion is ownership-checked, including embedded argument,
+/// URL and header references. Defaults and malformed placeholders fail closed.
+pub fn text_referenced_vars(text: &str) -> Result<std::collections::BTreeSet<String>> {
+    let mut names = std::collections::BTreeSet::new();
+    for open in ["${", "{env:"] {
+        let mut rest = text;
+        while let Some(start) = rest.find(open) {
+            let after = &rest[start + open.len()..];
+            let end = after
+                .find('}')
+                .ok_or_else(|| anyhow!("MCP 变量引用不完整，拒绝执行"))?;
+            let name = &after[..end];
+            if !crate::secret_values::valid_var_name(name) {
+                bail!("MCP 变量引用无效或使用默认值，拒绝执行；请显式配置此账号的变量");
+            }
+            names.insert(name.to_string());
+            rest = &after[end + 1..];
+        }
+    }
+    Ok(names)
+}
+
+pub fn all_referenced_vars(
+    format: &Format,
+    view: &View,
+) -> Result<std::collections::BTreeSet<String>> {
+    let mut names = referenced_vars(format, view)
+        .into_iter()
+        .map(|(_, _, name)| name)
+        .collect::<std::collections::BTreeSet<_>>();
+    for text in std::iter::once(&view.command)
+        .chain(&view.args)
+        .chain(std::iter::once(&view.url))
+        .chain(view.env.iter().map(|(_, value)| value))
+    {
+        names.extend(text_referenced_vars(text)?);
+    }
+    for (_, header) in &view.headers {
+        if let HeaderVal::Lit(text) = header {
+            names.extend(text_referenced_vars(text)?);
+        }
+    }
+    fn extras(value: &Value, names: &mut std::collections::BTreeSet<String>) -> Result<()> {
+        match value {
+            Value::String(text) => names.extend(text_referenced_vars(text)?),
+            Value::Object(map) => {
+                for value in map.values() {
+                    extras(value, names)?;
+                }
+            }
+            Value::Array(items) => {
+                for value in items {
+                    extras(value, names)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    extras(&Value::Object(view.extra.clone()), &mut names)?;
+    if names
+        .iter()
+        .any(|name| !crate::secret_values::valid_var_name(name))
+    {
+        bail!("MCP 变量名称无效，拒绝执行");
+    }
+    Ok(names)
+}
+
+/// Copying an account-bound credential, or a reference whose owner cannot be
+/// established, would silently give the destination another account's identity.
+/// Existing entries remain editable in place; this guard only controls copying.
+pub fn account_copy_blocked_reason(format: &Format, view: &View) -> Option<&'static str> {
+    match all_referenced_vars(format, view) {
+        Ok(names) if names.is_empty() => {}
+        _ => {
+            return Some(
+                "服务含凭据、变量引用或无法确认的引用，不能跨账号复制；请在目标账号单独配置",
+            )
+        }
+    }
+    if view.env.iter().any(|(name, value)| {
+        env_ref(format, value).is_some()
+            || value.contains("${")
+            || value.contains("{env:")
+            || reject_secret_literal(name, value).is_err()
+    }) || view.headers.iter().any(|(name, value)| match value {
+        HeaderVal::Ref(_) => true,
+        HeaderVal::Lit(value) => {
+            value.contains("${")
+                || value.contains("{env:")
+                || reject_secret_literal(name, value).is_err()
+        }
+    }) {
+        return Some("服务含凭据或变量引用，不能跨账号复制；请在目标账号单独配置");
+    }
+    if view.args.iter().any(|arg| {
+        arg.contains("${")
+            || arg.contains("{env:")
+            || crate::native::reject_secret_text(arg).is_some()
+            || arg.starts_with('-') && crate::native::credential_like_name(arg)
+    }) || crate::native::reject_secret_text(&view.command).is_some()
+    {
+        return Some("服务命令可能带凭据，不能跨账号复制；请在目标账号单独配置");
+    }
+    if !view.url.is_empty() {
+        let Some((scheme, rest)) = view.url.split_once("://") else {
+            return Some("服务地址无法确认，不能跨账号复制");
+        };
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+        if !matches!(scheme, "https" | "http" | "wss" | "ws")
+            || authority.is_empty()
+            || authority.contains('@')
+            || view.url.contains(['?', '#'])
+            || view.url.chars().any(char::is_whitespace)
+            || crate::native::reject_secret_text(&view.url).is_some()
+        {
+            return Some("服务地址可能带凭据，不能跨账号复制；请在目标账号单独配置");
+        }
+    }
+    const SAFE_EXTRA: &[&str] = &[
+        "type",
+        "cwd",
+        "timeout",
+        "alwaysLoad",
+        "enabled_tools",
+        "disabled_tools",
+        "tool_timeout_sec",
+        "startup_timeout_ms",
+        "required",
+        "default_tools_approval_mode",
+    ];
+    if view.extra.iter().any(|(key, value)| {
+        !SAFE_EXTRA.contains(&key.as_str())
+            || value.to_string().contains("${")
+            || value.to_string().contains("{env:")
+            || crate::native::reject_secret_text(&value.to_string()).is_some()
+    }) {
+        return Some("服务含无法确认凭据归属的设置，不能跨账号复制；请在目标账号单独配置");
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -706,7 +862,7 @@ pub fn reject_secret_literal(key: &str, value: &str) -> Result<()> {
 }
 
 fn resolve_var(var: &str, missing: &mut Vec<String>) -> String {
-    match crate::secret_values::lookup(var) {
+    match crate::secret_values::lookup_account(var).ok() {
         Some(value) => value,
         None => {
             missing.push(var.to_string());

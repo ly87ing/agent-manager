@@ -1,14 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { parseAliasValue } from "./aliasCommand";
+import { assistantExtraArgs } from "./aliasCommand";
 import type { ProfileObserved, StatusData } from "./contract";
 import { runEngine } from "./engine";
 import { useExecutions } from "./execution";
 import {
   buildProfileDefinition,
-  isThirdPartyProfile,
-  parseProfileDefinition,
-  profileLaunchValue,
   type ProfileDraftPreview,
   type ProfileFormInput,
 } from "./profileDefinition";
@@ -19,13 +16,14 @@ import { mcpFillArgs, mcpFillRows } from "./mcpFill";
 import type { EngineElement, McpTarget } from "./contract";
 import { configureArgs, currentConfigOf } from "./agentCurrent";
 import { sharedApplyArgs, type SharedStatus } from "./profileShared";
-import { DEFAULT_SECRETS_PATH, secretSourceOf } from "./secretSource";
+import { accountCommand } from "./accountCommand";
 import { useAliasSource, type AliasFilePreview } from "./useAliasSource";
 import { sameJson } from "./utils";
 
 export interface CreatePreview {
   config: ProfileDraftPreview;
   alias: AliasFilePreview;
+  launchValue: string;
 }
 
 /**
@@ -33,7 +31,7 @@ export interface CreatePreview {
  *
  * 写入保护沿用实例域：新建前预览并在保存时重读比对，编辑带 status 给出的文件与定义基准，
  * 引擎拒绝时文件与库都不动。新账号默认带上主账号的全部共用设置（权限、状态栏、规则、MCP），
- * 启动命令沿用主账号命令里的时区与语言。
+ * 启动命令由引擎绑定账号；仅沿用主账号命令末尾的 CLI 参数。
  */
 export function useAccountOps() {
   const aliasSource = useAliasSource();
@@ -41,31 +39,22 @@ export function useAccountOps() {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: engineKeys.all });
 
-  /** 主账号那条命令（如用户自己的 `alias claude='TZ=… claude …'`）里的时区与语言。 */
-  const mainPrefix = (bin: string): string => {
-    const source = aliasSource.source;
-    const value = source?.aliases[bin]
-      ?? source?.targets.flatMap((target) => target.external).find((line) => line.name === bin)?.value;
-    if (!value) return "";
-    const parsed = parseAliasValue(value);
-    const parts: string[] = [];
-    if (parsed.timezone) parts.push(`TZ="${parsed.timezone}"`);
-    if (parsed.lang) parts.push(`LANG="${parsed.lang}"`, `LC_ALL="${parsed.lang}"`);
-    return parts.length ? `${parts.join(" ")} ` : "";
-  };
-
   /** 新账号的默认启动参数：沿用主账号命令里的固定参数。 */
   const mainExtraArgs = (bin: string): string => {
     const source = aliasSource.source;
     const value = source?.aliases[bin]
       ?? source?.targets.flatMap((target) => target.external).find((line) => line.name === bin)?.value;
-    return value ? parseAliasValue(value).extraArgs : "";
+    return value ? assistantExtraArgs(value) : "";
   };
 
-  const launchValue = (input: ProfileFormInput, bin: string) => `${mainPrefix(bin)}${profileLaunchValue(input, bin)}`;
+  const launchValue = async (input: ProfileFormInput, bin: string, draft = false) => {
+    const command = await accountCommand(`profiles:${input.id}`, "launch", "posix", draft ? buildProfileDefinition(input, bin) : undefined);
+    return `${command.launch_value}${input.extraArgs.trim() ? ` ${input.extraArgs.trim()}` : ""}`;
+  };
 
   const previewCreate = async (input: ProfileFormInput, bin: string): Promise<CreatePreview | string> => {
     try {
+      const value = await launchValue(input, bin, true);
       const [config, alias] = await Promise.all([
         runEngine<ProfileDraftPreview>("profiles:preview", [
           "--only", `profiles:${input.id}`,
@@ -73,11 +62,11 @@ export function useAccountOps() {
           "--on-save",
           "--items", ALL_SEED_ITEMS.join(","),
         ]),
-        aliasSource.previewSetAlias(input.id, launchValue(input, bin)),
+        aliasSource.previewSetAlias(input.id, value),
       ]);
       if (!config.ok) return config.errors[0]?.message ?? "配置预览失败";
       if (typeof alias === "string") return alias;
-      return { config: config.data, alias };
+      return { config: config.data, alias, launchValue: value };
     } catch (error) {
       return `预览失败：${String(error)}`;
     }
@@ -97,34 +86,6 @@ export function useAccountOps() {
     } catch {
       return "读不到现有终端命令，没有保存；刷新后重试";
     }
-  };
-
-  /** API Key 只写进外部密钥文件；还没有密钥文件时在默认位置新建（仅本人可读）。 */
-  const saveSecret = async (variable: string, value: string): Promise<string | null> => {
-    const status = await runEngine<StatusData>("secrets:status", []);
-    const source = secretSourceOf(status.ok ? status.data : null);
-    if (source && !source.configured) {
-      const created = await runEngine("secrets:source", ["--path", DEFAULT_SECRETS_PATH, "--create"]);
-      if (!created.ok) return `没能新建密钥文件 ${DEFAULT_SECRETS_PATH}：${created.errors[0]?.message ?? "未知原因"}`;
-    }
-    const saved = await runEngine("secrets:set", ["--var", variable, "--value", value]);
-    return saved.ok ? null : `API Key 没有写入密钥文件：${saved.errors[0]?.message ?? "未知原因"}`;
-  };
-
-  /** 目录里还没有配置文件时先写好（第三方凭据、官方账号的凭据隔离），已有文件不覆盖。 */
-  const writeNewConfig = async (id: string): Promise<boolean> => {
-    const status = await runEngine<StatusData>("profiles:status", []).catch(() => null);
-    const element = status?.ok ? status.data.elements.find((item) => item.id === `profiles:${id}`) : undefined;
-    if (!element) return false;
-    const base = (element.observed as { base?: string | null }).base ?? "missing";
-    if (base !== "missing") return true;
-    const applied = await execute({
-      command: "profiles:apply",
-      label: `写入账号 ${id} 的配置`,
-      args: ["--only", element.id, "--base", "missing"],
-      silent: true,
-    });
-    return applied?.ok === true;
   };
 
   /** 新账号拿到全部在用的技能（按技能逐个 add，单个失败不影响其余）。 */
@@ -181,29 +142,26 @@ export function useAccountOps() {
       toast.error("目标文件在预览后变了，没有保存；请看一眼新的预览再创建");
       return false;
     }
-    if (secret?.value) {
-      const failed = await saveSecret(secret.variable, secret.value);
-      if (failed) {
-        toast.error(failed);
-        return false;
-      }
+    if (!again.config.base) {
+      toast.error("没有取得账号目录的当前内容，没有保存；请刷新后重试");
+      return false;
     }
-    const saved = await runEngine("policy:set", [
-      "--layer", "local",
-      "--key", `agents.definitions.${input.id}`,
-      "--value", JSON.stringify({ ...buildProfileDefinition(input, bin), _delete: false, _replace: true }),
-      "--expect-definition", "null",
+    const saved = await runEngine("profiles:create", [
+      "--only", `profiles:${input.id}`,
+      "--definition", JSON.stringify(buildProfileDefinition(input, bin)),
+      "--base", again.config.base,
+      ...(secret?.value ? ["--secret-var", secret.variable, "--secret-value", secret.value] : []),
     ]).catch((error) => ({ ok: false, errors: [{ message: String(error) }] }) as const);
     if (!saved.ok) {
       toast.error(`没有保存：${saved.errors[0]?.message ?? "未知错误"}`);
       return false;
     }
-    if ((isThirdPartyProfile(input) || input.kind === "claude") && !(await writeNewConfig(input.id))) {
-      toast.error(`账号 ${input.id} 已登记，但配置没写进目录，启动命令也先不写`, { description: "原因见任务记录；处理后在账号上重新编辑保存。" });
-      await refresh();
-      return true;
+    let aliasOk = false;
+    try {
+      aliasOk = await aliasSource.setAlias(input.id, await launchValue(input, bin), { label: `写入账号 ${input.id} 的启动命令`, silent: true });
+    } catch (error) {
+      toast.error(`已创建账号 ${input.id}，但启动检查未通过`, { description: String(error) });
     }
-    const aliasOk = await aliasSource.setAlias(input.id, launchValue(input, bin), { label: `写入账号 ${input.id} 的启动命令`, silent: true });
     const seeded = await execute({
       command: "profiles:seed",
       args: seedArgs(input.id, ALL_SEED_ITEMS),
@@ -221,6 +179,20 @@ export function useAccountOps() {
     else toast.success(`已创建账号 ${input.id}`, { description: `已链接 ${skills.linked} 个技能；新开终端后输入 ${input.id} 启动。` });
     await refresh();
     return true;
+  };
+
+  const refreshLaunchBinding = async (id: string): Promise<void> => {
+    const existing = aliasSource.source?.aliases[id];
+    if (!existing) return;
+    try {
+      const current = await accountCommand(`profiles:${id}`, "launch");
+      const extra = assistantExtraArgs(existing);
+      const value = `${current.launch_value}${extra ? ` ${extra}` : ""}`;
+      const ok = await aliasSource.setAlias(id, value, { label: `更新账号 ${id} 的启动命令`, silent: true });
+      if (!ok) toast.warning(`账号 ${id} 已保存，启动命令需要更新`, { description: "到账号的「命令」里点「更新启动命令」，再新开终端。" });
+    } catch (error) {
+      toast.warning(`账号 ${id} 已保存，启动命令需要更新`, { description: String(error) });
+    }
   };
 
   /** 只改显示名：只写登记，不碰目录文件。 */
@@ -264,27 +236,21 @@ export function useAccountOps() {
       toast.error(`没有保存：${preview.ok ? "预览没有完成，请重试" : preview.errors[0]?.message ?? "预览失败"}`);
       return false;
     }
-    if (secret?.value) {
-      const failed = await saveSecret(secret.variable, secret.value);
-      if (failed) {
-        toast.error(failed);
-        return false;
-      }
-    }
     const applied = await execute({
       command: "profiles:apply-definition",
       label: `更新账号 ${id}`,
       args: [...bases, "--candidate", JSON.stringify(candidate),
-        "--preview-file-base", preview.data.file_base, "--preview-content-base", preview.data.content_base],
+        "--preview-file-base", preview.data.file_base, "--preview-content-base", preview.data.content_base,
+        ...(secret?.value ? ["--secret-var", secret.variable, "--secret-value", secret.value] : [])],
       silent: true,
     });
     if (!applied?.ok) {
       const reason = applied?.errors[0]?.message ?? "详见任务记录";
-      if (secret?.value) toast.error("API Key 已保存，但账号配置未更新", { description: reason });
-      else toast.error(`没有保存：${reason}`);
+      toast.error(`没有保存：${reason}`);
       await refresh();
       return false;
     }
+    await refreshLaunchBinding(id);
     await refresh();
     return true;
   };
@@ -315,10 +281,16 @@ export function useAccountOps() {
   };
 
   /** 账号还没有启动命令：按登记补写一条。 */
-  const addLaunch = async (id: string, definition: Record<string, unknown>, bin: string): Promise<boolean> => {
-    const ok = await aliasSource.setAlias(id, launchValue(parseProfileDefinition(id, definition), bin), { label: `写入账号 ${id} 的启动命令` });
-    if (ok) await refresh();
-    return ok;
+  const addLaunch = async (id: string, _definition: Record<string, unknown>, _bin: string): Promise<boolean> => {
+    try {
+      const command = await accountCommand(`profiles:${id}`, "launch");
+      const ok = await aliasSource.setAlias(id, command.launch_value, { label: `写入账号 ${id} 的启动命令` });
+      if (ok) await refresh();
+      return ok;
+    } catch (error) {
+      toast.error(`没有写入启动命令：${String(error)}`);
+      return false;
+    }
   };
 
   /** 目录被外部改过：以目录里的实际内容更新登记（只改库，文件不动）。 */
@@ -328,6 +300,7 @@ export function useAccountOps() {
       label: `以目录内容更新账号 ${elementId.replace(/^profiles:/, "")}`,
       args: ["--only", elementId, "--base", base],
     });
+    if (result?.ok) await refreshLaunchBinding(elementId.replace(/^profiles:/, ""));
     await refresh();
     return result?.ok === true;
   };

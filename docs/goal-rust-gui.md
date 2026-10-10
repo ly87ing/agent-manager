@@ -765,3 +765,89 @@ MCP rows now distinguish configuration enablement from a manual connection check
 - Final full engine and Tauri suites, 738 frontend tests in 70 files, production build, Rust formatting and documentation links passed. Full engine tests used one test thread and frontend tests used two workers after host contention caused earlier waits to fail; assertions and timeouts were not weakened.
 - Limits: actual assistant sessions and a native Tauri window were not launched for this slice. No real MCP configuration, installer, tag or Release was changed or published.
 
+## 2026-10-10: Cross-platform safety regressions
+
+This candidate fixes the eight issues reviewed at `cbe73bf`: resolved account-path
+isolation, junction-backed current-version protection, explicit authentication
+shell commands, Windows npm prefix/launcher lifecycle, PATH/PATHEXT tool probes,
+format-specific DEB updater manifests, cold/runtime import-link delivery, and one
+deadline for child exit plus inherited pipe closure. It also fixes the existing
+Linux autostart `OsString` to `PathBuf` compilation error exposed by a real Tauri
+build. Subsystem contracts are linked from [Subsystem References](subsystems/README.md).
+
+- Passed on Linux: 489 engine tests plus the portable program-lifecycle CLI
+  harness; 30 Tauri tests; 749 frontend tests across 72 files; 13 script tests;
+  TypeScript checking and production frontend build; engine/Tauri formatting and
+  all-target checks; engine release build. Two frontend cases that require native
+  Windows `.cmd` execution were skipped by their platform condition.
+- Windows GNU all-target checking and compilation/linking of every engine test
+  executable passed. This is compile coverage, not Windows execution.
+- Actual operations used isolated HOME/data and disposable fixtures: protected
+  account/rules bytes stayed unchanged after rejected writes, package lifecycle
+  fixtures checked ordinary/scoped npm layouts and rollback readback, process
+  regressions measured post-parent-exit deadlines and descendant cleanup, and
+  generated authentication commands ran in POSIX and PowerShell 7.5.3 on Linux.
+  Negative controls restored the original implementations in separate build
+  artifacts and demonstrated the unsafe behavior before these fixes.
+- A separate-identifier native Linux debug binary with embedded frontend built
+  successfully. Runtime acceptance could not start because the execution
+  environment denied Xvfb Unix sockets, including after scoped escalation. Wine
+  also failed during its own initialization, before any application test.
+- Still unverified: native Windows/macOS execution, installed OS protocol
+  registration and single-instance delivery, physical desktop UI, real assistant
+  login, and signed DEB/AppImage download/install/restart. Synthetic updater
+  signatures verify manifest bindings only. No installer, tag or Release was
+  published, and no real account configuration was used.
+
+## 2026-10-10: Strict account isolation and publication decision
+
+The latest user decision supersedes inherited credentials and raw assistant
+aliases. Controlled status, launch, login, and logout now use the same registered
+account context, absolute assistant executable, clean environment, authentication
+mode, endpoint, and account-owned credential references. Paths and identity files
+must be unique across registrations; conflicting references and automatic copies
+of credential-bearing MCP entries are refused. Legacy unsafe definitions receive
+diagnostics without automatic credential migration. The supported contracts and
+limits are documented in [Account Isolation](ACCOUNT-ISOLATION.md).
+
+Verification before integration with the newer remote MCP commit:
+
+- The last complete engine run had **563 passed and 14 failed**, plus the portable
+  lifecycle harness. It is not an accepted full-suite result. Four alias failures
+  used obsolete raw-command fixtures; two audit fixtures lacked the newly required
+  explicit source; one failure exposed a real CAS bug caused by the existing
+  unused-builtin-skill migration. Those changes have targeted passing evidence:
+  aliases 18+1, audit 6, and migration/config/core/skills 68. Other failures included
+  CLI version timeouts and two assertions without enough diagnostic output; their
+  individual causes were not all established. Original logs were retained.
+- The later Windows-fixture follow-up passed Mac agent-settings 27 and transaction
+  14, with one transaction failure: the test expected to reach a real fake-CLI probe
+  but received "external credential source changed; no write." Its cause remains
+  unresolved. The command stopped before the remaining four targets.
+- Frontend full rerun passed **751**, with **4 conditional skips**: two PowerShell
+  execution cases because the runtime is unavailable and two native Windows `.cmd`
+  cases. An earlier run had two timeout-related failures; unchanged targeted cases
+  and the subsequent full run passed. Tauri passed **31**, scripts **13**, and
+  TypeScript checking passed. These checks preceded the newer remote MCP changes
+  and are not a final integrated-snapshot acceptance claim.
+- Windows GNU test-executable compilation/linking passed before the last capture,
+  CAS, and fixture updates. Later Windows test checking and the alias target check
+  passed. Two newest Windows fixture regressions were not compiled or executed.
+  No native Windows or Linux desktop acceptance is claimed for this combined change.
+- Native Mac interaction created isolated official/API accounts, generated their
+  commands, and exercised fake login, logout, and a launch under an interfering
+  alias and polluted parent credentials. Disk readback preserved main and the other
+  account. All credentials and CLIs were fake; no real upstream login was attempted.
+  A 760 px API drawer overflow was found and fixed. The final rebuilt UI width
+  recheck and final-snapshot native acceptance were not completed. Clipboard
+  delivery readback was not verified.
+- Host load exceeded 250 during later runs. Build/test concurrency was limited to
+  one without weakening assertions or extending timeouts. Resource contention is
+  recorded as a condition, not a proven explanation for every failure.
+
+After seeing the failed full-suite result and outstanding acceptance, the user
+explicitly requested publication of the completed cross-platform and isolation
+changes to `main`. Publication therefore proceeds without claiming acceptance or
+waiting for another full run. The newer remote MCP commit must be preserved; no
+force push, branch-protection bypass, PR, tag, release, or billing change is authorized.
+

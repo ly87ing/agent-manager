@@ -110,27 +110,57 @@ function validate(payload: SharePayload): SharePayload | string {
   return "只支持分享 MCP 服务与技能来源";
 }
 
-/** 系统里点开分享链接时，桌面壳发来的事件；只带链接文字，校验与确认都在界面里做。 */
+/** Native deliveries carry a URL and opening ID; validation and confirmation stay in the UI. */
 const IMPORT_LINK_EVENT = "import-link";
 
-/** 订阅点开的分享链接；返回取消订阅函数（浏览器环境没有这个通道，返回空操作）。 */
-export function subscribeImportLinks(onLink: (url: string) => void): () => void {
+/** Native delivery IDs distinguish a repeated click from the startup/event race. */
+interface ImportLinkDelivery { id: number; url: string }
+export interface ImportLinkClient {
+  listen(onDelivery: (delivery: unknown) => void): Promise<() => void>;
+  current(): Promise<unknown>;
+}
+
+const nativeImportLinkClient: ImportLinkClient = {
+  async listen(onDelivery) {
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen<unknown>(IMPORT_LINK_EVENT, (event) => onDelivery(event.payload));
+  },
+  async current() {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<ImportLinkDelivery[]>("import_links_current");
+  },
+};
+
+/** Subscribe before reading startup links, so no opening can fall between them. */
+export function subscribeImportLinks(onLink: (url: string) => void, client = nativeImportLinkClient): () => void {
   let disposed = false;
   let unlisten: (() => void) | undefined;
+  // Native IDs are monotonic. A delayed snapshot (or event) must never
+  // replace a newer URL already shown in the single import dialog.
+  let latestId = 0;
+  const receive = (value: unknown) => {
+    if (disposed || !value || typeof value !== "object") return;
+    const { id, url } = value as Partial<ImportLinkDelivery>;
+    if (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0 || id <= latestId
+      || typeof url !== "string" || url.length > 64 * 1024 || !url.startsWith(SHARE_PREFIX.split("?")[0])) return;
+    latestId = id;
+    onLink(url);
+  };
   void (async () => {
     try {
-      const { listen } = await import("@tauri-apps/api/event");
-      const stop = await listen<unknown>(IMPORT_LINK_EVENT, (event) => {
-        if (typeof event.payload === "string" && event.payload.startsWith(SHARE_PREFIX.split("?")[0])) onLink(event.payload);
-      });
-      if (disposed) stop();
-      else unlisten = stop;
+      const stop = await client.listen(receive);
+      if (disposed) { stop(); return; }
+      unlisten = stop;
+      const initial = await client.current();
+      if (Array.isArray(initial)) initial.forEach(receive);
     } catch {
-      // 浏览器环境没有桌面壳，不是错误
+      // A browser has no desktop bridge. A failed initial read must not remove
+      // an already registered listener for subsequent runtime openings.
     }
   })();
   return () => {
     disposed = true;
     unlisten?.();
+    unlisten = undefined;
   };
 }

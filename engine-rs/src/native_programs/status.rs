@@ -6,7 +6,8 @@
 //!
 //! 只读零写、零网络，不执行被检测的程序（新版本探测结果只从探测缓存读）。
 
-use anyhow::Result;
+use crate::platform::Canon;
+use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -231,22 +232,45 @@ fn managed_ids(ctx: &Context) -> Vec<String> {
     out
 }
 
+/// Resolve both relative symlinks and absolute Windows junctions to a completed,
+/// direct child version. An unreadable or external pointer is never a version ID.
+pub(crate) fn managed_current(dir: &Path) -> Result<Option<String>> {
+    let current = dir.join("current");
+    match std::fs::symlink_metadata(&current) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+        Ok(_) => {}
+    }
+    // A normal directory named `current` is not a managed version pointer.
+    crate::platform::read_link(&current)?;
+    let root = dir.canon()?;
+    let target = current.canon()?;
+    if target.parent() != Some(root.as_path()) || !target.join(META_FILE).is_file() {
+        bail!("当前版本不在已完成的托管版本目录内");
+    }
+    let version = target
+        .file_name()
+        .and_then(|v| v.to_str())
+        .filter(|v| *v != "current" && !v.starts_with('.'))
+        .ok_or_else(|| anyhow!("当前版本目录无法识别"))?;
+    Ok(Some(version.to_string()))
+}
+
 /// 托管的版本（装完整的）与当前版本。
-fn managed_versions(dir: &Path) -> (Vec<String>, Option<String>) {
+pub(crate) fn managed_versions(dir: &Path) -> (Vec<String>, Option<String>) {
     let versions: Vec<String> = std::fs::read_dir(dir)
         .map(|rd| {
             rd.filter_map(|e| e.ok())
                 .filter(|e| {
-                    e.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                    e.file_name() != "current"
+                        && e.file_type().map(|t| t.is_dir()).unwrap_or(false)
                         && e.path().join(META_FILE).is_file()
                 })
                 .map(|e| e.file_name().to_string_lossy().to_string())
                 .collect()
         })
         .unwrap_or_default();
-    let current = crate::platform::read_link(dir.join("current"))
-        .ok()
-        .map(|p| p.to_string_lossy().to_string());
+    let current = managed_current(dir).ok().flatten();
     (versions, current)
 }
 
@@ -259,12 +283,16 @@ pub(crate) fn managed_bins(dir: &Path, scheme: &str) -> Vec<String> {
     let mut out: Vec<String> = std::fs::read_dir(bin_dir)
         .map(|rd| {
             rd.filter_map(|e| e.ok())
-                .map(|e| e.file_name().to_string_lossy().to_string())
+                .filter(|e| !cfg!(windows) || crate::platform::is_executable(&e.path()))
+                .map(|e| {
+                    crate::platform::command_name(&e.file_name().to_string_lossy()).to_string()
+                })
                 .filter(|n| !n.starts_with('.'))
                 .collect()
         })
         .unwrap_or_default();
     out.sort();
+    out.dedup();
     out
 }
 
@@ -800,6 +828,48 @@ fn manual_commands(id: &str, owner: Option<&str>, install: &[InstallSpec]) -> Va
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_current_resolves_absolute_directory_links_and_rejects_external_targets() {
+        let root = std::env::temp_dir().join(format!(
+            "am-managed-current-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let dir = root.join("program");
+        let version = dir.join("1.2.0");
+        std::fs::create_dir_all(&version).unwrap();
+        std::fs::write(version.join(META_FILE), "{}").unwrap();
+        let current = dir.join("current");
+        #[cfg(windows)]
+        junction::create(&version, &current).unwrap();
+        #[cfg(unix)]
+        crate::platform::link_dir(&version, &current).unwrap();
+        assert_eq!(managed_current(&dir).unwrap(), Some("1.2.0".into()));
+        assert_eq!(
+            managed_versions(&dir),
+            (vec!["1.2.0".into()], Some("1.2.0".into()))
+        );
+        crate::platform::remove_link(&current).unwrap();
+
+        let external = root.join("outside/1.2.0");
+        std::fs::create_dir_all(&external).unwrap();
+        std::fs::write(external.join(META_FILE), "{}").unwrap();
+        crate::platform::link_dir(&external, &current).unwrap();
+        assert!(managed_current(&dir).is_err());
+        assert_eq!(managed_versions(&dir).1, None);
+        crate::platform::remove_link(&current).unwrap();
+        crate::platform::link_dir(&dir.join("missing"), &current).unwrap();
+        assert!(managed_current(&dir).is_err());
+        crate::platform::remove_link(&current).unwrap();
+        assert_eq!(managed_current(&dir).unwrap(), None);
+        std::fs::create_dir_all(&current).unwrap();
+        assert!(managed_current(&dir).is_err());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     fn need(command: &str, args: &[&str]) -> Option<(String, Option<String>, bool)> {
         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();

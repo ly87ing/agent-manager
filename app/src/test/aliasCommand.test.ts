@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ALIAS_NAME_RE,
+  assistantExtraArgs,
   aliasTextError,
   buildAliasValue,
   listTimeZones,
@@ -49,6 +50,13 @@ describe("启动命令别名的解析与生成", () => {
 
   it("空值不可结构化", () => {
     expect(parseAliasValue("   ").structured).toBe(false);
+  });
+
+  it("受控主账号只继承分隔符后的CLI参数，账号绑定与环境前缀不进入新账号", () => {
+    const controlled = 'TZ="UTC" "/isolated/Agent Manager" --account-launch --home "/isolated/home" --data-dir "/isolated/data" --only "agents:claude-code" --operation launch --binding "generation-a" -- --dangerously-skip-permissions';
+    expect(assistantExtraArgs(controlled)).toBe("--dangerously-skip-permissions");
+    expect(assistantExtraArgs('TZ="UTC" claude --verbose')).toBe("--verbose");
+    expect(assistantExtraArgs('"/isolated/Agent Manager" --account-launch --only "agents:claude-code"')).toBe("");
   });
 
   it("生成的值把环境变量放在命令之前且用双引号包裹", () => {

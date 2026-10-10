@@ -128,14 +128,13 @@ pub(crate) fn resolve_targets(ctx: &Context, policy: &Value) -> Vec<Target> {
             profiles::ProfileKind::Claude => (RuleKind::Claude, profiles::FILE_CLAUDE_RULES),
             profiles::ProfileKind::Codex => (RuleKind::Codex, profiles::FILE_CODEX_RULES),
         };
-        let (path, blocked) =
-            match profiles::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir) {
-                Ok(dir) => (dir.join(file), None),
-                Err(err) => (
-                    profiles::expand_home(def.config_dir_raw.trim(), &ctx.home_dir).join(file),
-                    Some(format!("{err:#}")),
-                ),
-            };
+        let (path, blocked) = match crate::native_profiles::paths::config_dir(ctx, &def) {
+            Ok(dir) => (dir.join(file), None),
+            Err(err) => (
+                profiles::expand_home(def.config_dir_raw.trim(), &ctx.home_dir).join(file),
+                Some(format!("{err:#}")),
+            ),
+        };
         out.push(Target {
             id: format!("{PROFILE_PREFIX}{}", def.id),
             name: format!("{} 实例规则", def.display_name),
@@ -181,6 +180,14 @@ mod tests {
 
     #[test]
     fn profiles_become_targets_sorted_by_id_with_their_own_rules_file() {
+        // A real isolated, canonical HOME keeps this directory contract portable
+        // across macOS firmlinks and Windows path spelling.
+        let root = std::env::temp_dir().join(format!("am-rule-targets-{}", store::uuid_v4()));
+        std::fs::create_dir_all(root.join("home")).unwrap();
+        let context = Context {
+            data_dir: root.join("data"),
+            home_dir: dunce::canonicalize(root.join("home")).unwrap(),
+        };
         let mut policy = store::builtin_policy();
         policy["agents"]["definitions"]["zz-work"] = json!({
             "display_name": "Codex 工作", "profile": {"base_agent": "codex", "config_dir": "~/.codex-work"}
@@ -189,7 +196,7 @@ mod tests {
             "display_name": "Claude ly", "profile": {"base_agent": "claude-code", "config_dir": "~/.claude-ly/"}
         });
         policy["agents"]["zz-work"] = json!({"enabled": false});
-        let targets = resolve_targets(&ctx(), &policy);
+        let targets = resolve_targets(&context, &policy);
         let ids: Vec<&str> = targets.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -202,17 +209,18 @@ mod tests {
         );
         assert_eq!(
             targets[2].path,
-            PathBuf::from("/home/u/.claude-ly/CLAUDE.md")
+            context.home_dir.join(".claude-ly/CLAUDE.md")
         );
         assert_eq!(targets[2].display, "~/.claude-ly/CLAUDE.md");
         assert_eq!(targets[2].name, "Claude ly 实例规则");
         assert!(targets[2].enabled);
         assert_eq!(
             targets[3].path,
-            PathBuf::from("/home/u/.codex-work/AGENTS.md")
+            context.home_dir.join(".codex-work/AGENTS.md")
         );
         assert_eq!(targets[3].kind, RuleKind::Codex);
         assert!(!targets[3].enabled, "停用的实例目标同样停用");
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -3,7 +3,9 @@ import { useState } from "react";
 import { toast } from "sonner";
 import type { Envelope } from "../lib/contract";
 import { useEngineQuery } from "../lib/queries";
-import { agoLabel, launchCommandOf, resumeCommand, type SessionsData } from "../lib/sessions";
+import { agoLabel, accountElementOfSession, resumeCommand, type RecentSession, type SessionsData } from "../lib/sessions";
+import { accountCommand } from "../lib/accountCommand";
+import { defaultAuthShell } from "../lib/profileDefinition";
 import { useAccountList } from "../lib/useAccountNames";
 import { usageAccountKey } from "../lib/usageModel";
 import { AgentIcon } from "./AgentIcon";
@@ -40,12 +42,14 @@ export function RecentSessions({ agent, labelOf }: { agent: string; labelOf: (ag
     .slice(0, SHOWN);
   if (rows.length === 0) return null;
 
-  const copy = async (command: string) => {
+  const copy = async (element: string, kind: "claude" | "codex", session: RecentSession) => {
     try {
-      await navigator.clipboard.writeText(command);
+      const shell = defaultAuthShell();
+      const command = await accountCommand(element, "launch", shell);
+      await navigator.clipboard.writeText(resumeCommand(kind, command.terminal_command, session, shell));
       toast.success("已复制，到终端里粘贴运行");
-    } catch {
-      toast.error("复制失败，请检查剪贴板权限");
+    } catch (error) {
+      toast.error(`没有复制会话命令：${String(error)}`);
     }
   };
 
@@ -57,7 +61,7 @@ export function RecentSessions({ agent, labelOf }: { agent: string; labelOf: (ag
       </div>
       <ul className="divide-y">
         {rows.map(({ account, session }) => {
-          const launch = launchCommandOf(account.agent, groups);
+          const element = accountElementOfSession(account.agent, groups);
           return (
             <li key={`${account.agent}/${session.id}`} data-testid={`session-${session.id}`} className="flex items-center gap-3 px-5 py-2">
               <AgentIcon kind={account.kind} />
@@ -76,9 +80,9 @@ export function RecentSessions({ agent, labelOf }: { agent: string; labelOf: (ag
               <button
                 type="button"
                 data-testid={`session-copy-${session.id}`}
-                disabled={!launch}
-                title={launch ? resumeCommand(account.kind, launch, session) : "这个账号还没有启动命令，先到账号页写入"}
-                onClick={() => launch && void copy(resumeCommand(account.kind, launch, session))}
+                disabled={!element}
+                title={element ? "检查此账号后复制受控会话命令" : "这个账号未登记或检查未通过，请到账号页查看"}
+                onClick={() => element && void copy(element, account.kind, session)}
                 className="inline-flex w-24 shrink-0 items-center justify-center gap-1 rounded-md border px-2.5 py-1.5 text-xs hover:bg-accent disabled:opacity-40"
               >
                 <Copy className="h-3.5 w-3.5" aria-hidden /> 复制命令

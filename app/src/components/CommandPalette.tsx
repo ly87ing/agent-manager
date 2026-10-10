@@ -9,6 +9,11 @@ import { sendDueReminders } from "../lib/quotaReminder";
 import { publishTrayAccounts, type TrayAccount } from "../lib/trayActions";
 import { cn } from "../lib/utils";
 import { matchesKeyword } from "./SearchInput";
+import { useQueries } from "@tanstack/react-query";
+import { accountCommand, type AccountCommand } from "../lib/accountCommand";
+import { runEngine } from "../lib/engine";
+import { engineKeys } from "../lib/queries";
+import { defaultAuthShell } from "../lib/profileDefinition";
 
 export interface CommandItem {
   id: string;
@@ -95,15 +100,21 @@ export function CommandPalette({
       ? buildAccounts(agents.data.data.elements, profiles.data?.ok ? profiles.data.data.elements : [], aliasValues)
       : [];
   }, [agents.data, profiles.data, aliases.data]);
+  const accountIds = groups.flatMap((group) => group.accounts.map((account) => account.elementId));
+  const controlledQueries = useQueries({ queries: accountIds.map((id) => {
+    const args = ["--only", id, "--operation", "launch", "--shell", defaultAuthShell()];
+    return { queryKey: engineKeys.request("accounts:command", args), queryFn: () => runEngine<AccountCommand>("accounts:command", args) };
+  }) });
+  const controlledCommands = new Map(accountIds.map((id, index) => [id, controlledQueries[index].data?.ok ? controlledQueries[index].data.data.terminal_command : null]));
 
   const trayAccounts = useMemo<TrayAccount[]>(() => groups.flatMap((group) => group.accounts.map((account) => ({
     agentId: group.agentId,
     agentName: group.label,
     accountId: account.elementId,
     accountName: account.isMain ? "主账号" : account.name,
-    command: account.command,
+    command: controlledCommands.get(account.elementId) ?? null,
     usageSummary: trayUsageSummary(account.usage, usageNow),
-  }))), [groups, usageNow]);
+  }))), [groups, usageNow, JSON.stringify([...controlledCommands])]);
 
   useEffect(() => {
     // 三份状态都成功后才替换原生菜单，避免瞬时读取失败清空上一次可用菜单
@@ -143,19 +154,19 @@ export function CommandPalette({
     for (const group of groups) {
       for (const account of group.accounts) {
         const name = account.isMain ? "主账号" : account.name;
-        const command = account.command;
+        const command = controlledCommands.get(account.elementId) ?? null;
         out.push({
           id: `account:${account.elementId}`,
           label: `${group.label} · ${name}`,
-          hint: command ? `复制 ${command}` : "没有启动命令",
-          keywords: `${group.agentId} ${command ?? ""} ${account.configDir} ${account.apiHost ?? ""} 账号`,
+          hint: command ? "复制受控命令" : "账号检查未通过",
+          keywords: `${group.agentId} ${account.command ?? ""} ${account.configDir} ${account.apiHost ?? ""} 账号`,
           group: "账号",
           run: () => {
             if (!command) {
               onNavigate("accounts");
               return;
             }
-            void navigator.clipboard.writeText(command)
+            void accountCommand(account.elementId, "launch", defaultAuthShell()).then((fresh) => navigator.clipboard.writeText(fresh.terminal_command))
               .then(() => toast.success(`已复制启动命令 ${command}`))
               .catch(() => toast.error("复制失败，请到账号页查看启动命令"));
           },
@@ -197,7 +208,7 @@ export function CommandPalette({
       run: () => refreshUpstream.mutate(undefined),
     });
     return out;
-  }, [groups, skills.data, mcp.data, refreshUpstream, onNavigate, onOpenAgentSkills]);
+  }, [groups, skills.data, mcp.data, refreshUpstream, onNavigate, onOpenAgentSkills, JSON.stringify([...controlledCommands])]);
 
   const filtered = useMemo(() => {
     const scoped = scope === "quick" ? items.filter((item) => item.group === "账号") : items;
@@ -258,6 +269,7 @@ export function CommandPalette({
             value={keyword}
             onChange={(event) => {
               setTargetItemId(null);
+              setActive(0);
               setKeyword(event.target.value);
             }}
             data-testid="command-palette-input"

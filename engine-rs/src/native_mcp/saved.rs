@@ -269,6 +269,54 @@ pub fn load_readonly(ctx: &Context) -> Result<Vec<SavedRow>> {
     }
 }
 
+/// Validate every imported snapshot against the candidate policy and the full
+/// candidate reference graph before committing any configuration or DB rows.
+pub(crate) fn validate_saved_rows(ctx: &Context, policy: &Value, rows: &[SavedRow]) -> Result<()> {
+    let mut owners = crate::native_secrets::account_secret_owners_in_policy(ctx, policy)?;
+    let targets = super::targets::agent_targets(policy, &ctx.home_dir);
+    let mut candidate = Vec::new();
+    for row in rows {
+        validate_row(row)?;
+        if row.agent.is_empty() {
+            continue;
+        }
+        let target = targets
+            .iter()
+            .find(|target| target.agent == row.agent)
+            .ok_or_else(|| {
+                anyhow::anyhow!("已保存 MCP 设置的账号 {} 未登记，没有导入", row.agent)
+            })?;
+        let view = super::entry::parse(&target.format, &row.entry).map_err(|_| {
+            anyhow::anyhow!(
+                "已保存 MCP 设置无法确认账号 {} 的有效引用，没有导入",
+                row.agent
+            )
+        })?;
+        let names = super::entry::all_referenced_vars(&target.format, &view)?;
+        for name in &names {
+            owners
+                .entry(name.to_ascii_uppercase())
+                .or_default()
+                .insert(row.agent.clone());
+        }
+        candidate.push((row.agent.as_str(), names));
+    }
+    for (agent, names) in candidate {
+        for name in names {
+            if !crate::secret_values::valid_var_name(&name) {
+                bail!("已保存 MCP 设置的变量名无效，没有导入");
+            }
+            if owners
+                .get(&name.to_ascii_uppercase())
+                .is_some_and(|accounts| accounts.iter().any(|owner| owner != agent))
+            {
+                bail!("变量 {name} 已属于其他账号，拒绝导入跨账号 MCP 引用");
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn ensure_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(TABLE_DDL)?;
     Ok(())

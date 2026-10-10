@@ -484,13 +484,17 @@ pub(crate) fn current_config_status(
     config_path: Option<&str>,
     kind: Kind,
 ) -> Value {
-    let path = match target_path(ctx, kind, config_path) {
-        Ok(path) => path,
-        Err(_) => {
-            let raw = config_path.unwrap_or("~/.codex/config.toml");
+    let path = match controlled_main_target(ctx, agent_id) {
+        Ok((_, actual_kind, path, _)) if actual_kind == kind => path,
+        result => {
+            let raw = config_path.unwrap_or(match kind {
+                Kind::Claude => "~/.claude/settings.json",
+                Kind::Codex => "~/.codex/config.toml",
+            });
             let target = crate::native_mcp::targets::expand_home(raw, &ctx.home_dir);
             return json!({
                 "state": "invalid-target",
+                "diagnostic": result.err().map(|err| format!("{err:#}")),
                 "file": target.file_name().and_then(|name| name.to_str()).unwrap_or_default(),
                 "target": target.display().to_string(),
                 "config": null,
@@ -1413,26 +1417,6 @@ fn write_codex_runtime(existing: &str, patch: &RuntimePatch) -> String {
     text
 }
 
-/// Codex 的目标文件绝对路径：配置文件就在 CODEX_HOME 下。
-pub(crate) fn codex_target(ctx: &Context, config_path: Option<&str>) -> Result<std::path::PathBuf> {
-    let target = match config_path {
-        Some(raw) => crate::native_mcp::targets::expand_home(raw, &ctx.home_dir),
-        None => ctx.home_dir.join(".codex").join(CODEX_CONFIG),
-    };
-    if target.file_name().and_then(|name| name.to_str()) != Some(CODEX_CONFIG) {
-        bail!(
-            "Codex 普通运行设置只允许写 config.toml；认证文件必须通过独立的显式认证操作修改：{}",
-            target.display()
-        );
-    }
-    Ok(target)
-}
-
-/// 目标文件的绝对路径。
-pub(crate) fn claude_target(ctx: &Context) -> std::path::PathBuf {
-    ctx.home_dir.join(CLAUDE_SETTINGS)
-}
-
 /// 本工具维护的状态栏脚本位置。
 pub(crate) fn statusline_target(ctx: &Context) -> std::path::PathBuf {
     ctx.data_dir.join(STATUSLINE_FILE)
@@ -1664,18 +1648,8 @@ pub(crate) fn editable_target(
     ctx: &Context,
     agent_id: &str,
 ) -> Result<(Kind, PathBuf, PathBuf, Option<Vec<u8>>)> {
-    let defs = crate::native_agents::load_definitions(ctx)?;
-    let def = defs
-        .iter()
-        .find(|d| d.id == agent_id)
-        .ok_or_else(|| anyhow::anyhow!("没有这个助手：{agent_id}"))?;
-    if def.spec_ref().get("profile").is_some() {
-        bail!("独立环境的配置文件请在独立环境里维护");
-    }
-    let kind = kind_for_bin(&def.bin)
-        .ok_or_else(|| anyhow::anyhow!("只有 Claude Code 与 Codex 形态的助手支持编辑配置文件"))?;
-    let path = target_path(ctx, kind, def.config_path())?;
-    let real = resolve_write_target(&path)?;
+    let (_, kind, path, _) = controlled_main_target(ctx, agent_id)?;
+    let real = path.clone();
     let existing = crate::native_mcp::rollback::read_existing_bytes(&real)?;
     if existing
         .as_ref()
@@ -1686,12 +1660,77 @@ pub(crate) fn editable_target(
     Ok((kind, path, real, existing))
 }
 
-/// 该形态的目标文件。
-fn target_path(ctx: &Context, kind: Kind, config_path: Option<&str>) -> Result<PathBuf> {
-    match kind {
-        Kind::Claude => Ok(claude_target(ctx)),
-        Kind::Codex => codex_target(ctx, config_path),
+/// Runtime settings are a main-account operation. Profiles have their own apply
+/// entry point; neither a profile ID nor a custom MCP target may select a main file.
+fn main_target_in_policy(
+    ctx: &Context,
+    def: &crate::native_agents::AgentDef,
+    policy: &Value,
+) -> Result<(Kind, PathBuf)> {
+    let expected = match def.id.as_str() {
+        "claude-code" => Kind::Claude,
+        "codex" => Kind::Codex,
+        _ => bail!("运行参数与原文配置入口只支持固定主账号；独立账号请使用账号自己的配置入口"),
+    };
+    let raw = policy
+        .pointer("/agents/definitions")
+        .and_then(|defs| defs.get(&def.id))
+        .ok_or_else(|| anyhow::anyhow!("主账号定义不存在，拒绝操作"))?;
+    if !def.enabled
+        || def.spec_ref().get("profile").is_some()
+        || raw.get("profile").is_some()
+        || raw.get("_delete") == Some(&Value::Bool(true))
+        || policy
+            .get("agents")
+            .and_then(|agents| agents.get(&def.id))
+            .and_then(|item| item.get("enabled"))
+            == Some(&Value::Bool(false))
+    {
+        bail!("主账号已停用或定义为独立账号，拒绝读写运行配置");
     }
+    let kind = kind_for_bin(&def.bin)
+        .ok_or_else(|| anyhow::anyhow!("只有 Claude Code 与 Codex 主账号支持运行配置"))?;
+    if kind != expected || raw.get("bin").and_then(Value::as_str) != Some(def.bin.as_str()) {
+        bail!("主账号 CLI 类型或定义与固定标识不一致，拒绝操作");
+    }
+    let mcp = if let Some(mcp) = raw.get("mcp_config") {
+        let raw_path = mcp
+            .get("path")
+            .unwrap_or(mcp)
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("主账号 MCP 目标路径必须是字符串，拒绝操作"))?;
+        crate::native_mcp::targets::expand_home(raw_path, &ctx.home_dir)
+    } else {
+        match kind {
+            Kind::Claude => ctx.home_dir.join(".claude.json"),
+            Kind::Codex => ctx.home_dir.join(".codex/config.toml"),
+        }
+    };
+    // This validates the primary directory, every identity file and the declared
+    // MCP file before any runtime content is read, even for Claude's distinct file.
+    let mcp =
+        crate::native_profiles::paths::validate_account_resource_path(ctx, policy, &def.id, &mcp)?;
+    let path = match kind {
+        Kind::Claude => mcp
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("主账号目录无效"))?
+            .join(CLAUDE_SETTINGS),
+        Kind::Codex => mcp,
+    };
+    Ok((kind, path))
+}
+
+fn controlled_main_target(
+    ctx: &Context,
+    agent_id: &str,
+) -> Result<(crate::native_agents::AgentDef, Kind, PathBuf, Value)> {
+    let def = crate::native_agents::load_definitions(ctx)?
+        .into_iter()
+        .find(|def| def.id == agent_id)
+        .ok_or_else(|| anyhow::anyhow!("没有这个助手：{agent_id}"))?;
+    let policy = store::effective_policy(ctx)?;
+    let (kind, path) = main_target_in_policy(ctx, &def, &policy)?;
+    Ok((def, kind, path, policy))
 }
 
 /// 写入落点：符号链接解析到最终目标（链接本身保持不变），目标必须是普通文件；
@@ -1921,26 +1960,19 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
     let args = configure_args(req)?;
     let id = args.id.clone();
 
-    let defs = crate::native_agents::load_definitions(ctx).map_err(agent_error)?;
-    let def = defs
-        .iter()
-        .find(|d| d.id == id)
-        .ok_or_else(|| DispatchError::new("AGENT_ERROR", format!("没有这个助手：{id}")))?;
-    let kind = kind_for_bin(&def.bin).ok_or_else(|| {
-        DispatchError::new(
-            "AGENT_ERROR",
-            "只有 Claude Code 与 Codex 形态的助手支持写运行参数".to_string(),
-        )
-    })?;
-    let path = target_path(ctx, kind, def.config_path()).map_err(agent_error)?;
+    controlled_main_target(ctx, &id).map_err(agent_error)?;
+    let _account_lock =
+        crate::native_account_context::lock_account_write(ctx, &format!("agents:{id}"))
+            .map_err(agent_error)?;
+    let (def, kind, path, policy_before) = controlled_main_target(ctx, &id).map_err(agent_error)?;
     let file_label = match kind {
         Kind::Claude => CLAUDE_SETTINGS,
         Kind::Codex => CODEX_CONFIG,
     };
     let statusline_path = statusline_target(ctx);
 
-    // 重读实际文件：链接解析到最终目标；解析不了的文件拒绝，不当成空文档覆盖
-    let real = resolve_write_target(&path).map_err(agent_error)?;
+    // Re-read and plan only after taking the account's exclusive mutation lock.
+    let real = path.clone();
     let existing = read_existing_bytes(&real).map_err(agent_error)?;
     if existing
         .as_ref()
@@ -2026,6 +2058,14 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
         .map_err(|err| agent_error(err.into()))?;
     let mut guard = RollbackGuard::new();
     let written = (|| -> Result<()> {
+        let mut policy = store::policy_from_connection(&tx)?;
+        if policy != policy_before {
+            bail!("账号定义在规划后发生变化，文件与库没有改动；请刷新后重试");
+        }
+        let (current_kind, current_path) = main_target_in_policy(ctx, &def, &policy)?;
+        if current_kind != kind || current_path != real {
+            bail!("账号配置目标在规划后发生变化，拒绝写入");
+        }
         ensure_table(&tx)?;
         // 脚本先就位再写 settings.json：反过来的话中途失败会留下一个指向不存在文件的状态栏
         if deploy {
@@ -2043,7 +2083,6 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value, DispatchError
             }
         }
         // 库：在事务里读到的定义上改 settings，未知键原样保留
-        let mut policy = store::policy_from_connection(&tx)?;
         let definition = policy
             .get_mut("agents")
             .and_then(|agents| agents.get_mut("definitions"))

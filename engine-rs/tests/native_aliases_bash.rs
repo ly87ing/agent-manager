@@ -38,6 +38,36 @@ fn run(ctx: &Context, command: &str, args: &[&str]) -> Envelope {
     )
 }
 
+fn run_cli(ctx: &Context, command: &str, args: &[&str]) -> Value {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
+        .args([command, "--json"])
+        .args(args)
+        .env_clear()
+        .env("HOME", &ctx.home_dir)
+        .env("AGENT_MANAGER_DATA_DIR", &ctx.data_dir)
+        .env("SHELL", "/bin/bash")
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(&ctx.home_dir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn controlled_main_command(ctx: &Context) -> String {
+    let result = run_cli(ctx, "accounts:command", &["--only", "agents:claude-code"]);
+    assert_eq!(result["ok"], true, "{}", result["errors"]);
+    let value = result["data"]["launch_value"].as_str().unwrap().to_string();
+    assert!(value.contains("--account-launch"));
+    assert!(value.contains("--binding"));
+    value
+}
+
 /// 各目标的 (写入基准参数, 基准)，与界面一样全部带上。
 fn bases(ctx: &Context) -> (Vec<String>, Value) {
     let env = run(ctx, "aliases:status", &[]);
@@ -55,6 +85,9 @@ fn bases(ctx: &Context) -> (Vec<String>, Value) {
 #[test]
 fn bash_用户新命令写进_bashrc_zshrc_没有那一段就不新建() {
     let (root, ctx) = temp_ctx("primary");
+    let value = controlled_main_command(&ctx);
+    let first = format!("{value} --model fixture-first");
+    let second = format!("{value} --model fixture-second");
     std::fs::write(
         ctx.home_dir.join(".bashrc"),
         "# 用户自己的\nexport EDITOR=vim\n",
@@ -67,15 +100,15 @@ fn bash_用户新命令写进_bashrc_zshrc_没有那一段就不新建() {
     );
 
     let mut args: Vec<&str> = flags.iter().map(String::as_str).collect();
-    args.extend(["--set", "cc", "--value", "claude --flag"]);
-    let applied = run(&ctx, "aliases:apply", &args);
-    assert!(applied.ok, "{:?}", applied.errors);
+    args.extend(["--set", "cc", "--value", &first]);
+    let applied = run_cli(&ctx, "aliases:apply", &args);
+    assert_eq!(applied["ok"], true, "{}", applied["errors"]);
     let bashrc = std::fs::read_to_string(ctx.home_dir.join(".bashrc")).unwrap();
     assert!(
         bashrc.starts_with("# 用户自己的\nexport EDITOR=vim\n"),
         "原有内容不动：{bashrc}"
     );
-    assert!(bashrc.contains("alias cc='claude --flag'"), "{bashrc}");
+    assert!(bashrc.contains(&format!("alias cc='{first}'")), "{bashrc}");
     assert!(
         !ctx.home_dir.join(".zshrc").exists(),
         "没有受管区块的 ~/.zshrc 不新建"
@@ -88,7 +121,7 @@ fn bash_用户新命令写进_bashrc_zshrc_没有那一段就不新建() {
         .output()
         .unwrap();
     assert!(
-        String::from_utf8_lossy(&out.stdout).contains("claude --flag"),
+        String::from_utf8_lossy(&out.stdout).contains(&first),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
@@ -96,17 +129,20 @@ fn bash_用户新命令写进_bashrc_zshrc_没有那一段就不新建() {
     // ~/.zshrc 已有本工具那一段：同步改它
     std::fs::write(
         ctx.home_dir.join(".zshrc"),
-        "# >>> agent-manager shell aliases >>>\nalias cc='claude --flag'\n# <<< agent-manager shell aliases <<<\n",
+        format!("# >>> agent-manager shell aliases >>>\nalias cc='{first}'\n# <<< agent-manager shell aliases <<<\n"),
     )
     .unwrap();
     let (flags, _) = bases(&ctx);
     let mut args: Vec<&str> = flags.iter().map(String::as_str).collect();
-    args.extend(["--set", "cc", "--value", "claude --other"]);
-    let applied = run(&ctx, "aliases:apply", &args);
-    assert!(applied.ok, "{:?}", applied.errors);
+    args.extend(["--set", "cc", "--value", &second]);
+    let applied = run_cli(&ctx, "aliases:apply", &args);
+    assert_eq!(applied["ok"], true, "{}", applied["errors"]);
     for file in [".bashrc", ".zshrc"] {
         let text = std::fs::read_to_string(ctx.home_dir.join(file)).unwrap();
-        assert!(text.contains("alias cc='claude --other'"), "{file}: {text}");
+        assert!(
+            text.contains(&format!("alias cc='{second}'")),
+            "{file}: {text}"
+        );
     }
     let _ = std::fs::remove_dir_all(root);
 }

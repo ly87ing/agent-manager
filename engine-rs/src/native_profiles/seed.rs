@@ -11,7 +11,7 @@
 //!   rules / mcp 域的写入（同一套写前比对、链接解析与审计），这里只挑要写什么；
 //! - 凭据一律不带：`env` 与 `apiKeyHelper` 不在可选项里；MCP 条目里有明文凭据（像凭据的 env
 //!   字面量、字面量请求头、地址里内嵌的账号密码、Codex 的 `bearer_token`）的整条跳过并点名，
-//!   要带就去 MCP 页逐条复制；
+//!   凭据只由目标账号单独配置，不自动跨账号复制；
 //! - 各项互不牵连：一项失败照常做下一项，逐项给出结果；
 //! - 审计只记带了哪些项与各自结果，不记内容。
 
@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use super::model::{self, ProfileDef, ProfileKind};
 use crate::native::{Context, Request};
-use crate::native_mcp::entry::{HeaderVal, View};
+use crate::native_mcp::entry::View;
 use crate::store;
 
 /// 可带的项，结果按这个顺序给出。
@@ -103,7 +103,7 @@ pub(super) fn config_dir(ctx: &Context, def: &ProfileDef) -> Result<PathBuf> {
     if !def.enabled {
         bail!("[{}] 实例已停用，不带设置", def.id);
     }
-    model::validate_config_dir(def, &ctx.home_dir, &ctx.data_dir)
+    super::paths::config_dir(ctx, def)
 }
 
 /// 配置目录由实例域创建：还没有就建（仅本人可访问）；已有的不改权限。
@@ -158,8 +158,12 @@ fn read_source(path: &Path) -> Option<Vec<u8>> {
 }
 
 /// 实例里的目标文件：链接解析到最终文件；不是普通文件就拒绝。
-pub(super) fn read_target(path: &Path) -> Result<(PathBuf, Option<Vec<u8>>)> {
-    let real = crate::native_agent_settings::resolve_write_target(path)?;
+pub(super) fn read_target(
+    ctx: &Context,
+    def: &ProfileDef,
+    path: &Path,
+) -> Result<(PathBuf, Option<Vec<u8>>)> {
+    let real = super::paths::target(ctx, def, path)?;
     match std::fs::symlink_metadata(&real) {
         Ok(meta) if meta.is_file() => {
             let bytes = std::fs::read(&real)?;
@@ -222,14 +226,22 @@ fn render_claude_settings(
     Ok((out, content))
 }
 
-fn seed_claude_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec<Value>> {
+fn seed_claude_settings(
+    ctx: &Context,
+    def: &ProfileDef,
+    dir: &Path,
+    items: &[&str],
+) -> Result<Vec<Value>> {
     let source = parse_json_object(
         read_source(&ctx.home_dir.join(".claude/settings.json")).as_deref(),
         "默认环境的 settings.json",
     )?;
-    let (real, previous) = read_target(&dir.join("settings.json"))?;
+    let (real, previous) = read_target(ctx, def, &dir.join("settings.json"))?;
     let (out, content) = render_claude_settings(&source, previous.as_deref(), items)?;
     if let Some(bytes) = content {
+        model::validate_effective_config(def, &bytes, &|name| {
+            crate::secret_values::lookup_account(name).ok()
+        })?;
         crate::native_mcp::rollback::atomic_write_bytes_checked(&real, &bytes, previous.as_deref())
             .map_err(|err| anyhow!("写 settings.json 没有成功（可能已在外部修改）：{err:#}"))?;
     }
@@ -343,16 +355,24 @@ fn render_codex_settings(
     Ok((out, content))
 }
 
-fn seed_codex_settings(ctx: &Context, dir: &Path, items: &[&str]) -> Result<Vec<Value>> {
+fn seed_codex_settings(
+    ctx: &Context,
+    def: &ProfileDef,
+    dir: &Path,
+    items: &[&str],
+) -> Result<Vec<Value>> {
     let source = match read_source(&ctx.home_dir.join(".codex/config.toml")) {
         Some(bytes) => String::from_utf8_lossy(&bytes)
             .parse::<toml_edit::Document>()
             .map_err(|_| anyhow!("默认环境的 config.toml 不是合法 TOML，没有带"))?,
         None => toml_edit::Document::new(),
     };
-    let (real, previous) = read_target(&dir.join("config.toml"))?;
+    let (real, previous) = read_target(ctx, def, &dir.join("config.toml"))?;
     let (out, content) = render_codex_settings(&source, previous.as_deref(), items)?;
     if let Some(bytes) = content {
+        model::validate_effective_config(def, &bytes, &|name| {
+            crate::secret_values::lookup_account(name).ok()
+        })?;
         crate::native_mcp::rollback::atomic_write_bytes_checked(&real, &bytes, previous.as_deref())
             .map_err(|err| anyhow!("写 config.toml 没有成功（可能已在外部修改）：{err:#}"))?;
     }
@@ -461,22 +481,9 @@ fn seed_rules(ctx: &Context, req: &Request, def: &ProfileDef) -> Result<Value> {
 
 // ---------- MCP：逐条交给 mcp 域的「复制到」 ----------
 
-/// 条目里有没有明文凭据：像凭据的 env 字面量、字面量请求头、地址里内嵌的账号密码，
-/// 或 Codex 的 `bearer_token`。
-pub(super) fn has_literal_credentials(format: &crate::native_mcp::Format, view: &View) -> bool {
-    let literal_env = view.env.iter().any(|(key, value)| {
-        crate::native_mcp::entry::env_ref(format, value).is_none()
-            && (crate::native::credential_like_name(key)
-                || crate::native::reject_secret_text(value).is_some())
-    });
-    let literal_header = view
-        .headers
-        .iter()
-        .any(|(_, value)| matches!(value, HeaderVal::Lit(_)));
-    literal_env
-        || literal_header
-        || crate::native::url_has_userinfo(&view.url)
-        || view.extra.contains_key("bearer_token")
+/// Sharing includes credential references, whose owner cannot follow another account.
+pub(super) fn cannot_share_account_entry(format: &crate::native_mcp::Format, view: &View) -> bool {
+    crate::native_mcp::entry::account_copy_blocked_reason(format, view).is_some()
 }
 
 fn seed_mcp(ctx: &Context, req: &Request, def: &ProfileDef) -> Result<Value> {
@@ -510,7 +517,7 @@ fn seed_mcp(ctx: &Context, req: &Request, def: &ProfileDef) -> Result<Value> {
             continue;
         }
         match &entry.view {
-            Ok(view) if !has_literal_credentials(&format, view) => {
+            Ok(view) if !cannot_share_account_entry(&format, view) => {
                 todo.push((entry.name.clone(), entry.base.clone()))
             }
             _ => skipped.push(entry.name.clone()),
@@ -557,7 +564,7 @@ fn seed_mcp(ctx: &Context, req: &Request, def: &ProfileDef) -> Result<Value> {
     }
     if !skipped.is_empty() {
         parts.push(format!(
-            "含明文凭据或格式不认识、没有复制：{}（需要的话在 MCP 页逐条复制）",
+            "凭据归属或格式无法确认、没有复制：{}（请在目标账号单独配置）",
             skipped.join("、")
         ));
     }
@@ -587,6 +594,20 @@ pub(crate) fn seed(ctx: &Context, req: &Request) -> Result<Value> {
     let args = parse_args(req)?;
     let def = find_def(ctx, &args.id)?;
     let dir = config_dir(ctx, &def)?;
+    let mut account_lock = Some(crate::native_account_context::lock_directory(
+        ctx, &dir, true,
+    )?);
+    let def = find_def(ctx, &args.id)?;
+    if config_dir(ctx, &def)? != dir {
+        bail!("账号目录在取得锁前已变化，拒绝写入共用设置");
+    }
+    model::validate_account_auth(
+        ctx,
+        &args.id,
+        def.kind,
+        Some(&dir),
+        model::account_auth_mode(&def),
+    )?;
     ensure_dir(&dir)?;
 
     let mut results = Vec::new();
@@ -598,8 +619,8 @@ pub(crate) fn seed(ctx: &Context, req: &Request) -> Result<Value> {
         .collect();
     if !settings_items.is_empty() {
         let outcome = match def.kind {
-            ProfileKind::Claude => seed_claude_settings(ctx, &dir, &settings_items),
-            ProfileKind::Codex => seed_codex_settings(ctx, &dir, &settings_items),
+            ProfileKind::Claude => seed_claude_settings(ctx, &def, &dir, &settings_items),
+            ProfileKind::Codex => seed_codex_settings(ctx, &def, &dir, &settings_items),
         };
         match outcome {
             Ok(items) => results.extend(items),
@@ -609,7 +630,12 @@ pub(crate) fn seed(ctx: &Context, req: &Request) -> Result<Value> {
     for item in &args.items {
         let outcome = match *item {
             "rules" => seed_rules(ctx, req, &def),
-            "mcp" => seed_mcp(ctx, req, &def),
+            "mcp" => {
+                // MCP owns its destination account lock. Do not reenter the same
+                // exclusive lock through the delegated domain operation.
+                drop(account_lock.take());
+                seed_mcp(ctx, req, &def)
+            }
             _ => continue,
         };
         results.push(outcome.unwrap_or_else(|err| failed(item, &err)));
@@ -644,6 +670,7 @@ pub(crate) fn seed(ctx: &Context, req: &Request) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::native_mcp::entry::HeaderVal;
     use crate::native_mcp::Format;
 
     fn req(args: &[&str]) -> Request {
@@ -715,26 +742,26 @@ mod tests {
     }
 
     #[test]
-    fn literal_credentials_are_detected_only_for_literals() {
+    fn credentials_and_references_cannot_be_shared_between_accounts() {
         let claude = Format::ClaudeJson;
         let referenced = view(
             &[("GITHUB_TOKEN", "${GITHUB_TOKEN}"), ("LOG", "debug")],
             vec![("Authorization", HeaderVal::Ref("TOKEN".into()))],
             "https://mcp.example.com/sse",
         );
-        assert!(!has_literal_credentials(&claude, &referenced));
+        assert!(cannot_share_account_entry(&claude, &referenced));
         let literal_env = view(&[("GITHUB_TOKEN", "not-a-reference")], vec![], "");
-        assert!(has_literal_credentials(&claude, &literal_env));
+        assert!(cannot_share_account_entry(&claude, &literal_env));
         let literal_header = view(
             &[],
             vec![("Authorization", HeaderVal::Lit("Bearer x".into()))],
             "",
         );
-        assert!(has_literal_credentials(&claude, &literal_header));
+        assert!(cannot_share_account_entry(&claude, &literal_header));
         let userinfo = view(&[], vec![], "https://user:pass@mcp.example.com/sse");
-        assert!(has_literal_credentials(&claude, &userinfo));
+        assert!(cannot_share_account_entry(&claude, &userinfo));
         let mut bearer = view(&[], vec![], "https://mcp.example.com");
         bearer.extra.insert("bearer_token".into(), json!("x"));
-        assert!(has_literal_credentials(&Format::CodexToml, &bearer));
+        assert!(cannot_share_account_entry(&Format::CodexToml, &bearer));
     }
 }

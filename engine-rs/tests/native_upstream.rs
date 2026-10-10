@@ -103,6 +103,7 @@ fn shim_agent_bin(ctx: &Context, bin: &str, version_line: Option<&str>) {
 /// PATH 前置 shim 目录的守卫；Drop 恢复。
 struct PathGuard {
     original: Option<std::ffi::OsString>,
+    original_user_path: Option<std::ffi::OsString>,
     _lock: MutexGuard<'static, ()>,
 }
 
@@ -110,13 +111,17 @@ impl PathGuard {
     fn prepend(dir: &Path) -> Self {
         let lock = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let original = std::env::var_os("PATH");
+        let original_user_path = std::env::var_os("AGENT_MANAGER_USER_PATH");
         let mut paths = vec![dir.to_path_buf()];
         if let Some(ref orig) = original {
             paths.extend(std::env::split_paths(orig));
         }
-        std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
+        let path = std::env::join_paths(paths).unwrap();
+        std::env::set_var("PATH", &path);
+        std::env::set_var("AGENT_MANAGER_USER_PATH", path);
         PathGuard {
             original,
+            original_user_path,
             _lock: lock,
         }
     }
@@ -127,6 +132,10 @@ impl Drop for PathGuard {
         match &self.original {
             Some(orig) => std::env::set_var("PATH", orig),
             None => std::env::remove_var("PATH"),
+        }
+        match &self.original_user_path {
+            Some(orig) => std::env::set_var("AGENT_MANAGER_USER_PATH", orig),
+            None => std::env::remove_var("AGENT_MANAGER_USER_PATH"),
         }
     }
 }

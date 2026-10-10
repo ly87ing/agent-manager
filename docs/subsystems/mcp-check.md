@@ -7,9 +7,9 @@ Checks one account's actual MCP entry once. This is a separate protocol session,
 | Part | Responsibility | Source |
 | --- | --- | --- |
 | Command | `mcp:check --only mcp:<name> --agent <account> [--base <digest>] [--cwd <absolute-directory>]`; optional `--base` rejects a changed entry before execution. The UI always supplies it | [`native_mcp/check.rs`](../../engine-rs/src/native_mcp/check.rs), [`native_mcp/inventory.rs`](../../engine-rs/src/native_mcp/inventory.rs) |
-| Variables | Whole-value references use `env_ref` / header references; inside strings `${NAME}` (and `${NAME:-default}`) is expanded for Claude and `{env:NAME}` for OpenCode; Codex strings are not expanded. Values come from `secret_values::lookup` (secrets file first, then process environment) | [`native_mcp/check.rs`](../../engine-rs/src/native_mcp/check.rs), [`secret_values.rs`](../../engine-rs/src/secret_values.rs) |
-| stdio | Runs the command with the user's login-shell PATH (`locate::user_path`) ahead of the inherited one, `HOME` set, in its own process group; sends `initialize`, `notifications/initialized`, `tools/list`; skips log and notification lines | [`native_mcp/check.rs`](../../engine-rs/src/native_mcp/check.rs) |
-| Streamable HTTP | Uses `curl -i`, headers on stdin (`-H @-`), keeps `Mcp-Session-Id`, reads JSON or `data:` lines | [`native_mcp/check.rs`](../../engine-rs/src/native_mcp/check.rs) |
+| Variables | Validate all reference names and exclusive account ownership, including embedded Claude `${NAME}`, OpenCode `{env:NAME}`, and Codex header references. Defaults and malformed references fail closed. Values come only from the explicit private secrets source | [`native_mcp/check.rs`](../../engine-rs/src/native_mcp/check.rs), [`native_secrets.rs`](../../engine-rs/src/native_secrets.rs), [`secret_values.rs`](../../engine-rs/src/secret_values.rs) |
+| stdio | Resolve an absolute executable without running shell startup files; use a clean environment with explicit HOME and this account's references, in its own process group. Send `initialize`, `notifications/initialized`, `tools/list`; skip log and notification lines | [`native_mcp/check.rs`](../../engine-rs/src/native_mcp/check.rs) |
+| Streamable HTTP | Use an absolute `curl` with `--disable` first to suppress curlrc, explicit URL and headers on stdin (`-H @-`), retain `Mcp-Session-Id`, and read JSON or `data:` lines | [`native_mcp/check.rs`](../../engine-rs/src/native_mcp/check.rs) |
 | Interface | Dialog shows account, file, command/address, working directory, effective timeouts, failure stage, natural exit code and sanitized stderr tail. Results stay in page memory per account and entry digest; a changed digest hides them. Switching account or directory clears the dialog result | [`McpCheckDialog.tsx`](../../app/src/components/McpCheckDialog.tsx), [`McpServerCard.tsx`](../../app/src/components/McpServerCard.tsx) |
 
 ## Constraints and failure behavior
@@ -23,7 +23,7 @@ Checks one account's actual MCP entry once. This is a separate protocol session,
 - Afterwards stdin is closed and, if the server is still running after 0.5 s, the whole process group is killed.
 - Commands use the shared [external-command layer](external-commands.md) for Windows console flags, timeout jobs and manual system proxy fallback; explicit entry environment variables take precedence.
 - Legacy SSE transports are refused with a reason.
-- The command takes no apply lock and writes neither files nor the database.
+- The command holds a shared account lock while its process runs. Account, credential, and MCP writes require an exclusive lock and refuse an active check. It writes neither configuration nor the database.
 
 ## Legacy marker recovery
 
@@ -36,4 +36,4 @@ cargo test --manifest-path engine-rs/Cargo.toml --test native_mcp check_
 cd app && pnpm vitest run src/test/McpPage.test.tsx
 ```
 
-Interop with a real server was last checked in an isolated HOME with `npx -y @modelcontextprotocol/server-everything@2025.9.25` (10 tools).
+The historical real-server check used an isolated HOME with `npx -y @modelcontextprotocol/server-everything@2025.9.25` (10 tools). Current account-isolation acceptance uses fake stdio and HTTP executables and a loopback server; it does not request a real account's service.

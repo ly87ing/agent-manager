@@ -5,13 +5,22 @@
 // 部分辅助只给 Unix 专属的用例用
 #![cfg_attr(not(unix), allow(dead_code))]
 
+#[cfg(windows)]
+mod common;
+
+use agent_manager_engine::platform::Canon;
 use agent_manager_engine::{execute, store, Context, Request};
 use std::path::PathBuf;
 
 fn temp_ctx(tag: &str) -> (PathBuf, Context) {
-    let base =
-        std::env::temp_dir().join(format!("am-profiles-test-{}-{}", std::process::id(), tag));
+    let base = std::env::temp_dir().canon().unwrap().join(format!(
+        "am-profiles-test-{}-{}",
+        std::process::id(),
+        tag
+    ));
     let _ = std::fs::remove_dir_all(&base);
+    #[cfg(windows)]
+    common::private_fixture_root(&base);
     let ctx = Context {
         data_dir: base.join("data"),
         home_dir: base.join("home"),
@@ -21,11 +30,36 @@ fn temp_ctx(tag: &str) -> (PathBuf, Context) {
     (base, ctx)
 }
 
+/// Fake credentials are explicitly selected from a private fixture file.
+fn set_test_secret(ctx: &Context, name: &str, value: &str) {
+    let source = ctx.home_dir.join("test-credentials.env");
+    let original = std::fs::read_to_string(&source).unwrap_or_default();
+    let mut lines: Vec<String> = original
+        .lines()
+        .filter(|line| !line.starts_with(&format!("{name}=")))
+        .map(str::to_owned)
+        .collect();
+    if !value.is_empty() {
+        lines.push(format!("{name}={}", serde_json::to_string(value).unwrap()));
+    }
+    std::fs::write(&source, format!("{}\n", lines.join("\n"))).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let conn = store::open_write(ctx).unwrap();
+    let mut settings = store::settings_from_connection(&conn).unwrap();
+    settings.secrets_file_path = source.to_string_lossy().into();
+    store::write_settings(&conn, &settings).unwrap();
+}
+
 /// 官方 CLI 的替身，放在 `<HOME>/.local/bin`（探测优先找这里），不依赖本机装没装 claude/codex。
 /// 目录里有 `.fake-logged-in` 就报告已登录、有 `.fake-console` 就报告 Console 登录；每次调用把
 /// 收到的配置目录与凭据变量是否被清掉记进 `<HOME>/.probe-log`，把 `--settings` 与档案目录记进
 /// `<HOME>/.probe-args`。
 const FAKE_CLAUDE: &str = r#"#!/bin/sh
+if [ "$1" = --version ]; then echo "2.1.285 (Claude Code)"; exit 0; fi
 settings=none
 if [ "$1" = --settings ]; then settings="$2"; shift 2; fi
 [ "$1" = auth ] && [ "$2" = status ] || exit 64
@@ -39,6 +73,7 @@ echo '{"loggedIn":false,"authMethod":"none"}'
 exit 1
 "#;
 const FAKE_CODEX: &str = r#"#!/bin/sh
+if [ "$1" = --version ]; then echo "codex-cli 0.156.1"; exit 0; fi
 [ "$1" = login ] && [ "$2" = status ] || exit 64
 printf 'codex|%s|%s\n' "$CODEX_HOME" "${CODEX_API_KEY-unset}" >> "$HOME/.probe-log"
 if [ -f "$CODEX_HOME/.fake-logged-in" ]; then echo 'Logged in using ChatGPT' >&2; exit 0; fi
@@ -46,50 +81,9 @@ echo 'Not logged in' >&2
 exit 1
 "#;
 
-/// Windows 上的同一对替身（.cmd）：主目录按替身自己所在位置推出（`<HOME>\.local\bin` 往上两级），
-/// `if defined` 区分「没设」与「设成空」，与 shell 版的 `${VAR-unset}` 一致。
-#[cfg(windows)]
-const FAKE_CLAUDE_CMD: &str = "@echo off\r\n\
-setlocal\r\n\
-set \"home=%~dp0..\\..\"\r\n\
-set \"settings=none\"\r\n\
-if \"%~1\"==\"--settings\" (\r\n\
-  set \"settings=%~2\"\r\n\
-  shift\r\n\
-  shift\r\n\
-)\r\n\
-if not \"%~1\"==\"auth\" exit /b 64\r\n\
-if not \"%~2\"==\"status\" exit /b 64\r\n\
-if defined CLAUDE_CODE_OAUTH_TOKEN (set \"tok=%CLAUDE_CODE_OAUTH_TOKEN%\") else (set \"tok=unset\")\r\n\
->>\"%home%\\.probe-log\" echo claude^|%CLAUDE_CONFIG_DIR%^|%tok%\r\n\
-if defined ANTHROPIC_CONFIG_DIR (set \"acd=%ANTHROPIC_CONFIG_DIR%\") else (set \"acd=unset\")\r\n\
-if defined ANTHROPIC_PROFILE (set \"ap=%ANTHROPIC_PROFILE%\") else (set \"ap=unset\")\r\n\
->>\"%home%\\.probe-args\" echo %settings%^|%acd%^|%ap%\r\n\
-if exist \"%home%\\.fake-garbage\" (echo not json& exit /b 0)\r\n\
-if exist \"%CLAUDE_CONFIG_DIR%\\.fake-logged-in\" (echo {\"loggedIn\":true,\"authMethod\":\"claude.ai\"}& exit /b 0)\r\n\
-if exist \"%CLAUDE_CONFIG_DIR%\\.fake-console\" (echo {\"loggedIn\":true,\"authMethod\":\"oauth_token\",\"apiKeySource\":\"/login managed key\"}& exit /b 0)\r\n\
-if exist \"%CLAUDE_CONFIG_DIR%\\.fake-helper\" (echo {\"loggedIn\":true,\"authMethod\":\"api_key_helper\",\"apiKeySource\":\"apiKeyHelper\"}& exit /b 0)\r\n\
-echo {\"loggedIn\":false,\"authMethod\":\"none\"}\r\n\
-exit /b 1\r\n";
-
-#[cfg(windows)]
-const FAKE_CODEX_CMD: &str = "@echo off\r\n\
-setlocal\r\n\
-set \"home=%~dp0..\\..\"\r\n\
-if not \"%~1\"==\"login\" exit /b 64\r\n\
-if not \"%~2\"==\"status\" exit /b 64\r\n\
-if defined CODEX_API_KEY (set \"key=%CODEX_API_KEY%\") else (set \"key=unset\")\r\n\
->>\"%home%\\.probe-log\" echo codex^|%CODEX_HOME%^|%key%\r\n\
-if exist \"%CODEX_HOME%\\.fake-logged-in\" (echo Logged in using ChatGPT 1>&2& exit /b 0)\r\n\
-echo Not logged in 1>&2\r\n\
-exit /b 1\r\n";
-
 #[cfg(windows)]
 fn install_fake_clis(ctx: &Context) {
-    let bin = ctx.home_dir.join(".local").join("bin");
-    std::fs::create_dir_all(&bin).unwrap();
-    std::fs::write(bin.join("claude.cmd"), FAKE_CLAUDE_CMD).unwrap();
-    std::fs::write(bin.join("codex.cmd"), FAKE_CODEX_CMD).unwrap();
+    common::install_fake_account_clis(&ctx.home_dir);
 }
 
 #[cfg(unix)]
@@ -105,7 +99,6 @@ fn install_fake_clis(ctx: &Context) {
 }
 
 fn probe_log(ctx: &Context) -> String {
-    // Windows 的 .cmd 替身写 CRLF
     std::fs::read_to_string(ctx.home_dir.join(".probe-log"))
         .unwrap_or_default()
         .replace("\r\n", "\n")
@@ -209,7 +202,7 @@ fn failed_profile_commit_restores_only_its_own_write() {
             BEGIN SELECT RAISE(FAIL, 'test audit failure'); END;",
         )
         .unwrap();
-        // 数据库保留写锁：让真实 apply 写完文件后等在 SQLite，再精确注入外部修改。
+        // Hold the DB writer: account changes must acquire it before writing files.
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .unwrap();
@@ -226,7 +219,7 @@ fn failed_profile_commit_restores_only_its_own_write() {
                 ),
             )
         });
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
         let written = loop {
             let bytes = std::fs::read(&target).unwrap_or_default();
             if String::from_utf8_lossy(&bytes).contains("new-model") {
@@ -238,16 +231,12 @@ fn failed_profile_commit_restores_only_its_own_write() {
             std::thread::sleep(std::time::Duration::from_millis(10));
         };
         let external = b"{\"model\":\"external-model\",\"theme\":\"external\"}\n";
-        if written && external_change {
+        assert!(!written, "事务取得数据库写锁前不得修改账号文件");
+        if external_change {
             std::fs::write(&target, external).unwrap();
         }
         tx.commit().unwrap();
         let result = worker.join().unwrap();
-        assert!(
-            written,
-            "必须走到实际文件写入后才测试提交失败: {:?}",
-            result.errors
-        );
         assert!(!result.ok, "审计失败不能报成功");
         if external_change {
             assert_eq!(
@@ -255,7 +244,6 @@ fn failed_profile_commit_restores_only_its_own_write() {
                 external,
                 "回滚不得覆盖外部修改"
             );
-            assert!(result.errors.iter().any(|err| err.message.contains("回滚")));
         } else if existed {
             assert_eq!(std::fs::read(&target).unwrap(), before);
         } else {
@@ -278,7 +266,7 @@ fn failed_profile_commit_restores_only_its_own_write() {
 fn edit_snapshot_uses_live_values_without_writes_or_plaintext_credentials() {
     let (root, ctx) = temp_ctx("edit-snapshot");
     let variable = "AM_TEST_EDIT_SNAPSHOT";
-    std::env::set_var(variable, "YOUR_TEST_TOKEN");
+    set_test_secret(&ctx, variable, "YOUR_TEST_TOKEN");
     assert!(save_definition(&ctx, "cc-ly", &claude_profile(variable)));
     assert!(apply_now(&ctx, "cc-ly").ok);
     let target = ctx.home_dir.join(".claude-ly/settings.json");
@@ -331,7 +319,11 @@ fn edit_snapshot_uses_live_values_without_writes_or_plaintext_credentials() {
         serde_json::from_str(&claude_profile(variable)).unwrap();
     definition["profile"]["env"]["ANTHROPIC_CUSTOM_HEADERS"] =
         serde_json::json!("X-Custom: YOUR_SAVED_HEADER");
-    assert!(save_definition(&ctx, "cc-ly", &definition.to_string()));
+    assert!(
+        !save_definition(&ctx, "cc-ly", &definition.to_string()),
+        "undeclared custom auth headers must be rejected"
+    );
+    isolation_legacy_definition(&ctx, "cc-ly", definition);
     live["env"]["ANTHROPIC_AUTH_TOKEN"] = serde_json::json!("YOUR_TEST_TOKEN");
     live["env"]["ANTHROPIC_CUSTOM_HEADERS"] = serde_json::json!("X-Custom: YOUR_EXTERNAL_HEADER");
     std::fs::write(&target, serde_json::to_vec(&live).unwrap()).unwrap();
@@ -339,10 +331,11 @@ fn edit_snapshot_uses_live_values_without_writes_or_plaintext_credentials() {
     assert!(element(&state, "cc-ly")["observed"]["editable_profile"].is_null());
     assert!(!state.data.to_string().contains("YOUR_EXTERNAL_HEADER"));
 
+    set_test_secret(&ctx, "AM_TEST_EDIT_SNAPSHOT_CODEX", "YOUR_CODEX_TEST_TOKEN");
     assert!(save_definition(
         &ctx,
         "cx-work",
-        r#"{"bin":"codex","profile":{"base_agent":"codex","kind":"codex","config_dir":"~/.codex-work","base_url":"https://old.example.com/v1","env_key":"AM_TEST_EDIT_SNAPSHOT","model":"old-model"}}"#
+        r#"{"bin":"codex","profile":{"base_agent":"codex","kind":"codex","config_dir":"~/.codex-work","base_url":"https://old.example.com/v1","env_key":"AM_TEST_EDIT_SNAPSHOT_CODEX","model":"old-model"}}"#
     ));
     assert!(apply_now(&ctx, "cx-work").ok);
     let codex = ctx.home_dir.join(".codex-work/config.toml");
@@ -359,9 +352,10 @@ fn edit_snapshot_uses_live_values_without_writes_or_plaintext_credentials() {
     );
     assert_eq!(edit["model"], "actual-model");
     assert_eq!(edit["base_url"], "https://actual.example.com/v1");
-    assert_eq!(edit["env_key"], variable);
+    assert_eq!(edit["env_key"], "AM_TEST_EDIT_SNAPSHOT_CODEX");
     assert!(!state.data.to_string().contains("YOUR_TEST_TOKEN"));
     assert_eq!(std::fs::read_to_string(&codex).unwrap(), content);
+    std::env::remove_var("AM_TEST_EDIT_SNAPSHOT_CODEX");
     std::env::remove_var(variable);
     let _ = std::fs::remove_dir_all(root);
 }
@@ -369,7 +363,7 @@ fn edit_snapshot_uses_live_values_without_writes_or_plaintext_credentials() {
 #[test]
 fn saved_profile_preview_matches_write_and_rejects_changed_file_or_secret() {
     let (root, ctx) = temp_ctx("saved-profile-preview");
-    std::env::set_var("AM_TEST_SAVED_PREVIEW", "preview-token");
+    set_test_secret(&ctx, "AM_TEST_SAVED_PREVIEW", "preview-token");
     assert!(save_definition(
         &ctx,
         "cc-ly",
@@ -415,10 +409,10 @@ fn saved_profile_preview_matches_write_and_rejects_changed_file_or_secret() {
         b"{\"theme\":\"changed\"}\n"
     );
     std::fs::write(&target, original).unwrap();
-    std::env::set_var("AM_TEST_SAVED_PREVIEW", "new-token");
+    set_test_secret(&ctx, "AM_TEST_SAVED_PREVIEW", "new-token");
     assert!(!execute(&ctx, &request("profiles:apply", &confirmed)).ok);
     assert_eq!(std::fs::read(&target).unwrap(), original);
-    std::env::set_var("AM_TEST_SAVED_PREVIEW", "preview-token");
+    set_test_secret(&ctx, "AM_TEST_SAVED_PREVIEW", "preview-token");
     let done = execute(&ctx, &request("profiles:apply", &confirmed));
     assert!(done.ok, "{:?}", done.errors);
     assert_eq!(std::fs::read_to_string(&target).unwrap(), candidate);
@@ -434,7 +428,7 @@ fn saved_profile_preview_matches_write_and_rejects_changed_file_or_secret() {
 #[test]
 fn saved_codex_profile_preview_preserves_other_settings_and_matches_write() {
     let (root, ctx) = temp_ctx("saved-codex-preview");
-    std::env::set_var("AM_TEST_CODEX_SAVED_PREVIEW", "codex-preview-token");
+    set_test_secret(&ctx, "AM_TEST_CODEX_SAVED_PREVIEW", "codex-preview-token");
     assert!(save_definition(
         &ctx,
         "cx-work",
@@ -487,7 +481,7 @@ fn saved_codex_profile_preview_preserves_other_settings_and_matches_write() {
 #[test]
 fn provider_candidate_updates_one_profile_definition_and_live_file_together() {
     let (root, ctx) = temp_ctx("provider-candidate");
-    std::env::set_var("AM_TEST_PROVIDER_CANDIDATE", "candidate-token-value");
+    set_test_secret(&ctx, "AM_TEST_PROVIDER_CANDIDATE", "candidate-token-value");
     let global = ctx.home_dir.join(".claude/settings.json");
     std::fs::create_dir_all(global.parent().unwrap()).unwrap();
     std::fs::write(&global, b"{\"theme\":\"keep\"}\n").unwrap();
@@ -576,7 +570,7 @@ fn provider_candidate_updates_one_profile_definition_and_live_file_together() {
 #[test]
 fn account_candidate_without_provider_updates_file_and_keeps_no_source() {
     let (root, ctx) = temp_ctx("account-candidate");
-    std::env::set_var("AM_TEST_ACCOUNT_CANDIDATE", "account-token-value");
+    set_test_secret(&ctx, "AM_TEST_ACCOUNT_CANDIDATE", "account-token-value");
     let global = ctx.home_dir.join(".claude/settings.json");
     std::fs::create_dir_all(global.parent().unwrap()).unwrap();
     std::fs::write(&global, b"{\"theme\":\"keep\"}\n").unwrap();
@@ -628,7 +622,7 @@ fn account_candidate_without_provider_updates_file_and_keeps_no_source() {
 #[test]
 fn provider_candidate_rejects_stale_file_definition_and_plaintext_before_writing() {
     let (root, ctx) = temp_ctx("provider-candidate-reject");
-    std::env::set_var("AM_TEST_PROVIDER_REJECT", "candidate-token-value");
+    set_test_secret(&ctx, "AM_TEST_PROVIDER_REJECT", "candidate-token-value");
     assert!(save_definition(
         &ctx,
         "cc-ly",
@@ -678,11 +672,25 @@ fn provider_candidate_rejects_stale_file_definition_and_plaintext_before_writing
     );
 
     let fresh_base = base_of(&ctx, "cc-ly");
-    assert!(save_definition(
+    let renamed = execute(
         &ctx,
-        "cc-ly",
-        &claude_profile("AM_TEST_PROVIDER_REJECT").replace("Claude Code · ly", "Edited elsewhere")
-    ));
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "agents.definitions.cc-ly.display_name",
+                "--value",
+                "\"Edited elsewhere\"",
+            ],
+        ),
+    );
+    assert!(
+        renamed.ok,
+        "safe name-only edits must remain available: {:?}",
+        renamed.errors
+    );
     let updated_policy = execute(&ctx, &request("policy:get", &[])).data;
     assert!(!update(&fresh_base, &definition_base, candidate).ok);
     assert_eq!(std::fs::read(&target).unwrap(), external);
@@ -698,7 +706,7 @@ fn provider_candidate_rejects_stale_file_definition_and_plaintext_before_writing
 #[test]
 fn provider_candidate_updates_only_codex_profile_and_preserves_mcp_and_main_config() {
     let (root, ctx) = temp_ctx("provider-codex-candidate");
-    std::env::set_var("AM_TEST_CODEX_OLD", "old-candidate-token");
+    set_test_secret(&ctx, "AM_TEST_CODEX_OLD", "old-candidate-token");
     let global = ctx.home_dir.join(".codex/config.toml");
     std::fs::create_dir_all(global.parent().unwrap()).unwrap();
     std::fs::write(&global, b"model = \"keep\"\n").unwrap();
@@ -740,7 +748,7 @@ fn provider_candidate_updates_only_codex_profile_and_preserves_mcp_and_main_conf
     );
     assert_eq!(std::fs::read(&target).unwrap(), before);
     assert_eq!(std::fs::read(&global).unwrap(), global_before);
-    std::env::set_var("AM_TEST_CODEX_NEW", "new-candidate-token");
+    set_test_secret(&ctx, "AM_TEST_CODEX_NEW", "new-candidate-token");
     let done = execute(&ctx, &request("profiles:apply-definition", &args));
     assert!(done.ok, "{:?}", done.errors);
     let text = std::fs::read_to_string(&target).unwrap();
@@ -936,8 +944,12 @@ fn draft_on_save_preview_preserves_existing_main_file_and_only_seeds_selected_se
 
     assert!(save_definition(&ctx, "cc-ly", &draft));
     let seeded = seed(&ctx, "cc-ly", "permissions");
-    assert!(seeded.ok, "{:?}", seeded.errors);
-    assert_eq!(std::fs::read_to_string(&target).unwrap(), content);
+    assert!(
+        !seeded.ok,
+        "an unresolved credential must block writes even when metadata registration is allowed"
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), before);
+    assert!(!ctx.home_dir.join(".claude-ly/.claude.json").exists());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1222,14 +1234,14 @@ fn seed_preview_reports_broken_mcp_target_without_hiding_other_files_or_writing(
 #[test]
 fn provider_candidate_preview_matches_apply_without_resolving_key_or_writing() {
     let (root, ctx) = temp_ctx("provider-candidate-preview");
-    std::env::set_var("AM_PREVIEW_OLD", "old-test-token");
+    set_test_secret(&ctx, "AM_PREVIEW_OLD", "old-test-token");
     assert!(save_definition(
         &ctx,
         "cc-ly",
         &claude_profile("AM_PREVIEW_OLD")
     ));
     assert!(apply_now(&ctx, "cc-ly").ok);
-    std::env::remove_var("AM_PREVIEW_OLD");
+    set_test_secret(&ctx, "AM_PREVIEW_OLD", "");
     let target = ctx.home_dir.join(".claude-ly/settings.json");
     let before = std::fs::read(&target).unwrap();
     let policy_before = execute(&ctx, &request("policy:get", &[])).data;
@@ -1267,7 +1279,7 @@ fn provider_candidate_preview_matches_apply_without_resolving_key_or_writing() {
     );
     assert!(probe_log(&ctx).is_empty());
 
-    std::env::set_var("AM_PREVIEW_NEW", "new-test-token");
+    set_test_secret(&ctx, "AM_PREVIEW_NEW", "new-test-token");
     let applied = execute(&ctx, &request("profiles:apply-definition", &args));
     assert!(applied.ok, "{:?}", applied.errors);
     let mut live: serde_json::Value =
@@ -1284,7 +1296,7 @@ fn provider_candidate_preview_matches_apply_without_resolving_key_or_writing() {
 #[test]
 fn provider_exact_candidate_preview_binds_file_and_secret_without_saving_draft_key() {
     let (root, ctx) = temp_ctx("provider-exact-candidate");
-    std::env::set_var("AM_EXACT_OLD", "old-test-token");
+    set_test_secret(&ctx, "AM_EXACT_OLD", "old-test-token");
     let global = ctx.home_dir.join(".claude/settings.json");
     std::fs::create_dir_all(global.parent().unwrap()).unwrap();
     std::fs::write(&global, b"{\"main\":true}\n").unwrap();
@@ -1348,7 +1360,7 @@ fn provider_exact_candidate_preview_binds_file_and_secret_without_saving_draft_k
         "--preview-content-base",
         content_base,
     ];
-    std::env::set_var("AM_EXACT_NEW", "different-test-token");
+    set_test_secret(&ctx, "AM_EXACT_NEW", "different-test-token");
     assert!(!execute(&ctx, &request("profiles:apply-definition", &apply_args)).ok);
     assert_eq!(std::fs::read(&target).unwrap(), before);
     assert_eq!(
@@ -1356,7 +1368,7 @@ fn provider_exact_candidate_preview_binds_file_and_secret_without_saving_draft_k
         policy_before
     );
 
-    std::env::set_var("AM_EXACT_NEW", "draft-test-token");
+    set_test_secret(&ctx, "AM_EXACT_NEW", "draft-test-token");
     let mut external = before.clone();
     external.push(b'\n');
     std::fs::write(&target, &external).unwrap();
@@ -1383,7 +1395,7 @@ fn claude_profile_writes_isolated_settings_without_touching_global() {
     std::fs::write(&global, "{\"hooks\":{}}\n").unwrap();
     let global_before = std::fs::read(&global).unwrap();
 
-    std::env::set_var("AM_TEST_TOKEN_WRITE", "sentinel-token-value");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_WRITE", "sentinel-token-value");
     assert!(save_definition(
         &ctx,
         "cc-ly",
@@ -1397,10 +1409,10 @@ fn claude_profile_writes_isolated_settings_without_touching_global() {
     assert_eq!(el["state"], "not-materialized");
     assert_eq!(el["observed"]["config_dir"], "~/.claude-ly");
     assert_eq!(el["observed"]["config_env"], "CLAUDE_CONFIG_DIR");
-    assert_eq!(
-        el["observed"]["launch_value"],
-        "CLAUDE_CONFIG_DIR=\"~/.claude-ly\" claude"
-    );
+    let launch = el["observed"]["launch_value"].as_str().unwrap();
+    assert!(launch.contains("--account-launch"));
+    assert!(launch.contains("profiles:cc-ly"));
+    assert!(!launch.contains("sentinel-token-value"));
     assert!(
         !ctx.home_dir.join(".claude-ly").exists(),
         "status 不得创建目录"
@@ -1472,7 +1484,7 @@ fn claude_profile_writes_isolated_settings_without_touching_global() {
 #[test]
 fn codex_实例把凭据写进自己的_config_toml_保留_mcp_条目_库里只有变量名() {
     let (root, ctx) = temp_ctx("codex-write");
-    std::env::set_var("AM_TEST_CODEX_TOKEN", "codex-sentinel-value");
+    set_test_secret(&ctx, "AM_TEST_CODEX_TOKEN", "codex-sentinel-value");
     let dir = ctx.home_dir.join(".codex-work");
     std::fs::create_dir_all(&dir).unwrap();
     let mcp = "[mcp_servers.fs]\ncommand = \"npx\"\n";
@@ -1514,10 +1526,10 @@ fn codex_实例把凭据写进自己的_config_toml_保留_mcp_条目_库里只�
     }
     let snapshot = status(&ctx);
     let el = element(&snapshot, "cx-work");
-    assert_eq!(
-        el["observed"]["launch_value"], "CODEX_HOME=\"~/.codex-work\" codex",
-        "只指定配置目录，不替用户加清空凭据变量的赋值，不用 -p"
-    );
+    let launch = el["observed"]["launch_value"].as_str().unwrap();
+    assert!(launch.contains("--account-launch"));
+    assert!(launch.contains("profiles:cx-work"));
+    assert!(!launch.contains("codex-sentinel-value"));
     assert_eq!(el["state"], "managed-ok", "{el}");
     assert!(
         !el.to_string().contains("codex-sentinel-value"),
@@ -1553,9 +1565,10 @@ fn unsafe_config_dirs_are_rejected_before_any_write() {
             r#"{{"bin":"claude","profile":{{"base_agent":"claude-code","config_dir":"{dir}"}},"_delete":false,"_replace":true}}"#
         );
         assert!(
-            save_definition(&ctx, id, &definition),
-            "保存定义本身不执行动作"
+            !save_definition(&ctx, id, &definition),
+            "unsafe registration must be rejected"
         );
+        isolation_legacy_definition(&ctx, id, serde_json::from_str(&definition).unwrap());
         let apply = execute(
             &ctx,
             &request(
@@ -1577,7 +1590,7 @@ fn unsafe_config_dirs_are_rejected_before_any_write() {
 #[test]
 fn live_settings_are_merged_and_external_edits_can_be_adopted() {
     let (root, ctx) = temp_ctx("live-first");
-    std::env::set_var("AM_TEST_TOKEN_LIVE", "live-token-value");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_LIVE", "live-token-value");
     assert!(save_definition(
         &ctx,
         "cc-ly",
@@ -1658,13 +1671,24 @@ fn live_settings_are_merged_and_external_edits_can_be_adopted() {
             &["--only", "profiles:cc-ly", "--base", &fresh],
         ),
     );
+    assert!(
+        !adopt.ok,
+        "a changed live credential cannot silently adopt another identity"
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), bytes);
+    edited["env"]["ANTHROPIC_AUTH_TOKEN"] = serde_json::json!("live-token-value");
+    std::fs::write(&target, serde_json::to_vec_pretty(&edited).unwrap()).unwrap();
+    let trusted_bytes = std::fs::read(&target).unwrap();
+    let fresh = base_of(&ctx, "cc-ly");
+    let adopt = execute(
+        &ctx,
+        &request(
+            "profiles:adopt",
+            &["--only", "profiles:cc-ly", "--base", &fresh],
+        ),
+    );
     assert!(adopt.ok, "{:?}", adopt.errors);
-    assert!(adopt.data["notes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|n| n.as_str().unwrap().contains("ANTHROPIC_AUTH_TOKEN")));
-    assert_eq!(std::fs::read(&target).unwrap(), bytes, "采纳只改库");
+    assert_eq!(std::fs::read(&target).unwrap(), trusted_bytes, "采纳只改库");
     let policy = execute(&ctx, &request("policy:get", &[]));
     let profile = &policy.data["effective"]["agents"]["definitions"]["cc-ly"]["profile"];
     assert_eq!(profile["env"]["ANTHROPIC_BASE_URL"], "http://10.0.0.8:8080");
@@ -1696,13 +1720,12 @@ fn live_settings_are_merged_and_external_edits_can_be_adopted() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-/// 实例 settings.json 是符号链接（dotfiles）时写到最终目标文件，链接本身不变；
-/// agents:status 不再把主目录 ~/.claude 的配置当成实例的当前配置。
+/// Account identity aliases are rejected without migrating independent dotfiles.
 #[cfg(unix)]
 #[test]
-fn symlinked_instance_settings_are_written_through_and_agents_status_does_not_read_main_dir() {
+fn symlinked_instance_settings_are_rejected_and_agents_status_does_not_read_main_dir() {
     let (root, ctx) = temp_ctx("symlink");
-    std::env::set_var("AM_TEST_TOKEN_LINK", "t");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_LINK", "t");
     assert!(save_definition(
         &ctx,
         "cc-ly",
@@ -1713,17 +1736,21 @@ fn symlinked_instance_settings_are_written_through_and_agents_status_does_not_re
     std::fs::write(&real, "{\"theme\":\"dark\"}\n").unwrap();
     let link = ctx.home_dir.join(".claude-ly/settings.json");
     std::os::unix::fs::symlink(&real, &link).unwrap();
-    let apply = apply_now(&ctx, "cc-ly");
-    assert!(apply.ok, "{:?}", apply.errors);
+    let apply = execute(
+        &ctx,
+        &request(
+            "profiles:apply",
+            &["--only", "profiles:cc-ly", "--base", "missing"],
+        ),
+    );
+    assert!(!apply.ok, "linked settings must never be written");
     assert!(std::fs::symlink_metadata(&link)
         .unwrap()
         .file_type()
         .is_symlink());
     let text = std::fs::read_to_string(&real).unwrap();
-    assert!(
-        text.contains("ANTHROPIC_BASE_URL") && text.contains("\"theme\": \"dark\""),
-        "{text}"
-    );
+    assert_eq!(text, "{\"theme\":\"dark\"}\n");
+    assert_eq!(element(&status(&ctx), "cc-ly")["state"], "unsupported");
 
     // 主目录放一份不同的配置：agents:status 对实例不得读它
     std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
@@ -1752,7 +1779,7 @@ fn symlinked_instance_settings_are_written_through_and_agents_status_does_not_re
 #[test]
 fn legacy_bindings_table_without_owned_column_still_works() {
     let (root, ctx) = temp_ctx("legacy-bindings");
-    std::env::set_var("AM_TEST_TOKEN_LEGACY", "t");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_LEGACY", "t");
     assert!(save_definition(
         &ctx,
         "cc-ly",
@@ -1813,11 +1840,13 @@ fn missing_variable_and_bad_definitions_fail_closed() {
     );
 
     // 鉴权取值写字面量：定义解析即拒绝，status 用固定语义块呈现
-    assert!(save_definition(
+    let unsafe_definition = r#"{"bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-plain","env":{"ANTHROPIC_AUTH_TOKEN":"literal-secret"}},"_delete":false,"_replace":true}"#;
+    assert!(!save_definition(&ctx, "cc-plain", unsafe_definition));
+    isolation_legacy_definition(
         &ctx,
         "cc-plain",
-        r#"{"bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-plain","env":{"ANTHROPIC_AUTH_TOKEN":"literal-secret"}},"_delete":false,"_replace":true}"#
-    ));
+        serde_json::from_str(unsafe_definition).unwrap(),
+    );
     let status = execute(&ctx, &request("profiles:status", &[]));
     assert!(status.ok, "{:?}", status.errors);
     let text = serde_json::to_string(&status.data).unwrap();
@@ -1867,7 +1896,7 @@ fn profile_directory_leaves_rules_file_and_hooks_alone() {
     let settings_before = std::fs::read(&global_settings).unwrap();
     let rules_before = std::fs::read(&global_rules).unwrap();
 
-    std::env::set_var("AM_TEST_TOKEN_FULLSET", "x");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_FULLSET", "x");
     assert!(save_definition(
         &ctx,
         "cc-ly",
@@ -1908,8 +1937,7 @@ fn profile_directory_leaves_rules_file_and_hooks_alone() {
     // 4) 用户自己写的实例规则与 hooks：状态不因它们变化，再次应用也不碰它们
     std::fs::write(&instance_rules, "external edit\n").unwrap();
     let mut with_hooks = settings.clone();
-    with_hooks["hooks"] =
-        serde_json::json!({"Stop": [{"hooks": [{"type": "command", "command": "echo mine"}]}]});
+    with_hooks["hooks"] = serde_json::json!({});
     // 与 Hooks 页写盘同一格式（pretty + 换行）
     std::fs::write(
         ctx.home_dir.join(".claude-ly/settings.json"),
@@ -1931,6 +1959,28 @@ fn profile_directory_leaves_rules_file_and_hooks_alone() {
     .unwrap();
     assert_eq!(after["hooks"], with_hooks["hooks"], "实例 hooks 原样保留");
 
+    // Command hooks can rewrite identity outside the controlled contract. Preserve
+    // them for diagnosis and refuse applying authentication configuration.
+    with_hooks["hooks"] =
+        serde_json::json!({"Stop": [{"hooks": [{"type": "command", "command": "echo mine"}]}]});
+    let unsafe_bytes = serde_json::to_vec_pretty(&with_hooks).unwrap();
+    let target = ctx.home_dir.join(".claude-ly/settings.json");
+    std::fs::write(&target, &unsafe_bytes).unwrap();
+    let before_probe = probe_log(&ctx);
+    let refused = apply_now(&ctx, "cc-ly");
+    assert!(
+        !refused.ok,
+        "command hooks require a fail-closed diagnostic"
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), unsafe_bytes);
+    assert_eq!(
+        probe_log(&ctx),
+        before_probe,
+        "unsafe hooks cannot trigger an auth probe"
+    );
+    assert_eq!(std::fs::read(&global_settings).unwrap(), settings_before);
+    assert_eq!(std::fs::read(&global_rules).unwrap(), rules_before);
+
     std::env::remove_var("AM_TEST_TOKEN_FULLSET");
     let _ = std::fs::remove_dir_all(root);
 }
@@ -1939,7 +1989,7 @@ fn profile_directory_leaves_rules_file_and_hooks_alone() {
 #[test]
 fn codex_profile_directory_gets_no_rules_or_hooks_file() {
     let (root, ctx) = temp_ctx("codex-full-set");
-    std::env::set_var("AM_TEST_CODEX_FULL_SET", "codex-full-set-token");
+    set_test_secret(&ctx, "AM_TEST_CODEX_FULL_SET", "codex-full-set-token");
     assert!(save_definition(
         &ctx,
         "cx-work",
@@ -1978,7 +2028,7 @@ fn 实例的额度读它自己的配置目录_不是默认那份() {
     )
     .unwrap();
 
-    std::env::set_var("AM_TEST_TOKEN_USAGE", "t");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_USAGE", "t");
     assert!(save_definition(
         &ctx,
         "cc-usage",
@@ -2006,7 +2056,7 @@ fn claude_settings(ctx: &Context, dir: &str) -> serde_json::Value {
 #[test]
 fn 第三方实例只写自己声明的凭据_不加别的变量() {
     let (root, ctx) = temp_ctx("cancel-env");
-    std::env::set_var("AM_TEST_TOKEN_CANCEL", "cancel-token");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_CANCEL", "cancel-token");
     assert!(save_definition(
         &ctx,
         "cc-ly",
@@ -2057,7 +2107,7 @@ fn 第三方实例只写自己声明的凭据_不加别的变量() {
 #[test]
 fn 目录里有官方登录时拒绝写入第三方凭据_文件不变() {
     let (root, ctx) = temp_ctx("official-present");
-    std::env::set_var("AM_TEST_TOKEN_OFFICIAL", "official-token");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_OFFICIAL", "official-token");
     let dir = ctx.home_dir.join(".claude-ly");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join(".fake-logged-in"), "").unwrap();
@@ -2091,7 +2141,7 @@ fn 目录里有官方登录时拒绝写入第三方凭据_文件不变() {
 #[test]
 fn 第三方凭据遮住官方登录时按登录记录拒绝() {
     let (root, ctx) = temp_ctx("official-masked");
-    std::env::set_var("AM_TEST_TOKEN_MASKED", "masked-token");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_MASKED", "masked-token");
     let dir = ctx.home_dir.join(".claude-ly");
     std::fs::create_dir_all(&dir).unwrap();
     // 目录里已经有一份第三方凭据，官方命令只会报告它；登录会话记录在 .claude.json
@@ -2122,7 +2172,7 @@ fn 第三方凭据遮住官方登录时按登录记录拒绝() {
 #[test]
 fn console_登录也算官方账号登录_拒绝写入第三方凭据() {
     let (root, ctx) = temp_ctx("official-console");
-    std::env::set_var("AM_TEST_TOKEN_CONSOLE", "console-token");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_CONSOLE", "console-token");
     assert!(save_definition(
         &ctx,
         "cc-ly",
@@ -2136,8 +2186,15 @@ fn console_登录也算官方账号登录_拒绝写入第三方凭据() {
     let refused = apply_now(&ctx, "cc-ly");
     assert!(!refused.ok);
     assert!(format!("{:?}", refused.errors).contains("官方账号登录"));
+    std::fs::write(
+        dir.join(".claude.json"),
+        "{\"primaryApiKey\":\"dummy-console-record\"}",
+    )
+    .unwrap();
     let auth = auth_status(&ctx, "profiles:cc-ly");
+    assert!(auth.ok, "{:?}", auth.errors);
     assert_eq!(auth.data["method"], "console");
+    assert_eq!(auth.data["isolation_blocked"], true);
     assert_eq!(auth.data["mixed"], true);
     std::fs::remove_file(dir.join(".fake-console")).unwrap();
 
@@ -2159,10 +2216,10 @@ fn console_登录也算官方账号登录_拒绝写入第三方凭据() {
 /// 指到不存在的位置，进程环境里的档案与联合身份变量不带给官方命令。托管设置给的 apiKeyHelper、
 /// 只存 MCP 登录的 `.credentials.json` 都不是官方账号登录。
 #[test]
-#[cfg(unix)] // .cmd 替身用 %~2 取参数，拿不到原样的 --settings JSON
+#[cfg(unix)] // This assertion also covers the Unix-specific nonexistent archive path.
 fn 探测取消目录声明的凭据_不看共享档案_不把托管凭据当成官方登录() {
     let (root, ctx) = temp_ctx("probe-isolation");
-    std::env::set_var("AM_TEST_TOKEN_PROBE", "probe-token");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_PROBE", "probe-token");
     assert!(save_definition(
         &ctx,
         "cc-ly",
@@ -2173,6 +2230,13 @@ fn 探测取消目录声明的凭据_不看共享档案_不把托管凭据当成
     std::fs::write(dir.join(".fake-helper"), "").unwrap();
     std::fs::write(dir.join(".credentials.json"), "{\"mcpOAuth\":{}}\n").unwrap();
     std::env::set_var("ANTHROPIC_PROFILE", "shared-wif");
+    let helper = apply_now(&ctx, "cc-ly");
+    assert!(
+        !helper.ok,
+        "unknown helper auth cannot prove official credential storage empty"
+    );
+    assert!(!dir.join("settings.json").exists());
+    std::fs::remove_file(dir.join(".fake-helper")).unwrap();
     let applied = apply_now(&ctx, "cc-ly");
     std::env::remove_var("ANTHROPIC_PROFILE");
     assert!(applied.ok, "{:?}", applied.errors);
@@ -2206,7 +2270,7 @@ fn 探测取消目录声明的凭据_不看共享档案_不把托管凭据当成
 #[test]
 fn 无法确认有没有官方登录时拒绝写入() {
     let (root, ctx) = temp_ctx("official-unknown");
-    std::env::set_var("AM_TEST_TOKEN_UNKNOWN", "unknown-token");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_UNKNOWN", "unknown-token");
     std::fs::create_dir_all(ctx.home_dir.join(".claude-ly")).unwrap();
     std::fs::write(ctx.home_dir.join(".fake-garbage"), "").unwrap();
     assert!(save_definition(
@@ -2242,7 +2306,7 @@ fn 官方账号实例不检查登录_只写自己声明的项() {
     // 官方账号实例不跑登录检查
     assert_eq!(probe_log(&ctx), "");
 
-    // 用户在实例文件里自己设了网关地址（定义没声明）：不归本工具管，不算不一致，也不列出来
+    // An undeclared endpoint in an official account is diagnosed and blocks application.
     let mut edited = settings.clone();
     edited["env"] = serde_json::json!({"ANTHROPIC_BASE_URL": "https://gw.example.com"});
     std::fs::write(
@@ -2252,7 +2316,10 @@ fn 官方账号实例不检查登录_只写自己声明的项() {
     .unwrap();
     let env = status(&ctx);
     let el = element(&env, "cc-work");
-    assert_eq!(el["state"], "managed-ok");
+    assert_eq!(el["state"], "unsupported");
+    let before = std::fs::read(dir.join("settings.json")).unwrap();
+    assert!(!apply_now(&ctx, "cc-work").ok);
+    assert_eq!(std::fs::read(dir.join("settings.json")).unwrap(), before);
     assert!(el["observed"]["fields"]
         .as_array()
         .unwrap()
@@ -2264,7 +2331,7 @@ fn 官方账号实例不检查登录_只写自己声明的项() {
 #[test]
 fn codex_第三方实例_目录已登录官方账号时拒绝_未登录才写() {
     let (root, ctx) = temp_ctx("codex-official");
-    std::env::set_var("AM_TEST_CODEX_OFFICIAL", "codex-official-token");
+    set_test_secret(&ctx, "AM_TEST_CODEX_OFFICIAL", "codex-official-token");
     let dir = ctx.home_dir.join(".codex-work");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join(".fake-logged-in"), "").unwrap();
@@ -2351,7 +2418,7 @@ fn 打开页面查登录只看本机文件_不调用官方命令_不改用户目
 #[test]
 fn 登录状态用官方命令按需查询_第三方实例里有官方登录标为混用() {
     let (root, ctx) = temp_ctx("auth-status-mixed");
-    std::env::set_var("AM_TEST_TOKEN_STATUS", "status-token");
+    set_test_secret(&ctx, "AM_TEST_TOKEN_STATUS", "status-token");
     assert!(save_definition(
         &ctx,
         "cc-ly",
@@ -2359,13 +2426,21 @@ fn 登录状态用官方命令按需查询_第三方实例里有官方登录标�
     ));
     let dir = ctx.home_dir.join(".claude-ly");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join(".fake-logged-in"), "").unwrap();
+    std::fs::write(
+        dir.join(".claude.json"),
+        "{\"oauthAccount\":{\"accountUuid\":\"stored-dummy-account\"}}",
+    )
+    .unwrap();
     let db_before = std::fs::read(store::db_path(&ctx)).ok();
 
     let env = auth_status(&ctx, "profiles:cc-ly");
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(env.data["state"], "logged-in");
-    assert_eq!(env.data["method"], "claude.ai");
+    assert!(
+        env.data["method"].is_null(),
+        "a stored unverified record cannot prove a server auth method"
+    );
+    assert_eq!(env.data["isolation_blocked"], true);
     assert_eq!(env.data["third_party"], true);
     assert_eq!(env.data["mixed"], true);
     assert!(!env.data.to_string().contains("status-token"));
@@ -2374,7 +2449,11 @@ fn 登录状态用官方命令按需查询_第三方实例里有官方登录标�
         db_before,
         "查询不写库"
     );
-    assert_eq!(probe_log(&ctx), format!("claude|{}|unset\n", dir.display()));
+    assert_eq!(
+        probe_log(&ctx),
+        "",
+        "API status never probes an unsafe mixed context"
+    );
     std::env::remove_var("AM_TEST_TOKEN_STATUS");
     let _ = std::fs::remove_dir_all(root);
 }
@@ -2494,7 +2573,7 @@ fn apply_shared(
 #[test]
 fn 已建环境逐项写入共用设置_来源被外部改过就拒绝_含明文密钥的服务不同步() {
     let (root, ctx) = temp_ctx("shared-preview-all");
-    std::env::set_var("AM_TEST_SHARED_PREVIEW", "YOUR_TEST_TOKEN");
+    set_test_secret(&ctx, "AM_TEST_SHARED_PREVIEW", "YOUR_TEST_TOKEN");
     let main_dir = ctx.home_dir.join(".claude");
     std::fs::create_dir_all(&main_dir).unwrap();
     std::fs::write(
@@ -2584,7 +2663,7 @@ fn 已建环境逐项写入共用设置_来源被外部改过就拒绝_含明文
 #[test]
 fn 已建_claude_环境逐项更新共用设置_来源目标变化拒绝覆盖() {
     let (root, ctx) = temp_ctx("shared-claude");
-    std::env::set_var("AM_TEST_SHARED_CLAUDE", "YOUR_TEST_TOKEN");
+    set_test_secret(&ctx, "AM_TEST_SHARED_CLAUDE", "YOUR_TEST_TOKEN");
     let main_dir = ctx.home_dir.join(".claude");
     std::fs::create_dir_all(&main_dir).unwrap();
     let main_settings = main_dir.join("settings.json");
@@ -2741,7 +2820,7 @@ fn 已建_claude_环境逐项更新共用设置_来源目标变化拒绝覆盖()
 #[test]
 fn 已建_codex_环境更新审批状态栏_保留接入和官方登录() {
     let (root, ctx) = temp_ctx("shared-codex");
-    std::env::set_var("AM_TEST_SHARED_CODEX", "profile-codex-token");
+    set_test_secret(&ctx, "AM_TEST_SHARED_CODEX", "profile-codex-token");
     let main_dir = ctx.home_dir.join(".codex");
     std::fs::create_dir_all(&main_dir).unwrap();
     let main_config = main_dir.join("config.toml");
@@ -2872,7 +2951,7 @@ fn snapshot_dir(dir: &std::path::Path) -> Vec<(PathBuf, Vec<u8>)> {
 #[test]
 fn 默认环境的设置可一次性带进_claude_独立环境_只补没有的_不带凭据() {
     let (root, ctx) = temp_ctx("seed-claude");
-    std::env::set_var("AM_TEST_SEED_CLAUDE_TOKEN", "seed-token-value");
+    set_test_secret(&ctx, "AM_TEST_SEED_CLAUDE_TOKEN", "seed-token-value");
     let main_dir = ctx.home_dir.join(".claude");
     std::fs::create_dir_all(&main_dir).unwrap();
     let main_settings = serde_json::json!({
@@ -3038,7 +3117,7 @@ fn 默认环境的设置可一次性带进_claude_独立环境_只补没有的_�
 #[test]
 fn 默认环境的设置可一次性带进_codex_独立环境_不破坏接入_状态栏在_tui_下() {
     let (root, ctx) = temp_ctx("seed-codex");
-    std::env::set_var("AM_TEST_SEED_CODEX_TOKEN", "seed-codex-value");
+    set_test_secret(&ctx, "AM_TEST_SEED_CODEX_TOKEN", "seed-codex-value");
     let main_dir = ctx.home_dir.join(".codex");
     std::fs::create_dir_all(&main_dir).unwrap();
     std::fs::write(
@@ -3178,22 +3257,18 @@ fn 带设置的前提不满足时拒绝且零写_各项失败互不牵连() {
     }
     std::fs::remove_file(dir.join("CLAUDE.md")).unwrap();
 
-    // 实例 settings.json 损坏：权限项失败，规则照常带
+    // Damaged authentication configuration blocks all writes, including otherwise safe seed items.
     std::fs::write(dir.join("settings.json"), "{ not json").unwrap();
     let env = seed(&ctx, "cc-work", "permissions,rules");
-    assert!(env.ok, "{:?}", env.errors);
-    assert_eq!(
-        seed_states(&env),
-        states(&[("permissions", "failed"), ("rules", "copied")])
-    );
+    assert!(!env.ok, "{:?}", env.errors);
     assert_eq!(
         std::fs::read_to_string(dir.join("settings.json")).unwrap(),
         "{ not json",
         "损坏的文件原样不动"
     );
-    assert_eq!(
-        std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap(),
-        "rules\n"
+    assert!(
+        !dir.join("CLAUDE.md").exists(),
+        "failed preflight must not partially seed rules"
     );
 
     // 主配置里没有的项：报「没有」，不写
@@ -3211,7 +3286,7 @@ fn 带设置的前提不满足时拒绝且零写_各项失败互不牵连() {
 #[test]
 fn 密钥换了还没写进环境_状态标出凭据项_不提供以实际配置更新定义() {
     let (root, ctx) = temp_ctx("credential-stale");
-    std::env::set_var("AM_TEST_STALE_TOKEN", "sk-old-value-1234567890");
+    set_test_secret(&ctx, "AM_TEST_STALE_TOKEN", "sk-old-value-1234567890");
     assert!(save_definition(
         &ctx,
         "cc-ly",
@@ -3232,7 +3307,7 @@ fn 密钥换了还没写进环境_状态标出凭据项_不提供以实际配置
     assert_eq!(token["state"], "same");
 
     // 用户在密钥文件里换了值：环境里还是旧的
-    std::env::set_var("AM_TEST_STALE_TOKEN", "sk-new-value-0987654321");
+    set_test_secret(&ctx, "AM_TEST_STALE_TOKEN", "sk-new-value-0987654321");
     let el = element(&status(&ctx), "cc-ly").clone();
     let text = serde_json::to_string(&el).unwrap();
     assert!(
@@ -3265,5 +3340,652 @@ fn 密钥换了还没写进环境_状态标出凭据项_不提供以实际配置
         "sk-new-value-0987654321"
     );
     std::env::remove_var("AM_TEST_STALE_TOKEN");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+// Account path isolation regression fixtures contain only disposable local data.
+const ISOLATION_CONTENT: &[u8] = b"{\"model\":\"protected\",\"theme\":\"unchanged\"}\n";
+
+fn isolation_definition(ctx: &Context, id: &str, dir: &str) {
+    let definition = serde_json::json!({
+        "bin": "claude",
+        "profile": {"base_agent": "claude-code", "config_dir": dir, "model": "changed"},
+        "_replace": true,
+    });
+    isolation_legacy_definition(ctx, id, definition);
+}
+
+fn isolation_legacy_definition(ctx: &Context, id: &str, definition: serde_json::Value) {
+    // Model a legacy registration; current policy:set must reject unsafe paths.
+    let mut policy = store::effective_policy(ctx).unwrap();
+    policy["agents"]["definitions"][id] = definition;
+    store::write_policy(&store::open_write(ctx).unwrap(), &policy).unwrap();
+}
+
+fn isolation_base() -> String {
+    use sha2::{Digest, Sha256};
+    format!(
+        "{:x}",
+        Sha256::digest(br#"{"env":null,"model":"protected"}"#)
+    )
+}
+
+fn assert_isolation_blocked(ctx: &Context, id: &str, protected: &std::path::Path) {
+    let before = std::fs::read(protected).unwrap();
+    let apply = execute(
+        ctx,
+        &request(
+            "profiles:apply",
+            &[
+                "--only",
+                &format!("profiles:{id}"),
+                "--base",
+                &isolation_base(),
+            ],
+        ),
+    );
+    assert!(
+        !apply.ok,
+        "unsafe account target was writable: {:?}",
+        apply.data
+    );
+    assert_eq!(
+        std::fs::read(protected).unwrap(),
+        before,
+        "protected bytes changed"
+    );
+    let status = status(ctx);
+    let account = element(&status, id);
+    assert_eq!(account["state"], "unsupported", "{account}");
+    assert!(
+        account["observed"]["base"].is_null(),
+        "unsafe target exposed a write baseline"
+    );
+    assert!(account["actions"].as_array().unwrap().is_empty());
+    assert_eq!(
+        std::fs::read(protected).unwrap(),
+        before,
+        "status modified protected bytes"
+    );
+}
+
+/// Windows explicitly uses a junction, without relying on symlink privileges or fallback.
+fn isolation_dir_alias(target: &std::path::Path, alias: &std::path::Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, alias).unwrap();
+    #[cfg(windows)]
+    junction::create(target, alias).unwrap();
+}
+
+#[test]
+fn account_isolation_rejects_main_account_ancestor_alias() {
+    let (root, ctx) = temp_ctx("isolation-main-ancestor");
+    let primary = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
+    std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+    isolation_dir_alias(&ctx.home_dir, &ctx.home_dir.join("alias"));
+    isolation_definition(&ctx, "work", "~/alias/.claude");
+    assert_isolation_blocked(&ctx, "work", &primary);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn account_isolation_resolves_ancestors_of_missing_directories() {
+    let (root, ctx) = temp_ctx("isolation-missing-ancestor");
+    let primary = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
+    std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+    isolation_dir_alias(primary.parent().unwrap(), &ctx.home_dir.join("alias"));
+    isolation_definition(&ctx, "work", "~/alias/not-created/deep");
+    let apply = execute(
+        &ctx,
+        &request(
+            "profiles:apply",
+            &["--only", "profiles:work", "--base", "missing"],
+        ),
+    );
+    assert!(
+        !apply.ok,
+        "a missing suffix must not hide a protected ancestor"
+    );
+    assert!(!primary.parent().unwrap().join("not-created").exists());
+    assert_eq!(std::fs::read(&primary).unwrap(), ISOLATION_CONTENT);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn account_isolation_rejects_data_directory_ancestor_alias() {
+    let (root, ctx) = temp_ctx("isolation-data-ancestor");
+    isolation_definition(&ctx, "work", "~/alias/account");
+    let primary = ctx.data_dir.join("account/settings.json");
+    std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
+    std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+    isolation_dir_alias(&ctx.data_dir, &ctx.home_dir.join("alias"));
+    assert_isolation_blocked(&ctx, "work", &primary);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn account_isolation_rejects_other_account_ancestor_alias() {
+    let (root, ctx) = temp_ctx("isolation-other-ancestor");
+    isolation_definition(&ctx, "other", "~/.claude-other");
+    isolation_definition(&ctx, "work", "~/alias/.claude-other");
+    let primary = ctx.home_dir.join(".claude-other/settings.json");
+    std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
+    std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+    isolation_dir_alias(&ctx.home_dir, &ctx.home_dir.join("alias"));
+    assert_isolation_blocked(&ctx, "work", &primary);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn account_isolation_rejects_main_account_hardlink() {
+    let (root, ctx) = temp_ctx("isolation-hardlink");
+    isolation_definition(&ctx, "work", "~/.claude-work");
+    let primary = ctx.home_dir.join(".claude/settings.json");
+    let target = ctx.home_dir.join(".claude-work/settings.json");
+    std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+    std::fs::hard_link(&primary, &target).unwrap();
+    assert_isolation_blocked(&ctx, "work", &primary);
+    assert_eq!(std::fs::read(&target).unwrap(), ISOLATION_CONTENT);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn account_isolation_rejects_file_links_to_protected_targets() {
+    for (tag, protected_dir, other) in [
+        ("main", ".claude", false),
+        ("other", ".claude-other", true),
+        ("other-kind", ".codex", false),
+    ] {
+        let (root, ctx) = temp_ctx(&format!("isolation-file-{tag}"));
+        isolation_definition(&ctx, "work", "~/.claude-work");
+        if other {
+            isolation_definition(&ctx, "other", "~/.claude-other");
+        }
+        let primary = ctx.home_dir.join(protected_dir).join("settings.json");
+        let target = ctx.home_dir.join(".claude-work/settings.json");
+        std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+        std::os::unix::fs::symlink(&primary, &target).unwrap();
+        assert_isolation_blocked(&ctx, "work", &primary);
+        assert!(std::fs::symlink_metadata(&target)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn account_isolation_rejects_shared_external_main_account_target() {
+    let (root, ctx) = temp_ctx("isolation-external-main");
+    isolation_definition(&ctx, "work", "~/.claude-work");
+    let primary = root.join("dotfiles-settings.json");
+    std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+    for directory in [".claude", ".claude-work"] {
+        let dir = ctx.home_dir.join(directory);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::os::unix::fs::symlink(&primary, dir.join("settings.json")).unwrap();
+    }
+    assert_isolation_blocked(&ctx, "work", &primary);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn account_isolation_rechecks_file_links_after_status() {
+    let (root, ctx) = temp_ctx("isolation-changed-link");
+    isolation_definition(&ctx, "work", "~/.claude-work");
+    let target = ctx.home_dir.join(".claude-work/settings.json");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, ISOLATION_CONTENT).unwrap();
+    let before = base_of(&ctx, "work");
+    let primary = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
+    std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+    std::fs::remove_file(&target).unwrap();
+    std::os::unix::fs::symlink(&primary, &target).unwrap();
+    let apply = execute(
+        &ctx,
+        &request(
+            "profiles:apply",
+            &["--only", "profiles:work", "--base", &before],
+        ),
+    );
+    assert!(
+        !apply.ok,
+        "identical bytes do not authorize a changed destination"
+    );
+    assert_eq!(std::fs::read(&primary).unwrap(), ISOLATION_CONTENT);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn account_isolation_rejects_case_aliases_before_creating_main_directory() {
+    let (root, ctx) = temp_ctx("isolation-case");
+    isolation_definition(&ctx, "work", "~/.CLAUDE");
+    let apply = execute(
+        &ctx,
+        &request(
+            "profiles:apply",
+            &["--only", "profiles:work", "--base", "missing"],
+        ),
+    );
+    assert!(!apply.ok, "case aliases must not create the main account");
+    assert!(!ctx.home_dir.join(".claude").exists());
+    assert!(!ctx.home_dir.join(".CLAUDE").exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn account_isolation_seed_and_shared_settings_reject_main_file_link() {
+    let (root, ctx) = temp_ctx("isolation-seed-shared");
+    isolation_definition(&ctx, "work", "~/.claude-work");
+    let primary = ctx.home_dir.join(".claude/settings.json");
+    let target = ctx.home_dir.join(".claude-work/settings.json");
+    std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    let before = b"{\"permissions\":{\"allow\":[\"Read\"]},\"theme\":\"unchanged\"}\n";
+    std::fs::write(&primary, before).unwrap();
+    std::os::unix::fs::symlink(&primary, &target).unwrap();
+    let seed = execute(
+        &ctx,
+        &request(
+            "profiles:seed",
+            &["--only", "profiles:work", "--items", "permissions"],
+        ),
+    );
+    assert!(
+        !seed.ok,
+        "identity aliases must fail before any seed action"
+    );
+    let shared = execute(
+        &ctx,
+        &request("profiles:shared-status", &["--only", "profiles:work"]),
+    );
+    assert!(shared.ok, "{:?}", shared.errors);
+    let permission = shared.data["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["item"] == "permissions")
+        .unwrap();
+    assert_eq!(permission["state"], "blocked", "{:?}", shared.data);
+    assert_eq!(std::fs::read(primary).unwrap(), before);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn account_isolation_protects_malformed_account_external_target() {
+    let (root, ctx) = temp_ctx("isolation-invalid-other");
+    isolation_definition(&ctx, "work", "~/.claude-work");
+    isolation_legacy_definition(
+        &ctx,
+        "other",
+        serde_json::json!({
+            "bin": "claude",
+            "profile": {"base_agent": "claude-code", "config_dir": "~/.claude-other",
+                "env": {"ANTHROPIC_AUTH_TOKEN": "invalid-literal"}},
+            "_replace": true,
+        }),
+    );
+    let primary = root.join("dotfiles-settings.json");
+    std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+    for directory in [".claude-other", ".claude-work"] {
+        let dir = ctx.home_dir.join(directory);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::os::unix::fs::symlink(&primary, dir.join("settings.json")).unwrap();
+    }
+    assert_isolation_blocked(&ctx, "work", &primary);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn account_isolation_rejects_file_link_into_data_directory() {
+    let (root, ctx) = temp_ctx("isolation-file-data");
+    isolation_definition(&ctx, "work", "~/.claude-work");
+    let primary = ctx.data_dir.join("protected.json");
+    let target = ctx.home_dir.join(".claude-work/settings.json");
+    std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&primary, &target).unwrap();
+    assert_isolation_blocked(&ctx, "work", &primary);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn account_isolation_rejects_nested_other_account_directories() {
+    let (root, ctx) = temp_ctx("isolation-other-nested");
+    isolation_definition(&ctx, "other", "~/.claude-other");
+    isolation_definition(&ctx, "work", "~/.claude-other/not-created");
+    let primary = ctx.home_dir.join(".claude-other/settings.json");
+    std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
+    std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+    let apply = execute(
+        &ctx,
+        &request(
+            "profiles:apply",
+            &["--only", "profiles:work", "--base", "missing"],
+        ),
+    );
+    assert!(!apply.ok);
+    assert!(!primary.parent().unwrap().join("not-created").exists());
+    assert_eq!(std::fs::read(primary).unwrap(), ISOLATION_CONTENT);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+#[test]
+fn account_isolation_rejects_existing_main_directory_case_alias() {
+    let (root, ctx) = temp_ctx("isolation-existing-case");
+    let primary = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
+    std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+    isolation_definition(&ctx, "work", "~/.CLAUDE");
+    assert_isolation_blocked(&ctx, "work", &primary);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[test]
+fn account_isolation_preserves_case_sensitive_distinct_directories() {
+    let (root, ctx) = temp_ctx("isolation-case-sensitive");
+    let primary = ctx.home_dir.join(".claude/settings.json");
+    std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
+    std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+    isolation_definition(&ctx, "work", "~/.CLAUDE");
+    let apply = apply_now(&ctx, "work");
+    assert!(apply.ok, "{:?}", apply.errors);
+    assert_eq!(std::fs::read(primary).unwrap(), ISOLATION_CONTENT);
+    assert!(
+        std::fs::read_to_string(ctx.home_dir.join(".CLAUDE/settings.json"))
+            .unwrap()
+            .contains("changed")
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn account_isolation_protects_external_authentication_targets() {
+    for (tag, directory, auth_file) in [
+        ("other-claude", ".claude-other", ".credentials.json"),
+        ("other-codex", ".codex-other", "auth.json"),
+        ("own", ".claude-work", ".credentials.json"),
+    ] {
+        let (root, ctx) = temp_ctx(&format!("isolation-auth-{tag}"));
+        isolation_definition(&ctx, "work", "~/.claude-work");
+        if tag == "other-codex" {
+            assert!(save_definition(
+                &ctx,
+                "other",
+                &serde_json::json!({
+                    "bin": "codex",
+                    "profile": {"base_agent": "codex", "config_dir": "~/.codex-other"},
+                    "_replace": true,
+                })
+                .to_string()
+            ));
+        } else {
+            isolation_definition(&ctx, "other", "~/.claude-other");
+        }
+        let primary = root.join("external-authentication.json");
+        // Valid settings-shaped dummy bytes ensure rejection is path protection, not parsing.
+        std::fs::write(&primary, ISOLATION_CONTENT).unwrap();
+        std::fs::create_dir_all(ctx.home_dir.join(directory)).unwrap();
+        std::fs::create_dir_all(ctx.home_dir.join(".claude-work")).unwrap();
+        std::os::unix::fs::symlink(&primary, ctx.home_dir.join(directory).join(auth_file)).unwrap();
+        std::os::unix::fs::symlink(&primary, ctx.home_dir.join(".claude-work/settings.json"))
+            .unwrap();
+        assert_isolation_blocked(&ctx, "work", &primary);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[test]
+fn account_isolation_rejects_account_ancestor_link_before_rules_or_settings() {
+    let (root, ctx) = temp_ctx("isolation-rules-alias");
+    let directory = ctx.home_dir.join("independent/work");
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("CLAUDE.md"), "original rules\n").unwrap();
+    isolation_dir_alias(
+        &ctx.home_dir.join("independent"),
+        &ctx.home_dir.join("alias"),
+    );
+    isolation_definition(&ctx, "work", "~/alias/work");
+    let profile = execute(
+        &ctx,
+        &request(
+            "profiles:apply",
+            &["--only", "profiles:work", "--base", "missing"],
+        ),
+    );
+    assert!(!profile.ok, "account ancestor aliases must be rejected");
+    assert!(!directory.join("settings.json").exists());
+    let rules = execute(&ctx, &request("rules:status", &[]));
+    assert!(rules.ok, "{:?}", rules.errors);
+    let target = rules.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == "rules:profile:work")
+        .unwrap();
+    assert!(
+        target["observed"]["base"].is_null(),
+        "rules must still see the configured ancestor link: {target}"
+    );
+    assert!(target["actions"].as_array().unwrap().is_empty());
+    assert_eq!(
+        std::fs::read(directory.join("CLAUDE.md")).unwrap(),
+        b"original rules\n"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn account_isolation_auth_probe_rejects_other_account_directory() {
+    let (root, ctx) = temp_ctx("isolation-auth-probe");
+    isolation_definition(&ctx, "other", "~/.claude-other");
+    isolation_definition(&ctx, "work", "~/.claude-other");
+    let protected = ctx.home_dir.join(".claude-other/settings.json");
+    std::fs::create_dir_all(protected.parent().unwrap()).unwrap();
+    std::fs::write(&protected, ISOLATION_CONTENT).unwrap();
+    let result = execute(
+        &ctx,
+        &request(
+            "agents:auth-status",
+            &["--only", "profiles:work", "--probe"],
+        ),
+    );
+    assert!(
+        !result.ok,
+        "shared account directory must not be passed to the CLI"
+    );
+    assert!(!ctx.home_dir.join(".probe-log").exists());
+    assert_eq!(std::fs::read(&protected).unwrap(), ISOLATION_CONTENT);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(windows)]
+#[test]
+fn account_isolation_rejects_windows_ambiguous_components_before_creation() {
+    for (index, directory, normalized) in [
+        (0, "~/.claude.", ".claude"),
+        (1, "~/.codex /nested", ".codex"),
+        (2, "~/.claude-work.", ".claude-work"),
+        (3, "~/.claude-work ", ".claude-work"),
+        (4, "~/.claude-work. /nested", ".claude-work"),
+    ] {
+        let (root, ctx) = temp_ctx(&format!("isolation-windows-component-{index}"));
+        isolation_definition(&ctx, "work", directory);
+        let apply = execute(
+            &ctx,
+            &request(
+                "profiles:apply",
+                &["--only", "profiles:work", "--base", "missing"],
+            ),
+        );
+        assert!(
+            !apply.ok,
+            "ambiguous Windows path was accepted: {directory}"
+        );
+        assert!(
+            !ctx.home_dir.join(normalized).exists(),
+            "rejected path created its normalized directory: {directory}"
+        );
+        assert_eq!(element(&status(&ctx), "work")["state"], "unsupported");
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[test]
+fn credential_isolation_rejects_merged_identity_sources_without_writing() {
+    for (index, extra) in [
+        serde_json::json!({"ANTHROPIC_API_KEY":"other-key"}),
+        serde_json::json!({"CLAUDE_CODE_OAUTH_TOKEN":"other-token"}),
+        serde_json::json!({"CLAUDE_CODE_USE_BEDROCK":"1"}),
+        serde_json::json!({"ANTHROPIC_CUSTOM_HEADERS":"Authorization: Bearer other"}),
+        serde_json::json!({"ANTHROPIC_PROFILE":"other"}),
+        serde_json::json!({"anthropic_base_url":"https://other.example.invalid"}),
+        serde_json::json!({"anthropic_api_key":"other-key"}),
+        serde_json::json!({"claude_code_use_bedrock":"1"}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (root, ctx) = temp_ctx(&format!("credential-merged-{index}"));
+        let variable = format!("AM_CREDENTIAL_MERGED_{index}");
+        set_test_secret(&ctx, &variable, "own-test-value");
+        let raw = serde_json::json!({"bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-isolated","env":{"ANTHROPIC_AUTH_TOKEN":format!("${{{variable}}}"),"ANTHROPIC_BASE_URL":"https://a.example.com"}}});
+        assert!(save_definition(&ctx, "isolated", &raw.to_string()));
+        let dir = ctx.home_dir.join(".claude-isolated");
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("settings.json");
+        let before =
+            serde_json::to_vec(&serde_json::json!({"env":extra,"theme":"original"})).unwrap();
+        std::fs::write(&target, &before).unwrap();
+        let main = ctx.home_dir.join(".claude.json");
+        std::fs::write(
+            &main,
+            b"{\"oauthAccount\":{\"emailAddress\":\"main@example.invalid\"}}",
+        )
+        .unwrap();
+        let main_before = std::fs::read(&main).unwrap();
+        let base = base_of(&ctx, "isolated");
+        let result = execute(
+            &ctx,
+            &request(
+                "profiles:apply",
+                &["--only", "profiles:isolated", "--base", &base],
+            ),
+        );
+        assert!(!result.ok, "merged identity must be rejected");
+        assert_eq!(std::fs::read(&target).unwrap(), before);
+        assert_eq!(std::fs::read(&main).unwrap(), main_before);
+        assert_eq!(element(&status(&ctx), "isolated")["state"], "unsupported");
+        let output = serde_json::to_string(&result).unwrap();
+        for secret in ["own-test-value", "other-key", "other-token"] {
+            assert!(!output.contains(secret));
+        }
+        std::env::remove_var(&variable);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[test]
+fn credential_isolation_source_failure_never_uses_parent_value_or_writes() {
+    for failure in ["missing-key", "bad-content", "permissions", "no-source"] {
+        if failure == "permissions" && !cfg!(unix) {
+            continue;
+        }
+        let (root, ctx) = temp_ctx(&format!("credential-source-{failure}"));
+        let variable = format!(
+            "AM_CREDENTIAL_SOURCE_{}",
+            failure.replace('-', "_").to_uppercase()
+        );
+        let source = root.join("private.env");
+        std::fs::write(&source, format!("{variable}=account-a-value\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert!(
+            execute(
+                &ctx,
+                &request("secrets:source", &["--path", source.to_str().unwrap()])
+            )
+            .ok
+        );
+        let raw = serde_json::json!({"bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-source","env":{"ANTHROPIC_AUTH_TOKEN":format!("${{{variable}}}"),"ANTHROPIC_BASE_URL":"https://a.example.com"}}});
+        assert!(save_definition(&ctx, "source-account", &raw.to_string()));
+        assert!(apply_now(&ctx, "source-account").ok);
+        let target = ctx.home_dir.join(".claude-source/settings.json");
+        let before = std::fs::read(&target).unwrap();
+        std::env::set_var(&variable, "parent-account-b-value");
+        match failure {
+            "no-source" => {
+                assert!(execute(&ctx, &request("secrets:source", &["--path", ""])).ok);
+            }
+            "missing-key" => std::fs::write(&source, "OTHER=unrelated\n").unwrap(),
+            "bad-content" => std::fs::write(&source, "malformed-line\n").unwrap(),
+            _ => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o644))
+                        .unwrap();
+                }
+            }
+        }
+        let result = apply_now(&ctx, "source-account");
+        assert!(!result.ok, "source {failure} must fail closed");
+        assert_eq!(std::fs::read(&target).unwrap(), before);
+        let status = execute(&ctx, &request("secrets:status", &[]));
+        assert!(status.ok);
+        assert!(!status.data.to_string().contains("parent-account-b-value"));
+        if failure != "missing-key" {
+            assert_eq!(status.data["elements"][0]["state"], "unsupported");
+        }
+        assert_eq!(std::env::var(&variable).unwrap(), "parent-account-b-value");
+        std::env::remove_var(variable);
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[test]
+fn credential_isolation_rejects_api_directory_oauth_credentials_without_writing() {
+    let (root, ctx) = temp_ctx("credential-local-oauth");
+    set_test_secret(&ctx, "AM_CREDENTIAL_LOCAL_OAUTH", "own-test-value");
+    assert!(save_definition(
+        &ctx,
+        "isolated",
+        r#"{"bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/.claude-isolated","env":{"ANTHROPIC_AUTH_TOKEN":"${AM_CREDENTIAL_LOCAL_OAUTH}"}}}"#
+    ));
+    let dir = ctx.home_dir.join(".claude-isolated");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(".credentials.json"),
+        b"{\"claudeAiOauth\":{\"accessToken\":\"official-local-test-token\"}}",
+    )
+    .unwrap();
+    let before = std::fs::read(dir.join(".credentials.json")).unwrap();
+    assert!(!apply_now(&ctx, "isolated").ok);
+    assert!(!dir.join("settings.json").exists());
+    assert_eq!(
+        std::fs::read(dir.join(".credentials.json")).unwrap(),
+        before
+    );
+    std::env::remove_var("AM_CREDENTIAL_LOCAL_OAUTH");
     let _ = std::fs::remove_dir_all(root);
 }

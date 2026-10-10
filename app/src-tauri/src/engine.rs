@@ -64,7 +64,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         // 测试连接：运行条目里的命令或请求地址一次，只返回结果，不写文件、不写库
         ("mcp", "check") => true,
         // 用户逐环境确认后同时更新定义与实际配置文件
-        ("profiles", "apply-definition") => true,
+        ("profiles", "apply-definition" | "create") => true,
+        ("accounts", "command") => true,
         // 把默认环境的权限、状态栏、规则与 MCP 一次性带进实例：只补实例没有的
         ("profiles", "seed") => true,
         ("profiles", "shared-status" | "shared-apply" | "preview") => true,
@@ -148,6 +149,8 @@ enum ArgValueKind {
     ProgramAction,
     /// true / false
     BoolText,
+    AccountOperation,
+    AccountShell,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -155,6 +158,21 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
     let (domain, verb) = command.split_once(':').unwrap_or(("", ""));
     let mut specs: Vec<(&'static str, ArgValueKind)> = Vec::new();
     match (domain, verb) {
+        ("accounts", "command") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--operation", ArgValueKind::AccountOperation));
+            specs.push(("--definition", ArgValueKind::JsonValue));
+            specs.push(("--shell", ArgValueKind::AccountShell));
+        }
+        ("profiles", "create") => {
+            specs.push(("--only", ArgValueKind::ElementId));
+            specs.push(("--definition", ArgValueKind::JsonValue));
+            specs.push(("--base", ArgValueKind::RuleBase));
+            specs.push(("--preview-file-base", ArgValueKind::RuleBase));
+            specs.push(("--preview-content-base", ArgValueKind::RuleBase));
+            specs.push(("--secret-var", ArgValueKind::VarName));
+            specs.push(("--secret-value", ArgValueKind::SecretValue));
+        }
         ("secrets", "set") => {
             specs.push(("--var", ArgValueKind::VarName));
             specs.push(("--value", ArgValueKind::SecretValue));
@@ -228,6 +246,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--candidate", ArgValueKind::JsonValue));
             specs.push(("--preview-file-base", ArgValueKind::RuleBase));
             specs.push(("--preview-content-base", ArgValueKind::Digest));
+            specs.push(("--secret-var", ArgValueKind::VarName));
+            specs.push(("--secret-value", ArgValueKind::SecretValue));
         }
         // 只读发现：--only 取域名（agents/skills/mcp），引擎侧再做词汇表校验
         ("profiles", "seed") => {
@@ -402,6 +422,20 @@ pub fn validate_run_id(value: &str) -> Result<(), EngineError> {
 
 fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError> {
     match kind {
+        ArgValueKind::AccountShell => {
+            if ["posix", "powershell"].contains(&value) {
+                Ok(())
+            } else {
+                Err(EngineError::new("invalid_args", "非法的账号终端类型"))
+            }
+        }
+        ArgValueKind::AccountOperation => {
+            if ["launch", "login", "logout", "status"].contains(&value) {
+                Ok(())
+            } else {
+                Err(EngineError::new("invalid_args", "非法的账号操作"))
+            }
+        }
         ArgValueKind::Flag => Ok(()),
         ArgValueKind::ElementId => validate_element_id(value),
         ArgValueKind::SeedItems => {
@@ -774,6 +808,62 @@ pub async fn engine_invoke(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn controlled_account_commands_reject_unsupported_operations_and_secret_flags() {
+        assert!(validate_command("accounts:command").is_ok());
+        assert!(validate_command("accounts:launch").is_err());
+        assert!(validate_command("profiles:create").is_ok());
+        let args = |items: &[&str]| {
+            items
+                .iter()
+                .map(|item| (*item).to_string())
+                .collect::<Vec<_>>()
+        };
+        assert!(validate_args(
+            "accounts:command",
+            &args(&[
+                "--only",
+                "profiles:work",
+                "--operation",
+                "logout",
+                "--shell",
+                "powershell"
+            ])
+        )
+        .is_ok());
+        assert!(validate_args("accounts:command", &args(&["--shell", "cmd"])).is_err());
+        assert!(validate_args("accounts:command", &args(&["--operation", "shell"])).is_err());
+        assert!(validate_args(
+            "accounts:command",
+            &args(&["--secret-value", "YOUR_TEST_KEY"])
+        )
+        .is_err());
+        let digest = "a".repeat(64);
+        let create = args(&[
+            "--only",
+            "profiles:work",
+            "--definition",
+            "{}",
+            "--base",
+            "missing",
+            "--preview-file-base",
+            "missing",
+            "--preview-content-base",
+            &digest,
+            "--secret-var",
+            "AM_WORK_KEY",
+            "--secret-value",
+            "YOUR_TEST_KEY",
+        ]);
+        assert!(validate_args("profiles:create", &create).is_ok());
+        assert!(validate_args(
+            "profiles:create",
+            &args(&["--secret-value", "YOUR_TEST_KEY\n"])
+        )
+        .is_err());
+        assert!(validate_args("profiles:create", &args(&["--allow-takeover"])).is_err());
+    }
 
     #[test]
     fn command_whitelist_covers_contract_surface_and_rejects_injection() {

@@ -196,6 +196,7 @@ export default function App() {
                 setActivePage("skills");
               }}
               onOpenSources={() => handleNavigate("sources")}
+              onOpenSecrets={() => handleNavigate("settings:secrets")}
             />
           )}
           {activePage === "skills" && (
@@ -250,6 +251,7 @@ export default function App() {
       />
       {importText !== null && (
         <ImportLinkDialog
+          key={importText}
           initialText={importText}
           onClose={() => setImportText(null)}
           onContinue={(payload) => {

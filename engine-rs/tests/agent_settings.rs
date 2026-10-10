@@ -4,6 +4,9 @@
 // 部分辅助只给 Unix 专属的用例用
 #![cfg_attr(not(unix), allow(dead_code))]
 
+#[cfg(windows)]
+mod common;
+
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,6 +24,10 @@ fn temp_ctx(tag: &str) -> (PathBuf, Context) {
             .as_nanos()
     ));
     let _ = fs::remove_dir_all(&base);
+    #[cfg(windows)]
+    common::private_fixture_root(&base);
+    fs::create_dir_all(&base).unwrap();
+    let base = agent_manager_engine::platform::Canon::canon(base.as_path()).unwrap();
     let ctx = Context {
         data_dir: base.join("data"),
         home_dir: base.join("home"),
@@ -902,7 +909,7 @@ fn 用户自己的状态栏不被碰_也不算外部修改() {
 
 #[cfg(unix)]
 #[test]
-fn 配置文件是符号链接时写到最终目标_链接本身不变() {
+fn main_settings_link_is_rejected_without_reading_or_changing_its_target() {
     use std::os::unix::fs::symlink;
     let (base, ctx) = temp_ctx("symlink");
     let dotfiles = base.join("dotfiles");
@@ -912,21 +919,23 @@ fn 配置文件是符号链接时写到最终目标_链接本身不变() {
     let link = ctx.home_dir.join(".claude/settings.json");
     symlink(&real, &link).unwrap();
 
-    assert_eq!(current_config(&ctx, "claude-code")["state"], "ready");
+    let before = fs::read(&real).unwrap();
+    let current = current_config(&ctx, "claude-code");
+    assert_eq!(current["state"], "invalid-target");
+    assert!(current["base"].is_null());
+    assert!(current["config"].is_null());
     let applied = configure(
         &ctx,
         "claude-code",
         &["--runtime", r#"{"claude_effort_level": "high"}"#],
     );
-    assert!(applied.ok, "{:?}", applied.errors);
+    assert!(!applied.ok, "unsafe linked configuration was accepted");
     assert!(fs::symlink_metadata(&link)
         .unwrap()
         .file_type()
         .is_symlink());
     assert_eq!(fs::read_link(&link).unwrap(), real);
-    let written: Value = serde_json::from_slice(&fs::read(&real).unwrap()).unwrap();
-    assert_eq!(written["effortLevel"], "high");
-    assert_eq!(written["env"]["MY_OWN"], "keep-me");
+    assert_eq!(fs::read(&real).unwrap(), before);
     assert_eq!(
         dotfiles.read_dir().unwrap().count(),
         1,
@@ -1225,6 +1234,7 @@ fn codex_普通运行设置保留认证并拒绝把配置路径指向认证文�
         "providers": {"native": {"install": "true", "upgrade": "true", "managed": true}},
         "settings": {"active": "relay", "profiles": {"relay": {"base_url": "https://other.example.com/v1"}}},
     });
+    let policy_before = store::effective_policy(&ctx).unwrap();
     let saved = execute(
         &ctx,
         &request(
@@ -1239,7 +1249,13 @@ fn codex_普通运行设置保留认证并拒绝把配置路径指向认证文�
             ],
         ),
     );
-    assert!(saved.ok, "{:?}", saved.errors);
+    assert!(!saved.ok, "unsafe account registration was accepted");
+    assert_eq!(store::effective_policy(&ctx).unwrap(), policy_before);
+    assert_eq!(fs::read(&auth_path).unwrap(), auth_bytes);
+    // Existing unsafe registrations must also fail closed at the actual write.
+    let mut legacy = policy_before;
+    legacy["agents"]["definitions"]["codex"] = dangerous;
+    store::write_policy(&store::open_write(&ctx).unwrap(), &legacy).unwrap();
 
     let refused = configure(
         &ctx,
@@ -1248,7 +1264,7 @@ fn codex_普通运行设置保留认证并拒绝把配置路径指向认证文�
     );
     assert!(!refused.ok);
     assert!(
-        refused.errors[0].message.contains("只允许写 config.toml"),
+        refused.errors[0].message.contains("未绑定主账号身份文件"),
         "{:?}",
         refused.errors
     );

@@ -24,10 +24,9 @@
 //!   元素报 USAGE_ERROR；不取全局 apply 锁、不改任何用户配置/策略。
 
 use std::collections::BTreeMap;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
 use rusqlite::TransactionBehavior;
@@ -384,26 +383,6 @@ fn collect_targets(ctx: &Context) -> Result<Vec<ProbeTarget>> {
 // 探测器（有界捕获 + 超时终止进程组，失败 → None，由上层归 unknown+error）
 // ---------------------------------------------------------------------------
 
-fn spawn_capture_reader(
-    mut pipe: impl Read + Send + 'static,
-    limit: usize,
-) -> std::sync::mpsc::Receiver<Vec<u8>> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut buf = [0u8; 256];
-        let mut captured = Vec::with_capacity(limit.min(1024));
-        while let Ok(n) = pipe.read(&mut buf) {
-            if n == 0 {
-                break;
-            }
-            let remaining = limit.saturating_sub(captured.len());
-            captured.extend_from_slice(&buf[..n.min(remaining)]);
-        }
-        let _ = tx.send(captured);
-    });
-    rx
-}
-
 /// 以参数数组直接执行（不经 shell），exit 0 → Some(stdout)；超时/非 0/启动
 /// 失败 → None。stdin 关闭，HOME 注入 ctx.home_dir（探测不继承调用方 HOME）。
 fn run_capture(
@@ -425,8 +404,9 @@ fn run_capture(
     String::from_utf8(stdout).ok()
 }
 
-/// 执行调用方配好参数与环境的命令：stdin 关闭、独立进程组、输出有界，超时终止进程组。
-/// 正常退出 → Some((退出码, stdout, stderr 前 256 字节))；超时、被信号终止或启动失败 → None。
+/// 执行调用方配好参数与环境的命令：stdin 关闭、独立进程组、输出有界。
+/// 正常退出且管道 EOF → Some((退出码, stdout, stderr 前 256 字节))；
+/// 进程或管道超时、被信号终止或启动失败 → None；超时时终止进程组。
 pub(crate) fn capture_exit(command: Command, timeout: Duration) -> Option<(i32, Vec<u8>, Vec<u8>)> {
     capture_exit_limited(command, timeout, CAPTURE_LIMIT)
 }
@@ -441,32 +421,10 @@ fn capture_exit_limited(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let (mut child, group) = crate::process::spawn_group(&mut command).ok()?;
-    let stdout_rx = spawn_capture_reader(child.stdout.take()?, limit);
-    let stderr_rx = spawn_capture_reader(child.stderr.take()?, 256);
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let stdout = stdout_rx
-                    .recv_timeout(Duration::from_secs(2))
-                    .unwrap_or_default();
-                let stderr = stderr_rx
-                    .recv_timeout(Duration::from_secs(2))
-                    .unwrap_or_default();
-                return Some((status.code()?, stdout, stderr));
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    group.kill(&mut child);
-                    let _ = child.wait();
-                    return None;
-                }
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Err(_) => return None,
-        }
-    }
+    let mut output = crate::process::capture_group(&mut command, timeout, limit.max(256)).ok()?;
+    output.stdout.truncate(limit);
+    output.stderr.truncate(256);
+    Some((output.status.code()?, output.stdout, output.stderr))
 }
 
 /// npm 包名白名单校验（防策略值被拼成 flag）；不合法 → 探测失败类别。
@@ -478,11 +436,38 @@ fn valid_npm_package(package: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '/' | '.' | '_' | '-'))
 }
 
+/// Resolve tools through the same user PATH/PATHEXT rules as program management.
+/// Pass that PATH to the child as well so npm can find its Node runtime.
+fn run_user_tool(
+    program: &str,
+    args: &[&str],
+    cwd: Option<&Path>,
+    ctx: &Context,
+    timeout: Duration,
+) -> Option<String> {
+    let path = crate::native_programs::locate::user_path(ctx, false);
+    let executable = crate::native_programs::locate::find_all(&path, program)
+        .into_iter()
+        .next()?;
+    let mut command = crate::process::command(executable);
+    command
+        .args(args)
+        .env("HOME", &ctx.home_dir)
+        .env("PATH", std::env::join_paths(&path.dirs).ok()?);
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+    let (code, stdout, _) = capture_exit(command, timeout)?;
+    (code == 0)
+        .then(|| String::from_utf8(stdout).ok())
+        .flatten()
+}
+
 fn npm_view(ctx: &Context, package: &str) -> Option<String> {
     if !valid_npm_package(package) {
         return None;
     }
-    let out = run_capture(
+    let out = run_user_tool(
         "npm",
         &["view", package, "version"],
         None,
@@ -505,7 +490,7 @@ fn pypi_latest(ctx: &Context, package: &str) -> Option<String> {
         return None;
     }
     let url = format!("https://pypi.org/pypi/{package}/json");
-    let out = run_capture(
+    let out = run_user_tool(
         "curl",
         &["-fsSL", "--max-time", "25", &url],
         None,
@@ -1021,4 +1006,92 @@ pub(crate) fn handle(ctx: &Context, request: &Request) -> DispatchResult {
         },
     });
     Ok((data, vec![]))
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::*;
+    use crate::process::capture_test_support as fixture;
+    use std::time::Instant;
+
+    fn command(root: &Path, mode: &str) -> Command {
+        let mut command = fixture::command(root, mode);
+        command
+            .env("HOME", root)
+            .env("USERPROFILE", root)
+            .current_dir(root);
+        command
+    }
+
+    fn inherited_pipe_deadline(stream: &str, timeout: Duration) {
+        let root = fixture::root(&format!("upstream-{stream}"));
+        let start = Instant::now();
+        let result = capture_exit(command(&root, stream), timeout);
+        let elapsed = start.elapsed();
+        let ready = root.join("ready").exists();
+        let parent_exited = root.join("parent-exited").exists();
+        std::thread::sleep(Duration::from_secs(6).saturating_sub(start.elapsed()));
+        let survived = root.join("late").exists();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(ready, "The pipe-holding descendant never started");
+        assert!(
+            parent_exited,
+            "The parent did not exit before its pipe holder"
+        );
+        assert!(
+            result.is_none(),
+            "Incomplete capture reported success: {result:?}"
+        );
+        assert!(
+            elapsed < timeout + Duration::from_secs(1),
+            "Capture exceeded its shared deadline: {elapsed:?}"
+        );
+        assert!(
+            !survived,
+            "The timed-out capture left its descendant running"
+        );
+    }
+
+    #[test]
+    fn capture_times_out_after_parent_exits_with_inherited_stdout() {
+        inherited_pipe_deadline("stdout", Duration::from_secs(2));
+    }
+
+    #[test]
+    fn capture_times_out_after_parent_exits_with_inherited_stderr() {
+        inherited_pipe_deadline("stderr", Duration::from_secs(2));
+    }
+
+    #[test]
+    fn capture_uses_one_deadline_for_parent_and_reader_completion() {
+        inherited_pipe_deadline("delayed-stdout", Duration::from_secs(3));
+    }
+
+    #[test]
+    fn capture_preserves_nonzero_exit_and_independent_stream_limits() {
+        let root = fixture::root("upstream-output");
+        let (code, stdout, stderr) =
+            capture_exit_limited(command(&root, "output"), Duration::from_secs(10), 4).unwrap();
+        assert_eq!(code, 7);
+        assert_eq!(stdout.len(), 4);
+        assert_eq!(
+            String::from_utf8(stderr).unwrap(),
+            (0..10)
+                .map(|i| format!("diagnostic-{i}\n"))
+                .collect::<String>()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn capture_drains_both_streams_past_retention_limits() {
+        let root = fixture::root("upstream-large-output");
+        let (code, stdout, stderr) =
+            capture_exit(command(&root, "large-output"), Duration::from_secs(10)).unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(stdout.len(), CAPTURE_LIMIT);
+        assert!(stdout.ends_with(b"oooo"));
+        assert_eq!(stderr, vec![b'e'; 256]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

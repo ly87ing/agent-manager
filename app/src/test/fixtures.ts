@@ -16,6 +16,17 @@ import {
 } from "../lib/contract";
 import type { AgentManagement, AgentRuntimeField, AgentRuntimeSummary } from "../lib/observed";
 
+export function controlledCommand(element: string, operation = "launch", shell = "posix"): string {
+  return `${shell === "powershell" ? "& " : ""}"/isolated/Agent Manager" --account-launch --home "/isolated/home" --data-dir "/isolated/data" --only "${element}" --operation ${operation} --`;
+}
+
+export async function accountCommandRoute(args: string[]): Promise<Envelope> {
+  const value = (flag: string) => args[args.indexOf(flag) + 1];
+  const element = value("--only");
+  const operation = value("--operation");
+  return makeEnvelope({ controlled: true, launch_value: controlledCommand(element, operation), terminal_command: controlledCommand(element, operation, value("--shell")) }, { command: "accounts.command" });
+}
+
 const summary = (label: string, extras: Partial<AgentRuntimeSummary> = {}): AgentRuntimeSummary => ({
   label,
   default: "客户端默认",

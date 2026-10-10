@@ -4,6 +4,7 @@ import { CreatePlan } from "../components/CreatePlan";
 
 // 与真实引擎 profiles:preview --on-save 的返回同形（2026-09-28 隔离 HOME 实测）
 const preview = {
+  launchValue: '"/isolated/agent-manager" --account-launch --only "profiles:glm" --operation launch --',
   config: {
     path: "~/.claude-glm/settings.json",
     exists: false,

@@ -1,8 +1,11 @@
 //! MCP 原生域：各助手配置文件里的实际条目即当前配置。
 //!
 //! 覆盖：只读 status（零写、脱敏、契约形状）、逐条 add/edit/enable/disable/remove/copy、
-//! `--base` CAS、Codex 原位编辑保留未建模字段、Claude 停用快照（疑似凭据转存、普通字面量
+//! `--base` CAS、Codex 原位编辑保留未建模字段、Claude 停用快照（不迁移凭据、普通字面量
 //! 原样保存）、旧服务库迁移、锁与审计、严格参数。全部在隔离 HOME 与数据目录里跑。
+
+#[cfg(windows)]
+mod common;
 
 use agent_manager_engine::native_mcp::model::{digest_of, is_sha256_hex};
 use agent_manager_engine::{execute, store, Context, Envelope, Request};
@@ -26,6 +29,8 @@ fn temp_ctx(tag: &str) -> (PathBuf, Context) {
             .as_nanos()
     ));
     let _ = std::fs::remove_dir_all(&base);
+    #[cfg(windows)]
+    common::private_fixture_root(&base);
     let ctx = Context {
         data_dir: base.join("data"),
         home_dir: base.join("home"),
@@ -469,7 +474,9 @@ fn status_lists_actual_entries_masked_zero_write_and_matches_contract() {
     assert_eq!(fs["extra"]["alwaysLoad"], true);
     assert_eq!(fs["vars"]["REF"]["placeholder"], "${AM_STATUS_REF_VAR}");
     assert!(is_sha256_hex(fs["base"].as_str().unwrap()));
-    assert_eq!(fs["actions"], json!(["edit", "disable", "copy", "remove"]));
+    assert_eq!(fs["actions"], json!(["edit", "disable", "remove"]));
+    assert_eq!(fs["copy_safe"], false);
+    assert!(fs["copy_blocked_reason"].as_str().unwrap().contains("凭据"));
 
     let remote = &element(&data, "remote")["observed"]["agents"]["claude-code"];
     assert_eq!(remote["transport"], "remote");
@@ -970,7 +977,8 @@ fn codex_disable_uses_official_enabled_field_and_keeps_entry() {
     let c = cell(&ctx, "github", "codex");
     assert_eq!(c["state"], "disabled");
     assert_eq!(c["source"], "file");
-    assert_eq!(c["actions"], json!(["edit", "enable", "copy", "remove"]));
+    assert_eq!(c["actions"], json!(["edit", "enable", "remove"]));
+    assert_eq!(c["copy_safe"], false);
     assert!(saved_rows(&ctx).is_empty(), "Codex 停用不存快照");
     let text = read(&codex_path(&ctx));
     assert!(text.contains("# 关于 other 的说明\n[mcp_servers.other]\ncommand = \"other-bin\"\n"));
@@ -1014,127 +1022,54 @@ fn codex_disable_uses_official_enabled_field_and_keeps_entry() {
 
 /// 必测 4（及裁决第 10 条两类）：Claude 停用 = 移出条目 + 快照入库。
 /// 疑似凭据的 env 字面量与全部 header 字面量转存到外部密钥文件、快照里只剩 ${VAR}；
-/// 普通字面量原样入快照；库中 grep 不到明文；重新启用写回的条目与停用前一致。
+/// Disabling existing owned references never adopts or overwrites credentials.
 #[test]
-fn claude_disable_snapshots_entry_transfers_secrets_and_enable_restores_identically() {
+fn claude_disable_snapshots_owned_references_and_enable_restores_identically() {
     let (root, ctx) = temp_ctx("claude-snapshot");
-    let secret = "sk-ant-api03-snapshot0123456789abcdefghijk";
-    let header = "Bearer header-secret-value-1234";
-    let original_fs = json!({"type": "stdio", "command": "npx", "args": ["-y", "fs"],
-        "env": {"AM_T4_API_KEY": secret, "NODE_ENV": "production", "REF": "${AM_T4_REF}"},
-        "alwaysLoad": true});
-    let original_remote = json!({"type": "http", "url": "https://mcp.example.com/mcp",
-        "headers": {"Authorization": header, "X-Ref": "${AM_T4_HDR}"}});
+    let secrets_file = configure_secrets_file(&ctx);
+    let original_fs = json!({"type":"stdio","command":"npx","args":["-y","fs"],
+        "env":{"AM_T4_API_KEY":"${AM_T4_API_KEY}","NODE_ENV":"production"},"alwaysLoad":true});
+    let original_remote = json!({"type":"http","url":"https://mcp.example.com/mcp",
+        "headers":{"Authorization":"${AM_T4_HDR}"}});
     write_claude(
         &ctx,
-        json!({"numStartups": 1, "mcpServers": {"fs": original_fs, "remote": original_remote, "other": {"command": "o"}}}),
+        json!({"numStartups":1,"mcpServers":{"fs":original_fs,"remote":original_remote,"other":{"command":"o"}}}),
     );
-    let secrets_file = configure_secrets_file(&ctx);
-
-    let env = apply_ok(
-        &ctx,
-        &[
-            "--only",
-            "mcp:fs",
-            "--agent",
-            "claude-code",
-            "--action",
-            "disable",
-            "--base",
-            &base(&ctx, "fs", "claude-code"),
-        ],
+    let before_secret = read(&secrets_file);
+    for name in ["fs", "remote"] {
+        apply_ok(
+            &ctx,
+            &[
+                "--only",
+                &format!("mcp:{name}"),
+                "--agent",
+                "claude-code",
+                "--action",
+                "disable",
+                "--base",
+                &base(&ctx, name, "claude-code"),
+            ],
+        );
+    }
+    assert_eq!(
+        read(&secrets_file),
+        before_secret,
+        "disable never adopts keys"
     );
-    assert!(
-        warnings(&env).contains("AM_T4_API_KEY"),
-        "{}",
-        warnings(&env)
-    );
-    assert!(!warnings(&env).contains(secret));
-    let env = apply_ok(
-        &ctx,
-        &[
-            "--only",
-            "mcp:remote",
-            "--agent",
-            "claude-code",
-            "--action",
-            "disable",
-            "--base",
-            &base(&ctx, "remote", "claude-code"),
-        ],
-    );
-    assert!(
-        warnings(&env).contains("REMOTE_AUTHORIZATION"),
-        "{}",
-        warnings(&env)
-    );
-
     let doc: Value = serde_json::from_str(&read(&claude_path(&ctx))).unwrap();
-    assert!(doc["mcpServers"].get("fs").is_none(), "条目已移出");
+    assert!(doc["mcpServers"].get("fs").is_none());
     assert!(doc["mcpServers"].get("remote").is_none());
-    assert_eq!(doc["mcpServers"]["other"], json!({"command": "o"}));
+    assert_eq!(doc["mcpServers"]["other"], json!({"command":"o"}));
     assert_eq!(doc["numStartups"], 1);
-
     let rows = saved_rows(&ctx);
-    let fs_row = rows.iter().find(|r| r.0 == "fs").unwrap();
-    assert_eq!(fs_row.1, "claude-code");
-    let fs_entry: Value = serde_json::from_str(&fs_row.2).unwrap();
-    assert_eq!(fs_entry["env"]["AM_T4_API_KEY"], "${AM_T4_API_KEY}");
-    assert_eq!(
-        fs_entry["env"]["NODE_ENV"], "production",
-        "普通字面量原样入快照"
-    );
-    assert_eq!(fs_entry["env"]["REF"], "${AM_T4_REF}");
-    assert_eq!(fs_row.3, r#"{"env":["AM_T4_API_KEY"],"headers":[]}"#);
-    let remote_row = rows.iter().find(|r| r.0 == "remote").unwrap();
-    let remote_entry: Value = serde_json::from_str(&remote_row.2).unwrap();
-    assert_eq!(
-        remote_entry["headers"]["Authorization"],
-        "${REMOTE_AUTHORIZATION}"
-    );
-    assert_eq!(remote_entry["headers"]["X-Ref"], "${AM_T4_HDR}");
-
-    let bytes = db_bytes(&ctx);
-    assert!(!contains(&bytes, secret), "数据库不得含明文密钥");
-    assert!(
-        !contains(&bytes, "header-secret-value-1234"),
-        "数据库不得含明文请求头"
-    );
-    let file = read(&secrets_file);
-    assert!(file.contains("AM_T4_API_KEY=") && file.contains(secret));
-    assert!(file.contains("REMOTE_AUTHORIZATION="));
-
+    assert_eq!(rows.len(), 2);
+    for row in &rows {
+        assert_eq!(row.3, r#"{"env":[],"headers":[]}"#);
+    }
     let c = cell(&ctx, "fs", "claude-code");
-    assert_eq!(c["state"], "disabled");
-    assert_eq!(c["source"], "saved");
     assert_eq!(c["entry"]["env"]["AM_T4_API_KEY"], "${AM_T4_API_KEY}");
-    // 不像凭据的字面量照原值显示，界面说得出原值是什么
-    assert_eq!(c["entry"]["env"]["NODE_ENV"], "production");
-    assert_eq!(c["actions"], json!(["enable", "copy", "remove"]));
-    assert_eq!(element(&status(&ctx), "fs")["state"], "disabled");
-
-    let remove_args = [
-        "--only",
-        "mcp:fs",
-        "--agent",
-        "claude-code",
-        "--action",
-        "remove",
-        "--base",
-        &base(&ctx, "fs", "claude-code"),
-    ];
-    let before_file = read(&claude_path(&ctx));
-    let before_db = db_bytes(&ctx);
-    let preview = run(&ctx, "mcp:preview", &remove_args);
-    assert!(preview.ok, "{}", errors(&preview));
-    assert_eq!(
-        preview.data["files"],
-        json!([]),
-        "已保存的停用项不会改配置文件"
-    );
-    assert_eq!(read(&claude_path(&ctx)), before_file);
-    assert_eq!(db_bytes(&ctx), before_db, "删除预览不得写库");
-
+    assert_eq!(c["actions"], json!(["enable", "remove"]));
+    assert_eq!(c["copy_safe"], false);
     for name in ["fs", "remote"] {
         apply_ok(
             &ctx,
@@ -1150,9 +1085,53 @@ fn claude_disable_snapshots_entry_transfers_secrets_and_enable_restores_identica
             ],
         );
     }
-    assert_eq!(claude_entry(&ctx, "fs"), original_fs, "写回与停用前一致");
+    assert_eq!(claude_entry(&ctx, "fs"), original_fs);
     assert_eq!(claude_entry(&ctx, "remote"), original_remote);
-    assert!(saved_rows(&ctx).is_empty(), "启用后快照删除");
+    assert!(saved_rows(&ctx).is_empty());
+    assert_eq!(read(&secrets_file), before_secret);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// Even a configured source is never silently used to migrate literal credentials.
+#[test]
+fn claude_disable_with_configured_secrets_refuses_literal_adoption_without_writes() {
+    let (root, ctx) = temp_ctx("claude-no-adoption");
+    let path = configure_secrets_file(&ctx);
+    std::fs::write(&path, "ACCOUNT_A_KEY=FAKE_ACCOUNT_A_VALUE\n").unwrap();
+    write_claude(
+        &ctx,
+        json!({"mcpServers":{"literal":{"command":"a","env":{"ACCOUNT_B_KEY":"FAKE_ACCOUNT_B_VALUE"}},"header":{"url":"https://mcp.example.com/mcp","headers":{"X-Team":"platform"}}}}),
+    );
+    let before_file = read(&claude_path(&ctx));
+    let before_secret = read(&path);
+    let before_db = db_bytes(&ctx);
+    for name in ["literal", "header"] {
+        let only = format!("mcp:{name}");
+        let current_base = base(&ctx, name, "claude-code");
+        let args = [
+            "--only",
+            only.as_str(),
+            "--agent",
+            "claude-code",
+            "--action",
+            "disable",
+            "--base",
+            current_base.as_str(),
+        ];
+        for command in ["mcp:preview", "mcp:apply"] {
+            let result = run(&ctx, command, &args);
+            assert!(!result.ok);
+            assert!(
+                command == "mcp:preview" || errors(&result).contains("不会自动迁移"),
+                "{}",
+                errors(&result)
+            );
+            assert!(!errors(&result).contains("FAKE_ACCOUNT_B_VALUE"));
+            assert_eq!(read(&claude_path(&ctx)), before_file);
+            assert_eq!(read(&path), before_secret);
+            assert_eq!(db_bytes(&ctx), before_db);
+        }
+    }
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1186,7 +1165,7 @@ fn claude_disable_without_secrets_file_refuses_only_when_secrets_must_move() {
                 &base(&ctx, name, "claude-code"),
             ],
         );
-        assert!(err.contains("外部密钥文件"), "{err}");
+        assert!(err.contains("不会自动迁移"), "{err}");
         assert!(!err.contains("ghp_"), "错误不得回显取值: {err}");
         assert!(!err.contains("custom-format"), "错误不得回显取值: {err}");
         assert_eq!(read(&claude_path(&ctx)), before, "被拒绝时文件不变");
@@ -1304,7 +1283,7 @@ fn opencode_target_toggles_official_enabled_field() {
             "--key",
             "agents.definitions.opencode",
             "--value",
-            r#"{"display_name":"OpenCode","bin":"opencode","mcp_config":{"path":"~/.config/opencode/opencode.json","format":"opencode"}}"#,
+            r#"{"display_name":"OpenCode","bin":"opencode","providers":{"native":{}},"preferred_provider":"native","mcp_config":{"path":"~/.config/opencode/opencode.json","format":"opencode"}}"#,
         ],
     );
     assert!(set.ok, "{}", errors(&set));
@@ -1345,8 +1324,14 @@ fn opencode_target_toggles_official_enabled_field() {
 #[test]
 fn add_writes_official_fields_only_for_all_clients() {
     let (root, ctx) = temp_ctx("add");
-    std::env::set_var("AM_T11_TOKEN", "resolved-t11-value");
-    std::env::set_var("AM_T11_HDR", "hdr-t11-value");
+    let source = configure_secrets_file(&ctx);
+    let mut values = String::new();
+    for suffix in ["CLAUDE", "CODEX", "OPENCODE"] {
+        values.push_str(&format!(
+            "AM_T11_TOKEN_{suffix}=resolved-t11-value\nAM_T11_HDR_{suffix}=hdr-t11-value\n"
+        ));
+    }
+    std::fs::write(&source, values).unwrap();
     let set = run(
         &ctx,
         "policy:set",
@@ -1356,11 +1341,21 @@ fn add_writes_official_fields_only_for_all_clients() {
             "--key",
             "agents.definitions.opencode",
             "--value",
-            r#"{"display_name":"OpenCode","bin":"opencode","mcp_config":{"path":"~/.config/opencode/opencode.json","format":"opencode"}}"#,
+            r#"{"display_name":"OpenCode","bin":"opencode","providers":{"native":{}},"preferred_provider":"native","mcp_config":{"path":"~/.config/opencode/opencode.json","format":"opencode"}}"#,
         ],
     );
     assert!(set.ok);
-    for agent in ["claude-code", "codex", "opencode"] {
+    for (agent, suffix) in [
+        ("claude-code", "CLAUDE"),
+        ("codex", "CODEX"),
+        ("opencode", "OPENCODE"),
+    ] {
+        let stdio_spec = format!(
+            r#"{{"command":"npx","args":["-y","pkg"],"env":{{"TOKEN":"${{AM_T11_TOKEN_{suffix}}}","MODE":"fast"}}}}"#
+        );
+        let remote_spec = format!(
+            r#"{{"url":"https://mcp.example.com/mcp","headers":{{"Authorization":"${{AM_T11_HDR_{suffix}}}"}}}}"#
+        );
         apply_ok(
             &ctx,
             &[
@@ -1371,7 +1366,7 @@ fn add_writes_official_fields_only_for_all_clients() {
                 "--action",
                 "add",
                 "--spec",
-                r#"{"command":"npx","args":["-y","pkg"],"env":{"TOKEN":"${AM_T11_TOKEN}","MODE":"fast"}}"#,
+                &stdio_spec,
             ],
         );
         apply_ok(
@@ -1384,7 +1379,7 @@ fn add_writes_official_fields_only_for_all_clients() {
                 "--action",
                 "add",
                 "--spec",
-                r#"{"url":"https://mcp.example.com/mcp","headers":{"Authorization":"${AM_T11_HDR}"}}"#,
+                &remote_spec,
             ],
         );
     }
@@ -1404,7 +1399,7 @@ fn add_writes_official_fields_only_for_all_clients() {
     );
     assert_eq!(
         claude_entry(&ctx, "remote1")["headers"]["Authorization"],
-        "${AM_T11_HDR}"
+        "${AM_T11_HDR_CLAUDE}"
     );
     assert_eq!(claude_entry(&ctx, "remote1")["type"], "http");
     let doc = codex_doc(&ctx);
@@ -1414,7 +1409,7 @@ fn add_writes_official_fields_only_for_all_clients() {
     );
     assert_eq!(
         doc["mcp_servers"]["remote1"]["env_http_headers"]["Authorization"].as_str(),
-        Some("AM_T11_HDR")
+        Some("AM_T11_HDR_CODEX")
     );
     let oc: Value = serde_json::from_str(&opencode).unwrap();
     // Windows 上新增的 npx 条目包成 cmd /c（Claude Code /doctor 的要求）
@@ -1426,7 +1421,7 @@ fn add_writes_official_fields_only_for_all_clients() {
     assert_eq!(oc["mcp"]["stdio1"]["command"], expected);
     assert_eq!(
         oc["mcp"]["remote1"]["headers"]["Authorization"],
-        "{env:AM_T11_HDR}"
+        "{env:AM_T11_HDR_OPENCODE}"
     );
 
     // 反例：同名已存在、url 不在白名单、缺变量、疑似凭据字面量、超时只适用于 Codex
@@ -1478,8 +1473,6 @@ fn add_writes_official_fields_only_for_all_clients() {
             "错误不得回显取值: {err}"
         );
     }
-    std::env::remove_var("AM_T11_TOKEN");
-    std::env::remove_var("AM_T11_HDR");
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1488,15 +1481,13 @@ fn add_writes_official_fields_only_for_all_clients() {
 #[test]
 fn copy_claude_to_codex_converts_fields_and_guards_existing_target() {
     let (root, ctx) = temp_ctx("copy");
-    std::env::set_var("AM_T8_REF", "resolved-t8");
-    std::env::set_var("AM_T8_HDR", "hdr-t8");
     write_claude(
         &ctx,
         json!({"mcpServers": {
             "fs": {"type": "stdio", "command": "npx", "args": ["-y", "fs"],
-                   "env": {"LIT": "literal-value", "REF": "${AM_T8_REF}"}, "alwaysLoad": true},
+                   "env": {"LIT": "literal-value"}, "alwaysLoad": true},
             "remote": {"type": "http", "url": "https://mcp.example.com/mcp",
-                       "headers": {"X-Ref": "${AM_T8_HDR}", "X-Lit": "static-value"}},
+                       "headers": {"X-Lit": "static-value"}},
             "ws": {"type": "ws", "url": "wss://mcp.example.com/socket"}
         }}),
     );
@@ -1551,18 +1542,11 @@ fn copy_claude_to_codex_converts_fields_and_guards_existing_target() {
         Some(if cfg!(windows) { "cmd" } else { "npx" })
     );
     assert_eq!(fs["env"]["LIT"].as_str(), Some("literal-value"));
-    assert_eq!(
-        fs["env"]["REF"].as_str(),
-        Some("resolved-t8"),
-        "Codex 不展开 ${{VAR}}，写入时解析"
-    );
+    assert!(fs["env"].get("REF").is_none());
     assert!(fs.get("alwaysLoad").is_none());
     let remote = &doc["mcp_servers"]["remote"];
     assert_eq!(remote["url"].as_str(), Some("https://mcp.example.com/mcp"));
-    assert_eq!(
-        remote["env_http_headers"]["X-Ref"].as_str(),
-        Some("AM_T8_HDR")
-    );
+    assert!(remote.get("env_http_headers").is_none());
     assert_eq!(
         remote["http_headers"]["X-Lit"].as_str(),
         Some("static-value")
@@ -1660,8 +1644,420 @@ fn copy_claude_to_codex_converts_fields_and_guards_existing_target() {
             &target_base,
         ],
     );
-    std::env::remove_var("AM_T8_REF");
-    std::env::remove_var("AM_T8_HDR");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn resolved_mcp_env_references_keep_durable_account_ownership_after_rendering() {
+    let (root, ctx) = temp_ctx("mcp-durable-ownership");
+    let source = configure_secrets_file(&ctx);
+    std::fs::write(&source, "YOUR_CLAIMED_A=YOUR_FAKE_CLAIMED_A_VALUE\n").unwrap();
+    write_claude(&ctx, json!({"mcpServers":{}}));
+    write_codex(&ctx, "# B stays intact\n");
+    let spec = r#"{"command":"mcp","env":{"TOKEN":"${YOUR_CLAIMED_A}"}}"#;
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:a",
+            "--agent",
+            "claude-code",
+            "--action",
+            "add",
+            "--spec",
+            spec,
+        ],
+    );
+    assert_eq!(
+        claude_entry(&ctx, "a")["env"]["TOKEN"],
+        "YOUR_FAKE_CLAIMED_A_VALUE"
+    );
+    assert!(
+        !read(&claude_path(&ctx)).contains("${YOUR_CLAIMED_A}"),
+        "reference is absent from native file"
+    );
+    let conn = store::open_readonly(&ctx).unwrap().unwrap();
+    let owner: String = conn
+        .query_row(
+            "SELECT account FROM secret_variable_owners WHERE name='YOUR_CLAIMED_A'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(owner, "claude-code");
+    drop(conn);
+    let before_a = read(&claude_path(&ctx));
+    let before_b = read(&codex_path(&ctx));
+    let before_source = read(&source);
+    let before_db = db_bytes(&ctx);
+    for command in ["mcp:preview", "mcp:apply"] {
+        let result = run(
+            &ctx,
+            command,
+            &[
+                "--only", "mcp:b", "--agent", "codex", "--action", "add", "--spec", spec,
+            ],
+        );
+        assert!(
+            !result.ok,
+            "B cannot borrow A's key after its reference was rendered"
+        );
+        assert_eq!(read(&claude_path(&ctx)), before_a);
+        assert_eq!(read(&codex_path(&ctx)), before_b);
+        assert_eq!(read(&source), before_source);
+        assert_eq!(db_bytes(&ctx), before_db);
+    }
+    // An edit by the same owner is still allowed.
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:a",
+            "--agent",
+            "claude-code",
+            "--action",
+            "edit",
+            "--base",
+            &base(&ctx, "a", "claude-code"),
+            "--spec",
+            r#"{"command":"mcp2","env":{"TOKEN":"${YOUR_CLAIMED_A}"}}"#,
+        ],
+    );
+    assert_eq!(claude_entry(&ctx, "a")["command"], "mcp2");
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:a",
+            "--agent",
+            "claude-code",
+            "--action",
+            "remove",
+            "--base",
+            &base(&ctx, "a", "claude-code"),
+        ],
+    );
+    let denied = run(
+        &ctx,
+        "mcp:apply",
+        &[
+            "--only", "mcp:b", "--agent", "codex", "--action", "add", "--spec", spec,
+        ],
+    );
+    assert!(
+        !denied.ok,
+        "removed accounts' credential variables stay reserved"
+    );
+    assert!(!contains(&db_bytes(&ctx), "YOUR_FAKE_CLAIMED_A_VALUE"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn failed_mcp_audit_rolls_back_written_config_and_creates_no_phantom_credential_owner() {
+    let (root, ctx) = temp_ctx("mcp-claim-audit-rollback");
+    let source = configure_secrets_file(&ctx);
+    std::fs::write(&source, "YOUR_UNCLAIMED_KEY=YOUR_FAKE_UNCLAIMED_VALUE\n").unwrap();
+    write_claude(&ctx, json!({"mcpServers":{}}));
+    write_codex(&ctx, "# B stays intact\n");
+    let conn = store::open_write(&ctx).unwrap();
+    conn.execute_batch("CREATE TRIGGER reject_mcp_audit BEFORE INSERT ON operation_logs BEGIN SELECT RAISE(ABORT, 'injected mcp audit failure'); END;").unwrap();
+    drop(conn);
+    let before_a = read(&claude_path(&ctx));
+    let before_b = read(&codex_path(&ctx));
+    let before_source = read(&source);
+    let before_db = db_bytes(&ctx);
+    let spec = r#"{"command":"mcp","env":{"TOKEN":"${YOUR_UNCLAIMED_KEY}"}}"#;
+    let failed = run(
+        &ctx,
+        "mcp:apply",
+        &[
+            "--only",
+            "mcp:a",
+            "--agent",
+            "claude-code",
+            "--action",
+            "add",
+            "--spec",
+            spec,
+        ],
+    );
+    assert!(!failed.ok);
+    assert_eq!(read(&claude_path(&ctx)), before_a);
+    assert_eq!(read(&codex_path(&ctx)), before_b);
+    assert_eq!(read(&source), before_source);
+    assert_eq!(db_bytes(&ctx), before_db);
+    let conn = store::open_write(&ctx).unwrap();
+    conn.execute_batch("DROP TRIGGER reject_mcp_audit;")
+        .unwrap();
+    drop(conn);
+    // B may claim the variable now because the failed A transaction left no owner.
+    apply_ok(
+        &ctx,
+        &[
+            "--only", "mcp:b", "--agent", "codex", "--action", "add", "--spec", spec,
+        ],
+    );
+    let conn = store::open_readonly(&ctx).unwrap().unwrap();
+    let owner: String = conn
+        .query_row(
+            "SELECT account FROM secret_variable_owners WHERE name='YOUR_UNCLAIMED_KEY'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(owner, "codex");
+    drop(conn);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn remove_unknown_entry_cannot_drop_unconfirmed_credential_ownership() {
+    let (root, ctx) = temp_ctx("remove-unknown-owner");
+    let original =
+        "[mcp_servers.legacy]\ncommand = 17\nargs = [\"--token=${YOUR_OLD_ACCOUNT_KEY}\"]\n";
+    write_codex(&ctx, original);
+    let digest = base(&ctx, "legacy", "codex");
+    let before_db = db_bytes(&ctx);
+    let args = [
+        "--only",
+        "mcp:legacy",
+        "--agent",
+        "codex",
+        "--action",
+        "remove",
+        "--base",
+        &digest,
+    ];
+    for command in ["mcp:preview", "mcp:apply"] {
+        let env = run(&ctx, command, &args);
+        assert!(!env.ok, "未知条目不能删除尚未确认的凭据归属");
+        assert!(
+            errors(&env).contains("无法确认凭据归属"),
+            "{}",
+            errors(&env)
+        );
+        assert_eq!(read(&codex_path(&ctx)), original);
+        assert_eq!(db_bytes(&ctx), before_db);
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 删除：表头形式按既有文本规则（保留上方用户注释、连带删紧邻的旧版注释）；
+#[test]
+fn account_copy_refuses_credentials_references_and_uncertain_fields_without_writes() {
+    let (root, ctx) = temp_ctx("account-copy");
+    let unsafe_entries = json!({
+        "literal": {"command":"mcp", "env":{"API_KEY":"YOUR_FAKE_KEY"}},
+        "reference": {"command":"mcp", "env":{"REF":"${YOUR_FAKE_VAR}"}},
+        "header": {"url":"https://mcp.example.test/mcp", "headers":{"Authorization":"YOUR_FAKE_HEADER"}},
+        "headerref": {"url":"https://mcp.example.test/mcp", "headers":{"X-Ref":"${YOUR_FAKE_VAR}"}},
+        "argument": {"command":"mcp", "args":["--api-key", "YOUR_FAKE_ARG"]},
+        "commandref": {"command":"${YOUR_FAKE_VAR}"},
+        "commandenvref": {"command":"{env:YOUR_FAKE_VAR}"},
+        "urlref": {"url":"https://mcp.example.test/${YOUR_FAKE_VAR}"},
+        "urlquery": {"url":"https://mcp.example.test/mcp?opaque=YOUR_FAKE_QUERY"},
+        "urluser": {"url":"https://YOUR_FAKE_USER:YOUR_FAKE_PASSWORD@mcp.example.test/mcp"},
+        "bearer": {"url":"https://mcp.example.test/mcp", "bearer_token_env_var":"YOUR_FAKE_VAR"},
+        "helper": {"command":"mcp", "headersHelper":"YOUR_FAKE_HELPER"},
+        "oauth": {"url":"https://mcp.example.test/mcp", "auth":{"type":"oauth"}},
+        "unknown": {"command":"mcp", "unrecognizedConfig":"YOUR_FAKE_UNKNOWN"}
+    });
+    write_claude(&ctx, json!({"mcpServers":unsafe_entries}));
+    write_codex(&ctx, "# target stays intact\n");
+    let source_before = read(&claude_path(&ctx));
+    let target_before = read(&codex_path(&ctx));
+    let db_before = db_bytes(&ctx);
+    for name in unsafe_entries.as_object().unwrap().keys() {
+        let data = status(&ctx);
+        let observed = &element(&data, name)["observed"]["agents"]["claude-code"];
+        assert_eq!(observed["copy_safe"], false, "{name}");
+        assert!(
+            !observed["actions"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("copy")),
+            "{name}"
+        );
+        let digest = base(&ctx, name, "claude-code");
+        let only = format!("mcp:{name}");
+        let args = [
+            "--only",
+            &only,
+            "--agent",
+            "claude-code",
+            "--to",
+            "codex",
+            "--action",
+            "copy",
+            "--base",
+            &digest,
+        ];
+        let preview = run(&ctx, "mcp:preview", &args);
+        assert!(!preview.ok, "{name}");
+        assert!(
+            errors(&preview).contains("不能跨账号复制"),
+            "{}",
+            errors(&preview)
+        );
+        let outcome = apply(&ctx, &args);
+        assert!(!outcome.ok, "{name}");
+        assert!(!serde_json::to_string(&outcome)
+            .unwrap()
+            .contains("YOUR_FAKE_"));
+        assert_eq!(read(&claude_path(&ctx)), source_before);
+        assert_eq!(read(&codex_path(&ctx)), target_before);
+        assert_eq!(db_bytes(&ctx), db_before);
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn oversized_mcp_account_config_is_blocked_before_read_or_write() {
+    let (root, ctx) = temp_ctx("oversized-account-config");
+    write_claude(&ctx, json!({"mcpServers": {}}));
+    let content = format!(
+        "{{\"padding\":\"{}\",\"mcpServers\":{{}}}}",
+        "x".repeat(1024 * 1024)
+    );
+    std::fs::write(claude_path(&ctx), &content).unwrap();
+    let before_db = db_bytes(&ctx);
+    let observed = status(&ctx);
+    let target = observed["targets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|target| target["agent"] == "claude-code")
+        .unwrap();
+    assert!(target["error"].as_str().unwrap().contains("1 MiB"));
+    let outcome = apply(
+        &ctx,
+        &[
+            "--only",
+            "mcp:new",
+            "--agent",
+            "claude-code",
+            "--action",
+            "add",
+            "--spec",
+            r#"{"command":"mcp"}"#,
+        ],
+    );
+    assert!(!outcome.ok);
+    assert_eq!(read(&claude_path(&ctx)), content);
+    assert_eq!(db_bytes(&ctx), before_db);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn mcp_add_edit_enable_and_check_cannot_borrow_another_accounts_variable() {
+    let (root, ctx) = temp_ctx("mcp-variable-owner");
+    write_claude(
+        &ctx,
+        json!({"mcpServers":{"owned":{"command":"mcp","env":{"KEY":"${YOUR_MCP_ACCOUNT_A}"}}}}),
+    );
+    write_codex(
+        &ctx,
+        "# B stays intact\n[mcp_servers.safe]\ncommand = \"mcp\"\n",
+    );
+    configure_secrets_file(&ctx);
+    let configured = run(
+        &ctx,
+        "secrets:set",
+        &[
+            "--var",
+            "YOUR_MCP_ACCOUNT_A",
+            "--value",
+            "YOUR_FAKE_MCP_ACCOUNT_A_VALUE",
+        ],
+    );
+    assert!(configured.ok, "{}", errors(&configured));
+    let original_a = read(&claude_path(&ctx));
+    let original_b = read(&codex_path(&ctx));
+    let original_db = db_bytes(&ctx);
+    let spec = r#"{"command":"mcp","env":{"KEY":"${YOUR_MCP_ACCOUNT_A}"}}"#;
+    let digest = base(&ctx, "safe", "codex");
+    for args in [
+        vec![
+            "--only", "mcp:new", "--agent", "codex", "--action", "add", "--spec", spec,
+        ],
+        vec![
+            "--only", "mcp:safe", "--agent", "codex", "--action", "edit", "--base", &digest,
+            "--spec", spec,
+        ],
+    ] {
+        let preview = run(&ctx, "mcp:preview", &args);
+        assert!(!preview.ok);
+        assert!(errors(&preview).contains("另一个账号"));
+        let outcome = apply(&ctx, &args);
+        assert!(!outcome.ok);
+        assert_eq!(read(&claude_path(&ctx)), original_a);
+        assert_eq!(read(&codex_path(&ctx)), original_b);
+        assert_eq!(db_bytes(&ctx), original_db);
+    }
+    // Embedded argument references are also owned; literal defaults do not weaken source failure.
+    for embedded in [
+        r#"{"command":"mcp","args":["--token=${YOUR_MCP_ACCOUNT_A}"]}"#,
+        r#"{"command":"mcp","args":["${YOUR_MCP_ACCOUNT_A:-fallback}"]}"#,
+        r#"{"url":"https://mcp.example.test/${YOUR_MCP_ACCOUNT_A}","headers":{}}"#,
+    ] {
+        let args = [
+            "--only",
+            "mcp:embedded",
+            "--agent",
+            "codex",
+            "--action",
+            "add",
+            "--spec",
+            embedded,
+        ];
+        for command in ["mcp:preview", "mcp:apply"] {
+            let result = run(&ctx, command, &args);
+            assert!(!result.ok, "embedded refs cannot borrow another account");
+            assert_eq!(read(&claude_path(&ctx)), original_a);
+            assert_eq!(read(&codex_path(&ctx)), original_b);
+            assert_eq!(db_bytes(&ctx), original_db);
+        }
+    }
+    // A's own variable remains a valid input for A.
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:own-new",
+            "--agent",
+            "claude-code",
+            "--action",
+            "add",
+            "--spec",
+            spec,
+        ],
+    );
+    write_codex(&ctx, "# external unsafe B\n[mcp_servers.unsafe]\ncommand = \"mcp\"\nenabled = false\n[mcp_servers.unsafe.env]\nKEY = \"${YOUR_MCP_ACCOUNT_A}\"\n");
+    let injected_b = read(&codex_path(&ctx));
+    let before_enable_db = db_bytes(&ctx);
+    let digest = base(&ctx, "unsafe", "codex");
+    let enabled = apply(
+        &ctx,
+        &[
+            "--only",
+            "mcp:unsafe",
+            "--agent",
+            "codex",
+            "--action",
+            "enable",
+            "--base",
+            &digest,
+        ],
+    );
+    assert!(!enabled.ok);
+    let checked = run(
+        &ctx,
+        "mcp:check",
+        &["--only", "mcp:unsafe", "--agent", "codex"],
+    );
+    assert!(!checked.ok);
+    assert_eq!(read(&codex_path(&ctx)), injected_b);
+    assert_eq!(db_bytes(&ctx), before_enable_db);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1880,7 +2276,8 @@ fn table_exists(ctx: &Context, name: &str) -> bool {
 #[test]
 fn legacy_library_is_migrated_on_write_without_touching_files() {
     let (root, ctx) = temp_ctx("legacy");
-    std::env::set_var("AM_T9_TOKEN", "resolved-t9");
+    let source = configure_secrets_file(&ctx);
+    std::fs::write(&source, "AM_T9_TOKEN=resolved-t9\n").unwrap();
     let present =
         json!({"command": "npx", "args": ["-y", "present"], "env": {"TOKEN": "${AM_T9_TOKEN}"}});
     let disabled = json!({"command": "npx", "args": ["-y", "disabled"], "env": {"TOKEN": "${AM_T9_TOKEN}"}, "startup_timeout_sec": 20});
@@ -1974,7 +2371,6 @@ fn legacy_library_is_migrated_on_write_without_touching_files() {
         doc["mcp_servers"]["disabled"]["startup_timeout_sec"].as_integer(),
         Some(20)
     );
-    std::env::remove_var("AM_T9_TOKEN");
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -2022,15 +2418,52 @@ fn policy_set_mcp_definition_becomes_saved_definition() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn imported_snapshot_case_aliases_are_rejected_before_database_creation() {
+    let (root, ctx) = temp_ctx("backup-case-alias");
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    let policy = store::effective_policy(&ctx).unwrap();
+    let row = |agent: &str, name: &str| {
+        json!({
+            "server": "remote", "agent": agent,
+            "entry": {"command": "mcp", "env": {"KEY": format!("${{{name}}}")}},
+            "resolve": {"env": [], "headers": []}, "origin": "disabled"
+        })
+    };
+    for (claude_name, codex_name) in [
+        ("your_case_alias_key", "YOUR_CASE_ALIAS_KEY"),
+        ("YOUR_CASE_ALIAS_KEY", "your_case_alias_key"),
+    ] {
+        let payload = json!({
+            "format": "agent-manager/config-backup/v1", "policy": policy,
+            "sources": {}, "mcp_saved": [
+                row("claude-code", claude_name), row("codex", codex_name)
+            ]
+        })
+        .to_string();
+        let rejected = run(&ctx, "config:import", &["--value", &payload]);
+        assert!(!rejected.ok, "大小写别名不能给两个账号共享同一变量");
+        assert!(
+            errors(&rejected).contains("拒绝导入跨账号 MCP 引用"),
+            "{}",
+            errors(&rejected)
+        );
+        assert!(!ctx.data_dir.exists(), "必须在建库前拒绝候选归属冲突");
+        assert!(!claude_path(&ctx).exists());
+        assert!(!codex_path(&ctx).exists());
+        assert_eq!(store::effective_policy(&ctx).unwrap(), policy);
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// 裁决第 8 条：配置备份包含已保存项（快照只含引用与普通字面量），换机导入后可启用。
 #[test]
 fn saved_items_roundtrip_through_config_backup() {
     let (root, ctx) = temp_ctx("backup-src");
-    std::env::set_var("AM_T22_KEY", "sk-ant-api03-backup0123456789abcdefghij");
     write_claude(
         &ctx,
         json!({"mcpServers": {"fs": {"command": "npx", "args": ["-y", "fs"],
-            "env": {"AM_T22_KEY": "sk-ant-api03-backup0123456789abcdefghij", "NODE_ENV": "production"}}}}),
+            "env": {"AM_T22_KEY": "${AM_T22_KEY}", "NODE_ENV": "production"}}}}),
     );
     configure_secrets_file(&ctx);
     apply_ok(
@@ -2056,6 +2489,7 @@ fn saved_items_roundtrip_through_config_backup() {
 
     let (root2, ctx2) = temp_ctx("backup-dst");
     std::fs::create_dir_all(&ctx2.home_dir).unwrap();
+    configure_secrets_file(&ctx2);
     let imported = run(&ctx2, "config:import", &["--value", &payload]);
     assert!(imported.ok, "{}", errors(&imported));
     let again = run(&ctx2, "config:export", &[]);
@@ -2063,7 +2497,7 @@ fn saved_items_roundtrip_through_config_backup() {
         again.data["mcp_saved"], exported.data["mcp_saved"],
         "往返一致"
     );
-    // 新机器上变量由进程环境提供，启用写回原值
+    // Existing references remain references after a round trip; no credential migration.
     apply_ok(
         &ctx2,
         &[
@@ -2079,14 +2513,13 @@ fn saved_items_roundtrip_through_config_backup() {
     );
     assert_eq!(
         claude_entry(&ctx2, "fs")["env"],
-        json!({"AM_T22_KEY": "sk-ant-api03-backup0123456789abcdefghij", "NODE_ENV": "production"})
+        json!({"AM_T22_KEY": "${AM_T22_KEY}", "NODE_ENV": "production"})
     );
     // 带明文的已保存项拒绝导入
     let bad = payload.replace("${AM_T22_KEY}", "sk-ant-api03-injected0123456789abcdef");
     let (root3, ctx3) = temp_ctx("backup-bad");
     let rejected = run(&ctx3, "config:import", &["--value", &bad]);
     assert!(!rejected.ok, "含疑似凭据的已保存项必须拒绝");
-    std::env::remove_var("AM_T22_KEY");
     let _ = std::fs::remove_dir_all(root);
     let _ = std::fs::remove_dir_all(root2);
     let _ = std::fs::remove_dir_all(root3);
@@ -2736,8 +3169,363 @@ fn check_does_not_report_success_when_tools_fail_or_initialize_is_invalid() {
 
 #[cfg(unix)]
 #[test]
+fn running_mcp_check_holds_account_lock_for_the_entire_server_lifetime() {
+    let (root, ctx) = temp_ctx("check-session-lock");
+    let body = FAKE_SERVER.replace("read line\necho 'starting fake server'", "while [ ! -f \"$(dirname \"$0\")/continue\" ]; do sleep 0.02; done\nread line\necho 'starting fake server'");
+    let server = fake_server(&ctx, &body);
+    write_claude(
+        &ctx,
+        json!({"mcpServers":{"fake":{"command":server.to_str().unwrap()}}}),
+    );
+    let before = read(&claude_path(&ctx));
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
+        .env_clear()
+        .env("HOME", &ctx.home_dir)
+        .env("USERPROFILE", &ctx.home_dir)
+        .env("AGENT_MANAGER_DATA_DIR", &ctx.data_dir)
+        .env("PATH", "/usr/bin:/bin")
+        .args([
+            "mcp:check",
+            "--only",
+            "mcp:fake",
+            "--agent",
+            "claude-code",
+            "--json",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let marker = server.parent().unwrap().join("ran");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while !marker.exists() && std::time::Instant::now() < deadline {
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    if !marker.exists() {
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        panic!(
+            "fake server must actually be running: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let args = [
+        "--only",
+        "mcp:new",
+        "--agent",
+        "claude-code",
+        "--action",
+        "add",
+        "--spec",
+        r#"{"command":"mcp"}"#,
+    ];
+    let rejected = run(&ctx, "mcp:apply", &args);
+    assert!(!rejected.ok);
+    assert!(
+        errors(&rejected).contains("正在运行"),
+        "{}",
+        errors(&rejected)
+    );
+    assert_eq!(read(&claude_path(&ctx)), before);
+    std::fs::write(server.parent().unwrap().join("continue"), "continue").unwrap();
+    let output = child.wait_with_output().unwrap();
+    let outcome: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(
+        output.status.success() && outcome["data"]["ok"] == true,
+        "{outcome}"
+    );
+    apply_ok(&ctx, &args);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn check_uses_only_selected_account_references_and_sanitized_parent_environment() {
+    let (root, ctx) = temp_ctx("check-clean-env");
+    let source = configure_secrets_file(&ctx);
+    std::fs::write(
+        &source,
+        "YOUR_MCP_OWN_B=YOUR_FAKE_B_ONLY_VALUE\nYOUR_MCP_A=YOUR_FAKE_A_ONLY_VALUE\n",
+    )
+    .unwrap();
+    let body = format!(
+        r#"#!/bin/sh
+printf '%s\n' "own=$OWN" "arg=$1" "foreign=${{YOUR_MCP_A-unset}}" "token=${{ANTHROPIC_API_KEY-unset}}" "dir=${{CLAUDE_CONFIG_DIR-unset}}" "endpoint=${{ANTHROPIC_BASE_URL-unset}}" > "$(dirname "$0")/environment"
+{}
+"#,
+        FAKE_SERVER.strip_prefix("#!/bin/sh\n").unwrap()
+    );
+    let server = fake_server(&ctx, &body);
+    write_claude(
+        &ctx,
+        json!({"mcpServers":{"a":{"command":"mcp","env":{"KEY":"${YOUR_MCP_A}"}}}}),
+    );
+    write_codex(&ctx, &format!("[mcp_servers.b]\ncommand = {}\nargs = [\"--safe\"]\n[mcp_servers.b.env]\nOWN = \"${{YOUR_MCP_OWN_B}}\"\n", serde_json::to_string(&server.to_string_lossy()).unwrap()));
+    let before_a = read(&claude_path(&ctx));
+    let before_b = read(&codex_path(&ctx));
+    let before_source = read(&source);
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
+        .env_clear()
+        .env("HOME", &ctx.home_dir)
+        .env("USERPROFILE", &ctx.home_dir)
+        .env("AGENT_MANAGER_DATA_DIR", &ctx.data_dir)
+        .env("PATH", "/usr/bin:/bin")
+        .env("YOUR_MCP_A", "YOUR_FAKE_PARENT_A_VALUE")
+        .env("ANTHROPIC_API_KEY", "YOUR_FAKE_PARENT_TOKEN")
+        .env("CLAUDE_CONFIG_DIR", root.join("other-a"))
+        .env("ANTHROPIC_BASE_URL", "https://parent-a.example.test")
+        .args(["mcp:check", "--only", "mcp:b", "--agent", "codex", "--json"])
+        .output()
+        .unwrap();
+    let outcome: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(output.status.success(), "{}", outcome);
+    assert_eq!(outcome["data"]["ok"], true);
+    let recorded = read(&server.parent().unwrap().join("environment"));
+    assert!(recorded.contains("own=YOUR_FAKE_B_ONLY_VALUE"));
+    for line in [
+        "foreign=unset",
+        "token=unset",
+        "dir=unset",
+        "endpoint=unset",
+    ] {
+        assert!(recorded.contains(line), "{recorded}");
+    }
+    assert!(!recorded.contains("YOUR_FAKE_A"));
+    assert_eq!(read(&claude_path(&ctx)), before_a);
+    assert_eq!(read(&codex_path(&ctx)), before_b);
+    assert_eq!(read(&source), before_source);
+    // Own embedded references are supported by the Claude codec too.
+    write_claude(
+        &ctx,
+        json!({"mcpServers":{"own":{"command":server.to_str().unwrap(),"args":["--own=${YOUR_MCP_A}"],"env":{"OWN":"${YOUR_MCP_A}"}}}}),
+    );
+    let result = run(
+        &ctx,
+        "mcp:check",
+        &["--only", "mcp:own", "--agent", "claude-code"],
+    );
+    assert!(
+        result.ok && result.data["ok"] == true,
+        "{}",
+        errors(&result)
+    );
+    assert!(read(&server.parent().unwrap().join("environment"))
+        .contains("arg=--own=YOUR_FAKE_A_ONLY_VALUE"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn mcp_environment_case_aliases_cannot_override_account_or_process_context() {
+    let (root, ctx) = temp_ctx("check-env-case-alias");
+    let body = format!(
+        "#!/bin/sh\nprintf '%s' \"$OPENAI_API_KEY\" > \"$(dirname \"$0\")/provider-key\"\n{}",
+        FAKE_SERVER.strip_prefix("#!/bin/sh\n").unwrap()
+    );
+    let server = fake_server(&ctx, &body);
+    for key in [
+        "home",
+        "userprofile",
+        "homedrive",
+        "homepath",
+        "codex_home",
+        "claude_config_dir",
+        "anthropic_config_dir",
+        "path",
+        "xdg_config_home",
+        "systemroot",
+        "windir",
+        "comspec",
+        "pathext",
+        "appdata",
+        "localappdata",
+        "programdata",
+        "programfiles",
+        "node_options",
+        "ld_preload",
+        "dyld_insert_libraries",
+    ] {
+        let unsafe_env = json!({key: root.join("other-account").to_string_lossy()});
+        let entry = json!({"command": server.to_str().unwrap(), "env": unsafe_env});
+        write_claude(&ctx, json!({"mcpServers": {"unsafe": entry}}));
+        let before = read(&claude_path(&ctx));
+        let before_db = db_bytes(&ctx);
+        let rejected = run(
+            &ctx,
+            "mcp:check",
+            &["--only", "mcp:unsafe", "--agent", "claude-code"],
+        );
+        assert!(
+            !rejected.ok && errors(&rejected).contains("账号目录或进程覆盖"),
+            "{key}: {}",
+            errors(&rejected)
+        );
+        let spec = entry.to_string();
+        let rejected = apply(
+            &ctx,
+            &[
+                "--only",
+                "mcp:new",
+                "--agent",
+                "claude-code",
+                "--action",
+                "add",
+                "--spec",
+                &spec,
+            ],
+        );
+        assert!(
+            !rejected.ok && errors(&rejected).contains("账号目录或进程覆盖"),
+            "{key}: {}",
+            errors(&rejected)
+        );
+        assert_eq!(read(&claude_path(&ctx)), before);
+        assert_eq!(db_bytes(&ctx), before_db);
+        assert!(!server.parent().unwrap().join("ran").exists());
+    }
+    // An explicit own-account provider credential is allowed in the service environment.
+    write_claude(&ctx, json!({"mcpServers": {}}));
+    let source = configure_secrets_file(&ctx);
+    std::fs::write(
+        &source,
+        "YOUR_MCP_OWN_PROVIDER_KEY=YOUR_FAKE_OWN_PROVIDER_VALUE\n",
+    )
+    .unwrap();
+    let spec = json!({"command": server.to_str().unwrap(), "env": {"OPENAI_API_KEY": "${YOUR_MCP_OWN_PROVIDER_KEY}"}}).to_string();
+    apply_ok(
+        &ctx,
+        &[
+            "--only",
+            "mcp:own",
+            "--agent",
+            "claude-code",
+            "--action",
+            "add",
+            "--spec",
+            &spec,
+        ],
+    );
+    let result = run(
+        &ctx,
+        "mcp:check",
+        &["--only", "mcp:own", "--agent", "claude-code"],
+    );
+    assert!(
+        result.ok && result.data["ok"] == true,
+        "{}",
+        errors(&result)
+    );
+    assert_eq!(
+        read(&server.parent().unwrap().join("provider-key")),
+        "YOUR_FAKE_OWN_PROVIDER_VALUE"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn account_mcp_references_cannot_use_parent_values_without_an_explicit_source() {
+    let (root, ctx) = temp_ctx("check-parent-only-key");
+    let body = format!(
+        "#!/bin/sh\nprintf '%s' \"$TOKEN\" > \"$(dirname \"$0\")/token\"\n{}",
+        FAKE_SERVER.strip_prefix("#!/bin/sh\n").unwrap()
+    );
+    let server = fake_server(&ctx, &body);
+    write_claude(
+        &ctx,
+        json!({"mcpServers": {"fake": {
+            "command": server.to_str().unwrap(), "env": {"TOKEN": "${YOUR_PARENT_ONLY_MCP_KEY}"}
+        }}}),
+    );
+    let before = read(&claude_path(&ctx));
+    let spec = r#"{"command":"mcp","env":{"TOKEN":"${YOUR_PARENT_ONLY_MCP_KEY}"}}"#;
+    let invoke = |args: &[&str]| {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
+            .env_clear()
+            .env("HOME", &ctx.home_dir)
+            .env("USERPROFILE", &ctx.home_dir)
+            .env("AGENT_MANAGER_DATA_DIR", &ctx.data_dir)
+            .env("PATH", "/usr/bin:/bin")
+            .env("YOUR_PARENT_ONLY_MCP_KEY", "YOUR_FAKE_PARENT_ONLY_VALUE")
+            .args(args)
+            .output()
+            .unwrap();
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    for args in [
+        vec![
+            "mcp:apply",
+            "--only",
+            "mcp:new",
+            "--agent",
+            "claude-code",
+            "--action",
+            "add",
+            "--spec",
+            spec,
+            "--json",
+        ],
+        vec![
+            "mcp:check",
+            "--only",
+            "mcp:fake",
+            "--agent",
+            "claude-code",
+            "--json",
+        ],
+    ] {
+        let result = invoke(&args);
+        assert_eq!(
+            result["ok"], false,
+            "必须显式选择密钥文件，不能继承同账号变量的父环境取值：{result}"
+        );
+        assert!(
+            result.to_string().contains("显式选择的外部密钥来源"),
+            "{result}"
+        );
+        assert!(!result.to_string().contains("YOUR_FAKE_PARENT_ONLY_VALUE"));
+        assert_eq!(read(&claude_path(&ctx)), before);
+        assert!(db_bytes(&ctx).is_empty());
+        assert!(!server.parent().unwrap().join("ran").exists());
+    }
+    // Choosing an explicit source enables the same own-account reference.
+    let source = configure_secrets_file(&ctx);
+    std::fs::write(
+        &source,
+        "YOUR_PARENT_ONLY_MCP_KEY=YOUR_FAKE_EXPLICIT_SOURCE_VALUE\n",
+    )
+    .unwrap();
+    let result = invoke(&[
+        "mcp:check",
+        "--only",
+        "mcp:fake",
+        "--agent",
+        "claude-code",
+        "--json",
+    ]);
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(result["data"]["ok"], true, "{result}");
+    assert!(server.parent().unwrap().join("ran").exists());
+    assert_eq!(
+        read(&server.parent().unwrap().join("token")),
+        "YOUR_FAKE_EXPLICIT_SOURCE_VALUE"
+    );
+    assert!(!result.to_string().contains("YOUR_FAKE_PARENT_ONLY_VALUE"));
+    assert!(!result
+        .to_string()
+        .contains("YOUR_FAKE_EXPLICIT_SOURCE_VALUE"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
 fn check_stops_before_running_when_a_variable_has_no_value() {
     let (root, ctx) = temp_ctx("check-novar");
+    configure_secrets_file(&ctx);
     let server = fake_server(&ctx, FAKE_SERVER);
     write_claude(
         &ctx,
@@ -2834,6 +3622,160 @@ fn check_rejects_unknown_entries_and_bad_arguments() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[cfg(unix)]
+#[test]
+fn remote_check_disables_curl_defaults_cleans_parent_environment_and_never_sends_foreign_refs() {
+    use std::os::unix::fs::PermissionsExt;
+    let (root, ctx) = temp_ctx("check-fake-curl");
+    let source = configure_secrets_file(&ctx);
+    std::fs::write(
+        &source,
+        "YOUR_REMOTE_A=YOUR_FAKE_REMOTE_A_VALUE\nYOUR_REMOTE_B=YOUR_FAKE_REMOTE_B_VALUE\n",
+    )
+    .unwrap();
+    let bin = ctx.home_dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let curl = bin.join("curl");
+    std::fs::write(&curl, r#"#!/bin/sh
+[ "$1" = "--disable" ] || exit 10
+[ "$2" = "--globoff" ] || exit 11
+[ "$3" = "--proto" ] && [ "$4" = "=http,https" ] || exit 12
+printf '%s\n' "curlhome=${CURL_HOME-unset}" "xdg=${XDG_CONFIG_HOME-unset}" "foreign=${YOUR_REMOTE_A-unset}" "token=${ANTHROPIC_API_KEY-unset}" > "$(dirname "$0")/env"
+cat > "$(dirname "$0")/headers"
+body=''
+url=''
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = '--data-binary' ]; then shift; body="$1"; fi
+  if [ "$1" = '--url' ]; then shift; url="$1"; fi
+  shift
+done
+[ "$url" = 'https://fake-service.example.test/mcp' ] || exit 13
+case "$body" in
+  *tools/list*) printf 'HTTP/1.1 200 OK\r\n\r\n%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"fake_remote_tool"}]}}';;
+  *notifications/initialized*) printf 'HTTP/1.1 202 Accepted\r\n\r\n';;
+  *) printf 'HTTP/1.1 200 OK\r\nMcp-Session-Id: fake-session\r\n\r\n%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fake-curl"}}}';;
+esac
+"#).unwrap();
+    std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    write_claude(
+        &ctx,
+        json!({"mcpServers":{"a":{"command":"mcp","env":{"KEY":"${YOUR_REMOTE_A}"}}}}),
+    );
+    write_codex(&ctx, "[mcp_servers.b]\nurl = \"https://fake-service.example.test/mcp\"\n[mcp_servers.b.env_http_headers]\nAuthorization = \"YOUR_REMOTE_B\"\n");
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"));
+    command
+        .env_clear()
+        .env("HOME", &ctx.home_dir)
+        .env("USERPROFILE", &ctx.home_dir)
+        .env("AGENT_MANAGER_DATA_DIR", &ctx.data_dir)
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .env("CURL_HOME", root.join("account-a"))
+        .env("XDG_CONFIG_HOME", root.join("account-a"))
+        .env("YOUR_REMOTE_A", "YOUR_FAKE_PARENT_REMOTE_A")
+        .env("ANTHROPIC_API_KEY", "YOUR_FAKE_PARENT_TOKEN")
+        .args(["mcp:check", "--only", "mcp:b", "--agent", "codex", "--json"]);
+    let output = command.output().unwrap();
+    let outcome: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(output.status.success(), "{outcome}");
+    assert_eq!(outcome["data"]["ok"], true);
+    assert_eq!(outcome["data"]["tools"], json!(["fake_remote_tool"]));
+    let headers = read(&bin.join("headers"));
+    assert!(headers.contains("Authorization: YOUR_FAKE_REMOTE_B_VALUE"));
+    assert!(!headers.contains("YOUR_FAKE_REMOTE_A"));
+    let recorded = read(&bin.join("env"));
+    for line in [
+        "curlhome=unset",
+        "xdg=unset",
+        "foreign=unset",
+        "token=unset",
+    ] {
+        assert!(recorded.contains(line), "{recorded}");
+    }
+    std::fs::remove_file(bin.join("headers")).unwrap();
+    write_codex(&ctx, "[mcp_servers.b]\nurl = \"https://fake-service.example.test/mcp\"\n[mcp_servers.b.env_http_headers]\nAuthorization = \"YOUR_REMOTE_A\"\n");
+    let before = read(&codex_path(&ctx));
+    let output = command.output().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        !bin.join("headers").exists(),
+        "foreign refs are blocked before any request"
+    );
+    assert_eq!(read(&codex_path(&ctx)), before);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn remote_check_rejects_curl_option_urls_protocols_and_header_injection_before_spawn() {
+    use std::os::unix::fs::PermissionsExt;
+    let (root, ctx) = temp_ctx("check-curl-option-url");
+    let source = configure_secrets_file(&ctx);
+    let account_a_rc = root.join("account-a-curlrc");
+    std::fs::write(
+        &account_a_rc,
+        "header = \"Authorization: YOUR_FAKE_ACCOUNT_A_HEADER\"\n",
+    )
+    .unwrap();
+    let malicious_url = format!("--config={}", account_a_rc.display());
+    std::fs::write(&source, format!("YOUR_REMOTE_BAD_URL={malicious_url}\n")).unwrap();
+    let bin = ctx.home_dir.join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let curl = bin.join("curl");
+    std::fs::write(
+        &curl,
+        "#!/bin/sh\ntouch \"$(dirname \"$0\")/ran\"\ncat > \"$(dirname \"$0\")/headers\"\nexit 1\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let docs = [
+        json!({"url": malicious_url}),
+        json!({"url": "-K"}),
+        json!({"url": "${YOUR_REMOTE_BAD_URL}"}),
+        json!({"url": format!("file://{}", account_a_rc.display())}),
+        json!({"url": "ftp://127.0.0.1/account-a"}),
+        json!({"url": "https://safe.example.test/mcp", "headers": {"X-Safe\nAuthorization": "YOUR_FAKE_ACCOUNT_A_HEADER"}}),
+        json!({"url": "https://safe.example.test/mcp", "headers": {"X-Safe": "static\r\nAuthorization: YOUR_FAKE_ACCOUNT_A_HEADER"}}),
+    ];
+    for doc in docs {
+        write_claude(&ctx, json!({"mcpServers": {"unsafe": doc}}));
+        let before = read(&claude_path(&ctx));
+        let before_db = db_bytes(&ctx);
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
+            .env_clear()
+            .env("HOME", &ctx.home_dir)
+            .env("USERPROFILE", &ctx.home_dir)
+            .env("AGENT_MANAGER_DATA_DIR", &ctx.data_dir)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .args([
+                "mcp:check",
+                "--only",
+                "mcp:unsafe",
+                "--agent",
+                "claude-code",
+                "--json",
+            ])
+            .output()
+            .unwrap();
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            result["ok"] == false || result["data"]["ok"] == false,
+            "{result}"
+        );
+        assert!(
+            !bin.join("ran").exists(),
+            "不安全请求不得启动curl：{result}"
+        );
+        assert!(
+            !bin.join("headers").exists(),
+            "不安全请求不得发送header：{result}"
+        );
+        assert_eq!(read(&claude_path(&ctx)), before);
+        assert_eq!(db_bytes(&ctx), before_db);
+        assert!(!result.to_string().contains("YOUR_FAKE_ACCOUNT_A_HEADER"));
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// 本地假 Streamable HTTP 服务：initialize 回 JSON 并给会话 id；tools/list 要带会话 id 与鉴权头，回 SSE。
 /// 返回地址与收到的请求头（小写）记录。
 #[cfg(unix)]
@@ -2911,6 +3853,12 @@ fn check_talks_streamable_http_with_session_and_resolved_headers() {
         ],
     );
     assert!(set.ok, "{}", errors(&set));
+    // curl must ignore account-external defaults even in the captured HOME.
+    std::fs::write(
+        ctx.home_dir.join(".curlrc"),
+        "header = \"X-Wrong-Account: YOUR_FAKE_CURLRC_A\"\nurl = \"http://127.0.0.1:1/never\"\n",
+    )
+    .unwrap();
     let (url, seen) =
         fake_http_server(r#"{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"remote_tool"}]}}"#);
     write_claude(
@@ -2932,6 +3880,11 @@ fn check_talks_streamable_http_with_session_and_resolved_headers() {
         "initialize、initialized、tools/list 各一次"
     );
     assert!(!env.data.to_string().contains("remote-plain-token-77"));
+    assert!(seen
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|headers| !headers.contains("your_fake_curlrc_a")));
     let _ = std::fs::remove_dir_all(root);
 }
 

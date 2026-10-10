@@ -1,13 +1,13 @@
 //! 凭据取值只来自用户显式选择的外部 `.env` 文件或进程环境。
 //!
 //! `native-manager.db` 只保存外部文件路径，不保存凭据值。外部文件优先于进程环境，
-//! 这样从 Dock / Finder 启动时也能稳定解析，同时仍保留终端注入作为回退。
+//! 选择外部文件后，它是唯一来源；文件失败或缺值绝不回退父进程中的同名变量。
 
 use crate::platform::Canon;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context as _, Result};
@@ -65,9 +65,148 @@ fn validate_permissions(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn validate_permissions(_path: &Path) -> Result<()> {
+#[cfg(windows)]
+fn validate_permissions(path: &Path) -> Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        Security::*,
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // Read-only OS APIs; unknown ACL shapes are rejected instead of being guessed safe.
+    unsafe {
+        let mut needed = 0;
+        GetFileSecurityW(
+            wide.as_ptr(),
+            DACL_SECURITY_INFORMATION | OWNER_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            0,
+            &mut needed,
+        );
+        if needed == 0 || needed > 64 * 1024 {
+            bail!("无法可靠读取外部密钥文件 Windows ACL，拒绝操作");
+        }
+        let mut descriptor = vec![0u8; needed as usize];
+        if GetFileSecurityW(
+            wide.as_ptr(),
+            DACL_SECURITY_INFORMATION | OWNER_SECURITY_INFORMATION,
+            descriptor.as_mut_ptr().cast(),
+            needed,
+            &mut needed,
+        ) == 0
+        {
+            bail!("无法读取外部密钥文件 Windows ACL，拒绝操作");
+        }
+        let mut token = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            bail!("无法确认当前 Windows 用户，拒绝操作");
+        }
+        let mut token_size = 0;
+        GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut token_size);
+        if token_size == 0 || token_size > 64 * 1024 {
+            CloseHandle(token);
+            bail!("无法读取当前 Windows 用户，拒绝操作");
+        }
+        let mut token_bytes = vec![0u8; token_size as usize];
+        let read_ok = GetTokenInformation(
+            token,
+            TokenUser,
+            token_bytes.as_mut_ptr().cast(),
+            token_size,
+            &mut token_size,
+        );
+        CloseHandle(token);
+        if read_ok == 0 {
+            bail!("无法读取当前 Windows 用户，拒绝操作");
+        }
+        let user = std::ptr::read_unaligned(token_bytes.as_ptr().cast::<TOKEN_USER>())
+            .User
+            .Sid;
+        let mut system = [0u8; 68];
+        let mut admins = [0u8; 68];
+        let mut system_len = system.len() as u32;
+        let mut admins_len = admins.len() as u32;
+        if CreateWellKnownSid(
+            WinLocalSystemSid,
+            std::ptr::null_mut(),
+            system.as_mut_ptr().cast(),
+            &mut system_len,
+        ) == 0
+            || CreateWellKnownSid(
+                WinBuiltinAdministratorsSid,
+                std::ptr::null_mut(),
+                admins.as_mut_ptr().cast(),
+                &mut admins_len,
+            ) == 0
+        {
+            bail!("无法确认 Windows 系统权限，拒绝操作");
+        }
+        let mut trusted = |sid| {
+            IsValidSid(sid) != 0
+                && (EqualSid(sid, user) != 0
+                    || EqualSid(sid, system.as_mut_ptr().cast()) != 0
+                    || EqualSid(sid, admins.as_mut_ptr().cast()) != 0)
+        };
+        let mut owner = std::ptr::null_mut();
+        let mut defaulted = 0;
+        if GetSecurityDescriptorOwner(descriptor.as_mut_ptr().cast(), &mut owner, &mut defaulted)
+            == 0
+            || !trusted(owner)
+        {
+            bail!("外部密钥文件所有者不是当前用户或系统管理员，拒绝操作");
+        }
+        let mut acl = std::ptr::null_mut();
+        let mut present = 0;
+        if GetSecurityDescriptorDacl(
+            descriptor.as_mut_ptr().cast(),
+            &mut present,
+            &mut acl,
+            &mut defaulted,
+        ) == 0
+            || present == 0
+            || acl.is_null()
+        {
+            bail!("外部密钥文件没有受限 Windows ACL，拒绝操作");
+        }
+        let mut info: ACL_SIZE_INFORMATION = std::mem::zeroed();
+        if GetAclInformation(
+            acl,
+            (&mut info as *mut ACL_SIZE_INFORMATION).cast(),
+            std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+            AclSizeInformation,
+        ) == 0
+        {
+            bail!("外部密钥文件 Windows ACL 无法识别，拒绝操作");
+        }
+        for index in 0..info.AceCount {
+            let mut raw = std::ptr::null_mut();
+            if GetAce(acl, index, &mut raw) == 0 || raw.is_null() {
+                bail!("外部密钥文件 Windows ACL 无法识别，拒绝操作");
+            }
+            let header = std::ptr::read_unaligned(raw.cast::<ACE_HEADER>());
+            if u32::from(header.AceFlags) & INHERIT_ONLY_ACE != 0 || header.AceType == 1 {
+                continue;
+            }
+            if header.AceType != 0
+                || usize::from(header.AceSize) < std::mem::size_of::<ACCESS_ALLOWED_ACE>()
+            {
+                bail!("外部密钥文件 Windows ACL 含无法可靠判断的授权，拒绝操作");
+            }
+            let ace = raw.cast::<ACCESS_ALLOWED_ACE>();
+            let mask = std::ptr::read_unaligned(std::ptr::addr_of!((*ace).Mask));
+            let sid = std::ptr::addr_of_mut!((*ace).SidStart).cast();
+            if mask != 0 && !trusted(sid) {
+                bail!("外部密钥文件 Windows ACL 允许其他用户访问，请先限制权限");
+            }
+        }
+    }
     Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn validate_permissions(_path: &Path) -> Result<()> {
+    bail!("当前平台无法可靠确认外部密钥文件权限，拒绝操作")
 }
 
 fn validated_source_path(ctx: &Context) -> Result<(String, PathBuf)> {
@@ -79,6 +218,9 @@ fn validated_source_path(ctx: &Context) -> Result<(String, PathBuf)> {
         bail!("外部密钥文件必须是普通文件，不能是目录或符号链接");
     }
     validate_permissions(&path)?;
+    if metadata.len() > 1024 * 1024 {
+        bail!("外部密钥文件超过安全读取上限");
+    }
     let canonical = path.canon().with_context(|| "无法解析外部密钥文件路径")?;
     if let Ok(data_dir) = ctx.data_dir.canon() {
         if canonical.starts_with(data_dir) {
@@ -153,15 +295,53 @@ pub fn validate_source(ctx: &Context, raw: &str) -> Result<()> {
         bail!("外部密钥文件必须是普通文件，不能是目录或符号链接");
     }
     validate_permissions(&path)?;
+    if metadata.len() > 1024 * 1024 {
+        bail!("外部密钥文件超过安全读取上限");
+    }
     let canonical = path.canon().with_context(|| "无法解析外部密钥文件路径")?;
     if let Ok(data_dir) = ctx.data_dir.canon() {
         if canonical.starts_with(data_dir) {
             bail!("外部密钥文件不能放在 Agent Manager 数据目录中");
         }
     }
-    let text = fs::read_to_string(&path).with_context(|| "外部密钥文件不是可读的 UTF-8 文本")?;
+    let text = read_secret_text(&path)?;
     parse_env(&text)?;
     Ok(())
+}
+
+pub(crate) fn source_identity(ctx: &Context, raw: &str) -> Result<Option<(PathBuf, Vec<u8>)>> {
+    validate_source(ctx, raw)?;
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(None);
+    }
+    let path = if raw == "~" {
+        ctx.home_dir.clone()
+    } else if let Some(rest) = raw.strip_prefix("~/") {
+        ctx.home_dir.join(rest)
+    } else {
+        PathBuf::from(raw)
+    };
+    Ok(Some((path.canon()?, read_secret_bytes(&path)?)))
+}
+
+const MAX_SECRET_BYTES: u64 = 1024 * 1024;
+
+fn read_secret_bytes(path: &Path) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .with_context(|| "外部密钥文件不可读取")?
+        .take(MAX_SECRET_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .with_context(|| "外部密钥文件不可读取")?;
+    if bytes.len() as u64 > MAX_SECRET_BYTES {
+        bail!("外部密钥文件超过安全读取上限");
+    }
+    Ok(bytes)
+}
+
+fn read_secret_text(path: &Path) -> Result<String> {
+    String::from_utf8(read_secret_bytes(path)?).with_context(|| "外部密钥文件不是可读的 UTF-8 文本")
 }
 
 fn parse_value(raw: &str) -> Result<String> {
@@ -194,6 +374,7 @@ fn key_of_line(line: &str) -> Option<&str> {
 
 fn parse_env(text: &str) -> Result<BTreeMap<String, String>> {
     let mut values = BTreeMap::new();
+    let mut case_names = BTreeSet::new();
     for (index, line) in text.lines().enumerate() {
         let mut item = line.trim();
         if item.is_empty() || item.starts_with('#') {
@@ -214,7 +395,9 @@ fn parse_env(text: &str) -> Result<BTreeMap<String, String>> {
         if value.contains('\0') {
             bail!("外部密钥文件第 {} 行含非法字符", index + 1);
         }
-        if values.insert(key.to_string(), value).is_some() {
+        if !case_names.insert(key.to_ascii_uppercase())
+            || values.insert(key.to_string(), value).is_some()
+        {
             bail!("外部密钥文件中存在重复变量 {key}");
         }
     }
@@ -235,7 +418,7 @@ fn load_snapshot(ctx: &Context) -> Snapshot {
         return Snapshot::default();
     };
     match validated_source_path(ctx).and_then(|(_, path)| {
-        let text = fs::read_to_string(path).with_context(|| "外部密钥文件不是可读的 UTF-8 文本")?;
+        let text = read_secret_text(&path)?;
         parse_env(&text)
     }) {
         Ok(values) => Snapshot {
@@ -257,15 +440,50 @@ pub fn refresh(ctx: &Context) {
 }
 
 pub fn lookup(name: &str) -> Option<String> {
-    let from_file = CACHE.with(|cache| {
-        cache
-            .borrow()
-            .values
-            .get(name)
-            .filter(|value| !value.is_empty())
-            .cloned()
+    CACHE.with(|cache| {
+        let snapshot = cache.borrow();
+        if snapshot.configured_path.is_some() || snapshot.error.is_some() {
+            if snapshot.error.is_some() {
+                return None;
+            }
+            return snapshot
+                .values
+                .get(name)
+                .filter(|value| !value.is_empty())
+                .cloned();
+        }
+        std::env::var(name).ok().filter(|value| !value.is_empty())
+    })
+}
+
+/// A configured credential source must remain valid even when a caller supplies a pending value.
+pub(crate) fn ensure_source_ready() -> Result<()> {
+    let (configured, error) = CACHE.with(|cache| {
+        let snapshot = cache.borrow();
+        (snapshot.configured_path.is_some(), snapshot.error.is_some())
     });
-    from_file.or_else(|| std::env::var(name).ok().filter(|value| !value.is_empty()))
+    if error {
+        bail!("已选择的外部密钥来源不可用，拒绝操作；不会回退进程环境");
+    }
+    if !configured {
+        bail!("账号凭据必须来自显式选择的外部密钥来源；请先配置来源，不会继承进程环境");
+    }
+    Ok(())
+}
+
+/// Controlled account operations never inherit credentials from the parent process.
+pub(crate) fn lookup_account(name: &str) -> Result<String> {
+    ensure_source_ready()?;
+    CACHE
+        .with(|cache| {
+            cache
+                .borrow()
+                .values
+                .get(name)
+                .filter(|value| !value.is_empty())
+                .cloned()
+        })
+        .ok_or_else(|| anyhow::anyhow!("账号独占密钥变量未在已选择的外部来源中设置"))
 }
 
 pub fn is_set(name: &str) -> bool {
@@ -300,6 +518,14 @@ fn render_line(name: &str, value: &str) -> Result<String> {
 }
 
 fn render_updated(text: &str, updates: &BTreeMap<String, Option<String>>) -> Result<String> {
+    let current = parse_env(text)?;
+    if updates.keys().any(|name| {
+        current
+            .keys()
+            .any(|old| old != name && old.eq_ignore_ascii_case(name))
+    }) {
+        bail!("密钥变量名称存在大小写别名，拒绝更改或隐式重命名");
+    }
     let mut seen = BTreeSet::new();
     let mut lines = Vec::new();
     for line in text.lines() {
@@ -328,7 +554,7 @@ fn render_updated(text: &str, updates: &BTreeMap<String, Option<String>>) -> Res
     Ok(out)
 }
 
-fn atomic_write(path: &Path, text: &str) -> Result<()> {
+fn atomic_write_checked(path: &Path, text: &str, expected: &[u8]) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("外部密钥文件没有父目录"))?;
@@ -348,6 +574,15 @@ fn atomic_write(path: &Path, text: &str) -> Result<()> {
         let mut file = options.open(&temp)?;
         file.write_all(text.as_bytes())?;
         file.sync_all()?;
+        let metadata = fs::symlink_metadata(path)?;
+        if !metadata.is_file()
+            || metadata.file_type().is_symlink()
+            || read_secret_bytes(path)? != expected
+        {
+            bail!("外部密钥来源已变化，拒绝覆盖外部修改");
+        }
+        validate_permissions(path)?;
+        validate_permissions(&temp)?;
         fs::rename(&temp, path)?;
         Ok(())
     })();
@@ -357,49 +592,90 @@ fn atomic_write(path: &Path, text: &str) -> Result<()> {
     result.with_context(|| "写入外部密钥文件失败")
 }
 
-fn update_values(ctx: &Context, updates: &BTreeMap<String, Option<String>>) -> Result<()> {
-    let (_, path) = validated_source_path(ctx)?;
-    let text = fs::read_to_string(&path).with_context(|| "外部密钥文件不是可读的 UTF-8 文本")?;
-    parse_env(&text)?;
-    let updated = render_updated(&text, updates)?;
-    atomic_write(&path, &updated)
+/// A source-file change staged without writes; callers coordinate it with account configuration.
+pub(crate) struct SecretWrite {
+    path: PathBuf,
+    old: Vec<u8>,
+    new: Vec<u8>,
 }
 
-pub fn set(ctx: &Context, name: &str, value: &str) -> Result<()> {
-    if !valid_var_name(name) {
-        bail!("变量名不合法：要以字母或下划线开头，只能用字母、数字与下划线");
+pub(crate) fn plan_set(ctx: &Context, name: &str, value: &str) -> Result<SecretWrite> {
+    if !valid_var_name(name) || value.is_empty() || value.chars().any(char::is_control) {
+        bail!("账号密钥变量或取值格式不正确");
     }
-    let mut updates = BTreeMap::new();
-    updates.insert(
+    plan_change(ctx, name, value)
+}
+
+pub(crate) fn plan_change(ctx: &Context, name: &str, value: &str) -> Result<SecretWrite> {
+    if !valid_var_name(name) || value.contains('\0') {
+        bail!("密钥变量或取值格式不正确");
+    }
+    let (_, path) = validated_source_path(ctx)?;
+    let old = read_secret_bytes(&path)?;
+    if old.len() > 1024 * 1024 {
+        bail!("外部密钥文件超过安全读取上限");
+    }
+    let text = std::str::from_utf8(&old).with_context(|| "外部密钥文件不是 UTF-8 文本")?;
+    parse_env(text)?;
+    let updates = BTreeMap::from([(
         name.to_string(),
         if value.is_empty() {
             None
         } else {
             Some(value.to_string())
         },
-    );
-    update_values(ctx, &updates)
+    )]);
+    let new = render_updated(text, &updates)?.into_bytes();
+    if new.len() > 1024 * 1024 {
+        bail!("外部密钥文件超过安全写入上限");
+    }
+    Ok(SecretWrite { path, old, new })
 }
 
-/// 计算好、还没落盘的一次密钥文件写入。
-struct PlannedWrite {
-    path: PathBuf,
-    new: Vec<u8>,
+impl SecretWrite {
+    pub(crate) fn validate(&self, ctx: &Context) -> Result<()> {
+        let (_, current) = validated_source_path(ctx)?;
+        if current != self.path || read_secret_bytes(&self.path)? != self.old {
+            bail!("外部密钥来源已变化，没有写入；请重新预览");
+        }
+        Ok(())
+    }
+
+    pub(crate) fn commit(&self, ctx: &Context) -> Result<()> {
+        self.validate(ctx)?;
+        atomic_write_checked(&self.path, std::str::from_utf8(&self.new)?, &self.old)
+    }
+
+    pub(crate) fn verify_committed(&self, ctx: &Context) -> Result<()> {
+        let (_, current) = validated_source_path(ctx)?;
+        if current != self.path || read_secret_bytes(&self.path)? != self.new {
+            bail!("外部密钥来源写后已变化，拒绝提交账号变更");
+        }
+        Ok(())
+    }
+
+    pub(crate) fn rollback(&self, ctx: &Context) -> Result<()> {
+        let (_, current) = validated_source_path(ctx)?;
+        if current != self.path || read_secret_bytes(&self.path)? != self.new {
+            bail!("外部密钥来源已被再次修改，拒绝覆盖外部修改");
+        }
+        atomic_write_checked(&self.path, std::str::from_utf8(&self.old)?, &self.new)
+    }
 }
 
 /// 只补缺失值的合并结果：同名不同值时拒绝；没有要补的返回 None。不落盘。
 fn plan_merge_named(
     ctx: &Context,
     incoming: &BTreeMap<String, String>,
-) -> Result<(Option<PlannedWrite>, Vec<String>)> {
+) -> Result<(SecretWrite, Vec<String>)> {
     let (_, path) = validated_source_path(ctx)?;
-    let text = fs::read_to_string(&path).with_context(|| "外部密钥文件不是可读的 UTF-8 文本")?;
+    let text = read_secret_text(&path)?;
     let current = parse_env(&text)?;
     let mut updates = BTreeMap::new();
     let mut merged = Vec::new();
     for (name, value) in incoming {
         if !valid_var_name(name) {
-            continue;
+            bail!("旧凭据变量名不合法，拒绝迁移或丢弃原记录");
         }
         match current.get(name) {
             Some(existing) if existing.is_empty() => {
@@ -417,30 +693,22 @@ fn plan_merge_named(
     }
     merged.sort();
     merged.dedup();
-    if updates.is_empty() {
-        return Ok((None, merged));
+    let new = if updates.is_empty() {
+        text.as_bytes().to_vec()
+    } else {
+        render_updated(&text, &updates)?.into_bytes()
+    };
+    if new.len() as u64 > MAX_SECRET_BYTES {
+        bail!("外部密钥文件超过安全写入上限");
     }
-    let updated = render_updated(&text, &updates)?;
     Ok((
-        Some(PlannedWrite {
+        SecretWrite {
             path,
-            new: updated.into_bytes(),
-        }),
+            old: text.into_bytes(),
+            new,
+        },
         merged,
     ))
-}
-
-/// 只补缺失值；同名不同值时拒绝，避免接管覆盖用户在外部仓库维护的凭据。
-pub fn merge_without_overwrite(
-    ctx: &Context,
-    incoming: &BTreeMap<String, String>,
-) -> Result<Vec<String>> {
-    let (write, merged) = plan_merge_named(ctx, incoming)?;
-    if let Some(write) = write {
-        let text = String::from_utf8(write.new).with_context(|| "外部密钥文件不是 UTF-8 文本")?;
-        atomic_write(&write.path, &text)?;
-    }
-    Ok(merged)
 }
 
 pub fn legacy_count(ctx: &Context) -> Result<usize> {
@@ -475,20 +743,64 @@ fn read_legacy(conn: &Connection) -> Result<BTreeMap<String, String>> {
     Ok(out)
 }
 
-/// 显式迁移：先无覆盖写入外部文件，成功后才删除旧表，失败时数据库原样保留。
+/// Explicit migration holds a DB transaction and restores its own source write on failure.
+/// Account locks and reference ownership are checked by the command entry point.
 pub fn migrate_legacy(ctx: &Context) -> Result<Vec<String>> {
+    if legacy_count(ctx)? == 0 {
+        return Ok(Vec::new());
+    }
     let Some(conn) = crate::store::open_readonly(ctx)? else {
         return Ok(Vec::new());
     };
-    let count = legacy_count(ctx)?;
-    if count == 0 {
-        return Ok(Vec::new());
-    }
     let values = read_legacy(&conn)?;
     drop(conn);
-    let migrated = merge_without_overwrite(ctx, &values)?;
-    let conn = crate::store::open_write(ctx)?;
-    conn.execute("DROP TABLE IF EXISTS secret_values", [])?;
+    for name in values.keys() {
+        crate::native_secrets::validate_variable_owners(ctx, name, None)?;
+    }
+    let (write, migrated) = plan_merge_named(ctx, &values)?;
+    let mut conn = crate::store::open_write(ctx)?;
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    if read_legacy(&tx)? != values {
+        bail!("旧凭据已变化，没有迁移；请重新检查");
+    }
+    let owners = crate::native_secrets::account_secret_owners_in_policy(
+        ctx,
+        &crate::store::policy_from_connection(&tx)?,
+    )?;
+    for name in values.keys() {
+        let ids = owners
+            .get(&name.to_ascii_uppercase())
+            .cloned()
+            .unwrap_or_default();
+        if ids.len() > 1 || ids.iter().any(|id| id.starts_with("retired:")) {
+            bail!("旧凭据归属冲突或已退役，未迁移任何值");
+        }
+        if let Some(account) = ids.iter().next() {
+            crate::native_secrets::claim_variable_ownership(
+                ctx,
+                &tx,
+                account,
+                &std::collections::BTreeSet::from([name.clone()]),
+            )?;
+        }
+    }
+    write.validate(ctx)?;
+    tx.execute("DROP TABLE IF EXISTS secret_values", [])?;
+    let changed = write.old != write.new;
+    if changed {
+        write.commit(ctx)?;
+    }
+    let result = write
+        .verify_committed(ctx)
+        .and_then(|()| tx.commit().map_err(Into::into));
+    if let Err(err) = result {
+        if changed {
+            write.rollback(ctx).map_err(|_| {
+                anyhow::anyhow!("凭据迁移未提交，且外部来源发生并发变化；拒绝覆盖，请检查来源文件")
+            })?;
+        }
+        return Err(err.context("凭据迁移未提交，来源文件已恢复"));
+    }
     Ok(migrated)
 }
 
@@ -513,6 +825,7 @@ mod tests {
         assert_eq!(parsed.get("B").map(String::as_str), Some("json value"));
         assert_eq!(parsed.get("C").map(String::as_str), Some("line\nvalue"));
         assert!(parse_env("A=one\nA=two\n").is_err());
+        assert!(parse_env("A=one\na=two\n").is_err());
         assert!(parse_env("bad-name=value\n").is_err());
     }
 
@@ -540,5 +853,35 @@ mod tests {
         assert_eq!(lookup("EMPTY_TEST_SECRET"), None);
         assert!(!is_set("EMPTY_TEST_SECRET"));
         assert!(!is_stored("EMPTY_TEST_SECRET"));
+    }
+    #[test]
+    fn selected_source_error_or_missing_key_never_falls_back_to_parent_environment() {
+        const NAME: &str = "AM_SELECTED_SOURCE_NO_FALLBACK";
+        std::env::set_var(NAME, "parent-account-value");
+        for snapshot in [
+            Snapshot {
+                configured_path: Some("/private-fixture/source.env".into()),
+                ..Snapshot::default()
+            },
+            Snapshot {
+                configured_path: Some("/private-fixture/source.env".into()),
+                error: Some("unreadable source".into()),
+                ..Snapshot::default()
+            },
+            Snapshot {
+                error: Some("invalid configured source".into()),
+                ..Snapshot::default()
+            },
+        ] {
+            CACHE.with(|cache| *cache.borrow_mut() = snapshot);
+            assert_eq!(lookup(NAME), None);
+            assert!(!is_set(NAME));
+            assert_eq!(std::env::var(NAME).unwrap(), "parent-account-value");
+        }
+        CACHE.with(|cache| *cache.borrow_mut() = Snapshot::default());
+        assert_eq!(lookup(NAME).as_deref(), Some("parent-account-value"));
+        assert!(ensure_source_ready().is_err());
+        assert!(lookup_account(NAME).is_err());
+        std::env::remove_var(NAME);
     }
 }

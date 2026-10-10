@@ -26,7 +26,7 @@ export function mcpFillRows(elements: EngineElement[], targets: McpTarget[], age
   return elements.flatMap((element) => {
     const cells = cellsOf(element);
     const sources = Object.entries(cells).filter(([agent, cell]) =>
-      cell.source === "file" && cell.state === "enabled" && cell.actions.includes("copy") && formatOf.has(agent));
+      cell.source === "file" && cell.state === "enabled" && cell.copy_safe === true && cell.actions.includes("copy") && formatOf.has(agent));
     return writable
       .filter((target) => !cells[target.agent] && (!agents || agents.includes(target.agent)))
       .flatMap((target) => {
@@ -54,7 +54,7 @@ export function mcpInUseElsewhere(elements: EngineElement[], targets: McpTarget[
     .filter((element) => {
       const cells = cellsOf(element);
       return !cells[mainAgent] && Object.entries(cells).some(([agent, cell]) =>
-        sameFormat.has(agent) && cell.source === "file" && cell.state === "enabled" && cell.actions.includes("copy"));
+        sameFormat.has(agent) && cell.source === "file" && cell.state === "enabled" && cell.copy_safe === true && cell.actions.includes("copy"));
     })
     .map((element) => element.id.replace(/^mcp:/, ""));
 }

@@ -30,8 +30,8 @@ fn sub_request(req: &Request, command: &str) -> Request {
     }
 }
 
-fn read_optional(path: &Path) -> Result<Option<Vec<u8>>> {
-    seed::read_target(path).map(|(_, bytes)| bytes)
+fn read_optional(ctx: &Context, def: &ProfileDef, path: &Path) -> Result<Option<Vec<u8>>> {
+    seed::read_target(ctx, def, path).map(|(_, bytes)| bytes)
 }
 
 fn file(path: String, original: Option<&[u8]>, bytes: Vec<u8>) -> Result<Value> {
@@ -71,7 +71,7 @@ fn rules(
         return Ok((result("rules", "absent", detail), None));
     }
     let path = dir.join(name);
-    let previous = read_optional(&path)?;
+    let previous = read_optional(ctx, def, &path)?;
     let existing = previous
         .as_deref()
         .map(std::str::from_utf8)
@@ -166,7 +166,7 @@ fn mcp(
         );
     }
     let previous = match def.kind {
-        ProfileKind::Claude => read_optional(&target_path)?,
+        ProfileKind::Claude => read_optional(ctx, def, &target_path)?,
         ProfileKind::Codex => Some(main.clone()),
     };
     // 写入前的 .claude.json 原文（Claude 的 MCP 另写这个文件）：界面据此只显示变化的部分
@@ -194,7 +194,7 @@ fn mcp(
             skipped.push(entry.name);
             continue;
         };
-        if seed::has_literal_credentials(&source_format, view) {
+        if seed::cannot_share_account_entry(&source_format, view) {
             skipped.push(entry.name);
             continue;
         }
@@ -208,7 +208,7 @@ fn mcp(
             to_base: None,
             replace: false,
         };
-        match mcp::preflight::plan(&parsed, &inv) {
+        match mcp::preflight::plan(ctx, &parsed, &inv) {
             Ok(plan) => {
                 notes.extend(plan.warnings);
                 if let Some(write) = plan.file_writes.into_iter().next() {
@@ -236,7 +236,7 @@ fn mcp(
     }
     if !skipped.is_empty() {
         parts.push(format!(
-            "含明文凭据或格式不认识、没有复制：{}（需要的话在 MCP 页逐条复制）",
+            "凭据归属或格式无法确认、没有复制：{}（请在目标账号单独配置）",
             skipped.join("、")
         ));
     }

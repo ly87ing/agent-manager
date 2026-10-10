@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { McpTarget } from "../lib/contract";
-import { mcpFillArgs, mcpFillRows } from "../lib/mcpFill";
+import { mcpFillArgs, mcpFillRows, mcpInUseElsewhere } from "../lib/mcpFill";
 import { makeElement } from "./fixtures";
 
 function target(agent: string, format: string, extra: Partial<McpTarget> = {}): McpTarget {
@@ -15,12 +15,12 @@ const targets = [
   target("broken", "claude-json", { error: "解析失败" }),
 ];
 
-function server(name: string, agents: Record<string, { state: string; source?: string; base?: string }>) {
+function server(name: string, agents: Record<string, { state: string; source?: string; base?: string; copy_safe?: boolean }>) {
   return makeElement({
     id: `mcp:${name}`,
     domain: "mcp",
     observed: {
-      agents: Object.fromEntries(Object.entries(agents).map(([agent, cell]) => [agent, { source: "file", base: `${agent}-base`, actions: ["edit", "copy", "disable", "remove"], ...cell }])),
+      agents: Object.fromEntries(Object.entries(agents).map(([agent, cell]) => [agent, { source: "file", base: `${agent}-base`, copy_safe: true, actions: ["edit", "copy", "disable", "remove"], ...cell }])),
     },
   });
 }
@@ -41,5 +41,14 @@ describe("MCP 补齐", () => {
     const codexTargets = [...targets, target("cx2", "codex-toml")];
     const rows = mcpFillRows([server("x", { codex: { state: "enabled" }, "claude-code": { state: "enabled" } })], codexTargets, ["cx2"]);
     expect(rows.map((row) => [row.from, row.to])).toEqual([["codex", "cx2"]]);
+  });
+
+  it("带凭据的服务不能在 seed 之后被补齐重新带入；未知安全状态也不自动复制", () => {
+    for (const copy_safe of [false, undefined]) {
+      const entry = server("private", { "claude-code": { state: "enabled", copy_safe } });
+      expect(mcpFillRows([entry], targets, ["work"])).toEqual([]);
+      expect(mcpInUseElsewhere([entry], targets, "work")).toEqual([]);
+    }
+    expect(mcpInUseElsewhere([server("safe", { ds: { state: "enabled" } })], targets, "claude-code")).toEqual(["safe"]);
   });
 });

@@ -1,5 +1,6 @@
 import type { AgentAccounts } from "./accounts";
 import { usageAccountKey } from "./usageModel";
+import type { AuthShell } from "./profileDefinition";
 
 /** `usage:sessions` 的一条：账号目录里最近的一个会话。 */
 export interface RecentSession {
@@ -26,6 +27,13 @@ export function launchCommandOf(agent: string, groups: AgentAccounts[]): string 
   return null;
 }
 
+export function accountElementOfSession(agent: string, groups: AgentAccounts[]): string | null {
+  const { id, kind } = usageAccountKey(agent);
+  const isMain = id === "claude-code" || id === "codex";
+  const account = groups.find((group) => group.kind === kind)?.accounts.find((item) => isMain ? item.isMain : item.elementId === `profiles:${id}`);
+  return account && !account.blockedReason && !account.mainHasThirdParty ? account.elementId : null;
+}
+
 function posixQuote(value: string): string {
   return /^[A-Za-z0-9_./~-]+$/.test(value) ? value : `'${value.replace(/'/g, `'"'"'`)}'`;
 }
@@ -34,9 +42,11 @@ function posixQuote(value: string): string {
  * 回到这个会话的命令：先进它当时的工作目录（Claude 按目录找会话），再用同一个账号的启动命令接着聊。
  * 目录是 Windows 盘符路径时按 cmd 的写法。
  */
-export function resumeCommand(kind: "claude" | "codex", launch: string, session: RecentSession): string {
+export function resumeCommand(kind: "claude" | "codex", launch: string, session: RecentSession, shell: AuthShell = "posix"): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(session.id)) throw new Error("会话标识不合法，未生成命令");
   const resume = kind === "codex" ? `${launch} resume ${session.id}` : `${launch} --resume ${session.id}`;
   if (!session.cwd) return resume;
+  if (shell === "powershell") return `& { Set-Location -LiteralPath '${session.cwd.replace(/'/g, "''")}' -ErrorAction Stop; ${resume} }`;
   if (/^[A-Za-z]:[\\/]/.test(session.cwd)) return `cd /d "${session.cwd}" && ${resume}`;
   return `cd ${posixQuote(session.cwd)} && ${resume}`;
 }

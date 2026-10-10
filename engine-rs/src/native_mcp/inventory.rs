@@ -160,6 +160,18 @@ fn scan_target(target: &AgentTarget, shared_with: Option<&str>) -> TargetScan {
 
 /// 逐个助手扫描目标文件；一个助手出错不影响其他助手。
 pub fn scan_targets(policy: &Value, home_dir: &std::path::Path) -> Vec<TargetScan> {
+    scan_targets_with_context(policy, home_dir, None)
+}
+
+pub fn scan_targets_checked(ctx: &Context, policy: &Value) -> Vec<TargetScan> {
+    scan_targets_with_context(policy, &ctx.home_dir, Some(ctx))
+}
+
+fn scan_targets_with_context(
+    policy: &Value,
+    home_dir: &std::path::Path,
+    ctx: Option<&Context>,
+) -> Vec<TargetScan> {
     let targets = agent_targets(policy, home_dir);
     let mut by_path: BTreeMap<std::path::PathBuf, Vec<String>> = BTreeMap::new();
     for target in &targets {
@@ -173,6 +185,22 @@ pub fn scan_targets(policy: &Value, home_dir: &std::path::Path) -> Vec<TargetSca
     targets
         .iter()
         .map(|target| {
+            if let Some(ctx) = ctx {
+                if let Err(error) = crate::native_profiles::paths::validate_account_resource_path(
+                    ctx,
+                    policy,
+                    &target.agent,
+                    &target.path,
+                ) {
+                    return TargetScan {
+                        target: target.clone(),
+                        exists: false,
+                        error: Some(format!("{error:#}")),
+                        entries: Vec::new(),
+                        old_bytes: None,
+                    };
+                }
+            }
             let shared = if target.path.as_os_str().is_empty() {
                 None
             } else {
@@ -206,7 +234,7 @@ pub fn merge_saved(mut rows: Vec<SavedRow>, legacy: Vec<SavedRow>) -> Vec<SavedR
 /// 只读清单：不建库、不建表、不写任何文件。
 pub fn load(ctx: &Context) -> Result<Inventory> {
     let policy = store::effective_policy(ctx)?;
-    let scans = scan_targets(&policy, &ctx.home_dir);
+    let scans = scan_targets_checked(ctx, &policy);
     let rows = saved::load_readonly(ctx)?;
     let bindings = super::legacy::load_bindings_readonly(ctx)?;
     let legacy = super::legacy::derive(&policy, &bindings, &scans);

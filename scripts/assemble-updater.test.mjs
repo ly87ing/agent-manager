@@ -11,6 +11,7 @@ const script = fileURLToPath(new URL('./assemble-updater.mjs', import.meta.url))
 const bundles = [
   'Agent Manager_aarch64.app.tar.gz', 'Agent Manager_x64.app.tar.gz',
   'Agent-Manager_amd64.AppImage', 'Agent-Manager_x64.msi', 'Agent-Manager_x64-setup.exe',
+  'Agent-Manager_amd64.deb',
 ];
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'updater-manifest-'));
@@ -19,7 +20,7 @@ function fixture(t) {
   mkdirSync(dir);
   for (const name of bundles) {
     writeFileSync(join(dir, name), 'test bundle');
-    writeFileSync(join(dir, `${name}.sig`), 'test signature\n');
+    writeFileSync(join(dir, `${name}.sig`), `signature for ${name}\n`);
   }
   return { cwd, dir, run: () => spawnSync(process.execPath, [script], {
     cwd, encoding: 'utf8', env: { ...process.env, RELEASE_TAG: 'v0.1.1-rc.1', GITHUB_REPOSITORY: 'YOUR_OWNER/YOUR_REPO' },
@@ -32,12 +33,16 @@ test('Tauri 2 原生制品生成全部平台并保留预发布版本和 URL 编�
   assert.equal(r.status, 0, r.stderr);
   const manifest = JSON.parse(readFileSync(join(f.cwd, 'latest.json'), 'utf8'));
   assert.equal(manifest.version, '0.1.1-rc.1');
-  assert.equal(Object.keys(manifest.platforms).length, 9);
+  assert.equal(Object.keys(manifest.platforms).length, 10);
   assert.match(manifest.platforms['darwin-aarch64'].url, /Agent%20Manager_aarch64.app.tar.gz$/);
   assert.match(manifest.platforms['linux-x86_64'].url, /\.AppImage$/);
+  assert.match(manifest.platforms['linux-x86_64-appimage'].url, /\.AppImage$/);
+  assert.match(manifest.platforms['linux-x86_64-deb'].url, /\.deb$/);
+  assert.equal(manifest.platforms['linux-x86_64-deb'].signature, `signature for ${bundles[5]}`);
+  assert.equal(manifest.platforms['linux-x86_64-appimage'].signature, `signature for ${bundles[2]}`);
   assert.match(manifest.platforms['windows-x86_64-msi'].url, /\.msi$/);
   assert.match(manifest.platforms['windows-x86_64-nsis'].url, /-setup.exe$/);
-  assert.equal(manifest.platforms['darwin-x86_64'].signature, 'test signature');
+  assert.equal(manifest.platforms['darwin-x86_64'].signature, `signature for ${bundles[1]}`);
   const sums = readFileSync(join(f.cwd, 'SHA256SUMS.txt'), 'utf8').trim().split('\n');
   assert.equal(sums.length, bundles.length * 2 + 1);
   for (const line of sums) {
@@ -46,6 +51,21 @@ test('Tauri 2 原生制品生成全部平台并保留预发布版本和 URL 编�
     assert.equal(hash, createHash('sha256').update(readFileSync(file)).digest('hex'));
   }
 });
+
+for (const failure of ['missing bundle', 'missing signature', 'empty signature', 'empty bundle', 'duplicate bundle']) {
+  test(`rejects a deb ${failure} before publishing a manifest`, t => {
+    const f = fixture(t);
+    const name = bundles[5];
+    if (failure === 'missing bundle') rmSync(join(f.dir, name));
+    if (failure === 'missing signature') rmSync(join(f.dir, `${name}.sig`));
+    if (failure === 'empty signature') writeFileSync(join(f.dir, `${name}.sig`), ' \n');
+    if (failure === 'empty bundle') writeFileSync(join(f.dir, name), '');
+    if (failure === 'duplicate bundle') writeFileSync(join(f.dir, 'other.deb'), 'duplicate');
+    assert.notEqual(f.run().status, 0);
+    assert.throws(() => readFileSync(join(f.cwd, 'latest.json')), { code: 'ENOENT' });
+    assert.throws(() => readFileSync(join(f.cwd, 'SHA256SUMS.txt')), { code: 'ENOENT' });
+  });
+}
 for (const failure of ['missing signature', 'empty signature', 'empty bundle', 'duplicate bundle', 'legacy format']) {
   test(`拒绝 ${failure}，不输出残缺更新清单`, t => {
     const f = fixture(t);

@@ -4,6 +4,9 @@ import { toast } from "sonner";
 import { launchCommandsOfAccount, type Account, type AgentAccounts } from "../lib/accounts";
 import { useDialogFocus } from "../lib/dialogFocus";
 import { fixLaunchCommandTilde } from "../lib/profileDefinition";
+import { accountCommand } from "../lib/accountCommand";
+import { useEngineQuery } from "../lib/queries";
+import type { AccountCommand } from "../lib/accountCommand";
 import { DEFAULT_LANG, DEFAULT_TIMEZONE, type useAliasSource, launchCommandsHome } from "../lib/useAliasSource";
 import { AliasApplyConfirm } from "./AliasApplyConfirm";
 import { AliasEditorDialog } from "./AliasEditorDialog";
@@ -19,20 +22,20 @@ export function LaunchCommandsDrawer({
   account,
   group,
   aliasSource,
-  defaultValue,
   onClose,
 }: {
   account: Account;
   group: AgentAccounts;
   aliasSource: AliasSource;
   /** 还没有命令时新增一条的底稿（按账号登记生成）。 */
-  defaultValue: string;
   onClose: () => void;
 }) {
   const source = aliasSource.source;
   const [editing, setEditing] = useState<{ name: string; value: string | null; presetName?: string } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: () => !editing && !removing && onClose() });
+  const controlled = useEngineQuery<AccountCommand>("accounts:command", ["--only", account.elementId, "--operation", "launch", "--shell", "posix"]);
+  const defaultValue = controlled.data?.ok ? controlled.data.data.launch_value : null;
   if (!source) return null;
 
   const external = source.targets.flatMap((target) => target.external);
@@ -45,13 +48,20 @@ export function LaunchCommandsDrawer({
     let candidate = commands.length === 0 ? base : `${base}-2`;
     for (let n = 3; source.aliases[candidate] !== undefined; n += 1) candidate = `${base}-${n}`;
     // 以这个账号已有的第一条为底稿：配置目录等前置变量照搬，只改名字和参数
-    setEditing({ name: "", value: commands[0]?.value ?? defaultValue, presetName: candidate });
+    if (defaultValue) setEditing({ name: "", value: defaultValue, presetName: candidate });
   };
 
   /** 只订正本工具早先生成错的目录写法（"~/…" 不会展开）；不替用户往命令里加别的东西。 */
   const fix = async (name: string, value: string) => {
     await aliasSource.setAlias(name, fixLaunchCommandTilde(value), { label: `订正启动命令 ${name}` });
   };
+  const update = async (name: string) => {
+    try {
+      const command = await accountCommand(account.elementId, "launch");
+      await aliasSource.setAlias(name, command.launch_value, { label: `更新启动命令 ${name}` });
+    } catch (error) { toast.error(`没有更新：${String(error)}`); }
+  };
+  const controlledValue = (value: string): boolean => Boolean(defaultValue && (value === defaultValue || value.startsWith(`${defaultValue} `)) && !/[;|&<>`$\r\n]/.test(value));
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/30" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -85,14 +95,15 @@ export function LaunchCommandsDrawer({
                     <button
                       type="button"
                       aria-label={`复制 ${command.name}`}
-                      onClick={() => void navigator.clipboard.writeText(command.name).then(() => toast.success(`已复制 ${command.name}`)).catch(() => toast.error("复制失败"))}
+                      disabled={!controlledValue(command.value)}
+                      onClick={() => void accountCommand(account.elementId, "launch").then((value) => navigator.clipboard.writeText(value.terminal_command)).then(() => toast.success(`已复制受控启动命令`)).catch((error) => toast.error(String(error)))}
                       className="rounded p-1 text-muted-foreground hover:bg-accent"
                     >
                       <Copy className="h-3.5 w-3.5" aria-hidden />
                     </button>
                     {command.managed && (
                       <>
-                        <button type="button" data-testid={`launch-edit-${command.name}`} onClick={() => setEditing({ name: command.name, value: command.value })} className="rounded px-2 py-0.5 text-xs hover:bg-accent">
+                        <button type="button" data-testid={`launch-edit-${command.name}`} disabled={!defaultValue} onClick={() => setEditing({ name: command.name, value: controlledValue(command.value) ? command.value : defaultValue })} className="rounded px-2 py-0.5 text-xs hover:bg-accent">
                           编辑
                         </button>
                         <button type="button" data-testid={`launch-remove-${command.name}`} onClick={() => setRemoving(command.name)} className="rounded px-2 py-0.5 text-xs text-destructive hover:bg-destructive/10">
@@ -103,6 +114,7 @@ export function LaunchCommandsDrawer({
                   </div>
                 </div>
                 <code className="block break-all rounded bg-muted p-1.5 font-mono text-[11px]">{`alias ${command.name}='${command.value}'`}</code>
+                {!controlledValue(command.value) && <div className="flex items-center gap-2 text-xs text-warning"><span>旧启动命令不经过账号检查。</span>{command.managed && <button type="button" data-testid={`launch-control-${command.name}`} disabled={!defaultValue || aliasSource.busy} onClick={() => void update(command.name)} className="shrink-0 rounded border border-warning/40 px-2 py-0.5 hover:bg-warning/10">更新启动命令</button>}</div>}
                 {command.managed && command.needsTildeFix && (
                   <div className="flex items-center gap-2 text-xs text-warning">
                     <span>目录写成了不会展开的 "~/…"，助手找不到这个账号的配置。</span>
@@ -126,7 +138,7 @@ export function LaunchCommandsDrawer({
           <button
             type="button"
             data-testid="launch-add"
-            disabled={!source.writable}
+            disabled={!source.writable || !defaultValue}
             onClick={addNew}
             className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
           >
@@ -140,17 +152,18 @@ export function LaunchCommandsDrawer({
           writesTo={launchCommandsHome(source.targets)}
           initialName={editing.value === null || editing.presetName ? undefined : editing.name}
           initialValue={editing.value ?? undefined}
-          defaultCommand={group.bin}
+          defaultCommand={defaultValue ?? ""}
           presetName={editing.presetName}
           defaults={{ timezone: DEFAULT_TIMEZONE, lang: DEFAULT_LANG }}
           existingNames={Object.keys(source.aliases)}
           previewBase={previewBase}
-          onPreview={aliasSource.previewSetAlias}
+          onPreview={(name, value, renameFrom) => controlledValue(value) ? aliasSource.previewSetAlias(name, value, renameFrom) : Promise.resolve("命令必须保留此账号的受控入口；不能添加终端执行符或环境展开")}
           onRefresh={() => {
             setEditing(null);
             void aliasSource.query.refetch();
           }}
           onSubmit={(name, value) => {
+            if (!controlledValue(value)) { toast.error("启动命令没有保留此账号的受控入口，没有保存"); return; }
             // 新增时 name 只是预填名，不算改名；编辑时改了名字就是重命名
             const renameFrom = editing.presetName ? undefined : editing.name || undefined;
             void aliasSource.setAlias(name, value, { renameFrom }).then((ok) => {

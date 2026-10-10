@@ -6,7 +6,7 @@
 //! - `entry`：条目的已建模视图、脱敏展示与写入变换
 //! - `inventory`：实际条目 + 已保存项的只读清单
 //! - `saved`：「已保存未生效」项（`mcp_saved` 表：停用快照、未分配定义）
-//! - `snapshot`：Claude 停用快照的生成与写回（疑似凭据转存外部密钥文件）
+//! - `snapshot`：Claude 停用快照的生成与写回（明文凭据须由用户独立配置）
 //! - `legacy`：旧服务库定义 + `mcp_bindings` 的迁移（读路径推导、写路径落库）
 //! - `write`：单条目写入的新字节计算与写前自检
 //! - `status` / `preflight` / `apply`：只读状态、写入计划、执行
@@ -65,7 +65,7 @@ pub fn dispatch(ctx: &Context, req: &Request) -> Result<(Value, Vec<String>)> {
                 bail!("mcp:preview 仅支持 add/edit/clean-markers/copy/remove");
             }
             let inv = inventory::load(ctx)?;
-            let plan = preflight::plan(&parsed, &inv)?;
+            let plan = preflight::plan(ctx, &parsed, &inv)?;
             let files = plan
                 .file_writes
                 .iter()

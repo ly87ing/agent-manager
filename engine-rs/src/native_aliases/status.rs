@@ -226,7 +226,7 @@ fn line_json(line: &AliasLine) -> Value {
 }
 
 /// 按名合并两个文件区块里的别名：取值取第一个出现的文件，另给出现在哪些文件、各文件是否一致。
-fn merged(views: &[View]) -> Vec<Value> {
+fn merged(ctx: &Context, views: &[View]) -> Vec<Value> {
     let mut by_name: BTreeMap<String, (AliasLine, Vec<&'static str>, bool)> = BTreeMap::new();
     for view in views {
         for entry in view.entries() {
@@ -249,6 +249,7 @@ fn merged(views: &[View]) -> Vec<Value> {
             json!({
                 "name": line.name,
                 "value": line.value,
+                "unsafe_account": line.value.as_deref().is_some_and(|value| crate::native_account_context::validate_alias(ctx, value).is_err()),
                 "line": line.line,
                 "targets": targets,
                 "consistent": consistent,
@@ -360,7 +361,7 @@ pub(crate) fn cmd_dir_on_path(ctx: &Context, dir: &Path) -> bool {
 pub(crate) fn build_status(ctx: &Context) -> Result<Value> {
     let views = observe(ctx);
     let row = legacy::read_row_readonly(ctx)?;
-    let merged = merged(&views);
+    let merged = merged(ctx, &views);
     let actual_of = |name: &str| {
         merged
             .iter()

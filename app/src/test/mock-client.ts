@@ -1382,6 +1382,16 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         return applyEnvelope("mcp", args, runId);
       }
       if (command === "agents:preview-runtime") return previewRuntime(args);
+      if (command === "accounts:command") {
+        const only = argOf(args, "--only") ?? "";
+        const operation = argOf(args, "--operation") ?? "launch";
+        const launch_value = `"/demo/agent-manager" --account-launch --home "/demo/home" --data-dir "/demo/data" --only "${only}" --operation ${operation} --`;
+        return makeEnvelope({ launch_value, terminal_command: `${argOf(args, "--shell") === "powershell" ? "& " : ""}${launch_value}`, controlled: true }, { command: "accounts.command" });
+      }
+      if (command === "profiles:create") {
+        const id = (argOf(args, "--only") ?? "").replace(/^profiles:/, "");
+        return policySet(["--layer", "local", "--key", `agents.definitions.${id}`, "--value", argOf(args, "--definition") ?? "{}", "--expect-definition", "null"]);
+      }
       if (command === "agents:auth-status") {
         const only = args[args.indexOf("--only") + 1] ?? "";
         // 全新机器：本机文件说明不了登录状态，点「确认」（--probe）才用官方命令查
@@ -1472,7 +1482,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         const items = (argOf(args, "--items") ?? "").split(",").filter(Boolean);
         const exact = args.includes("--exact");
         return makeEnvelope({
-          path, exists: false, content, will_write: !officialCodex,
+          path, exists: false, base: "missing", content, will_write: !officialCodex,
           existing_profile_skipped: false, files: [],
           seed_results: items.map((item) => ({ item, state: "absent", detail: `${item}：演示数据，正式预览按实际文件计算` })),
           ...(exact ? { file_base: "missing", content_base: "d".repeat(64) } : {}),

@@ -2,12 +2,13 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import { TrayPanel } from "../components/TrayPanel";
 import type { Envelope } from "../lib/contract";
-import { agentManagementFixture, makeAliasStatus, makeElement, makeEnvelope } from "./fixtures";
+import { accountCommandRoute, controlledCommand, agentManagementFixture, makeAliasStatus, makeElement, makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
-function routes(): Record<string, Envelope> {
+function routes(): Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> {
   const soon = new Date(Date.now() + 40 * 60_000).toISOString();
   return {
+    "accounts:command": accountCommandRoute,
     "agents:status": makeEnvelope({
       domain: "agents",
       elements: [makeElement({
@@ -51,11 +52,11 @@ describe("托盘面板", () => {
     expect(work).toHaveTextContent("38%");
     expect(work).toHaveTextContent("40 分钟后重置");
     expect(screen.getByTestId("tray-panel-row-profiles:relay")).toHaveTextContent("没有启动命令");
-    expect(screen.getByTestId("tray-panel-copy-profiles:relay")).toBeDisabled();
+    expect(screen.getByTestId("tray-panel-copy-profiles:relay")).not.toBeDisabled();
 
     await userEvent.click(screen.getByTestId("tray-panel-copy-profiles:work"));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("cw"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(controlledCommand("profiles:work")));
     expect(screen.getByTestId("tray-panel-copy-profiles:work")).toHaveTextContent("已复制");
-    expect(calls.every((call) => call.command.endsWith(":status"))).toBe(true);
+    expect(calls.every((call) => call.command.endsWith(":status") || call.command === "accounts:command")).toBe(true);
   });
 });

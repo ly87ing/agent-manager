@@ -155,6 +155,16 @@ fn file_cell(
             json!(notices.join("；"))
         },
     );
+    let copy_block = file_entry
+        .view
+        .as_ref()
+        .ok()
+        .and_then(|view| entry::account_copy_blocked_reason(format, view));
+    cell.insert(
+        "copy_safe".into(),
+        json!(copy_block.is_none() && file_entry.view.is_ok()),
+    );
+    cell.insert("copy_blocked_reason".into(), json!(copy_block));
     let mut actions: Vec<&str> = if block.is_some() {
         vec![]
     } else {
@@ -171,6 +181,9 @@ fn file_cell(
             .is_ok_and(|view| view.legacy_marker)
     {
         actions.push("clean-markers");
+    }
+    if copy_block.is_some() {
+        actions.retain(|action| *action != "copy");
     }
     let reason = block.or_else(|| {
         (state == "invalid").then(|| {
@@ -224,12 +237,24 @@ fn snapshot_cell(scan: Option<&TargetScan>, row: &SavedRow) -> Value {
         "notice".into(),
         json!("已停用：条目保存在本工具里，启用时写回配置文件"),
     );
-    let actions: Vec<&str> = match (&parsed, &block) {
+    let copy_block = parsed
+        .as_ref()
+        .ok()
+        .and_then(|(format, view)| entry::account_copy_blocked_reason(format, view));
+    cell.insert(
+        "copy_safe".into(),
+        json!(copy_block.is_none() && parsed.is_ok()),
+    );
+    cell.insert("copy_blocked_reason".into(), json!(copy_block));
+    let mut actions: Vec<&str> = match (&parsed, &block) {
         (Ok(_), None) => vec!["enable", "copy", "remove"],
         // 助手没了或快照无效：只能丢掉这份保存的内容
         _ if scan.map_or(true, |s| s.target.enabled) => vec!["remove"],
         _ => vec![],
     };
+    if copy_block.is_some() {
+        actions.retain(|action| *action != "copy");
+    }
     let reason = match (&parsed, block) {
         (_, Some(block)) => Some(block),
         (Err(reason), None) => Some(format!("已保存的内容无效（{reason}），只能删除")),

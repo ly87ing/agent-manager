@@ -80,7 +80,7 @@ describe("统一状态：各领域的实际状态映射成同一套待处理项"
         server("bad", { a: { state: "invalid" } }),
         server("nocmd", { a: { state: "enabled", command_available: false } }),
         server("vars", { a: { state: "enabled", vars: { K: { placeholder: "${K}", resolved: false } } } }),
-        server("fill", { a: { state: "enabled" } }),
+        server("fill", { a: { state: "enabled", copy_safe: true } }),
       ],
       mcpTargets: [target("a", "claude-json"), target("b", "claude-json")],
     })));

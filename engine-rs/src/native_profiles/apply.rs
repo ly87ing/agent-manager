@@ -3,7 +3,7 @@
 //! 写入面只有 `<配置目录>/settings.json`（Claude，只改实例定义声明的 env 变量与 model）
 //! 或 `<配置目录>/config.toml`（Codex，只改 model、model_provider 与本工具那张接入表）。以实际文件为准：
 //! 调用方必须带 status 给出的 `--base`，实际与之不符时拒绝（「已在外部修改」），文件与库都
-//! 不动；不再有「接管 = 用库覆盖」。目标是符号链接时写到最终目标文件，链接本身不变。
+//! 不动；不再有「接管 = 用库覆盖」。账号目录和身份文件存在链接或路径别名时拒绝操作。
 //! 全局 `~/.claude` 与 `~/.codex` 全程不碰。
 //!
 //! `profiles:adopt` 反方向：把实际文件里的值写回实例定义（只改库，不动文件），同样按
@@ -18,13 +18,14 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 use super::model::{self, ProfileDef};
-use super::persistence::{load_bindings_from, write_binding, Binding};
+use super::persistence::load_bindings_from;
 use super::status::definition_base;
 use crate::native::{Context, Request};
-use crate::native_mcp::rollback::{read_existing_bytes, safe_restore_bytes_cas};
-use crate::store;
+use crate::native_mcp::rollback::read_existing_bytes;
+use crate::{secret_values, store};
 
 const MAX_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
+const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
 fn parse_only(req: &Request) -> Result<String> {
     let only = req
@@ -53,7 +54,11 @@ fn check_args(req: &Request, command: &str) -> Result<()> {
         bail!("{command} 已退役 --dry-run，拒绝该参数");
     }
     let mut iter = req.args.iter();
+    let mut seen = std::collections::BTreeSet::new();
     while let Some(arg) = iter.next() {
+        if !seen.insert(arg) {
+            bail!("{command} 不接受重复选项");
+        }
         match arg.as_str() {
             "--only" | "--base" => {
                 if iter.next().is_none() {
@@ -77,7 +82,11 @@ fn check_update_args(req: &Request, preview: bool) -> Result<()> {
         bail!("profiles:apply-definition 不支持 --dry-run");
     }
     let mut iter = req.args.iter();
+    let mut seen = std::collections::BTreeSet::new();
     while let Some(arg) = iter.next() {
+        if !seen.insert(arg) {
+            bail!("账号配置操作不接受重复选项");
+        }
         match arg.as_str() {
             "--only" | "--base" | "--definition-base" | "--candidate" => {
                 if iter.next().is_none() {
@@ -85,6 +94,11 @@ fn check_update_args(req: &Request, preview: bool) -> Result<()> {
                 }
             }
             "--preview-file-base" | "--preview-content-base" if !preview => {
+                if iter.next().is_none() {
+                    bail!("profiles:apply-definition 的 {arg} 缺少取值");
+                }
+            }
+            "--secret-var" | "--secret-value" if !preview => {
                 if iter.next().is_none() {
                     bail!("profiles:apply-definition 的 {arg} 缺少取值");
                 }
@@ -132,13 +146,30 @@ fn find_def(ctx: &Context, id: &str) -> Result<ProfileDef> {
 
 /// 实例目标文件：解析符号链接到最终普通文件（与接入配置一致），返回
 /// （展示用文件名, 实际读写路径, 现有字节）。
-fn read_target(def: &ProfileDef, dir: &Path) -> Result<(String, PathBuf, Option<Vec<u8>>)> {
+fn read_target(
+    ctx: &Context,
+    def: &ProfileDef,
+    dir: &Path,
+) -> Result<(String, PathBuf, Option<Vec<u8>>)> {
     let file = def.kind.target_file().to_string();
     let path = dir.join(&file);
-    let real = crate::native_agent_settings::resolve_write_target(&path)
-        .map_err(|err| anyhow!("[{}] {err:#}", def.id))?;
+    let real =
+        super::paths::target(ctx, def, &path).map_err(|err| anyhow!("[{}] {err:#}", def.id))?;
     let bytes = match std::fs::symlink_metadata(&real) {
-        Ok(meta) if meta.is_file() => Some(std::fs::read(&real)?),
+        Ok(meta) if meta.is_file() => {
+            if meta.len() > MAX_CONFIG_BYTES {
+                bail!("账号配置文件超过安全读取上限");
+            }
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            std::fs::File::open(&real)?
+                .take(MAX_CONFIG_BYTES + 1)
+                .read_to_end(&mut bytes)?;
+            if bytes.len() as u64 > MAX_CONFIG_BYTES {
+                bail!("账号配置文件超过安全读取上限");
+            }
+            Some(bytes)
+        }
         Ok(_) => bail!("[{}] {} 不是普通文件，拒绝写入", def.id, file),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
         Err(err) => return Err(err.into()),
@@ -166,13 +197,13 @@ fn stale(def: &ProfileDef, file: &str) -> anyhow::Error {
 }
 
 /// 一次写入的计划：锁前与锁内各算一次，锁内结果为准。
-struct Plan {
-    def: ProfileDef,
-    dir: PathBuf,
-    file: String,
-    real: PathBuf,
-    previous: Option<Vec<u8>>,
-    content: Vec<u8>,
+pub(super) struct Plan {
+    pub(super) def: ProfileDef,
+    pub(super) dir: PathBuf,
+    pub(super) file: String,
+    pub(super) real: PathBuf,
+    pub(super) previous: Option<Vec<u8>>,
+    pub(super) content: Vec<u8>,
 }
 
 fn plan_for_def(
@@ -185,8 +216,8 @@ fn plan_for_def(
     if !def.enabled {
         bail!("[{}] 实例已停用，拒绝写入", def.id);
     }
-    let dir = model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
-    let (file, real, previous) = read_target(&def, &dir)?;
+    let dir = super::paths::config_dir(ctx, &def)?;
+    let (file, real, previous) = read_target(ctx, &def, &dir)?;
     if model::live_base(def.kind, previous.as_deref())? != base {
         return Err(stale(&def, &file));
     }
@@ -204,6 +235,8 @@ fn plan_for_def(
         .next()
         .map(|target| target.content)
         .ok_or_else(|| anyhow!("[{}] 没有要写的文件", def.id))?;
+    model::validate_effective_config(&def, &content, resolve)?;
+    model::validate_secret_ownership(ctx, &def)?;
     if let Some(expected) = req.value("--preview-content-base") {
         if !crate::native_mcp::model::is_sha256_hex(expected) {
             bail!("--preview-content-base 必须是 64 位小写 sha256");
@@ -222,6 +255,15 @@ fn plan_for_def(
     })
 }
 
+pub(super) fn check_plan_paths(ctx: &Context, plan: &Plan) -> Result<()> {
+    if super::paths::config_dir(ctx, &plan.def)? != plan.dir
+        || super::paths::target(ctx, &plan.def, &plan.dir.join(&plan.file))? != plan.real
+    {
+        bail!("[{}] 配置路径已在外部修改，没有写入", plan.def.id);
+    }
+    Ok(())
+}
+
 fn check_preview_base(value: &str, arg: &str) -> Result<()> {
     if value != model::BASE_MISSING && !crate::native_mcp::model::is_sha256_hex(value) {
         bail!("{arg} 必须是 64 位小写 sha256 或 missing");
@@ -238,7 +280,9 @@ fn file_base(bytes: Option<&[u8]>) -> String {
 fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
     check_args(req, "profiles:apply")?;
     let id = parse_only(req)?;
-    plan_for_def(ctx, req, find_def(ctx, &id)?, &crate::secret_values::lookup)
+    plan_for_def(ctx, req, find_def(ctx, &id)?, &|name| {
+        secret_values::lookup_account(name).ok()
+    })
 }
 
 /// 已保存实例按写入计划预览真实取值；新建草稿保留变量引用。
@@ -287,7 +331,7 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
                     if secret_var == Some(name) {
                         secret_value.map(str::to_string)
                     } else {
-                        crate::secret_values::lookup(name)
+                        secret_values::lookup_account(name).ok()
                     }
                 },
                 true,
@@ -332,8 +376,8 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
     let raw: Value =
         serde_json::from_str(&req.args[3]).map_err(|_| anyhow!("--definition 不是合法 JSON"))?;
     let def = model::parse_definition(&id, &raw, true)?;
-    let dir = model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
-    let (file, _, previous) = read_target(&def, &dir)?;
+    let dir = super::paths::config_dir(ctx, &def)?;
+    let (file, _, previous) = read_target(ctx, &def, &dir)?;
     if previous
         .as_ref()
         .is_some_and(|bytes| bytes.len() > MAX_PREVIEW_BYTES)
@@ -378,6 +422,8 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         "path": format!("{}/{}", def.config_dir_raw, file),
         "format": if def.kind.as_str() == "codex" { "toml" } else { "json" },
         "exists": previous.is_some(),
+        "base": model::live_base(def.kind, previous.as_deref())?,
+        "file_base": file_base(previous.as_deref()),
         "original": crate::native_mcp::original_text(previous.as_deref()),
         "will_write": will_write,
         "existing_profile_skipped": on_save && previous.is_some(),
@@ -387,9 +433,70 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
     }))
 }
 
+/// New registrations and their configuration are committed together. Existing files are
+/// always rendered and validated; an existing directory is not an authentication exemption.
+fn plan_create(ctx: &Context, req: &Request) -> Result<(Plan, Value, Option<Value>)> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut args = req.args.iter();
+    while let Some(arg) = args.next() {
+        if !matches!(
+            arg.as_str(),
+            "--only"
+                | "--definition"
+                | "--base"
+                | "--preview-file-base"
+                | "--preview-content-base"
+                | "--secret-var"
+                | "--secret-value"
+        ) || !seen.insert(arg)
+        {
+            bail!("profiles:create 参数不支持或重复");
+        }
+        if args.next().is_none() {
+            bail!("profiles:create 参数缺少取值");
+        }
+    }
+    let id = parse_only(req)?;
+    let raw = req
+        .value("--definition")
+        .ok_or_else(|| anyhow!("缺少 --definition"))?;
+    if raw.len() > MAX_CONFIG_BYTES as usize {
+        bail!("账号定义超过安全读取上限");
+    }
+    let mut candidate: Value =
+        serde_json::from_str(raw).map_err(|_| anyhow!("--definition 不是合法 JSON"))?;
+    if candidate.get("account_generation").is_some() {
+        bail!("新账号的启动代际由本工具生成，不能由调用方指定");
+    }
+    if candidate.get("_delete") == Some(&Value::Bool(true)) {
+        bail!("新账号不能标记为已移除");
+    }
+    crate::native::reject_secrets_value(&candidate)?;
+    if !candidate.is_object() {
+        bail!("账号定义必须是对象");
+    }
+    candidate["account_generation"] = json!(store::new_account_generation()?);
+    let policy = store::effective_policy(ctx)?;
+    let expected = policy
+        .pointer("/agents/definitions")
+        .and_then(|defs| defs.get(&id))
+        .cloned();
+    if expected
+        .as_ref()
+        .is_some_and(|raw| raw.get("_delete") != Some(&Value::Bool(true)))
+    {
+        bail!("[{id}] 账号已登记，没有创建；请刷新后重试");
+    }
+    let def = model::parse_definition(&id, &candidate, true)?;
+    let secret = super::transaction::pending_secret(req)?;
+    let plan = plan_for_def(ctx, req, def, &|name| secret.resolve(name))?;
+    Ok((plan, candidate, expected))
+}
+
 /// 从现有完整定义生成候选；只替换实例负责的字段，未知元数据原样保留。
 fn plan_update(ctx: &Context, req: &Request) -> Result<(Plan, Value, String)> {
-    plan_update_with_resolver(ctx, req, &crate::secret_values::lookup, false)
+    let secret = super::transaction::pending_secret(req)?;
+    plan_update_with_resolver(ctx, req, &|name| secret.resolve(name), false)
 }
 
 fn plan_update_with_resolver(
@@ -455,6 +562,9 @@ fn plan_update_with_resolver(
         }
     }
     let mut next = original.clone();
+    if next.get("account_generation").is_none() {
+        next["account_generation"] = json!(store::new_account_generation()?);
+    }
     if let Some(name) = fields.get("display_name") {
         let name = name
             .as_str()
@@ -497,7 +607,13 @@ fn plan_update_with_resolver(
 /// 第三方实例的配置目录里不能有官方账号登录：两种凭据在同一个目录里，助手取哪个就只能
 /// 靠它的优先级规则，一旦第三方凭据缺失就会退回官方登录。用官方命令确认没有才写；
 /// 无法确认也拒绝。官方账号实例（不带第三方凭据与地址）不做这项检查。
-fn ensure_no_official_login(ctx: &Context, def: &ProfileDef, dir: &Path) -> Result<()> {
+pub(super) fn ensure_no_official_login(ctx: &Context, def: &ProfileDef, dir: &Path) -> Result<()> {
+    model::validate_local_auth(
+        &ctx.home_dir,
+        def.kind,
+        Some(dir),
+        model::account_auth_mode(def),
+    )?;
     if !model::is_third_party(def) {
         return Ok(());
     }
@@ -527,7 +643,23 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     if cmd == "profiles:adopt" {
         plan_adopt(ctx, req)?;
     } else if cmd == "profiles:apply-definition" {
-        plan_update(ctx, req)?;
+        let (plan, _, _) = plan_update(ctx, req)?;
+        super::transaction::prepare_secret(ctx, req, &plan.def)?;
+        model::validate_local_auth(
+            &ctx.home_dir,
+            plan.def.kind,
+            Some(&plan.dir),
+            model::account_auth_mode(&plan.def),
+        )?;
+    } else if cmd == "profiles:create" {
+        let (plan, _, _) = plan_create(ctx, req)?;
+        super::transaction::prepare_secret(ctx, req, &plan.def)?;
+        model::validate_local_auth(
+            &ctx.home_dir,
+            plan.def.kind,
+            Some(&plan.dir),
+            model::account_auth_mode(&plan.def),
+        )?;
     } else {
         plan(ctx, req)?;
     }
@@ -536,7 +668,7 @@ pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
 
 /// 原子换入：同目录临时文件 + rename，权限 0600。文件里有凭据：临时文件从创建起就是 0600，
 /// 且只新建不复用——上次中断留下的同名文件或链接先删掉，不会顺着链接把内容写到别处。
-fn atomic_write(target: &Path, content: &[u8], expected: Option<&[u8]>) -> Result<()> {
+pub(super) fn atomic_write(target: &Path, content: &[u8], expected: Option<&[u8]>) -> Result<()> {
     use std::io::Write;
     let dir = target
         .parent()
@@ -582,18 +714,18 @@ fn atomic_write(target: &Path, content: &[u8], expected: Option<&[u8]>) -> Resul
     Ok(())
 }
 
-fn ensure_dir(path: &PathBuf) -> Result<()> {
+pub(super) fn ensure_dir(path: &PathBuf) -> Result<()> {
+    #[cfg(unix)]
+    let existed = path.exists();
     std::fs::create_dir_all(path)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+        if !existed {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+        }
     }
     Ok(())
-}
-
-fn now() -> String {
-    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
@@ -604,108 +736,52 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     // 锁内重新读取并比对基准，不沿用锁前结果
     let (plan, update) = if cmd == "profiles:apply-definition" {
         let (plan, candidate, expected) = plan_update(ctx, req)?;
-        (plan, Some((candidate, expected)))
+        (
+            plan,
+            super::transaction::DefinitionChange::Replace {
+                candidate,
+                expected,
+            },
+        )
+    } else if cmd == "profiles:create" {
+        let (plan, candidate, expected) = plan_create(ctx, req)?;
+        (
+            plan,
+            super::transaction::DefinitionChange::Create {
+                candidate,
+                expected,
+            },
+        )
     } else {
-        (plan(ctx, req)?, None)
+        let plan = plan(ctx, req)?;
+        let policy = store::effective_policy(ctx)?;
+        let raw = policy
+            .pointer("/agents/definitions")
+            .and_then(|defs| defs.get(&plan.def.id))
+            .ok_or_else(|| anyhow!("未知实例"))?;
+        let expected = definition_base(raw)?;
+        let update = if raw.get("account_generation").is_none() {
+            let mut candidate = raw.clone();
+            candidate["account_generation"] = json!(store::new_account_generation()?);
+            super::transaction::DefinitionChange::Replace {
+                candidate,
+                expected,
+            }
+        } else {
+            super::transaction::DefinitionChange::Keep { expected }
+        };
+        (plan, update)
     };
-    let def = &plan.def;
-    ensure_no_official_login(ctx, def, &plan.dir)?;
-
-    ensure_dir(&plan.dir)?;
-    let existed = plan.previous.is_some();
-    // 写前再比一次字节：锁内读取之后若又被改过，拒绝替换
-    let current = read_existing_bytes(&plan.real)?;
-    if current != plan.previous {
-        return Err(stale(def, &plan.file));
-    }
-    // 原本没有这个文件、这次也没有要写的内容：不新建空文件
-    let wrote_file = !(plan.previous.is_none() && model::is_empty_render(def.kind, &plan.content));
-    if wrote_file {
-        atomic_write(&plan.real, &plan.content, plan.previous.as_deref())?;
-    }
-
-    let result = (|| -> Result<()> {
-        if wrote_file && read_existing_bytes(&plan.real)?.as_deref() != Some(&plan.content) {
-            bail!("账号配置写后回读不一致");
-        }
-        let mut conn = store::open_write(ctx)?;
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some((candidate, expected)) = &update {
-            let mut policy = store::policy_from_connection(&tx)?;
-            let definitions = policy
-                .get_mut("agents")
-                .and_then(|v| v.get_mut("definitions"))
-                .and_then(Value::as_object_mut)
-                .ok_or_else(|| anyhow!("[{}] 实例定义已移除，没有写入", def.id))?;
-            let current = definitions
-                .get(&def.id)
-                .ok_or_else(|| anyhow!("[{}] 实例定义已移除，没有写入", def.id))?;
-            if definition_base(current)? != *expected {
-                bail!("[{}] 实例定义已在外部修改，没有写入", def.id);
-            }
-            definitions.insert(def.id.clone(), candidate.clone());
-            store::write_policy(&tx, &policy)?;
-        }
-        write_binding(
-            &tx,
-            &Binding {
-                profile_id: def.id.clone(),
-                file: plan.file.clone(),
-                applied_digest: {
-                    let base = model::live_base(def.kind, Some(&plan.content))?;
-                    if base == model::BASE_MISSING {
-                        crate::native_mcp::model::sha256_hex_bytes(&plan.content)
-                    } else {
-                        base
-                    }
-                },
-                updated_at: now(),
-                owned: model::owned_paths(def),
-            },
-        )?;
-        store::record_operation(
-            &tx,
-            Some(&req.run_id),
-            if update.is_some() {
-                "profiles:apply-definition"
-            } else {
-                "profiles:apply"
-            },
-            Some(&def.id),
-            Some(&json!({
-                "action": if update.is_some() { "apply-definition" } else { "apply" },
-                "kind": def.kind.as_str(),
-                "created": !existed,
-                "files": [plan.file.clone()],
-            })),
-        )?;
-        tx.commit()?;
-        Ok(())
-    })();
-
-    if let Err(err) = result {
-        if wrote_file {
-            if let Err(restore) =
-                safe_restore_bytes_cas(&plan.real, &plan.content, plan.previous.as_deref())
-            {
-                return Err(anyhow!("执行失败: {err:#}；配置回滚失败: {restore:#}"));
-            }
-        }
-        return Err(err);
-    }
-
-    Ok(json!({
-        "domain": "profiles",
-        "steps": [{"name": format!("{} {}", req.command.replace('.', ":"), def.id), "ok": true, "exit_code": 0}],
-        "skipped": [],
-        "base": model::live_base(def.kind, Some(&plan.content))?,
-    }))
+    let secret = super::transaction::prepare_secret(ctx, req, &plan.def)?;
+    super::transaction::commit(ctx, req, plan, update, secret)
 }
 
 /// 采纳计划：新 profile 段与提示。
 struct AdoptPlan {
     def: ProfileDef,
     profile: serde_json::Map<String, Value>,
+    definition_base: String,
+    generation: Value,
     notes: Vec<String>,
 }
 
@@ -714,8 +790,8 @@ fn plan_adopt(ctx: &Context, req: &Request) -> Result<AdoptPlan> {
     let id = parse_only(req)?;
     let base = parse_base(req)?;
     let def = find_def(ctx, &id)?;
-    let dir = model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
-    let (file, _real, bytes) = read_target(&def, &dir)?;
+    let dir = super::paths::config_dir(ctx, &def)?;
+    let (file, _real, bytes) = read_target(ctx, &def, &dir)?;
     if model::live_base(def.kind, bytes.as_deref())? != base {
         return Err(stale(&def, &file));
     }
@@ -728,12 +804,9 @@ fn plan_adopt(ctx: &Context, req: &Request) -> Result<AdoptPlan> {
         .and_then(Value::as_object)
         .cloned()
         .ok_or_else(|| anyhow!("未知实例: {}", id))?;
-    let (profile, notes) = model::adopt_profile(
-        &def,
-        &raw_profile,
-        bytes.as_deref(),
-        &crate::secret_values::lookup,
-    )?;
+    let (profile, notes) = model::adopt_profile(&def, &raw_profile, bytes.as_deref(), &|name| {
+        secret_values::lookup_account(name).ok()
+    })?;
     // 采纳结果必须仍是合法定义（凭据仍只能是引用等），否则整体拒绝
     let mut candidate = policy
         .get("agents")
@@ -742,11 +815,36 @@ fn plan_adopt(ctx: &Context, req: &Request) -> Result<AdoptPlan> {
         .cloned()
         .unwrap_or_else(|| json!({}));
     candidate["profile"] = Value::Object(profile.clone());
-    model::parse_definition(&id, &candidate, true)
+    if candidate.get("account_generation").is_none() {
+        candidate["account_generation"] = json!(store::new_account_generation()?);
+    }
+    let candidate_def = model::parse_definition(&id, &candidate, true)
         .map_err(|err| anyhow!("[{id}] 实际配置无法作为实例定义保存：{err:#}"))?;
+    model::validate_secret_ownership(ctx, &candidate_def)?;
+    let empty: &[u8] = match def.kind {
+        model::ProfileKind::Claude => b"{}",
+        model::ProfileKind::Codex => b"",
+    };
+    model::validate_effective_config(&candidate_def, bytes.as_deref().unwrap_or(empty), &|name| {
+        secret_values::lookup_account(name).ok()
+    })?;
+    model::validate_local_auth(
+        &ctx.home_dir,
+        def.kind,
+        Some(&dir),
+        model::account_auth_mode(&candidate_def),
+    )?;
+    let definition_base = definition_base(
+        policy
+            .pointer("/agents/definitions")
+            .and_then(|defs| defs.get(&id))
+            .ok_or_else(|| anyhow!("未知实例"))?,
+    )?;
     Ok(AdoptPlan {
-        def,
+        def: candidate_def,
         profile,
+        definition_base,
+        generation: candidate["account_generation"].clone(),
         notes,
     })
 }
@@ -754,10 +852,23 @@ fn plan_adopt(ctx: &Context, req: &Request) -> Result<AdoptPlan> {
 /// 以实际配置更新实例定义：只写库。
 fn adopt(ctx: &Context, req: &Request) -> Result<Value> {
     let plan = plan_adopt(ctx, req)?;
+    let dir = super::paths::config_dir(ctx, &plan.def)?;
+    let _account_lock = crate::native_account_context::lock_directory(ctx, &dir, true)?;
+    // Re-read under the account lock; a prior preview cannot authorize a newer file.
+    let plan = plan_adopt(ctx, req)?;
+    ensure_no_official_login(ctx, &plan.def, &dir)?;
     let id = plan.def.id.clone();
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let mut policy = store::policy_from_connection(&tx)?;
+    let original = policy
+        .pointer("/agents/definitions")
+        .and_then(|defs| defs.get(&id))
+        .ok_or_else(|| anyhow!("账号定义已移除，没有采纳"))?;
+    if definition_base(original)? != plan.definition_base {
+        bail!("账号定义已在外部修改，没有采纳；请刷新后重试");
+    }
+    let before = policy.clone();
     let definition = policy
         .get_mut("agents")
         .and_then(|v| v.get_mut("definitions"))
@@ -765,7 +876,13 @@ fn adopt(ctx: &Context, req: &Request) -> Result<Value> {
         .and_then(Value::as_object_mut)
         .ok_or_else(|| anyhow!("未知实例: {}", id))?;
     definition.insert("profile".into(), Value::Object(plan.profile));
+    definition.insert("account_generation".into(), plan.generation);
+    super::paths::validate_policy_account_paths(ctx, &policy)?;
+    crate::native_secrets::reserve_account_references(ctx, &tx, &id, &before, Some(&policy))?;
+    model::validate_secret_ownership_in_policy(ctx, &plan.def, &policy)?;
+    let references = crate::native_secrets::account_reference_names(ctx, &id, &policy)?;
     store::write_policy(&tx, &policy)?;
+    crate::native_secrets::claim_variable_ownership(ctx, &tx, &id, &references)?;
     store::record_operation(
         &tx,
         Some(&req.run_id),
@@ -774,6 +891,24 @@ fn adopt(ctx: &Context, req: &Request) -> Result<Value> {
         Some(
             &json!({"action": "adopt", "kind": plan.def.kind.as_str(), "notes": plan.notes.len()}),
         ),
+    )?;
+    let (_, _, bytes) = read_target(ctx, &plan.def, &dir)?;
+    if model::live_base(plan.def.kind, bytes.as_deref())? != parse_base(req)? {
+        bail!("账号配置在提交前已被外部修改，没有采纳");
+    }
+    secret_values::refresh(ctx);
+    let empty: &[u8] = match plan.def.kind {
+        model::ProfileKind::Claude => b"{}",
+        model::ProfileKind::Codex => b"",
+    };
+    model::validate_effective_config(&plan.def, bytes.as_deref().unwrap_or(empty), &|name| {
+        secret_values::lookup_account(name).ok()
+    })?;
+    model::validate_local_auth(
+        &ctx.home_dir,
+        plan.def.kind,
+        Some(&dir),
+        model::account_auth_mode(&plan.def),
     )?;
     tx.commit()?;
     Ok(json!({

@@ -36,6 +36,32 @@ fn audit(ctx: &Context, args: &[&str]) -> agent_manager_engine::Envelope {
     execute(ctx, &request("system:audit", args))
 }
 
+fn select_empty_secret_source(ctx: &Context) -> PathBuf {
+    let path = ctx.home_dir.join("audit-secrets.env");
+    // Use the actual setup operation, including private Windows ACL creation.
+    let selected = execute(
+        ctx,
+        &request(
+            "secrets:source",
+            &["--path", path.to_str().unwrap(), "--create"],
+        ),
+    );
+    assert!(selected.ok, "{:?}", selected.errors);
+    let status = execute(ctx, &request("secrets:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    assert_eq!(status.data["elements"][0]["state"], "missing");
+    assert_eq!(status.data["elements"][0]["observed"]["unresolved"], 1);
+    assert_eq!(
+        status.data["elements"][0]["observed"]["source"]["ready"],
+        true
+    );
+    assert_eq!(
+        status.data["elements"][0]["observed"]["ownership_conflict"],
+        false
+    );
+    path
+}
+
 fn section<'a>(env: &'a agent_manager_engine::Envelope, name: &str) -> &'a [Value] {
     env.data["sections"][name]
         .as_array()
@@ -301,6 +327,10 @@ fn wired_domain_elements_map_into_sections() {
         r#"{"mcpServers":{"demo-server":{"command":"d","env":{"DEMO_KEY":"${AM_AUDIT_MAPPING_UNRESOLVED_VAR}"}}}}"#,
     )
     .unwrap();
+    let source = select_empty_secret_source(&ctx);
+    let before_db = std::fs::read(store::db_path(&ctx)).unwrap();
+    let before_mcp = std::fs::read(ctx.home_dir.join(".claude.json")).unwrap();
+    let before_source = std::fs::read(&source).unwrap();
     let env = audit(&ctx, &[]);
     assert!(env.ok, "{:?}", env.errors);
     let agents = section(&env, "agents");
@@ -345,6 +375,12 @@ fn wired_domain_elements_map_into_sections() {
         .find(|d| d.code == "UNMATERIALIZED")
         .expect("应有 UNMATERIALIZED 分类诊断");
     assert!(unmat.message.contains(&unmaterialized.to_string()));
+    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), before_db);
+    assert_eq!(
+        std::fs::read(ctx.home_dir.join(".claude.json")).unwrap(),
+        before_mcp
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), before_source);
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -361,6 +397,18 @@ fn audit_maps_real_secrets_state() {
         r#"{"mcpServers":{"demo-server":{"command":"d","env":{"DEMO_KEY":"${AM_AUDIT_UNRESOLVED_VAR}"}}}}"#,
     )
     .unwrap();
+    let unconfigured = execute(&ctx, &request("secrets:status", &[]));
+    assert!(unconfigured.ok, "{:?}", unconfigured.errors);
+    assert_eq!(unconfigured.data["elements"][0]["state"], "unsupported");
+    assert_eq!(
+        unconfigured.data["elements"][0]["observed"]["account_source_missing"],
+        true
+    );
+    assert!(!store::db_path(&ctx).exists(), "只读状态不能隐式配置来源");
+    let source = select_empty_secret_source(&ctx);
+    let before_db = std::fs::read(store::db_path(&ctx)).unwrap();
+    let before_mcp = std::fs::read(ctx.home_dir.join(".claude.json")).unwrap();
+    let before_source = std::fs::read(&source).unwrap();
     let env = audit(&ctx, &[]);
     assert!(env.ok, "{:?}", env.errors);
     let secrets = section(&env, "secrets");
@@ -368,6 +416,12 @@ fn audit_maps_real_secrets_state() {
     assert_eq!(secrets[0]["name"], "secrets:mcp-env");
     assert_eq!(secrets[0]["status"], "warning");
     assert_eq!(secrets[0]["category"], "unmaterialized");
+    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), before_db);
+    assert_eq!(
+        std::fs::read(ctx.home_dir.join(".claude.json")).unwrap(),
+        before_mcp
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), before_source);
     assert!(
         env.data["sections"].get("tools").is_none(),
         "已退役 tools 域不得出现在审计结果: {}",

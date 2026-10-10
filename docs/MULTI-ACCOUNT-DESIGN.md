@@ -4,10 +4,12 @@ Status: **Design confirmed and implemented (2026-09-28)**. P0–P7 are complete 
 
 ## 1. Positioning
 
-**Agent Manager lets multiple Claude Code / Codex accounts run simultaneously on the same Mac: each account has its own configuration directory and launch command; one set of skills, MCP, and rules is distributed to all accounts through symlinks or managed entries.**
+**Agent Manager lets multiple Claude Code / Codex accounts run simultaneously: each account has its own configuration directory and controlled launch command. Skills, rules, and credential-free MCP entries can be shared. Credential references and authentication settings belong to one account.**
+
+The 2026-10-10 account-isolation decision supersedes earlier credential inheritance and automatic MCP copying. [Account Isolation](ACCOUNT-ISOLATION.md) defines the controlled-entry boundary, compatibility diagnostics, and acceptance requirements.
 
 - Use case: work in parallel with one account per terminal; when an account is nearly out of quota, continue in another account's terminal.
-- Deployment model: a single-user local desktop application plus a CLI using the same Rust library; reads and writes local files only, does not change configuration over the network, and does not read or write credentials.
+- Deployment model: a single-user local desktop application plus a CLI using the same Rust library. The assistant CLI owns official login and logout. The tool reads local identity metadata and resolves explicitly selected account-owned API/MCP secrets; it does not store their values in SQLite or backups.
 - Switching is no longer the central workflow: accounts have no current/alternative distinction; all are peers and can be used concurrently.
 
 ### Goals
@@ -20,7 +22,7 @@ Status: **Design confirmed and implemented (2026-09-28)**. P0–P7 are complete 
 ### Non-goals
 
 - Switching third-party connections in the main configuration (use tools such as cc-switch or create an API account).
-- Reading/writing login credentials: login uses only the assistant's own `/login` / `codex login`. Account identification reads identity information only: Claude's login record in `.claude.json`, and email/plan from the `id_token` in Codex `auth.json`; token values are never read or stored.
+- Owning official login credentials: login and logout use the assistant CLI in an explicit account context. Local authentication files are read to detect mixed modes and display identity metadata; their credential values are not stored in the database or backups. Decoded JWT labels do not validate signatures or remote identity.
 - Installing, upgrading, or uninstalling assistant software.
 - Saving a separate effective configuration for Agent Manager: actual files remain the sole source of truth.
 
@@ -45,12 +47,12 @@ flowchart LR
   C -- Write directory/settings.json --> A2 & A3
 ```
 
-**Account = a configuration directory + a launch command.** The launch command points `CLAUDE_CONFIG_DIR` / `CODEX_HOME` to that directory. The assistant's login, settings, sessions, skills, and rules live there, allowing multiple accounts to run at once.
+**Account = a configuration directory + an authentication mode + owned credential references + an endpoint + a controlled launch command.** The generated command validates its registration binding and sets `CLAUDE_CONFIG_DIR` / `CODEX_HOME` explicitly. Main Claude's official login metadata is at `HOME/.claude.json`; an independent Claude account's is inside its directory.
 
-- **Main account:** `~/.claude` / `~/.codex`, launched as `claude` / `codex`. Official login only (preserving the existing main-configuration policy); displayed read-only, with no switching action.
-- **Official account:** a separate directory; run `/login` once there, then each account uses its own subscription.
+- **Main account:** `~/.claude` / `~/.codex`, addressed explicitly by the controlled command. Official login only (preserving the existing main-configuration policy); displayed read-only, with no switching action.
+- **Official account:** a separate directory; use its generated login command once, then each account uses its own subscription.
 - **API account:** a separate directory holding endpoint, secret reference, and model; official login is not allowed there (preserving one credential type per directory).
-- **Shared resources:** skills, MCP, rules, and shared settings. Assignment means which accounts have a resource; all accounts are the default.
+- **Shared resources:** credential-free skills, MCP, rules, and shared settings. Assignment means which accounts have a resource; all accounts are the default. Credential-bearing MCP entries require separate account configuration and ownership.
 
 Evidence, all from local testing or source on 2026-09-28:
 
@@ -182,7 +184,7 @@ Retain [GUI Redesign · Data Model](GUI-REDESIGN.md#data-model-the-actual-config
 | --- | --- |
 | Account registration | Store only account id, display name, assistant, directory, launch-command name, and type. Actual directory files determine API parameters; database copies are used only to determine ownership |
 | Definition differs from actual configuration | No longer a concept. External changes show only Directory changed externally, with one action: Adopt directory content |
-| Shared resource assignment | All accounts by default. Skills use what any account uses: if enabled on at least one account, automatically link it to new accounts and offer one-click Fill for others. Disabling on one account is an exception; filling does not re-enable it. Newly discovered skills that have never been selected require Add first; adding assigns them to all accounts. Fill missing MCP services within the same assistant type: copy enabled services from an account of the same format to accounts missing them, leave disabled services alone, and retain Copy to… across assistant types. Fill missing rules only for accounts with no rule file (copy from the same-type main account); never change existing content |
+| Shared resource assignment | Skills and rules retain their existing assignment behavior. MCP Fill and Copy accept only credential-free entries with understood fields. Credentials, credential references, authentication helpers, and ambiguous extras block copying; configure them separately for the target account. Fill does not re-enable disabled services or overwrite existing rule files |
 | Main account | Show connection type read-only; do not write third-party connections or provide Switch back to official |
 | Account removal | Remove launch command and registration; preserve directory by default (including sessions and login), deleting it only when selected by the user |
 
@@ -204,7 +206,7 @@ The backend already largely models multiple accounts (instance = directory + lau
 | Frontend `AgentsPage`, `ConnectionWorkbench`, `ConnectionFormDialog`, `ProfileCards`, `ProfileFormDialog`, overview, operation records, command-palette switching items | Delete | Replaced by new pages |
 | New frontend | Add | `AppShell` (top bar), `AccountsPage`, `AccountDrawer`, list templates and drawers for `SkillsPage`, `McpPage`, `RulesPage` |
 
-Only one new backend interface is an aggregate read: `accounts:status`, returning each assistant's accounts in one response (registration, directory existence, launch-command effectiveness, login status, quota, shared resource counts), read-only with zero writes. The first version can combine existing `profiles:status`, `agents:auth-status`, and quota reads in the frontend, then move aggregation into the backend once the page is stable.
+The original aggregation proposal below remains a design goal rather than an implemented interface. Current account reads combine `profiles:status`, `agents:auth-status`, and quota reads. The controlled command interface is `accounts:command`; account creation uses `profiles:create` so definition, credential, and file changes share one checked transaction. See [account context](subsystems/account-context.md) for the current contract.
 
 ## 6. Alternatives
 
@@ -259,7 +261,7 @@ UI entries (replaced in P1–P4, code deleted in P6):
 - Assistants page: default environment card; View actual configuration files; account/login, runtime settings, launch-command subpages; mixed-use notices; current actual configuration (unsaved); official-account card and Switch back to official; third-party connection library and Create independent environment; instance Definition differs from actual comparison and two-way overwrite buttons; Update shared settings button (moved to Settings).
 - Overview, operation records page (audit logs continue to be written to the database; Settings retains Clear), update center.
 - Account switching and connection items in the command palette (`⌘K` remains for page/account search).
-- Entire Hooks feature (user decision on 2026-09-29 invalidates the original fold-into-shared-settings plan): page, editor, hooks in new accounts, shared-settings hook synchronization, and `hooks:*` engine commands were all deleted. Existing hooks in account files remain intact and effective; `hooks.*` in old backups are skipped during import.
+- Entire Hooks feature (user decision on 2026-09-29 invalidates the original fold-into-shared-settings plan): page, editor, hooks in new accounts, shared-settings hook synchronization, and `hooks:*` engine commands were all deleted. Existing hooks in account files remain intact; since 2026-10-10, executable hooks block controlled startup because their identity effects cannot be validated. `hooks.*` in old backups are skipped during import.
 
 Backend (P6, separate commit):
 

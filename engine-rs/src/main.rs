@@ -33,6 +33,20 @@ fn data_dir() -> PathBuf {
 }
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("--account-launch") {
+        match agent_manager_engine::native_account_context::run_cli(&argv[1..]) {
+            Ok(code) => std::process::exit(code),
+            Err(err) => {
+                eprintln!(
+                    "{}",
+                    agent_manager_engine::sanitize::sanitize_diagnostic_message(&format!(
+                        "{err:#}"
+                    ))
+                );
+                std::process::exit(2);
+            }
+        }
+    }
     let mut command = None;
     let mut args = Vec::new();
     let mut json = false;

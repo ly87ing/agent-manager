@@ -3,7 +3,7 @@
 //! 预检（锁前）与执行（锁内、Immediate 事务里重读文件后）共用 [`plan`]：同一份清单
 //! 得出同一份计划，直接调用 apply 也绕不过这些校验。
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 
 use anyhow::{anyhow, bail, Result};
@@ -15,7 +15,7 @@ use super::entry::{
 use super::inventory::{self, FileEntry, Inventory, TargetScan};
 use super::model::{canonicalize_agent_id, is_sha256_hex, is_valid_server_name};
 use super::saved::SavedRow;
-use super::snapshot::{self, Adoptions};
+use super::snapshot;
 use super::targets::Format;
 use super::write::{self, Change};
 use crate::native::{Context, Request};
@@ -219,8 +219,8 @@ pub struct Plan {
     pub file_writes: Vec<FileWrite>,
     pub saved_upserts: Vec<SavedRow>,
     pub saved_deletes: Vec<(String, String)>,
-    pub adoptions: Adoptions,
     pub warnings: Vec<String>,
+    pub variable_names: BTreeSet<String>,
 }
 
 fn stale(server: &str, agent: &str) -> anyhow::Error {
@@ -269,7 +269,7 @@ fn push_write(plan: &mut Plan, scan: &TargetScan, server: &str, change: Change) 
 }
 
 /// 由清单与参数得出写入计划（纯读、不落盘）。
-pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
+pub fn plan(ctx: &Context, parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
     let server = parsed.server.as_str();
     let mut plan = Plan::default();
     if parsed.action == Action::Forget {
@@ -293,6 +293,8 @@ pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
                 bail!("助手 {agent} 里已有停用的同名条目 {server}，请先启用或删除它");
             }
             let spec = parse_spec(parsed.spec.as_deref().unwrap_or_default())?;
+            plan.variable_names
+                .extend(validate_spec_variables(ctx, agent, &spec)?);
             if spec.startup_timeout_sec.is_some() && scan.target.format != Format::CodexToml {
                 bail!("startup_timeout_sec 只适用于 Codex");
             }
@@ -313,6 +315,14 @@ pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
             }
             let view = valid_view(file_entry)?;
             let spec = parse_spec(parsed.spec.as_deref().unwrap_or_default())?;
+            plan.variable_names
+                .extend(validate_spec_variables(ctx, agent, &spec)?);
+            plan.variable_names.extend(validate_entry_variables(
+                ctx,
+                agent,
+                &scan.target.format,
+                view,
+            )?);
             let new = apply_edit(&scan.target.format, raw_map(file_entry)?, view, &spec)?;
             push_write(&mut plan, scan, server, Change::Set(&new))?;
         }
@@ -324,7 +334,14 @@ pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
             if Some(file_entry.base.as_str()) != base {
                 return Err(stale(server, agent));
             }
-            if !valid_view(file_entry)?.legacy_marker {
+            let view = valid_view(file_entry)?;
+            plan.variable_names.extend(validate_entry_variables(
+                ctx,
+                agent,
+                &scan.target.format,
+                view,
+            )?);
+            if !view.legacy_marker {
                 bail!("{server} 在助手 {agent} 中没有旧版标记需要清理");
             }
             let new = entry::without_marker(&scan.target.format, raw_map(file_entry)?);
@@ -342,19 +359,16 @@ pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
                 return Err(stale(server, agent));
             }
             let view = valid_view(file_entry)?;
+            plan.variable_names.extend(validate_entry_variables(
+                ctx,
+                agent,
+                &scan.target.format,
+                view,
+            )?);
             match scan.target.format {
                 Format::ClaudeJson => {
-                    let (row, adoptions) =
+                    let row =
                         snapshot::from_claude_entry(server, agent, raw_map(file_entry)?, view)?;
-                    if !adoptions.is_empty() {
-                        let names: Vec<&str> = adoptions.keys().map(String::as_str).collect();
-                        plan.warnings.push(format!(
-                            "已把 {} 个疑似凭据的明文取值转存到外部密钥文件：{}",
-                            names.len(),
-                            names.join(", ")
-                        ));
-                    }
-                    plan.adoptions = adoptions;
                     push_write(&mut plan, scan, server, Change::Remove)?;
                     plan.saved_upserts.push(row);
                 }
@@ -379,6 +393,12 @@ pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
                     return Err(stale(server, agent));
                 }
                 let view = valid_view(file_entry)?;
+                plan.variable_names.extend(validate_entry_variables(
+                    ctx,
+                    agent,
+                    &scan.target.format,
+                    view,
+                )?);
                 if view.enabled {
                     bail!("{server} 在助手 {agent} 中已处于启用状态");
                 }
@@ -391,6 +411,14 @@ pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
                     return Err(stale(server, agent));
                 }
                 super::saved::validate_row(row)?;
+                let saved_view = entry::parse(&scan.target.format, &row.entry)
+                    .map_err(|reason| anyhow!("已保存的 MCP 设置无法确认：{reason}"))?;
+                plan.variable_names.extend(validate_entry_variables(
+                    ctx,
+                    agent,
+                    &scan.target.format,
+                    &saved_view,
+                )?);
                 let restored = snapshot::restore(row)?;
                 entry::parse(&scan.target.format, &Value::Object(restored.clone()))
                     .map_err(|e| anyhow!("保存的内容无法写回 {agent}：{e}"))?;
@@ -406,6 +434,17 @@ pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
                 if Some(file_entry.base.as_str()) != base {
                     return Err(stale(server, agent));
                 }
+                let view = file_entry.view.as_ref().map_err(|_| {
+                    anyhow!("MCP 条目结构无法确认凭据归属，没有删除；请先单独修正配置")
+                })?;
+                plan.variable_names
+                    .extend(entry::all_referenced_vars(&scan.target.format, view)?);
+                if let Some(row) = snapshot_row {
+                    let view = entry::parse(&scan.target.format, &row.entry)
+                        .map_err(|_| anyhow!("已保存的 MCP 设置无法确认凭据引用，没有删除"))?;
+                    plan.variable_names
+                        .extend(entry::all_referenced_vars(&scan.target.format, &view)?);
+                }
                 push_write(&mut plan, scan, server, Change::Remove)?;
                 if snapshot_row.is_some() {
                     plan.saved_deletes
@@ -420,6 +459,13 @@ pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
                 if Some(row.base().as_str()) != base {
                     return Err(stale(server, agent));
                 }
+                let scan = inv
+                    .scan(agent)
+                    .ok_or_else(|| anyhow!("没有此账号的安全 MCP 配置目标，未删除"))?;
+                let view = entry::parse(&scan.target.format, &row.entry)
+                    .map_err(|_| anyhow!("已保存的 MCP 设置无法确认凭据引用，没有删除"))?;
+                plan.variable_names
+                    .extend(entry::all_referenced_vars(&scan.target.format, &view)?);
                 plan.saved_deletes
                     .push((server.to_string(), agent.to_string()));
             } else {
@@ -429,6 +475,9 @@ pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
         Action::Copy => {
             let to = parsed.to.as_deref().expect("解析阶段已保证 --to");
             let source_scan = inv.scan(agent);
+            if let Some(reason) = source_scan.and_then(|scan| scan.error.as_deref()) {
+                bail!("来源账号 MCP 配置不可用：{reason}");
+            }
             let (neutral, view) =
                 if let Some(file_entry) = source_scan.and_then(|s| s.entry(server)) {
                     if Some(file_entry.base.as_str()) != base {
@@ -449,6 +498,13 @@ pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
                 } else {
                     bail!("助手 {agent} 里没有名为 {server} 的条目");
                 };
+            let source_format = &source_scan
+                .ok_or_else(|| anyhow!("来源助手 {agent} 已没有 MCP 配置目标"))?
+                .target
+                .format;
+            if let Some(reason) = entry::account_copy_blocked_reason(source_format, &view) {
+                bail!("{reason}");
+            }
             let target = operable(inv, to)?;
             let existing = target.entry(server);
             let target_row = inv.saved_row(server, to);
@@ -486,5 +542,56 @@ pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
 pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     let parsed = parse_action_args(req)?;
     let inv = inventory::load(ctx)?;
-    plan(&parsed, &inv).map(|_| ())
+    plan(ctx, &parsed, &inv).map(|_| ())
+}
+
+fn validate_environment_keys<'a>(keys: impl Iterator<Item = &'a String>) -> Result<()> {
+    if keys.into_iter().any(|key| {
+        crate::native_account_context::process_override_env(key)
+            || matches!(
+                key.to_ascii_uppercase().as_str(),
+                "CLAUDE_CONFIG_DIR" | "CODEX_HOME" | "ANTHROPIC_CONFIG_DIR"
+            )
+    }) {
+        bail!("MCP 环境含账号目录或进程覆盖，没有执行；请在同一账号独立配置服务");
+    }
+    Ok(())
+}
+
+fn validate_spec_variables(
+    ctx: &Context,
+    agent: &str,
+    spec: &entry::Spec,
+) -> Result<BTreeSet<String>> {
+    validate_environment_keys(spec.env.iter().map(|(key, _)| key))?;
+    let mut vars = BTreeSet::new();
+    for text in std::iter::once(&spec.command)
+        .chain(&spec.args)
+        .chain(std::iter::once(&spec.url))
+    {
+        vars.extend(entry::text_referenced_vars(text)?);
+    }
+    for (_, value) in spec.env.iter().chain(&spec.headers) {
+        match value {
+            entry::SpecVal::Ref(name) => {
+                vars.insert(name.clone());
+            }
+            entry::SpecVal::Lit(text) => vars.extend(entry::text_referenced_vars(text)?),
+            entry::SpecVal::Keep => {}
+        }
+    }
+    crate::native_secrets::validate_vars_ownership(ctx, agent, &vars)?;
+    Ok(vars)
+}
+
+pub(crate) fn validate_entry_variables(
+    ctx: &Context,
+    agent: &str,
+    format: &Format,
+    view: &entry::View,
+) -> Result<BTreeSet<String>> {
+    validate_environment_keys(view.env.iter().map(|(key, _)| key))?;
+    let vars = entry::all_referenced_vars(format, view)?;
+    crate::native_secrets::validate_vars_ownership(ctx, agent, &vars)?;
+    Ok(vars)
 }

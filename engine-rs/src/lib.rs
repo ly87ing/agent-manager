@@ -13,6 +13,7 @@
 pub(crate) mod agent_usage;
 pub mod envelope;
 pub mod native;
+pub mod native_account_context;
 pub(crate) mod native_agent_adapters;
 pub(crate) mod native_agent_settings;
 pub mod native_agents;

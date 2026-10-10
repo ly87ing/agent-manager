@@ -413,9 +413,7 @@ pub(crate) fn session_roots(ctx: &Context) -> Vec<(PathBuf, String, SessionKind)
             .into_iter()
             .flatten()
         {
-            let Ok(dir) =
-                crate::native_profiles::model::validate_config_dir(&def, home, &ctx.data_dir)
-            else {
+            let Ok(dir) = crate::native_profiles::paths::config_dir(ctx, &def) else {
                 continue;
             };
             let kind = match def.kind {

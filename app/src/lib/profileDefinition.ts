@@ -13,6 +13,16 @@
 import type { ConnectionEntry } from "./agentDefinitionForm";
 
 export type ProfileKind = "claude" | "codex";
+export type AuthShell = "posix" | "powershell";
+
+/** The selector remains explicit because Windows Terminal can host different shells. */
+export function defaultAuthShell(platform = typeof navigator === "undefined" ? "" : navigator.platform): AuthShell {
+  return /Win/i.test(platform) ? "powershell" : "posix";
+}
+
+export function authShellLabel(shell: AuthShell): string {
+  return shell === "powershell" ? "PowerShell" : "Bash / Zsh / Git Bash";
+}
 
 export interface ProfileDraftPreview {
   path: string;
@@ -21,6 +31,7 @@ export interface ProfileDraftPreview {
   /** 写入前的原文；文件不存在为 null。界面据此只显示变化的部分。 */
   original?: string | null;
   file_base?: string;
+  base?: string;
   content_base?: string;
   will_write?: boolean;
   existing_profile_skipped?: boolean;
@@ -193,7 +204,21 @@ export function authTerminalCommand(
   bin: string,
   action: "login" | "logout",
   configDir?: string,
+  shell: AuthShell = "posix",
 ): string {
+  if (shell === "powershell") {
+    const quote = (value: string) => `'${value.replace(/'/g, "''")}'`;
+    const command = `& ${quote(bin)} ${kind === "claude" ? "auth " : ""}${action}`;
+    if (!configDir) return command;
+    const env = `$env:${configEnvOf(kind)}`;
+    const path = configDir === "~" || configDir === "$HOME" ? "$HOME"
+      : /^(~|\$HOME)[/\\]/.test(configDir)
+        ? `(Join-Path $HOME ${quote(configDir.replace(/^(~|\$HOME)[/\\]/, ""))})`
+        : quote(configDir);
+    // A script-block scope protects the caller's variables; finally restores the
+    // process environment even when command lookup or login fails.
+    return `& { $previous = ${env}; try { ${env} = ${path}; ${command} } finally { ${env} = $previous } }`;
+  }
   const quotedBin = /^[A-Za-z0-9_./-]+$/.test(bin) ? bin : `'${bin.replace(/'/g, `'"'"'`)}'`;
   const command = kind === "claude" ? `${quotedBin} auth ${action}` : `${quotedBin} ${action}`;
   if (!configDir) return command;
@@ -241,11 +266,13 @@ export function launchCommandsForProfile(
   kind: ProfileKind,
   configDir: string,
   parseEnv: (value: string) => Record<string, string>,
+  profileId?: string,
 ): ProfileLaunchCommand[] {
   const envName = configEnvOf(kind);
   const want = normalizeConfigDir(configDir);
   return Object.entries(aliases)
     .filter(([, value]) => {
+      if (profileId && controlledAccountOf(value) === `profiles:${profileId}`) return true;
       const dir = parseEnv(value)[envName];
       return dir !== undefined && normalizeConfigDir(dir) === want;
     })
@@ -255,6 +282,13 @@ export function launchCommandsForProfile(
       needsTildeFix: launchCommandNeedsTildeFix(value),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Recognition is for display only; execution always asks the engine again. */
+export function controlledAccountOf(value: string): string | null {
+  if (!/\s--account-launch\s/.test(value) || !/\s--operation\s+(?:"launch"|launch)(?:\s|$)/.test(value)) return null;
+  const ids = [...value.matchAll(/\s--only\s+(?:"([^"\r\n]+)"|([^\s"']+))/g)];
+  return ids.length === 1 ? ids[0][1] ?? ids[0][2] : null;
 }
 
 /** 归一化配置目录，用于判断一条命令属于哪个实例（`~/x`、`$HOME/x` 视为同一处）。 */

@@ -2595,6 +2595,66 @@ fn legacy_builtin_without_bindings_is_recommendation_and_retired_on_write() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn legacy_builtin_retirement_preserves_policy_delete_and_config_import_snapshots() {
+    for operation in ["delete", "import"] {
+        let (root, ctx) = temp_ctx(&format!("skills-retirement-{operation}"));
+        std::fs::create_dir_all(&ctx.home_dir).unwrap();
+        let conn = store::open_write(&ctx).unwrap();
+        let mut policy = store::policy_from_connection(&conn).unwrap();
+        policy["retirement_fixture"] = serde_json::json!("before");
+        store::write_policy(&conn, &policy).unwrap();
+        drop(conn);
+        seed_legacy_builtin(
+            &ctx,
+            serde_json::from_str(LEGACY_BUILTIN_REPO).unwrap(),
+            &[],
+        );
+        let before = store::effective_policy(&ctx).unwrap();
+        let result = if operation == "delete" {
+            execute(
+                &ctx,
+                &request(
+                    "policy:delete",
+                    &["--layer", "local", "--key", "retirement_fixture"],
+                ),
+            )
+        } else {
+            let exported = execute(&ctx, &request("config:export", &[]));
+            assert!(exported.ok, "{:?}", exported.errors);
+            assert_eq!(
+                store::effective_policy(&ctx).unwrap(),
+                before,
+                "export must not migrate policy"
+            );
+            let mut payload = exported.data;
+            payload["policy"]["skills"] = serde_json::json!({"repositories": {}});
+            payload["policy"]["retirement_fixture"] = serde_json::json!("restored");
+            execute(
+                &ctx,
+                &request("config:import", &["--value", &payload.to_string()]),
+            )
+        };
+        assert!(result.ok, "{operation}: {:?}", result.errors);
+        let after = store::effective_policy(&ctx).unwrap();
+        assert_eq!(
+            after["agents"], before["agents"],
+            "retirement must not change account registrations"
+        );
+        assert!(after["skills"]["repositories"]
+            .get("agent-skills")
+            .is_none());
+        assert!(after["skills"].get("agent-skills").is_none());
+        assert_eq!(retire_log_count(&ctx), 1);
+        if operation == "delete" {
+            assert!(after.get("retirement_fixture").is_none());
+        } else {
+            assert_eq!(after["retirement_fixture"], "restored");
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+}
+
 /// 旧库里内置集合已在助手生效（有 bindings）或被用户改过：保持为用户集合，写路径不动。
 #[test]
 fn legacy_builtin_with_bindings_or_edits_stays_user_collection() {

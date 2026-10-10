@@ -2,13 +2,14 @@ import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
 import UsagePage from "../pages/UsagePage";
 import { vi } from "vitest";
-import { agentManagementFixture, makeAliasStatus, makeElement, makeEnvelope } from "./fixtures";
+import { accountCommandRoute, controlledCommand, agentManagementFixture, makeAliasStatus, makeElement, makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within, chooseOption, readOptions } from "./render-with-engine";
 import type { Envelope } from "../lib/contract";
 
-function routes(overrides: Record<string, Envelope> = {}): Record<string, Envelope> {
+function routes(overrides: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {}): Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> {
   const hour = (h: string) => `${new Date().toISOString().slice(0, 10)}T${h}:00:00Z`;
   return {
+    "accounts:command": accountCommandRoute,
     "usage:status": makeEnvelope(
       {
         domain: "usage",
@@ -38,7 +39,7 @@ describe("用量页", () => {
   it("按账号：主账号与独立账号分开合计，点一个账号只看它；趋势图按账号叠起来", async () => {
     const hour = (h: string) => `${new Date().toISOString().slice(0, 10)}T${h}:00:00Z`;
     const base = routes();
-    const data = JSON.parse(JSON.stringify(base["usage:status"].data));
+    const data = JSON.parse(JSON.stringify((base["usage:status"] as Envelope).data));
     data.rows.push({ hour: hour("04"), agent: "claude:work", model: "claude-opus-5", input: 2_000_000, output: 100_000, cache_write: 0, cache_read: 0, requests: 5 });
     renderWithEngine(<UsagePage />, { ...base, "usage:status": makeEnvelope(data, { command: "usage.status" }) });
     const table = await screen.findByTestId("usage-by-account");
@@ -54,7 +55,7 @@ describe("用量页", () => {
 
   it("缓存命中率 = 缓存读取 ÷（输入 + 缓存写入 + 缓存读取）", async () => {
     const base = routes();
-    const data = JSON.parse(JSON.stringify(base["usage:status"].data));
+    const data = JSON.parse(JSON.stringify((base["usage:status"] as Envelope).data));
     data.rows[0] = { ...data.rows[0], input: 100_000, cache_write: 100_000, cache_read: 800_000 };
     data.rows[1] = { ...data.rows[1], input: 0, cache_read: 0 };
     renderWithEngine(<UsagePage />, { ...base, "usage:status": makeEnvelope(data, { command: "usage.status" }) });
@@ -178,11 +179,11 @@ describe("用量页", () => {
     expect(screen.getByTestId("session-s-work")).toHaveTextContent("修登录");
     expect(screen.getByTestId("session-s-work")).toHaveTextContent("5 分钟前");
     expect(screen.getByTestId("session-s-relay")).toHaveTextContent("没有标题");
-    // 没有启动命令的账号不给复制
-    expect(screen.getByTestId("session-copy-s-relay")).toBeDisabled();
+    // 已登记但没有别名的账号，也通过引擎生成绑定账号的受控命令。
+    expect(screen.getByTestId("session-copy-s-relay")).toBeEnabled();
     await userEvent.click(screen.getByTestId("session-copy-s-work"));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("cd /work/app && cw --resume s-work"));
-    expect(calls.every((call) => call.command.endsWith(":status") || call.command === "usage:sessions")).toBe(true);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`cd /work/app && ${controlledCommand("profiles:work")} --resume s-work`));
+    expect(calls.every((call) => call.command.endsWith(":status") || call.command === "usage:sessions" || call.command === "accounts:command")).toBe(true);
   });
 });
 

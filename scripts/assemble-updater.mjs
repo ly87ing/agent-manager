@@ -39,12 +39,14 @@ const entry = (bundle) => {
 const macArm = findOne((f) => f.endsWith('.app.tar.gz') && f.includes('aarch64'), 'macOS aarch64 updater bundle');
 const macX64 = findOne((f) => f.endsWith('.app.tar.gz') && !f.includes('aarch64') && (f.includes('x86_64') || f.includes('x64')), 'macOS x86_64 updater bundle');
 const appimage = findOne((f) => f.endsWith('.AppImage'), 'Linux AppImage updater bundle');
+const deb = findOne((f) => f.endsWith('.deb'), 'Linux deb updater bundle');
 const msi = findOne((f) => f.endsWith('.msi'), 'Windows msi updater bundle');
 const nsis = findOne((f) => f.endsWith('-setup.exe'), 'Windows nsis updater bundle');
 
 const eMacArm = entry(macArm);
 const eMacX64 = entry(macX64);
 const eLinux = entry(appimage);
+const eDeb = entry(deb);
 const eMsi = entry(msi);
 const eNsis = entry(nsis);
 
@@ -61,6 +63,7 @@ const latest = {
     'darwin-x86_64-app': eMacX64,
     'linux-x86_64': eLinux,
     'linux-x86_64-appimage': eLinux,
+    'linux-x86_64-deb': eDeb,
     'windows-x86_64': eMsi,
     'windows-x86_64-msi': eMsi,
     'windows-x86_64-nsis': eNsis,

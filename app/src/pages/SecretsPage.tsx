@@ -189,7 +189,7 @@ export default function SecretsPage() {
 
       <div className="flex items-start gap-2 rounded-lg border bg-muted px-4 py-2.5 text-xs text-muted-foreground">
         <EyeOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-        <p>页面只显示变量名和来源，不读取回显密钥。外部文件优先，进程环境仅作为只读回退。</p>
+        <p>页面只显示变量名和来源，不读取回显密钥。进程环境仅用于只读状态提示；账号启动、认证和配置写入必须使用所选外部文件。</p>
       </div>
 
       {mcpEnv && providerKeys.length > 0 && (
@@ -351,7 +351,7 @@ export default function SecretsPage() {
       {clearing && (
         <ConfirmModal
           title={`删除 ${clearing} 的取值`}
-          description={`只从外部密钥文件 ${currentSourcePath} 删除这一项；接入配置与 MCP 条目里的变量引用不变。删除后如果进程环境也没有该变量，相关配置将无法同步。`}
+          description={`只从外部密钥文件 ${currentSourcePath} 删除这一项；接入配置与 MCP 条目里的变量引用不变。删除后，相关受控操作会因缺少密钥而停止。`}
           risk="write-local"
           riskLabel="删除外部密钥"
           confirmLabel="确认删除"
@@ -393,7 +393,7 @@ export default function SecretsPage() {
       {confirmDisconnect && (
         <ConfirmModal
           title="停止使用外部密钥文件"
-          description="只会取消本应用对该文件的引用，不会删除或修改文件。之后只能读取进程环境，应用内填写和接管密钥将不可用。"
+          description="只会取消本应用对该文件的引用，不会删除或修改文件。依赖密钥的账号启动、认证和配置写入将停止，直到重新选择可用文件。"
           risk="write-local"
           confirmLabel="确认停止使用"
           executing={directApply.executing}

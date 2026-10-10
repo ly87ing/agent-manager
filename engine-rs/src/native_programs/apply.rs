@@ -15,7 +15,7 @@ use rusqlite::TransactionBehavior;
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::native::{Context, Request};
 use crate::store;
@@ -68,7 +68,24 @@ fn expand(path: &str, home: &Path) -> PathBuf {
 }
 
 fn valid_version(version: &str) -> bool {
+    // Keep one portable filename contract, including case-insensitive filesystems
+    // and Windows device names / trailing-dot normalization.
+    let base = version
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    let reserved = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ["COM", "LPT"].iter().any(|prefix| {
+            base.strip_prefix(prefix).is_some_and(|suffix| {
+                suffix.len() == 1 && matches!(suffix.as_bytes()[0], b'1'..=b'9')
+            })
+        });
     !version.is_empty()
+        && !version.eq_ignore_ascii_case("current")
+        && !version.starts_with('.')
+        && !version.ends_with('.')
+        && !reserved
         && version.len() <= 64
         && version
             .chars()
@@ -90,41 +107,16 @@ fn run(mut command: Command, timeout: Duration) -> Result<Output> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // 一组启动：超时时 npm、uv 再拉起的进程一起结束
-    let (mut child, group) =
-        crate::process::spawn_group(&mut command).with_context(|| "启动命令失败")?;
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let out_handle = std::thread::spawn(move || {
-        let mut buf = String::new();
-        if let Some(mut s) = stdout {
-            use std::io::Read;
-            let _ = (&mut s).take(4 * 1024 * 1024).read_to_string(&mut buf);
-        }
-        buf
-    });
-    let err_handle = std::thread::spawn(move || {
-        let mut buf = String::new();
-        if let Some(mut s) = stderr {
-            use std::io::Read;
-            let _ = (&mut s).take(4 * 1024 * 1024).read_to_string(&mut buf);
-        }
-        buf
-    });
-    let start = Instant::now();
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if start.elapsed() > timeout {
-            group.kill(&mut child);
-            let _ = child.wait();
-            bail!("命令超时（{} 秒）", timeout.as_secs());
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    };
-    let stdout = out_handle.join().unwrap_or_default();
-    let stderr = err_handle.join().unwrap_or_default();
+    let output =
+        crate::process::capture_group(&mut command, timeout, 4 * 1024 * 1024).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::TimedOut {
+                anyhow!("命令超时（{} 秒）", timeout.as_secs())
+            } else {
+                anyhow!(error).context("启动命令失败")
+            }
+        })?;
+    let stdout = String::from_utf8(output.stdout).unwrap_or_default();
+    let stderr = String::from_utf8(output.stderr).unwrap_or_default();
     let combined = format!("{stdout}\n{stderr}");
     let tail: String = combined
         .lines()
@@ -137,7 +129,7 @@ fn run(mut command: Command, timeout: Duration) -> Result<Output> {
         .collect::<Vec<_>>()
         .join("\n");
     Ok(Output {
-        ok: status.success(),
+        ok: output.status.success(),
         stdout,
         tail: crate::sanitize::sanitize_diagnostic_message(&tail),
     })
@@ -167,8 +159,9 @@ fn npm_latest(npm: &Path, package: &str) -> Result<String> {
 }
 
 /// PyPI 上某个包的最新版本（联网）。
-fn pypi_latest(package: &str) -> Result<String> {
-    let mut cmd = crate::process::command("/usr/bin/curl");
+fn pypi_latest(package: &str, user_path: &super::locate::UserPath) -> Result<String> {
+    let curl = which("curl", user_path).ok_or_else(|| anyhow!("PATH 上没有 curl"))?;
+    let mut cmd = crate::process::command(curl);
     cmd.args([
         "-fsSL",
         "--max-time",
@@ -183,7 +176,7 @@ fn pypi_latest(package: &str) -> Result<String> {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    if !valid_version(&version) {
+    if !out.ok || !valid_version(&version) {
         bail!("查不到 {package} 的最新版本");
     }
     Ok(version)
@@ -451,21 +444,84 @@ fn npm_bin_dir(prefix: &Path) -> PathBuf {
     }
 }
 
+/// Derive a global prefix only from the expected package suffix. Unix adds
+/// `lib` before `node_modules`; Windows puts `node_modules` directly in it.
+fn npm_global_prefix(package_dir: &Path, package: &str) -> Result<PathBuf> {
+    let mut parent = package_dir;
+    let parts: Vec<_> = package.split('/').collect();
+    if !matches!(parts.as_slice(), [name] if !name.starts_with('@'))
+        && !matches!(parts.as_slice(), [scope, _] if scope.starts_with('@'))
+    {
+        bail!("npm 包名结构认不出来");
+    }
+    for component in parts
+        .iter()
+        .rev()
+        .copied()
+        .chain(std::iter::once("node_modules"))
+        .chain((!cfg!(windows)).then_some("lib"))
+    {
+        if component.is_empty() || parent.file_name() != Some(std::ffi::OsStr::new(component)) {
+            bail!("npm 全局目录结构认不出来");
+        }
+        parent = parent
+            .parent()
+            .ok_or_else(|| anyhow!("npm 全局目录结构认不出来"))?;
+    }
+    if !parent.is_absolute() {
+        bail!("npm 全局前缀不是绝对路径");
+    }
+    Ok(parent.to_path_buf())
+}
+
 /// 包目录下指向它的命令链接（npm 全局的 `<prefix>/bin/<命令>`、uv tool 的 `~/.local/bin/<命令>`）。
 fn bin_links_into(bin_dir: &Path, package_dir: &Path, bins: &[String]) -> Vec<PathBuf> {
     let real_pkg = package_dir
         .canon()
         .unwrap_or_else(|_| package_dir.to_path_buf());
     bins.iter()
-        .map(|b| bin_dir.join(crate::platform::command_link_name(b)))
+        .flat_map(|b| {
+            let primary = bin_dir.join(crate::platform::command_link_name(b));
+            if cfg!(windows) {
+                vec![primary, bin_dir.join(format!("{b}.ps1")), bin_dir.join(b)]
+            } else {
+                vec![primary]
+            }
+        })
         .filter(|p| p.symlink_metadata().is_ok())
         .filter(|p| {
             // Windows 上是 npm 的 cmd-shim：顺着脚本里记的位置判断
             let followed = crate::platform::cmd_shim_target(p).unwrap_or_else(|| p.clone());
-            followed
+            let direct = followed
                 .canon()
                 .map(|r| r.starts_with(&real_pkg))
-                .unwrap_or(false)
+                .unwrap_or(false);
+            if direct || !cfg!(windows) {
+                return direct;
+            }
+            // npm also writes PowerShell and POSIX launchers beside its .cmd.
+            // Only move scripts whose explicit $basedir target is in this package.
+            if std::fs::metadata(p)
+                .map(|m| m.len() > 64 * 1024)
+                .unwrap_or(true)
+            {
+                return false;
+            }
+            let Ok(text) = std::fs::read_to_string(p) else {
+                return false;
+            };
+            let re = regex::Regex::new(r#""\$basedir[\\/]([^"\r\n]+)""#)
+                .expect("fixed npm shim pattern");
+            let matches = re.captures_iter(&text).any(|capture| {
+                let mut target = bin_dir.to_path_buf();
+                for part in capture[1].split(['/', '\\']) {
+                    target.push(part);
+                }
+                target
+                    .canon()
+                    .is_ok_and(|target| target.starts_with(&real_pkg))
+            });
+            matches
         })
         .collect()
 }
@@ -555,15 +611,7 @@ fn plan_delegated(
                 None | Some("latest") => npm_latest(&npm, name)?,
                 Some(v) => v.to_string(),
             };
-            // <prefix>/lib/node_modules/<包> → prefix
-            let mut prefix = package_dir.clone();
-            let depth = if name.starts_with('@') { 4 } else { 3 };
-            for _ in 0..depth {
-                prefix = prefix
-                    .parent()
-                    .map(Path::to_path_buf)
-                    .ok_or_else(|| anyhow!("npm 全局目录结构认不出来"))?;
-            }
+            let prefix = npm_global_prefix(&package_dir, name)?;
             let links = bin_links_into(&npm_bin_dir(&prefix), &package_dir, &bins);
             let allow = args.allow_scripts || scripts_allowed(status, id);
             let mut steps = backup_steps(
@@ -625,7 +673,7 @@ fn plan_delegated(
             }
             let uv = which("uv", user_path).ok_or_else(|| anyhow!("PATH 上没有 uv"))?;
             let target = match args.version.as_deref() {
-                None | Some("latest") => pypi_latest(name)?,
+                None | Some("latest") => pypi_latest(name, user_path)?,
                 Some(v) => v.to_string(),
             };
             let tool_parent = package_dir
@@ -967,14 +1015,7 @@ fn plan_managed(
         .split_once(':')
         .ok_or_else(|| anyhow!("程序标识格式不对"))?;
     let pdir = program_dir(ctx, id)?;
-    let installed: Vec<String> = std::fs::read_dir(&pdir)
-        .map(|rd| {
-            rd.filter_map(|e| e.ok())
-                .filter(|e| e.path().join(META_FILE).is_file())
-                .map(|e| e.file_name().to_string_lossy().to_string())
-                .collect()
-        })
-        .unwrap_or_default();
+    let installed = super::status::managed_versions(&pdir).0;
     let bins: Vec<String> = element
         .map(all_bins)
         .filter(|b| !b.is_empty())
@@ -999,7 +1040,7 @@ fn plan_managed(
                     &which("npm", user_path).ok_or_else(|| anyhow!("PATH 上没有 npm"))?,
                     name,
                 ),
-                "pypi" => pypi_latest(name),
+                "pypi" => pypi_latest(name, user_path),
                 _ => bail!("git 源要给出具体提交（--version <提交>）"),
             },
         }
@@ -1055,10 +1096,12 @@ fn plan_managed(
             let bins = managed_cleanup_bins(ctx, id, element);
             let links = registered_links(status);
             for (path, points_to) in links {
-                if bins
-                    .iter()
-                    .any(|b| points_to.ends_with(&format!("programs/bin/{b}")))
-                {
+                if bins.iter().any(|b| {
+                    expand(&points_to, &ctx.home_dir)
+                        == programs_root(ctx)
+                            .join("bin")
+                            .join(crate::platform::command_link_name(b))
+                }) {
                     steps.push(Step::Unlink {
                         path: expand(&path, &ctx.home_dir),
                     });
@@ -1073,10 +1116,19 @@ fn plan_managed(
             }
             if let Some(version) = args.version.clone() {
                 // 只删一个版本：不能删当前版本
-                let current = crate::platform::read_link(pdir.join("current"))
+                let current = super::status::managed_current(&pdir)
+                    .with_context(|| "无法确认当前托管版本，未删除任何版本")?
+                    .ok_or_else(|| anyhow!("无法确认当前托管版本，未删除任何版本"))?;
+                let same_target = pdir
+                    .join(&version)
+                    .canon()
                     .ok()
-                    .map(|p| p.to_string_lossy().to_string());
-                if current.as_deref() == Some(version.as_str()) {
+                    .zip(pdir.join(&current).canon().ok())
+                    .is_some_and(|(requested, active)| requested == active);
+                if current == version
+                    || same_target
+                    || cfg!(windows) && current.eq_ignore_ascii_case(&version)
+                {
                     bail!("{version} 是当前版本，不能单独删除");
                 }
                 steps.clear();
@@ -1194,13 +1246,7 @@ fn plan_adopt(
     }
     let (links, verify) = entry_links(ctx, id, &bins, &entry_dir)?;
     steps.extend(links);
-    let mut prefix = package_dir.clone();
-    for _ in 0..if name.starts_with('@') { 4 } else { 3 } {
-        prefix = prefix
-            .parent()
-            .map(Path::to_path_buf)
-            .ok_or_else(|| anyhow!("npm 全局目录结构认不出来"))?;
-    }
+    let prefix = npm_global_prefix(&package_dir, name)?;
     let global_links = bin_links_into(&npm_bin_dir(&prefix), &package_dir, &bins);
     let backup = new_backup_dir(ctx, id);
     steps.extend(backup_steps(
@@ -1238,10 +1284,12 @@ fn plan_unadopt(ctx: &Context, status: &Value, args: &Args) -> Result<Plan> {
     let element = element_of(status, &args.program).ok();
     let bins = managed_cleanup_bins(ctx, &args.program, element.as_ref());
     for (path, points_to) in registered_links(status) {
-        if bins
-            .iter()
-            .any(|b| points_to.ends_with(&format!("programs/bin/{b}")))
-        {
+        if bins.iter().any(|b| {
+            expand(&points_to, &ctx.home_dir)
+                == programs_root(ctx)
+                    .join("bin")
+                    .join(crate::platform::command_link_name(b))
+        }) {
             restore.steps.push(Step::Unlink {
                 path: expand(&path, &ctx.home_dir),
             });
@@ -1648,8 +1696,10 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                             .unwrap_or(false)
                         {
                             let _ = crate::platform::remove_link(from);
-                        } else {
+                        } else if from.is_dir() {
                             let _ = std::fs::remove_dir_all(from);
+                        } else {
+                            let _ = std::fs::remove_file(from);
                         }
                     }
                     let _ = std::fs::rename(to, from);
@@ -1866,4 +1916,104 @@ pub fn declare(ctx: &Context, req: &Request) -> Result<Value> {
         return Ok(json!({"program": req.value("--program"), "allow_scripts": allow}));
     }
     bail!("programs:declare 需要 --skill、--bin 或 --program")
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn npm_global_prefix_handles_ordinary_and_scoped_native_layouts() {
+        let prefix = std::env::temp_dir().join("npm-prefix");
+        let modules = if cfg!(windows) {
+            prefix.join("node_modules")
+        } else {
+            prefix.join("lib/node_modules")
+        };
+        for package in ["tool-a", "@scope/tool-a"] {
+            assert_eq!(
+                npm_global_prefix(&modules.join(package), package).unwrap(),
+                prefix
+            );
+            assert!(npm_global_prefix(&modules.join(package), "other").is_err());
+        }
+        assert!(npm_global_prefix(&prefix.join("packages/tool-a"), "tool-a").is_err());
+    }
+
+    #[test]
+    fn version_cannot_address_parent_or_current_pointer() {
+        for version in [
+            ".", "..", "current", "CURRENT", "current.", "1.2.0.", "1.2.0 ", "NUL", "con.txt",
+            "COM1", "lpt9.0", "../1.0.0", "1.0.0/..",
+        ] {
+            assert!(!valid_version(version), "accepted {version}");
+        }
+        assert!(valid_version("1.2.0-rc.1"));
+    }
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::*;
+    use crate::process::capture_test_support as fixture;
+    use std::time::Instant;
+
+    fn inherited_pipe_deadline(stream: &str, timeout: Duration) {
+        let root = fixture::root(stream);
+        let start = Instant::now();
+        let result = run(fixture::command(&root, stream), timeout);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < timeout + Duration::from_secs(1),
+            "Waited for an inherited {stream} pipe: {elapsed:?}"
+        );
+        assert!(result.err().unwrap().to_string().contains("超时"));
+        fixture::assert_descendant_stopped(&root, start);
+    }
+
+    #[test]
+    fn run_times_out_after_parent_exits_with_inherited_stdout() {
+        inherited_pipe_deadline("stdout", Duration::from_secs(2));
+    }
+
+    #[test]
+    fn run_times_out_after_parent_exits_with_inherited_stderr() {
+        inherited_pipe_deadline("stderr", Duration::from_secs(2));
+    }
+
+    #[test]
+    fn run_uses_one_deadline_for_parent_and_reader_completion() {
+        inherited_pipe_deadline("delayed-stdout", Duration::from_secs(3));
+    }
+
+    #[test]
+    fn run_preserves_exit_status_output_and_diagnostic_tail() {
+        let root = fixture::root("output");
+        let output = run(fixture::command(&root, "output"), Duration::from_secs(10)).unwrap();
+        assert!(!output.ok);
+        assert!(output.stdout.contains("retained standard output"));
+        assert_eq!(
+            output.tail,
+            (2..10)
+                .map(|i| format!("diagnostic-{i}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn run_drains_both_streams_past_the_capture_limit() {
+        let root = fixture::root("limit");
+        let output = run(
+            fixture::command(&root, "large-output"),
+            Duration::from_secs(10),
+        )
+        .unwrap();
+        assert!(output.ok);
+        assert_eq!(output.stdout.len(), 4 * 1024 * 1024);
+        assert!(output.stdout.ends_with("oooo"));
+        assert!(output.tail.ends_with("eeee"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

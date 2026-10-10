@@ -49,6 +49,10 @@ fn define_agent_with(ctx: &Context, id: &str, bin: &str, config: Option<&str>) {
     });
     if let Some(path) = config {
         value["mcp_config"] = json!({"path": path, "format": "json"});
+        if bin == "claude" {
+            let directory = path.rsplit_once('/').unwrap().0;
+            value["profile"] = json!({"base_agent":"claude-code","config_dir":directory});
+        }
     }
     let env = execute(
         ctx,

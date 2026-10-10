@@ -372,7 +372,7 @@ describe("McpPage：实际条目为主", () => {
         }
         return makeEnvelope(makeApplyResult({ domain: "mcp" }), {
           command: "mcp.apply",
-          warnings: [{ code: "MCP_NOTICE", element: null, message: "已把 1 个疑似凭据的明文取值转存到外部密钥文件：API_KEY" }],
+          warnings: [{ code: "MCP_NOTICE", element: null, message: "条目含旧版标记，已清除标记" }],
         });
       }),
     );
@@ -381,13 +381,16 @@ describe("McpPage：实际条目为主", () => {
     await waitFor(() => expect(calls.filter((call) => call.command === "mcp:status").length).toBeGreaterThan(1));
 
     await userEvent.click(screen.getByTestId("action-disable-mcp:fs-claude-code"));
-    await waitFor(() => expect(infoSpy).toHaveBeenCalledWith("已把 1 个疑似凭据的明文取值转存到外部密钥文件：API_KEY"));
+    await waitFor(() => expect(infoSpy).toHaveBeenCalledWith("条目含旧版标记，已清除标记"));
     errorSpy.mockRestore();
     infoSpy.mockRestore();
   });
 
   it("账号开关直接在行上：没有这个服务的账号点一下，从有它的账号复制过来，带来源 base、不覆盖", async () => {
-    const { calls } = renderWithEngine(<McpPage />, routes());
+    const status = mcpStatusData();
+    const cell = (status.elements[1].observed as { agents: Record<string, Record<string, unknown>> }).agents.codex;
+    Object.assign(cell, { entry: { url: "https://mcp.example.com/mcp", headers: {} }, copy_safe: true, actions: ["edit", "enable", "copy", "remove"] });
+    const { calls } = renderWithEngine(<McpPage />, routes(status));
     const card = await screen.findByTestId("mcp-card-mcp:remote-api");
     const absent = within(card).getByTestId("action-add-here-mcp:remote-api-claude-code");
     expect(absent).toHaveAttribute("data-tone", "off");
@@ -402,6 +405,8 @@ describe("McpPage：实际条目为主", () => {
   it("补齐：表头按账号补齐，在用服务从同格式账号复制过来，带来源条目的 base", async () => {
     const status = mcpStatusData();
     status.targets = [...(status.targets ?? []), { ...(status.targets ?? [])[0], agent: "work", path: "/work/.claude.json" }];
+    const safe = (status.elements[0].observed as { agents: Record<string, Record<string, unknown>> }).agents["claude-code"];
+    Object.assign(safe, { entry: { command: "npx", args: ["-y", "fs-mcp"], env: {} }, vars: {}, copy_safe: true, actions: ["edit", "disable", "copy", "remove"] });
     const { calls } = renderWithEngine(<McpPage />, routes(status));
     // 表头按账号补齐；Claude 主号和 Codex 已经齐了
     await userEvent.click(await screen.findByTestId("mcp-fill-work"));
@@ -417,6 +422,8 @@ describe("McpPage：实际条目为主", () => {
   it("全部补齐：一次补所有账号，与按账号补齐是同样的复制", async () => {
     const status = mcpStatusData();
     status.targets = [...(status.targets ?? []), { ...(status.targets ?? [])[0], agent: "work", path: "/work/.claude.json" }];
+    const safe = (status.elements[0].observed as { agents: Record<string, Record<string, unknown>> }).agents["claude-code"];
+    Object.assign(safe, { entry: { command: "npx", args: ["-y", "fs-mcp"], env: {} }, vars: {}, copy_safe: true, actions: ["edit", "disable", "copy", "remove"] });
     const { calls } = renderWithEngine(<McpPage />, routes(status));
     await userEvent.click(await screen.findByTestId("mcp-fill-all"));
     await waitFor(() => expect(applyCalls(calls).length).toBeGreaterThan(0));

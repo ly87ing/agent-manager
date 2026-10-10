@@ -4,7 +4,7 @@ import App from "../App";
 import type { Envelope, SettingsData } from "../lib/contract";
 import { setSettingsClient } from "../lib/settings";
 import { encodeShareLink } from "../lib/shareLink";
-import { agentManagementFixture, makeAliasStatus, makeAuditData, makeElement, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
+import { accountCommandRoute, controlledCommand, agentManagementFixture, makeAliasStatus, makeAuditData, makeElement, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
 /** 按事件名记下界面订阅的桌面壳事件（托盘动作、点开的分享链接）。 */
@@ -38,6 +38,7 @@ type TestRoute = Envelope | ((args: string[]) => Promise<Envelope>);
 /** 主账号 claude + 有启动命令的 work + 还没有启动命令的 relay。 */
 function routes(): Record<string, TestRoute> {
   return {
+    "accounts:command": accountCommandRoute,
     "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
     "agents:status": makeEnvelope({
       domain: "agents",
@@ -104,7 +105,7 @@ describe("命令面板", () => {
     await userEvent.keyboard("{Meta>}k{/Meta}");
     const palette = await screen.findByTestId("command-palette");
     expect(within(palette).getByTestId("command-item-account:agents:claude-code")).toHaveTextContent("Claude · 主账号");
-    expect(within(palette).getByTestId("command-item-account:profiles:work")).toHaveTextContent("复制 cw");
+    await waitFor(() => expect(within(palette).getByTestId("command-item-account:profiles:work")).toHaveTextContent("复制受控命令"));
     expect(within(palette).getByTestId("command-item-skill:agent-skills")).toBeInTheDocument();
     await userEvent.type(screen.getByTestId("command-palette-input"), "MCP");
     await userEvent.click(within(palette).getByTestId("command-item-page:mcp"));
@@ -118,21 +119,22 @@ describe("命令面板", () => {
     expect(await screen.findByTestId("command-palette")).toBeInTheDocument();
   });
 
-  it("⌘⇧K 只列账号；选中复制启动命令，没有启动命令的去账号页；全程不写配置", async () => {
+  it("⌘⇧K 只列账号；有无旧 alias 都复制引擎受控命令；全程不写配置", async () => {
     const writeText = mockClipboard();
     const { calls } = await renderApp();
     await userEvent.keyboard("{Meta>}{Shift>}k{/Shift}{/Meta}");
     const palette = await screen.findByRole("dialog", { name: "账号" });
     expect(within(palette).queryByTestId("command-item-page:mcp")).toBeNull();
     expect(within(palette).queryByTestId("command-item-skill:agent-skills")).toBeNull();
-    expect(within(palette).getByTestId("command-item-account:profiles:relay")).toHaveTextContent("没有启动命令");
+    await waitFor(() => expect(within(palette).getByTestId("command-item-account:profiles:relay")).toHaveTextContent("复制受控命令"));
 
     await userEvent.type(screen.getByTestId("command-palette-input"), "cw");
     await userEvent.click(within(palette).getByTestId("command-item-account:profiles:work"));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("cw"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(controlledCommand("profiles:work")));
 
     await userEvent.keyboard("{Meta>}{Shift>}k{/Shift}{/Meta}");
     await userEvent.click(await screen.findByTestId("command-item-account:profiles:relay"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(controlledCommand("profiles:relay")));
     expect(within(screen.getByRole("navigation")).getByRole("button", { name: "账号" })).toHaveAttribute("aria-current", "page");
     expect(writes(calls)).toEqual([]);
   });
@@ -174,7 +176,7 @@ describe("命令面板", () => {
     const palette = await screen.findByRole("dialog", { name: "账号" });
     expect(within(palette).getAllByRole("button")).toHaveLength(1);
     await userEvent.keyboard("{Enter}");
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith("cw"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(controlledCommand("profiles:work")));
     expect(writes(calls)).toEqual([]);
   });
 
@@ -182,7 +184,7 @@ describe("命令面板", () => {
     const { calls } = await renderApp();
     await waitFor(() => expect(trayEvents.byName.get("import-link")?.size).toBe(1));
     const link = encodeShareLink({ kind: "mcp", name: "shared-srv", spec: { command: "uvx", args: [], env: {} } });
-    for (const listener of trayEvents.byName.get("import-link") ?? []) listener({ payload: link });
+    for (const listener of trayEvents.byName.get("import-link") ?? []) listener({ payload: { id: 1, url: link } });
     const dialog = await screen.findByRole("dialog", { name: "从分享链接导入" });
     expect(within(dialog).getByTestId("import-link-input")).toHaveValue(link);
     expect(within(dialog).getByTestId("import-link-summary")).toHaveTextContent("shared-srv");

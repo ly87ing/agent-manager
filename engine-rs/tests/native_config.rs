@@ -1,11 +1,16 @@
 //! 配置备份：导出只读、导入整体替换、坏内容一律拒绝且不留半份。
 
+#[cfg(windows)]
+mod common;
+
 use agent_manager_engine::{execute, store, Context, Request};
 use std::path::PathBuf;
 
 fn temp_ctx(tag: &str) -> (PathBuf, Context) {
     let base = std::env::temp_dir().join(format!("am-config-test-{}-{}", std::process::id(), tag));
     let _ = std::fs::remove_dir_all(&base);
+    #[cfg(windows)]
+    common::private_fixture_root(&base);
     let ctx = Context {
         data_dir: base.join("data"),
         home_dir: base.join("home"),

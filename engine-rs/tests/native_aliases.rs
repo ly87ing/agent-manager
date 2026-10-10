@@ -52,6 +52,37 @@ fn run(ctx: &Context, command: &str, args: &[&str]) -> Envelope {
     execute(ctx, &request(command, args))
 }
 
+fn run_cli(ctx: &Context, command: &str, args: &[&str]) -> Value {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
+        .args([command, "--json"])
+        .args(args)
+        .env_clear()
+        .env("HOME", &ctx.home_dir)
+        .env("AGENT_MANAGER_DATA_DIR", &ctx.data_dir)
+        .env("SHELL", "/bin/zsh")
+        .env("PATH", "/usr/bin:/bin")
+        .current_dir(&ctx.home_dir)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn controlled_main_command(ctx: &Context, only: &str) -> String {
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    let result = run_cli(ctx, "accounts:command", &["--only", only]);
+    assert_eq!(result["ok"], true, "{}", result["errors"]);
+    let value = result["data"]["launch_value"].as_str().unwrap().to_string();
+    assert!(value.contains("--account-launch"));
+    assert!(value.contains("--binding"));
+    value
+}
+
 fn sha(text: &str) -> String {
     format!("{:x}", Sha256::digest(text.as_bytes()))
 }
@@ -93,6 +124,12 @@ fn apply(ctx: &Context, bases: &[String], op: &[&str]) -> Envelope {
     let mut args: Vec<&str> = bases.iter().map(String::as_str).collect();
     args.extend_from_slice(op);
     run(ctx, "aliases:apply", &args)
+}
+
+fn apply_cli(ctx: &Context, bases: &[String], op: &[&str]) -> Value {
+    let mut args: Vec<&str> = bases.iter().map(String::as_str).collect();
+    args.extend_from_slice(op);
+    run_cli(ctx, "aliases:apply", &args)
 }
 
 fn read(ctx: &Context, rel: &str) -> Option<String> {
@@ -305,20 +342,21 @@ fn preview_matches_both_rc_files_and_does_not_write() {
 #[test]
 fn first_alias_appends_block_only_and_leaves_zprofile_alone() {
     let (root, ctx) = temp_ctx("append-only");
+    let value = controlled_main_command(&ctx, "agents:claude-code");
     write(&ctx, ".zshrc", "# user\nalias ll=\"ls -l\"\n");
     write(&ctx, ".zprofile", "export PATH=\"$HOME/bin:$PATH\"\n");
-    let env = apply(
+    let env = apply_cli(
         &ctx,
         &both_bases(&status(&ctx)),
-        &["--set", "cc2", "--value", "claude"],
+        &["--set", "cc2", "--value", &value],
     );
-    assert!(env.ok, "{:?}", env.errors);
-    assert_eq!(env.data["skipped"], json!(["aliases:zprofile"]));
+    assert_eq!(env["ok"], true, "{}", env["errors"]);
+    assert_eq!(env["data"]["skipped"], json!(["aliases:zprofile"]));
     assert_eq!(
         read(&ctx, ".zshrc").unwrap(),
         format!(
             "# user\nalias ll=\"ls -l\"\n{}",
-            block(&["alias cc2='claude'"])
+            block(&[&format!("alias cc2='{value}'")])
         )
     );
     assert_eq!(
@@ -367,31 +405,32 @@ fn source_aliases_are_recommended_with_their_source() {
 #[test]
 fn adding_a_recommendation_writes_zshrc_only_and_passes_zsh_syntax() {
     let (root, ctx) = temp_ctx("recommend");
-    add_alias_source(&ctx, "mine", &[("aliases.json", ALIAS_SOURCE)]);
+    let value = controlled_main_command(&ctx, "agents:claude-code");
+    let mut source: Value = serde_json::from_str(ALIAS_SOURCE).unwrap();
+    source["aliases"]["claude"] = json!(value);
+    add_alias_source(&ctx, "mine", &[("aliases.json", &source.to_string())]);
     let before = status(&ctx);
     let db_before = std::fs::read(store::db_path(&ctx)).unwrap();
     let bases = both_bases(&before);
     let mut preview_args: Vec<&str> = bases.iter().map(String::as_str).collect();
     preview_args.extend_from_slice(&["--recommended", "claude"]);
-    let preview = run(&ctx, "aliases:preview", &preview_args);
-    assert!(preview.ok, "{:?}", preview.errors);
-    assert!(!preview.lock.held);
-    assert_eq!(preview.data["files"].as_array().unwrap().len(), 1);
+    let preview = run_cli(&ctx, "aliases:preview", &preview_args);
+    assert_eq!(preview["ok"], true, "{}", preview["errors"]);
+    assert_eq!(preview["lock"]["held"], false);
+    assert_eq!(preview["data"]["files"].as_array().unwrap().len(), 1);
     assert!(read(&ctx, ".zshrc").is_none());
     assert!(read(&ctx, ".zprofile").is_none());
     assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), db_before);
-    let env = apply(&ctx, &both_bases(&before), &["--recommended", "claude"]);
-    assert!(env.ok, "{:?}", env.errors);
-    assert!(env.lock.held, "真实写入必须持锁");
-    assert_eq!(env.data["steps"].as_array().unwrap().len(), 1);
-    let expected = block(&[
-        "alias claude='TZ=\"America/Los_Angeles\" LANG=\"en_US.UTF-8\" LC_ALL=\"en_US.UTF-8\" claude'",
-    ]);
+    let env = apply_cli(&ctx, &both_bases(&before), &["--recommended", "claude"]);
+    assert_eq!(env["ok"], true, "{}", env["errors"]);
+    assert_eq!(env["lock"]["held"], true, "真实写入必须持锁");
+    assert_eq!(env["data"]["steps"].as_array().unwrap().len(), 1);
+    let expected = block(&[&format!("alias claude='{value}'")]);
     assert_eq!(read(&ctx, ".zshrc").unwrap(), expected);
     assert!(read(&ctx, ".zprofile").is_none(), "不新建 ~/.zprofile");
     assert_eq!(
         read(&ctx, ".zshrc").as_deref(),
-        preview.data["files"][0]["content"].as_str()
+        preview["data"]["files"][0]["content"].as_str()
     );
     #[cfg(unix)]
     {
@@ -428,6 +467,10 @@ fn adding_a_recommendation_writes_zshrc_only_and_passes_zsh_syntax() {
         "审计记来源: {detail}"
     );
     assert!(!detail.contains("Los_Angeles"), "审计不得含取值: {detail}");
+    assert!(
+        !detail.contains("--account-launch"),
+        "审计不得含受控启动取值: {detail}"
+    );
 
     // 再添加同一条推荐：它已不在推荐里，拒绝且文件不变
     let env = apply(&ctx, &both_bases(&after), &["--recommended", "claude"]);
@@ -722,6 +765,41 @@ fn invalid_values_and_names_are_rejected_without_writes_or_echo() {
     assert!(!ctx.data_dir.exists(), "拒绝路径不得建库或锁文件");
     assert!(!ctx.home_dir.exists(), "拒绝路径不得写 rc 文件");
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn bare_assistant_commands_are_rejected_without_changing_rc_files_or_creating_state() {
+    let (root, ctx) = temp_ctx("bare-account-command");
+    let zshrc = "# foreign lines\nalias own='echo own'\n";
+    let zprofile = "export EDITOR=vim\n";
+    write(&ctx, ".zshrc", zshrc);
+    write(&ctx, ".zprofile", zprofile);
+    let bases = both_bases(&status(&ctx));
+    for value in [
+        "claude",
+        "codex --model fixture-model",
+        "CLAUDE_CONFIG_DIR=~/.claude-other claude",
+        "CODEX_HOME=~/.codex-other codex",
+    ] {
+        let mut args: Vec<&str> = bases.iter().map(String::as_str).collect();
+        args.extend(["--set", "work", "--value", value]);
+        for command in ["aliases:preview", "aliases:apply"] {
+            let result = run(&ctx, command, &args);
+            assert!(!result.ok, "{command} accepted {value}");
+            assert!(
+                result.errors[0].message.contains("账号预检"),
+                "{:?}",
+                result.errors
+            );
+            assert_eq!(read(&ctx, ".zshrc").as_deref(), Some(zshrc));
+            assert_eq!(read(&ctx, ".zprofile").as_deref(), Some(zprofile));
+            assert!(
+                !ctx.data_dir.exists(),
+                "Rejected commands must not create a database or lock files"
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(root);
 }
 
 /// 并发第二个 apply 被全局锁拒绝，零写；释放后照常写入。
@@ -1055,15 +1133,23 @@ fn upgraded_database_reads_actual_blocks_and_old_tables_never_gate_writes() {
     assert_eq!(now["alias_legacy"], json!([]), "与内置相同的旧行不产生建议");
     assert_eq!(names(&now["alias_recommendations"]), ["chrome", "grok"]);
 
-    let env = apply(
+    let value = format!(
+        "{} --model fixture-model",
+        controlled_main_command(&ctx, "agents:codex")
+    );
+    let env = apply_cli(
         &ctx,
         &["--zshrc-base".into(), base_of(&now, "aliases:zshrc")],
-        &["--set", "codex", "--value", "codex --search"],
+        &["--set", "codex", "--value", &value],
     );
-    assert!(env.ok, "旧 binding 不得挡住写入: {:?}", env.errors);
+    assert_eq!(
+        env["ok"], true,
+        "旧 binding 不得挡住写入: {}",
+        env["errors"]
+    );
     assert!(read(&ctx, ".zshrc")
         .unwrap()
-        .contains("alias codex='codex --search'"));
+        .contains(&format!("alias codex='{value}'")));
     assert_eq!(
         count(&ctx, "SELECT COUNT(*) FROM alias_target_bindings"),
         1,

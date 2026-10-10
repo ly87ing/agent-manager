@@ -26,7 +26,7 @@ pub(crate) fn set(app: &tauri::AppHandle, enabled: bool) -> Result<bool, String>
 fn executable(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     #[cfg(target_os = "linux")]
     if let Some(path) = app.env().appimage {
-        return Ok(path);
+        return Ok(PathBuf::from(path));
     }
     #[cfg(not(target_os = "linux"))]
     let _ = app;

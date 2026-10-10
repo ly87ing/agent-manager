@@ -1,15 +1,34 @@
 //! MCP 原子写入、回读校验与回滚保护
 
 use anyhow::{anyhow, bail, Context as _, Result};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use super::targets::{check_symlink_metadata, validate_target_path};
 use crate::store;
 
 pub fn read_existing_bytes(path: &Path) -> Result<Option<Vec<u8>>> {
-    match std::fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
+    const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+    match std::fs::File::open(path) {
+        Ok(file) => {
+            let metadata = file.metadata()?;
+            if !metadata.is_file() || metadata.len() > MAX_CONFIG_BYTES {
+                bail!("配置文件不是普通文件或超过 1 MiB，拒绝读取");
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if metadata.permissions().mode() & 0o444 == 0 {
+                    bail!("配置文件不可读取，拒绝操作");
+                }
+            }
+            let mut bytes = Vec::new();
+            file.take(MAX_CONFIG_BYTES + 1).read_to_end(&mut bytes)?;
+            if bytes.len() as u64 > MAX_CONFIG_BYTES {
+                bail!("配置文件超过 1 MiB，拒绝读取");
+            }
+            Ok(Some(bytes))
+        }
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(err) => {
             Err(anyhow::Error::from(err).context(format!("无法读取目标文件: {}", path.display())))
@@ -22,12 +41,32 @@ enum ExpectedOld<'a> {
     Exact(Option<&'a [u8]>),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PostReplaceStage {
+    ParentSync,
+    Validation,
+}
+
 fn write_temp_and_replace(
     path: &Path,
     bytes: &[u8],
     expected_old: ExpectedOld<'_>,
-    mut before_compare: Option<&mut dyn FnMut(&Path) -> Result<()>>,
+    before_compare: Option<&mut dyn FnMut(&Path) -> Result<()>>,
 ) -> Result<()> {
+    replace_with_hooks(path, bytes, expected_old, before_compare, None, true)
+}
+
+fn replace_with_hooks(
+    path: &Path,
+    bytes: &[u8],
+    expected_old: ExpectedOld<'_>,
+    mut before_compare: Option<&mut dyn FnMut(&Path) -> Result<()>>,
+    mut after_replace: Option<&mut dyn FnMut(PostReplaceStage, &Path) -> Result<()>>,
+    restore_on_failure: bool,
+) -> Result<()> {
+    if bytes.len() > 1024 * 1024 {
+        bail!("配置文件超过 1 MiB，拒绝写入");
+    }
     validate_target_path(path)?;
     let parent = path
         .parent()
@@ -54,6 +93,7 @@ fn write_temp_and_replace(
     let file_stem = path.file_name().and_then(|s| s.to_str()).unwrap_or("tmp");
     let tmp_path = parent.join(format!(".{}.tmp_{}", file_stem, store::uuid_v4()));
 
+    let mut replaced = false;
     let write_res = (|| -> Result<()> {
         let mut opts = std::fs::OpenOptions::new();
         opts.write(true).create_new(true);
@@ -90,6 +130,10 @@ fn write_temp_and_replace(
 
         std::fs::rename(&tmp_path, path)
             .with_context(|| format!("原子替换目标文件失败: {}", path.display()))?;
+        replaced = true;
+        if let Some(hook) = after_replace.as_mut() {
+            hook(PostReplaceStage::ParentSync, path)?;
+        }
 
         #[cfg(unix)]
         {
@@ -100,17 +144,26 @@ fn write_temp_and_replace(
                 .with_context(|| format!("无法同步目标父目录元数据: {}", parent.display()))?;
         }
 
+        if let Some(hook) = after_replace.as_mut() {
+            hook(PostReplaceStage::Validation, path)?;
+        }
         validate_target_path(path)?;
         Ok(())
     })();
 
-    if let Err(write_err) = write_res {
+    if let Err(mut write_err) = write_res {
         if let Err(cleanup_err) = std::fs::remove_file(&tmp_path) {
             if cleanup_err.kind() != std::io::ErrorKind::NotFound {
-                return Err(write_err.context(format!(
+                write_err = write_err.context(format!(
                     "写入失败后清理临时文件 {} 同时失败: {cleanup_err:#}",
                     tmp_path.display()
-                )));
+                ));
+            }
+        }
+        if replaced && restore_on_failure {
+            let ExpectedOld::Exact(old) = expected_old;
+            if let Err(restore_err) = safe_restore_bytes_cas(path, bytes, old) {
+                return Err(write_err.context(format!("替换后失败且回滚恢复失败: {restore_err:#}")));
             }
         }
         return Err(write_err);
@@ -128,10 +181,15 @@ pub fn safe_restore_bytes_cas(
 ) -> Result<()> {
     validate_target_path(path)?;
     match old_bytes {
-        Some(bytes) => {
-            write_temp_and_replace(path, bytes, ExpectedOld::Exact(Some(written_bytes)), None)
-                .map_err(|err| anyhow!("回滚冲突: {err:#}"))
-        }
+        Some(bytes) => replace_with_hooks(
+            path,
+            bytes,
+            ExpectedOld::Exact(Some(written_bytes)),
+            None,
+            None,
+            false,
+        )
+        .map_err(|err| anyhow!("回滚冲突: {err:#}")),
         None => {
             if check_symlink_metadata(path)?.is_some() {
                 validate_target_path(path)?;
@@ -145,6 +203,10 @@ pub fn safe_restore_bytes_cas(
             }
             std::fs::remove_file(path)
                 .with_context(|| format!("回滚删除文件失败: {}", path.display()))?;
+            #[cfg(unix)]
+            if let Some(parent) = path.parent() {
+                std::fs::File::open(parent)?.sync_all()?;
+            }
             Ok(())
         }
     }
@@ -306,6 +368,82 @@ mod tests {
             "CAS 拒绝后必须清理临时文件"
         );
 
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn post_replace_sync_and_validation_errors_restore_existing_and_new_files() {
+        for stage in [PostReplaceStage::ParentSync, PostReplaceStage::Validation] {
+            for existing in [true, false] {
+                let root = test_root(&format!("post-replace-{}-{}", stage as u8, existing));
+                let _ = std::fs::remove_dir_all(&root);
+                std::fs::create_dir_all(&root).unwrap();
+                let path = root.join("target.json");
+                let original = b"original";
+                if existing {
+                    std::fs::write(&path, original).unwrap();
+                }
+                let mut hook = |observed, target: &Path| -> Result<()> {
+                    if observed == stage {
+                        assert_eq!(
+                            std::fs::read(target).unwrap(),
+                            b"replacement",
+                            "fault must happen after rename"
+                        );
+                        bail!("injected post-rename failure");
+                    }
+                    Ok(())
+                };
+                let old = if existing {
+                    Some(original.as_slice())
+                } else {
+                    None
+                };
+                let result = replace_with_hooks(
+                    &path,
+                    b"replacement",
+                    ExpectedOld::Exact(old),
+                    None,
+                    Some(&mut hook),
+                    true,
+                );
+                assert!(result.is_err());
+                assert_eq!(read_existing_bytes(&path).unwrap().as_deref(), old);
+                assert!(std::fs::read_dir(&root).unwrap().all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".tmp_")));
+                let _ = std::fs::remove_dir_all(root);
+            }
+        }
+    }
+
+    #[test]
+    fn post_replace_failure_preserves_a_later_external_edit_and_reports_conflict() {
+        let root = test_root("post-replace-conflict");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("target.json");
+        std::fs::write(&path, b"original").unwrap();
+        let mut hook = |stage, target: &Path| -> Result<()> {
+            if stage == PostReplaceStage::Validation {
+                assert_eq!(std::fs::read(target).unwrap(), b"replacement");
+                std::fs::write(target, b"external")?;
+                bail!("injected validation failure");
+            }
+            Ok(())
+        };
+        let result = replace_with_hooks(
+            &path,
+            b"replacement",
+            ExpectedOld::Exact(Some(b"original")),
+            None,
+            Some(&mut hook),
+            true,
+        );
+        assert!(format!("{:#}", result.unwrap_err()).contains("回滚冲突"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"external");
         let _ = std::fs::remove_dir_all(root);
     }
 

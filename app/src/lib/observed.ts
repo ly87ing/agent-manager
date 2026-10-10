@@ -144,6 +144,8 @@ export interface OfficialAuthStatus {
   third_party: boolean;
   /** 第三方环境里有官方账号登录：两种凭据混在同一个配置目录。 */
   mixed: boolean;
+  /** 受控操作前检查不通过；本地记录仍可显示，不允许用记录状态放行启动。 */
+  isolation_blocked?: boolean;
   /** 无法确认时的原因。 */
   reason: string | null;
 }
@@ -216,6 +218,9 @@ export interface McpAgentCell {
   blocked_reason?: string | null;
   reason?: string;
   actions: string[];
+  /** 引擎已确认跨账号复制不会带入凭据；缺少此字段时不可自动补齐。 */
+  copy_safe?: boolean;
+  copy_blocked_reason?: string | null;
 }
 
 export interface McpSavedDefinition {

@@ -36,6 +36,7 @@ export function mcpCell(overrides: Partial<McpAgentCell> = {}): McpAgentCell {
   return {
     state: "enabled",
     source: "file",
+    copy_safe: true,
     target: "/tmp/demo/.claude.json",
     target_exists: true,
     transport: "stdio",
@@ -72,6 +73,8 @@ export function mcpStatusData(): StatusData {
           agents: {
             "claude-code": mcpCell({
               entry: { command: "npx", args: ["-y", "fs-mcp"], env: { API_KEY: "${FS_API_KEY}" } },
+              copy_safe: false,
+              actions: ["edit", "disable", "remove"],
               vars: { API_KEY: { placeholder: "${FS_API_KEY}", resolved: false, stored: false, kind: "env" } },
             }),
             codex: mcpCell({
@@ -79,9 +82,10 @@ export function mcpStatusData(): StatusData {
               entry: { command: "npx", args: ["-y", "fs-mcp@2"], env: { TOKEN: "<literal>" }, startup_timeout_sec: 30 },
               extra: { cwd: "/work", enabled_tools: ["read"], tools: "<hidden>" },
               base: BASE_CODEX_FS,
+              copy_safe: false,
               legacy_marker: true,
               notice: "含旧版 Agent Manager 标记，可能触发助手配置警告；可预览后单独清理",
-              actions: ["edit", "disable", "copy", "remove", "clean-markers"],
+              actions: ["edit", "disable", "remove", "clean-markers"],
             }),
           },
         },
@@ -101,7 +105,8 @@ export function mcpStatusData(): StatusData {
               entry: { url: "https://mcp.example.com/mcp", headers: { Authorization: "${REMOTE_TOKEN}", "X-Static": "<literal>" } },
               base: BASE_CODEX_REMOTE,
               command_available: null,
-              actions: ["edit", "enable", "copy", "remove"],
+              copy_safe: false,
+              actions: ["edit", "enable", "remove"],
             }),
           },
         },
@@ -127,7 +132,8 @@ export function mcpStatusData(): StatusData {
               base: BASE_CLAUDE_SNAPSHOT,
               command_available: null,
               notice: "已停用：条目保存在本工具里，启用时写回配置文件",
-              actions: ["enable", "copy", "remove"],
+              copy_safe: false,
+              actions: ["enable", "remove"],
             }),
           },
         },

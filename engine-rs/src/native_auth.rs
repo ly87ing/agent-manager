@@ -49,27 +49,27 @@ const CLAUDE_PROBE_ENV_REMOVE: &[&str] = &[
 const CLAUDE_PROBE_NO_PROFILE_DIR: &str = "/nonexistent/agent-manager-probe/anthropic";
 #[cfg(not(unix))]
 const CLAUDE_PROBE_NO_PROFILE_DIR: &str = "Z:\\nonexistent\\agent-manager-probe\\anthropic";
-/// 经官方 `--settings` 取消的凭据来源（CLI 参数优先于配置目录里的 settings.json）：目录自己
-/// 声明的第三方凭据、长期令牌、云厂商开关与 apiKeyHelper 都会遮住目录里的登录，取消后官方命令
-/// 报告的就是这个目录存的登录。只在这次子进程里生效，不改任何文件。
-const CLAUDE_PROBE_CANCELLED_ENV: &[&str] = &[
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_API_KEY",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "CLAUDE_CODE_USE_BEDROCK",
-    "CLAUDE_CODE_USE_VERTEX",
-    "CLAUDE_CODE_USE_FOUNDRY",
-    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
-    "CLAUDE_CODE_USE_MANTLE",
-];
 /// Console 登录生成、由 Claude Code 自己保管的 API key 在 `auth status` 里的来源名。
 const CLAUDE_CONSOLE_KEY_SOURCE: &str = "/login managed key";
 
-fn claude_probe_settings() -> String {
-    let env: serde_json::Map<String, Value> = CLAUDE_PROBE_CANCELLED_ENV
-        .iter()
-        .map(|name| (name.to_string(), Value::String(String::new())))
-        .collect();
+/// This narrowly scoped probe asks about stored login, including the account's
+/// keychain slot. An API setting must not hide a second stored official login
+/// during apply preflight. Ordinary launch never uses these overrides.
+fn stored_login_probe_settings() -> String {
+    let env: serde_json::Map<String, Value> = [
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+        "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+        "CLAUDE_CODE_USE_MANTLE",
+    ]
+    .into_iter()
+    .map(|name| (name.into(), Value::String(String::new())))
+    .collect();
     json!({"apiKeyHelper": "", "env": env}).to_string()
 }
 const CODEX_PROBE_ENV_REMOVE: &[&str] = &["CODEX_API_KEY", "OPENAI_API_KEY", "CODEX_ACCESS_TOKEN"];
@@ -77,6 +77,7 @@ const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// 官方 CLI：先找 `<HOME>/.local/bin`（官方安装器的落点），再找 PATH，最后是其他常见
 /// 安装目录（桌面应用的 PATH 里没有 Homebrew、npm 全局目录）。
+#[cfg(all(test, unix))]
 fn resolve_cli(home_dir: &Path, bin: &str) -> Option<std::path::PathBuf> {
     std::iter::once(home_dir.join(".local").join("bin"))
         .chain(
@@ -174,11 +175,10 @@ fn codex_local_login(codex_home: &Path) -> Result<Option<LoginStatus>, String> {
     if !codex_home.is_dir() {
         return Ok(Some(logged_out()));
     }
-    let bytes = match std::fs::read(codex_home.join("auth.json")) {
-        Ok(bytes) if bytes.len() <= 1024 * 1024 => bytes,
-        Ok(_) => return Err("auth.json 过大".into()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err("无法读取 auth.json".into()),
+    let bytes = match crate::native_account_context::read_config(&codex_home.join("auth.json")) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return Ok(None),
+        Err(_) => return Err("无法读取 auth.json 或文件过大".into()),
     };
     let found = serde_json::from_slice::<CodexLoginPresence>(&bytes)
         .map_err(|_| "auth.json 不是合法 JSON".to_string())?;
@@ -233,10 +233,8 @@ fn chatgpt_plan_label(plan: &str) -> String {
 
 /// `<CODEX_HOME>/auth.json` 的账号标识；文件不存在（例如登录存在钥匙串里）或看不懂时为 None。
 fn codex_account(codex_home: &Path) -> Option<AccountLabel> {
-    let bytes = std::fs::read(codex_home.join("auth.json")).ok()?;
-    if bytes.len() > 1024 * 1024 {
-        return None;
-    }
+    let bytes =
+        crate::native_account_context::read_config(&codex_home.join("auth.json")).ok()??;
     let id_token = serde_json::from_slice::<CodexAuthFile>(&bytes)
         .ok()?
         .tokens?
@@ -337,10 +335,10 @@ impl<'de> serde::Deserialize<'de> for ClaudeJsonLogin {
 fn claude_json_login(
     path: &Path,
 ) -> Result<Option<(Option<&'static str>, Option<AccountLabel>)>, String> {
-    let bytes = match std::fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err("无法读取 .claude.json".into()),
+    let bytes = match crate::native_account_context::read_config(path) {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return Ok(None),
+        Err(_) => return Err("无法读取 .claude.json 或文件过大".into()),
     };
     let found = serde_json::from_slice::<ClaudeJsonLogin>(&bytes)
         .map_err(|_| ".claude.json 不是合法 JSON".to_string())?;
@@ -415,15 +413,49 @@ pub(crate) fn official_status(
             "本机没有 auth.json（登录可能存在钥匙串里）；需要时用官方命令确认".into()
         });
     }
-    let cli = resolve_cli(home_dir, bin)
-        .ok_or_else(|| format!("找不到 {bin} 命令，无法用官方命令确认登录状态"))?;
-    let mut command = crate::process::command(&cli);
-    command
-        .env("HOME", home_dir)
-        .env("PATH", crate::native_agents::path_for_command(&cli));
+    let profile_kind = match kind {
+        AuthKind::Claude => crate::native_profiles::model::ProfileKind::Claude,
+        AuthKind::Codex => crate::native_profiles::model::ProfileKind::Codex,
+    };
+    let account = crate::native_account_context::Account {
+        only: "official-status".into(),
+        kind: profile_kind,
+        bin: bin.into(),
+        dir: config_dir.map_or_else(
+            || {
+                home_dir.join(match kind {
+                    AuthKind::Claude => ".claude",
+                    AuthKind::Codex => ".codex",
+                })
+            },
+            Path::to_path_buf,
+        ),
+        profile: None,
+        mode: crate::native_profiles::model::AccountAuthMode::Official,
+    };
+    let ctx = crate::native::Context {
+        home_dir: home_dir.to_path_buf(),
+        data_dir: home_dir.join(".agent-manager"),
+    };
+    // Auth inspection must not load the caller's project settings. The actual
+    // launch separately checks its working directory and all project ancestors.
+    let neutral_cwd = crate::native_account_context::NeutralWorkingDir::new()
+        .map_err(|err| format!("无法创建隔离认证探针目录: {err:#}"))?;
+    crate::native_account_context::validate_layers(&account, neutral_cwd.path())
+        .map_err(|err| format!("{err:#}"))?;
+    crate::native_account_context::validate_cli_version(&ctx, &account)
+        .map_err(|err| format!("{err:#}"))?;
+    let mut command = crate::native_account_context::command_for(&ctx, &account)
+        .map_err(|err| format!("{err:#}"))?;
+    command.current_dir(neutral_cwd.path());
     match kind {
         AuthKind::Claude => {
-            command.args(["--settings", &claude_probe_settings(), "auth", "status"]);
+            command.args([
+                "--settings",
+                &stored_login_probe_settings(),
+                "auth",
+                "status",
+            ]);
             match config_dir {
                 Some(dir) => command.env("CLAUDE_CONFIG_DIR", dir),
                 None => command.env_remove("CLAUDE_CONFIG_DIR"),
@@ -438,18 +470,23 @@ pub(crate) fn official_status(
                 .ok()
                 .filter(|_| code == 0 || code == 1)
                 .ok_or_else(|| format!("{bin} auth status 的输出无法识别"))?;
-            if status.get("loggedIn").and_then(Value::as_bool) != Some(true) {
-                return Ok(logged_out());
+            match status.get("loggedIn").and_then(Value::as_bool) {
+                Some(false) => return Ok(logged_out()),
+                Some(true) => {}
+                None => {
+                    return Err(
+                        "stored login 探测缺少明确 loggedIn 状态，拒绝确认凭据存储为空".into(),
+                    )
+                }
             }
-            // 目录声明的凭据已经取消：剩下的 claude.ai / Console 登录是这个目录存的；长期令牌
-            // 只可能来自托管设置，按有登录处理（不放行第三方凭据写进来）。API key、apiKeyHelper
-            // 与云厂商（third_party）也只可能来自托管设置，不是官方账号登录。
+            // The fixed cancellation must yield explicit logged-out or a known
+            // stored login. An unknown source cannot establish an empty store.
             let key_source = status.get("apiKeySource").and_then(Value::as_str);
             let method = match status.get("authMethod").and_then(Value::as_str) {
                 _ if key_source == Some(CLAUDE_CONSOLE_KEY_SOURCE) => "console",
                 Some("claude.ai") => "claude.ai",
                 Some("oauth_token") => "oauth_token",
-                _ => return Ok(logged_out()),
+                _ => return Err("stored login 探测返回未知认证来源，拒绝确认凭据存储为空".into()),
             };
             Ok(LoginStatus {
                 logged_in: true,
@@ -540,8 +577,7 @@ pub(crate) fn status_command(
             .flatten()
             .find(|def| def.id == id)
             .ok_or_else(|| anyhow::anyhow!("未知实例: {id}"))?;
-        let dir =
-            crate::native_profiles::model::validate_config_dir(&def, &ctx.home_dir, &ctx.data_dir)?;
+        let dir = crate::native_profiles::paths::config_dir(ctx, &def)?;
         let kind = match def.kind {
             crate::native_profiles::model::ProfileKind::Claude => AuthKind::Claude,
             crate::native_profiles::model::ProfileKind::Codex => AuthKind::Codex,
@@ -569,22 +605,52 @@ pub(crate) fn status_command(
         };
         (kind, def.bin.clone(), None, false)
     };
-    let result = official_status(&ctx.home_dir, kind, &bin, config_dir.as_deref(), probe);
+    // Status can still show a stored login in a mixed directory, but an unsafe
+    // context never reaches the CLI. The same guard is used by actual launch.
+    let account = crate::native_account_context::resolve_account(ctx, &only)?;
+    let isolation_error = crate::native_account_context::validate_auth(ctx, &account)
+        .err()
+        .map(|err| format!("{err:#}"));
+    let effective_probe = probe && isolation_error.is_none();
+    let _lock = if effective_probe {
+        Some(crate::native_account_context::lock_directory(
+            ctx,
+            &account.dir,
+            false,
+        )?)
+    } else {
+        None
+    };
+    let result = official_status(
+        &ctx.home_dir,
+        kind,
+        &bin,
+        config_dir.as_deref(),
+        effective_probe,
+    );
     Ok(match result {
-        Ok(status) => json!({
-            "element": only,
-            "state": if status.logged_in { "logged-in" } else { "logged-out" },
-            "logged_in": status.logged_in,
-            "method": status.method,
-            "account": status.account.map(|account| json!({
-                "email": account.email,
-                "org": account.org,
-                "plan": account.plan,
-            })),
-            "third_party": third_party,
-            "mixed": third_party && status.logged_in,
-            "reason": null,
-        }),
+        Ok(status) => {
+            let isolation_error = isolation_error.or_else(|| {
+                (status.logged_in
+                    && account.mode != crate::native_profiles::model::AccountAuthMode::Official)
+                    .then(|| "账号凭据存储有另一份官方登录，拒绝受控启动".to_string())
+            });
+            json!({
+                "element": only,
+                "state": if status.logged_in { "logged-in" } else { "logged-out" },
+                "logged_in": status.logged_in,
+                "method": status.method,
+                "account": status.account.map(|account| json!({
+                    "email": account.email,
+                    "org": account.org,
+                    "plan": account.plan,
+                })),
+                "third_party": third_party,
+                "mixed": third_party && status.logged_in,
+                "reason": isolation_error,
+                "isolation_blocked": isolation_error.is_some(),
+            })
+        }
         Err(reason) => json!({
             "element": only,
             "state": "unknown",
@@ -593,7 +659,8 @@ pub(crate) fn status_command(
             "account": null,
             "third_party": third_party,
             "mixed": false,
-            "reason": reason,
+            "reason": isolation_error.as_ref().unwrap_or(&reason),
+            "isolation_blocked": isolation_error.is_some() || effective_probe,
         }),
     })
 }
@@ -1562,7 +1629,7 @@ mod tests {
             ),
             (
                 cli.as_str(),
-                format!("#!/usr/bin/env {interpreter}\necho 'Not logged in' >&2\nexit 1\n"),
+                format!("#!/usr/bin/env {interpreter}\nif [ \"$1\" = --version ]; then echo 'codex-cli 0.156.1'; exit 0; fi\necho 'Not logged in' >&2\nexit 1\n"),
             ),
         ] {
             let path = bin.join(name);

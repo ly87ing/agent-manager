@@ -6,7 +6,7 @@
 //!   请求头经 stdin 交给 curl（`-H @-`），不出现在进程参数里。旧的 SSE 传输不检测。
 //! - 命令经 `crate::process` 启动：Windows 上不弹窗、超时整组结束，没有代理变量时带上系统代理。
 //!
-//! 变量引用按各助手的写法取值（本工具的密钥文件优先，其次进程环境）；有变量取不到值就不启动，
+//! 变量引用按各助手的写法仅从显式选择的密钥文件取值；有变量取不到值就不启动，
 //! 直接说缺哪个。命令可能自己下载依赖（如 npx），所以只在用户点「测试连接」时运行。
 //! 输出里出现的变量取值一律打码，再经统一脱敏。
 
@@ -118,23 +118,14 @@ fn expand(
     let mut rest = text;
     while let Some(start) = rest.find(open) {
         let after = &rest[start + open.len()..];
-        let Some(end) = after.find(close) else { break };
+        let Some(end) = after.find(close) else {
+            return Err("MCP 变量引用不完整".into());
+        };
         let inner = &after[..end];
-        // Claude 支持 ${NAME:-默认值}
-        let (name, default) = match inner.split_once(":-") {
-            Some((name, default)) if *format == Format::ClaudeJson => (name, Some(default)),
-            _ => (inner, None),
-        };
-        if !crate::secret_values::valid_var_name(name) {
-            out.push_str(&rest[..start + open.len()]);
-            rest = after;
-            continue;
+        if !crate::secret_values::valid_var_name(inner) {
+            return Err("MCP 变量引用无效或使用默认值".into());
         }
-        let value = match (crate::secret_values::lookup(name), default) {
-            (Some(value), _) => value,
-            (None, Some(default)) => default.to_string(),
-            (None, None) => return Err(name.to_string()),
-        };
+        let value = crate::secret_values::lookup_account(inner).map_err(|_| inner.to_string())?;
         used.push(value.clone());
         out.push_str(&rest[..start]);
         out.push_str(&value);
@@ -145,7 +136,7 @@ fn expand(
 }
 
 fn resolve_ref(name: &str, used: &mut Vec<String>) -> std::result::Result<String, String> {
-    let value = crate::secret_values::lookup(name).ok_or_else(|| name.to_string())?;
+    let value = crate::secret_values::lookup_account(name).map_err(|_| name.to_string())?;
     used.push(value.clone());
     Ok(value)
 }
@@ -360,14 +351,19 @@ fn tool_names(response: &Value) -> Option<Vec<String>> {
     )
 }
 
-/// 用户 PATH（登录 shell 里的那份）接在继承的 PATH 前面：从程序坞启动的应用 PATH 很短。
+/// Resolve programs from absolute PATH entries and known local install folders.
+/// MCP checks do not execute user shell startup files to discover a command.
 fn user_path(ctx: &Context) -> (Vec<PathBuf>, std::ffi::OsString) {
-    let mut dirs = crate::native_programs::locate::user_path(ctx, false).dirs;
-    if let Some(inherited) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&inherited) {
-            if !dirs.contains(&dir) {
-                dirs.push(dir);
-            }
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|paths| {
+            std::env::split_paths(&paths)
+                .filter(|path| path.is_absolute())
+                .collect()
+        })
+        .unwrap_or_default();
+    for dir in crate::native_agents::fallback_bin_dirs(&ctx.home_dir) {
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
         }
     }
     let joined = std::env::join_paths(&dirs).unwrap_or_default();
@@ -395,9 +391,7 @@ fn check_stdio(
                 return (
                     Outcome::fail(
                         "variables",
-                        format!(
-                        "变量 {var} 没有取值：到「设置 › 密钥」里填上，或在启动本工具的环境里设置"
-                    ),
+                        format!("变量 {var} 没有取值：到「设置 › 密钥」选择的外部文件里填上"),
                     ),
                     secrets,
                 )
@@ -446,11 +440,16 @@ fn check_stdio(
             secrets,
         );
     };
-    let mut command = crate::process::command_with_env(
-        &program,
-        env.iter()
-            .map(|(key, value)| (key.as_str(), value.as_str())),
-    );
+    let mut command = match crate::native_account_context::clean_command(ctx, &program) {
+        Ok(command) => command,
+        Err(err) => {
+            return (
+                Outcome::fail("start", format!("受控环境检查失败：{err}")),
+                secrets,
+            )
+        }
+    };
+    command.envs(env);
     command
         .args(&args)
         .env("PATH", &path)
@@ -547,6 +546,7 @@ fn completed(server: Option<Value>, tools: Option<Vec<String>>) -> Outcome {
 
 /// 一次 POST：返回（响应头里的会话 id，id 对上的 JSON-RPC 响应）。
 fn http_post(
+    ctx: &Context,
     url: &str,
     headers: &[(String, String)],
     session: Option<&str>,
@@ -554,6 +554,19 @@ fn http_post(
     want: Option<u64>,
     deadline: Instant,
 ) -> std::result::Result<(Option<String>, Option<Value>), String> {
+    super::policy_view::validate_remote_url(url)
+        .map_err(|_| "远程地址不安全：仅允许 HTTPS 或本机 HTTP，没有发送请求".to_string())?;
+    if url.chars().any(char::is_control) {
+        return Err("远程地址包含控制字符，没有发送请求".into());
+    }
+    for (name, value) in headers {
+        if !super::policy_view::is_valid_header_name(name) || value.chars().any(char::is_control) {
+            return Err("请求头包含非法名称或控制字符，没有发送请求".into());
+        }
+    }
+    if session.is_some_and(|id| id.chars().any(char::is_control)) {
+        return Err("远程会话标识包含控制字符，没有发送请求".into());
+    }
     let left = deadline
         .checked_duration_since(Instant::now())
         .ok_or("超时")?
@@ -568,8 +581,25 @@ fn http_post(
     if let Some(id) = session {
         header_text.push_str(&format!("Mcp-Session-Id: {id}\n"));
     }
-    let mut command = crate::process::command("curl");
+    let (dirs, _) = user_path(ctx);
+    let curl = crate::native_programs::locate::find_all(
+        &crate::native_programs::locate::UserPath {
+            dirs,
+            stable: Vec::new(),
+            error: None,
+        },
+        "curl",
+    )
+    .into_iter()
+    .next()
+    .ok_or_else(|| "在 PATH 中找不到 curl".to_string())?;
+    let mut command = crate::native_account_context::clean_command(ctx, &curl)
+        .map_err(|_| "无法建立受控 curl 环境".to_string())?;
     command.args([
+        "--disable",
+        "--globoff",
+        "--proto",
+        "=http,https",
         "-sS",
         "-i",
         "--max-time",
@@ -580,6 +610,7 @@ fn http_post(
         "@-",
         "--data-binary",
         &body.to_string(),
+        "--url",
         url,
     ]);
     let mut running = Running::spawn(command, Some(header_text.as_bytes()))
@@ -662,6 +693,7 @@ fn http_post(
 }
 
 fn check_remote(
+    ctx: &Context,
     format: &Format,
     view: &View,
     raw: &Value,
@@ -684,19 +716,34 @@ fn check_remote(
             )
         }
     };
+    if super::policy_view::validate_remote_url(&url).is_err() || url.chars().any(char::is_control) {
+        return (
+            Outcome::fail(
+                "start",
+                "远程地址展开后不安全：仅允许 HTTPS 或本机 HTTP，没有发送请求",
+            ),
+            secrets,
+        );
+    }
     let mut headers = Vec::new();
     for (name, value) in &view.headers {
+        if !super::policy_view::is_valid_header_name(name) {
+            return (
+                Outcome::fail("variables", "请求头名称非法，没有发送请求"),
+                secrets,
+            );
+        }
         let resolved = match value {
             HeaderVal::Ref(var) => resolve_ref(var, &mut secrets),
             HeaderVal::Lit(text) => expand(format, text, &mut secrets),
         };
         match resolved {
-            Ok(value) if !value.contains('\n') && !value.contains('\r') => {
+            Ok(value) if !value.chars().any(char::is_control) => {
                 headers.push((name.clone(), value))
             }
             Ok(_) => {
                 return (
-                    Outcome::fail("variables", format!("请求头 {name} 的取值含换行")),
+                    Outcome::fail("variables", "请求头取值含控制字符，没有发送请求"),
                     secrets,
                 )
             }
@@ -713,7 +760,7 @@ fn check_remote(
     }
     let deadline = Instant::now() + timeout;
     let (session, response) =
-        match http_post(&url, &headers, None, &initialize(), Some(1), deadline) {
+        match http_post(ctx, &url, &headers, None, &initialize(), Some(1), deadline) {
             Ok(result) => result,
             Err(err) => {
                 return (
@@ -746,6 +793,7 @@ fn check_remote(
     let server = server_info(&response);
     let initialized: Value = serde_json::from_str(INITIALIZED).expect("static json");
     if let Err(err) = http_post(
+        ctx,
         &url,
         &headers,
         session.as_deref(),
@@ -762,6 +810,7 @@ fn check_remote(
         return (completed(server, None), secrets);
     }
     let outcome = match http_post(
+        ctx,
         &url,
         &headers,
         session.as_deref(),
@@ -779,6 +828,7 @@ fn check_remote(
 /// `mcp:check --only mcp:<name> --agent <账号>`。
 pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
     let (server, agent, base, selected_cwd) = parse_args(req)?;
+    let _account_lock = crate::native_secrets::lock_credential_account(ctx, &agent, false)?;
     let inv = inventory::load(ctx)?;
     let scan = inv
         .scan(&agent)
@@ -793,6 +843,7 @@ pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
         .view
         .as_ref()
         .map_err(|reason| anyhow!("条目无法识别：{reason}"))?;
+    super::preflight::validate_entry_variables(ctx, &agent, &scan.target.format, view)?;
     if base.as_ref().is_some_and(|base| base != &entry.base) {
         bail!("{server} 的配置已变化，请刷新后重新检查");
     }
@@ -857,9 +908,14 @@ pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
         Transport::Stdio => {
             check_stdio(ctx, &scan.target.format, view, &cwd, timeout, tool_timeout)
         }
-        Transport::Remote => {
-            check_remote(&scan.target.format, view, &entry.raw, timeout, tool_timeout)
-        }
+        Transport::Remote => check_remote(
+            ctx,
+            &scan.target.format,
+            view,
+            &entry.raw,
+            timeout,
+            tool_timeout,
+        ),
     };
     let tools = outcome.tools.as_ref();
     Ok(json!({
@@ -882,4 +938,65 @@ pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
         "detail": outcome.detail.map(|text| scrub(&text, &secrets)),
         "elapsed_ms": started.elapsed().as_millis() as u64,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn http_request_rejects_unsafe_url_header_and_session_before_starting_curl() {
+        let root = std::env::temp_dir().join(format!(
+            "am-mcp-http-guard-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let ctx = Context {
+            home_dir: root.join("home"),
+            data_dir: root.join("data"),
+        };
+        for (url, headers, session) in [
+            ("--config=/YOUR_OTHER_ACCOUNT/curlrc", Vec::new(), None),
+            ("file:///YOUR_OTHER_ACCOUNT/curlrc", Vec::new(), None),
+            (
+                "https://mcp.example.invalid",
+                vec![("X-Test\nAuthorization".into(), "static".into())],
+                None,
+            ),
+            (
+                "https://mcp.example.invalid",
+                vec![(
+                    "X-Test".into(),
+                    "static\r\nAuthorization: YOUR_OTHER_ACCOUNT".into(),
+                )],
+                None,
+            ),
+            (
+                "https://mcp.example.invalid",
+                Vec::new(),
+                Some("session\nYOUR_OTHER_ACCOUNT"),
+            ),
+            (
+                "https://mcp.example.invalid",
+                Vec::new(),
+                Some("session\0YOUR_OTHER_ACCOUNT"),
+            ),
+        ] {
+            let result = http_post(
+                &ctx,
+                url,
+                &headers,
+                session,
+                &json!({}),
+                Some(1),
+                Instant::now() + Duration::from_secs(1),
+            );
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("没有发送请求"));
+            assert!(!root.exists());
+        }
+    }
 }

@@ -255,20 +255,44 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
     }
     let payload: Value =
         serde_json::from_str(raw).map_err(|_| anyhow::anyhow!("备份内容不是合法 JSON"))?;
-    let payload = validate_payload(&payload)?;
+    let mut payload = validate_payload(&payload)?;
+    let before = store::effective_policy(ctx)?;
+    crate::native::prepare_account_generations(&before, &mut payload.policy, true, None)?;
+    crate::native::validate_account_policy_change(ctx, &before, &payload.policy)?;
+    crate::native_mcp::saved::validate_saved_rows(ctx, &payload.policy, &payload.mcp_saved)?;
+    let _account_locks =
+        crate::native_account_context::lock_policy_account_changes(ctx, &before, &payload.policy)?;
 
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     // 本机旧库先迁移（本机的已保存项因此不会随策略替换而丢失），再换策略；
     // 备份策略里的旧版 MCP 定义随即转成未分配的已保存定义。
     let current = store::policy_from_connection(&tx)?;
-    let scans = crate::native_mcp::inventory::scan_targets(&current, &ctx.home_dir);
+    if !store::policy_matches_write_snapshot(&tx, &current, &before)? {
+        bail!("账号登记在导入预检后发生变化，未导入；请刷新后重试");
+    }
+    crate::native::validate_account_policy_change(ctx, &current, &payload.policy)?;
+    crate::native_mcp::saved::validate_saved_rows(ctx, &payload.policy, &payload.mcp_saved)?;
+    let scans = crate::native_mcp::inventory::scan_targets_checked(ctx, &current);
     crate::native_mcp::legacy::migrate(&tx, &scans, Some(&req.run_id))?;
+    crate::native::reserve_changed_account_references(ctx, &tx, &current, &payload.policy)?;
     store::write_policy(&tx, &payload.policy)?;
+    crate::native::claim_changed_account_references(ctx, &tx, &current, &payload.policy)?;
     crate::native_mcp::legacy::migrate(&tx, &scans, Some(&req.run_id))?;
     if !payload.mcp_saved.is_empty() {
         mcp_saved::ensure_table(&tx)?;
+        let targets = crate::native_mcp::targets::agent_targets(&payload.policy, &ctx.home_dir);
         for row in &payload.mcp_saved {
+            if !row.agent.is_empty() {
+                let target = targets
+                    .iter()
+                    .find(|target| target.agent == row.agent)
+                    .ok_or_else(|| anyhow::anyhow!("导入的 MCP 快照账号未登记，拒绝保存"))?;
+                let view = crate::native_mcp::entry::parse(&target.format, &row.entry)
+                    .map_err(|_| anyhow::anyhow!("导入的 MCP 快照不可解析，拒绝保存"))?;
+                let names = crate::native_mcp::entry::all_referenced_vars(&target.format, &view)?;
+                crate::native_secrets::claim_variable_ownership(ctx, &tx, &row.agent, &names)?;
+            }
             mcp_saved::upsert(&tx, row)?;
         }
     }
