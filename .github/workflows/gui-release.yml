@@ -264,6 +264,11 @@ jobs:
         working-directory: app
         run: pnpm typecheck
 
+      - name: Prepare private Windows test directory
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: ./scripts/prepare-windows-test-temp.ps1
+
       - name: Run unit tests
         working-directory: app
         run: pnpm test:unit run --maxWorkers=2

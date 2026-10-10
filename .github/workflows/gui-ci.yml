@@ -41,6 +41,11 @@ jobs:
           key: ${{ runner.os }}-engine-cargo-${{ hashFiles('engine-rs/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-engine-cargo-
 
+      - name: Prepare private Windows test directory
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: ./scripts/prepare-windows-test-temp.ps1
+
       - name: Run cargo tests
         run: cargo test --manifest-path engine-rs/Cargo.toml
 
@@ -144,6 +149,11 @@ jobs:
       - name: Typecheck
         working-directory: app
         run: pnpm typecheck
+
+      - name: Prepare private Windows test directory
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        run: ./scripts/prepare-windows-test-temp.ps1
 
       - name: Run unit tests
         working-directory: app

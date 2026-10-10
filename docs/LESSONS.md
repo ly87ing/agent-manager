@@ -93,6 +93,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Absolute Windows volume/share roots need ACL checks too. Skip only drive-relative prefixes; permitting new root children must not permit replacing existing children or changing their ACL/owner.
 - Seen 1× (2026-10-10).
 
+**Native Windows CI must diagnose ancestor ACL failures before loosening checks.**
+- The first native run passed 214 library tests and rejected 14 lock users at ancestor validation. Generic errors hid whether the runtime or fixture parent failed. Preserve the static ACL rejection cause and report only permission categories for both parent chains.
+- Use a fresh protected test directory under the OS user profile for Windows TEMP/TMP. Leave existing directory permissions unchanged; retain unsafe-parent and private-credential rejection assertions. Native CI must confirm the cause and rerun the full suite.
+- Seen 1× (2026-10-10).
+
 **Launch the generated OS entry; a correct-looking string is not startup evidence.**
 - The first Linux autostart entry escaped a literal `%` as `%%` according to the Desktop Entry syntax. Real `gio launch` refused it because GIO checks whether the executable exists before expanding field codes. File readback alone had passed. Such paths now fail before writing; a disposable Linux run executed the exact path containing spaces, quotes, `$`, and a backslash.
 - Seen 1× (2026-10-09).

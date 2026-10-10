@@ -392,8 +392,9 @@ fn validate_ancestors(path: &Path) -> Result<()> {
                 #[cfg(windows)]
                 {
                     let _ = meta;
-                    crate::secret_values::validate_windows_acl(&current, false)
-                        .map_err(|_| anyhow!("账号锁父目录的 Windows ACL 不安全，拒绝操作"))?;
+                    crate::secret_values::validate_windows_acl(&current, false).map_err(|err| {
+                        anyhow!("账号锁父目录的 Windows ACL 不安全，拒绝操作：{err}")
+                    })?;
                 }
             }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => break,
