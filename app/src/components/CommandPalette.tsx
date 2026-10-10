@@ -68,7 +68,7 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const refreshUpstream = useRefreshUpstream();
 
-  const agents = useEngineQuery<StatusData>("agents:status", [], { enabled: open });
+  const agents = useEngineQuery<StatusData>("agents:status", ["--metadata-only"], { enabled: open });
   const profiles = useEngineQuery<StatusData>("profiles:status", [], { enabled: open });
   const aliases = useEngineQuery<StatusData>("aliases:status", [], { enabled: open });
   const skills = useEngineQuery<StatusData>("skills:status", [], { enabled: open && scope === "all" });

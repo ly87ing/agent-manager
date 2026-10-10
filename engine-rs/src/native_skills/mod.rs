@@ -101,7 +101,16 @@ pub(crate) fn hidden_builtin_collections(
 
 pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     match req.command.as_str() {
-        "skills:status" | "skills.status" => status::build_status(ctx),
+        "skills:status" | "skills.status" => {
+            if req
+                .args
+                .iter()
+                .any(|arg| !matches!(arg.as_str(), "--collections-only" | "--offline"))
+            {
+                bail!("skills:status 仅接受 --collections-only 或 --offline");
+            }
+            status::build_status_view(ctx, req.flag("--collections-only"))
+        }
         "skills:apply" | "skills.apply" => apply::apply(ctx, req),
         "skills:fork" | "skills.fork" => fork::fork(ctx, req),
         "skills:versions" | "skills.versions" => versions_command(ctx, req),

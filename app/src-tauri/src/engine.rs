@@ -182,6 +182,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         }
         ("system", "refresh-upstream") => specs.push(("--only", ArgValueKind::ElementId)),
         ("programs", "status") => specs.push(("--rescan", ArgValueKind::Flag)),
+        ("agents", "status") => specs.push(("--metadata-only", ArgValueKind::Flag)),
+        ("skills", "status") => specs.push(("--collections-only", ArgValueKind::Flag)),
         ("programs", "preview" | "apply") => {
             specs.push(("--program", ArgValueKind::ElementId));
             specs.push(("--action", ArgValueKind::ProgramAction));

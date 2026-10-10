@@ -541,10 +541,11 @@ fn status_element(
     ctx: &Context,
     def: &AgentDef,
     probes: &std::collections::BTreeMap<String, crate::native_upstream::ProbeRecord>,
+    metadata_only: bool,
 ) -> Value {
     let bin_path = resolve_bin(&ctx.home_dir, &def.bin);
     let installed = bin_path.is_some();
-    let version = if installed {
+    let version = if installed && !metadata_only {
         bin_path.as_deref().and_then(probe_version)
     } else {
         None
@@ -834,10 +835,17 @@ pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let defs = load_definitions(ctx)?;
     match canonical_command(&req.command).as_str() {
         "agents:status" => {
+            if req
+                .args
+                .iter()
+                .any(|arg| !matches!(arg.as_str(), "--metadata-only" | "--offline"))
+            {
+                bail!("agents:status 仅接受 --metadata-only 或 --offline");
+            }
             let probes = crate::native_upstream::load_probe_cache(ctx)?;
             let elements: Vec<Value> = defs
                 .iter()
-                .map(|def| status_element(ctx, def, &probes))
+                .map(|def| status_element(ctx, def, &probes, req.flag("--metadata-only")))
                 .collect();
             Ok(json!({"domain": "agents", "elements": elements}))
         }

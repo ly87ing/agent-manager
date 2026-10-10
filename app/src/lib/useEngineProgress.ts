@@ -25,12 +25,17 @@ export function useEngineProgress(runId: string | null, intervalMs = 500): Engin
     setProgress(null);
     if (!runId) return;
     let alive = true;
-    const poll = () =>
-      runEngine<{ progress: EngineProgress | null }>("runs:progress", ["--run", runId])
+    let pending = false;
+    const poll = () => {
+      if (pending) return;
+      pending = true;
+      void runEngine<{ progress: EngineProgress | null }>("runs:progress", ["--run", runId])
         .then((envelope) => {
           if (alive && envelope.ok && envelope.data.progress) setProgress(envelope.data.progress);
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => { pending = false; });
+    };
     void poll();
     const timer = setInterval(() => void poll(), intervalMs);
     return () => {

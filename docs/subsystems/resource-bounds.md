@@ -29,3 +29,46 @@ cargo test --manifest-path engine-rs/Cargo.toml --test native_skills
 Use the same large local source and isolated HOME/data to compare CLI peak RSS and
 fingerprints against the previous build. See the [goal record](../goal-lightweight.md)
 for the measured workload and results.
+
+## Frontend retention and query work
+
+The execution provider retains the newest 50 completed operations and all running
+operations. It keeps at most 50 resource-step summaries and 20 diagnostics, each
+text field limited to 2,048 characters. Full command results are returned to the
+caller and fetched from the audit store only when a user opens details.
+Inactive query cache entries expire after 60 seconds. Known resource writes
+invalidate their domain and its cross-domain dependencies; unknown writers retain
+the conservative all-domain refresh. Batch resource writes refresh once in finally,
+including partial failures. Runs polls only while an operation is running, and
+progress polls cannot overlap.
+
+Account selectors use agents:status --metadata-only, which skips CLI version
+processes. Accounts and controlled launch compatibility checks keep their normal
+version validation. Sources uses skills:status --collections-only: it discovers
+names and source metadata without building skill fingerprints. Per-skill health is
+deferred (discovery_inbox is omitted); update/copy actions fetch full status before
+planning writes. Dependency status runs only when its owning page is mounted and
+performs no executable version probes or network access.
+
+## Process output and previews
+
+MCP checks retain at most 1 MiB per stdout line, 4 MiB total, and 16 queued lines.
+Oversized or flooded output fails explicitly. Stderr keeps its existing bounded
+tail; HTTP body accumulation uses one string rather than a per-line vector. Normal
+process-group cleanup, credential scrubbing, and account locks remain in place.
+Git previews retain at most 64 KiB plus one sentinel byte per blob through the
+shared deadline-aware process capture. Oversized files remain distinguishable from
+empty and missing files; previews still display at most 30 file contents.
+These limits bound payload retention, not the number of configuration items or the
+entire WebKit/application memory footprint.
+
+Additional checks:
+
+```sh
+cargo test --manifest-path engine-rs/Cargo.toml --lib native_mcp::check::tests
+cargo test --manifest-path engine-rs/Cargo.toml --lib git_preview_retains_a_bounded_blob
+cargo test --manifest-path engine-rs/Cargo.toml --test native_core metadata_status
+cargo test --manifest-path engine-rs/Cargo.toml --test native_skills collection_view
+cd app
+pnpm test:unit run src/test/executionBounds.test.tsx src/test/ProgramsPage.test.tsx src/test/SourcesPage.test.tsx src/test/RunsPage.test.tsx
+```

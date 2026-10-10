@@ -17,14 +17,14 @@ import { DiscoverPanel } from "../components/DiscoverPanel";
 import type { EngineElement, PolicyData, SkillRecommendation, StatusData } from "../lib/contract";
 import { runEngine } from "../lib/engine";
 import { useExecutions } from "../lib/execution";
-import { agentCellsOf, type SkillCollectionObserved, type SkillCollectionSpec, type SkillSpec } from "../lib/observed";
+import { type SkillCollectionObserved, type SkillCollectionSpec, type SkillSpec } from "../lib/observed";
 import { engineKeys, useCheckingUpdates, useEngineQuery } from "../lib/queries";
 import { dismissRecommendation, loadDismissed } from "../lib/recommendDismiss";
 import { encodeShareLink, type SharePayload } from "../lib/shareLink";
 import { availableSkills, fullSkillDefinition, isCollection } from "../lib/skillCollections";
 import { addToAllRows, versionUpdateRows } from "../lib/skillFill";
 import { describeTrack, versionLabel } from "../lib/skillTrack";
-import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
+import { useAccountGroups, useAccountList, useAccountNames } from "../lib/useAccountNames";
 import { useBatchApply } from "../lib/useBatchApply";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -57,7 +57,7 @@ export default function SourcesPage({
   importPayload?: Extract<SharePayload, { kind: "skills" }> | null;
   onImportConsumed?: () => void;
 } = {}) {
-  const skills = useEngineQuery<StatusData>("skills:status");
+  const skills = useEngineQuery<StatusData>("skills:status", ["--collections-only"]);
   const rules = useEngineQuery<StatusData>("rules:status");
   const policy = useEngineQuery<PolicyData>("policy:get");
   const userSources = useRuleSources();
@@ -67,6 +67,7 @@ export default function SourcesPage({
   const { execute } = useExecutions();
   const queryClient = useQueryClient();
   const nameOfAccount = useAccountNames();
+  const accounts = useAccountList();
   const groupsOf = useAccountGroups();
   const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
   const [adding, setAdding] = useState<"collection" | "rule" | null>(null);
@@ -114,11 +115,14 @@ export default function SourcesPage({
   const sourceRules = rules.data?.ok ? rules.data.data.source_rules ?? [] : [];
   const layers = policy.data?.ok ? policy.data.data.layers : null;
   const nameOf = (collection: EngineElement) => collection.id.replace(/^skill:/, "");
-  const skillCount = (name: string) => skillElements.filter((element) => (element.spec as SkillSpec).collection === name).length;
+  const skillCount = (name: string) => {
+    const observed = collections.find(collection => nameOf(collection) === name)?.observed as SkillCollectionObserved | undefined;
+    return observed?.discovered?.length ?? skillElements.filter((element) => (element.spec as SkillSpec).collection === name).length;
+  };
   const ruleCount = (name: string) => sourceRules.filter((rule) => rule.collection === name).length;
   const agentIds = Array.from(
     new Set([
-      ...skillElements.flatMap((element) => Object.keys(agentCellsOf(element))),
+      ...accounts.flatMap(group => group.accounts.map(account => account.elementId.replace(/^(agents|profiles):/, ""))),
       ...(unmanaged?.skills ?? []).flatMap((skill) => skill.locations.flatMap((location) => (location.agent ? [location.agent] : []))),
       ...(unmanaged?.duplicates ?? []).map((dup) => dup.agent),
     ]),

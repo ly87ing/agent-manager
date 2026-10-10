@@ -13,7 +13,11 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{channel, sync_channel, Receiver, RecvTimeoutError};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
@@ -32,6 +36,9 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 /// 报告里最多列这么多个工具名。
 const TOOL_NAMES: usize = 30;
 const STDERR_TAIL: usize = 600;
+const LINE_LIMIT: usize = 1024 * 1024;
+const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
+const QUEUED_LINES: usize = 16;
 
 struct Outcome {
     ok: bool,
@@ -170,8 +177,52 @@ const INITIALIZED: &str = r#"{"jsonrpc":"2.0","method":"notifications/initialize
 
 /// 没等到响应的原因：进程关了输出（多半已退出），或到点了。
 enum Waited {
+    Limit,
     Exited,
     Timeout,
+}
+
+/// Bound each line, total bytes, and queue allocation independently.
+fn read_lines(
+    reader: impl Read,
+    tx: std::sync::mpsc::SyncSender<String>,
+    overflow: Arc<AtomicBool>,
+) {
+    let mut reader = BufReader::new(reader);
+    let mut total = 0usize;
+    loop {
+        let mut bytes = Vec::new();
+        let read = reader
+            .by_ref()
+            .take((LINE_LIMIT + 1) as u64)
+            .read_until(b'\n', &mut bytes);
+        let Ok(n) = read else { break };
+        if n == 0 {
+            break;
+        }
+        total += n;
+        if n > LINE_LIMIT || total > OUTPUT_LIMIT {
+            overflow.store(true, Ordering::Relaxed);
+            break;
+        }
+        if bytes.last() == Some(&b'\n') {
+            bytes.pop();
+        }
+        if bytes.last() == Some(&b'\r') {
+            bytes.pop();
+        }
+        let Ok(line) = String::from_utf8(bytes) else {
+            break;
+        };
+        match tx.try_send(line) {
+            Ok(()) => {}
+            Err(std::sync::mpsc::TrySendError::Full(_)) => {
+                overflow.store(true, Ordering::Relaxed);
+                break;
+            }
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
+        }
+    }
 }
 
 /// 一个子进程：stdout 按行进通道，stderr 只留结尾一段。
@@ -180,6 +231,7 @@ struct Running {
     group: crate::process::Group,
     lines: Receiver<String>,
     stderr: Receiver<Vec<u8>>,
+    overflow: Arc<AtomicBool>,
 }
 
 impl Running {
@@ -194,16 +246,11 @@ impl Running {
                 let _ = pipe.write_all(data);
             }
         }
-        let (tx, lines) = channel();
+        let (tx, lines) = sync_channel(QUEUED_LINES);
         let stdout = child.stdout.take().expect("piped stdout");
-        std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines() {
-                let Ok(line) = line else { break };
-                if tx.send(line).is_err() {
-                    break;
-                }
-            }
-        });
+        let overflow = Arc::new(AtomicBool::new(false));
+        let reader_overflow = Arc::clone(&overflow);
+        std::thread::spawn(move || read_lines(stdout, tx, reader_overflow));
         let (tx, stderr) = channel();
         let mut pipe = child.stderr.take().expect("piped stderr");
         std::thread::spawn(move || {
@@ -225,6 +272,7 @@ impl Running {
             group,
             lines,
             stderr,
+            overflow,
         })
     }
 
@@ -241,6 +289,9 @@ impl Running {
     /// 等 id 对上的响应；中间的通知、日志行跳过。
     fn wait_for(&mut self, id: u64, deadline: Instant) -> std::result::Result<Value, Waited> {
         loop {
+            if self.overflow.load(Ordering::Relaxed) {
+                return Err(Waited::Limit);
+            }
             let left = deadline
                 .checked_duration_since(Instant::now())
                 .ok_or(Waited::Timeout)?;
@@ -258,17 +309,30 @@ impl Running {
                     }
                 }
                 Err(RecvTimeoutError::Timeout) => return Err(Waited::Timeout),
-                Err(RecvTimeoutError::Disconnected) => return Err(Waited::Exited),
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(if self.overflow.load(Ordering::Relaxed) {
+                        Waited::Limit
+                    } else {
+                        Waited::Exited
+                    })
+                }
             }
         }
     }
 
     /// 剩下的 stdout 全部收齐（进程自己结束时用）。
-    fn drain(&mut self, deadline: Instant) -> Vec<String> {
-        let mut out = Vec::new();
+    fn drain(&mut self, deadline: Instant) -> String {
+        let mut out = String::new();
         while let Some(left) = deadline.checked_duration_since(Instant::now()) {
             match self.lines.recv_timeout(left) {
-                Ok(line) => out.push(line),
+                Ok(line) => {
+                    if out.len() + line.len() + 1 > OUTPUT_LIMIT {
+                        self.overflow.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    out.push_str(&line);
+                    out.push('\n');
+                }
                 Err(_) => break,
             }
         }
@@ -482,6 +546,7 @@ fn stdio_session(
     }
     let response = match running.wait_for(1, deadline) {
         Ok(response) => response,
+        Err(Waited::Limit) => return Outcome::fail("output", "MCP 输出超出上限，已停止测试"),
         Err(Waited::Exited) => return Outcome::fail("initialize", "命令退出了，没有回应初始化"),
         Err(Waited::Timeout) => {
             return Outcome::fail(
@@ -511,6 +576,7 @@ fn stdio_session(
     }
     match running.wait_for(2, Instant::now() + tool_timeout) {
         Ok(response) => tools_outcome(server, &response),
+        Err(Waited::Limit) => Outcome::fail("output", "MCP 输出超出上限，已停止测试"),
         Err(Waited::Exited) => Outcome::fail("tools", "命令退出了，没有返回工具列表"),
         Err(Waited::Timeout) => Outcome::fail(
             "tools",
@@ -619,7 +685,7 @@ fn http_post(
     let mut session_id = None;
     let mut status = None;
     let mut found = None;
-    let mut body_lines = Vec::new();
+    let mut body_lines = String::new();
     let mut in_body = false;
     loop {
         let Some(left) = deadline.checked_duration_since(Instant::now()) else {
@@ -655,12 +721,17 @@ fn http_post(
                 }
             }
         }
-        body_lines.push(line);
+        body_lines.push_str(&line);
+        body_lines.push('\n');
     }
     if found.is_none() {
-        body_lines.extend(running.drain(Instant::now() + Duration::from_millis(200)));
+        body_lines.push_str(&running.drain(Instant::now() + Duration::from_millis(200)));
     }
+    let overflow = running.overflow.load(Ordering::Relaxed);
     let (stderr, _) = running.finish();
+    if overflow {
+        return Err("MCP 输出超出上限，已停止测试".into());
+    }
     let Some(code) = status else {
         return Err(if stderr.is_empty() {
             "没有收到响应".to_string()
@@ -669,7 +740,7 @@ fn http_post(
         });
     };
     if !(200..300).contains(&code) {
-        let body = body_lines.join(" ");
+        let body = body_lines.replace('\n', " ");
         let snippet: String = body.chars().take(200).collect();
         return Err(format!(
             "HTTP {code}{}",
@@ -683,7 +754,7 @@ fn http_post(
     if found.is_none() {
         if let Some(id) = want {
             // 普通 JSON 响应可能跨行
-            let body = body_lines.join("\n");
+            let body = body_lines;
             found = serde_json::from_str::<Value>(body.trim())
                 .ok()
                 .filter(|value| value.get("id").and_then(Value::as_u64) == Some(id));
@@ -943,6 +1014,38 @@ pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_line_and_a_flooded_queue_fail_without_unbounded_retention() {
+        let (tx, rx) = sync_channel(QUEUED_LINES);
+        let overflow = Arc::new(AtomicBool::new(false));
+        read_lines(std::io::repeat(b'x'), tx, Arc::clone(&overflow));
+        assert!(overflow.load(Ordering::Relaxed));
+        assert_eq!(rx.try_iter().count(), 0);
+
+        let (tx, rx) = sync_channel(QUEUED_LINES);
+        let overflow = Arc::new(AtomicBool::new(false));
+        read_lines(
+            std::io::Cursor::new("log\n".repeat(100_000)),
+            tx,
+            Arc::clone(&overflow),
+        );
+        assert!(overflow.load(Ordering::Relaxed));
+        assert_eq!(rx.try_iter().count(), QUEUED_LINES);
+    }
+
+    #[test]
+    fn bounded_reader_preserves_protocol_lines_and_a_final_line_without_newline() {
+        let (tx, rx) = sync_channel(QUEUED_LINES);
+        let overflow = Arc::new(AtomicBool::new(false));
+        read_lines(
+            std::io::Cursor::new(b"first\r\n\nlast"),
+            tx,
+            Arc::clone(&overflow),
+        );
+        assert!(!overflow.load(Ordering::Relaxed));
+        assert_eq!(rx.try_iter().collect::<Vec<_>>(), ["first", "", "last"]);
+    }
 
     #[test]
     fn http_request_rejects_unsafe_url_header_and_session_before_starting_curl() {

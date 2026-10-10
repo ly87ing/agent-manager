@@ -178,7 +178,7 @@ export default function RunsPage() {
   const listQuery = useQuery({
     queryKey: engineKeys.command("runs:list"),
     queryFn: () => runEngine<RunsListData>("runs:list"),
-    refetchInterval: 5000,
+    refetchInterval: executions.some(record => record.status === "running") ? 2000 : false,
   });
 
   const detailQuery = useQuery({

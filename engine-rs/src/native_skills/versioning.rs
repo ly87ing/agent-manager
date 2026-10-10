@@ -204,6 +204,24 @@ pub(crate) fn available_at(repo_dir: &Path, rev: &str, coll_name: &str) -> Resul
 pub(crate) const DIFF_FILE_LIMIT: usize = 64 * 1024;
 pub(crate) const DIFF_FILE_COUNT: usize = 30;
 
+fn preview_blob(repo_dir: &Path, rev: &str, file: &str) -> Option<Vec<u8>> {
+    let mut command = crate::platform::git_command();
+    command
+        .args(["show", &format!("{rev}:{file}")])
+        .current_dir(repo_dir)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    // One extra byte distinguishes an oversized file from an empty/missing one.
+    let output = crate::process::capture_group(
+        &mut command,
+        std::time::Duration::from_secs(60),
+        DIFF_FILE_LIMIT + 1,
+    )
+    .ok()?;
+    output.status.success().then_some(output.stdout)
+}
+
 pub(crate) fn text_or_none(bytes: Option<Vec<u8>>) -> Result<Option<String>, ()> {
     match bytes {
         None => Ok(None),
@@ -361,11 +379,7 @@ pub(crate) fn preview_update(
     let mut other: Vec<Value> = Vec::new();
     let mut fields = diff.split('\0').filter(|f| !f.is_empty());
     let mut shown = 0usize;
-    let show = |rev: &str, file: &str| -> Option<Vec<u8>> {
-        git_in(repo_dir, &["show", &format!("{rev}:{file}")], &coll.name)
-            .ok()
-            .map(String::into_bytes)
-    };
+    let show = |rev: &str, file: &str| -> Option<Vec<u8>> { preview_blob(repo_dir, rev, file) };
     while let (Some(status), Some(file)) = (fields.next(), fields.next()) {
         let status = match status.chars().next() {
             Some('A') => "added",
@@ -557,6 +571,44 @@ pub(crate) fn versions(ctx: &Context, coll: &CollectionDef, repo_dir: &Path) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_preview_retains_a_bounded_blob_and_distinguishes_empty_and_missing() {
+        let repo = std::env::temp_dir().join(format!(
+            "am-bounded-git-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&repo).unwrap();
+        git_in(&repo, &["init", "--quiet"], "test").unwrap();
+        std::fs::write(repo.join("large"), vec![b'x'; 4 * 1024 * 1024]).unwrap();
+        std::fs::write(repo.join("empty"), []).unwrap();
+        git_in(&repo, &["add", "large", "empty"], "test").unwrap();
+        git_in(
+            &repo,
+            &[
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "fixture",
+            ],
+            "test",
+        )
+        .unwrap();
+        let large = preview_blob(&repo, "HEAD", "large").unwrap();
+        assert_eq!(large.len(), DIFF_FILE_LIMIT + 1);
+        assert!(text_or_none(Some(large)).is_err());
+        assert_eq!(preview_blob(&repo, "HEAD", "empty"), Some(Vec::new()));
+        assert_eq!(preview_blob(&repo, "HEAD", "missing"), None);
+        std::fs::remove_dir_all(repo).unwrap();
+    }
 
     fn coll(raw: serde_json::Value) -> CollectionDef {
         let raw = raw.as_object().cloned().unwrap_or_default();

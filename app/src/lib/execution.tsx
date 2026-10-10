@@ -5,7 +5,7 @@ import { errorSummary } from "./errorAdvice";
 import { effectHint } from "./effectHints";
 import { engineErrorMessage, runEngine } from "./engine";
 import type { Diagnostic, Envelope } from "./contract";
-import { engineKeys } from "./queries";
+import { invalidateEngineQueries } from "./queries";
 import { newRunId } from "./runId";
 
 /**
@@ -41,6 +41,27 @@ export interface ExecuteRequest {
   undo?: () => void;
   /** 调用方预先生成的运行编号：长操作据此轮询进度（runs:progress）。缺省自动生成。 */
   runId?: string;
+  /** Batch callers refresh affected domains once in finally. */
+  refresh?: boolean;
+}
+
+export const COMPLETED_EXECUTION_LIMIT = 50;
+const textSummary = (value: string) => value.length > 2048 ? value.slice(0, 2047) + "…" : value;
+
+/** Keep only what the list renders; callers still receive the original envelope. */
+export function executionSummary(envelope: Envelope): Envelope {
+  const data = envelope.data as { steps?: Array<{ name: string; ok: boolean; exit_code: number }> } | null;
+  return {
+    ...envelope,
+    data: { steps: Array.isArray(data?.steps) ? data.steps.filter(step => typeof step.name === "string" && typeof step.ok === "boolean" && typeof step.exit_code === "number").slice(0, 50).map(({ name, ok, exit_code }) => ({ name: textSummary(name), ok, exit_code })) : [] },
+    warnings: [],
+    errors: envelope.errors.slice(0, 20).map(error => ({ code: textSummary(error.code), element: error.element ? textSummary(error.element) : null, message: textSummary(error.message) })),
+  };
+}
+
+export function boundedExecutions(records: ExecutionRecord[]): ExecutionRecord[] {
+  let completed = 0;
+  return records.filter(record => record.status === "running" || ++completed <= COMPLETED_EXECUTION_LIMIT);
 }
 
 const ExecutionContext = createContext<ExecutionContextValue | null>(null);
@@ -62,10 +83,10 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
         envelope: null,
         bridgeError: null,
       };
-      setExecutions((prev) => [record, ...prev]);
+      setExecutions((prev) => boundedExecutions([record, ...prev]));
 
       const patch = (update: Partial<ExecutionRecord>) => {
-        setExecutions((prev) => prev.map((item) => (item.runId === runId ? { ...item, ...update } : item)));
+        setExecutions((prev) => boundedExecutions(prev.map((item) => (item.runId === runId ? { ...item, ...update } : item))));
       };
 
       let envelope: Envelope | null = null;
@@ -73,18 +94,18 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
         envelope = await runEngine(request.command, request.args ?? [], { runId });
       } catch (err) {
         const message = engineErrorMessage(err);
-        patch({ status: "failed", finishedAt: Date.now(), bridgeError: message });
+        patch({ status: "failed", finishedAt: Date.now(), bridgeError: textSummary(message) });
         if (!request.silent) {
           const summary = errorSummary(message);
           if (summary.description) toast.error(`${request.label} 调用失败：${summary.text}`, { description: summary.description });
           else toast.error(`${request.label} 调用失败：${summary.text}`);
         }
-        void queryClient.invalidateQueries({ queryKey: engineKeys.all });
+        if (request.refresh !== false) void invalidateEngineQueries(queryClient, request.command);
         return null;
       }
 
       const ok = envelope.ok;
-      patch({ status: ok ? "ok" : "failed", finishedAt: Date.now(), envelope });
+      patch({ status: ok ? "ok" : "failed", finishedAt: Date.now(), envelope: executionSummary(envelope) });
       const firstError: Diagnostic | undefined = envelope.errors[0];
       if (!request.silent) {
         if (ok) {
@@ -101,7 +122,7 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
           else toast.error(`${request.label} 失败：${summary.text}`);
         }
       }
-      void queryClient.invalidateQueries({ queryKey: engineKeys.all });
+      if (request.refresh !== false) void invalidateEngineQueries(queryClient, request.command);
       return envelope;
     },
     [queryClient],

@@ -4185,3 +4185,42 @@ fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
     assert!(!preview("synced").ok);
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn collection_view_lists_sources_without_per_skill_fingerprints_or_writes() {
+    let (root, ctx) = temp_ctx("collection-view");
+    let source = root.join("source");
+    std::fs::create_dir_all(source.join("alpha")).unwrap();
+    std::fs::write(source.join("alpha/SKILL.md"), "# Alpha\n").unwrap();
+    let value = serde_json::json!({"source_path":source.to_str().unwrap()}).to_string();
+    let saved = execute(
+        &ctx,
+        &request(
+            "policy:set",
+            &[
+                "--layer",
+                "local",
+                "--key",
+                "skills.repositories.view",
+                "--value",
+                &value,
+            ],
+        ),
+    );
+    assert!(saved.ok, "{:?}", saved.errors);
+    let before = std::fs::read(store::db_path(&ctx)).unwrap();
+    let status = execute(&ctx, &request("skills:status", &["--collections-only"]));
+    assert!(status.ok, "{:?}", status.errors);
+    let rows = status.data["elements"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], "skill:view");
+    assert_eq!(
+        rows[0]["observed"]["discovered"],
+        serde_json::json!(["alpha"])
+    );
+    assert!(rows[0].pointer("/spec/available_version").is_none());
+    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), before);
+    assert!(!ctx.home_dir.exists());
+    assert!(!execute(&ctx, &request("skills:status", &["--unknown"])).ok);
+    std::fs::remove_dir_all(root).unwrap();
+}

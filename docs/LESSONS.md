@@ -170,3 +170,15 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 **A rejection test must reach the security check it names.**
 - A missing generated-command binding or an unsupported argument can reject a request before its intended alias or account test runs. Build fixtures through the actual command interface and assert the relevant diagnostic. Compare critical tests with the previous source using the same fixtures.
 - Seen 1× (2026-10-10).
+
+### 2026-10-10: execution summaries must respect domain result schemas
+
+- Rule: enumerate result shapes before retaining a shared execution summary; copy
+  only fields with the schema the list can render, while returning the full result
+  unchanged to the caller.
+- Why: resource apply steps have name/ok/exit_code, while program operations return
+  their own plan steps. Treating them alike threw during summary creation and stopped
+  the caller's post-install refresh.
+- Evidence: the first focused summary/Skills/MCP checks passed without exercising
+  Programs. Full frontend checks caught the failure; a program-step regression and
+  the existing program-upgrade/refresh test cover the correction.

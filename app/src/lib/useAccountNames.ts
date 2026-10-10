@@ -4,7 +4,7 @@ import { useEngineQuery } from "./queries";
 
 /** 账号页用的三份只读数据：主助手、实例与启动命令。 */
 function useAccountSources(): [EngineElement[], EngineElement[], Record<string, string>] {
-  const agents = useEngineQuery<StatusData>("agents:status");
+  const agents = useEngineQuery<StatusData>("agents:status", ["--metadata-only"]);
   const profiles = useEngineQuery<StatusData>("profiles:status");
   const aliases = useEngineQuery<StatusData>("aliases:status");
   const lines = (aliases.data?.ok ? (aliases.data.data.aliases ?? []) : []) as { name: string; value: string | null }[];

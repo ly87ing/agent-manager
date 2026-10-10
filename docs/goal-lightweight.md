@@ -23,11 +23,11 @@ and residency requirements in earlier acceptance records.
       existing assistant files and database data; retired commands fail explicitly.
 - [x] Retire enabling OS login entries; retain safe removal of an existing owned
       entry. Do not silently remove externally changed entries.
-- [ ] Bound execution summaries and refresh only affected domains; keep necessary
+- [x] Bound execution summaries and refresh only affected domains; keep necessary
       cross-domain invalidation after source, account, and dependency operations.
-- [ ] Bound core memory: stream skill hashes, cap MCP output, and avoid loading
+- [x] Bound core memory: stream skill hashes, cap MCP output, and avoid loading
       full Git blobs for previews that will be rejected by the display limit.
-- [ ] Keep source lists and dependency discovery on demand; avoid content hashing
+- [x] Keep source lists and dependency discovery on demand; avoid content hashing
       and assistant version probes just to populate selectors.
 - [ ] Remove unreachable retired implementation separately from behavior changes.
 - [ ] Update current product/subsystem documentation and acceptance records.
@@ -113,3 +113,28 @@ scripts and login entries need an explicit, ownership-checked removal path.
   rendered Accounts without quota and Settings with only legacy login-entry removal.
   The removal action returned the read-back disabled state. All eight retained
   pages passed 1000/760 px overflow checks; Accounts and Settings pixels were viewed.
+
+- Bounds slice: completed execution history is capped at 50 summaries; running
+  work is retained. Domain refresh, one batch refresh, non-overlapping progress,
+  active-only audit polling, and 60-second inactive cache expiry are implemented.
+  Sources defers per-skill fingerprints; account selectors skip CLI versions.
+  MCP stdout and Git preview capture now have explicit retention limits.
+- MCP integration: 52 passed; Skills: 35 passed before the new collection-view
+  regression. Pure MCP reader guards: three passed; bounded Git blob check: one
+  passed. The full frontend check caught incompatible program-step summaries;
+  it was corrected and 22 execution/program/audit tests then passed. No assertion
+  was weakened. The remaining shell-fixture startup failures are tracked separately.
+- Actual isolated CLI acceptance: metadata status returned both main assistants
+  without adding any fake-assistant probe-log entry. A source with a 256 MiB asset
+  returned only its collection row; all source metadata matched full status after
+  excluding the deliberately deferred per-skill health field.
+- The collection-view regression passed after correcting its fixture policy key
+  to skills.repositories; metadata status passed and preserved database bytes.
+  Tauri's 27 tests and the production build passed again. Sources/Accounts and all
+  retained pages passed 1000/760 layout checks after the query changes.
+- The corrected full frontend rerun passed 761 tests with four platform skips and
+  one Settings navigation timing failure. The assertion remains intact; navigation
+  now supplies the initial account-status fixtures, preloads the lazy Accounts
+  module as the navigation suite does, and waits for that page. An empty route map
+  had rendered an account read error rather than that page. All 25 Settings tests
+  passed after this correction.

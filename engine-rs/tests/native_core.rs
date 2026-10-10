@@ -1312,3 +1312,21 @@ fn first_write_round_trips_and_preserves_builtin_domains() {
     assert!(policy["skills"]["repositories"].is_object());
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn metadata_status_skips_versions_and_preserves_the_store() {
+    let (root, ctx) = temp_ctx("metadata-status");
+    set_agent(&ctx, "fixture", "fixture-missing", "true");
+    let before = std::fs::read(store::db_path(&ctx)).unwrap();
+    let status = execute(&ctx, &request("agents:status", &["--metadata-only"]));
+    assert!(status.ok, "{:?}", status.errors);
+    assert!(status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|row| row["observed"]["version"].is_null()));
+    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), before);
+    assert!(!ctx.home_dir.exists());
+    assert!(!execute(&ctx, &request("agents:status", &["--unknown"])).ok);
+    std::fs::remove_dir_all(root).unwrap();
+}

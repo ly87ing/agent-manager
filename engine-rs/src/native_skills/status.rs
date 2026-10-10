@@ -634,7 +634,7 @@ fn build_collection_element(
     })
 }
 
-pub fn build_status(ctx: &Context) -> Result<Value> {
+pub(super) fn build_status_view(ctx: &Context, collections_only: bool) -> Result<Value> {
     let meta = load_metadata(ctx)?;
     let bindings = load_bindings_readonly(ctx)?;
     let probes = crate::native_upstream::load_probe_cache(ctx)?;
@@ -672,7 +672,7 @@ pub fn build_status(ctx: &Context) -> Result<Value> {
         }
 
         let mut inbox_skills = Vec::new();
-        for skill_name in &coll_skills {
+        for skill_name in coll_skills.iter().filter(|_| !collections_only) {
             elements.push(build_skill_element(
                 ctx,
                 coll_name,
@@ -688,7 +688,7 @@ pub fn build_status(ctx: &Context) -> Result<Value> {
             ));
         }
 
-        elements.push(build_collection_element(
+        let mut collection_element = build_collection_element(
             coll_name,
             coll,
             &repo_dir,
@@ -705,7 +705,14 @@ pub fn build_status(ctx: &Context) -> Result<Value> {
             discovery_error.as_ref(),
             &inbox_skills,
             &probes,
-        ));
+        );
+        if collections_only {
+            collection_element["observed"]
+                .as_object_mut()
+                .unwrap()
+                .remove("discovery_inbox");
+        }
+        elements.push(collection_element);
     }
 
     Ok(json!({

@@ -1,3 +1,5 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { invalidateEngineQueries } from "./queries";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useExecutions } from "./execution";
@@ -16,12 +18,13 @@ export interface BatchApplyRow {
 
 /**
  * 资源批量执行器：对目标行顺序逐行 apply，每行走与单行相同的
- * 执行通道（独立 run_id、执行记录、查询刷新；silent 压掉单行结果 toast）；
+ * 执行通道（独立 run_id、执行记录；silent 压掉单行结果 toast），最后统一刷新；
  * 单行失败不中断后续行；全部完成后汇总 toast（失败时指向任务记录并逐行
  * console.error 原因）；同步 ref 保证在途期间拒绝重入。
  */
 export function useBatchApply() {
   const { execute } = useExecutions();
+  const queryClient = useQueryClient();
   const busyRef = useRef(false);
   const [executing, setExecuting] = useState(false);
 
@@ -39,8 +42,9 @@ export function useBatchApply() {
           command: request.command ?? "skills:apply",
           label: `${request.actionLabel} ${row.label}`,
           args,
-          // 单行结果 toast 由下方汇总 toast 取代；执行记录与查询刷新照常。
+          // Keep per-row audit records, with one refresh after the batch.
           silent: true,
+          refresh: false,
         });
         if (envelope?.ok) {
           succeeded += 1;
@@ -51,6 +55,7 @@ export function useBatchApply() {
         }
       }
     } finally {
+      await invalidateEngineQueries(queryClient, request.command ?? "skills:apply");
       busyRef.current = false;
       setExecuting(false);
     }

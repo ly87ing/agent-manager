@@ -69,8 +69,8 @@ export function agentManagementFixture(kind: "claude" | "codex"): AgentManagemen
         },
         {
           key: "statusline", type: "enum", section: "界面与模型行为", label: "状态栏",
-          description: "选择是否使用本地用量状态栏。",
-          options: [{ value: "", label: "保持现有状态栏" }, { value: "builtin", label: "使用 Agent Manager 用量状态栏" }],
+          description: "仅移除本工具旧状态栏；保留自定义配置。",
+          options: [{ value: "", label: "移除本工具旧状态栏" }],
           targets: [{ key: "statusLine.command", enabled_value: "<Agent Manager statusline.sh>" }],
           summary: summary("状态栏", { default: "保持现状", values: { builtin: "用量状态栏" } }),
         },

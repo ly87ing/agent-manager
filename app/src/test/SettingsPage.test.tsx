@@ -80,10 +80,18 @@ describe("SettingsPage", () => {
   });
 
   it("warns about a read-only launch location and prevents manual update checks", async () => {
+    // Match the navigation suite: load lazy modules before timing UI interactions.
+    await import("../pages/AccountsPage");
     const runtimeWarning = "请先退出应用，将 Agent Manager 拖到应用程序后再打开。";
     setSettingsClient({ get: async () => ({ ...settings, updaterConfigured: true, runtimeWarning }), save: async () => settings });
-    renderWithEngine(<App />, {});
+    renderWithEngine(<App />, {
+      "agents:status": makeEnvelope({ domain: "agents", elements: [] }),
+      "profiles:status": makeEnvelope({ domain: "profiles", elements: [] }),
+      "aliases:status": makeEnvelope({ domain: "aliases", elements: [] }),
+      "skills:status": makeEnvelope({ domain: "skills", elements: [] }),
+    });
     expect(await screen.findByRole("alert")).toHaveTextContent(runtimeWarning);
+    await screen.findByRole("heading", { name: "账号", exact: true });
     await userEvent.click(await screen.findByRole("button", { name: "设置" }));
     expect(await screen.findByRole("button", { name: "检查更新" })).toBeDisabled();
     expect(check).not.toHaveBeenCalled();

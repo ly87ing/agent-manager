@@ -14,6 +14,7 @@ export function createQueryClient(options?: { retry?: number | false }) {
     defaultOptions: {
       queries: {
         staleTime: 30_000,
+        gcTime: 60_000,
         retry: options?.retry ?? 1,
         refetchOnWindowFocus: false,
       },
@@ -32,9 +33,8 @@ export function useEngineQuery<T>(
     queryKey: engineKeys.request(command, normalizedArgs),
     queryFn: () => runEngine<T>(command, normalizedArgs),
     enabled: options?.enabled ?? true,
-    // 窗口隐藏、只剩托盘时也照常按间隔重读
     refetchInterval: options?.refetchInterval,
-    refetchIntervalInBackground: options?.refetchInterval !== undefined,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -80,4 +80,22 @@ export function useRefreshUpstream() {
       toast.error(`检查更新调用失败：${engineErrorMessage(err)}`);
     },
   });
+}
+
+/** Conservative cross-domain dependencies; unknown writers refresh everything. */
+export function affectedDomains(command: string): string[] | null {
+  const domain = command.replaceAll(".", ":").split(":")[0];
+  const dependencies: Record<string, string[]> = {
+    mcp: ["mcp", "agents", "profiles", "secrets"],
+    skills: ["skills", "rules", "aliases", "programs"],
+    rules: ["rules", "agents", "profiles"],
+    aliases: ["aliases", "accounts"],
+    runs: ["runs"],
+  };
+  return dependencies[domain] ? [...new Set([...dependencies[domain], "runs", "system"])] : null;
+}
+
+export function invalidateEngineQueries(client: QueryClient, command: string): Promise<void> {
+  const domains = affectedDomains(command);
+  return client.invalidateQueries({ queryKey: engineKeys.all, predicate: query => !domains || domains.includes(String(query.queryKey[1] ?? "").split(":")[0]) });
 }
