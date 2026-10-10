@@ -109,7 +109,15 @@ pub(crate) fn validate_windows_acl(path: &Path, private: bool) -> Result<()> {
         Security::*,
         System::Threading::{GetCurrentProcess, OpenProcessToken},
     };
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // Keep std's verbatim Windows prefix: raw Win32 ACL APIs otherwise reject
+    // existing paths beyond MAX_PATH even though Rust's file APIs opened them.
+    let native_path =
+        std::fs::canonicalize(path).with_context(|| "无法解析 Windows ACL 路径，拒绝操作")?;
+    let wide: Vec<u16> = native_path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
     // Read-only OS APIs; unknown ACL shapes are rejected instead of being guessed safe.
     unsafe {
         let mut needed = 0;

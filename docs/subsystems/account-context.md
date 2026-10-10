@@ -17,6 +17,8 @@ Actual assistant files hold active authentication and configuration. Registratio
 
 `accounts:command --only <agents:reserved-id|profiles:id> --operation <launch|login|logout|status> --shell <posix|powershell>` returns a controlled command without secret values. A draft `--definition` is a preview only. The executable's early `--account-launch` path validates the account binding, holds a session lock, checks local/project/managed configuration, resolves the assistant's absolute executable, and starts it with a clean environment. Accounts, authentication actions, tray copy, the palette, and recent-session resume request this command instead of using stored raw aliases.
 
+Authentication and CLI-version probes use exclusively created private temporary directories with a process-wide sequence in addition to the timestamp. Collisions are retried without adopting an existing directory; each probe cleans up only its own directory. Windows security APIs retain canonical verbatim paths to inspect long lock/credential paths with the same ACL policy.
+
 `profiles:create` and `profiles:apply-definition` coordinate pending secret values, actual configuration, and registration. Planning is read-only. Writes hold the manager and account locks, compare baselines, read back results, and conditionally compensate normal failures. Adoption and shared settings apply the same identity and path checks. Main configuration parameters use the reserved main account's fixed path; a profile cannot invoke that writer.
 
 ## Constraints and failure behavior

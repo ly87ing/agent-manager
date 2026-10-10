@@ -728,20 +728,38 @@ pub(crate) struct NeutralWorkingDir(PathBuf);
 
 impl NeutralWorkingDir {
     pub(crate) fn new() -> Result<Self> {
-        let path = std::env::temp_dir().join(format!(
-            "am-account-probe-{}-{}",
-            std::process::id(),
+        Self::with_prefix("am-account-probe")
+    }
+
+    fn with_prefix(prefix: &str) -> Result<Self> {
+        Self::at_timestamp(
+            prefix,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
-                .as_nanos()
-        ));
-        std::fs::create_dir(&path)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))?;
+                .as_nanos(),
+        )
+    }
+
+    fn at_timestamp(prefix: &str, timestamp: u128) -> Result<Self> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+        for _ in 0..64 {
+            let path = std::env::temp_dir().join(format!(
+                "{prefix}-{}-{timestamp}-{}",
+                std::process::id(),
+                NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed),
+            ));
+            match crate::native_account_locks::create_private_directory(&path) {
+                Ok(()) => {
+                    let mut directory = Self(path);
+                    directory.0 = directory.0.canon()?;
+                    return Ok(directory);
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(err) => return Err(err.into()),
+            }
         }
-        Ok(Self(path.canon()?))
+        bail!("无法独占创建隔离认证探针目录，拒绝操作")
     }
 
     pub(crate) fn path(&self) -> &Path {
@@ -759,23 +777,10 @@ impl Drop for NeutralWorkingDir {
 /// contract, rather than a promise about arbitrary future CLI releases.
 pub(crate) fn validate_cli_version(ctx: &Context, account: &Account) -> Result<()> {
     let cli = resolve_cli(ctx, account)?;
-    let root = std::env::temp_dir().join(format!(
-        "am-account-version-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)?
-            .as_nanos()
-    ));
-    std::fs::create_dir(&root)?;
-    struct Cleanup(PathBuf);
-    impl Drop for Cleanup {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-    let _cleanup = Cleanup(root.clone());
+    let directory = NeutralWorkingDir::with_prefix("am-account-version")?;
+    let root = directory.path();
     let version_ctx = Context {
-        home_dir: root.clone(),
+        home_dir: root.to_path_buf(),
         data_dir: root.join("data"),
     };
     let version_account = Account {
@@ -1359,6 +1364,40 @@ pub(crate) fn command_request(ctx: &Context, req: &Request) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn simultaneous_probe_directories_with_the_same_clock_value_are_private_and_independent() {
+        let a = NeutralWorkingDir::at_timestamp("am-probe-clock-regression", 0).unwrap();
+        let b = NeutralWorkingDir::at_timestamp("am-probe-clock-regression", 0).unwrap();
+        assert_ne!(a.path(), b.path());
+        std::fs::write(a.path().join("marker"), b"a").unwrap();
+        std::fs::write(b.path().join("marker"), b"b").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for directory in [&a, &b] {
+                assert_eq!(
+                    std::fs::metadata(directory.path())
+                        .unwrap()
+                        .permissions()
+                        .mode()
+                        & 0o777,
+                    0o700
+                );
+            }
+        }
+        #[cfg(windows)]
+        for directory in [&a, &b] {
+            crate::secret_values::validate_permissions(directory.path()).unwrap();
+        }
+        let old_a = a.path().to_path_buf();
+        drop(a);
+        assert!(!old_a.exists());
+        assert_eq!(std::fs::read(b.path().join("marker")).unwrap(), b"b");
+        let old_b = b.path().to_path_buf();
+        drop(b);
+        assert!(!old_b.exists());
+    }
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).into()).collect()

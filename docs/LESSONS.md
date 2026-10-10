@@ -108,6 +108,16 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Create the disposable legacy-lock directory with the same atomic protected-ACL helper used for the runtime directory. Read back both directory and file ACLs before acquiring the simulated old session. Keep production rejection and the expected upgrade-restart assertion unchanged.
 - Seen 1× (2026-10-10).
 
+**Rust file access does not prove raw Windows ACL APIs support the same path.**
+- Explicit private fixture readback on `ad6ef6c` rejected the longer desktop-default lock file while its directory and file creation succeeded. The ordinary desktop-default filename reaches 261 UTF-16 characters under this CI fixture; the shorter CLI-default filename reaches 243. The failure was ACL lookup, not a broad grant.
+- Pass standard-library canonical Windows paths, including the verbatim prefix, to ACL lookup and atomic private-directory creation. Keep the ACL rules unchanged and exercise a real private file beyond MAX_PATH on native Windows.
+- Seen 1× (2026-10-10).
+
+**Wall-clock timestamps alone do not identify concurrent probe directories.**
+- The macOS `ad6ef6c` adoption regression passed the library suite but failed a later version probe with `File exists`. Probe directories used only the process ID and wall-clock nanoseconds, which need not be unique across calls.
+- Add a process-wide atomic sequence and retry only exclusive-creation collisions. Authentication and version probes share private atomic directory creation and RAII cleanup. Force the same timestamp in a regression, keep both directories alive, and verify that cleaning one leaves the other unchanged.
+- Seen 1× (2026-10-10).
+
 **Launch the generated OS entry; a correct-looking string is not startup evidence.**
 - The first Linux autostart entry escaped a literal `%` as `%%` according to the Desktop Entry syntax. Real `gio launch` refused it because GIO checks whether the executable exists before expanding field codes. File readback alone had passed. Such paths now fail before writing; a disposable Linux run executed the exact path containing spaces, quotes, `$`, and a backslash.
 - Seen 1× (2026-10-09).

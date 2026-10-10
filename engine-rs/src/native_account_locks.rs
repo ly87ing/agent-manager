@@ -144,13 +144,13 @@ fn validate_entry(path: &Path, meta: &Metadata, directory: bool, private: bool) 
 }
 
 #[cfg(unix)]
-fn create_private_directory(path: &Path) -> std::io::Result<()> {
+pub(crate) fn create_private_directory(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::DirBuilderExt;
     fs::DirBuilder::new().mode(0o700).create(path)
 }
 
 #[cfg(windows)]
-fn create_private_directory(path: &Path) -> std::io::Result<()> {
+pub(crate) fn create_private_directory(path: &Path) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::{
         Foundation::CloseHandle,
@@ -158,7 +158,18 @@ fn create_private_directory(path: &Path) -> std::io::Result<()> {
         Storage::FileSystem::{CreateDirectoryW, FILE_ALL_ACCESS},
         System::Threading::{GetCurrentProcess, OpenProcessToken},
     };
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("missing private directory parent"))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| std::io::Error::other("missing private directory name"))?;
+    let native_path = fs::canonicalize(parent)?.join(name);
+    let wide: Vec<u16> = native_path
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
     unsafe {
         let mut token = std::ptr::null_mut();
         if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
@@ -957,6 +968,23 @@ mod tests {
         drop(open_lock(&path, true, true).unwrap());
         fs::hard_link(&path, directory.join("hardlink")).unwrap();
         assert!(open_lock(&path, true, false).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn private_windows_acl_checks_support_paths_beyond_max_path() {
+        use std::os::windows::ffi::OsStrExt;
+        let f = Fixture::new("windows-long-acl");
+        let directory = f
+            .root
+            .join("long-component-".repeat(6))
+            .join("nested-".repeat(12));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("private-source.env");
+        assert!(path.as_os_str().encode_wide().count() > 260);
+        fs::write(&path, b"# disposable empty source\n").unwrap();
+        crate::secret_values::validate_permissions(&directory).unwrap();
+        crate::secret_values::validate_permissions(&path).unwrap();
     }
 
     #[cfg(windows)]
