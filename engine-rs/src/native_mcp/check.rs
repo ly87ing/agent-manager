@@ -1,4 +1,4 @@
-//! 测试连接：像助手那样连一次某个账号里的 MCP 条目，结果只返回、不落盘。
+//! 按指定账号的实际条目检查 MCP 协议；不代表助手进程已经加载，结果不落盘。
 //!
 //! - 命令型（stdio）：用用户的 PATH 启动条目里的命令，按 MCP 协议发 `initialize`、
 //!   `notifications/initialized`、`tools/list`，拿到工具清单后关掉进程。
@@ -41,6 +41,7 @@ struct Outcome {
     server: Option<Value>,
     tools: Option<Vec<String>>,
     detail: Option<String>,
+    exit_code: Option<i32>,
 }
 
 impl Outcome {
@@ -52,18 +53,23 @@ impl Outcome {
             server: None,
             tools: None,
             detail: None,
+            exit_code: None,
         }
     }
 }
 
-fn parse_args(req: &Request) -> Result<(String, String)> {
+fn parse_args(req: &Request) -> Result<(String, String, Option<String>, Option<PathBuf>)> {
     let mut only = None;
     let mut agent = None;
+    let mut base = None;
+    let mut cwd = None;
     let mut iter = req.args.iter();
     while let Some(arg) = iter.next() {
         let slot = match arg.as_str() {
             "--only" => &mut only,
             "--agent" => &mut agent,
+            "--base" => &mut base,
+            "--cwd" => &mut cwd,
             other => bail!("mcp:check 不接受参数 '{other}'"),
         };
         let value = iter
@@ -80,7 +86,20 @@ fn parse_args(req: &Request) -> Result<(String, String)> {
         .filter(|name| is_valid_server_name(name))
         .ok_or_else(|| anyhow!("--only 只接受 mcp:<name>，得到 '{only}'"))?;
     let agent = agent.ok_or_else(|| anyhow!("缺少 --agent"))?;
-    Ok((server.to_string(), canonicalize_agent_id(&agent)))
+    if base
+        .as_ref()
+        .is_some_and(|value| !super::model::is_sha256_hex(value))
+    {
+        bail!("--base 必须是条目的 64 位小写十六进制摘要");
+    }
+    let cwd = cwd.map(PathBuf::from);
+    if cwd
+        .as_ref()
+        .is_some_and(|path| !path.is_absolute() || !path.is_dir())
+    {
+        bail!("--cwd 必须是已存在目录的绝对路径");
+    }
+    Ok((server.to_string(), canonicalize_agent_id(&agent), base, cwd))
 }
 
 /// 文本里的 `${NAME}`（Claude）/ `{env:NAME}`（OpenCode）按助手的写法换成取值。
@@ -266,7 +285,14 @@ impl Running {
     }
 
     /// 关 stdin 让服务自己退出，稍等后结束整个进程组；返回 stderr 结尾。
-    fn finish(mut self) -> String {
+    fn finish(mut self) -> (String, Option<i32>) {
+        // Report only exits observed before our shutdown, never cleanup-induced exits.
+        let exit_code = self
+            .child
+            .try_wait()
+            .ok()
+            .flatten()
+            .and_then(|status| status.code());
         drop(self.child.stdin.take());
         let until = Instant::now() + Duration::from_millis(500);
         while Instant::now() < until {
@@ -275,7 +301,8 @@ impl Running {
             }
             std::thread::sleep(Duration::from_millis(20));
         }
-        if !matches!(self.child.try_wait(), Ok(Some(_))) {
+        let status = self.child.try_wait().ok().flatten();
+        if status.is_none() {
             self.group.kill(&mut self.child);
         }
         let _ = self.child.wait();
@@ -290,7 +317,7 @@ impl Running {
             .nth(STDERR_TAIL)
             .map(|(index, _)| index)
             .unwrap_or(0);
-        text[start..].trim().to_string()
+        (text[start..].trim().to_string(), exit_code)
     }
 }
 
@@ -307,6 +334,19 @@ fn rpc_error(response: &Value) -> Option<String> {
 
 fn server_info(response: &Value) -> Option<Value> {
     response.pointer("/result/serverInfo").cloned()
+}
+
+fn valid_initialize(response: &Value) -> bool {
+    response
+        .pointer("/result/protocolVersion")
+        .and_then(Value::as_str)
+        .is_some()
+        && response
+            .pointer("/result/capabilities")
+            .is_some_and(Value::is_object)
+        && response
+            .pointer("/result/serverInfo")
+            .is_some_and(Value::is_object)
 }
 
 fn tool_names(response: &Value) -> Option<Vec<String>> {
@@ -334,7 +374,14 @@ fn user_path(ctx: &Context) -> (Vec<PathBuf>, std::ffi::OsString) {
     (dirs, joined)
 }
 
-fn check_stdio(ctx: &Context, format: &Format, view: &View) -> (Outcome, Vec<String>) {
+fn check_stdio(
+    ctx: &Context,
+    format: &Format,
+    view: &View,
+    cwd: &std::path::Path,
+    timeout: Duration,
+    tool_timeout: Duration,
+) -> (Outcome, Vec<String>) {
     let mut secrets = Vec::new();
     let mut env = Vec::new();
     for (key, raw) in &view.env {
@@ -408,26 +455,29 @@ fn check_stdio(ctx: &Context, format: &Format, view: &View) -> (Outcome, Vec<Str
         .args(&args)
         .env("PATH", &path)
         .env("HOME", &ctx.home_dir)
-        .current_dir(&ctx.home_dir);
-    let timeout = view
-        .startup_timeout_sec
-        .filter(|sec| *sec > 0)
-        .map(|sec| Duration::from_secs(sec as u64))
-        .unwrap_or(STDIO_TIMEOUT);
+        .current_dir(cwd);
     let deadline = Instant::now() + timeout;
     let mut running = match Running::spawn(command, None) {
         Ok(running) => running,
         Err(err) => return (Outcome::fail("start", format!("启动失败：{err}")), secrets),
     };
-    let mut outcome = stdio_session(&mut running, deadline, timeout);
-    let stderr = running.finish();
+    let mut outcome = stdio_session(&mut running, deadline, timeout, tool_timeout);
+    let (stderr, exit_code) = running.finish();
+    if !outcome.ok {
+        outcome.exit_code = exit_code;
+    }
     if !outcome.ok && !stderr.is_empty() {
         outcome.detail = Some(stderr);
     }
     (outcome, secrets)
 }
 
-fn stdio_session(running: &mut Running, deadline: Instant, timeout: Duration) -> Outcome {
+fn stdio_session(
+    running: &mut Running,
+    deadline: Instant,
+    timeout: Duration,
+    tool_timeout: Duration,
+) -> Outcome {
     if !running.send(&initialize().to_string()) {
         return Outcome::fail("start", "命令启动后马上退出了");
     }
@@ -447,23 +497,51 @@ fn stdio_session(running: &mut Running, deadline: Instant, timeout: Duration) ->
     if let Some(error) = rpc_error(&response) {
         return Outcome::fail("initialize", format!("初始化被拒绝：{error}"));
     }
+    if !valid_initialize(&response) {
+        return Outcome::fail("initialize", "响应里没有有效的初始化结果");
+    }
     let server = server_info(&response);
-    running.send(INITIALIZED);
-    running.send(&request(2, "tools/list", json!({})).to_string());
-    let tools = running
-        .wait_for(2, deadline)
-        .ok()
-        .and_then(|value| tool_names(&value));
+    if !running.send(INITIALIZED) {
+        return Outcome::fail("initialize", "发送初始化完成通知时命令退出了");
+    }
+    if response.pointer("/result/capabilities/tools").is_none() {
+        return completed(server, None);
+    }
+    if !running.send(&request(2, "tools/list", json!({})).to_string()) {
+        return Outcome::fail("tools", "读取工具列表时命令退出了");
+    }
+    match running.wait_for(2, Instant::now() + tool_timeout) {
+        Ok(response) => tools_outcome(server, &response),
+        Err(Waited::Exited) => Outcome::fail("tools", "命令退出了，没有返回工具列表"),
+        Err(Waited::Timeout) => Outcome::fail(
+            "tools",
+            format!("{} 秒内没有返回工具列表", tool_timeout.as_secs()),
+        ),
+    }
+}
+
+fn tools_outcome(server: Option<Value>, response: &Value) -> Outcome {
+    if let Some(error) = rpc_error(response) {
+        return Outcome::fail("tools", format!("读取工具列表失败：{error}"));
+    }
+    match tool_names(response) {
+        Some(tools) => completed(server, Some(tools)),
+        None => Outcome::fail("tools", "响应里没有有效的工具列表"),
+    }
+}
+
+fn completed(server: Option<Value>, tools: Option<Vec<String>>) -> Outcome {
     Outcome {
         ok: true,
         stage: "done",
         message: match &tools {
             Some(tools) => format!("连接成功，提供 {} 个工具", tools.len()),
-            None => "连接成功，但没有列出工具".to_string(),
+            None => "初始化成功，服务未声明工具能力".to_string(),
         },
         server,
         tools,
         detail: None,
+        exit_code: None,
     }
 }
 
@@ -551,7 +629,7 @@ fn http_post(
     if found.is_none() {
         body_lines.extend(running.drain(Instant::now() + Duration::from_millis(200)));
     }
-    let stderr = running.finish();
+    let (stderr, _) = running.finish();
     let Some(code) = status else {
         return Err(if stderr.is_empty() {
             "没有收到响应".to_string()
@@ -583,7 +661,13 @@ fn http_post(
     Ok((session_id, found))
 }
 
-fn check_remote(format: &Format, view: &View, raw: &Value) -> (Outcome, Vec<String>) {
+fn check_remote(
+    format: &Format,
+    view: &View,
+    raw: &Value,
+    timeout: Duration,
+    tool_timeout: Duration,
+) -> (Outcome, Vec<String>) {
     let mut secrets = Vec::new();
     if raw.get("type").and_then(Value::as_str) == Some("sse") {
         return (
@@ -627,7 +711,7 @@ fn check_remote(format: &Format, view: &View, raw: &Value) -> (Outcome, Vec<Stri
             }
         }
     }
-    let deadline = Instant::now() + HTTP_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     let (session, response) =
         match http_post(&url, &headers, None, &initialize(), Some(1), deadline) {
             Ok(result) => result,
@@ -653,46 +737,48 @@ fn check_remote(format: &Format, view: &View, raw: &Value) -> (Outcome, Vec<Stri
             secrets,
         );
     }
+    if !valid_initialize(&response) {
+        return (
+            Outcome::fail("initialize", "响应里没有有效的初始化结果"),
+            secrets,
+        );
+    }
     let server = server_info(&response);
     let initialized: Value = serde_json::from_str(INITIALIZED).expect("static json");
-    let _ = http_post(
+    if let Err(err) = http_post(
         &url,
         &headers,
         session.as_deref(),
         &initialized,
         None,
         deadline,
-    );
-    let tools = http_post(
+    ) {
+        return (
+            Outcome::fail("initialize", format!("发送初始化完成通知失败：{err}")),
+            secrets,
+        );
+    }
+    if response.pointer("/result/capabilities/tools").is_none() {
+        return (completed(server, None), secrets);
+    }
+    let outcome = match http_post(
         &url,
         &headers,
         session.as_deref(),
         &request(2, "tools/list", json!({})),
         Some(2),
-        deadline,
-    )
-    .ok()
-    .and_then(|(_, value)| value)
-    .and_then(|value| tool_names(&value));
-    (
-        Outcome {
-            ok: true,
-            stage: "done",
-            message: match &tools {
-                Some(tools) => format!("连接成功，提供 {} 个工具", tools.len()),
-                None => "连接成功，但没有列出工具".to_string(),
-            },
-            server,
-            tools,
-            detail: None,
-        },
-        secrets,
-    )
+        Instant::now() + tool_timeout,
+    ) {
+        Ok((_, Some(response))) => tools_outcome(server, &response),
+        Ok((_, None)) => Outcome::fail("tools", "响应里没有工具列表结果"),
+        Err(err) => Outcome::fail("tools", format!("读取工具列表失败：{err}")),
+    };
+    (outcome, secrets)
 }
 
 /// `mcp:check --only mcp:<name> --agent <账号>`。
 pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
-    let (server, agent) = parse_args(req)?;
+    let (server, agent, base, selected_cwd) = parse_args(req)?;
     let inv = inventory::load(ctx)?;
     let scan = inv
         .scan(&agent)
@@ -707,10 +793,73 @@ pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
         .view
         .as_ref()
         .map_err(|reason| anyhow!("条目无法识别：{reason}"))?;
+    if base.as_ref().is_some_and(|base| base != &entry.base) {
+        bail!("{server} 的配置已变化，请刷新后重新检查");
+    }
+    let configured_cwd = view
+        .extra
+        .get("cwd")
+        .and_then(Value::as_str)
+        .map(PathBuf::from);
+    let cwd_source = if configured_cwd.is_some() {
+        "config"
+    } else if selected_cwd.is_some() {
+        "selected"
+    } else {
+        "home"
+    };
+    let cwd = configured_cwd
+        .or(selected_cwd)
+        .unwrap_or_else(|| ctx.home_dir.clone());
+    let codex = scan.target.format == Format::CodexToml;
+    let default_timeout = if codex {
+        Duration::from_secs(10)
+    } else if view.transport == Transport::Remote {
+        HTTP_TIMEOUT
+    } else {
+        STDIO_TIMEOUT
+    };
+    let timeout = view
+        .startup_timeout_sec
+        .filter(|sec| *sec > 0)
+        .map(|sec| Duration::from_secs(sec as u64))
+        .or_else(|| {
+            view.extra
+                .get("startup_timeout_ms")
+                .and_then(Value::as_u64)
+                .filter(|ms| *ms > 0)
+                .map(Duration::from_millis)
+        })
+        .unwrap_or(default_timeout);
+    let tool_timeout = view
+        .extra
+        .get("tool_timeout_sec")
+        .and_then(Value::as_u64)
+        .filter(|sec| *sec > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(if codex {
+            Duration::from_secs(60)
+        } else {
+            default_timeout
+        });
     let started = Instant::now();
     let (outcome, secrets) = match view.transport {
-        Transport::Stdio => check_stdio(ctx, &scan.target.format, view),
-        Transport::Remote => check_remote(&scan.target.format, view, &entry.raw),
+        Transport::Stdio
+            if !cwd.is_absolute()
+                || !cwd.is_dir()
+                || (view.extra.contains_key("cwd") && view.extra["cwd"].as_str().is_none()) =>
+        {
+            (
+                Outcome::fail("start", "配置中的工作目录必须是已存在目录的绝对路径"),
+                Vec::new(),
+            )
+        }
+        Transport::Stdio => {
+            check_stdio(ctx, &scan.target.format, view, &cwd, timeout, tool_timeout)
+        }
+        Transport::Remote => {
+            check_remote(&scan.target.format, view, &entry.raw, timeout, tool_timeout)
+        }
     };
     let tools = outcome.tools.as_ref();
     Ok(json!({
@@ -718,6 +867,12 @@ pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
         "action": "check",
         "server": server,
         "agent": agent,
+        "base": entry.base,
+        "cwd": if view.transport == Transport::Stdio { Some(&cwd) } else { None },
+        "cwd_source": if view.transport == Transport::Stdio { Some(cwd_source) } else { None },
+        "startup_timeout_sec": timeout.as_secs_f64(),
+        "tool_timeout_sec": tool_timeout.as_secs_f64(),
+        "exit_code": outcome.exit_code,
         "ok": outcome.ok,
         "stage": outcome.stage,
         "message": scrub(&outcome.message, &secrets),

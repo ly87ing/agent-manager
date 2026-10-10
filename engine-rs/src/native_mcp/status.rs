@@ -141,7 +141,7 @@ fn file_cell(
     let mut notices = Vec::new();
     if let Ok(view) = &file_entry.view {
         if view.legacy_marker {
-            notices.push("条目含旧版 Agent Manager 标记，编辑或启停时会顺带清除");
+            notices.push("含旧版 Agent Manager 标记，可能触发助手配置警告；可预览后单独清理");
         }
     }
     if snapshot.is_some() {
@@ -155,7 +155,7 @@ fn file_cell(
             json!(notices.join("；"))
         },
     );
-    let actions: Vec<&str> = if block.is_some() {
+    let mut actions: Vec<&str> = if block.is_some() {
         vec![]
     } else {
         match state {
@@ -164,6 +164,14 @@ fn file_cell(
             _ => vec!["remove"],
         }
     };
+    if block.is_none()
+        && file_entry
+            .view
+            .as_ref()
+            .is_ok_and(|view| view.legacy_marker)
+    {
+        actions.push("clean-markers");
+    }
     let reason = block.or_else(|| {
         (state == "invalid").then(|| {
             format!(

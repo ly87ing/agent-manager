@@ -32,6 +32,10 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - `mcp:check` first reported "no reply to initialize within 30 seconds" for a server that exited after 0.5 s. The wait now returns why it stopped, and the test asserts the exit message (`a97f432`).
 - Seen 1× (2026-10-09).
 
+**Capture the server's exit status before starting cleanup.**
+- Closing stdin can make an unresponsive MCP server exit normally or return a new error. Capture its status before closing stdin; otherwise a timeout can acquire an unrelated exit code. Cover both forced termination and EOF-driven shutdown in the same failure-stage test.
+- Seen 1× (2026-10-09).
+
 ## Dependencies and lockfiles
 
 **Pin a dependency to a known-compatible version in one step; do not probe versions in a loop.**

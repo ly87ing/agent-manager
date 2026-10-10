@@ -8,6 +8,7 @@ import { missingVariables } from "../lib/mcpVariables";
 import { cn } from "../lib/utils";
 import { STATE_TONE, StateBadge } from "./StateBadge";
 import { DependencyChips, type DependencyChip } from "./DependencyChips";
+import { CHECK_STAGE, type McpCheckResult } from "./McpCheckDialog";
 
 function savedSummary(spec: McpSpec): string {
   const def = spec.saved?.definition ?? {};
@@ -71,6 +72,9 @@ export function McpServerCard({
   onCheck,
   dependencies = [],
   onOpenProgram,
+  onCleanMarkers,
+  nameOf,
+  checks = {},
 }: {
   /** 这个服务依赖的程序（npx / uvx 包、命令），点一下到程序页。 */
   dependencies?: DependencyChip[];
@@ -91,7 +95,10 @@ export function McpServerCard({
   onForget: (element: EngineElement) => void;
   onConfigureSecrets?: (variable: string) => void;
   /** 测试连接：像助手那样连一次。 */
-  onCheck?: (element: EngineElement) => void;
+  onCheck?: (element: EngineElement, agent?: string) => void;
+  onCleanMarkers?: (element: EngineElement, agent: string, cell: McpAgentCell) => void;
+  nameOf: (agent: string) => string;
+  checks?: Record<string, McpCheckResult>;
 }) {
   const spec = element.spec as unknown as McpSpec;
   const name = element.id.replace(/^mcp:/, "");
@@ -166,6 +173,7 @@ export function McpServerCard({
               aria-label={`测试 ${name} 的连接`}
               title="测试连接（运行一次它的命令或请求它的地址，不改配置）"
               onClick={() => onCheck(element)}
+              disabled={busy}
               className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <PlugZap className="h-3.5 w-3.5" aria-hidden />
@@ -211,6 +219,18 @@ export function McpServerCard({
           )}
         </RowActions>
       </div>
+
+      {Object.entries(cells).some(([agent, cell]) => cell.legacy_marker || checks[agent]?.base === cell.base) && (
+        <div className="mx-4 mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+          {Object.entries(cells).map(([agent, cell]) => (
+            <div key={agent} className="flex flex-wrap items-center gap-2">
+              {cell.legacy_marker && <span className="text-warning">{nameOf(agent)}：含旧标记，可能触发配置警告</span>}
+              {cell.actions.includes("clean-markers") && onCleanMarkers && <button type="button" data-testid={`clean-markers-${element.id}-${agent}`} disabled={busy} onClick={() => onCleanMarkers(element, agent, cell)} className="text-primary hover:underline disabled:opacity-50">预览清理</button>}
+              {checks[agent]?.base === cell.base && <button type="button" data-testid={`check-result-${element.id}-${agent}`} disabled={busy} onClick={() => onCheck?.(element, agent)} className={cn("rounded px-1.5 py-0.5 hover:underline", checks[agent].ok ? "bg-success/10 text-success" : STATE_TONE.broken)}>{nameOf(agent)} · 上次检查{checks[agent].ok ? "通过" : `失败：${CHECK_STAGE[checks[agent].stage]}`} · 查看 / 重试</button>}
+            </div>
+          ))}
+        </div>
+      )}
 
       {spec.saved && (
         <div

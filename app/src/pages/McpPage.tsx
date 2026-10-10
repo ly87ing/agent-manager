@@ -8,7 +8,8 @@ import { ErrorPanel } from "../components/ErrorPanel";
 import { mcpEntrySummary } from "../components/McpAssignmentRow";
 import { AccountHeader } from "../components/AccountGrid";
 import { McpRemoveDialog, type McpRemovePreview } from "../components/McpRemoveDialog";
-import { McpCheckDialog } from "../components/McpCheckDialog";
+import { McpCheckDialog, type McpCheckResult } from "../components/McpCheckDialog";
+import { McpMarkerCleanupDialog } from "../components/McpMarkerCleanupDialog";
 import { McpServerCard } from "../components/McpServerCard";
 import { McpServerFormDialog, type McpFilePreview, type McpFormMode, type McpFormPayload } from "../components/McpServerFormDialog";
 import { PageError, PageLoading } from "../components/PageState";
@@ -83,7 +84,9 @@ export default function McpPage({
   const [removing, setRemoving] = useState<EngineElement | null>(null);
   const [pendingForget, setPendingForget] = useState<EngineElement | null>(null);
   const [editingSecret, setEditingSecret] = useState<string | null>(null);
-  const [checking, setChecking] = useState<EngineElement | null>(null);
+  const [checking, setChecking] = useState<{ element: EngineElement; agent?: string } | null>(null);
+  const [checks, setChecks] = useState<Record<string, Record<string, McpCheckResult>>>({});
+  const [cleaning, setCleaning] = useState<{ element: EngineElement; agent: string; cell: McpAgentCell } | null>(null);
 
   useEffect(() => {
     if (!importPayload || !query.data?.ok) return;
@@ -337,6 +340,7 @@ export default function McpPage({
   return (
     <div className="space-y-3">
       <h1 className="text-lg font-semibold tracking-tight">MCP</h1>
+      <p className="text-xs text-muted-foreground">开关表示配置是否启用；连接结果来自手动检查，不代表助手已经加载。</p>
       {query.data.errors.length > 0 && <ErrorPanel title="MCP 状态读取失败" errors={query.data.errors} />}
       {brokenTargets.map((target) => (
         <div
@@ -481,14 +485,37 @@ export default function McpPage({
                 onAddFromSaved={openAddFromSaved}
                 onForget={setPendingForget}
                 onConfigureSecrets={setEditingSecret}
-                onCheck={setChecking}
+                nameOf={nameOfAgent}
+                checks={checks[element.id]}
+                onCheck={(element, agent) => setChecking({ element, agent })}
+                onCleanMarkers={(element, agent, cell) => setCleaning({ element, agent, cell })}
               />
             ))}
           </ul>
         </div>
       )}
 
-      {checking && <McpCheckDialog element={checking} nameOf={nameOfAgent} onClose={() => setChecking(null)} />}
+      {checking && <McpCheckDialog
+        element={checking.element}
+        initialAgent={checking.agent}
+        initialResult={checking.agent && checks[checking.element.id]?.[checking.agent]?.base === cellsOf(checking.element)[checking.agent]?.base ? checks[checking.element.id][checking.agent] : undefined}
+        nameOf={nameOfAgent}
+        onResult={(agent, result) => {
+          setChecks((current) => {
+            const results = { ...current[checking.element.id] };
+            if (result) results[agent] = result;
+            else delete results[agent];
+            return { ...current, [checking.element.id]: results };
+          });
+          if (!result) void query.refetch();
+        }}
+        onEdit={(agent) => { openEdit(checking.element, agent); setChecking(null); }}
+        onClose={() => setChecking(null)}
+      />}
+
+      {cleaning && <McpMarkerCleanupDialog id={cleaning.element.id} agent={cleaning.agent} base={cleaning.cell.base} nameOf={nameOfAgent} busy={busy} onClose={() => setCleaning(null)} onConfirm={(args) => {
+        void apply(`清理旧标记 ${nameOf(cleaning.element)} @ ${nameOfAgent(cleaning.agent)}`, args).then((envelope) => { if (envelope?.ok) setCleaning(null); });
+      }} />}
 
       {form && (
         <McpServerFormDialog

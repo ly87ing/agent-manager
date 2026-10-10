@@ -277,6 +277,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("mcp", "check") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--agent", ArgValueKind::ElementId));
+            specs.push(("--base", ArgValueKind::Digest));
+            specs.push(("--cwd", ArgValueKind::FilePath));
         }
         ("agents", "auth-status") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -644,11 +646,11 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
             _ => Err(EngineError::new("invalid_args", "非法 skills action")),
         },
         ArgValueKind::McpAction => match value {
-            "add" | "edit" | "enable" | "disable" | "remove" | "copy" | "forget" => Ok(()),
+            "add" | "edit" | "clean-markers" | "enable" | "disable" | "remove" | "copy" | "forget" => Ok(()),
             _ => Err(EngineError::new(
                 "invalid_args",
                 format!(
-                    "非法 mcp action '{value}'（仅 add|edit|enable|disable|remove|copy|forget）"
+                    "非法 mcp action '{value}'（仅 add|edit|clean-markers|enable|disable|remove|copy|forget）"
                 ),
             )),
         },
@@ -1079,7 +1081,14 @@ mod tests {
 
         let digest = "a".repeat(64);
         for action in [
-            "add", "edit", "enable", "disable", "remove", "copy", "forget",
+            "add",
+            "edit",
+            "clean-markers",
+            "enable",
+            "disable",
+            "remove",
+            "copy",
+            "forget",
         ] {
             assert!(
                 validate_args(
@@ -1097,6 +1106,20 @@ mod tests {
                 "mcp:apply with action {action} should pass"
             );
         }
+        assert!(validate_args(
+            "mcp:check",
+            &[
+                "--only".into(),
+                "mcp:s1".into(),
+                "--agent".into(),
+                "codex".into(),
+                "--base".into(),
+                digest.clone(),
+                "--cwd".into(),
+                "/isolated/project with spaces".into(),
+            ]
+        )
+        .is_ok());
         // 逐条写入的完整参数面：--spec JSON、--base/--to-base 摘要、--to、--replace
         assert!(validate_args(
             "mcp:apply",

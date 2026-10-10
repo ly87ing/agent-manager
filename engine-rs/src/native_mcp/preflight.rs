@@ -24,6 +24,7 @@ use crate::native::{Context, Request};
 pub enum Action {
     Add,
     Edit,
+    CleanMarkers,
     Enable,
     Disable,
     Remove,
@@ -36,6 +37,7 @@ impl Action {
         Ok(match raw {
             "add" => Action::Add,
             "edit" => Action::Edit,
+            "clean-markers" => Action::CleanMarkers,
             "enable" => Action::Enable,
             "disable" => Action::Disable,
             "remove" => Action::Remove,
@@ -45,7 +47,7 @@ impl Action {
                 "mcp:apply 已不再支持 '{raw}'：条目以各助手配置文件为准，请用 edit 直接修改该助手里的条目"
             ),
             other => bail!(
-                "mcp:apply 不支持动作 '{other}'，仅支持 add/edit/enable/disable/remove/copy/forget"
+                "mcp:apply 不支持动作 '{other}'，仅支持 add/edit/clean-markers/enable/disable/remove/copy/forget"
             ),
         })
     }
@@ -54,6 +56,7 @@ impl Action {
         match self {
             Action::Add => "add",
             Action::Edit => "edit",
+            Action::CleanMarkers => "clean-markers",
             Action::Enable => "enable",
             Action::Disable => "disable",
             Action::Remove => "remove",
@@ -174,7 +177,7 @@ pub fn parse_action_args(req: &Request) -> Result<ParsedAction> {
             need(spec.is_some(), "需要 --spec")?;
             need(base.is_some(), "需要 --base（打开编辑时条目的摘要）")?;
         }
-        Action::Enable | Action::Disable | Action::Remove | Action::Copy => {
+        Action::CleanMarkers | Action::Enable | Action::Disable | Action::Remove | Action::Copy => {
             forbid(spec.is_some(), "--spec")?;
             need(base.is_some(), "需要 --base（操作时条目的摘要）")?;
         }
@@ -311,6 +314,20 @@ pub fn plan(parsed: &ParsedAction, inv: &Inventory) -> Result<Plan> {
             let view = valid_view(file_entry)?;
             let spec = parse_spec(parsed.spec.as_deref().unwrap_or_default())?;
             let new = apply_edit(&scan.target.format, raw_map(file_entry)?, view, &spec)?;
+            push_write(&mut plan, scan, server, Change::Set(&new))?;
+        }
+        Action::CleanMarkers => {
+            let scan = operable(inv, agent)?;
+            let file_entry = scan
+                .entry(server)
+                .ok_or_else(|| anyhow!("助手 {agent} 的配置里没有名为 {server} 的条目"))?;
+            if Some(file_entry.base.as_str()) != base {
+                return Err(stale(server, agent));
+            }
+            if !valid_view(file_entry)?.legacy_marker {
+                bail!("{server} 在助手 {agent} 中没有旧版标记需要清理");
+            }
+            let new = entry::without_marker(&scan.target.format, raw_map(file_entry)?);
             push_write(&mut plan, scan, server, Change::Set(&new))?;
         }
         Action::Disable => {

@@ -1,26 +1,33 @@
 # MCP Test Connection
 
-Starts one account's MCP entry once, the way its assistant would, and reports whether it answers and which tools it offers. Runs only when the user asks; it changes no configuration and saves no result.
+Checks one account's actual MCP entry once. This is a separate protocol session, not evidence that the assistant has loaded the service. Runs only when the user asks; it changes no configuration and persists no result.
 
 ## Responsibilities and sources of truth
 
 | Part | Responsibility | Source |
 | --- | --- | --- |
-| Command | `mcp:check --only mcp:<name> --agent <account>`; the entry comes from the same inventory as `mcp:status`, so it is the account's actual file | [`native_mcp/check.rs`](../../engine-rs/src/native_mcp/check.rs), [`native_mcp/inventory.rs`](../../engine-rs/src/native_mcp/inventory.rs) |
+| Command | `mcp:check --only mcp:<name> --agent <account> [--base <digest>] [--cwd <absolute-directory>]`; optional `--base` rejects a changed entry before execution. The UI always supplies it | [`native_mcp/check.rs`](../../engine-rs/src/native_mcp/check.rs), [`native_mcp/inventory.rs`](../../engine-rs/src/native_mcp/inventory.rs) |
 | Variables | Whole-value references use `env_ref` / header references; inside strings `${NAME}` (and `${NAME:-default}`) is expanded for Claude and `{env:NAME}` for OpenCode; Codex strings are not expanded. Values come from `secret_values::lookup` (secrets file first, then process environment) | [`native_mcp/check.rs`](../../engine-rs/src/native_mcp/check.rs), [`secret_values.rs`](../../engine-rs/src/secret_values.rs) |
 | stdio | Runs the command with the user's login-shell PATH (`locate::user_path`) ahead of the inherited one, `HOME` set, in its own process group; sends `initialize`, `notifications/initialized`, `tools/list`; skips log and notification lines | [`native_mcp/check.rs`](../../engine-rs/src/native_mcp/check.rs) |
 | Streamable HTTP | Uses `curl -i`, headers on stdin (`-H @-`), keeps `Mcp-Session-Id`, reads JSON or `data:` lines | [`native_mcp/check.rs`](../../engine-rs/src/native_mcp/check.rs) |
-| Interface | Test button on each MCP row; dialog to pick the account and show server, tools, and stderr tail | [`McpCheckDialog.tsx`](../../app/src/components/McpCheckDialog.tsx), [`McpServerCard.tsx`](../../app/src/components/McpServerCard.tsx) |
+| Interface | Dialog shows account, file, command/address, working directory, effective timeouts, failure stage, natural exit code and sanitized stderr tail. Results stay in page memory per account and entry digest; a changed digest hides them. Switching account or directory clears the dialog result | [`McpCheckDialog.tsx`](../../app/src/components/McpCheckDialog.tsx), [`McpServerCard.tsx`](../../app/src/components/McpServerCard.tsx) |
 
 ## Constraints and failure behavior
 
 - A variable without a value stops the check before anything runs and names the variable.
 - Resolved values are replaced with `***` in the message and stderr, then the usual diagnostic sanitizer runs.
-- stdio waits for the entry's `startup_timeout_sec`, else 30 s; HTTP waits 20 s. The result says whether the program exited or the wait timed out.
+- Working directory: entry `cwd`, then explicit `--cwd`, then the tool's HOME. Paths must be existing absolute directories. A project-dependent server needs the correct project directory. The tool's process environment, selected secrets file and proxy fallback can differ from the assistant's environment.
+- Initialization uses `startup_timeout_sec`, then `startup_timeout_ms`, then Codex's 10 s default (other formats: stdio 30 s, HTTP 20 s). Tool listing gets a separate `tool_timeout_sec`, defaulting to 60 s for Codex and the transport default for others. Codex defaults follow its [official MCP guide](https://learn.chatgpt.com/docs/extend/mcp).
+- Invalid initialization, tool-list RPC errors, missing results, early exits and timeouts fail at their respective stage. Servers without the [tools capability](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) succeed at initialization without claiming a tool list. Only the first tool-list page is read; no tools are invoked.
+- Results include `base`, `cwd`, `cwd_source`, both effective timeouts and optional `exit_code`. Only exits observed before shutdown are reported; closing stdin or forced termination must not manufacture a failure exit code.
 - Afterwards stdin is closed and, if the server is still running after 0.5 s, the whole process group is killed.
 - Commands use the shared [external-command layer](external-commands.md) for Windows console flags, timeout jobs and manual system proxy fallback; explicit entry environment variables take precedence.
 - Legacy SSE transports are refused with a reason.
 - The command takes no apply lock and writes neither files nor the database.
+
+## Legacy marker recovery
+
+MCP rows expose legacy `_MANAGED_BY` fields as configuration warnings, independently of connection results. `mcp:preview` and `mcp:apply` accept `--action clean-markers --only mcp:<name> --agent <account> --base <digest>`. The action removes only the selected entry's top-level and env-container marker fields, preserving other values, enabled state and other accounts. Preview is read-only; apply rechecks the digest under the normal write lock. See the [configuration guide](../MCP-CONFIG-GUIDE.md).
 
 ## Verification
 

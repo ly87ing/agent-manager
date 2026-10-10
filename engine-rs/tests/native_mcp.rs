@@ -101,7 +101,7 @@ fn preview_matches_add_and_edit_without_writing_and_rejects_stale_entry() {
         ],
     );
     assert!(!unsupported.ok);
-    assert!(errors(&unsupported).contains("仅支持 add/edit/copy/remove"));
+    assert!(errors(&unsupported).contains("仅支持 add/edit/clean-markers/copy/remove"));
     assert!(!ctx.data_dir.exists());
     let spec = r#"{"command":"npx","args":["-y","example-mcp"]}"#;
     for (agent, path) in [
@@ -2498,6 +2498,57 @@ fn edit_never_adds_fields_the_original_entry_did_not_have() {
 // mcp:check：测试连接（只返回结果，不写文件、不写库）
 // ---------------------------------------------------------------------------
 
+#[test]
+fn clean_markers_previews_one_entry_preserves_fields_and_rejects_stale_input() {
+    let (root, ctx) = temp_ctx("clean-markers");
+    let original = "# user settings\nmodel = \"example\"\n\n[mcp_servers.old]\n_MANAGED_BY = \"agent-manager\"\ncommand = \"uvx\"\nargs = [\"serve\"]\nenabled = false\ncwd = \"/work\"\nrequired = true\nenabled_tools = [\"search\"]\n[mcp_servers.old.env]\n_MANAGED_BY = \"agent-manager\"\nTOKEN = \"example-value\"\n[mcp_servers.other]\ncommand = \"other\"\n_MANAGED_BY = \"keep-other\"\n";
+    write_codex(&ctx, original);
+    write_claude(&ctx, json!({"mcpServers":{"old":{"command":"different"}}}));
+    let other_account = read(&claude_path(&ctx));
+    let before = codex_doc(&ctx);
+    let cell = cell(&ctx, "old", "codex");
+    assert!(cell["actions"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("clean-markers")));
+    let args = [
+        "--only",
+        "mcp:old",
+        "--agent",
+        "codex",
+        "--action",
+        "clean-markers",
+        "--base",
+        cell["base"].as_str().unwrap(),
+    ];
+    let preview = run(&ctx, "mcp:preview", &args);
+    assert!(preview.ok, "{}", errors(&preview));
+    assert_eq!(read(&codex_path(&ctx)), original);
+    assert!(!ctx.data_dir.exists(), "preview must not create state");
+    let changed = original.replace("required = true", "required = false");
+    write_codex(&ctx, &changed);
+    assert!(apply_err(&ctx, &args).contains("外部修改"));
+    assert_eq!(read(&codex_path(&ctx)), changed);
+    assert!(
+        !ctx.data_dir.exists(),
+        "stale cleanup must not create state"
+    );
+    write_codex(&ctx, original);
+    apply_ok(&ctx, &args);
+    assert_eq!(
+        read(&codex_path(&ctx)),
+        preview.data["files"][0]["content"].as_str().unwrap()
+    );
+    let mut expected = before;
+    let old = expected["mcp_servers"]["old"].as_table_mut().unwrap();
+    old.remove("_MANAGED_BY");
+    old["env"].as_table_mut().unwrap().remove("_MANAGED_BY");
+    assert_eq!(codex_doc(&ctx), expected);
+    assert!(read(&codex_path(&ctx)).starts_with("# user settings\n"));
+    assert_eq!(read(&claude_path(&ctx)), other_account);
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// 假的 stdio MCP 服务：先打一行日志和一条通知，再回 initialize；读到 initialized 与 tools/list 后回工具清单。
 #[cfg(unix)]
 const FAKE_SERVER: &str = r#"#!/bin/sh
@@ -2505,7 +2556,7 @@ touch "$(dirname "$0")/ran"
 read line
 echo 'starting fake server'
 echo '{"jsonrpc":"2.0","method":"notifications/message","params":{}}'
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"fake","version":"1.2.3"}}}'
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"fake","version":"1.2.3"}}}'
 read line
 read line
 printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"search"},{"name":"fetch"}]}}'
@@ -2551,6 +2602,135 @@ fn check_runs_a_stdio_server_lists_tools_and_writes_nothing() {
         !ctx.data_dir.join("native-manager.db").exists(),
         "测试连接不写库"
     );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn check_uses_configured_or_selected_cwd_and_rejects_stale_entries_before_start() {
+    let (root, ctx) = temp_ctx("check-cwd");
+    let server = fake_server(
+        &ctx,
+        &FAKE_SERVER.replace("touch \"$(dirname \"$0\")/ran\"", "pwd > \"${0}.cwd\""),
+    );
+    let project = ctx.home_dir.join("project with spaces");
+    std::fs::create_dir_all(&project).unwrap();
+    for configured in [true, false] {
+        write_codex(
+            &ctx,
+            &format!(
+                "[mcp_servers.fake]\ncommand = {:?}\n{}",
+                server.to_str().unwrap(),
+                if configured {
+                    format!("cwd = {:?}\n", project.to_str().unwrap())
+                } else {
+                    String::new()
+                }
+            ),
+        );
+        let base = cell(&ctx, "fake", "codex")["base"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let result = run(
+            &ctx,
+            "mcp:check",
+            &[
+                "--only",
+                "mcp:fake",
+                "--agent",
+                "codex",
+                "--base",
+                &base,
+                "--cwd",
+                ctx.home_dir.to_str().unwrap(),
+            ],
+        );
+        assert!(result.ok && result.data["ok"] == true, "{result:?}");
+        let expected = if configured { &project } else { &ctx.home_dir };
+        assert_eq!(
+            read(&server.with_extension("cwd")).trim(),
+            std::fs::canonicalize(expected).unwrap().to_str().unwrap()
+        );
+        assert_eq!(result.data["cwd"], expected.to_str().unwrap());
+        assert_eq!(
+            result.data["cwd_source"],
+            if configured { "config" } else { "selected" }
+        );
+        assert_eq!(result.data["startup_timeout_sec"], 10.0);
+        assert_eq!(result.data["tool_timeout_sec"], 60.0);
+        assert_eq!(result.data["base"], base);
+    }
+    std::fs::remove_file(server.with_extension("cwd")).unwrap();
+    let stale = run(
+        &ctx,
+        "mcp:check",
+        &[
+            "--only",
+            "mcp:fake",
+            "--agent",
+            "codex",
+            "--base",
+            &"0".repeat(64),
+        ],
+    );
+    assert!(!stale.ok && errors(&stale).contains("配置已变化"));
+    let invalid = run(
+        &ctx,
+        "mcp:check",
+        &[
+            "--only", "mcp:fake", "--agent", "codex", "--cwd", "relative",
+        ],
+    );
+    assert!(!invalid.ok);
+    assert!(!server.with_extension("cwd").exists());
+    assert!(!ctx.data_dir.exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn check_does_not_report_success_when_tools_fail_or_initialize_is_invalid() {
+    let (root, ctx) = temp_ctx("check-tools");
+    for (replacement, expected_stage) in [
+        ("printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32603,\"message\":\"tools failed\"}}'", "tools"),
+        ("printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}'", "tools"),
+        ("exit 7", "tools"),
+        ("sleep 3", "tools"),
+        ("read line", "tools"),
+    ] {
+        let body = FAKE_SERVER.lines().map(|line| if line.contains("\"id\":2") { replacement } else { line }).collect::<Vec<_>>().join("\n");
+        let server = fake_server(&ctx, &body);
+        write_codex(&ctx, &format!("[mcp_servers.fake]\ncommand = {:?}\ntool_timeout_sec = 1\n", server.to_str().unwrap()));
+        let result = run(&ctx, "mcp:check", &["--only", "mcp:fake", "--agent", "codex"]);
+        assert!(result.ok, "{}", errors(&result));
+        assert_eq!(result.data["ok"], false, "{replacement}: {}", result.data);
+        assert_eq!(result.data["stage"], expected_stage);
+        if replacement == "exit 7" { assert_eq!(result.data["exit_code"], 7); }
+        if replacement == "sleep 3" || replacement == "read line" { assert_eq!(result.data["exit_code"], Value::Null, "forced cleanup is not a server exit code"); }
+    }
+    let invalid = FAKE_SERVER.replace("\"protocolVersion\":\"2025-06-18\",", "");
+    fake_server(&ctx, &invalid);
+    let result = run(
+        &ctx,
+        "mcp:check",
+        &["--only", "mcp:fake", "--agent", "codex"],
+    );
+    assert_eq!(result.data["ok"], false);
+    assert_eq!(result.data["stage"], "initialize");
+    let no_tools = FAKE_SERVER.replace("\"tools\":{}", "");
+    fake_server(&ctx, &no_tools);
+    let result = run(
+        &ctx,
+        "mcp:check",
+        &["--only", "mcp:fake", "--agent", "codex"],
+    );
+    assert_eq!(result.data["ok"], true);
+    assert_eq!(result.data["tool_count"], Value::Null);
+    assert!(result.data["message"]
+        .as_str()
+        .unwrap()
+        .contains("未声明工具能力"));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -2612,6 +2792,7 @@ fn check_reports_a_failing_server_without_leaking_the_secret_it_was_given() {
     let text = env.data.to_string();
     assert!(text.contains("auth failed for token"), "{text}");
     assert_eq!(env.data["message"], "命令退出了，没有回应初始化");
+    assert_eq!(env.data["exit_code"], 1);
     assert!(!text.contains(SECRET), "取值不能出现在结果里：{text}");
     let _ = std::fs::remove_dir_all(root);
 }
@@ -2656,7 +2837,9 @@ fn check_rejects_unknown_entries_and_bad_arguments() {
 /// 本地假 Streamable HTTP 服务：initialize 回 JSON 并给会话 id；tools/list 要带会话 id 与鉴权头，回 SSE。
 /// 返回地址与收到的请求头（小写）记录。
 #[cfg(unix)]
-fn fake_http_server() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+fn fake_http_server(
+    tools_response: &'static str,
+) -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
     use std::io::{BufRead, BufReader, Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/mcp", listener.local_addr().unwrap());
@@ -2687,7 +2870,7 @@ fn fake_http_server() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>)
             log.lock().unwrap().push(headers.join("\n"));
             let response = match body["method"].as_str() {
                 Some("initialize") => {
-                    let json = r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"remote-fake","version":"9"}}}"#;
+                    let json = r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"remote-fake","version":"9"}}}"#;
                     format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nMcp-Session-Id: sess-42\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}", json.len())
                 }
                 Some("tools/list") => {
@@ -2696,7 +2879,7 @@ fn fake_http_server() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>)
                             .iter()
                             .any(|h| h == "authorization: bearer remote-plain-token-77");
                     let json = if ok {
-                        r#"{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"remote_tool"}]}}"#
+                        tools_response
                     } else {
                         r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32001,"message":"missing session or auth"}}"#
                     };
@@ -2728,7 +2911,8 @@ fn check_talks_streamable_http_with_session_and_resolved_headers() {
         ],
     );
     assert!(set.ok, "{}", errors(&set));
-    let (url, seen) = fake_http_server();
+    let (url, seen) =
+        fake_http_server(r#"{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"remote_tool"}]}}"#);
     write_claude(
         &ctx,
         json!({"mcpServers": {"remote": {"type": "http", "url": url, "headers": {"Authorization": "Bearer ${AM_REMOTE_TOKEN}"}}}}),
@@ -2748,5 +2932,32 @@ fn check_talks_streamable_http_with_session_and_resolved_headers() {
         "initialize、initialized、tools/list 各一次"
     );
     assert!(!env.data.to_string().contains("remote-plain-token-77"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn check_reports_streamable_http_tools_errors_as_failures() {
+    let (root, ctx) = temp_ctx("check-http-tools");
+    for response in [
+        r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"tools rejected"}}"#,
+        r#"{"jsonrpc":"2.0","id":2,"result":{}}"#,
+    ] {
+        let (url, _) = fake_http_server(response);
+        write_claude(
+            &ctx,
+            json!({"mcpServers":{"remote":{"type":"http","url":url,"headers":{"Authorization":"Bearer remote-plain-token-77"}}}}),
+        );
+        let result = run(
+            &ctx,
+            "mcp:check",
+            &["--only", "mcp:remote", "--agent", "claude-code"],
+        );
+        assert!(result.ok, "{}", errors(&result));
+        assert_eq!(result.data["ok"], false, "{}", result.data);
+        assert_eq!(result.data["stage"], "tools");
+        assert!(result.data["tools"].is_null());
+    }
+    assert!(!ctx.data_dir.exists());
     let _ = std::fs::remove_dir_all(root);
 }

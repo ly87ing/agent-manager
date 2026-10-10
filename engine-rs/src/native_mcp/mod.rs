@@ -58,10 +58,11 @@ pub fn dispatch(ctx: &Context, req: &Request) -> Result<(Value, Vec<String>)> {
                 parsed.action,
                 preflight::Action::Add
                     | preflight::Action::Edit
+                    | preflight::Action::CleanMarkers
                     | preflight::Action::Copy
                     | preflight::Action::Remove
             ) {
-                bail!("mcp:preview 仅支持 add/edit/copy/remove");
+                bail!("mcp:preview 仅支持 add/edit/clean-markers/copy/remove");
             }
             let inv = inventory::load(ctx)?;
             let plan = preflight::plan(&parsed, &inv)?;

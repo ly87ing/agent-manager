@@ -77,10 +77,12 @@ describe("McpPage：实际条目为主", () => {
       ...routes(),
       "mcp:check": async (args: string[]) => {
         checks.push(args);
+        if (checks.length > 1) return makeEnvelope(null, { ok: false, errors: [{ code: "stale", element: null, message: "配置已变化，请刷新后重新检查" }] });
         return makeEnvelope({
           domain: "mcp", action: "check", server: "fs", agent: args[3], ok: true, stage: "done",
           message: "连接成功，提供 2 个工具", server_info: { name: "fs-mcp", version: "1.0.0" },
           tool_count: 2, tools: ["read_file", "write_file"], detail: null, elapsed_ms: 1234,
+          base: BASE_CODEX_FS, cwd: "/work", cwd_source: "config", startup_timeout_sec: 30, tool_timeout_sec: 60, exit_code: null,
         }, { command: "mcp.check" });
       },
     });
@@ -94,7 +96,20 @@ describe("McpPage：实际条目为主", () => {
     expect(result).toHaveTextContent("连接成功，提供 2 个工具");
     expect(result).toHaveTextContent("fs-mcp 1.0.0");
     expect(result).toHaveTextContent("read_file、write_file");
-    expect(checks).toEqual([["--only", "mcp:fs", "--agent", "codex"]]);
+    expect(result).toHaveTextContent("阶段：完成");
+    expect(result).toHaveTextContent("初始化 30 秒 · 工具 60 秒");
+    expect(within(dialog).getByTestId("mcp-check-cwd")).toBeDisabled();
+    expect(checks).toEqual([["--only", "mcp:fs", "--agent", "codex", "--base", BASE_CODEX_FS]]);
+    await userEvent.click(within(dialog).getByTestId("mcp-check-agent-claude-code"));
+    expect(within(dialog).queryByTestId("mcp-check-result")).toBeNull();
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-cancel"));
+    expect(screen.getByTestId("check-result-mcp:fs-codex")).toHaveTextContent("上次检查通过");
+    await userEvent.click(screen.getByTestId("check-result-mcp:fs-codex"));
+    const retry = await screen.findByRole("dialog", { name: "测试连接 · fs" });
+    await userEvent.click(within(retry).getByTestId("confirm-modal-confirm"));
+    expect(await within(retry).findByRole("alert")).toHaveTextContent("配置已变化");
+    await userEvent.click(within(retry).getByTestId("confirm-modal-cancel"));
+    expect(screen.queryByTestId("check-result-mcp:fs-codex")).toBeNull();
     expect(calls.some((call) => call.command === "mcp:apply" || call.command === "mcp:preview")).toBe(false);
   });
 
@@ -104,6 +119,67 @@ describe("McpPage：实际条目为主", () => {
     renderWithEngine(<McpPage />, routes(status));
     expect(await screen.findByTestId("mcp-target-error-codex")).toHaveTextContent("配置文件解析失败");
     expect(screen.getByTestId("action-disable-mcp:fs-claude-code")).toBeInTheDocument();
+  });
+
+  it("旧标记单独预览清理：取消不写，确认只提交所选账号及原摘要", async () => {
+    const { calls } = renderWithEngine(<McpPage />, routes());
+    await expandAll();
+    const open = async () => {
+      await userEvent.click(screen.getByTestId("clean-markers-mcp:fs-codex"));
+      const dialog = await screen.findByRole("dialog", { name: "清理旧标记 · fs" });
+      await within(dialog).findByTestId("mcp-marker-preview");
+      expect(dialog).toHaveTextContent("保留启用状态、命令、取值和其他字段");
+      return dialog;
+    };
+    let dialog = await open();
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-cancel"));
+    expect(applyCalls(calls)).toHaveLength(0);
+    dialog = await open();
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(applyCalls(calls)).toHaveLength(1));
+    const args = ["--only", "mcp:fs", "--agent", "codex", "--action", "clean-markers", "--base", BASE_CODEX_FS];
+    expect(applyCalls(calls)[0].args).toEqual(args);
+    expect(calls.filter((call) => call.command === "mcp:preview").every((call) => JSON.stringify(call.args) === JSON.stringify(args))).toBe(true);
+  });
+
+  it("旧标记预览失败时不能清理", async () => {
+    const { calls } = renderWithEngine(<McpPage />, { ...routes(), "mcp:preview": makeEnvelope(null, { ok: false, errors: [{ code: "stale", element: null, message: "配置已变化" }] }) });
+    await expandAll();
+    await userEvent.click(screen.getByTestId("clean-markers-mcp:fs-codex"));
+    const dialog = await screen.findByRole("dialog", { name: "清理旧标记 · fs" });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("配置已变化");
+    expect(within(dialog).getByTestId("confirm-modal-confirm")).toBeDisabled();
+    expect(applyCalls(calls)).toHaveLength(0);
+  });
+
+  it("失败检查显示阶段、退出码和错误输出；工作目录变化清空结果，配置变化使行上结果失效", async () => {
+    const status = mcpStatusData();
+    const { calls } = renderWithEngine(<McpPage />, {
+      ...routes(status),
+      "mcp:status": async () => makeEnvelope(structuredClone(status)),
+      "mcp:check": async () => makeEnvelope({ ok: false, stage: "initialize", message: "命令退出了，没有回应初始化", base: BASE_CLAUDE_FS, cwd: "/isolated/project", cwd_source: "selected", startup_timeout_sec: 30, tool_timeout_sec: 30, exit_code: 1, server_info: null, tools: null, tool_count: null, elapsed_ms: 123, detail: "auth failed for token ***" }),
+      "mcp:apply": async () => {
+        const observed = status.elements[0].observed as { agents: Record<string, { base: string }> };
+        observed.agents["claude-code"].base = "e".repeat(64);
+        return makeEnvelope(makeApplyResult({ domain: "mcp" }));
+      },
+    });
+    await expandAll();
+    await userEvent.click(screen.getByTestId("check-mcp:fs"));
+    const dialog = await screen.findByRole("dialog", { name: "测试连接 · fs" });
+    await userEvent.type(within(dialog).getByTestId("mcp-check-cwd"), "/isolated/project");
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
+    const result = await within(dialog).findByTestId("mcp-check-result");
+    expect(result).toHaveTextContent("阶段：初始化 · 退出码：1");
+    expect(result).toHaveTextContent("auth failed for token ***");
+    expect(within(result).getByRole("button", { name: "编辑服务配置" })).toBeInTheDocument();
+    expect(calls.find((call) => call.command === "mcp:check")?.args).toEqual(["--only", "mcp:fs", "--agent", "claude-code", "--base", BASE_CLAUDE_FS, "--cwd", "/isolated/project"]);
+    await userEvent.clear(within(dialog).getByTestId("mcp-check-cwd"));
+    expect(within(dialog).queryByTestId("mcp-check-result")).toBeNull();
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-cancel"));
+    expect(screen.getByTestId("check-result-mcp:fs-claude-code")).toHaveTextContent("上次检查失败：初始化");
+    await userEvent.click(screen.getByTestId("action-disable-mcp:fs-claude-code"));
+    await waitFor(() => expect(screen.queryByTestId("check-result-mcp:fs-claude-code")).toBeNull());
   });
 
   it("配置格式还不支持的账号不占列，只在表头说明里提一句", async () => {

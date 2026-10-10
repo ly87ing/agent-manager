@@ -182,7 +182,7 @@ function demoEnvelopes(): Record<string, Envelope> {
           observed: {
             agents: {
               "claude-code": { ...mcpCellBase, state: "enabled", source: "file", target: "/Users/demo/.claude.json", transport: "stdio", entry: { command: "npx", args: ["-y", "chrome-devtools-mcp", "--isolated"], env: {} }, base: "1".repeat(64), command_available: true, actions: ["edit", "disable", "copy", "remove"] },
-              codex: { ...mcpCellBase, state: "enabled", source: "file", target: "/Users/demo/.codex/config.toml", transport: "stdio", entry: { command: "npx", args: ["-y", "chrome-devtools-mcp@1.2.0"], env: {}, startup_timeout_sec: 120 }, extra: { cwd: "/Users/demo/work", enabled_tools: ["take_screenshot"] }, base: "2".repeat(64), legacy_marker: true, notice: "条目含旧版 Agent Manager 标记，编辑或启停时会顺带清除", command_available: true, actions: ["edit", "disable", "copy", "remove"] },
+              codex: { ...mcpCellBase, state: "enabled", source: "file", target: "/Users/demo/.codex/config.toml", transport: "stdio", entry: { command: "npx", args: ["-y", "chrome-devtools-mcp@1.2.0"], env: {}, startup_timeout_sec: 120 }, extra: { cwd: "/Users/demo/work", enabled_tools: ["take_screenshot"] }, base: "2".repeat(64), legacy_marker: true, notice: "含旧版 Agent Manager 标记，可能触发助手配置警告；可预览后单独清理", command_available: true, actions: ["edit", "disable", "copy", "remove", "clean-markers"] },
             },
           },
           state: "managed-ok",
@@ -1360,6 +1360,27 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         return makeEnvelope({ deleted }, { command: "runs.clear" });
       }
       if (command === "agents:configure") return configureAgent(args, runId);
+      if (command === "mcp:check") {
+        const agent = argOf(args, "--agent") ?? "claude-code";
+        const id = argOf(args, "--only") ?? "";
+        const status = routes["mcp:status"].data as { elements: Array<{ id: string; observed: { agents: Record<string, { base: string; extra: Record<string, unknown>; entry: { startup_timeout_sec?: number } }> } }> };
+        const cell = status.elements.find((item) => item.id === id)?.observed.agents[agent];
+        const failed = agent === "codex";
+        return makeEnvelope({ ...routes["mcp:check"].data as object, agent, server: id.replace(/^mcp:/, ""), base: cell?.base,
+          ok: !failed, stage: failed ? "initialize" : "done", exit_code: failed ? 1 : null,
+          message: failed ? "命令退出了，没有回应初始化" : "连接成功，提供 3 个工具",
+          detail: failed ? "Demo: server exited before initialize; credential value ***" : null,
+          server_info: failed ? null : { name: "demo-mcp", version: "1.4.0" }, tools: failed ? null : ["search", "fetch", "summarize"], tool_count: failed ? null : 3,
+          cwd: cell?.extra.cwd ?? argOf(args, "--cwd") ?? "/Users/demo", cwd_source: cell?.extra.cwd ? "config" : argOf(args, "--cwd") ? "selected" : "home",
+          startup_timeout_sec: cell?.entry.startup_timeout_sec ?? (agent === "codex" ? 10 : 30), tool_timeout_sec: agent === "codex" ? 60 : 30,
+        }, { command: "mcp.check" });
+      }
+      if (command === "mcp:apply" && argOf(args, "--action") === "clean-markers") {
+        const status = routes["mcp:status"].data as { elements: Array<{ id: string; observed: { agents: Record<string, { base: string; legacy_marker: boolean; notice: string | null; actions: string[] }> } }> };
+        const cell = status.elements.find((item) => item.id === argOf(args, "--only"))?.observed.agents[argOf(args, "--agent") ?? ""];
+        if (cell) { cell.legacy_marker = false; cell.notice = null; cell.base = mockBase(++baseSeed); cell.actions = cell.actions.filter((action) => action !== "clean-markers"); }
+        return applyEnvelope("mcp", args, runId);
+      }
       if (command === "agents:preview-runtime") return previewRuntime(args);
       if (command === "agents:auth-status") {
         const only = args[args.indexOf("--only") + 1] ?? "";
@@ -1393,6 +1414,12 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         const target = status.targets.find((item) => item.agent === (to ?? agent));
         if (!target) throw new EngineBridgeError({ kind: "invalid_args", message: "找不到 MCP 目标" });
         const source = status.elements.find((item) => item.id === `mcp:${name}`);
+        if (action === "clean-markers") {
+          const entry = source?.observed.agents[agent]?.entry ?? {};
+          const content = `# Demonstration only\n[mcp_servers.${name}]\ncommand = ${JSON.stringify(entry.command)}\nargs = ${JSON.stringify(entry.args ?? [])}\n`;
+          const original = `${content}_MANAGED_BY = "agent-manager"\n`;
+          return makeEnvelope({ files: [{ path: target.path, exists: true, original, content }] }, { command: "mcp.preview" });
+        }
         if (action === "remove") {
           if (source?.observed.agents[agent]?.source === "saved") {
             return makeEnvelope({ files: [] }, { command: "mcp.preview" });
