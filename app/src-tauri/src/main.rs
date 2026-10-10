@@ -2,6 +2,7 @@
 
 mod engine;
 mod settings;
+mod startup;
 mod theme;
 mod tray;
 

@@ -178,6 +178,11 @@ export default function App() {
         setPaletteOpen(true);
       }}
     >
+      {settings.data?.runtimeWarning && (
+        <p role="alert" className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
+          {settings.data.runtimeWarning}
+        </p>
+      )}
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
       <Suspense fallback={<PageLoading text="正在打开页面…" />}>
         <div key={`${activePage}:${activePage === "sources" ? sourceFocus ?? "" : activePage === "mcp" ? mcpSearch ?? "" : activePage === "programs" ? programFocus ?? "" : ""}`} className="animate-page-in">

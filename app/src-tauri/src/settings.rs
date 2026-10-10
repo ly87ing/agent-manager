@@ -27,6 +27,8 @@ pub struct SettingsData {
     pub resource_dir: String,
     pub data_dir: String,
     pub updater_configured: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_warning: Option<String>,
 }
 
 fn data_root(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
@@ -109,6 +111,7 @@ pub(crate) fn settings_data(app: &tauri::AppHandle) -> Result<SettingsData, Stri
         resource_dir: resource.display().to_string(),
         data_dir: data.display().to_string(),
         updater_configured: updater_configured(app),
+        runtime_warning: crate::startup::location_warning(),
     })
 }
 pub(crate) fn save_preferences(

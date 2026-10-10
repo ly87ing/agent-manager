@@ -213,7 +213,7 @@ export default function SettingsPage({
       void update.close().catch(() => {});
     }
     setUpdate(null);
-    if (!data.updaterConfigured) return;
+    if (!data.updaterConfigured || data.runtimeWarning) return;
     setUpdateState("checking");
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
@@ -259,7 +259,7 @@ export default function SettingsPage({
   };
 
   const installUpdate = async () => {
-    if (!update) return;
+    if (!update || data.runtimeWarning) return;
     const currentUpdate = update;
     setConfirmUpdate(false);
     setUpdateState("installing");
@@ -368,13 +368,14 @@ export default function SettingsPage({
             <button
               type="button"
               onClick={() => void checkForUpdate()}
-              disabled={updateState !== "idle"}
+              disabled={updateState !== "idle" || Boolean(data.runtimeWarning)}
               className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm hover:bg-accent disabled:opacity-50"
             >
               <RefreshCw className={cn("h-3.5 w-3.5", updateState === "checking" && "animate-spin")} aria-hidden />
               检查更新
             </button>
-            {updateState === "idle" && !update && !updateError && (
+            {data.runtimeWarning && <p role="status" className="w-full text-xs text-muted-foreground">安装到“应用程序”后可检查更新。</p>}
+            {!data.runtimeWarning && updateState === "idle" && !update && !updateError && (
               <p role="status" className="w-full text-right text-xs text-muted-foreground">{updateStatus ?? "尚未检查更新。"}</p>
             )}
             {updateError && (

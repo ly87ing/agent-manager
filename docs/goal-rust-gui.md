@@ -738,3 +738,11 @@ The interrupted command-layer changes now use one launch path for GUI console fl
 - Initial concurrent runs failed one mock-CLI status test and one frontend shortcut test. Both targeted reruns and the subsequent full suites passed with lower concurrency; no assertions or timeouts were relaxed.
 - Not covered: physical Windows console appearance, real Windows desktop use, and a live macOS/Windows system-proxy network (the available macOS system proxy was off). Wine is process evidence, not physical-desktop acceptance.
 
+## 2026-10-09: Desktop installation-location warning
+
+macOS reads the current executable's mount flags and AppTranslocation path component. Read-only or translocated launches show an installation banner and suppress automatic/manual update checks and installation. Writable external volumes remain allowed. The warning is runtime information, not a saved setting. See [Desktop startup](subsystems/desktop-startup.md).
+
+- Native acceptance: a separate-identifier debug executable with isolated HOME/data and version-only test assistants rendered the warning through Tauri IPC from a controlled AppTranslocation path. A normal development launch had no warning. This controlled path is not Gatekeeper or DMG acceptance.
+- Mount tests read the actual read-only system and writable development filesystems; path cases cover writable external volumes. Browser mock settings exercised the banner on all ten main navigation pages at 1000 and 760 px without document overflow; Settings screenshots confirmed disabled updates and readable wrapping.
+- Tauri 26 tests, frontend 730 tests and production build passed. Frontend regressions cover the banner and both update-check paths. No installer, signing, updater download/install, tag or Release was produced.
+

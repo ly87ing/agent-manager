@@ -28,7 +28,7 @@ function persistDismissedVersion(version: string): void {
 
 export function useUpdateCheck({ delayMs = 1500 }: { delayMs?: number } = {}) {
   const settings = useSettings();
-  const configured = settings.data?.updaterConfigured ?? false;
+  const configured = Boolean(settings.data?.updaterConfigured && !settings.data?.runtimeWarning);
   const [availableVersion, setAvailableVersion] = useState<string | null>(null);
 
   useEffect(() => {

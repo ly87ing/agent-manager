@@ -18,6 +18,7 @@ export const settingsSchema = z
     resourceDir: z.string(),
     dataDir: z.string(),
     updaterConfigured: z.boolean(),
+    runtimeWarning: z.string().optional(),
   })
   .strict();
 

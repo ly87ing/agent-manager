@@ -74,6 +74,17 @@ describe("启动自动检查更新（useUpdateCheck）", () => {
     expect(screen.getByTestId("available-version")).toHaveTextContent("none");
   });
 
+  it("read-only launch location prevents the configured automatic update check", async () => {
+    setSettingsClient({
+      get: async () => ({ ...baseSettings, updaterConfigured: true, runtimeWarning: "Install the app first" }),
+      save: async (preferences) => ({ ...baseSettings, preferences }),
+    });
+    renderWithEngine(<Harness />, {});
+    await screen.findByTestId("available-version");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(check).not.toHaveBeenCalled();
+  });
+
   it("已配置且发现新版本：展示版本号并立即释放更新句柄", async () => {
     useUpdaterConfigured(true);
     const update = makeUpdate("2.0.0");

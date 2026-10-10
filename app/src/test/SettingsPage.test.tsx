@@ -21,6 +21,15 @@ const settings: SettingsData = {
 };
 
 describe("SettingsPage", () => {
+  it("warns about a read-only launch location and prevents manual update checks", async () => {
+    const runtimeWarning = "请先退出应用，将 Agent Manager 拖到应用程序后再打开。";
+    setSettingsClient({ get: async () => ({ ...settings, updaterConfigured: true, runtimeWarning }), save: async () => settings });
+    renderWithEngine(<App />, {});
+    expect(await screen.findByRole("alert")).toHaveTextContent(runtimeWarning);
+    await userEvent.click(await screen.findByRole("button", { name: "设置" }));
+    expect(await screen.findByRole("button", { name: "检查更新" })).toBeDisabled();
+    expect(check).not.toHaveBeenCalled();
+  });
   it("应用从设置加载态进入主界面时 Hook 顺序保持一致", async () => {
     setSettingsClient({ get: async () => settings, save: async () => settings });
     renderWithEngine(<App />, {});

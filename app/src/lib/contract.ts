@@ -47,6 +47,7 @@ export interface SettingsData {
   resourceDir: string;
   dataDir: string;
   updaterConfigured: boolean;
+  runtimeWarning?: string;
 }
 
 // ---------- element（双轴模型：收敛轴 state + 上游轴 freshness） ----------
