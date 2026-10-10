@@ -2,14 +2,18 @@
 
 Run several Claude Code and Codex accounts side by side. Each account has its own configuration directory and controlled launch command; skills, credential-free MCP servers, and rules can be shared. Built with Tauri 2, React, and Rust/SQLite, the desktop app and CLI share one Rust engine.
 
+The desktop app runs in the foreground: closing its window exits, and command
+search loads resources only while open. Navigation does not query every resource
+for global badges. See the [lightweight goal](docs/goal-lightweight.md) for the
+remaining retirement and memory-bound work.
+
 ## Features
 
 **All external sources are optional.** You can manage local accounts, MCP, rules, and existing skills without configuring a repository. The author's public skill repository is only a recommendation and is downloaded after confirmation. Secrets can be entered directly into a local file created by the app or stored in a file from your own private repository; the author's secrets repository is not required.
 
 - **Accounts:** list each assistant's main account (`claude` / `codex`, official login only) and separate accounts such as `cc2` or `ds`. Search by name, command, endpoint, or model, and refresh local status. Each row shows the actual endpoint, model, login state, and quota reset time; expired quota percentages are hidden. Add an official account or an API-provider preset to create its directory and launch command with shared settings and active skills. API keys are stored in an external secrets file and also written in plaintext to that account's assistant configuration when applied; the database stores only references. Edit forms read actual configuration and compare it with the opening baseline before saving; name and connection changes are submitted together. If safe prefill is unavailable, the app explains why and still allows renaming. Removal preserves the directory, login, and sessions; failure to remove a launch command is reported separately. Login copies the official command for you to run in a terminal.
-- **Live quota:** install the Agent Manager usage status line for all Claude accounts with one action. Each refresh records quota in this tool's data directory for the accounts page and tray. Codex quota is read from its own session records.
+- **Live quota (retirement pending):** the existing status-line action and local quota readers remain until the next lightweight slice. Tray publishing and reminders are already removed.
 - **Skills:** manage collections from Git repositories or local directories, with symlinks in each account's skill directory. Active skills are assigned to all accounts by default. Fill links them to accounts where they are missing; disabling one for an account is an exception that Fill respects. Adding a newly discovered skill assigns it to all accounts. Git sources can follow the latest version when version tags exist, otherwise the main branch; a specific branch, matching branches, or fixed version can also be selected. Only used directories are downloaded. Preview changes in Versions before updating or switching to any version. Skills installed by other tools, such as npx skills, appear as unmanaged on Sources and can be adopted individually: retain one source, back up redundant copies before cleanup, and allow undo. Add, update, switch, and remove sources on the Sources page.
-- **Inbox:** collect items that are broken, drifted, missing, have a new version, or are unmanaged. Each has one action, identical to the action on its resource page. Read back after handling; resolved items disappear automatically.
 - **MCP:** read and write entries in each account's actual configuration files. One row per service summarizes enabled accounts. Fill within one assistant type, or Copy to another assistant. Editing and deletion show file previews; every write checks for external changes. Legacy `_MANAGED_BY` fields have a per-account cleanup preview that preserves the other fields. Test connection runs a separate protocol session and reports the working directory, timeouts, failure stage, natural exit code, sanitized error output, server and tools. It changes no configuration and persists no result; an enabled switch or successful check does not mean the assistant has loaded the service.
 - **Rules:** edit each account's `CLAUDE.md` / `AGENTS.md` directly. Templates are local; recommended rules come from skill sources (`rules/` in agent-skills). Fill copies the main account's rules only to accounts without a rule file and never changes existing content.
 - **Usage:** read local session records and total tokens per account. Filter by time, account, and model, see the prompt-cache hit rate, and estimate cost from a price table; this is not a bill. Recent sessions list each account's latest conversations (title, directory, time) and copy a command that enters that directory and resumes the conversation with the same account's launch command.
@@ -19,11 +23,10 @@ Run several Claude Code and Codex accounts side by side. Each account has its ow
 
 ## Experience
 
-- Top navigation: Inbox, Accounts, Skills, MCP, Rules, Commands, Sources, and Programs. Search `⌘K`, theme controls, Usage, and Settings are on the right. Each page opens with a list, one item per row.
+- Top navigation: Accounts, Skills, MCP, Rules, Commands, Sources, and Programs. Search `⌘K`, theme controls, Usage, and Settings are on the right. Each page opens with a list, one item per row.
 - `⌘K` searches pages, accounts, and resources; selecting an account copies its launch command. `⌘⇧K` lists accounts only. `⌘F` searches the current page; `⌘,` opens Settings.
-- Left-clicking the tray icon (macOS / Windows) opens a small panel listing every account by assistant with its launch command, quota bars, and reset countdown; Copy puts the launch command on the clipboard. Right-click (and any click on Linux) opens the native menu, which groups accounts the same way and opens the command palette at the chosen one. The tray never switches accounts or writes configuration.
-- Optional quota reminder (Settings): a system notification when an account's window is about to reset with more than half of it unused. It only informs; it takes no action.
-- Light, dark, and system themes; persistent window position and size; single-instance operation; update notifications.
+- No tray window, quota notification, or background account refresh. Application update checks are manual in Settings.
+- Light, dark, and system themes; persistent window position and size; single-instance operation.
 
 The application UI is in Simplified Chinese.
 

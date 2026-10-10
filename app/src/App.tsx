@@ -1,14 +1,10 @@
-import { Inbox, Library, Package, ScrollText, Server, Settings, Sparkles, SquareTerminal, Users, Wallet } from "lucide-react";
+import { Library, Package, ScrollText, Server, Settings, Sparkles, SquareTerminal, Users, Wallet } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
 import { ImportLinkDialog } from "./components/ImportLinkDialog";
 import { subscribeImportLinks, type SharePayload } from "./lib/shareLink";
 import { useSettings } from "./lib/settings";
-import { subscribeTrayActions } from "./lib/trayActions";
-import { useUpdateCheck } from "./lib/update-check";
-import { countByPage, useInbox } from "./lib/inbox";
-import { useAccountNames } from "./lib/useAccountNames";
 import { PageError, PageLoading } from "./components/PageState";
 
 const AccountsPage = lazy(() => import("./pages/AccountsPage"));
@@ -20,13 +16,10 @@ const AliasesPage = lazy(() => import("./pages/AliasesPage"));
 const UsagePage = lazy(() => import("./pages/UsagePage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SourcesPage = lazy(() => import("./pages/SourcesPage"));
-const InboxPage = lazy(() => import("./pages/InboxPage"));
 const ProgramsPage = lazy(() => import("./pages/ProgramsPage"));
 
-// 管理体系（docs/MULTI-ACCOUNT-DESIGN.md）：待处理是闭环的入口；账号管在哪生效，技能 / MCP / 规则 / 命令管分配，
-// 来源管内容从哪来、用哪个版本；密钥、操作记录等工具本身的事在设置里。
+// Keep resource queries in their pages; navigation does not collect global status.
 const NAV: NavItem[] = [
-  { key: "inbox", label: "待处理", icon: Inbox },
   { key: "accounts", label: "账号", icon: Users },
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
@@ -63,8 +56,6 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteScope, setPaletteScope] = useState<"all" | "quick">("all");
   const [paletteTarget, setPaletteTarget] = useState<{ keyword: string; itemId: string } | null>(null);
-  const update = useUpdateCheck();
-  const attention = countByPage(useInbox(useAccountNames()).items);
   /** 跳到来源页时定位的来源（名称；`unmanaged` 为未纳管）。 */
   const [sourceFocus, setSourceFocus] = useState<string | null>(null);
   /** 跳到 MCP 页时直接搜到的服务。 */
@@ -104,22 +95,6 @@ export default function App() {
 
   // 系统里点开 agentmanager://import 链接：打开导入对话框并填好链接，由用户检查确认
   useEffect(() => subscribeImportLinks((url) => setImportText(url)), []);
-
-  useEffect(
-    () =>
-      subscribeTrayActions((action) => {
-        if (action === "search") {
-          setPaletteScope("all");
-          setPaletteTarget(null);
-        } else {
-          // 托盘点中账号：面板定位到它，按 Enter 复制启动命令
-          setPaletteScope("quick");
-          setPaletteTarget({ keyword: `${action.agentName} · ${action.accountName}`, itemId: `account:${action.accountId}` });
-        }
-        setPaletteOpen(true);
-      }),
-    [],
-  );
 
   if (settings.isPending) return <PageLoading text="正在读取应用设置…" />;
   if (settings.isError) return <PageError title="应用设置加载失败" error={settings.error} />;
@@ -166,12 +141,10 @@ export default function App() {
 
   return (
     <AppLayout
-      nav={NAV.map((item) => ({ ...item, badge: attention[item.key] }))}
+      nav={NAV}
       secondaryNav={SECONDARY_NAV}
       active={activePage === "runs" ? "settings" : activePage}
       onNavigate={handleNavigate}
-      updateVersion={update.availableVersion}
-      onDismissUpdate={update.dismiss}
       onSearch={() => {
         setPaletteScope("all");
         setPaletteTarget(null);
@@ -186,7 +159,6 @@ export default function App() {
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
       <Suspense fallback={<PageLoading text="正在打开页面…" />}>
         <div key={`${activePage}:${activePage === "sources" ? sourceFocus ?? "" : activePage === "mcp" ? mcpSearch ?? "" : activePage === "programs" ? programFocus ?? "" : ""}`} className="animate-page-in">
-          {activePage === "inbox" && <InboxPage onOpen={handleNavigate} />}
           {activePage === "programs" && <ProgramsPage focus={programFocus} onOpen={handleNavigate} />}
           {activePage === "accounts" && (
             <AccountsPage

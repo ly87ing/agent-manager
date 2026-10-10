@@ -12,7 +12,7 @@ import { AccountCells, AccountHeader, AccountSwitch, ActionMenu, RowActions, TRA
 import { skillChip, skillNeedsUpdate } from "../lib/skillChip";
 import { SkillInstalledView } from "../components/SkillInstalledView";
 import { AttentionOnlyToggle, StateBadge } from "../components/StateBadge";
-import { shortRef, useInbox } from "../lib/inbox";
+import { shortRef, skillItems } from "../lib/inbox";
 import { DependencyChips, dependenciesOf } from "../components/DependencyChips";
 import type { ProgramsData } from "../lib/programs";
 import type { InboxState } from "../lib/inbox";
@@ -113,8 +113,10 @@ export default function SkillsPage({
 
   const directApply = useDirectApply();
   const batchApply = useBatchApply();
-  /** 「只看待处理」与待处理页同一份判断。 */
-  const attentionSubjects = new Set(useInbox(nameOf).items.filter((item) => item.page === "skills").map((item) => item.subject));
+  // Derive attention from this page's status without querying other domains.
+  const attentionSubjects = new Set(
+    skillItems(query.data?.ok ? query.data.data.elements ?? [] : [], nameOf).map((item) => item.subject),
+  );
   const [attentionOnly, setAttentionOnly] = useState(false);
   const programsQuery = useEngineQuery<ProgramsData>("programs:status");
   const programs = programsQuery.data?.ok ? programsQuery.data.data.elements : [];

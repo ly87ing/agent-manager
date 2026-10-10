@@ -39,7 +39,7 @@ export function renderWithEngine(
       </ExecutionProvider>
     </QueryClientProvider>,
   );
-  return { calls, ...view };
+  return { calls, queryClient, ...view };
 }
 
 export { screen, within, userEvent };

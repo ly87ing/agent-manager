@@ -1,5 +1,10 @@
 # Concurrent Accounts: Redesign and Implementation Plan
 
+Current scope amendment (2026-10-10): [Lightweight desktop goal](goal-lightweight.md)
+retires monitoring and background residency. Accounts, launch commands, resource
+assignment, Sources, and dependency programs remain. Earlier quota, tray, and
+session requirements below are historical acceptance records, not new obligations.
+
 Status: **Design confirmed and implemented (2026-09-28)**. P0–P7 are complete (2026-09-29: an account was created through the UI of a DMG built from the current code and read back). P5 quota writes still lack testing with an official subscription session; see Implementation Record below. Conflicting material in [GUI Redesign](GUI-REDESIGN.md) (main-configuration switching, saved connections, overview, etc.) was retired under Appendix A and is no longer a new requirement.
 
 ## 1. Positioning

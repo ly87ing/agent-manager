@@ -9,6 +9,8 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    // Rust builds do not change frontend source; keep their output out of HMR.
+    watch: { ignored: ["**/src-tauri/target/**"] },
   },
   build: {
     outDir: "dist",

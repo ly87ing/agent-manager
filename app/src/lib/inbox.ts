@@ -129,7 +129,7 @@ function sourceItems(collections: EngineElement[]): InboxItem[] {
   });
 }
 
-function skillItems(elements: EngineElement[], nameOf: (agent: string) => string): InboxItem[] {
+export function skillItems(elements: EngineElement[], nameOf: (agent: string) => string): InboxItem[] {
   const skills = elements.filter((element) => !isCollection(element));
   const fill = fillRows(elements);
   const versions = versionUpdateRows(elements);
@@ -211,7 +211,7 @@ function unmanagedItems(view: StatusData["unmanaged"] | null | undefined): Inbox
   ];
 }
 
-function mcpItems(elements: EngineElement[], targets: McpTarget[], nameOf: (agent: string) => string): InboxItem[] {
+export function mcpItems(elements: EngineElement[], targets: McpTarget[], nameOf: (agent: string) => string): InboxItem[] {
   const fill = mcpFillRows(elements, targets);
   return elements.flatMap((element): InboxItem[] => {
     const name = element.id.replace(/^mcp:/, "");

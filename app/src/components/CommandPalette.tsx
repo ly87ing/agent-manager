@@ -2,11 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
 import { buildAccounts } from "../lib/accounts";
-import { trayUsageSummary } from "../lib/agentUsage";
 import type { StatusData } from "../lib/contract";
 import { useEngineQuery, useRefreshUpstream } from "../lib/queries";
-import { sendDueReminders } from "../lib/quotaReminder";
-import { publishTrayAccounts, type TrayAccount } from "../lib/trayActions";
 import { cn } from "../lib/utils";
 import { matchesKeyword } from "./SearchInput";
 import { useQueries } from "@tanstack/react-query";
@@ -26,10 +23,7 @@ export interface CommandItem {
   run: () => void;
 }
 
-const USAGE_REFRESH_MS = 10 * 60_000;
-
 const PAGES: { key: string; label: string; keywords: string }[] = [
-  { key: "inbox", label: "待处理", keywords: "inbox 待处理 需要处理 损坏 缺失 更新 偏离 未纳管" },
   { key: "accounts", label: "账号", keywords: "accounts 账号 claude codex 启动命令 额度" },
   { key: "skills", label: "技能", keywords: "skills 技能" },
   { key: "mcp", label: "MCP", keywords: "mcp 服务器" },
@@ -47,8 +41,8 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
 /**
  * 命令面板（⌘K）：一个入口搜到页面、账号与资源，键盘直接完成。⌘⇧K 只列账号。
  *
- * 选中账号即复制它的启动命令；面板本身不写任何配置。同一份账号列表发给托盘菜单，
- * 托盘点中某个账号会带着精确目标重新打开面板，按 Enter 复制。
+ * Queries run only while open. Selecting an account copies its launch command;
+ * the palette never writes configuration.
  */
 export function CommandPalette({
   open,
@@ -72,23 +66,14 @@ export function CommandPalette({
   const [keyword, setKeyword] = useState("");
   const [targetItemId, setTargetItemId] = useState<string | null>(null);
   const [active, setActive] = useState(0);
-  const [usageNow, setUsageNow] = useState(() => new Date());
   const inputRef = useRef<HTMLInputElement>(null);
   const refreshUpstream = useRefreshUpstream();
 
-  useEffect(() => {
-    // 不重扫会话文件；只让托盘里的额度在窗口重置后消失、过旧后标明。
-    const timer = window.setInterval(() => setUsageNow(new Date()), 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  // 托盘要在窗口隐藏时也有账号列表，这三份状态保持热缓存（与账号页共享请求）。
-  // 额度跟着助手记账变化，每 10 分钟重读一次本机文件，托盘数字和额度提醒才不会停在打开时。
-  const agents = useEngineQuery<StatusData>("agents:status", [], { enabled: true, refetchInterval: USAGE_REFRESH_MS });
-  const profiles = useEngineQuery<StatusData>("profiles:status", [], { enabled: true, refetchInterval: USAGE_REFRESH_MS });
-  const aliases = useEngineQuery<StatusData>("aliases:status", [], { enabled: true });
-  const skills = useEngineQuery<StatusData>("skills:status", [], { enabled: open });
-  const mcp = useEngineQuery<StatusData>("mcp:status", [], { enabled: open });
+  const agents = useEngineQuery<StatusData>("agents:status", [], { enabled: open });
+  const profiles = useEngineQuery<StatusData>("profiles:status", [], { enabled: open });
+  const aliases = useEngineQuery<StatusData>("aliases:status", [], { enabled: open });
+  const skills = useEngineQuery<StatusData>("skills:status", [], { enabled: open && scope === "all" });
+  const mcp = useEngineQuery<StatusData>("mcp:status", [], { enabled: open && scope === "all" });
 
   const groups = useMemo(() => {
     const aliasValues = Object.fromEntries(
@@ -103,35 +88,9 @@ export function CommandPalette({
   const accountIds = groups.flatMap((group) => group.accounts.map((account) => account.elementId));
   const controlledQueries = useQueries({ queries: accountIds.map((id) => {
     const args = ["--only", id, "--operation", "launch", "--shell", defaultAuthShell()];
-    return { queryKey: engineKeys.request("accounts:command", args), queryFn: () => runEngine<AccountCommand>("accounts:command", args) };
+    return { enabled: open, queryKey: engineKeys.request("accounts:command", args), queryFn: () => runEngine<AccountCommand>("accounts:command", args) };
   }) });
   const controlledCommands = new Map(accountIds.map((id, index) => [id, controlledQueries[index].data?.ok ? controlledQueries[index].data.data.terminal_command : null]));
-
-  const trayAccounts = useMemo<TrayAccount[]>(() => groups.flatMap((group) => group.accounts.map((account) => ({
-    agentId: group.agentId,
-    agentName: group.label,
-    accountId: account.elementId,
-    accountName: account.isMain ? "主账号" : account.name,
-    command: controlledCommands.get(account.elementId) ?? null,
-    usageSummary: trayUsageSummary(account.usage, usageNow),
-  }))), [groups, usageNow, JSON.stringify([...controlledCommands])]);
-
-  useEffect(() => {
-    // 三份状态都成功后才替换原生菜单，避免瞬时读取失败清空上一次可用菜单
-    if (agents.data?.ok && profiles.data?.ok && aliases.data?.ok) void publishTrayAccounts(trayAccounts);
-  }, [agents.data?.ok, profiles.data?.ok, aliases.data?.ok, trayAccounts]);
-
-  useEffect(() => {
-    // 额度快作废提醒（设置里打开才发）：随展示时钟每分钟判断一次，同一轮只发一次
-    sendDueReminders(
-      groups.flatMap((group) => group.accounts.map((account) => ({
-        accountId: account.elementId,
-        label: `${group.label} · ${account.isMain ? "主账号" : account.name}`,
-        usage: account.usage,
-      }))),
-      usageNow,
-    );
-  }, [groups, usageNow]);
 
   useEffect(() => {
     if (open) {

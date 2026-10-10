@@ -908,3 +908,23 @@ isolated Mac library run passed **243 tests**, account-transaction integration
 passed **15**, and script tests passed **15**, all with zero failures. Formatting
 and Windows GNU library checking also passed. Cross-checking does not establish
 physical Windows desktop operation.
+
+## 2026-10-10: foreground desktop increment
+
+The [lightweight goal](goal-lightweight.md) supersedes historical monitoring and
+tray requirements. Starting from `f10d71d`, the desktop now closes normally,
+creates no tray webview, and does not query global Inbox status or run automatic
+update checks. Search queries run only while open; quick account search does not
+scan Skills or MCP. Controlled account commands and queued cold/warm import links
+remain intact. Accounts, Rules, Sources, and dependency programs remain available.
+Usage collection and login-entry enabling are still pending retirement.
+
+Acceptance: Tauri passed 27 tests; frontend passed 758 tests across 72 files with
+four existing platform skips; TypeScript and production build passed. All eight
+retained pages were checked at 1000 and 760 px. A separately identified native
+app with isolated HOME/data and version-only assistant fixtures rendered Accounts
+through IPC; closing its window ended its process. No real assistant data was used.
+The unchanged engine's full check passed 240 library tests and failed eight
+subprocess timing/capture tests under heavy concurrent host compilation; integration
+targets were not reached. A no-fail-fast rerun is collecting further evidence.
+This record does not claim a passing full engine suite or completion of the goal.

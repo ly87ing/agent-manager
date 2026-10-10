@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { waitFor } from "@testing-library/react";
+import { act, waitFor } from "@testing-library/react";
 import { check } from "@tauri-apps/plugin-updater";
 import App from "../App";
 import type { SettingsData } from "../lib/contract";
 import { setSettingsClient } from "../lib/settings";
 import { getDismissedUpdateVersion, useUpdateCheck } from "../lib/update-check";
 import { makeAuditData, makeEnvelope, makeMode } from "./fixtures";
-import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: vi.fn() }));
 
@@ -141,25 +141,19 @@ describe("启动自动检查更新（useUpdateCheck）", () => {
 });
 
 describe("更新提示 badge（侧边栏设置项）", () => {
-  it("发现新版本时设置项显示绿点，点击进设置页，点关闭后按版本不再提示", async () => {
+  it("does not start automatic checks or show a badge even when configured", async () => {
     useUpdaterConfigured(true);
     vi.mocked(check).mockResolvedValue(makeUpdate("2.0.0") as never);
-    renderWithEngine(<App />, appRoutes());
-
-    // 启动延迟约 1.5s 后发起检查
-    const badge = await screen.findByTestId("update-badge", {}, { timeout: 4000 });
-    const nav = screen.getByRole("navigation");
-    const settingsNav = within(nav).getByRole("button", { name: "设置" });
-    expect(settingsNav).toContainElement(badge);
-
-    // 点击设置项进入设置页（badge 随导航项）
-    await userEvent.click(settingsNav);
-    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
-
-    // 关闭 badge：按版本持久化并不再显示
-    await userEvent.click(screen.getByTestId("update-badge-dismiss"));
-    expect(screen.queryByTestId("update-badge")).toBeNull();
-    expect(window.localStorage.getItem("agent-manager:update:dismissedVersion")).toBe("2.0.0");
+    vi.useFakeTimers();
+    try {
+      renderWithEngine(<App />, appRoutes());
+      await act(async () => { await vi.advanceTimersByTimeAsync(11 * 60_000); });
+      expect(screen.getByRole("navigation")).toBeInTheDocument();
+      expect(check).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("update-badge")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   }, 15000);
 
   it("updater 未配置时不显示 badge", async () => {

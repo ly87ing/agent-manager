@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { waitFor } from "@testing-library/react";
+import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { act, waitFor } from "@testing-library/react";
+import { CommandPalette } from "../components/CommandPalette";
+import { useState } from "react";
+import { engineKeys } from "../lib/queries";
 import App from "../App";
 import type { Envelope, SettingsData } from "../lib/contract";
 import { setSettingsClient } from "../lib/settings";
@@ -98,6 +101,9 @@ function writes(calls: { command: string }[]) {
 }
 
 describe("命令面板", () => {
+  beforeAll(async () => {
+    await Promise.all([import("../pages/AccountsPage"), import("../pages/SettingsPage")]);
+  });
   beforeEach(() => trayEvents.byName.clear());
 
   it("⌘K 搜到页面、账号与资源，选中页面跳过去", async () => {
@@ -106,7 +112,7 @@ describe("命令面板", () => {
     const palette = await screen.findByTestId("command-palette");
     expect(within(palette).getByTestId("command-item-account:agents:claude-code")).toHaveTextContent("Claude · 主账号");
     await waitFor(() => expect(within(palette).getByTestId("command-item-account:profiles:work")).toHaveTextContent("复制受控命令"));
-    expect(within(palette).getByTestId("command-item-skill:agent-skills")).toBeInTheDocument();
+    expect(await within(palette).findByTestId("command-item-skill:agent-skills")).toBeInTheDocument();
     await userEvent.type(screen.getByTestId("command-palette-input"), "MCP");
     await userEvent.click(within(palette).getByTestId("command-item-page:mcp"));
     expect(screen.queryByTestId("command-palette")).toBeNull();
@@ -151,7 +157,7 @@ describe("命令面板", () => {
     await userEvent.keyboard("{Meta>}k{/Meta}");
     await userEvent.type(screen.getByTestId("command-palette-input"), "设置");
     await userEvent.keyboard("{Enter}");
-    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "设置" }, { timeout: 10_000 })).toBeInTheDocument();
     await userEvent.keyboard("{Meta>}k{/Meta}");
     await screen.findByTestId("command-palette");
     await userEvent.keyboard("{Escape}");
@@ -166,18 +172,37 @@ describe("命令面板", () => {
     expect(within(screen.getByRole("navigation")).getByRole("button", { name: "设置" })).toHaveAttribute("aria-current", "page");
   });
 
-  it("托盘点中账号：面板只剩这个账号，Enter 复制启动命令", async () => {
-    const writeText = mockClipboard();
-    const { calls } = await renderApp();
-    await waitFor(() => expect(trayEvents.listeners.size).toBe(1));
-    for (const listener of trayEvents.listeners) {
-      listener({ payload: { type: "open-account", agentName: "Claude Code", accountId: "profiles:work", accountName: "工作账号" } });
+  it("does not query or poll while closed", async () => {
+    vi.useFakeTimers();
+    try {
+      const { calls } = renderWithEngine(<CommandPalette open={false} onClose={() => {}} onNavigate={() => {}} onOpenAgentSkills={() => {}} />, routes());
+      await act(async () => { await vi.advanceTimersByTimeAsync(11 * 60_000); });
+      expect(calls).toEqual([]);
+    } finally {
+      vi.useRealTimers();
     }
-    const palette = await screen.findByRole("dialog", { name: "账号" });
-    expect(within(palette).getAllByRole("button")).toHaveLength(1);
-    await userEvent.keyboard("{Enter}");
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(controlledCommand("profiles:work")));
-    expect(writes(calls)).toEqual([]);
+  });
+
+  it("quick account search does not scan skills or MCP", async () => {
+    const { calls } = renderWithEngine(<CommandPalette open scope="quick" onClose={() => {}} onNavigate={() => {}} onOpenAgentSkills={() => {}} />, routes());
+    await waitFor(() => expect(screen.getByTestId("command-item-account:profiles:work")).toHaveTextContent("复制受控命令"));
+    expect([...new Set(calls.map((call) => call.command))].sort()).toEqual(["accounts:command", "agents:status", "aliases:status", "profiles:status"]);
+  });
+
+  it("closed search does not refresh controlled commands cached while open", async () => {
+    function Harness() {
+      const [open, setOpen] = useState(true);
+      return <>
+        <button onClick={() => setOpen(false)}>Close search</button>
+        <CommandPalette open={open} scope="quick" onClose={() => setOpen(false)} onNavigate={() => {}} onOpenAgentSkills={() => {}} />
+      </>;
+    }
+    const { calls, queryClient } = renderWithEngine(<Harness />, routes());
+    await waitFor(() => expect(screen.getByTestId("command-item-account:profiles:work")).toHaveTextContent("复制受控命令"));
+    await userEvent.click(screen.getByRole("button", { name: "Close search" }));
+    const count = calls.length;
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: engineKeys.all }); });
+    expect(calls).toHaveLength(count);
   });
 
   it("系统里点开分享链接：打开导入对话框并填好链接，确认前不写任何东西", async () => {

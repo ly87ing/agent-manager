@@ -46,6 +46,18 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - A before-fix timeout check in a temporary checkout initially reused the shared Cargo target's same-package artifact. Renaming the temporary package forced the original function bodies to compile; six new behavior regressions then failed for the intended reasons. A copied source tree alone is not proof that Cargo executed that copy.
 - Seen 1× (2026-10-10).
 
+**Prepare lazy modules before timing navigation; await data loaded on demand.**
+- Removing global prefetch made navigation tests time the first Vite module transform,
+  and the palette test assumed resource results existed before its query completed.
+  Preloading modules in test setup and waiting for the actual result kept the
+  functional assertions. Preserve the existing 10-second initial-page wait; allow
+  the same loading wait for a newly deferred Settings page under host contention.
+  Per-test interaction deadlines remain unchanged.
+- Native acceptance initially opened a blank page while the development server was
+  unresponsive. Relaunching after checking the server rendered actual Tauri data;
+  a blank window alone is not UI acceptance. Ignore Rust target output in Vite HMR.
+- Seen 1× (2026-10-10).
+
 **A test for masking must use a value the generic sanitizer does not already mask.**
 - `mcp:check` masks resolved variable values in its output. The first test used `sk-am-check-…`; it still passed with the masking removed, because `sanitize_diagnostic_message` already masks `sk-` keys. With a plain value (`plainvalue-qq83hz-moonlight`) it failed without the masking and passed with it (`a97f432`).
 - Before trusting a new test, put the old code back and see it fail for the reason it names.

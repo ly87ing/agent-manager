@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { MOD } from "../lib/platform";
 import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
@@ -35,7 +35,16 @@ function routes() {
 }
 
 describe("App 顶层导航", () => {
-  it("顶栏：待处理、账号、四类资源与来源，默认渲染账号页；扫描本机已有内容不再单独占设置入口", async () => {
+  // Load lazy modules before timing UI interactions; these imports issue no queries.
+  beforeAll(async () => {
+    await Promise.all([
+      import("../pages/AccountsPage"), import("../pages/SettingsPage"),
+      import("../pages/RulesPage"), import("../pages/SourcesPage"),
+      import("../pages/McpPage"), import("../pages/SkillsPage"),
+    ]);
+  });
+
+  it("keeps account and resource navigation without the global inbox", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -48,7 +57,6 @@ describe("App 顶层导航", () => {
 
     // 用量、设置只显示图标，按无障碍名称核对
     expect(navButtons.map((b) => b.getAttribute("aria-label") ?? b.textContent?.trim())).toEqual([
-      "待处理",
       "账号",
       "技能",
       "MCP",
@@ -76,14 +84,12 @@ describe("App 顶层导航", () => {
     const settingsNav = within(nav).getByRole("button", { name: "设置" });
     await userEvent.click(settingsNav);
     expect(settingsNav).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "设置" }, { timeout: 10_000 })).toBeInTheDocument();
 
     expect(screen.queryByTestId("advanced-entry-takeover")).toBeNull();
     expect(screen.queryByTestId("advanced-entry-import-link")).toBeNull();
 
-    // 待处理：什么都生效时是空态
-    await userEvent.click(within(nav).getByRole("button", { name: "待处理" }));
-    expect(await screen.findByTestId("inbox-empty")).toHaveTextContent("没有需要处理的");
+    expect(within(nav).queryByRole("button", { name: "待处理" })).toBeNull();
 
     const rulesNav = within(nav).getByRole("button", { name: "规则" });
     await userEvent.click(rulesNav);
@@ -93,9 +99,9 @@ describe("App 顶层导航", () => {
     expect(screen.queryByRole("tab", { name: /Hooks/ })).toBeNull();
   }, 15000);
 
-  it("导航上标出各页待处理数；数字不进按钮名字，没有待处理的不标", async () => {
+  it("does not query unrelated domains for navigation badges", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
-    renderWithEngine(<App />, {
+    const { calls } = renderWithEngine(<App />, {
       ...routes(),
       "skills:status": makeEnvelope({
         domain: "skills",
@@ -106,9 +112,11 @@ describe("App 顶层导航", () => {
       }, { command: "skills.status" }),
     });
     const nav = await screen.findByRole("navigation");
-    expect(await within(nav).findByTestId("nav-badge-skills")).toHaveTextContent("1");
+    await screen.findByRole("heading", { name: "账号" });
+    expect(within(nav).queryByTestId("nav-badge-skills")).toBeNull();
     expect(within(nav).getByRole("button", { name: "技能" })).toBeInTheDocument();
     expect(within(nav).queryByTestId("nav-badge-mcp")).toBeNull();
+    expect(calls.filter((call) => ["rules:status", "mcp:status", "programs:status"].includes(call.command))).toEqual([]);
   });
 
   it("从分享链接导入：来源页打开，带明文取值的链接拦下，合法的跳到 MCP 页并预填新增表单", async () => {

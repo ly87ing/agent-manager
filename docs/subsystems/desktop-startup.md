@@ -8,7 +8,7 @@ The current executable's location determines whether macOS needs an installation
 
 ## Runtime path
 
-[`settings_data`](../../app/src-tauri/src/settings.rs) includes an optional `runtimeWarning`. [`App`](../../app/src/App.tsx) displays it above the current page. The [automatic update hook](../../app/src/lib/update-check.ts) and [Settings page](../../app/src/pages/SettingsPage.tsx) suppress update checks and installation while the warning is present.
+[`settings_data`](../../app/src-tauri/src/settings.rs) includes an optional `runtimeWarning`. [`App`](../../app/src/App.tsx) displays it above the current page. The [Settings page](../../app/src/pages/SettingsPage.tsx) suppresses manual update checks and installation while the warning is present. There is no automatic update check. Closing the main window uses Tauri's normal close/exit flow; no tray or second webview is created.
 
 Settings reads `autostart_get` on opening. Only an explicit switch click calls `autostart_set`; the backend reads back the result before returning, and the [frontend query](../../app/src/lib/autostart.ts) refreshes even after a failed write. macOS uses a plist serializer and `AbandonProcessGroup` so an updater's replacement process can survive its launchd parent's exit. Windows quotes the executable path; Linux uses Desktop Entry quoting rather than a shell command.
 

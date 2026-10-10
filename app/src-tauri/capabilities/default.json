@@ -1,6 +1,6 @@
 {
   "identifier": "default",
   "description": "Default capability set for the main window",
-  "windows": ["main", "tray-panel"],
-  "permissions": ["core:default", "updater:default", "notification:default"]
+  "windows": ["main"],
+  "permissions": ["core:default", "updater:default"]
 }

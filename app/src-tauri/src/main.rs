@@ -6,9 +6,7 @@ mod import_links;
 mod settings;
 mod startup;
 mod theme;
-mod tray;
 
-use tauri::RunEvent;
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_window_state::StateFlags;
@@ -36,36 +34,16 @@ fn autostart_set(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
     autostart::set(&app, enabled)
 }
 
-/// 跨会话持久化的窗口状态：位置/尺寸/最大化。
-///
-/// 有意不含 VISIBLE：关窗按钮被拦截为隐藏后，若用户从托盘「退出」，窗口处于
-/// 隐藏态；持久化可见性会让下次启动恢复出一个隐藏窗口（只剩托盘，看起来像
-/// 没启动）。不含 FULLSCREEN：不跨会话恢复全屏。
+/// Restore geometry, but always open a visible, non-fullscreen window.
 fn window_state_flags() -> StateFlags {
     StateFlags::POSITION | StateFlags::SIZE | StateFlags::MAXIMIZED
 }
 
-/// `RunEvent::ExitRequested` 的 code 语义（见 tauri-runtime-wry）：
-/// 最后一个窗口被销毁 → code 为 None；app.exit(code)/app.restart() → Some(code)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ExitRequestAction {
-    /// None：运行时自动触发（如隐藏窗口的 WebView 被回收导致无存活窗口），
-    /// 阻止退出，保持托盘驻留。
-    StayInTray,
-    /// RESTART_EXIT_CODE：app.restart() / 自更新 relaunch。此路径上
-    /// prevent_exit() 会被 Tauri 忽略（见 ExitRequestApi 文档），交还默认
-    /// re-exec 流程：窗口状态由 window-state 插件的 RunEvent::Exit 钩子在
-    /// 主线程保存，托盘图标由 Tauri 的 cleanup_before_exit 正常 Drop。
-    DeferToTauriRestart,
-    /// 其它 Some(_)：用户主动退出（托盘「退出」→ app.exit(0)）。
-    CleanupAndExit,
-}
-
-fn classify_exit_request(code: Option<i32>) -> ExitRequestAction {
-    match code {
-        None => ExitRequestAction::StayInTray,
-        Some(tauri::RESTART_EXIT_CODE) => ExitRequestAction::DeferToTauriRestart,
-        Some(_) => ExitRequestAction::CleanupAndExit,
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
     }
 }
 
@@ -87,35 +65,19 @@ fn main() {
         std::process::exit(code);
     }
     let app = tauri::Builder::default()
-        .manage(tray::TrayState::default())
         .manage(import_links::ImportLinkState::default())
         // 单实例须最先注册：二次启动时把已有主窗口唤到前台，不再起第二份进程。
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::show_main_window(app);
+            show_main_window(app);
         }))
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
-                // 托盘面板每次跟着图标定位，不记位置
-                .with_denylist(&[tray::PANEL_LABEL])
                 .build(),
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
-        // 额度快作废的系统提醒：界面判断时机，插件只负责发通知。
-        .plugin(tauri_plugin_notification::init())
-        // 关窗不退出：点击关闭按钮只隐藏窗口，驻留托盘；
-        // 托盘「显示主界面」/ macOS Dock 点图标（Reopen）/ 二次启动均可唤回。
-        .on_window_event(|window, event| match event {
-            tauri::WindowEvent::CloseRequested { api, .. } => {
-                api.prevent_close();
-                let _ = window.hide();
-            }
-            tauri::WindowEvent::Focused(focused) => tray::handle_panel_focus(window, *focused),
-            _ => {}
-        })
         .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
-            tray::setup(app)?;
             // 分享链接 agentmanager://import?data=…：只把链接文字交给界面的导入对话框，
             // 由界面校验、展示并等用户确认；这里不解析、不写任何东西。其他链接一律忽略。
             let handle = app.handle().clone();
@@ -129,7 +91,7 @@ fn main() {
                     false,
                 );
                 if !links.is_empty() {
-                    tray::show_main_window(&handle);
+                    show_main_window(&handle);
                     for link in links {
                         let _ = handle.emit("import-link", link);
                     }
@@ -151,28 +113,18 @@ fn main() {
             settings_save,
             autostart_get,
             autostart_set,
-            tray::tray_set_accounts,
-            tray::tray_panel_open_main,
-            tray::tray_panel_quit,
             theme::set_window_theme
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| match event {
-        RunEvent::ExitRequested { api, code, .. } => match classify_exit_request(code) {
-            ExitRequestAction::StayInTray => api.prevent_exit(),
-            ExitRequestAction::DeferToTauriRestart => {}
-            // 用户退出不拦截，让默认流程执行插件退出钩子（含窗口状态落盘）；
-            // 仅显式摘托盘图标，避免进程结束后系统托盘残留死图标。
-            ExitRequestAction::CleanupAndExit => tray::remove_tray_icon_before_exit(app_handle),
-        },
+    app.run(|_app_handle, event| match event {
         // macOS：点击 Dock 图标且没有可见窗口时恢复主窗口。
         #[cfg(target_os = "macos")]
-        RunEvent::Reopen {
+        tauri::RunEvent::Reopen {
             has_visible_windows: false,
             ..
-        } => tray::show_main_window(app_handle),
+        } => show_main_window(_app_handle),
         _ => {}
     });
 }
@@ -189,22 +141,5 @@ mod tests {
         assert!(flags.contains(StateFlags::MAXIMIZED));
         assert!(!flags.contains(StateFlags::VISIBLE));
         assert!(!flags.contains(StateFlags::FULLSCREEN));
-    }
-
-    #[test]
-    fn exit_request_classification() {
-        assert_eq!(classify_exit_request(None), ExitRequestAction::StayInTray);
-        assert_eq!(
-            classify_exit_request(Some(tauri::RESTART_EXIT_CODE)),
-            ExitRequestAction::DeferToTauriRestart
-        );
-        assert_eq!(
-            classify_exit_request(Some(0)),
-            ExitRequestAction::CleanupAndExit
-        );
-        assert_eq!(
-            classify_exit_request(Some(1)),
-            ExitRequestAction::CleanupAndExit
-        );
     }
 }

@@ -23,7 +23,7 @@ import { useEngineQuery } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
 import { useExecutions } from "../lib/execution";
 import { mcpFillArgs, mcpFillRows } from "../lib/mcpFill";
-import { useInbox } from "../lib/inbox";
+import { mcpItems } from "../lib/inbox";
 import { AttentionOnlyToggle } from "../components/StateBadge";
 import { dependenciesOf } from "../components/DependencyChips";
 import type { ProgramsData } from "../lib/programs";
@@ -71,8 +71,12 @@ export default function McpPage({
   const nameOfAgent = useAccountNames();
   const groupsOf = useAccountGroups();
   const [search, setSearch] = useState(initialSearch ?? "");
-  /** 「只看待处理」与待处理页同一份判断。 */
-  const attentionSubjects = new Set(useInbox(nameOfAgent).items.filter((item) => item.page === "mcp").map((item) => item.subject));
+  // Derive attention from this page's status without querying other domains.
+  const attentionSubjects = new Set(mcpItems(
+    query.data?.ok ? query.data.data.elements ?? [] : [],
+    query.data?.ok ? query.data.data.targets ?? [] : [],
+    nameOfAgent,
+  ).map((item) => item.subject));
   const [attentionOnly, setAttentionOnly] = useState(false);
   const programsQuery = useEngineQuery<ProgramsData>("programs:status");
   const programs = programsQuery.data?.ok ? programsQuery.data.data.elements : [];

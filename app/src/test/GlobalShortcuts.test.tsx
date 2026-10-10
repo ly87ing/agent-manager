@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import App from "../App";
 import type { SettingsData } from "../lib/contract";
 import { setSettingsClient } from "../lib/settings";
@@ -27,6 +27,9 @@ function routes() {
 }
 
 describe("全局快捷键", () => {
+  beforeAll(async () => {
+    await Promise.all([import("../pages/AccountsPage"), import("../pages/SettingsPage"), import("../pages/McpPage")]);
+  });
   it("Cmd/Ctrl+, 跳到设置页", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
