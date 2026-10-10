@@ -84,6 +84,23 @@ fn windows_acl_grants_untrusted_access(mask: u32, private: bool, root: bool) -> 
     mask & (mutation | 0x000D_0000 | 0x5000_0000) != 0
 }
 
+#[cfg(any(windows, test))]
+fn windows_acl_allows_installer_ancestor_owner(sid: &[u8], private: bool) -> bool {
+    // Windows Modules Installer: S-1-5-80-956008885-3418522649-1831038044-
+    // 1853292631-2271478464. This exception is only for ancestor ownership;
+    // it never trusts another service SID or any private-file/ACL grant.
+    const SUBAUTHORITIES: [u32; 6] = [
+        80, 956008885, 3418522649, 1831038044, 1853292631, 2271478464,
+    ];
+    !private
+        && sid.len() == 32
+        && sid[..8] == [1, 6, 0, 0, 0, 0, 0, 5]
+        && sid[8..]
+            .chunks_exact(4)
+            .zip(SUBAUTHORITIES)
+            .all(|(bytes, value)| bytes == value.to_le_bytes())
+}
+
 #[cfg(windows)]
 pub(crate) fn validate_windows_acl(path: &Path, private: bool) -> Result<()> {
     use std::os::windows::ffi::OsStrExt;
@@ -171,7 +188,12 @@ pub(crate) fn validate_windows_acl(path: &Path, private: bool) -> Result<()> {
         let mut defaulted = 0;
         if GetSecurityDescriptorOwner(descriptor.as_mut_ptr().cast(), &mut owner, &mut defaulted)
             == 0
-            || !trusted(owner)
+            || IsValidSid(owner) == 0
+            || (!trusted(owner)
+                && !windows_acl_allows_installer_ancestor_owner(
+                    std::slice::from_raw_parts(owner.cast::<u8>(), GetLengthSid(owner) as usize),
+                    private,
+                ))
         {
             bail!("外部密钥文件所有者不是当前用户或系统管理员，拒绝操作");
         }
@@ -828,6 +850,38 @@ pub fn migrate_legacy(ctx: &Context) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_installer_owner_exception_excludes_private_files_and_other_services() {
+        let mut installer = vec![1, 6, 0, 0, 0, 0, 0, 5];
+        for value in [
+            80u32, 956008885, 3418522649, 1831038044, 1853292631, 2271478464,
+        ] {
+            installer.extend(value.to_le_bytes());
+        }
+        assert!(windows_acl_allows_installer_ancestor_owner(
+            &installer, false
+        ));
+        assert!(!windows_acl_allows_installer_ancestor_owner(
+            &installer, true
+        ));
+        for offset in [0, 1, 7, 8, 12, 16, 20, 24, 28] {
+            let mut other_service = installer.clone();
+            other_service[offset] ^= 1;
+            assert!(!windows_acl_allows_installer_ancestor_owner(
+                &other_service,
+                false
+            ));
+        }
+        assert!(!windows_acl_allows_installer_ancestor_owner(
+            &installer[..28],
+            false
+        ));
+        installer.extend(0u32.to_le_bytes());
+        assert!(!windows_acl_allows_installer_ancestor_owner(
+            &installer, false
+        ));
+    }
 
     #[test]
     fn windows_root_acl_allows_new_children_but_rejects_replacement_rights() {

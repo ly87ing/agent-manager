@@ -98,6 +98,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Use a fresh protected test directory under the OS user profile for Windows TEMP/TMP. Leave existing directory permissions unchanged; retain unsafe-parent and private-credential rejection assertions. Native CI must confirm the cause and rerun the full suite.
 - Seen 1× (2026-10-10).
 
+**Windows system ancestors may be owned by TrustedInstaller.**
+- Moving the fixture under the user profile did not repair the 14 lock failures. Native diagnostics on `ab28ed7` identified the same system-root owner as the exact Windows Modules Installer SID for both runtime and original TEMP chains; rejection happened before ACL grants were inspected. The untrusted effective grants only allowed creation/read/traversal.
+- Accept that exact SID only as an ancestor owner. Keep private credential/lock owners, ACL grantees, and rejection of deletion/ACL/owner changes strict. Test private-file rejection, nearby service SIDs, and dangerous grants, then rerun the native Windows suite.
+- Seen 1× (2026-10-10).
+
 **Launch the generated OS entry; a correct-looking string is not startup evidence.**
 - The first Linux autostart entry escaped a literal `%` as `%%` according to the Desktop Entry syntax. Real `gio launch` refused it because GIO checks whether the executable exists before expanding field codes. File readback alone had passed. Such paths now fail before writing; a disposable Linux run executed the exact path containing spaces, quotes, `$`, and a backslash.
 - Seen 1× (2026-10-09).
