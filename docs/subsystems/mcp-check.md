@@ -20,7 +20,10 @@ Checks one account's actual MCP entry once. This is a separate protocol session,
 - Initialization uses `startup_timeout_sec`, then `startup_timeout_ms`, then Codex's 10 s default (other formats: stdio 30 s, HTTP 20 s). Tool listing gets a separate `tool_timeout_sec`, defaulting to 60 s for Codex and the transport default for others. Codex defaults follow its [official MCP guide](https://learn.chatgpt.com/docs/extend/mcp).
 - Invalid initialization, tool-list RPC errors, missing results, early exits and timeouts fail at their respective stage. Servers without the [tools capability](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) succeed at initialization without claiming a tool list. Only the first tool-list page is read; no tools are invoked.
 - Results include `base`, `cwd`, `cwd_source`, both effective timeouts and optional `exit_code`. Only exits observed before shutdown are reported; closing stdin or forced termination must not manufacture a failure exit code.
-- Afterwards stdin is closed and, if the server is still running after 0.5 s, the whole process group is killed.
+- Afterwards stdin is closed and the server gets up to 0.5 s to exit. The whole
+  process group is then terminated even if the parent already exited, so background
+  descendants cannot retain pipes or outlive the check. Natural exit codes are
+  recorded before shutdown.
 - Commands use the shared [external-command layer](external-commands.md) for Windows console flags, timeout jobs and manual system proxy fallback; explicit entry environment variables take precedence.
 - Legacy SSE transports are refused with a reason.
 - The command holds a shared account lock while its process runs. Account, credential, and MCP writes require an exclusive lock and refuse an active check. It writes neither configuration nor the database.

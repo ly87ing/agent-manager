@@ -196,3 +196,13 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Derive ownership fixture paths through the production path helper. A hardcoded
   Unix separator tested a different command on Windows and missed the intended
   ownership check. Keep its skip/custom-copy assertions intact.
+
+### 2026-10-10: MCP cleanup must include descendants after parent exit
+
+- A successful protocol session does not prove process cleanup. The old finish
+  path skipped process-group termination after a natural parent exit, leaving a
+  background process and inherited reader pipes alive on Unix.
+- The isolated CLI reproduced a delayed descendant write after success. The new
+  integration regression confirms the descendant starts, preserves configuration,
+  and checks that it cannot write after the check returns. Keep the natural exit
+  code observed before shutdown while terminating the remaining group.

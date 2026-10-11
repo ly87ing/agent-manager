@@ -3040,6 +3040,46 @@ fn check_runs_a_stdio_server_lists_tools_and_writes_nothing() {
 
 #[cfg(unix)]
 #[test]
+fn check_reaps_background_descendants_after_the_server_exits() {
+    let (root, ctx) = temp_ctx("check-orphan");
+    let server = fake_server(
+        &ctx,
+        r#"#!/bin/sh
+(printf ready > "${0}.ready"; sleep 2; printf survived > "${0}.late") &
+while [ ! -f "${0}.ready" ]; do sleep 0.01; done
+read line
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"orphan-fixture","version":"1"}}}'
+exit 0
+"#,
+    );
+    write_claude(
+        &ctx,
+        json!({"mcpServers":{"fake":{"command":server.to_str().unwrap()}}}),
+    );
+    let before = read(&claude_path(&ctx));
+    let result = run(
+        &ctx,
+        "mcp:check",
+        &["--only", "mcp:fake", "--agent", "claude-code"],
+    );
+    assert!(result.ok && result.data["ok"] == true, "{result:?}");
+    assert!(
+        server.with_extension("ready").exists(),
+        "descendant must actually start"
+    );
+    assert_eq!(read(&claude_path(&ctx)), before);
+    assert!(!ctx.data_dir.exists());
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+    let survived = server.with_extension("late").exists();
+    let _ = std::fs::remove_dir_all(root);
+    assert!(
+        !survived,
+        "MCP descendant survived after the server exited and the check returned"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn check_uses_configured_or_selected_cwd_and_rejects_stale_entries_before_start() {
     let (root, ctx) = temp_ctx("check-cwd");
     let server = fake_server(

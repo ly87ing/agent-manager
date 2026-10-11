@@ -356,10 +356,8 @@ impl Running {
             }
             std::thread::sleep(Duration::from_millis(20));
         }
-        let status = self.child.try_wait().ok().flatten();
-        if status.is_none() {
-            self.group.kill(&mut self.child);
-        }
+        // Descendants can retain pipes and keep running after the server exits.
+        self.group.kill(&mut self.child);
         let _ = self.child.wait();
         let tail = self
             .stderr
