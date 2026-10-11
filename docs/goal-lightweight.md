@@ -6,7 +6,8 @@ and CLI continue to share the Rust engine. This scope supersedes the monitoring
 and residency requirements in earlier acceptance records.
 
 The implementation is on main. See [final verification](#final-verification-2026-10-10)
-for measured results and the existing Windows acceptance failure.
+for resource measurements and [defect follow-up](#defect-follow-up-2026-10-10)
+for the subsequent Windows and process-lifecycle corrections.
 
 ## Constraints
 
@@ -52,8 +53,9 @@ scripts and login entries need an explicit, ownership-checked removal path.
 
 ## Final verification (2026-10-10)
 
-Verified implementation: `f9b2c94`. Later acceptance-only documentation does not
-change the executable source.
+Initial implementation acceptance: `f9b2c94`. The
+[defect follow-up](#defect-follow-up-2026-10-10) below records current source
+acceptance at `dcb5aa0`.
 
 | Check | Result and boundary |
 | --- | --- |
@@ -63,19 +65,75 @@ change the executable source.
 | Layout and idle queries | Eight retained pages passed 1000/760 px checks. A browser fixture on Sources made zero additional engine queries during 65 settled idle seconds. This is query-scheduling evidence. |
 | Large skill file | A 256 MiB sparse asset produced identical full status/fingerprints; CLI peak RSS fell from 261.2 to 6.1 MiB. This measures that hashing workload, not the entire desktop/WebKit footprint. |
 
-The Windows failure is reproduced in both the
+The Windows failure was reproduced in both the
 [pre-change run at f10d71d](https://github.com/ly87ing/agent-manager/actions/runs/38040239536/job/114178852419)
-and the [current run](https://github.com/ly87ing/agent-manager/actions/runs/38052651772/job/114214758658):
-native_aliases_windows fails at line 398 because the isolated engine process cannot
+and the [implementation run](https://github.com/ly87ing/agent-manager/actions/runs/38052651772/job/114214758658):
+native_aliases_windows failed at line 398 because the isolated engine process could not
 locate the OS user's lock directory. The production account context, lock code and
-test are unchanged. The lock guard remains intact; Windows full-suite and physical
-Windows/Linux desktop acceptance remain unconfirmed.
+test were unchanged at that revision. The lock guard remained intact; Windows
+full-suite and physical Windows/Linux desktop acceptance were unconfirmed then.
 
 The pre-correction local full run completed with 228 library passes and ten
 failures: one obsolete status-line expectation, now corrected, and nine subprocess
 capture/timing failures. All 354 subsequent integration tests passed. That local
-run failed; it is not counted as a full pass. Current Linux/macOS CI supplies the
+run failed; it is not counted as a full pass. Linux/macOS CI supplied the
 passing full-suite evidence without relaxed deadlines or safety assertions.
+
+## Defect follow-up (2026-10-10)
+
+Reviewed source: `dcb5aa0`, including the lifecycle fix at `986ebfb`. Six observed
+product defects were corrected; the first four already passed full CI at `566458a`:
+
+| Area | Correction and decisive evidence |
+| --- | --- |
+| Windows runtime locks | Resolve the OS user's LocalAppData with an explicit process token. Native Windows passed the cleared/overridden-profile regression and full engine suite at `dcb5aa0`; the previous lock-directory failure is gone. ACL and ownership validation remain strict. |
+| MCP process cleanup | Terminate the remaining group after natural parent exit. The corrected integration regression still fails with the old cleanup body; all 53 MCP tests pass with the fix. Actual isolated CLI readback confirms a started descendant cannot write its delayed marker, configuration is unchanged, and no database is created. |
+| Account setup queries | Eight skill/MCP writes, including a rejected item, now trigger two invalidations instead of eleven: the alias refresh and final resource refresh. All remaining writes and failure feedback are retained. |
+| Task-record deletion | An engine rejection preserves records, selection and confirmation, and displays the diagnostic. The new regression fails on the old code; browser error-state checks passed at 1000/760 px. |
+| Desktop exit | Closing the native app during an isolated MCP check previously left its descendant running. The exit hook now stops active owned groups; actual native readback shows the app exited and the delayed descendant write did not occur. Independent processes survive; new temporary commands are refused after shutdown begins. |
+| Successful temporary commands | A child can exit successfully after its descendant closes the output pipes. The new real-process regression fails on the old guard; normal guard drop now terminates remaining descendants. Parallel spawning remains available through a shared exit gate. |
+
+Local frontend verification passed 692 tests with four unchanged platform skips;
+Tauri passed 27 and scripts passed 14. TypeScript and production build passed.
+Account previews and task-clear error states were inspected at both widths without
+overflow or page errors. Browser fixtures prove those UI states; they do not prove
+physical Windows/Linux desktop interaction.
+
+Three test fixtures were corrected without weakening assertions. Windows alias
+execution now retains the CI-prepared private TEMP/TMP instead of falling back to
+its deliberately invalid USERPROFILE. The MCP fake server consumes the initialized
+notification before exiting, so faster CI reaches the intended cleanup phase.
+The Windows detached-process helper clears inheritance on captured pipe handles;
+NUL standard streams alone had kept the capture waiting until the descendant's
+delayed write. A new assertion requires return before that marker as well as
+the existing later absence check.
+
+The final normal local Cargo run at `986ebfb` passed 583 tests and failed 13:
+12 library startup/capture/session cases and one account CAS fixture that never
+reached its CLI probe. The CAS case passed separately using the identical test
+binary in a private directory. A byte-identical library copy passed all 241 tests.
+After the test-only fixture correction, an additional copy run passed 238 and
+failed three unchanged shell/auth startup cases; their focused repeats also
+failed. A fresh private filename for the same final bytes then passed all 241
+tests in 13.05 s. These recorded failures are not converted into a normal local
+full pass.
+
+Earlier, a no-op test helper took 20.5 s in `spawn` and 8 ms to run; its
+byte-identical private copy spawned in 3 ms and passed all 238 tests at `566458a`.
+The specific host/path startup cause remains undiagnosed. No OS settings,
+original binary attributes, assertions or deadlines were changed to bypass it.
+
+Tauri passed 27; Windows all-target compilation and all nine native process tests
+passed. Final source `dcb5aa0` passed full
+[CI 38111569122](https://github.com/ly87ing/agent-manager/actions/runs/38111569122)
+and [GUI CI 38111569099](https://github.com/ly87ing/agent-manager/actions/runs/38111569099).
+Linux/macOS engine, Tauri, frontend, type/build and script checks passed. Native
+Windows passed 229 library tests and every integration target, including the
+corrected detached-process fixture and exit without guard destructors. Engine
+checks/builds and all four GUI platform builds passed. No release or tag was made.
+Physical Windows/Linux desktop, real upstream login and signed-update acceptance
+remain outside this isolated defect review. These checks cannot prove absence of
+every possible defect or a fixed whole-desktop memory ceiling.
 
 ## Implementation record
 

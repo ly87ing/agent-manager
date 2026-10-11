@@ -983,8 +983,31 @@ platform skips. Isolated native IPC, close-to-exit, actual configuration write
 readback and all 16 retained-page layout cases passed. The 65-second browser idle
 observation made no additional engine queries.
 
-Windows retirement tests passed; the unchanged controlled-command test still
-fails to locate the OS-user lock directory, exactly as on the pre-change `f10d71d`.
-The failed local full engine run and this existing Windows failure remain explicit
-acceptance limits. See the [final lightweight verification](goal-lightweight.md#final-verification-2026-10-10)
+At that revision, Windows retirement tests passed; the unchanged controlled-command
+test failed to locate the OS-user lock directory, as on the pre-change `f10d71d`.
+The failed local full engine run and Windows failure were explicit acceptance
+limits; the subsequent corrections and acceptance are recorded below. See the
+[initial lightweight verification](goal-lightweight.md#final-verification-2026-10-10)
 for CI links, counts and workload-specific memory evidence.
+
+### 2026-10-10: lightweight defect follow-up
+
+The follow-up corrects Windows runtime-lock discovery with altered profile
+environment, MCP descendants surviving natural parent exit, repeated discovery
+after every account resource write, false task-clear success on engine
+rejection, and temporary processes surviving normal completion or native desktop
+exit. Account/credential guards remain intact. Three native test fixtures now
+preserve valid temporary-directory setup, complete the intended MCP protocol
+phase, and prevent extra Windows pipe inheritance; their original safety and
+cleanup assertions remain, with a stronger return-before-marker assertion.
+
+Source `dcb5aa0` passed full CI and GUI CI: native engine tests/checks on
+Windows/Linux/macOS, Tauri/frontend/type/build/script checks, and all four GUI
+platform builds. Native Windows passed 229 library tests and all integration
+targets. The final byte-identical private macOS library copy passed 241 tests;
+the normal local Cargo run passed 583 and failed 13 and remains a failed result.
+
+The [defect record](goal-lightweight.md#defect-follow-up-2026-10-10) distinguishes
+native Windows test/check evidence, real isolated CLI cleanup, UI fixtures,
+the same-byte local test-binary comparison, and unverified physical desktop/login
+acceptance. It does not convert the failed normal local Cargo run into a pass.
