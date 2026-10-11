@@ -98,6 +98,7 @@ export function useAccountOps() {
         label: row.label,
         args: ["--only", row.elementId, "--action", row.action, "--agent", row.agent],
         silent: true,
+        refresh: false,
       });
       if (result?.ok) linked += 1;
       else failed += 1;
@@ -112,7 +113,7 @@ export function useAccountOps() {
     let copied = 0;
     let failed = 0;
     for (const row of mcpFillRows(status.data.elements, status.data.targets ?? [], [agent])) {
-      const result = await execute({ command: "mcp:apply", label: `补齐 ${row.name} @ ${agent}`, args: mcpFillArgs(row), silent: true });
+      const result = await execute({ command: "mcp:apply", label: `补齐 ${row.name} @ ${agent}`, args: mcpFillArgs(row), silent: true, refresh: false });
       if (result?.ok) copied += 1;
       else failed += 1;
     }
@@ -165,6 +166,7 @@ export function useAccountOps() {
       args: seedArgs(input.id, ALL_SEED_ITEMS),
       label: `把共用设置带到账号 ${input.id}`,
       silent: true,
+      refresh: false,
     });
     const seedResults = (seeded?.data as { results?: SeedResult[] } | null)?.results ?? [];
     const seedFailed = !seeded?.ok || summarizeSeed(seedResults).failed;

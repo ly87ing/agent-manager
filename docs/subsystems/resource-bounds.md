@@ -42,6 +42,10 @@ the conservative all-domain refresh. Batch resource writes refresh once in final
 including partial failures. Runs polls only while an operation is running, and
 progress polls cannot overlap.
 
+Account creation seeds shared settings and fills skills/MCP without refreshing
+queries per item. After all items (including rejected writes), it refreshes once;
+the launch-alias write retains its separate alias refresh.
+
 Account selectors use agents:status --metadata-only, which skips CLI version
 processes. Accounts and controlled launch compatibility checks keep their normal
 version validation. Sources and the account onboarding source-presence check use

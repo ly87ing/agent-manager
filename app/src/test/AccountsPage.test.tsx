@@ -323,6 +323,41 @@ describe("账号页", () => {
     expect(await screen.findByTestId("account-readiness-profiles:work")).toHaveTextContent("新账号「");
   });
 
+  it("account resource batches refresh once after all items, including partial failures", async () => {
+    const r = routes();
+    const names = ["one", "two", "three", "four"];
+    r["skills:status"] = makeEnvelope({ domain: "skills", elements: names.map(name => makeElement({
+      id: `skill:repo/${name}`, domain: "skills", spec: { collection: "repo", name },
+      observed: { agents: {
+        "claude-code": { state: "linked", assigned: true },
+        batch: { state: "not-assigned", assigned: false, actions: ["add"] },
+      } },
+    })) });
+    r["mcp:status"] = makeEnvelope({ domain: "mcp",
+      targets: ["claude-code", "ds", "batch"].map(agent => ({ agent, path: `/${agent}/.claude.json`, format: "claude-json", exists: true, agent_enabled: true, error: null })),
+      elements: names.map(name => makeElement({ id: `mcp:${name}`, domain: "mcp", observed: { agents: {
+        ds: { state: "enabled", source: "file", copy_safe: true, base: "ds-base", actions: ["copy"] },
+      } } })),
+    });
+    r["skills:apply"] = async args => makeEnvelope(makeApplyResult({ domain: "skills" }), {
+      ok: valueOf(args, "--only") !== "skill:repo/two",
+      errors: valueOf(args, "--only") === "skill:repo/two" ? [{ code: "WRITE_FAILED", element: null, message: "test item failed" }] : [],
+    });
+    const { calls, queryClient } = renderWithEngine(<AccountsPage />, r);
+    const drawer = await openCreate();
+    await userEvent.type(within(drawer).getByTestId("account-name"), "Batch");
+    await within(drawer).findByTestId("account-create-plan");
+    const refresh = vi.spyOn(queryClient, "invalidateQueries");
+    onTestFinished(() => refresh.mockRestore());
+    await userEvent.click(within(drawer).getByTestId("account-save"));
+    await waitFor(() => expect(screen.queryByTestId("account-drawer")).toBeNull());
+
+    expect(calls.filter(call => ["skills:apply", "mcp:apply"].includes(call.command))).toHaveLength(8);
+    expect(await screen.findByText("已创建账号 batch，1 个技能没链接上")).toBeInTheDocument();
+    // One alias refresh plus one final refresh, independent of the batch size.
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
   it("受控主号创建新账号：只沿用CLI参数，重新绑定新账号", async () => {
     const base = routes();
     base["aliases:status"] = makeEnvelope(makeAliasStatus({ claude: `${controlledCommand("agents:claude-code")} --verbose`, ds: 'CLAUDE_CONFIG_DIR="$HOME/.claude-ds" claude' }), { command: "aliases.status" });
