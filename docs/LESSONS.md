@@ -222,3 +222,8 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   process startup and caused additional deadline failures in the full suite.
   Parallel spawns must share the exit gate; only shutdown takes it exclusively.
   Keep the readiness, late-marker, refusal and independent-process assertions.
+- On Windows, NUL standard streams alone do not prevent inheriting the parent's
+  other inheritable pipe handles. The detached-descendant fixture must clear
+  inheritance on its captured stdout/stderr handles before spawning. Assert that
+  capture returns before the delayed marker, then retain the later absence check.
+  See [Windows handle inheritance](https://learn.microsoft.com/en-us/windows/win32/procthread/inheritance).

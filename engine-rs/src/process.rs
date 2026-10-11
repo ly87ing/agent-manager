@@ -583,6 +583,24 @@ pub(crate) mod capture_test_support {
         let root = PathBuf::from(std::env::var_os("AM_CAPTURE_ROOT").unwrap());
         match mode.as_str() {
             "stdout" | "stderr" | "delayed-stdout" | "detached" => {
+                #[cfg(windows)]
+                if mode == "detached" {
+                    use std::os::windows::io::AsRawHandle;
+                    use windows_sys::Win32::Foundation::{
+                        SetHandleInformation, HANDLE_FLAG_INHERIT,
+                    };
+                    // NUL stdio alone still inherits other inheritable handles.
+                    // This fixture must close captured pipes before the descendant exits.
+                    for handle in [
+                        std::io::stdout().as_raw_handle(),
+                        std::io::stderr().as_raw_handle(),
+                    ] {
+                        assert_ne!(
+                            unsafe { SetHandleInformation(handle as _, HANDLE_FLAG_INHERIT, 0) },
+                            0
+                        );
+                    }
+                }
                 let mut command = command(&root, "hold");
                 command.stdin(Stdio::null());
                 if mode == "detached" {
@@ -943,6 +961,10 @@ mod tests {
         )
         .unwrap();
         assert!(output.status.success());
+        assert!(
+            !root.join("late").exists(),
+            "Fixture retained captured pipes until the descendant wrote its marker"
+        );
         assert_descendant_stopped(&root, start);
     }
 
