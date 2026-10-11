@@ -3049,6 +3049,7 @@ fn check_reaps_background_descendants_after_the_server_exits() {
 while [ ! -f "${0}.ready" ]; do sleep 0.01; done
 read line
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"orphan-fixture","version":"1"}}}'
+IFS= read -r initialized || exit 2
 exit 0
 "#,
     );

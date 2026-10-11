@@ -206,3 +206,6 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   integration regression confirms the descendant starts, preserves configuration,
   and checks that it cannot write after the check returns. Keep the natural exit
   code observed before shutdown while terminating the remaining group.
+- The first fixture exited before consuming `notifications/initialized`, so faster
+  Linux/macOS CI correctly rejected the handshake before reaching cleanup. Wait
+  for that actual protocol phase; keep the success and descendant checks unchanged.
