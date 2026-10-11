@@ -19,6 +19,10 @@ Actual assistant files hold active authentication and configuration. Registratio
 
 Authentication and CLI-version probes use exclusively created private temporary directories with a process-wide sequence in addition to the timestamp. Collisions are retried without adopting an existing directory; each probe cleans up only its own directory. Windows security APIs retain canonical verbatim paths to inspect long lock/credential paths with the same ACL policy.
 
+Windows runtime-lock lookup passes the current process's user token to
+SHGetKnownFolderPath. Clearing or overriding profile environment variables must
+not redirect or prevent this OS-user lookup; folder failures still stop the operation.
+
 `profiles:create` and `profiles:apply-definition` coordinate pending secret values, actual configuration, and registration. Planning is read-only. Writes hold the manager and account locks, compare baselines, read back results, and conditionally compensate normal failures. Adoption and shared settings apply the same identity and path checks. Main configuration parameters use the reserved main account's fixed path; a profile cannot invoke that writer.
 
 ## Constraints and failure behavior

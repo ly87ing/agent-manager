@@ -70,15 +70,37 @@ fn runtime_root() -> Result<PathBuf> {
 fn runtime_root() -> Result<PathBuf> {
     use std::os::windows::ffi::OsStringExt;
     use windows_sys::Win32::{
-        System::Com::CoTaskMemFree,
+        Foundation::CloseHandle,
+        Security::{TOKEN_IMPERSONATE, TOKEN_QUERY},
+        System::{
+            Com::CoTaskMemFree,
+            Threading::{GetCurrentProcess, OpenProcessToken},
+        },
         UI::Shell::{FOLDERID_LocalAppData, SHGetKnownFolderPath},
     };
     let mut raw = std::ptr::null_mut();
-    // The OS user profile, not the caller-controlled HOME/TEMP/data directory.
-    if unsafe { SHGetKnownFolderPath(&FOLDERID_LocalAppData, 0, std::ptr::null_mut(), &mut raw) }
-        < 0
-    {
-        bail!("无法定位当前 Windows 用户的账号锁目录");
+    // Resolve for the OS identity even when the caller clears or overrides its
+    // profile environment, rather than expanding that environment as the user.
+    let result = unsafe {
+        let mut token = std::ptr::null_mut();
+        if OpenProcessToken(
+            GetCurrentProcess(),
+            TOKEN_QUERY | TOKEN_IMPERSONATE,
+            &mut token,
+        ) == 0
+        {
+            bail!(
+                "无法读取当前 Windows 用户身份：{}",
+                std::io::Error::last_os_error()
+            );
+        }
+        let result = SHGetKnownFolderPath(&FOLDERID_LocalAppData, 0, token, &mut raw);
+        CloseHandle(token);
+        result
+    };
+    if result < 0 {
+        unsafe { CoTaskMemFree(raw.cast()) };
+        bail!("无法定位当前 Windows 用户的账号锁目录（HRESULT {result:#x}）");
     }
     if raw.is_null() {
         bail!("当前 Windows 用户的账号锁目录为空");
@@ -723,6 +745,52 @@ mod tests {
         drop(shared);
         finish_session(&f, &mut child);
         assert!(lock_directory(&other, &f.account, true).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn runtime_root_ignores_cleared_and_overridden_profile_environment() {
+        const EXPECTED: &str = "AM_LOCK_EXPECTED_RUNTIME_ROOT";
+        const TEST: &str = "native_account_locks::tests::runtime_root_ignores_cleared_and_overridden_profile_environment";
+        if let Some(expected) = std::env::var_os(EXPECTED) {
+            assert_eq!(runtime_root().unwrap(), PathBuf::from(expected));
+            return;
+        }
+        let f = Fixture::new("profile-environment");
+        let expected = runtime_root().unwrap();
+        for overridden in [false, true] {
+            let mut process = Command::new(std::env::current_exe().unwrap());
+            process
+                .args(["--exact", TEST, "--nocapture"])
+                .env_clear()
+                .env(EXPECTED, &expected);
+            for name in ["PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"] {
+                if let Some(value) = std::env::var_os(name) {
+                    process.env(name, value);
+                }
+            }
+            if overridden {
+                for name in [
+                    "HOME",
+                    "USERPROFILE",
+                    "APPDATA",
+                    "LOCALAPPDATA",
+                    "TEMP",
+                    "TMP",
+                ] {
+                    process.env(name, f.root.join("missing-profile"));
+                }
+            }
+            let output = process.output().unwrap();
+            assert!(
+                output.status.success(),
+                "overridden={overridden}: {} {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        assert!(!f.root.join("missing-profile").exists());
+        assert!(!f.ctx.data_dir.exists());
     }
 
     #[test]
