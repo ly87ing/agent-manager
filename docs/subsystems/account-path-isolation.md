@@ -8,6 +8,8 @@ Independent accounts own their configuration directory and account settings. Mai
 
 Skill destinations use the same account path guards. Main Claude and Codex targets are fixed to their own `skills` directories; independent accounts use `<config_dir>/skills`, including when `skills_dir` is omitted. An explicit target or historical `skills.agents` fallback must resolve to that destination. Custom assistants may retain separate destinations, but cannot overlap main accounts, registered accounts, manager data, or Codex's shared `~/.agents/skills`. Destination directories reject links and Windows reparse points; individual installed skill links may still point to a shared source.
 
+Shell command targets have no account owner. Unix rc links may point to ordinary dotfiles, but their resolved destination cannot enter a main/registered account or manager data directory, or alias a known identity file or registered MCP target. Disabled and malformed account registrations still reserve their directory. Windows command directories also reject overlapping protected paths and linked ancestors. Status, preview and apply use the same observation guard before reading command contents or offering a write baseline.
+
 ## Runtime path
 
 1. Resolve trusted HOME, expand the configured directory, and reject relative paths, parent traversal, control characters, and links in every account-directory component below HOME.
@@ -33,6 +35,8 @@ Run the focused regressions, the existing profile suite, and the engine suite:
 cargo test --manifest-path engine-rs/Cargo.toml --test native_profiles account_isolation
 cargo test --manifest-path engine-rs/Cargo.toml --test native_account_paths
 cargo test --manifest-path engine-rs/Cargo.toml --test native_account_skills
+cargo test --manifest-path engine-rs/Cargo.toml --test native_account_aliases
+cargo test --manifest-path engine-rs/Cargo.toml --test native_aliases --test native_aliases_bash --test native_aliases_windows
 cargo test --manifest-path engine-rs/Cargo.toml --test native_profiles
 cargo test --manifest-path engine-rs/Cargo.toml
 ```

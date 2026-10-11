@@ -8,6 +8,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Resolving an ordinary file does not establish its owner.**
+- The rc-file symlink compatibility path accepted `.zshrc` pointing at main Codex's `config.toml`; an actual isolated CLI alias write appended shell content to that configuration. Retain ordinary dotfiles links, but check the resolved target against all account directories, known identity files, registered MCP targets and manager data before reading or planning a write.
+- Cover external identity links, hard links, disabled/malformed registrations, stale baselines and Windows command-directory junctions. The prior ordinary-dotfile compatibility test remains necessary and passes alongside the rejection cases.
+- Seen 1× (2026-10-10).
+
 **Account skill fixtures must distinguish registration IDs from directory names.**
 - Skill target fallback used the registration ID rather than the account's configuration directory. A first fixture accidentally used matching names, so its fallback case passed before the fix. The regression now uses different names for both assistant types and reads the actual installed files, while checking that the accidental directories stay absent.
 - Saving a `skills_dir` override also allowed an independent account to write inside another account. Cover registration, import, historical fallback, legacy writes, directory aliases and cleanup through the real engine entry point, rather than checking only equal skill target directories.

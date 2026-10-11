@@ -269,6 +269,46 @@ fn other_accounts(ctx: &Context, policy: &Value, exclude_id: Option<&str>) -> Re
     Ok(paths)
 }
 
+/// Shell command targets are never account configuration or manager data.
+/// Ordinary dotfile links remain supported, but resolving a link is not ownership.
+pub(crate) fn validate_shell_target(ctx: &Context, path: &Path, directory: bool) -> Result<()> {
+    let path = resolved(path)?;
+    let policy = store::effective_policy(ctx)?;
+    let mut directories = vec![
+        ctx.home_dir.join(".claude"),
+        ctx.home_dir.join(".codex"),
+        ctx.data_dir.clone(),
+    ];
+    directories.extend(other_accounts(ctx, &policy, None)?);
+    let mut files = vec![
+        ctx.home_dir.join(".claude.json"),
+        ctx.data_dir.join("native-manager.db"),
+    ];
+    for target in crate::native_mcp::targets::agent_targets(&policy, &ctx.home_dir) {
+        if !target.path.is_absolute() {
+            bail!("已登记 MCP 目标无法安全确定，拒绝读写命令目标");
+        }
+        files.push(target.path);
+    }
+    for dir in &directories {
+        files.extend(IDENTITY_FILES.map(|file| dir.join(file)));
+        let protected = resolved(dir)?;
+        if starts_with(&path, &protected) || (directory && starts_with(&protected, &path)) {
+            bail!("命令目标与账号或本工具的数据目录冲突，拒绝读写");
+        }
+    }
+    for file in files {
+        let protected = resolved(&file)?;
+        if same_file(&path, &protected)?
+            || (starts_with(&path, &protected) && starts_with(&protected, &path))
+            || (directory && starts_with(&protected, &path))
+        {
+            bail!("命令目标与账号身份文件或本工具的数据文件冲突，拒绝读写");
+        }
+    }
+    Ok(())
+}
+
 fn protected(
     ctx: &Context,
     policy: &Value,

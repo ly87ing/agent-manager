@@ -127,7 +127,10 @@ impl View {
 /// Windows 命令脚本目录：本工具的脚本还原成虚拟区块（见 cmd.rs）。
 fn observe_cmd(ctx: &Context, spec: TargetSpec) -> View {
     let abs = ctx.home_dir.join(spec.target);
-    let probe = match super::cmd::scan(&abs) {
+    let scan = crate::native_profiles::paths::validate_shell_target(ctx, &abs, true)
+        .and_then(|_| validate_target_path(&abs.join(".agent-manager-path-check")))
+        .and_then(|_| super::cmd::scan(&abs));
+    let probe = match scan {
         Ok(scan) if scan.ours.is_empty() && scan.others.is_empty() => Probe::Missing,
         Ok(scan) => {
             let split = super::cmd::virtual_split(&scan);
@@ -161,8 +164,13 @@ pub(crate) fn observe(ctx: &Context) -> Vec<View> {
                 return observe_cmd(ctx, spec);
             }
             let abs = ctx.home_dir.join(spec.target);
-            // 与接入配置一致：链接解析到最终普通文件后读写；断链、指向目录等拒绝
-            let (real, probe) = match crate::native_agent_settings::resolve_write_target(&abs) {
+            // Dotfile links may be followed only when their final target is not account data.
+            let target =
+                crate::native_agent_settings::resolve_write_target(&abs).and_then(|real| {
+                    crate::native_profiles::paths::validate_shell_target(ctx, &real, false)?;
+                    Ok(real)
+                });
+            let (real, probe) = match target {
                 Ok(real) => {
                     let probe = probe(&real);
                     (real, probe)
