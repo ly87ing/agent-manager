@@ -79,7 +79,17 @@ fn run_cli(ctx: &Context, command: &str, args: &[&str]) -> Value {
 }
 
 fn windows_process_environment(process: &mut Command) {
-    for name in ["PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"] {
+    // Keep the prepared private temp root: Windows otherwise falls back to the
+    // deliberately invalid USERPROFILE used by the account-isolation test.
+    for name in [
+        "PATH",
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+        "TEMP",
+        "TMP",
+    ] {
         if let Some(value) = std::env::var_os(name) {
             process.env(name, value);
         }
