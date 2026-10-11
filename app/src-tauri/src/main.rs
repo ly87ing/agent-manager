@@ -119,6 +119,7 @@ fn main() {
         .expect("error while building tauri application");
 
     app.run(|_app_handle, event| match event {
+        tauri::RunEvent::Exit => agent_manager_engine::shutdown_temporary_commands(),
         // macOS：点击 Dock 图标且没有可见窗口时恢复主窗口。
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen {

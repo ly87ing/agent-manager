@@ -19,7 +19,16 @@ The engine starts external commands through `process::command` or `command_with_
 - Linux inherits proxy environment variables only. No system settings or registry values are written.
 - Program installation, Unix shell PATH discovery, and version/auth/upstream capture keep their deadlines active after the parent exits. On timeout they terminate the group/job and poll child/reader cleanup for at most 250 ms; they never block joining an unfinished reader. Capture retains bounded output and drains the rest. Returned output stays capped at 4 MiB per stream for programs, 256 KiB for PATH, and the caller's stdout cap plus 256 stderr bytes for version/auth/upstream probes. A pipe timeout fails the probe; it cannot substitute an empty successful result.
 - npm/curl upstream probes and PyPI installation tool resolution use the detected user PATH and platform command candidates, including Windows PATHEXT and command shims.
-- Timeout handlers terminate the process group, including descendants. Windows also closes the job when the guard is dropped. Job setup errors are reported rather than silently weakening cleanup to a single child.
+- Timeout handlers terminate the process group, including descendants. Dropping
+  the guard also terminates remaining descendants after normal completion, even
+  if they closed the captured pipes. Windows closes its kill-on-close job; Unix
+  terminates the owned process group. Job setup errors are reported rather than
+  silently weakening cleanup to a single child.
+- Desktop exit cleans up active temporary commands. Parallel spawns share an exit
+  gate; shutdown waits for group/job setup and refuses further group creation.
+  Unix terminates its tracked groups; Windows closes OS-managed kill-on-close jobs
+  as the process exits. Independent account terminal sessions run outside these
+  groups and continue after the desktop closes. No polling thread is added.
 
 ## Verification
 

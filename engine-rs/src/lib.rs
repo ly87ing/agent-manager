@@ -6,6 +6,7 @@
 //! - `native::{Context, Request, execute}` — dispatcher entry point.
 //! - `store` — SQLite (native-manager.db) connection helpers + policy access.
 //! - `envelope` — Contract v1 envelope types.
+//! - `shutdown_temporary_commands` — desktop exit cleanup for owned commands.
 //!
 //! Resource domains not yet implemented return an explicit
 //! `DOMAIN_NOT_IMPLEMENTED` error; this core never fabricates success.
@@ -39,3 +40,4 @@ pub mod store;
 
 pub use envelope::{diagnostic, Diagnostic, Envelope, Lock, Mode, CONTRACT_ID};
 pub use native::{execute, Context, Request};
+pub use process::shutdown_groups as shutdown_temporary_commands;

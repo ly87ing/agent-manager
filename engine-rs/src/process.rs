@@ -52,17 +52,53 @@ fn window_flags() -> u32 {
 fn hide_window(_: &mut Command) {}
 
 pub struct Group {
+    #[cfg(unix)]
+    id: u32,
     #[cfg(windows)]
     job: windows_sys::Win32::Foundation::HANDLE,
 }
 
+static EXITING: std::sync::RwLock<bool> = std::sync::RwLock::new(false);
+
+#[cfg(unix)]
+static ACTIVE_GROUPS: Mutex<std::collections::BTreeSet<u32>> =
+    Mutex::new(std::collections::BTreeSet::new());
+
+/// Stop temporary commands before the desktop process exits.
+pub fn shutdown_groups() {
+    let mut exiting = EXITING.write().unwrap_or_else(|e| e.into_inner());
+    *exiting = true;
+    #[cfg(unix)]
+    {
+        let mut groups = ACTIVE_GROUPS.lock().unwrap_or_else(|e| e.into_inner());
+        for id in std::mem::take(&mut *groups) {
+            kill_unix_group(id);
+        }
+    }
+    // Windows closes the process's kill-on-close Job Object handles on exit.
+}
+
 pub fn spawn_group(command: &mut Command) -> std::io::Result<(Child, Group)> {
+    // Parallel spawns share the gate; exit waits for group/job setup and
+    // prevents a child starting after the sweep in Tauri's event loop.
+    let exiting = EXITING.read().unwrap_or_else(|e| e.into_inner());
+    if *exiting {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Interrupted,
+            "Application is shutting down",
+        ));
+    }
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
         let child = command.spawn()?;
-        Ok((child, Group {}))
+        let id = child.id();
+        ACTIVE_GROUPS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(id);
+        Ok((child, Group { id }))
     }
     #[cfg(windows)]
     {
@@ -247,11 +283,8 @@ impl Group {
     pub fn kill(&self, child: &mut Child) {
         #[cfg(unix)]
         {
-            extern "C" {
-                fn kill(pid: i32, sig: i32) -> i32;
-            }
-            const SIGKILL: i32 = 9;
-            if unsafe { kill(-(child.id() as i32), SIGKILL) } != 0 {
+            let mut groups = ACTIVE_GROUPS.lock().unwrap_or_else(|e| e.into_inner());
+            if groups.remove(&self.id) && !kill_unix_group(self.id) {
                 let _ = child.kill();
             }
         }
@@ -266,9 +299,25 @@ impl Group {
     }
 }
 
-#[cfg(windows)]
+#[cfg(unix)]
+fn kill_unix_group(id: u32) -> bool {
+    extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    const SIGKILL: i32 = 9;
+    unsafe { kill(-(id as i32), SIGKILL) == 0 }
+}
+
 impl Drop for Group {
     fn drop(&mut self) {
+        #[cfg(unix)]
+        {
+            let mut groups = ACTIVE_GROUPS.lock().unwrap_or_else(|e| e.into_inner());
+            if groups.remove(&self.id) {
+                kill_unix_group(self.id);
+            }
+        }
+        #[cfg(windows)]
         unsafe {
             windows_sys::Win32::Foundation::CloseHandle(self.job);
         }
@@ -533,10 +582,12 @@ pub(crate) mod capture_test_support {
         };
         let root = PathBuf::from(std::env::var_os("AM_CAPTURE_ROOT").unwrap());
         match mode.as_str() {
-            "stdout" | "stderr" | "delayed-stdout" => {
+            "stdout" | "stderr" | "delayed-stdout" | "detached" => {
                 let mut command = command(&root, "hold");
                 command.stdin(Stdio::null());
-                if mode != "stderr" {
+                if mode == "detached" {
+                    command.stdout(Stdio::null()).stderr(Stdio::null());
+                } else if mode != "stderr" {
                     command.stdout(Stdio::inherit()).stderr(Stdio::null());
                 } else {
                     command.stdout(Stdio::null()).stderr(Stdio::inherit());
@@ -763,6 +814,29 @@ mod tests {
     #[test]
     fn windows_job_helper() {
         match std::env::var("AM_JOB_HELPER").as_deref() {
+            Ok("exit") => {
+                let root = std::path::PathBuf::from(std::env::var_os("AM_JOB_DIR").unwrap());
+                let mut command = Command::new(std::env::current_exe().unwrap());
+                command
+                    .args([
+                        "--exact",
+                        "process::tests::windows_job_helper",
+                        "--nocapture",
+                    ])
+                    .env("AM_JOB_HELPER", "grandchild");
+                let (_child, _group) = spawn_group(&mut command).unwrap();
+                let start = Instant::now();
+                while !root.join("ready").exists() {
+                    assert!(start.elapsed() < Duration::from_secs(15));
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                shutdown_groups();
+                assert_eq!(
+                    spawn_group(&mut command).err().unwrap().kind(),
+                    std::io::ErrorKind::Interrupted
+                );
+                std::process::exit(0);
+            }
             Ok("parent") => {
                 let status = std::process::Command::new(std::env::current_exe().unwrap())
                     .args([
@@ -783,6 +857,30 @@ mod tests {
             }
             _ => {}
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_exit_closes_jobs_without_running_guard_destructors() {
+        let root = fresh_test_dir("job-exit");
+        let status = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "process::tests::windows_job_helper",
+                "--nocapture",
+            ])
+            .env("AM_JOB_HELPER", "exit")
+            .env("AM_JOB_DIR", &root)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert!(root.join("ready").exists());
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(
+            !root.join("late").exists(),
+            "Grandchild survived process exit"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]
@@ -811,6 +909,103 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2500));
         assert!(!marker.exists(), "Grandchild survived group termination");
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_shutdown_cleans_groups_without_stopping_independent_commands() {
+        let root = fresh_test_dir("shutdown");
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "process::tests::shutdown_helper", "--nocapture"])
+            .env("AM_SHUTDOWN_DIR", &root)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "Shutdown helper failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn completed_capture_does_not_leave_a_detached_descendant() {
+        use capture_test_support::{assert_descendant_stopped, command, root};
+        let root = root("completed");
+        let start = Instant::now();
+        let output = capture_group(
+            command(&root, "detached")
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped()),
+            Duration::from_secs(10),
+            1024,
+        )
+        .unwrap();
+        assert!(output.status.success());
+        assert_descendant_stopped(&root, start);
+    }
+
+    // Shutdown is process-wide; exercise it in a separate test process.
+    #[cfg(unix)]
+    #[test]
+    fn shutdown_helper() {
+        use std::process::Stdio;
+        let Some(root) = std::env::var_os("AM_SHUTDOWN_DIR") else {
+            return;
+        };
+        let root = std::path::PathBuf::from(root);
+        let mut groups = Vec::new();
+        for (name, wait) in [("running", "wait"), ("exited", "")] {
+            let mut command = Command::new("/bin/sh");
+            command
+                .arg("-c")
+                .arg(format!(
+                    "(touch '{name}.ready'; sleep 2; touch '{name}.late') & \
+                     while [ ! -e '{name}.ready' ]; do sleep 0.01; done; {wait}"
+                ))
+                .current_dir(&root)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            let (mut child, group) = spawn_group(&mut command).unwrap();
+            let start = Instant::now();
+            while !root.join(format!("{name}.ready")).exists() {
+                assert!(start.elapsed() < Duration::from_secs(10));
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            if name == "exited" {
+                assert!(child.wait().unwrap().success());
+            }
+            groups.push((child, group));
+        }
+        let mut independent = Command::new("/bin/sh")
+            .args(["-c", "sleep 2; touch independent.late"])
+            .current_dir(&root)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        shutdown_groups();
+        shutdown_groups();
+        for (child, _) in &mut groups {
+            let _ = child.wait().unwrap();
+        }
+        assert!(independent.wait().unwrap().success());
+        assert!(
+            !root.join("running.late").exists(),
+            "Running group survived"
+        );
+        assert!(
+            !root.join("exited.late").exists(),
+            "Exited parent's descendant survived"
+        );
+        assert!(root.join("independent.late").exists());
+        let error = spawn_group(Command::new("/bin/sh").arg("-c").arg("true"))
+            .err()
+            .expect("A new command started during shutdown");
+        assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
     }
 
     #[test]

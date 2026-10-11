@@ -209,3 +209,16 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - The first fixture exited before consuming `notifications/initialized`, so faster
   Linux/macOS CI correctly rejected the handshake before reaching cleanup. Wait
   for that actual protocol phase; keep the success and descendant checks unchanged.
+
+### 2026-10-10: command cleanup must cover desktop exit and normal completion
+
+- Tauri exits with `std::process::exit`; pending blocking commands do not get to
+  drop their guards. Exercise native close while an isolated MCP command is still
+  running, then check the descendant's delayed marker after the app has exited.
+- A successful capture with closed pipes can also leave a detached descendant.
+  Terminate remaining owned groups on guard drop as Windows Job Objects already
+  do, and retain independent terminal sessions outside the temporary groups.
+- An exclusive lock around every spawn queued unrelated probes behind slow host
+  process startup and caused additional deadline failures in the full suite.
+  Parallel spawns must share the exit gate; only shutdown takes it exclusively.
+  Keep the readiness, late-marker, refusal and independent-process assertions.

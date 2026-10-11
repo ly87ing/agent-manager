@@ -17,6 +17,10 @@ The removal action remains available for an OS-disabled Windows entry, since a
 false enabled state does not prove the Run value is absent. Existing entry formats
 are recognized only for ownership-checked removal.
 
+The native exit event stops the engine's active temporary command groups before
+Tauri terminates the process. Independent account terminal sessions continue;
+see [External commands](external-commands.md) for ownership and race handling.
+
 ### Share links and authentication commands
 
 [`import_links.rs`](../../app/src-tauri/src/import_links.rs) keeps the deep-link plugin's initial URL batch and assigns each opening a delivery ID. The runtime listener is installed before seeding from `get_current`; a newer opening wins over that setup snapshot. [`subscribeImportLinks`](../../app/src/lib/shareLink.ts) registers its frontend listener before reading `import_links_current`, deduplicating the two delivery paths by monotonically increasing ID and ignoring stale snapshots after a newer runtime opening. Another click on the same URL gets a new ID. Disposing a subscription prevents callbacks from a delayed initial read and removes even a listener whose registration completes after disposal. Links only prefill the existing import dialog; they never apply configuration by themselves.
