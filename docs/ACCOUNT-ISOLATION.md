@@ -8,6 +8,7 @@ Agent Manager's controlled commands bind one registered account to one configura
 | Main accounts hold official logins only | Multi-account design | Main Claude uses `HOME/.claude.json`; independent Claude uses `<CLAUDE_CONFIG_DIR>/.claude.json` |
 | API and official authentication cannot coexist | User decision, 2026-10-10 | Validate existing and rendered effective configuration before writing or launching |
 | Credentials belong to one account | User decision, 2026-10-10 | Reject conflicting secret references and automatic copies of credential-bearing MCP entries |
+| Resource destinations belong to the selected account | User decision, 2026-10-10 | Bind main/profile skill destinations to their own configuration directory and reject redirected targets |
 | No partial account update on failure | User decision, 2026-10-10 | Compare the preview baselines and conditionally restore this operation's writes |
 | Real accounts remain untouched during acceptance | User decision, 2026-10-10 | Use isolated HOME/data directories and fake CLIs and credentials |
 
@@ -40,3 +41,61 @@ Use a generated command again after changing an account or its configuration so 
 Run the engine, Tauri bridge, frontend, and script suites described in [AGENTS.md](../AGENTS.md). Isolation acceptance must additionally run actual generated commands against fake CLIs, compare the same inputs with the previous implementation, and read back main/A/B files after both accepted and rejected operations. A cross-compile or linked test executable proves build coverage only. Native Windows/Linux desktop flows and real signed updates need acceptance on their own operating systems.
 
 Implementation details are indexed in [subsystem references](subsystems/README.md).
+
+### 2026-10-10: configuration and account review
+
+Source `80d82ed` fixes two verified skill destination errors. An explicit
+`skills_dir` could direct account A's actual skill write into a nested directory
+inside main Codex or another account. Without that field, the target used the
+registration ID rather than the profile's configuration directory. Destination
+validation now covers saves, imports, historical fallbacks and runtime skill
+operations, including adoption and cleanup. Unsafe historical definitions are
+rejected without moving or deleting existing files. Source-only rules, aliases
+and recommendations remain available independently of skill destination checks.
+
+The six new integration checks all fail against a distinctly named build of the
+previous source and pass on the corrected source. They cover both assistant
+types, differing registration/directory names, nested foreign targets, import,
+fallback edits, links/junctions, cleanup and valid custom-assistant destinations.
+The existing skill adoption/undo case also passes with its trusted HOME alias.
+Actual isolated CLI execution rejects the unsafe registration before creating
+data, applies A and B separately and preserves 13 configuration, authentication,
+session and sentinel files. Status-query snapshots remain unchanged.
+
+Source `38b47b3` closes a separate command-write route: an rc symlink could point
+to main Codex's `config.toml`, and adding an alias appended shell text to that
+configuration. Command observation now checks ownership before reading contents
+or returning a baseline. Four Unix regression groups fail on the old source and
+pass on the correction; Windows additionally covers command-directory junctions.
+They protect main/registered accounts, disabled/malformed registrations, external
+identity links, hard links, declared custom MCP targets and manager data. Actual
+isolated CLI readback rejects the unsafe link without changing protected bytes,
+accepts ordinary dotfiles links, preserves outside edits and rejects stale edits
+inside the managed block.
+
+Local evidence includes 66 profile checks, 36 skill checks, 24 rule checks,
+18 existing alias checks, one bash check, four new command-target groups and
+27 Tauri checks passing. The final normal local engine run still has 12 failures
+in subprocess/lifecycle library tests and one transaction fixture that did not
+reach its real CLI probe; it is not a pass. Byte-identical private test copies
+from the preceding skill fix are recorded separately and do not turn failed
+normal runs green. An unrelated bare shell script also exceeded
+five seconds when executed directly; reading the same bytes with `/bin/sh`
+completed in milliseconds. Test deadlines and safety assertions remain intact.
+The unchanged frontend authentication cases passed alone, but timed out in local
+full runs; the production frontend build passed.
+
+For source `38b47b3`, native engine CI passes 605 tests on Linux, 606 on macOS and
+519 on Windows, with no failures. The new Windows command-directory junction case
+executed successfully. Full Linux/macOS engine, Tauri, frontend, type/build and
+script CI also passes. All nine CI/GUI CI jobs succeeded, including the four
+platform builds. These are source-bound test/build results, not physical desktop
+or real-login acceptance. The final documentation-only follow-up changes no
+product code and is checked for link/anchor consistency separately.
+See [CI](https://github.com/ly87ing/agent-manager/actions/runs/38115020549) and
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/38115020553).
+
+No real account login or installed application was changed during this review.
+This evidence covers the tool's supported configuration paths; it cannot
+establish an absolute absence of defects or extend the same-OS-user and
+crash-recovery boundaries described above.

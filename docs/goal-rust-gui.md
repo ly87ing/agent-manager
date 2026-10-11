@@ -1011,3 +1011,13 @@ The [defect record](goal-lightweight.md#defect-follow-up-2026-10-10) distinguish
 native Windows test/check evidence, real isolated CLI cleanup, UI fixtures,
 the same-byte local test-binary comparison, and unverified physical desktop/login
 acceptance. It does not convert the failed normal local Cargo run into a pass.
+
+### 2026-10-10: configuration target and account review
+
+Sources `80d82ed` and `38b47b3` close actual cross-account skill writes, incorrect
+profile skill defaults, and shell rc links that redirected alias writes into
+account configuration. Unsafe targets stop before content reads or write plans;
+ordinary dotfiles links remain supported. Old-source negative controls and actual
+isolated CLI writes/readback accompany the regressions. No real account or login
+was changed. See [the account review](ACCOUNT-ISOLATION.md#2026-10-10-configuration-and-account-review)
+for exact source/CI evidence, retained local failures and acceptance boundaries.
