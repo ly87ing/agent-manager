@@ -386,6 +386,7 @@ pub(crate) fn validate_policy_account_paths(ctx: &Context, policy: &Value) -> Re
             if raw.get("_delete") == Some(&Value::Bool(true)) {
                 continue;
             }
+            skills_dir_in_policy(ctx, policy, id)?;
             if raw.get("profile").is_some() {
                 let dir = raw
                     .pointer("/profile/config_dir")
@@ -409,6 +410,107 @@ pub(crate) fn validate_policy_account_paths(ctx: &Context, policy: &Value) -> Re
         }
     }
     Ok(())
+}
+
+/// Skill links may share their source, but their destination belongs to one account.
+/// Resolve the same effective target for policy saves and every skill operation.
+pub(crate) fn skills_dir_in_policy(ctx: &Context, policy: &Value, id: &str) -> Result<PathBuf> {
+    let raw = policy
+        .pointer("/agents/definitions")
+        .and_then(|defs| defs.get(id))
+        .ok_or_else(|| anyhow!("[{id}] 技能目标的账号定义不存在"))?;
+    let expected = if raw.get("profile").is_some() {
+        let dir = raw
+            .pointer("/profile/config_dir")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("[{id}] 技能目标缺少账号配置目录"))?;
+        Some(
+            config_dir_in_policy(ctx, &path_definition(id, ProfileKind::Claude, dir), policy)?
+                .join("skills"),
+        )
+    } else {
+        match id {
+            "claude-code" => Some(
+                validate_primary_account_in_policy(ctx, ProfileKind::Claude, policy)?
+                    .join("skills"),
+            ),
+            "codex" => Some(
+                validate_primary_account_in_policy(ctx, ProfileKind::Codex, policy)?.join("skills"),
+            ),
+            _ => None,
+        }
+    };
+    let configured = raw.get("skills_dir").or_else(|| {
+        policy
+            .get("skills")
+            .and_then(|s| s.get("agents"))
+            .and_then(|a| a.get(id))
+    });
+    let target = match configured {
+        Some(value) => model::expand_home(
+            value
+                .as_str()
+                .ok_or_else(|| anyhow!("[{id}] 技能目录必须是字符串"))?,
+            &ctx.home_dir,
+        ),
+        None => expected
+            .clone()
+            .unwrap_or_else(|| ctx.home_dir.join(format!(".{id}/skills"))),
+    };
+    if !target.is_absolute()
+        || target.to_string_lossy().chars().any(char::is_control)
+        || target
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        bail!("[{id}] 技能目录必须是无歧义的绝对路径");
+    }
+    #[cfg(windows)]
+    if target.components().any(|c| matches!(c, std::path::Component::Normal(n) if n.to_string_lossy().ends_with(['.', ' ']))) {
+        bail!("[{id}] Windows 技能目录的路径段不能以点或空格结尾");
+    }
+    let actual = if expected.is_some() || target.starts_with(&ctx.home_dir) {
+        unaliased_home_path(&ctx.home_dir, &target, id)?
+    } else {
+        // Validate a missing child to inspect the destination as a directory,
+        // including its ancestors, without following a directory link.
+        crate::native_mcp::targets::validate_target_path(
+            &target.join(".agent-manager-path-check"),
+        )?;
+        #[cfg(windows)]
+        for ancestor in target.ancestors() {
+            if std::fs::symlink_metadata(ancestor)
+                .ok()
+                .is_some_and(|m| is_link(&m))
+            {
+                bail!("[{id}] 技能目录不能使用联接或重解析点");
+            }
+        }
+        resolved(&target)?
+    };
+    if actual.exists() && !actual.is_dir() {
+        bail!("[{id}] 技能目录不是普通目录");
+    }
+    if let Some(expected) = expected {
+        if actual != expected {
+            bail!("[{id}] 技能目录未绑定本账号的 skills 目录，拒绝操作");
+        }
+    } else {
+        protected(
+            ctx,
+            policy,
+            &path_definition(id, ProfileKind::Claude, ""),
+            &actual,
+            true,
+            false,
+        )?;
+        if overlaps(&actual, &resolved(&ctx.home_dir.join(".agents/skills"))?) {
+            bail!("[{id}] 技能目录与 Codex 共用技能目录冲突，拒绝操作");
+        }
+    }
+    // Keep the validated spelling used by existing skill adoption journals.
+    // Canonical identity is used for validation, not to rename recorded paths.
+    Ok(target)
 }
 
 /// Main Claude keeps its authentication record at HOME/.claude.json.

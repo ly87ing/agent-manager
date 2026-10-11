@@ -6,6 +6,8 @@ Independent accounts own their configuration directory and account settings. Mai
 
 [Profile path guards](../../engine-rs/src/native_profiles/paths.rs) are shared by profile status, previews, apply/adopt, and the profile-owned seed/shared-settings readers and writers. Rules target selection, login probing, and session-root discovery also use the account-directory guard. Identity and authentication configuration paths reject links; intentional shared skill/rule links remain resource-domain responsibilities.
 
+Skill destinations use the same account path guards. Main Claude and Codex targets are fixed to their own `skills` directories; independent accounts use `<config_dir>/skills`, including when `skills_dir` is omitted. An explicit target or historical `skills.agents` fallback must resolve to that destination. Custom assistants may retain separate destinations, but cannot overlap main accounts, registered accounts, manager data, or Codex's shared `~/.agents/skills`. Destination directories reject links and Windows reparse points; individual installed skill links may still point to a shared source.
+
 ## Runtime path
 
 1. Resolve trusted HOME, expand the configured directory, and reject relative paths, parent traversal, control characters, and links in every account-directory component below HOME.
@@ -17,6 +19,7 @@ Independent accounts own their configuration directory and account settings. Mai
 ## Constraints and failure behavior
 
 - Unsafe targets are reported as unsupported, with no write baseline or available write action. Rejected operations leave protected file bytes unchanged.
+- Skill metadata fails closed when any registered destination is unsafe, so status/discovery and all skill add, collection, adoption and cleanup paths cannot use an unvalidated destination. Saving or importing a changed destination also validates it before writing registration; invalid historical definitions require explicit correction, with no automatic relocation or deletion of existing files.
 - Both assistant types are protected, regardless of the selected account's type. The main Claude login record and known authentication files for every account (including the target account) are also protected, even when linked outside the account directory.
 - Windows rejects normal configuration-path components ending in a dot or space before directory creation, avoiding Win32 normalization onto a protected name. Windows uses canonical paths without an unnecessary verbatim prefix. Junction regressions create a real junction directly; they do not depend on administrator access or symlink privileges.
 - Windows/macOS comparisons conservatively reject case-only aliases, including not-yet-created names. This also rejects case-distinct account paths on case-sensitive Windows/macOS volumes. Linux keeps case-sensitive path comparisons. Canonicalization and file identity checks handle existing aliases.
@@ -29,6 +32,7 @@ Run the focused regressions, the existing profile suite, and the engine suite:
 ```sh
 cargo test --manifest-path engine-rs/Cargo.toml --test native_profiles account_isolation
 cargo test --manifest-path engine-rs/Cargo.toml --test native_account_paths
+cargo test --manifest-path engine-rs/Cargo.toml --test native_account_skills
 cargo test --manifest-path engine-rs/Cargo.toml --test native_profiles
 cargo test --manifest-path engine-rs/Cargo.toml
 ```

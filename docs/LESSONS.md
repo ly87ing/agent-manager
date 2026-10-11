@@ -8,6 +8,13 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Account skill fixtures must distinguish registration IDs from directory names.**
+- Skill target fallback used the registration ID rather than the account's configuration directory. A first fixture accidentally used matching names, so its fallback case passed before the fix. The regression now uses different names for both assistant types and reads the actual installed files, while checking that the accidental directories stay absent.
+- Saving a `skills_dir` override also allowed an independent account to write inside another account. Cover registration, import, historical fallback, legacy writes, directory aliases and cleanup through the real engine entry point, rather than checking only equal skill target directories.
+- Keep source-rule discovery independent of skill destinations. The first guard made an unsafe account's directory hide the Rules status result; the existing blocked-target regression caught this, and source discovery now loads only collection metadata.
+- Validate canonical destinations without changing recorded display paths. Returning canonical skill paths broke adoption undo for a trusted HOME alias; the existing adoption-and-undo regression caught the mismatch with its journal.
+- Seen 1× (2026-10-10).
+
 **Do not kernel-execute a newly written shell fixture to bootstrap another test.**
 - A concurrent fork can retain a writable descriptor until exec, so Linux rejects an immediate script launch with `ETXTBSY` even after the writer in the parent has closed. The fake npm bootstrap now reads the exact script through `/bin/sh`; real product discovery, installation, and rollback still execute the fixture normally.
 - A held-writer regression reproduces the old helper failure deterministically and checks the resulting package, symlink, script bytes, and executable permission after the fix.

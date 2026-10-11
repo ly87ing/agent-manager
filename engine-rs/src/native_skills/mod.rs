@@ -78,7 +78,7 @@ pub(crate) use paths::repo_base_dir;
 pub(crate) use paths::collection_source_root;
 pub(crate) use paths::{expand_home, is_path_within, resolve_loose};
 pub(crate) use recommend::suggested_sources;
-pub(crate) use status::load_metadata;
+pub(crate) use status::load_collections;
 
 // 供只读 system:discover 复用同一份元数据/binding 视图扫描未纳管条目（零写）
 pub(crate) use discover::discover as discover_unmanaged;

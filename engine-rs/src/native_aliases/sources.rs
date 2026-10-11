@@ -24,9 +24,10 @@ pub(crate) struct SourceAlias {
 }
 
 pub(crate) fn load(ctx: &Context) -> Result<Vec<SourceAlias>> {
-    let meta = crate::native_skills::load_metadata(ctx)?;
+    let policy = crate::store::effective_policy(ctx)?;
+    let collections = crate::native_skills::load_collections(ctx, &policy)?;
     let mut out: Vec<SourceAlias> = Vec::new();
-    for coll in meta.collections.values() {
+    for coll in collections.values() {
         if coll.deleted || !coll.enabled {
             continue;
         }

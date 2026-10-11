@@ -1144,11 +1144,20 @@ pub(crate) fn validate_account_policy_change(
         .and_then(Value::as_object)
     {
         for (id, raw) in definitions {
-            if old.and_then(|definitions| definitions.get(id)) == Some(raw)
+            if (old.and_then(|definitions| definitions.get(id)) == Some(raw)
+                && before
+                    .get("skills")
+                    .and_then(|s| s.get("agents"))
+                    .and_then(|a| a.get(id))
+                    == after
+                        .get("skills")
+                        .and_then(|s| s.get("agents"))
+                        .and_then(|a| a.get(id)))
                 || raw.get("_delete") == Some(&Value::Bool(true))
             {
                 continue;
             }
+            crate::native_profiles::paths::skills_dir_in_policy(ctx, after, id)?;
             if let Some(mcp) = raw.get("mcp_config") {
                 let path = mcp
                     .as_str()

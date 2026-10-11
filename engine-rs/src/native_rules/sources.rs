@@ -118,9 +118,10 @@ fn read_rule(path: &Path, collection: &str, local: bool, root: &Path) -> Option<
 ///
 /// 镜像还没取回、路径不存在、不是普通文件、过大或非 UTF-8 的条目都跳过，不报错：来源规则只是可选的模板。
 pub(crate) fn load(ctx: &Context) -> Result<Vec<SourceRule>> {
-    let meta = crate::native_skills::load_metadata(ctx)?;
+    let policy = store::effective_policy(ctx)?;
+    let collections = crate::native_skills::load_collections(ctx, &policy)?;
     let mut out = Vec::new();
-    for coll in meta.collections.values() {
+    for coll in collections.values() {
         if coll.deleted || !coll.enabled {
             continue;
         }
@@ -144,7 +145,6 @@ pub(crate) fn load(ctx: &Context) -> Result<Vec<SourceRule>> {
             ));
         }
     }
-    let policy = store::effective_policy(ctx)?;
     if let Some(sources) = policy
         .get("rules")
         .and_then(|r| r.get("sources"))
@@ -154,7 +154,7 @@ pub(crate) fn load(ctx: &Context) -> Result<Vec<SourceRule>> {
             // 删除标记、与集合同名、或被用户停用（enabled: false）的来源都不读
             if def.get("_delete") == Some(&Value::Bool(true))
                 || def.get("enabled") == Some(&Value::Bool(false))
-                || meta.collections.contains_key(name)
+                || collections.contains_key(name)
             {
                 continue;
             }

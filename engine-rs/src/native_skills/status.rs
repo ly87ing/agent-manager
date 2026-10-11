@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::paths::{
-    collection_source_root, expand_home, expected_link_path, is_link_entry, is_local_source,
-    is_managed_link, managed_bases, resolve_link_target, resolve_loose,
+    collection_source_root, expected_link_path, is_link_entry, is_local_source, is_managed_link,
+    managed_bases, resolve_link_target, resolve_loose,
 };
 use super::persistence::load_bindings_readonly;
 use super::snapshot::{discover_repo_skills, hash_skill_dir, SkillPathsError};
@@ -48,25 +48,33 @@ pub struct DomainMetadata {
 
 pub fn load_metadata(ctx: &Context) -> Result<DomainMetadata> {
     let policy = store::effective_policy(ctx)?;
-    let agents = load_agent_targets(&policy, &ctx.home_dir);
-    let mut collections = load_collection_defs(&policy);
-    // 旧库固化、从未生效的内置集合按推荐处理，不作为集合（写路径迁移会把它移出库）
-    let hidden = super::hidden_builtin_collections(ctx, &policy)?;
-    collections.retain(|name, _| !hidden.contains(name));
+    let agents = load_agent_targets(ctx, &policy)?;
+    let collections = load_collections(ctx, &policy)?;
     Ok(DomainMetadata {
         collections,
         agents,
     })
 }
 
-fn load_agent_targets(policy: &Value, home_dir: &Path) -> BTreeMap<String, AgentTargetInfo> {
+pub(crate) fn load_collections(
+    ctx: &Context,
+    policy: &Value,
+) -> Result<BTreeMap<String, CollectionDef>> {
+    let mut collections = load_collection_defs(policy);
+    // 旧库固化、从未生效的内置集合按推荐处理，不作为集合（写路径迁移会把它移出库）
+    let hidden = super::hidden_builtin_collections(ctx, policy)?;
+    collections.retain(|name, _| !hidden.contains(name));
+    Ok(collections)
+}
+
+fn load_agent_targets(ctx: &Context, policy: &Value) -> Result<BTreeMap<String, AgentTargetInfo>> {
     let mut agents = BTreeMap::new();
     let agent_defs = policy
         .get("agents")
         .and_then(|v| v.get("definitions"))
         .and_then(Value::as_object);
     let Some(agent_defs) = agent_defs else {
-        return agents;
+        return Ok(agents);
     };
     for (agent_id, raw) in agent_defs {
         if raw.get("_delete") == Some(&Value::Bool(true)) {
@@ -78,17 +86,8 @@ fn load_agent_targets(policy: &Value, home_dir: &Path) -> BTreeMap<String, Agent
             .and_then(|v| v.get("enabled"))
             .and_then(Value::as_bool)
             .unwrap_or(true);
-        let skills_dir_raw = raw.get("skills_dir").and_then(Value::as_str).or_else(|| {
-            policy
-                .get("skills")
-                .and_then(|v| v.get("agents"))
-                .and_then(|v| v.get(agent_id))
-                .and_then(Value::as_str)
-        });
-        let skills_dir = match skills_dir_raw {
-            Some(p) => expand_home(p, home_dir),
-            None => home_dir.join(format!(".{}/skills", agent_id)),
-        };
+        let skills_dir =
+            crate::native_profiles::paths::skills_dir_in_policy(ctx, policy, agent_id)?;
         agents.insert(
             agent_id.clone(),
             AgentTargetInfo {
@@ -102,7 +101,7 @@ fn load_agent_targets(policy: &Value, home_dir: &Path) -> BTreeMap<String, Agent
             },
         );
     }
-    agents
+    Ok(agents)
 }
 
 fn load_collection_defs(policy: &Value) -> BTreeMap<String, CollectionDef> {

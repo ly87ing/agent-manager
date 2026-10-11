@@ -55,12 +55,12 @@ pub(crate) fn unadopted_builtin_collections(
 /// 某个域（规则、别名）没有任何来源内容时给界面的推荐来源：与技能推荐同一份，
 /// `collection` 为已登记的同名/同地址集合（取回即可），没登记为 null。只读零写。
 pub(crate) fn suggested_sources(ctx: &crate::native::Context) -> anyhow::Result<Value> {
-    let meta = super::status::load_metadata(ctx)?;
+    let policy = crate::store::effective_policy(ctx)?;
+    let collections = super::status::load_collections(ctx, &policy)?;
     let items = RECOMMENDATIONS
         .iter()
         .map(|rec| {
-            let collection = meta
-                .collections
+            let collection = collections
                 .values()
                 .find(|c| !c.deleted && (c.name == rec.name || c.url.as_deref() == Some(rec.url)))
                 .map(|c| c.name.clone());
