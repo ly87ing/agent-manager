@@ -194,6 +194,7 @@ export default function RunsPage() {
     setClearStatus(null);
     try {
       const res = await runEngine<RunsClearData>("runs:clear");
+      if (!res.ok) throw new Error(res.errors[0]?.message ?? "未能清空任务记录");
       setSelectedRun(null);
       await queryClient.invalidateQueries({ queryKey: engineKeys.command("runs:list") });
       setShowClearConfirm(false);

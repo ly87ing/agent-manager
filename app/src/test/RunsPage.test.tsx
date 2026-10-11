@@ -214,6 +214,28 @@ describe("执行中心", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("清空任务记录失败：SQLite busy");
   });
 
+  it("engine rejection keeps the records, selection and confirmation open", async () => {
+    const r = routes();
+    r["runs:clear"] = makeEnvelope({}, {
+      command: "runs.clear", ok: false,
+      errors: [{ code: "WRITE_FAILED", element: null, message: "SQLite busy" }],
+    });
+    const { calls } = renderWithEngine(<RunsPage />, r);
+    const row = await screen.findByTestId("run-row-20260905T235900Z-legacy1");
+    await userEvent.click(within(row).getByText("详情"));
+    expect(await screen.findByText("mcp:grok-search")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("clear-runs-button"));
+    const dialog = await screen.findByRole("dialog", { name: "清空任务记录" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认清空" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("清空任务记录失败：SQLite busy");
+    expect(screen.getByRole("dialog", { name: "清空任务记录" })).toBeInTheDocument();
+    expect(screen.getByText("mcp:grok-search")).toBeInTheDocument();
+    expect(row).toBeInTheDocument();
+    expect(screen.queryByText(/任务记录已清空/)).toBeNull();
+    expect(calls.filter(call => call.command === "runs:list")).toHaveLength(1);
+  });
+
   it("列表读取失败时使用用户能理解的标题", async () => {
     const broken = routes();
     broken["runs:list"] = () => Promise.reject(new Error("bridge down"));
