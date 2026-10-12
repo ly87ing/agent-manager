@@ -567,9 +567,9 @@ export default function SkillsPage({
         </button>
       )}
 
-      <details className="rounded-lg border bg-card">
-        <summary className="cursor-pointer px-4 py-2 text-sm text-muted-foreground">各账号技能目录里的实际内容</summary>
-        <div className="border-t p-3">
+      <details className="border-t pt-3">
+        <summary className="w-fit cursor-pointer text-xs text-muted-foreground hover:text-foreground">各账号技能目录里的实际内容</summary>
+        <div className="mt-3 rounded-lg border bg-card p-3">
           <SkillInstalledView entries={installed} agents={agentOptions} />
         </div>
       </details>

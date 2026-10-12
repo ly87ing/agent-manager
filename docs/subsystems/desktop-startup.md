@@ -17,6 +17,12 @@ The removal action remains available for an OS-disabled Windows entry, since a
 false enabled state does not prove the Run value is absent. Existing entry formats
 are recognized only for ownership-checked removal.
 
+The committed first-launch window is 1000 × 650. Later geometry remains owned by
+the window-state plugin. Native UI previews use a fresh identifier and isolated
+HOME/data while inheriting the committed window settings; overriding their height
+would not verify the default proportions. Check empty and populated pages at the
+normal height, following [UI rules](../UI-RULES.md).
+
 The native exit event stops the engine's active temporary command groups before
 Tauri terminates the process. Independent account terminal sessions continue;
 see [External commands](external-commands.md) for ownership and race handling.

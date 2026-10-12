@@ -132,6 +132,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Acceptance on the real desktop
 
+**Use committed window geometry for the preview users review.**
+- The tips preview overrode the committed 1000 × 650 window with 1000 × 800. Earlier browser captures used a tall viewport, so the checks did not establish the default-window proportions. The user reported the excessive space in the empty Skills page.
+- Inherit the committed window settings in isolated native previews; change only the identifier and title. Inspect empty and populated pages at the normal height, plus the required narrow browser width. Keep user-resized window memory intact.
+- Seen 1× (2026-10-12).
+
 **Temporary-path fixtures must reach the intended ancestor permission check.**
 - The runtime sticky-parent test used macOS's `/tmp` symlink and failed before checking its disposable parent's mode. Canonicalize the fixture root; retain the rejection of untrusted ancestor links in production.
 - Absolute Windows volume/share roots need ACL checks too. Skip only drive-relative prefixes; permitting new root children must not permit replacing existing children or changing their ACL/owner.

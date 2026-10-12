@@ -6,6 +6,11 @@ Rules every page, dialog, and panel of the desktop app follows. Check them on ev
 
 Check at about 1000 px and 760 px wide in the mock dev server (`pnpm --dir app dev`, then open `/?mock=1`).
 
+Native first-launch acceptance uses the committed window geometry (1000 × 650),
+with isolated HOME/data and a separate application identifier. Do not override
+the width or height in a preview configuration. Check both empty and populated
+pages within that viewport; a tall full-page capture does not prove default-window usability.
+
 1. No horizontal scroll bar anywhere. The top navigation folds extra pages into More; content never overflows.
 2. Key information (launch commands, repository URLs, versions) is shown in full and wraps at spaces. Only secondary information may truncate, and then it carries a hover title.
 3. No column whose value is almost always the same. Show only the abnormal case, inline.
@@ -14,6 +19,10 @@ Check at about 1000 px and 760 px wide in the mock dev server (`pnpm --dir app d
 6. Buttons in a list sit in fixed-width columns so they line up from row to row.
 7. While a background job runs, conflicting actions are disabled and say why.
 8. Dialog confirm and cancel buttons are reachable without scrolling.
+
+Empty states use short, left-aligned guidance with a small icon and an adjacent
+action. The `compact` variant omits its border inside an existing panel. Secondary
+read-only disclosures should not look like a second primary card.
 
 ## Controls and marks
 

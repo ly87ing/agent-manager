@@ -2,6 +2,22 @@
 
 > Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
 
+## 2026-10-12: Compact Empty Pages at the Default Window Size
+
+Verification base: `eeb2ca3cd05d029c5bb8fca7890d317f1520d028`, plus the layout changes. Shared empty states now use a small icon, left-aligned guidance, and an adjacent action. Skills' actual-content disclosure uses a secondary text entry. Data, resource actions, and account protections are unchanged.
+
+The earlier native preview explicitly used 1000 × 800 instead of the committed 1000 × 650. The replacement preview inherits the committed geometry, with only a separate identifier and title. Production defaults and remembered user geometry are unchanged. [UI rules](UI-RULES.md) and [Desktop startup](subsystems/desktop-startup.md) now require this verification setup.
+
+Verification generated and read back locally:
+
+- Before/after browser comparison with the same empty Skills fixture: the empty-state panel decreased from 234 px to 86 px at both 1000 px and 760 px. The source navigation button and actual-content disclosure remained usable.
+- All five shared-component pages were inspected at both widths and 650 px height: Skills, MCP, Sources, Programs, and task records. No page-level horizontal overflow or browser errors occurred. Populated Skills, search with no matches, clearing the search, and expanding/collapsing actual contents passed. Light and dark Skills renders were inspected. These fixtures performed no resource writes or account operations.
+- Focused component suite: 4 passed before and after. Affected suites: 228 passed. Full frontend: 56 files, 584 passed and 4 existing skips. TypeScript checking and production build passed; the existing dynamic-import warning remains.
+- Native debug build without bundling passed, with the existing engine dead-code warnings. The new macOS window was read back at exactly 1000 × 650 and visually inspected. It uses fresh HOME/data and no inherited credential environment. No account or shell files were created in the isolated HOME.
+- Documentation links and whitespace checks passed. Full engine and desktop-bridge tests were not rerun because their implementation is unchanged. Installed-package, Windows/Linux desktop, and user acceptance of the revised proportions are not established by this receipt.
+
+The replacement isolated preview remains open for review. No real account configuration, installer, tag, or release was changed or published.
+
 ## 2026-10-12: Share Read-only Account and Alias Tips
 
 Verification base: `0cb7e6799673c06e4492223b752842489b32ddca`, plus the tips page. Settings and search now open **More tips**, with guidance about independent environments and terminal aliases. The page contains bundled text and generic `YOUR_*` examples. Its only action copies example text to the clipboard. It has no engine, filesystem, or process access and does not restore account or alias management.
