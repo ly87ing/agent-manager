@@ -23,6 +23,7 @@
 use anyhow::{bail, Result};
 use rusqlite::TransactionBehavior;
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 
 use std::collections::BTreeMap;
 
@@ -62,7 +63,7 @@ pub(crate) fn export(ctx: &Context, req: &Request) -> Result<Value> {
         }
     }
     let saved: Vec<Value> = mcp.saved.iter().map(|row| row.to_backup()).collect();
-    Ok(json!({
+    let mut backup = json!({
         "format": FORMAT,
         "exported_at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         "policy": policy,
@@ -72,7 +73,11 @@ pub(crate) fn export(ctx: &Context, req: &Request) -> Result<Value> {
             .map(|t| json!({ "name": t.name, "body": t.body, "origin": t.origin }))
             .collect::<Vec<_>>(),
         "mcp_saved": saved,
-    }))
+    });
+    let mut state = backup.clone();
+    state.as_object_mut().unwrap().remove("exported_at");
+    backup["base"] = json!(format!("{:x}", Sha256::digest(serde_json::to_vec(&state)?)));
+    Ok(backup)
 }
 
 /// 校验后的备份内容：policy、规则模板（None = 备份没带这一段）、
@@ -227,7 +232,7 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
         .value("--value")
         .ok_or_else(|| anyhow::anyhow!("缺少 --value（备份 JSON 正文）"))?;
     for arg in &req.args {
-        if arg.starts_with("--") && arg != "--value" {
+        if arg.starts_with("--") && !["--value", "--modules", "--base"].contains(&arg.as_str()) {
             bail!("config:import 不支持参数 '{}'", arg);
         }
     }
@@ -244,6 +249,36 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
     }
     crate::native::prepare_account_generations(&before, &mut payload.policy, true, None)?;
     crate::native::validate_account_policy_change(ctx, &before, &payload.policy)?;
+    let modules = req
+        .value("--modules")
+        .map(|value| value.split(',').collect::<Vec<_>>());
+    if let Some(modules) = &modules {
+        if modules.is_empty()
+            || modules
+                .iter()
+                .any(|module| !["skills", "mcp", "rules"].contains(module))
+        {
+            bail!("恢复模块只能选择 skills、mcp、rules，且至少选择一项");
+        }
+        let incoming = payload.policy.clone();
+        payload.policy = before.clone();
+        for key in ["skills", "mcp"] {
+            if modules.contains(&key) {
+                if let Some(value) = incoming.get(key) {
+                    payload.policy[key] = value.clone();
+                } else {
+                    payload.policy.as_object_mut().unwrap().remove(key);
+                }
+            }
+        }
+        if !modules.contains(&"rules") {
+            payload.rule_templates = None;
+            payload.legacy_rules.clear();
+        }
+        if !modules.contains(&"mcp") {
+            payload.mcp_saved.clear();
+        }
+    }
     crate::native_mcp::saved::validate_saved_rows(ctx, &payload.policy, &payload.mcp_saved)?;
     let _account_locks =
         crate::native_account_context::lock_policy_account_changes(ctx, &before, &payload.policy)?;
@@ -253,6 +288,19 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
     // 本机旧库先迁移（本机的已保存项因此不会随策略替换而丢失），再换策略；
     // 备份策略里的旧版 MCP 定义随即转成未分配的已保存定义。
     let current = store::policy_from_connection(&tx)?;
+    if let Some(base) = req.value("--base") {
+        let current_backup = export(
+            ctx,
+            &Request {
+                command: "config:export".into(),
+                args: vec![],
+                run_id: req.run_id.clone(),
+            },
+        )?;
+        if current_backup["base"].as_str() != Some(base) {
+            bail!("扩展定义在预览后已变化，未恢复；请重新预览");
+        }
+    }
     if current.get("agents") != payload.policy.get("agents") {
         bail!("账号定义只读；导入期间账号元数据发生变化，未写入");
     }
@@ -262,11 +310,18 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
     crate::native::validate_account_policy_change(ctx, &current, &payload.policy)?;
     crate::native_mcp::saved::validate_saved_rows(ctx, &payload.policy, &payload.mcp_saved)?;
     let scans = crate::native_mcp::inventory::scan_targets_checked(ctx, &current);
-    crate::native_mcp::legacy::migrate(&tx, &scans, Some(&req.run_id))?;
+    let restore_mcp = modules
+        .as_ref()
+        .is_none_or(|modules| modules.contains(&"mcp"));
+    if restore_mcp {
+        crate::native_mcp::legacy::migrate(&tx, &scans, Some(&req.run_id))?;
+    }
     crate::native::reserve_changed_account_references(ctx, &tx, &current, &payload.policy)?;
     store::write_policy(&tx, &payload.policy)?;
     crate::native::claim_changed_account_references(ctx, &tx, &current, &payload.policy)?;
-    crate::native_mcp::legacy::migrate(&tx, &scans, Some(&req.run_id))?;
+    if restore_mcp {
+        crate::native_mcp::legacy::migrate(&tx, &scans, Some(&req.run_id))?;
+    }
     if !payload.mcp_saved.is_empty() {
         mcp_saved::ensure_table(&tx)?;
         let targets = crate::native_mcp::targets::agent_targets(&payload.policy, &ctx.home_dir);
@@ -324,6 +379,7 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
             "sources": [],
             "rule_templates": restored_templates,
             "mcp_saved": payload.mcp_saved.len(),
+            "modules": modules,
         })),
     )?;
     tx.commit()?;

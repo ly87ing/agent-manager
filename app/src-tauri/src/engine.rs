@@ -255,7 +255,11 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--key", ArgValueKind::DotKey));
         }
         // 配置备份：导出不带参数，导入只接整份备份正文
-        ("config", "import") => specs.push(("--value", ArgValueKind::JsonValue)),
+        ("config", "import") => {
+            specs.push(("--value", ArgValueKind::JsonValue));
+            specs.push(("--modules", ArgValueKind::AgentList));
+            specs.push(("--base", ArgValueKind::Digest));
+        }
         ("skills", "fork") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--dest", ArgValueKind::FilePath));

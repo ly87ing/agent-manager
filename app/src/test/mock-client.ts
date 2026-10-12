@@ -1341,6 +1341,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
         return makeEnvelope(
           {
             format: "agent-manager/config-backup/v1",
+            base: "a".repeat(64),
             policy: structuredClone(sqlitePolicy),
             sources: {},
           },

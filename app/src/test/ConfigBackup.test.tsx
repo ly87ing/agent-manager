@@ -5,6 +5,7 @@ import { makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
 const BACKUP = {
+  base: "a".repeat(64),
   format: "agent-manager/config-backup/v1",
   exported_at: "2026-09-17T00:00:00Z",
   policy: { mcp: { definitions: {} } },
@@ -26,6 +27,23 @@ function routes() {
 }
 
 describe("配置备份", () => {
+  it("只恢复勾选模块，预览不包含未选择的规则和 MCP", async () => {
+    const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
+    fireEvent.click(screen.getByTestId("config-import-toggle"));
+    fireEvent.change(screen.getByTestId("config-import-input"), { target: { value: JSON.stringify({ ...BACKUP,
+      policy: { skills: { repositories: { imported: { url: "https://example.com/skills.git" } } } },
+      rule_templates: [{ name: "Unselected rule", body: "Keep current instead" }], mcp_saved: [],
+    }) } });
+    await userEvent.click(screen.getByTestId("restore-module-mcp"));
+    await userEvent.click(screen.getByTestId("restore-module-rules"));
+    await userEvent.click(screen.getByTestId("config-import-button"));
+    const preview = await screen.findByTestId("config-import-diff");
+    expect(preview).toHaveTextContent("新增：imported");
+    expect(preview).not.toHaveTextContent("Unselected rule");
+    expect(screen.queryByTestId("config-diff-MCP 已保存项")).toBeNull();
+    await userEvent.click(screen.getByTestId("config-import-confirm"));
+    await waitFor(() => expect(calls.find((call) => call.command === "config:import")?.args.slice(2)).toEqual(["--modules", "skills", "--base", BACKUP.base]));
+  });
   it("导出明确不包含密钥取值与外部文件路径", async () => {
     const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
     await userEvent.click(screen.getByTestId("config-export-button"));
@@ -70,11 +88,11 @@ describe("配置备份", () => {
 
     const preview = await screen.findByTestId("config-import-diff");
     expect(preview).toHaveTextContent("新增：newcomer");
-    expect(preview).not.toHaveTextContent("消失：demo");
+    expect(preview).not.toHaveTextContent("移除：demo");
     expect(preview).toHaveTextContent("会被替换：旧规则来源（共享，导入后转为模板）");
     // 旧格式没带规则模板：现有模板不动，不报消失
     expect(screen.queryByTestId("config-diff-规则模板")).toBeNull();
-    expect(preview).toHaveTextContent("导入是整体替换，不能撤销");
+    expect(preview).toHaveTextContent("仅恢复所选模块");
     // 看差异这一步只读当前配置，不写任何东西
     expect(calls.some((call) => call.command === "config:import")).toBe(false);
 
@@ -82,6 +100,7 @@ describe("配置备份", () => {
     await waitFor(() => expect(calls.some((call) => call.command === "config:import")).toBe(true));
     const write = calls.find((call) => call.command === "config:import")!;
     expect(write.args[0]).toBe("--value");
+    expect(write.args.slice(2)).toEqual(["--modules", "skills,mcp,rules", "--base", BACKUP.base]);
     expect(JSON.parse(write.args[1]).format).toBe("agent-manager/config-backup/v1");
     expect(await screen.findByTestId("config-import-success")).toHaveTextContent("逐项预览和应用");
     expect(screen.queryByTestId("config-go-sync")).toBeNull();

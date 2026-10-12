@@ -24,6 +24,22 @@ export interface BackupDiff {
 
 type Json = Record<string, unknown>;
 
+export const BACKUP_MODULES = ["skills", "mcp", "rules"] as const;
+export type BackupModule = typeof BACKUP_MODULES[number];
+export const BACKUP_MODULE_LABELS: Record<BackupModule, string> = { skills: "技能来源", mcp: "MCP 已保存项", rules: "规则模板" };
+
+export function selectBackupModules(current: Json, incoming: Json, modules: BackupModule[]): Json {
+  const policy = { ...asObject(current.policy) };
+  for (const key of ["skills", "mcp"] as const) {
+    if (modules.includes(key)) policy[key] = asObject(incoming.policy)[key];
+  }
+  return { ...incoming, policy,
+    mcp_saved: modules.includes("mcp") ? incoming.mcp_saved : current.mcp_saved,
+    rule_templates: modules.includes("rules") ? incoming.rule_templates ?? current.rule_templates : current.rule_templates,
+    sources: modules.includes("rules") ? incoming.sources : {},
+  };
+}
+
 function asObject(value: unknown): Json {
   return typeof value === "object" && value !== null ? (value as Json) : {};
 }

@@ -28,6 +28,90 @@ fn request(command: &str, args: &[&str]) -> Request {
 }
 
 #[test]
+fn selective_restore_preserves_other_modules_and_rejects_stale_previews() {
+    let (root, ctx) = temp_ctx("selective-restore");
+    let account_metadata = store::effective_policy(&ctx).unwrap()["agents"].clone();
+    let original = execute(
+        &ctx,
+        &request(
+            "rules:save-template",
+            &["--name", "Local rule", "--value", "Keep this rule"],
+        ),
+    );
+    assert!(original.ok, "{:?}", original.errors);
+    let before = execute(&ctx, &request("config:export", &[])).data;
+    let incoming = serde_json::json!({
+        "format": "agent-manager/config-backup/v1",
+        "policy": {"skills": {"repositories": {"incoming": {"url": "https://example.com/skills.git"}}}, "mcp": {"definitions": {"incoming": {"command": "npx"}}}},
+        "rule_templates": [{"name": "Incoming rule", "body": "Replacement"}], "sources": {}
+    });
+    let raw = incoming.to_string();
+    assert!(
+        execute(
+            &ctx,
+            &request(
+                "rules:save-template",
+                &["--name", "Later rule", "--value", "Edited after preview"]
+            )
+        )
+        .ok
+    );
+    let changed = execute(&ctx, &request("config:export", &[])).data;
+    let restore = |modules: &str, base: &str| {
+        execute(
+            &ctx,
+            &request(
+                "config:import",
+                &["--value", &raw, "--modules", modules, "--base", base],
+            ),
+        )
+    };
+    let stale = restore("skills", before["base"].as_str().unwrap());
+    assert!(!stale.ok, "stale preview must fail");
+    assert_eq!(
+        execute(&ctx, &request("config:export", &[])).data["base"],
+        changed["base"]
+    );
+    assert!(!restore("accounts", changed["base"].as_str().unwrap()).ok);
+    assert!(!restore("", changed["base"].as_str().unwrap()).ok);
+    let result = restore("skills", changed["base"].as_str().unwrap());
+    assert!(result.ok, "{:?}", result.errors);
+    let after_skills = execute(&ctx, &request("config:export", &[])).data;
+    assert!(after_skills["policy"]["skills"]["repositories"]
+        .get("incoming")
+        .is_some());
+    assert_eq!(after_skills["rule_templates"], changed["rule_templates"]);
+    assert_eq!(after_skills["mcp_saved"], changed["mcp_saved"]);
+    assert!(restore("mcp", after_skills["base"].as_str().unwrap()).ok);
+    let after_mcp = execute(&ctx, &request("config:export", &[])).data;
+    assert_eq!(
+        after_mcp["policy"]["skills"],
+        after_skills["policy"]["skills"]
+    );
+    assert_eq!(after_mcp["rule_templates"], changed["rule_templates"]);
+    assert!(after_mcp["mcp_saved"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["server"] == "incoming"));
+    assert!(restore("rules", after_mcp["base"].as_str().unwrap()).ok);
+    let after_rules = execute(&ctx, &request("config:export", &[])).data;
+    assert_eq!(
+        after_rules["policy"]["skills"],
+        after_skills["policy"]["skills"]
+    );
+    assert_eq!(after_rules["mcp_saved"], after_mcp["mcp_saved"]);
+    assert_eq!(after_rules["rule_templates"][0]["name"], "Incoming rule");
+    assert_eq!(
+        store::effective_policy(&ctx).unwrap()["agents"],
+        account_metadata
+    );
+    assert!(!ctx.home_dir.join(".claude").exists());
+    assert!(!ctx.home_dir.join(".codex").exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn export_is_read_only_and_roundtrips_definitions_and_sources() {
     let (root, ctx) = temp_ctx("roundtrip");
 

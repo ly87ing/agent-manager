@@ -8,6 +8,7 @@ Each page describes how one subsystem works now: what it is responsible for, whe
 | Retired session collection | [Recent sessions](recent-sessions.md) |
 | MCP test connection | [MCP test connection](mcp-check.md) |
 | Skill assignments and atomic source switching | [Skills](skills.md) |
+| Selective extension definition restore | [Extension backups](extension-backups.md) |
 | External commands, timeout groups and system proxy fallback | [External commands](external-commands.md) |
 | Desktop installation warning and OS login entries | [Desktop startup](desktop-startup.md) |
 | Independent account directories and settings targets | [Account path isolation](account-path-isolation.md) |
