@@ -3195,6 +3195,51 @@ fn forking_a_skill_copies_it_into_the_users_collection_and_tracks_upstream() {
 }
 
 #[test]
+fn forking_an_assigned_local_skill_copies_current_source_without_a_snapshot() {
+    let (root, context) = temp_ctx("skills-fork-local");
+    let source = root.join("local/alpha");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("SKILL.md"), "# Original\n").unwrap();
+    set_collection(
+        &context,
+        "local",
+        &serde_json::json!({"source_path": source}).to_string(),
+    );
+    assert!(skill_action(&context, "skill:local/alpha", "add", "claude-code").ok);
+    // Local assignments follow their actual source and have no content snapshot.
+    std::fs::write(source.join("SKILL.md"), "# Current local version\n").unwrap();
+    assert!(!context.data_dir.join("skill-versions").exists());
+    let dest = root.join("personal");
+    let result = execute(
+        &context,
+        &request(
+            "skills:fork",
+            &[
+                "--only",
+                "skill:local/alpha",
+                "--dest",
+                dest.to_str().unwrap(),
+            ],
+        ),
+    );
+    assert!(result.ok, "{:?}", result.errors);
+    assert_eq!(
+        std::fs::read_to_string(dest.join("alpha/SKILL.md")).unwrap(),
+        "# Current local version\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(context.home_dir.join(".claude/skills/alpha/SKILL.md")).unwrap(),
+        "# Current local version\n"
+    );
+    std::fs::write(dest.join("alpha/SKILL.md"), "# Personal edits\n").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(source.join("SKILL.md")).unwrap(),
+        "# Current local version\n"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn replacing_a_skill_is_atomic_and_refuses_stale_bindings_or_changed_links() {
     let (root, context) = temp_ctx("skills-atomic-replace");
     let repo = context.data_dir.join("repositories/upstream");

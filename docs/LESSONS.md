@@ -280,3 +280,9 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Verify real CLI resource writes in isolated HOME/data and read back account-file bytes, target metadata, and unselected targets. Development mock success is UI evidence only.
 - A short API-key denylist misses OAuth and cloud-provider identity variables. Reuse the existing identity-variable guard and test protected names even when MCP explicitly references them; dedicated MCP names remain editable.
 - Parse smoke-test JSON readback structurally. Matching the line after an object key failed once other fields preceded the extension flag, despite a successful write.
+
+### 2026-10-12: exercise local sources and verify test selection
+
+- Git-source switching tests did not cover an assigned local skill, whose link follows its actual source without a content snapshot. Exercise both source types through the CLI and read back the copy, original and unselected assistant.
+- An exact test filter with an abbreviated name ran zero tests. Check the executed count as well as the exit code. Old-source negative controls need a separate build target; sharing one reused stale Cargo artifacts until the package was rebuilt.
+- Backup previews must match native handling of omitted sections: an absent legacy template section preserves current templates. Do not display removals that the restore will not perform.

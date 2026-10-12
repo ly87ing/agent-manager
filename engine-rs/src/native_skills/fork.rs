@@ -2,8 +2,8 @@
 //! 并记下它来自哪个集合的哪个版本。之后用户的版本与原集合互不影响；原集合出新版时，
 //! status 只提示「上游有新版」，不会改用户的文件。
 //!
-//! 这里只做复制与登记；各账号从原版本换到用户版本由界面用已有的 `skills:apply`
-//! （先 remove 原分配、再 add 用户的）逐个账号完成，每一步照常核对。
+//! This command copies and registers only. The interface switches each selected
+//! assistant with a guarded atomic `skills:apply --replace-from` operation.
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use rusqlite::TransactionBehavior;
@@ -96,11 +96,13 @@ pub(crate) fn fork(ctx: &Context, req: &Request) -> Result<Value> {
         }
     }
 
-    // 复制用户现在用着的那一版；没有账号在用就取来源里的当前版本
+    // Git assignments use snapshots; local assignments follow the actual source.
     let bindings = load_bindings_readonly(ctx)?;
     let in_use = bindings
         .iter()
-        .find(|((c, s, _), b)| c == coll_name && s == skill && b.assigned && b.enabled)
+        .find(|((c, s, _), b)| {
+            origin.source_path.is_none() && c == coll_name && s == skill && b.assigned && b.enabled
+        })
         .map(|(_, b)| b.version.clone());
     let (source, version) = match in_use {
         Some(version) => (verify_skill_version(&ctx.data_dir, &version)?, version),

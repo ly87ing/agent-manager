@@ -10,6 +10,9 @@ Git sources provide verified content snapshots.
 ## Runtime path and failure behavior
 
 Creating a personal version first copies and registers the skill with `skills:fork`.
+Git assignments copy their verified content snapshot. Local assignments copy the
+current source directory because their active links follow that source directly;
+they do not have a content snapshot. Editing the copy never changes the source.
 Each selected assistant then uses `skills:apply --action add --only skill:NEW/NAME
 --agent TARGET --replace-from skill:OLD/NAME --replace-version VERSION`.
 The old assigned version must still match, and an existing link must point to that
