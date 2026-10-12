@@ -1158,7 +1158,7 @@ fn plan_managed(
             } else {
                 for bin in &bins {
                     steps.push(Step::Unlink {
-                        path: entry_dir.join(bin),
+                        path: entry_dir.join(crate::platform::command_link_name(bin)),
                     });
                 }
             }

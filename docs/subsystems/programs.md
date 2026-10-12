@@ -59,6 +59,9 @@ the link must resolve to a completed direct child of the program directory.
 - Version identifiers cannot address `current`, dot components, Windows device
   names, or trailing-dot aliases. Registered command entries are compared as
   native paths and use extension-free command names in inventory.
+- Linking and unlinking derive the same platform-specific entry filename:
+  `<command>` on Unix and `<command>.cmd` on Windows. Unlink retains the managed
+  installation and entries in other directories.
 - Failed delegated upgrades restore both package directories and regular Windows
   launcher files, including failures after the installer has replaced them.
 - Install-time PyPI discovery locates `curl` through user PATH/PATHEXT. Explicit

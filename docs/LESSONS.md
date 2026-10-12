@@ -8,6 +8,12 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Check the actual command entry after success on each platform.**
+- Dependency unlink returned success while leaving the Windows `.cmd` entry in
+  place: its plan used the extension-free inventory name instead of the same
+  platform filename as link. Keep the portable CLI link/unlink readback and
+  account identity assertions; a successful envelope alone missed the defect.
+
 **Validate every dependency-program mutation, including backup and internal paths.**
 - Checking only a chosen entry directory missed historical cleanup links, backup destinations inside an account, and a `programs/bin` alias into an account. Isolated CLI regressions reproduced each path; plans and execution now share checks for every filesystem mutation step.
 - A first version of the step guard rejected legitimate upgrades after moving a package made its launcher link temporarily dangling. Check the link location and destination separately, and retain the existing ordinary/scoped npm upgrade, rollback, and adoption acceptance. Account identity files still reject links.
