@@ -37,7 +37,7 @@
 
 ## Generated files
 
-- Recommended rules are not maintained in this repository. Their text lives in `rules/` in the agent-skills repository; this tool reads it as a skill source and writes to targets only when the user applies individual items. Active rules are the files used by each assistant. `engine-rs/assets/legacy-rules/` contains frozen copies solely for legacy database migration detection; do not edit them as recommendations.
+- Recommended rules are not maintained in this repository. Their text lives in `rules/` in the agent-skills repository; this tool reads it as a skill source and writes to targets only when the user applies individual items. Active rules are the files used by each assistant. `engine-rs/assets/legacy-rules/` contains sanitized fallback copies for legacy database migration. Preserve original-default fingerprints when retiring text; do not edit these copies as recommendations.
 - Keep the README and task documents consistent with actual acceptance status. Do not claim a result passed unless it was generated, run, and read back.
 
 ## Sensitive information

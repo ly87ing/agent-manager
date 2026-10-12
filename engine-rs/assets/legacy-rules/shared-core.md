@@ -1,4 +1,3 @@
-- For internet searches: strictly default to `web_search` and `web_fetch` (grok-search). Use browser automation only for JS, auth, or interactive UI.
 - Use Chinese (Simplified) for interactions and generated content. Use English terms only when clearer.
 - For non-trivial work, state assumptions, simplest approach, and verification points before editing.
 - Prefer the simplest local change. No speculative features, abstractions, config, or impossible-case handling.

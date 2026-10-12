@@ -34,6 +34,8 @@ Skills, MCP, and other resources and their per-assistant assignments support add
 
 Public `*:plan` and `--dry-run` entry points are retired and rejected.
 
+Legacy rule migration recognizes the original shared default by its content digest. Unmodified defaults create no saved template. When only an assistant-specific source was customized, migration combines it with the sanitized shared fallback. Custom shared sources and actual assistant files remain unchanged.
+
 ## Native MCP domain
 
 MCP uses actual entries in assistant configuration files: top-level `mcpServers` in Claude `~/.claude.json`, `[mcp_servers.*]` in Codex `config.toml`, and other assistants/instances with `mcp_config`. Read-only `mcp:status` directly lists stdio and remote entries. Env/header references are preserved, literals masked, and unmodeled official fields preserved; every entry has a write baseline `base`.

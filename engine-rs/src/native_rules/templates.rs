@@ -269,10 +269,12 @@ pub(crate) const LEGACY_KEY_CLAUDE: &str = "rules.claude";
 pub(crate) const LEGACY_KEY_CODEX: &str = "rules.codex";
 pub(crate) const LEGACY_KEYS: [&str; 3] = [LEGACY_KEY_SHARED, LEGACY_KEY_CLAUDE, LEGACY_KEY_CODEX];
 
-/// 旧版本编译内置的来源默认值：只用于判定旧库行「是否改过」。共享规则冻结在规则迁出本仓
-/// （2026-09-23）时的内容；两个助手专用来源当时是空的。
+/// Sanitized fallback for legacy sources; assistant-specific defaults were empty.
 pub(crate) const LEGACY_DEFAULT_SHARED: &str =
     include_str!("../../assets/legacy-rules/shared-core.md");
+// Recognize the original default without retaining or rendering retired rules.
+const LEGACY_SHARED_DEFAULT_SHA256: &str =
+    "7508ea8b05c3cd596df9e1cb7ce358b4704761cf45e642f73c6b7f7ac34d82c6";
 const LEGACY_DEFAULT_CLAUDE: &str = "";
 const LEGACY_DEFAULT_CODEX: &str = "";
 
@@ -313,13 +315,16 @@ pub(crate) fn legacy_templates(
     stored: &BTreeMap<String, String>,
     created_at: &str,
 ) -> Vec<Template> {
-    let changed = |key: &str| stored.get(key).is_some_and(|v| v != legacy_default(key));
     let value = |key: &str| {
         stored
             .get(key)
             .map(String::as_str)
+            .filter(|body| {
+                key != LEGACY_KEY_SHARED || sha256_hex(body) != LEGACY_SHARED_DEFAULT_SHA256
+            })
             .unwrap_or_else(|| legacy_default(key))
     };
+    let changed = |key: &str| value(key) != legacy_default(key);
     let mut out = Vec::new();
     for (id, name, adapter_key) in [
         (LEGACY_ID_CLAUDE, "旧规则来源（Claude）", LEGACY_KEY_CLAUDE),
@@ -445,8 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn old_default_apply_wrote_exactly_the_shared_core() {
-        // 旧版本按默认来源写入的文件就是共享规则本身（助手专用来源为空），与迁出时的 core.md 一致
+    fn fallback_render_preserves_shared_rules() {
         assert_eq!(
             legacy_render(LEGACY_DEFAULT_SHARED, LEGACY_DEFAULT_CLAUDE),
             LEGACY_DEFAULT_SHARED

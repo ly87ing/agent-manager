@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
-/// 旧版本内置的共享规则（冻结副本，只用于旧库迁移判定）。
+/// Sanitized shared fallback; original defaults are recognized by digest.
 const LEGACY_SHARED: &str = include_str!("../assets/legacy-rules/shared-core.md");
 
 fn temp_ctx(tag: &str) -> (PathBuf, Context) {
