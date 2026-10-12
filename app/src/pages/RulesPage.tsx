@@ -105,7 +105,7 @@ export default function RulesPage({
     );
   }
 
-  // 与账号页同序：Claude 在前、Codex 在后；每个助手主号在前
+  // 与助手页同序：Claude 在前、Codex 在后；每个助手主号在前
   const elements = [...query.data.data.elements].sort(
     (a, b) =>
       Number(specOf(a).kind === "codex") - Number(specOf(b).kind === "codex") ||
@@ -145,11 +145,11 @@ export default function RulesPage({
   };
 
   const pendingFill = rulesFillRows(elements);
-  /** 补齐一个账号：还没有规则文件时从同类主账号复制；引擎写前再核对文件仍不存在。 */
+  /** 补齐一个助手：还没有规则文件时从同类主助手复制；引擎写前再核对文件仍不存在。 */
   const fillOne = (row: RulesFillRow) =>
     void directApply.apply({ command: "rules:apply", label: `补齐 ${row.name}`, args: rulesFillArgs(row) });
 
-  /** 账号名：主账号用助手名，实例用账号名。 */
+  /** 助手名：主助手用助手名，实例用助手名。 */
   const labelOf = (element: EngineElement) => {
     const spec = specOf(element);
     const account = spec.profile_id ? accountName(spec.profile_id) : spec.kind === "codex" ? accountName("codex") : accountName("claude-code");
@@ -247,7 +247,7 @@ export default function RulesPage({
   );
 }
 
-/** 这个账号的规则文件用的是哪条、状态如何。 */
+/** 这个助手的规则文件用的是哪条、状态如何。 */
 function ruleStatus(element: EngineElement, sourceRules: RuleSourceRule[]) {
   const observed = observedOf(element);
   const follow = observed.source_follow;
@@ -422,7 +422,7 @@ function RuleLibrary({
   const userSourceOf = (collection: string) => userSources.sources.find((source) => source.name === collection);
   const emptySources = userSources.sources.filter((source) => !sourceRules.some((rule) => rule.collection === source.name));
   const count = sourceRules.length + templates.length;
-  const used = (n: number) => (n > 0 ? `${n} 个账号在用` : "未使用");
+  const used = (n: number) => (n > 0 ? `${n} 个助手在用` : "未使用");
   const body = (id: string, text: string, testId: string) =>
     openId === id && (
       <pre data-testid={testId} className="mx-4 mb-2 max-h-80 overflow-auto whitespace-pre-wrap rounded border bg-muted/40 p-2 font-mono text-xs">

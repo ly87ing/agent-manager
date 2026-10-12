@@ -137,7 +137,7 @@ describe("来源页", () => {
     expect(calls.filter((call) => !call.command.endsWith(":status") && !["policy:get", "resources:targets"].includes(call.command) && call.command !== "system:discover")).toEqual([]);
   });
 
-  it("添加推荐来源只保存定义（不限账号、不分配），不下载", async () => {
+  it("添加推荐来源只保存定义（不限助手、不分配），不下载", async () => {
     localStorage.clear();
     const r = routes();
     const status = r["skills:status"] as Envelope<{ recommendations: unknown[] }>;

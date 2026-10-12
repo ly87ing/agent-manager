@@ -25,7 +25,7 @@ describe("McpServerFormDialog", () => {
     render(<McpServerFormDialog mode={{ kind: "add", targets: mcpTargets() }} onSubmit={vi.fn()} onPreview={onPreview} onClose={vi.fn()} />);
     const dialog = screen.getByRole("dialog");
     await userEvent.type(within(dialog).getByTestId("server-name-input"), "example");
-    // 新服务默认写到全部账号
+    // 新服务默认写到全部助手
     expect(within(dialog).getByTestId("server-agent-claude-code")).toBeChecked();
     expect(within(dialog).getByTestId("server-agent-codex")).toBeChecked();
     await userEvent.type(within(dialog).getByTestId("server-command-input"), "npx");
@@ -76,7 +76,7 @@ describe("McpServerFormDialog", () => {
     expect(within(dialog).queryByTestId("mcp-preview-content-claude-code")).toBeNull();
   });
 
-  it("新增：名称必填；账号默认全选、全取消时要求至少选一个；超时输入只在选中 Codex 时出现", async () => {
+  it("新增：名称必填；助手默认全选、全取消时要求至少选一个；超时输入只在选中 Codex 时出现", async () => {
     const { onSubmit, dialog } = renderForm({ kind: "add", targets: mcpTargets() });
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
     expect(within(dialog).getByRole("alert")).toHaveTextContent("名称只能用");
@@ -84,7 +84,7 @@ describe("McpServerFormDialog", () => {
     await userEvent.click(within(dialog).getByTestId("server-agent-claude-code"));
     await userEvent.click(within(dialog).getByTestId("server-agent-codex"));
     await userEvent.click(within(dialog).getByTestId("server-form-submit"));
-    expect(within(dialog).getByRole("alert")).toHaveTextContent("至少选一个账号");
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("至少选一个助手");
     await userEvent.click(within(dialog).getByTestId("server-agent-claude-code"));
     expect(within(dialog).queryByTestId("server-timeout-input")).toBeNull();
     await userEvent.click(within(dialog).getByTestId("server-agent-codex"));

@@ -71,7 +71,7 @@ export function useRuleSources() {
   };
 }
 
-/** 移除一条登记：只删登记，目录里的文件和已写进各账号的规则文件都不动。 */
+/** 移除一条登记：只删登记，目录里的文件和已写进各助手的规则文件都不动。 */
 export function RemoveSourceDialog({
   source,
   busy,
@@ -86,7 +86,7 @@ export function RemoveSourceDialog({
   return (
     <ConfirmModal
       title={`移除规则来源 ${source.name}`}
-      description={`只移除这条登记，${source.path} 里的文件原样保留；已经写进各账号的规则文件也不动（不再提示来源更新）。`}
+      description={`只移除这条登记，${source.path} 里的文件原样保留；已经写进各助手的规则文件也不动（不再提示来源更新）。`}
       risk="write-local"
       confirmLabel="移除"
       executing={busy}
@@ -136,7 +136,7 @@ export function AddSourceDialog({
             <span className="text-xs font-medium text-muted-foreground">位置：一个 .md 文件，或一个目录（目录里的每个 .md 是一条规则）</span>
             <input data-testid="rule-source-path" value={path} onChange={(event) => setPath(event.target.value)} placeholder="~/notes/CLAUDE.md 或 ~/notes/rules" className="mt-1 w-full rounded border border-input bg-background px-2 py-1.5 font-mono text-xs" />
           </label>
-          <p className="text-xs text-muted-foreground">只登记位置、原地读取，文件改了这里即时看到；不会复制内容，也不会改任何账号的规则文件。</p>
+          <p className="text-xs text-muted-foreground">只登记位置、原地读取，文件改了这里即时看到；不会复制内容，也不会改任何助手的规则文件。</p>
         </div>
         <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex items-center justify-end gap-2">
           {error && (name || path) && <span className="mr-auto text-xs text-destructive">{error}</span>}

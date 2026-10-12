@@ -288,7 +288,7 @@ describe("来源页：添加、编辑、更新、移除", () => {
     // 整个新加或被删掉的技能单独标出来
     expect(within(dialog).queryByTestId("preview-skill-new-alpha")).toBeNull();
     expect(within(dialog).getByTestId("preview-skill-new-gamma")).toHaveTextContent("新技能");
-    expect(within(dialog).getByTestId("preview-skill-gamma")).toHaveTextContent("由你决定给哪些账号");
+    expect(within(dialog).getByTestId("preview-skill-gamma")).toHaveTextContent("由你决定给哪些助手");
     expect(within(dialog).getByTestId("preview-skill-gone-omega")).toBeInTheDocument();
     expect(calls.some((call) => call.command === "skills:apply")).toBe(false);
     await userEvent.click(within(dialog).getByTestId("versions-preview-confirm"));
@@ -325,7 +325,7 @@ describe("来源页：添加、编辑、更新、移除", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "移除来源 agent-skills" });
     // 说清会发生什么：技能链接移除、自己的目录不动、规则文件保留、启动命令不动
-    expect(dialog).toHaveTextContent("你自己放进账号的同名技能目录不动");
+    expect(dialog).toHaveTextContent("你自己放进助手的同名技能目录不动");
     expect(dialog).toHaveTextContent("规则文件内容保留");
     expect(screen.getByTestId("confirm-modal-input")).toBeInTheDocument();
 
@@ -530,7 +530,7 @@ describe("optional recommended sources", () => {
     expect(screen.queryByTestId("source-suggest-agent-skills-rec")).toBeNull();
   });
 
-  it("启用：先确认，确认后依次登记、下载、把技能链接到能加的账号；已有同名内容的账号跳过", async () => {
+  it("启用：先确认，确认后依次登记、下载、把技能链接到能加的助手；已有同名内容的助手跳过", async () => {
     const base = recommendationRoutes({ collections: false });
     let saved = false;
     const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = {
@@ -553,7 +553,7 @@ describe("optional recommended sources", () => {
                 discovery_inbox: true,
                 agents: {
                   "claude-code": { state: "not-assigned", assigned: false, enabled: false, actions: ["add"] },
-                  // 账号里已有同名的外部内容：引擎不给 add，不覆盖
+                  // 助手里已有同名的外部内容：引擎不给 add，不覆盖
                   codex: { state: "extra-link", assigned: false, enabled: false, actions: [] },
                 },
               },
@@ -750,7 +750,7 @@ describe("来源页：版本", () => {
     expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(0);
 
     await userEvent.click(within(dialog).getByTestId("version-switch-v3.1.0-rc.1"));
-    // 先预览：列出会变的文件与跟着换的账号，确认前不写
+    // 先预览：列出会变的文件与跟着换的助手，确认前不写
     const preview = await within(dialog).findByTestId("preview-skill-archify");
     expect(preview).toHaveTextContent("跟着换：");
     expect(preview).toHaveTextContent("修改 SKILL.md");
@@ -902,7 +902,7 @@ describe("来源页：纳入管理", () => {
   });
 });
 
-describe("来源页：纳入管理的账号与执行中", () => {
+describe("来源页：纳入管理的助手与执行中", () => {
   const same = {
     ...ADOPT_BASE,
     current_accounts: ["codex"],
@@ -914,7 +914,7 @@ describe("来源页：纳入管理的账号与执行中", () => {
     },
   };
 
-  it("可选账号：默认全选并标出原来就有的；取消勾选后只链接选中的；一个不选不能确认", async () => {
+  it("可选助手：默认全选并标出原来就有的；取消勾选后只链接选中的；一个不选不能确认", async () => {
     const { calls } = renderWithEngine(<SourcesPage />, adoptRoutes(same));
     await userEvent.click(await screen.findByTestId("adopt-archify"));
     const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
@@ -925,7 +925,7 @@ describe("来源页：纳入管理的账号与执行中", () => {
     await userEvent.click(within(accounts).getByTestId("adopt-account-claude-code"));
     await userEvent.click(within(accounts).getByTestId("adopt-account-codex"));
     expect(within(dialog).getByTestId("adopt-confirm")).toBeDisabled();
-    expect(within(accounts).getByText("至少选一个账号")).toBeInTheDocument();
+    expect(within(accounts).getByText("至少选一个助手")).toBeInTheDocument();
     await userEvent.click(within(accounts).getByTestId("adopt-account-codex"));
     await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
     await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
@@ -949,7 +949,7 @@ describe("来源页：纳入管理的账号与执行中", () => {
           steps: [
             { key: "check", label: "核对预览后有没有变化", state: "done", detail: null },
             { key: "backup", label: "备份并移走原来的目录", state: "active", detail: "1/2：~/.claude/skills/archify" },
-            { key: "link", label: "链接到账号", state: "pending", detail: null },
+            { key: "link", label: "链接到助手", state: "pending", detail: null },
           ],
         },
       }),

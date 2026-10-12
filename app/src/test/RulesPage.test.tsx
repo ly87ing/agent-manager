@@ -70,7 +70,7 @@ function rulesRoutes(): Record<string, Envelope> {
 }
 
 describe("RulesPage：规则来源与补齐", () => {
-  it("补齐：只在还没有规则文件的账号行上给「从主号补齐」，从同类主账号复制；已有内容、阻塞与停用的不给", async () => {
+  it("补齐：只在还没有规则文件的助手行上给「从主号补齐」，从同类主助手复制；已有内容、阻塞与停用的不给", async () => {
     const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
     const fill = await screen.findByTestId("rules-fill-rules:profile:cc-work");
     expect(screen.getAllByTestId(/^rules-fill-/)).toHaveLength(1);
@@ -285,14 +285,14 @@ describe("RulesPage：实际文件为准", () => {
 
     const section = await screen.findByRole("region", { name: "规则库" });
     expect(section).toHaveTextContent("agent-skills · git");
-    expect(section).toHaveTextContent("1 个账号在用");
+    expect(section).toHaveTextContent("1 个助手在用");
     await userEvent.click(within(section).getByRole("button", { name: "查看 core" }));
     expect(screen.getByTestId("rules-source-body-agent-skills/core").textContent).toBe(SOURCE_BODY);
     await userEvent.click(screen.getByRole("button", { name: "应用规则「core」（来自 agent-skills）到…" }));
     const dialog = screen.getByRole("dialog", { name: "应用规则「core」（来自 agent-skills）" });
     // 只列可写目标：阻塞与停用的实例不在其中
     const targetSelect = within(dialog).getByRole("combobox", { name: "写入目标" });
-    // 与账号页同序：Claude 主号、Claude 其他账号、Codex
+    // 与助手页同序：Claude 主号、Claude 其他助手、Codex
     expect((await readOptions(targetSelect)).map((option) => option.value)).toEqual([
       "rules:claude_global",
       "rules:profile:cc-work",

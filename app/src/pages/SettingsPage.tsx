@@ -125,8 +125,8 @@ const ADVANCED_ENTRIES = [
   },
   {
     key: "secrets",
-    title: "密钥",
-    description: "选择外部密钥文件，填写取值并查看哪些还没配。",
+    title: "MCP 密钥",
+    description: "管理 MCP 专用变量与外部密钥文件；账号凭据只读。",
     icon: KeyRound,
   },
 ];

@@ -14,10 +14,10 @@ export type ProgramActionKind = "install" | "upgrade" | "switch" | "restore" | "
 const TITLE: Record<ProgramActionKind, string> = {
   install: "安装",
   upgrade: "升级",
-  switch: "换版本",
+  switch: "切换版本",
   restore: "回退",
   remove: "删除",
-  adopt: "纳入为本工具安装",
+  adopt: "改由本工具安装",
   unadopt: "撤回纳入",
 };
 
@@ -149,7 +149,7 @@ export function ProgramActionDialog({
   return (
     <ConfirmModal
       title={`${TITLE[action]} ${program.name}${plan?.target_version ? ` ${plan.target_version}` : version ? ` ${version}` : ""}`}
-      description={loading ? "正在算计划…" : error ? "" : "确认后按下面的步骤执行；失败会原样恢复。"}
+      description={loading ? "正在生成操作计划" : error ? "" : "确认后执行下列步骤；执行失败时尝试恢复，并报告需要检查的备份。"}
       risk="write-local"
       riskLabel="改动本机程序"
       confirmLabel={TITLE[action]}
@@ -217,7 +217,7 @@ export function ProgramActionDialog({
         )}
         {failed && (
           <p data-testid="program-apply-failed" className="whitespace-pre-wrap rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            没有完成（已原样恢复）：{failed}
+            执行未完成，请核对当前状态：{failed}
             {plan?.manual.length ? "\n可以复制上面的命令自己执行。" : ""}
           </p>
         )}

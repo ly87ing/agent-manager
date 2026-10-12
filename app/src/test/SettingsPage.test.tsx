@@ -532,7 +532,7 @@ describe("SettingsPage", () => {
     // 常驻返回设置按钮出现，且在面包屑中展示
     const backButton = await screen.findByTestId("back-to-settings-button");
     expect(backButton).toBeInTheDocument();
-    expect(screen.getByText(/工具 \/ 密钥/)).toBeInTheDocument();
+    expect(screen.getByText(/工具 \/ MCP 密钥/)).toBeInTheDocument();
 
     // 点击返回设置
     await userEvent.click(backButton);

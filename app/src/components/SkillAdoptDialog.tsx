@@ -21,7 +21,7 @@ export interface AdoptPreview {
   name: string;
   /** dedupe：已被管理，只清理 Codex 共用目录里的副本；adopt：纳入。 */
   kind: "dedupe" | "adopt";
-  /** 原来就有它的账号（它所在的账号目录，以及共用目录对应的全部 Codex 账号）。 */
+  /** 原来就有它的助手（它所在的助手目录，以及共用目录对应的全部 Codex 助手）。 */
   current_accounts?: string[];
   locations: { agent: string | null; shared: string | null; path: string; origin: string }[];
   removes: string[];
@@ -52,7 +52,7 @@ const FILE_STATUS: Record<string, string> = {
 
 /**
  * 纳入管理：先预览（识别来源、与来源逐文件比对、列出会备份 / 删除 / 链接的内容），用户确认后执行。
- * 内容一致时直接纳入；不一致时由用户选「用来源的版本」或「保留我的改动」；链接到哪些账号可勾选。
+ * 内容一致时直接纳入；不一致时由用户选「用来源的版本」或「保留我的改动」；链接到哪些助手可勾选。
  *
  * 预览只读，可以随时取消；执行会移动目录，中途不能安全停下：执行时不给「取消」、不响应 Esc 与点遮罩，
  * 只能「在后台继续」（关掉窗口，执行照常，结束后弹提示）。两个阶段都按引擎报告的步骤显示进度。
@@ -75,7 +75,7 @@ export function SkillAdoptDialog({
   /** 执行中的运行编号：有值时不能取消。 */
   const [runningId, setRunningId] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
-  /** 要链接的账号；预览回来后默认全选。 */
+  /** 要链接的助手；预览回来后默认全选。 */
   const [selected, setSelected] = useState<string[]>([]);
   const running = runningId !== null;
   const progress = useEngineProgress(runningId ?? previewId);
@@ -191,7 +191,7 @@ export function SkillAdoptDialog({
                     纳入到来源 <span className="text-foreground">{preview.collection?.name}</span>
                     {preview.collection?.exists ? "（已有）" : "（新建）"}，版本 <span className="font-mono text-foreground">{check.adopt_at.label}</span>
                     {check.adopt_at.commit !== check.latest.commit && `，之后可更新到 ${check.latest.label}`}
-                    {preview.collection?.linked_as && preview.collection.linked_as !== name && `；在来源里叫 ${preview.collection.linked_as}，账号里按这个名字链接`}
+                    {preview.collection?.linked_as && preview.collection.linked_as !== name && `；在来源里叫 ${preview.collection.linked_as}，助手里按这个名字链接`}
                   </p>
                 )}
                 {checkError && <p data-testid="adopt-source-error" className="text-warning">{checkError}</p>}
@@ -244,7 +244,7 @@ export function SkillAdoptDialog({
 
           {preview && !running && !dedupe && accounts.length > 0 && (
             <fieldset data-testid="adopt-accounts" className="space-y-1 text-xs">
-              <legend className="mb-1 text-muted-foreground">链接到哪些账号（默认全部）</legend>
+              <legend className="mb-1 text-muted-foreground">链接到哪些助手（默认全部）</legend>
               <div className="flex flex-wrap gap-x-4 gap-y-1">
                 {accounts.map((agent) => (
                   <label key={agent} className="flex items-center gap-1.5 text-foreground">
@@ -261,7 +261,7 @@ export function SkillAdoptDialog({
                   </label>
                 ))}
               </div>
-              {chosen.length === 0 && <p className="text-destructive">至少选一个账号</p>}
+              {chosen.length === 0 && <p className="text-destructive">至少选一个助手</p>}
             </fieldset>
           )}
 

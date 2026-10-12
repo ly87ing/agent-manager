@@ -26,7 +26,7 @@ const BLOCKED: Record<string, string> = {
 };
 
 /**
- * 来源页的「未纳管」：各账号目录与 Codex 共用目录里、本工具没管理的技能，以及 Codex
+ * 来源页的「未纳管」：各助手目录与 Codex 共用目录里、本工具没管理的技能，以及 Codex
  * 会加载两份的重名。每项可「纳入管理」或「清理多余」，具体做什么先在对话框里预览。
  */
 export function SkillOtherSources({
@@ -59,7 +59,7 @@ export function SkillOtherSources({
       <AccountHeader
         groups={groups}
         left={
-          <span className="font-medium text-foreground" title="用别的方式装进账号目录的技能：纳入管理后只留一份源，可撤回">
+          <span className="font-medium text-foreground" title="用别的方式装进助手目录的技能：纳入管理后只留一份源，可撤回">
             未纳管 · {skills.length}
           </span>
         }
@@ -80,7 +80,7 @@ export function SkillOtherSources({
                     key={location.path}
                     data-testid={`other-shared-${skill.name}`}
                     className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                    title={`${sharedPath(location.shared!)}：全部 Codex 账号都会用到，不能按账号关`}
+                    title={`${sharedPath(location.shared!)}：全部 Codex 助手都会用到，不能按助手关`}
                   >
                     Codex 共用
                   </span>

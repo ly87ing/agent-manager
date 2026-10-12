@@ -24,8 +24,8 @@ const RULES: [RegExp, ErrorAdvice][] = [
     { what: "连不上网络或远程仓库", todo: "检查网络后重试；公司网络可能需要代理" },
   ],
   [/解析失败|parse error|invalid json|语法错误/i, { what: "配置文件的格式有错，读不出来", todo: "用编辑器打开这个文件修好格式（多半是少了逗号或括号），再回来刷新" }],
-  [/疑似凭据|明文取值|明文凭据/, { what: "内容里像是写了密钥", todo: "改写成 ${变量名}，把取值放进密钥文件（设置 → 密钥）" }],
-  [/no such file or directory/i, { what: "要用的文件或目录不存在", todo: "确认路径；账号目录可以在账号页的「准备情况」里补齐" }],
+  [/疑似凭据|明文取值|明文凭据/, { what: "内容里像是写了密钥", todo: "改写成 ${变量名}，把取值放进密钥文件（设置 → MCP 密钥）" }],
+  [/no such file or directory/i, { what: "要用的文件或目录不存在", todo: "核对资源路径与来源是否存在；助手扩展路径可在助手页查看" }],
 ];
 
 export function adviseError(message: string): ErrorAdvice | null {

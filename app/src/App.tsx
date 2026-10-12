@@ -22,7 +22,7 @@ const NAV: NavItem[] = [
   { key: "mcp", label: "MCP", icon: Server },
   { key: "rules", label: "规则", icon: ScrollText },
   { key: "sources", label: "来源", icon: Library },
-  { key: "programs", label: "程序", icon: Package },
+  { key: "programs", label: "依赖程序", icon: Package },
   { key: "agents", label: "助手", icon: Bot },
 ];
 const SECONDARY_NAV: NavItem[] = [

@@ -111,11 +111,11 @@ export default function McpPage({
 
   const elements = query.data.data.elements;
   const allTargets: McpTarget[] = query.data.data.targets ?? [];
-  /** 配置格式本工具还不支持的账号（如 Kimi Code）：不占列，只在表头说明里提一句。 */
+  /** 配置格式本工具还不支持的助手（如 Kimi Code）：不占列，只在表头说明里提一句。 */
   const unsupported = allTargets.filter((target) => target.error?.startsWith("不支持的 MCP 配置格式"));
   const targets = allTargets.filter((target) => !unsupported.includes(target));
   const agentColumns = targets.map((target) => target.agent);
-  /** 账号名单里没有的助手（如 kimi-code）写成 Kimi Code。 */
+  /** 助手名单里没有的助手（如 kimi-code）写成 Kimi Code。 */
   const readableName = (agent: string) =>
     nameOfAgent(agent) !== agent ? nameOfAgent(agent) : agent.split("-").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
   const targetOf = (agent: string) => targets.find((target) => target.agent === agent);
@@ -128,20 +128,20 @@ export default function McpPage({
     });
 
   /**
-   * 撤销：写入后条目的基准变了，先重读状态拿这个账号条目的新基准再做反向操作；
+   * 撤销：写入后条目的基准变了，先重读状态拿这个助手条目的新基准再做反向操作；
    * 期间被外部改过就由引擎照常拒绝。
    */
   const undoWith = (element: EngineElement, agent: string, label: string, action: string) => () =>
     void runEngine<StatusData>("mcp:status", []).then((envelope) => {
       const cell = envelope.ok ? cellsOf(envelope.data.elements.find((item) => item.id === element.id) ?? element)[agent] : undefined;
       if (!cell) {
-        toast.error(`${label}：这个账号上已经找不到这一条`);
+        toast.error(`${label}：这个助手上已经找不到这一条`);
         return;
       }
       void apply(label, ["--only", element.id, "--agent", agent, "--action", action, "--base", cell.base]);
     });
 
-  /** 账号开关：启用 / 停用这一个账号上的条目，可撤销。 */
+  /** 助手开关：启用 / 停用这一个助手上的条目，可撤销。 */
   const handleAction = (element: EngineElement, agent: string, action: string, cell: McpAgentCell) => {
     const verb = action === "enable" ? "启用" : "停用";
     const label = `${verb} ${nameOf(element)} @ ${nameOfAgent(agent)}`;
@@ -183,7 +183,7 @@ export default function McpPage({
     }
   };
 
-  /** 编辑：一张表单写到所有有这个服务的账号；各账号内容不同时先以 base 那份预填。 */
+  /** 编辑：一张表单写到所有有这个服务的助手；各助手内容不同时先以 base 那份预填。 */
   const openEdit = (element: EngineElement, base?: string) => {
     const editable = Object.entries(cellsOf(element)).filter(([, cell]) => cell.actions.includes("edit"));
     if (editable.length === 0) return;
@@ -211,7 +211,7 @@ export default function McpPage({
     }
   };
 
-  /** 删除：逐个账号执行，各自带写入基准；一个失败不拦其他。 */
+  /** 删除：逐个助手执行，各自带写入基准；一个失败不拦其他。 */
   const runRemove = async (element: EngineElement, agents: string[]) => {
     setRemoving(null);
     for (const agent of agents) {
@@ -231,7 +231,7 @@ export default function McpPage({
     return spec;
   };
 
-  /** 编辑时每个账号用它自己条目的写入基准。 */
+  /** 编辑时每个助手用它自己条目的写入基准。 */
   const baseOf = (agent: string) => (form?.kind === "edit" ? form.targets.find((target) => target.agent === agent)?.cell.base : undefined);
   const previewForm = async (payload: McpFormPayload): Promise<McpFilePreview[]> => {
     return Promise.all(payload.agents.map(async (agent): Promise<McpFilePreview> => {
@@ -263,7 +263,7 @@ export default function McpPage({
     setForm(null);
     if (!mode) return;
     if (mode.kind === "edit") {
-      // 各账号逐个写入，各自核对是否被外部改过：一个失败不拦其他
+      // 各助手逐个写入，各自核对是否被外部改过：一个失败不拦其他
       for (const target of mode.targets.filter((target) => payload.agents.includes(target.agent))) {
         await apply(`编辑 ${payload.name} @ ${nameOfAgent(target.agent)}`, [
           "--only",
@@ -318,8 +318,8 @@ export default function McpPage({
   const shown = (agentFilter === "all" ? filtered : filtered.filter((element) => cellsOf(element)[agentFilter])).filter(
     (element) => !attentionOnly || attentionSubjects.has(element.id),
   );
-  /** 补齐一个账号：把在用的服务从同类账号逐条复制过来，单条失败不影响其余；每条仍由引擎带 base 锁内核对。 */
-  /** 不给账号时补齐所有账号。 */
+  /** 补齐一个助手：把在用的服务从同类助手逐条复制过来，单条失败不影响其余；每条仍由引擎带 base 锁内核对。 */
+  /** 不给助手时补齐所有助手。 */
   const runFill = async (agent?: string) => {
     const pendingFill = mcpFillRows(elements, targets, agent ? [agent] : undefined);
     if (filling || pendingFill.length === 0) return;
@@ -360,12 +360,12 @@ export default function McpPage({
       <div className="flex flex-wrap items-center gap-2">
         <SearchInput value={search} onChange={setSearch} placeholder="搜索服务…" testId="mcp-search" />
         <Select
-          label="账号筛选"
+          label="助手筛选"
           testId="filter-agent-select"
           value={agentFilter}
           onChange={setAgentFilter}
           className="rounded-md border bg-card px-2 py-1.5 text-sm"
-          options={[{ value: "all", label: "全部账号" }, ...agentColumns.map((agent) => ({ value: agent, label: nameOfAgent(agent) }))]}
+          options={[{ value: "all", label: "全部助手" }, ...agentColumns.map((agent) => ({ value: agent, label: nameOfAgent(agent) }))]}
         />
         <AttentionOnlyToggle checked={attentionOnly} count={attentionSubjects.size} onChange={setAttentionOnly} />
         <div className="ml-auto flex items-center gap-2">
@@ -374,7 +374,7 @@ export default function McpPage({
               type="button"
               data-testid="mcp-fill-all"
               disabled={filling || busy}
-              title="把在用的服务从同类账号复制到所有还没有它的账号；账号上停用的不动"
+              title="把在用的服务从同类助手复制到所有还没有它的助手；助手上停用的不动"
               onClick={() => void runFill()}
               className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/15 disabled:opacity-40"
             >
@@ -399,7 +399,7 @@ export default function McpPage({
       {elements.length === 0 ? (
         <EmptyState
           icon={Server}
-          title="各账号的配置里还没有 MCP 服务"
+          title="各助手的配置里还没有 MCP 服务"
           description={<p>点击右上角「{OVERLAY_COPY.addServer}」写入第一个服务；在助手里直接加的条目也会出现在这里。</p>}
         />
       ) : (search_ || agentFilter !== "all" || attentionOnly) && shown.length === 0 ? (
@@ -407,7 +407,7 @@ export default function McpPage({
           icon={SearchX}
           testId="mcp-search-empty"
           title="无匹配结果"
-          description="没有名称、启动命令、地址或账号包含该关键词的服务。"
+          description="没有名称、启动命令、地址或助手包含该关键词的服务。"
           actions={
             <button
               type="button"
@@ -419,7 +419,7 @@ export default function McpPage({
           }
         />
       ) : (
-        <div role="region" aria-label="MCP 账号列表" tabIndex={0} className="table-scroll rounded-lg border bg-card" style={{ "--table-min-width": `${Math.max(704, 400 + groups.reduce((count, group) => count + group.columns.length * 64 + 16, 0))}px` } as CSSProperties}>
+        <div role="region" aria-label="MCP 助手列表" tabIndex={0} className="table-scroll rounded-lg border bg-card" style={{ "--table-min-width": `${Math.max(704, 400 + groups.reduce((count, group) => count + group.columns.length * 64 + 16, 0))}px` } as CSSProperties}>
           <AccountHeader
             className="sticky top-0 z-10"
             groups={groups}
@@ -430,7 +430,7 @@ export default function McpPage({
                   {disabledCount > 0 && <span className="font-normal text-muted-foreground">（{disabledCount} 个已停用）</span>}
                 </span>
                 {unsupported.length > 0 && (
-                  <span data-testid="mcp-unsupported" title="这些账号的 MCP 配置格式本工具还不支持，没有列出；它们自己的 MCP 不受影响。">
+                  <span data-testid="mcp-unsupported" title="这些助手的 MCP 配置格式本工具还不支持，没有列出；它们自己的 MCP 不受影响。">
                     <Info className="inline h-3.5 w-3.5 align-[-2px]" aria-hidden /> {unsupported.map((target) => readableName(target.agent)).join("、")} 暂不支持
                   </span>
                 )}
@@ -446,7 +446,7 @@ export default function McpPage({
                       type="button"
                       data-testid={`mcp-fill-${column.id}`}
                       disabled={filling || busy}
-                      title={`把在用的 ${missing} 个服务复制到 ${column.fullName}；账号上停用的不动`}
+                      title={`把在用的 ${missing} 个服务复制到 ${column.fullName}；助手上停用的不动`}
                       onClick={() => void runFill(column.id)}
                       className="text-primary hover:underline disabled:opacity-40"
                     >
@@ -477,7 +477,7 @@ export default function McpPage({
                       command: "mcp:apply",
                       label,
                       args: copyArgs(target, from, cell.base, to, null),
-                      // 撤销复制 = 从这个账号删掉刚复制过来的那一条
+                      // 撤销复制 = 从这个助手删掉刚复制过来的那一条
                       undo: undoWith(target, to, `撤销：${label}`, "remove"),
                     })
                     .then(showNotices);

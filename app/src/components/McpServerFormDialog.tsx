@@ -66,13 +66,13 @@ export type McpFormMode =
   | {
       kind: "edit";
       name: string;
-      /** 表单预填取自这个账号的条目。 */
+      /** 表单预填取自这个助手的条目。 */
       agent: string;
       cell: McpAgentCell;
       format: string;
-      /** 保存时写入的全部账号（含 agent），各自带写入基准。 */
+      /** 保存时写入的全部助手（含 agent），各自带写入基准。 */
       targets: { agent: string; cell: McpAgentCell; format: string }[];
-      /** 各账号的内容不一样：保存后统一成表单里这一份。 */
+      /** 各助手的内容不一样：保存后统一成表单里这一份。 */
       differs: boolean;
     };
 
@@ -94,9 +94,9 @@ export function McpServerFormDialog({
   onSubmit: (payload: McpFormPayload) => void;
   onPreview: (payload: McpFormPayload) => Promise<McpFilePreview[] | string>;
   onClose: () => void;
-  /** 账号键 → 账号名。 */
+  /** 助手键 → 助手名。 */
   nameOf?: (agent: string) => string;
-  /** 各账号内容不同时，换成以另一个账号的内容为准重新预填。 */
+  /** 各助手内容不同时，换成以另一个助手的内容为准重新预填。 */
   onSwitchBase?: (agent: string) => void;
 }) {
   const isNew = mode.kind === "add";
@@ -116,7 +116,7 @@ export function McpServerFormDialog({
   );
   const [name, setName] = useState(mode.kind === "edit" ? mode.name : (mode.initialName ?? ""));
   const [selectedAgents, setSelectedAgents] = useState<string[]>(
-    // 新增默认给全部账号（产品规则：新服务默认分配给所有账号），可以取消
+    // 新增默认给全部助手（产品规则：新服务默认分配给所有助手），可以取消
     mode.kind === "edit" ? [mode.agent] : writableTargets.map((target) => target.agent),
   );
   const [command, setCommand] = useState(editEntry?.command ?? initial?.command ?? "");
@@ -147,7 +147,7 @@ export function McpServerFormDialog({
       return "名称只能用字母、数字、- 与 _（如 my-server）";
     }
     if (selectedAgents.length === 0) {
-      return "至少选一个账号";
+      return "至少选一个助手";
     }
     let spec: Record<string, unknown>;
     if (transport === "remote") {
@@ -343,7 +343,7 @@ export function McpServerFormDialog({
           </div>
           {mode.kind === "add" && (
             <div className="lg:col-span-2">
-              <span className="mb-1 block text-xs font-medium text-muted-foreground">写入哪些账号</span>
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">写入哪些助手</span>
               <div className="flex flex-wrap gap-3">
                 {writableTargets.map((target) => (
                   <label key={target.agent} className="flex items-center gap-1.5 text-xs text-foreground">
@@ -386,7 +386,7 @@ export function McpServerFormDialog({
                 <div className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-warning">
                   <span>各助手的内容不同。勾选多个目标时，将使用下面的内容。选择预填来源会重置目标选择：</span>
                   <Select
-                    label="以哪个账号的内容为准"
+                    label="以哪个助手的内容为准"
                     testId="server-edit-base"
                     value={mode.agent}
                     onChange={(next) => onSwitchBase?.(next)}
@@ -524,7 +524,7 @@ export function McpServerFormDialog({
 
         <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-5 flex items-center justify-end gap-2 sm:-bottom-6 sm:-mx-6 sm:-mb-6 sm:px-6">
           <span className="mr-auto text-xs text-muted-foreground">
-            {isNew ? "直接写入所选账号的配置文件" : "只改这一条，每个账号写入前都会核对是否已被外部修改"}
+            {isNew ? "直接写入所选助手的配置文件" : "只改这一条，每个助手写入前都会核对是否已被外部修改"}
           </span>
           <button type="button" onClick={onClose} className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent">
             取消

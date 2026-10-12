@@ -41,7 +41,7 @@ interface VersionsData {
 /**
  * 一个 git 来源的版本：跟踪方式、当前与最新版本，可更新到最新或切换到任意标签 / 分支（即回滚）。
  * 打开时读一次远端清单（只读网络，不写）；切换由调用方执行：先把镜像换到那个版本，
- * 再把各账号在用的技能换过去。
+ * 再把各助手在用的技能换过去。
  */
 export function SkillVersionsDialog({
   collectionId,
@@ -66,9 +66,9 @@ export function SkillVersionsDialog({
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"tags" | "branches">("tags");
   const [reload, setReload] = useState(0);
-  /** 确认前的预览：要换到哪个版本、各技能改了什么、哪些账号跟着换。 */
+  /** 确认前的预览：要换到哪个版本、各技能改了什么、哪些助手跟着换。 */
   const [pending, setPending] = useState<{ ref: string | null; label: string; data: PreviewData | null; error: string | null } | null>(null);
-  // 切换中（镜像已在换、账号链接在跟着换）不能安全停下：不响应 Esc、遮罩与关闭
+  // 切换中（镜像已在换、助手链接在跟着换）不能安全停下：不响应 Esc、遮罩与关闭
   const close = () => {
     if (!busy) onClose();
   };
@@ -163,7 +163,7 @@ export function SkillVersionsDialog({
                   <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} aria-hidden /> 更新到 {versionLabel(latest)}
                 </button>
               )}
-              <p className="text-[11px] text-muted-foreground">切换后，各账号在用的技能一起换到那个版本，停用的不动。要一直停在某个版本，把跟踪改成「固定」。</p>
+              <p className="text-[11px] text-muted-foreground">切换后，各助手在用的技能一起换到那个版本，停用的不动。要一直停在某个版本，把跟踪改成「固定」。</p>
             </>
           )}
         </div>
@@ -206,8 +206,8 @@ export function SkillVersionsDialog({
                             {skill.accounts.length
                               ? `跟着换：${skill.accounts.map(nameOf).join("、")}`
                               : skillChange(skill.files) === "added"
-                                ? "换过去后出现在技能页，由你决定给哪些账号"
-                                : "没有账号在用"}
+                                ? "换过去后出现在技能页，由你决定给哪些助手"
+                                : "没有助手在用"}
                           </span>
                         </p>
                         <ul className="mt-1 space-y-0.5 font-mono">

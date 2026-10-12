@@ -33,7 +33,7 @@ export function RemoveCollectionDialog({
       onClose={onClose}
     >
       <ul data-testid="remove-collection-effects" className="mt-3 list-disc space-y-1.5 pl-5 text-sm">
-        <li>各账号里这个集合的技能链接全部移除；你自己放进账号的同名技能目录不动</li>
+        <li>各助手里这个集合的技能链接全部移除；你自己放进助手的同名技能目录不动</li>
         <li>用过它的规则：规则文件内容保留，只是不再跟随它、不再提示更新</li>
         <li>从它添加的启动命令已写进终端配置，保留不动</li>
         {local && <li>它是本机目录，目录里的文件一律不动</li>}

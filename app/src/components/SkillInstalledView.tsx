@@ -38,7 +38,7 @@ function detailOf(entry: SkillInstalledEntry): string | null {
 
 export function SkillInstalledView({ entries, agents }: { entries: SkillInstalledEntry[]; agents: string[] }) {
   const groupsOf = useAccountGroups();
-  // 按账号页的顺序：同一助手的账号挨在一起，主号在前
+  // 按助手页的顺序：同一助手的助手挨在一起，主号在前
   const columns = groupsOf(Array.from(new Set([...agents, ...entries.map((entry) => entry.agent)])).sort())
     .flatMap((group) => group.columns.map((column) => ({ ...column, kind: group.kind })));
   return (
@@ -48,11 +48,11 @@ export function SkillInstalledView({ entries, agents }: { entries: SkillInstalle
         当前安装
       </h3>
       <p className="mt-1 text-xs text-muted-foreground">
-        各账号技能目录里现在实际有什么。这里只展示：外部链接和真实目录由它们原来的方式维护，不需要处理。
+        各助手技能目录里现在实际有什么。这里只展示：外部链接和真实目录由它们原来的方式维护，不需要处理。
       </p>
       {entries.length === 0 ? (
         <p data-testid="skills-installed-empty" className="mt-3 text-xs text-muted-foreground">
-          各账号的技能目录里还没有技能。
+          各助手的技能目录里还没有技能。
         </p>
       ) : (
         <div className="mt-3 space-y-2">
@@ -81,7 +81,7 @@ export function SkillInstalledView({ entries, agents }: { entries: SkillInstalle
                   </span>
                 </summary>
                 {own.length === 0 ? (
-                  <p className="mt-2 text-xs text-muted-foreground">这个账号的技能目录里还没有技能。</p>
+                  <p className="mt-2 text-xs text-muted-foreground">这个助手的技能目录里还没有技能。</p>
                 ) : (
                   <ul className="mt-2 space-y-1">
                     {own.map((entry) => {

@@ -34,6 +34,10 @@ A managed installation has completed version directories and a `current`
 directory link. Status and individual-version removal share the same resolver:
 the link must resolve to a completed direct child of the program directory.
 
+The interface labels these resources as extension dependencies. Version action
+buttons display complete versions and wrap within their action column; short
+status badges do not repeat long version strings. Paths and current versions wrap.
+
 ## Constraints and failure behavior
 
 - Assistant packages and commands are excluded from skill declarations, suggestions,

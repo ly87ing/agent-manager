@@ -19,8 +19,8 @@ function savedSummary(spec: McpSpec): string {
 function mcpChip(cell: McpAgentCell | undefined, canAddHere: boolean): { tone: CellTone; checked: boolean; hint: string; primary: string | null } {
   if (!cell) {
     return canAddHere
-      ? { tone: "off", checked: false, hint: "这个账号还没有，点击从其他账号复制过来", primary: "add-here" }
-      : { tone: "blocked", checked: false, hint: "这个账号还没有这个服务", primary: null };
+      ? { tone: "off", checked: false, hint: "这个助手还没有，点击从其他助手复制过来", primary: "add-here" }
+      : { tone: "blocked", checked: false, hint: "这个助手还没有这个服务", primary: null };
   }
   const has = (action: string) => cell.actions.includes(action);
   if (cell.state === "invalid") {
@@ -43,7 +43,7 @@ function mcpChip(cell: McpAgentCell | undefined, canAddHere: boolean): { tone: C
   };
 }
 
-/** 给还没有这个服务的账号复制时用哪一份：优先同格式（同一助手）的，其次任何能复制的。 */
+/** 给还没有这个服务的助手复制时用哪一份：优先同格式（同一助手）的，其次任何能复制的。 */
 export function copySource(cells: Record<string, McpAgentCell>, formatOf: (agent: string) => string | undefined, to: string): string | null {
   const candidates = Object.entries(cells).filter(([, cell]) => cell.source === "file" && cell.copy_safe === true && cell.actions.includes("copy"));
   const same = candidates.find(([agent]) => formatOf(agent) === formatOf(to));
@@ -51,9 +51,9 @@ export function copySource(cells: Record<string, McpAgentCell>, formatOf: (agent
 }
 
 /**
- * 一个服务一行：左边是名字和一句话说明，右边在与表头对齐的列里每个账号一个开关
- * （点一下启用 / 停用；没有这个服务的账号点一下从其他账号复制过来）。
- * 编辑、删除各一个，鼠标移到行上才显示。另附「已保存、还没写进任何账号」的定义。取值一律由引擎脱敏。
+ * 一个服务一行：左边是名字和一句话说明，右边在与表头对齐的列里每个助手一个开关
+ * （点一下启用 / 停用；没有这个服务的助手点一下从其他助手复制过来）。
+ * 编辑、删除各一个，鼠标移到行上才显示。另附「已保存、还没写进任何助手」的定义。取值一律由引擎脱敏。
  */
 export function McpServerCard({
   element,
@@ -81,12 +81,12 @@ export function McpServerCard({
   onOpenProgram?: (program: string) => void;
   element: EngineElement;
   groups: AccountGroup[];
-  /** 配置文件读写正常的账号。 */
+  /** 配置文件读写正常的助手。 */
   writable: string[];
   busy: boolean;
   formatOf: (agent: string) => string | undefined;
   onAction: (element: EngineElement, agent: string, action: string, cell: McpAgentCell) => void;
-  /** 这个账号还没有：从 from 账号的条目复制过来。 */
+  /** 这个助手还没有：从 from 助手的条目复制过来。 */
   onAddHere: (element: EngineElement, from: string, to: string) => void;
   onEdit: (element: EngineElement) => void;
   onShare?: (element: EngineElement) => void;
@@ -122,9 +122,9 @@ export function McpServerCard({
             {first && <span className="truncate" title={mcpEntrySummary(first)}>{mcpBrief(first)}</span>}
             <DependencyChips chips={dependencies} onOpen={onOpenProgram} />
             {/* 统一状态（lib/inbox.ts）：与待处理页同一套标签 */}
-            {summaries.size > 1 && <StateBadge state="drifted" title="保存编辑时会统一成一份">各账号内容不同</StateBadge>}
-            {commandMissing && <StateBadge state="broken">有账号找不到它要执行的命令</StateBadge>}
-            {invalid && <StateBadge state="broken" title="只能删除或在配置文件里修正">有账号的条目无法识别</StateBadge>}
+            {summaries.size > 1 && <StateBadge state="drifted" title="保存编辑时会统一成一份">各助手内容不同</StateBadge>}
+            {commandMissing && <StateBadge state="broken">有助手找不到它要执行的命令</StateBadge>}
+            {invalid && <StateBadge state="broken" title="只能删除或在配置文件里修正">有助手的条目无法识别</StateBadge>}
             {missing.length > 0 && onConfigureSecrets && (
               <button
                 type="button"
@@ -145,7 +145,7 @@ export function McpServerCard({
             const source = canWrite && !cell ? copySource(cells, formatOf, column.id) : null;
             const chip = canWrite
               ? mcpChip(cell, Boolean(source))
-              : { tone: "blocked" as const, checked: cell?.state === "enabled", hint: cell?.blocked_reason ?? "这个账号的配置文件现在读写不了", primary: null };
+              : { tone: "blocked" as const, checked: cell?.state === "enabled", hint: cell?.blocked_reason ?? "这个助手的配置文件现在读写不了", primary: null };
             const detail = cell ? `\n${mcpEntrySummary(cell)}` : "";
             return (
               <AccountSwitch
@@ -184,7 +184,7 @@ export function McpServerCard({
               type="button"
               data-testid={`edit-${element.id}`}
               aria-label={`编辑 ${name}`}
-              title="编辑（写到所有有它的账号）"
+              title="编辑（写到所有有它的助手）"
               onClick={() => onEdit(element)}
               disabled={busy}
               className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -209,7 +209,7 @@ export function McpServerCard({
               type="button"
               data-testid={`remove-${element.id}`}
               aria-label={`删除 ${name}`}
-              title="删除（可选从哪些账号删）"
+              title="删除（可选从哪些助手删）"
               onClick={() => onRemove(element)}
               disabled={busy}
               className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
@@ -239,7 +239,7 @@ export function McpServerCard({
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0 text-xs">
-              <span className="font-medium text-foreground">存着但还没用上的配置（没写进任何账号）</span>
+              <span className="font-medium text-foreground">存着但还没用上的配置（没写进任何助手）</span>
               <code className="ml-2 font-mono text-muted-foreground">{savedSummary(spec)}</code>
               {!spec.saved.valid && <span className="ml-2 text-warning">内容不完整，只能删除</span>}
             </div>
@@ -252,7 +252,7 @@ export function McpServerCard({
                   disabled={busy}
                   className="rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-50"
                 >
-                  添加到账号
+                  添加到助手
                 </button>
               )}
               <button

@@ -91,7 +91,7 @@ export default function SecretsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="密钥" description="先选择一个外部密钥文件；本应用只保存路径，不把密钥写进数据库。" />
+      <PageHeader title="MCP 密钥" description="先选择一个外部密钥文件；本应用只保存路径，不把密钥写进数据库。" />
       {query.data.errors.length > 0 && <ErrorPanel title="密钥状态读取失败" errors={query.data.errors} />}
 
       <section data-testid="secrets-source-card" className="rounded-lg border bg-card p-5 shadow-sm">

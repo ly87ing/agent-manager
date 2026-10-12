@@ -6,8 +6,8 @@ import { ConfirmModal } from "./ConfirmModal";
 export type McpRemovePreview = { files: { path: string; exists: boolean; content: string; original?: string | null }[]; warnings: string[] } | string;
 
 /**
- * 删除一个服务：列出有它的账号，默认全选，可以取消某个账号；每个账号给出删除后的配置文件预览。
- * 预览全部取回且没有出错才能确认。确认后由调用方逐个账号执行，各自带写入基准。
+ * 删除一个服务：列出有它的助手，默认全选，可以取消某个助手；每个助手给出删除后的配置文件预览。
+ * 预览全部取回且没有出错才能确认。确认后由调用方逐个助手执行，各自带写入基准。
  */
 export function McpRemoveDialog({
   name,
@@ -49,9 +49,9 @@ export function McpRemoveDialog({
   return (
     <ConfirmModal
       title={`删除 ${name}`}
-      description="从勾选的账号里删掉这一条，其他条目与配置保持不变；停用时保存在本工具里的内容一并删除。确认后逐个账号执行。"
+      description="从勾选的助手里删掉这一条，其他条目与配置保持不变；停用时保存在本工具里的内容一并删除。确认后逐个助手执行。"
       risk="write-local"
-      confirmLabel={selected.length ? `从 ${selected.length} 个账号删除` : "确认删除"}
+      confirmLabel={selected.length ? `从 ${selected.length} 个助手删除` : "确认删除"}
       confirmDisabled={!ready}
       executing={busy}
       onConfirm={() => onConfirm(selected)}

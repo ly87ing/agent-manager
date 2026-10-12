@@ -29,6 +29,10 @@ copy available for review and a later retry.
 Ordinary add rollback must not be offered for source replacement: removing the new
 assignment alone cannot restore the previous source.
 
+Collection summaries wrap names, source paths and status marks inside their own
+column while assistant counts keep fixed aligned columns. Source locations remain
+fully readable at narrow widths.
+
 ## Verification
 
 ```sh

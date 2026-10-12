@@ -26,7 +26,7 @@ export interface McpCheckResult {
 
 export const CHECK_STAGE = { variables: "变量取值", start: "启动命令", initialize: "初始化", tools: "读取工具", done: "完成" };
 
-/** 能测的账号：文件里实际有、结构认得出的条目。 */
+/** 能测的助手：文件里实际有、结构认得出的条目。 */
 export function checkableAgents(element: EngineElement): string[] {
   const cells = (element.observed as McpObserved).agents ?? {};
   return Object.entries(cells)
@@ -36,7 +36,7 @@ export function checkableAgents(element: EngineElement): string[] {
 }
 
 /**
- * 测试连接：像助手那样连一次某个账号里的这条 MCP，看它能不能起来、给出哪些工具。
+ * 测试连接：像助手那样连一次某个助手里的这条 MCP，看它能不能起来、给出哪些工具。
  * 会运行条目里的命令（npx 一类可能先下载）或请求它的地址；不改任何配置，结果不保存。
  */
 export function McpCheckDialog({
@@ -89,7 +89,7 @@ export function McpCheckDialog({
   return (
     <ConfirmModal
       title={`测试连接 · ${name}`}
-      description="按所选账号的实际配置检查初始化和工具读取。命令型会运行命令，npx 一类可能下载依赖；地址型会发请求。不改任何配置，结果仅在当前页面保留；通过也不代表助手已经加载。"
+      description="按所选助手的实际配置检查初始化和工具读取。命令型会运行命令，npx 一类可能下载依赖；地址型会发请求。不改任何配置，结果仅在当前页面保留；通过也不代表助手已经加载。"
       risk="exec-local"
       confirmLabel={running ? "测试中…" : result || error ? "再测一次" : "测试"}
       confirmDisabled={!agent}
@@ -99,8 +99,8 @@ export function McpCheckDialog({
     >
       {agents.length > 1 && (
         <div className="mt-3">
-          <p className="mb-1.5 text-xs text-muted-foreground">用哪个账号里的配置</p>
-          <div role="radiogroup" aria-label="账号" className="flex flex-wrap gap-1.5">
+          <p className="mb-1.5 text-xs text-muted-foreground">用哪个助手里的配置</p>
+          <div role="radiogroup" aria-label="助手" className="flex flex-wrap gap-1.5">
             {agents.map((item) => (
               <button
                 key={item}
@@ -123,7 +123,7 @@ export function McpCheckDialog({
       )}
       {cell && (
         <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-          <p>账号：{nameOf(agent)}</p>
+          <p>助手：{nameOf(agent)}</p>
           <p className="break-all font-mono">配置：{cell.target}</p>
           <p className="break-all font-mono">{cell.entry?.url ?? [cell.entry?.command, ...(cell.entry?.args ?? [])].join(" ")}</p>
           {cell.transport === "stdio" && (
@@ -135,7 +135,7 @@ export function McpCheckDialog({
           <p>取值使用本工具的密钥文件及运行环境，可能与助手进程不同。</p>
         </div>
       )}
-      {agents.length === 0 && <p className="mt-3 text-xs text-warning">没有账号里有能识别的这条配置，测不了。</p>}
+      {agents.length === 0 && <p className="mt-3 text-xs text-warning">没有助手里有能识别的这条配置，测不了。</p>}
       {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
       {result && (
         <div data-testid="mcp-check-result" className={cn("mt-3 rounded-md border p-3 text-sm", result.ok ? "border-success/30 bg-success/5" : "border-destructive/30 bg-destructive/5")}>

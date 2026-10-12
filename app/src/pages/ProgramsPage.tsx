@@ -11,27 +11,27 @@ import { StateBadge } from "../components/StateBadge";
 import { runEngine } from "../lib/engine";
 import { useExecutions } from "../lib/execution";
 import type { InboxState } from "../lib/inbox";
-import { MODE_HINT, MODE_LABEL, displayName, ownerLabel, shortVersion, upgradeTarget, type ProgramElement, type ProgramsData } from "../lib/programs";
+import { MODE_HINT, MODE_LABEL, displayName, ownerLabel, upgradeTarget, type ProgramElement, type ProgramsData } from "../lib/programs";
 import { engineKeys, useCheckingUpdates, useEngineQuery, useRefreshUpstream } from "../lib/queries";
 import { cn } from "../lib/utils";
 
 const TEXT_BUTTON = "rounded px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40";
-const PRIMARY = "whitespace-nowrap rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-40";
-const GRID = "grid grid-cols-2 items-center gap-x-4 gap-y-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_8rem]";
+const PRIMARY = "min-w-0 break-words [overflow-wrap:anywhere] rounded-md border px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-40";
+const GRID = "grid grid-cols-2 items-center gap-x-4 gap-y-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(9rem,1fr)]";
 
 /** 程序的问题 → 统一状态标签。 */
 function problemBadges(program: ProgramElement): { state: InboxState; text: string }[] {
   const out: { state: InboxState; text: string }[] = [];
   for (const problem of program.problems) {
     if (problem.code === "missing") out.push({ state: "missing", text: `缺 ${(problem.bins ?? []).join("、")}` });
-    if (problem.code === "missing-no-install") out.push({ state: "missing", text: "不知道怎么装" });
+    if (problem.code === "missing-no-install") out.push({ state: "missing", text: "未提供安装方式" });
     if (problem.code === "runner-missing") out.push({ state: "broken", text: `找不到 ${problem.bin}` });
     if (problem.code === "multiple") out.push({ state: "drifted", text: `${problem.bin} 有多份` });
-    if (problem.code === "unused") out.push({ state: "cleanup", text: "没人用了" });
+    if (problem.code === "unused") out.push({ state: "cleanup", text: "无扩展依赖" });
   }
-  if (program.problems.some((problem) => problem.code === "unpinned")) out.push({ state: "update", text: "没固定版本" });
+  if (program.problems.some((problem) => problem.code === "unpinned")) out.push({ state: "update", text: "未固定版本" });
   else if (program.runners.some((runner) => runner.follow_latest && !runner.pinned)) out.push({ state: "unmanaged", text: "跟最新版本" });
-  else if (program.freshness?.state === "behind") out.push({ state: "update", text: `可更新到 ${shortVersion(program.freshness.upstream)}` });
+  else if (program.freshness?.state === "behind") out.push({ state: "update", text: "可更新" });
   return out;
 }
 
@@ -76,8 +76,8 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
   }, [focus, query.data]);
 
   if (query.isPending) return <PageLoading text="正在查找技能与 MCP 用到的程序…" />;
-  if (query.isError) return <PageError title="程序读取失败" error={query.error} />;
-  if (!query.data.ok) return <PageError title="程序读取失败" error={new Error(query.data.errors[0]?.message ?? "读取失败")} />;
+  if (query.isError) return <PageError title="依赖程序读取失败" error={query.error} />;
+  if (!query.data.ok) return <PageError title="依赖程序读取失败" error={new Error(query.data.errors[0]?.message ?? "读取失败")} />;
   const data = query.data.data;
   const programs = [...data.elements].sort((a, b) => severity(a) - severity(b) || a.name.localeCompare(b.name));
 
@@ -106,39 +106,39 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
     const installable = ["npm", "pypi", "git"].includes(program.kind);
     switch (program.mode) {
       case "missing":
-        if (installable) primary = { label: "安装…", testId: `program-install-${program.program}`, run: () => setDialog({ program, action: "install" }) };
+        if (installable) primary = { label: "安装依赖", testId: `program-install-${program.program}`, run: () => setDialog({ program, action: "install" }) };
         break;
       case "delegated":
-        if (target) primary = { label: `升级到 ${shortVersion(target)}…`, testId: `program-upgrade-${program.program}`, run: () => setDialog({ program, action: "upgrade", version: target ?? undefined }) };
+        if (target) primary = { label: `升级到 ${target}`, testId: `program-upgrade-${program.program}`, run: () => setDialog({ program, action: "upgrade", version: target ?? undefined }) };
         for (const backup of backups.filter((item) => item.reason !== "adopt")) {
           menu.push({ label: `回退到 ${backup.version ?? "上一版"}`, testId: `program-restore-${backup.id}`, onSelect: () => setDialog({ program, action: "restore", backup: backup.id }) });
         }
         if (program.kind === "npm" && program.owner === "npm-global") {
-          menu.push({ label: "改为本工具安装…", testId: `program-adopt-${program.program}`, onSelect: () => setDialog({ program, action: "adopt" }) });
+          menu.push({ label: "改由本工具安装", testId: `program-adopt-${program.program}`, onSelect: () => setDialog({ program, action: "adopt" }) });
         }
         break;
       case "managed":
-        if (target) primary = { label: `升级到 ${shortVersion(target)}…`, testId: `program-upgrade-${program.program}`, run: () => setDialog({ program, action: "upgrade", version: target ?? undefined }) };
+        if (target) primary = { label: `升级到 ${target}`, testId: `program-upgrade-${program.program}`, run: () => setDialog({ program, action: "upgrade", version: target ?? undefined }) };
         for (const version of program.managed_versions.filter((item) => item !== program.managed_current)) {
-          menu.push({ label: `换到 ${version}`, testId: `program-switch-${version}`, onSelect: () => setDialog({ program, action: "switch", version }) });
+          menu.push({ label: `切换到 ${version}`, testId: `program-switch-${version}`, onSelect: () => setDialog({ program, action: "switch", version }) });
           menu.push({ label: `删除旧版本 ${version}`, testId: `program-remove-version-${version}`, danger: true, onSelect: () => setDialog({ program, action: "remove", version }) });
         }
         for (const backup of backups.filter((item) => item.reason === "adopt")) {
           menu.push({ label: "撤回：改回原来的安装", testId: `program-unadopt-${program.program}`, onSelect: () => setDialog({ program, action: "unadopt", backup: backup.id }) });
         }
-        menu.push({ label: "删除这个程序…", testId: `program-remove-${program.program}`, danger: true, onSelect: () => setDialog({ program, action: "remove" }) });
+        menu.push({ label: "移除依赖程序", testId: `program-remove-${program.program}`, danger: true, onSelect: () => setDialog({ program, action: "remove" }) });
         break;
       case "runner":
         if (program.runners.length) {
           const unpinned = program.runners.some((runner) => !runner.pinned);
           primary = {
-            label: unpinned ? "固定版本…" : target ? `升级到 ${shortVersion(target)}…` : "改版本…",
+            label: unpinned ? "固定版本" : target ? `升级到 ${target}` : "修改版本",
             testId: `program-pin-${program.program}`,
             run: () => setPin({ program, mode: "pin" }),
           };
           // 已固定的可以取消固定、改回跟最新版本（检查新版本照常提示）
           if (program.runners.some((runner) => runner.pinned)) {
-            menu.push({ label: "取消固定，跟最新版本…", testId: `program-unpin-${program.program}`, onSelect: () => setPin({ program, mode: "unpin" }) });
+            menu.push({ label: "取消固定并使用最新版本", testId: `program-unpin-${program.program}`, onSelect: () => setPin({ program, mode: "unpin" }) });
           }
         }
         break;
@@ -152,7 +152,7 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
 
   return (
     <div className="space-y-3">
-      <h1 className="text-lg font-semibold">程序 <span className="ml-1 text-sm font-normal text-muted-foreground">{programs.length}</span></h1>
+      <h1 className="text-lg font-semibold">依赖程序 <span className="ml-1 text-sm font-normal text-muted-foreground">{programs.length}</span></h1>
       <div className="flex flex-wrap items-center justify-end gap-2">
         <div className="mr-auto min-w-0 break-all text-xs text-muted-foreground">
           入口目录：<span className="font-mono">{data.entry_dir ?? "首次安装时选择"}</span>
@@ -173,7 +173,7 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
       )}
 
       {programs.length === 0 ? (
-        <EmptyState testId="programs-empty" title="暂无程序" description="技能和 MCP 的依赖会显示在这里。" />
+        <EmptyState testId="programs-empty" title="暂无依赖程序" description="技能和 MCP 的依赖会显示在这里。" />
       ) : (
         <section aria-label="程序" data-testid="programs-list" className="overflow-clip rounded-lg border bg-card">
           <div className={cn(GRID, "hidden border-b bg-muted/50 px-4 py-2.5 text-xs text-muted-foreground md:grid")}>
@@ -192,8 +192,8 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
                 ? `${runners} · ${program.name}`
                 : [program.all_bins.length ? `命令 ${program.all_bins.join("、")}` : null, install ? `${ownerLabel(install)} · ${install.path}` : null].filter(Boolean).join(" · ");
               const current = program.mode === "runner"
-                ? [...new Set(program.runners.map((runner) => (runner.version ? shortVersion(runner.version) : "没写版本")))].join("、")
-                : shortVersion(program.version ?? program.managed_current);
+                ? [...new Set(program.runners.map((runner) => runner.version || "未指定版本"))].join("、")
+                : program.version ?? program.managed_current;
               return (
                 <li
                   key={program.program}
@@ -203,16 +203,16 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
                 >
                   <div className="col-span-2 min-w-0 space-y-1.5 md:col-span-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="truncate text-sm font-medium" title={program.program}>{displayName(program)}</span>
+                      <span className="break-words [overflow-wrap:anywhere] text-sm font-medium" title={program.program}>{displayName(program)}</span>
                       <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" title={MODE_HINT[program.mode]}>{MODE_LABEL[program.mode]}</span>
                     </div>
-                    <div className="truncate font-mono text-xs text-muted-foreground" title={install?.real ?? where}>{where || "—"}</div>
+                    <div className="break-words [overflow-wrap:anywhere] font-mono text-xs text-muted-foreground" title={install?.real ?? where}>{where || "—"}</div>
                   </div>
                   <div
                     className={"col-span-2 flex min-w-0 flex-col items-start gap-1 text-xs text-muted-foreground md:col-span-1"}
                     title={program.dependents.map((dep) => `${dep.kind === "skill" ? "技能" : "MCP"} ${dep.name}`).join("\n")}
                   >
-                    {program.dependents.length === 0 && "没人用"}
+                    {program.dependents.length === 0 && "无扩展依赖"}
                     {program.dependents.map((dep) => (
                       <span className="max-w-full" key={`${dep.kind}:${dep.name}`}>
                         <button
@@ -220,7 +220,7 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
                           data-testid={`program-dependent-${program.program}-${dep.name}`}
                           onClick={() => onOpen?.(dep.kind === "skill" ? `skills:${dep.name}` : `mcp:${dep.name}`)}
                           title={`${dep.kind === "skill" ? "技能" : "MCP"} ${dep.name}`}
-                          className="block max-w-full truncate text-left hover:text-foreground hover:underline"
+                          className="block max-w-full break-words [overflow-wrap:anywhere] text-left hover:text-foreground hover:underline"
                         >
                           {dep.kind === "skill" ? "技能 " : "MCP "}
                           {dep.name}
@@ -229,7 +229,7 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
                     ))}
                   </div>
                   <div className="min-w-0 space-y-1.5">
-                    <div className="truncate font-mono text-xs" title={current || undefined}>{current || "—"}</div>
+                    <div className="break-words [overflow-wrap:anywhere] font-mono text-xs" title={current || undefined}>{current || "—"}</div>
                     <div className="flex flex-wrap gap-1">
                       {["delegated", "managed"].includes(program.mode) && !upgradeTarget(program) && (
                         <span className="text-xs text-muted-foreground">

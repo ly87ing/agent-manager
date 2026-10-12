@@ -24,9 +24,9 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
   { key: "settings", label: "设置", keywords: "settings 偏好" },
   // 设置里的二级页面也要搜得到
   { key: "runs", label: "操作记录", keywords: "runs 任务 日志 记录" },
-  { key: "settings:secrets", label: "密钥", keywords: "secrets 密钥 变量 token api key 凭据" },
+  { key: "settings:secrets", label: "MCP 密钥", keywords: "secrets 密钥 变量 token api key 凭据" },
   { key: "settings:tips", label: "更多技巧", keywords: "tips 技巧 分享 多账号 独立环境 别名 alias shell" },
-  { key: "programs", label: "程序", keywords: "programs 程序 cli 命令行 依赖 npm npx uvx 安装 升级 版本" },
+  { key: "programs", label: "依赖程序", keywords: "programs 程序 cli 命令行 依赖 npm npx uvx 安装 升级 版本" },
   { key: "sources", label: "来源", keywords: "sources 来源 集合 仓库 规则来源 添加 更新 版本 停用 移除 未纳管 纳入 接管 扫描 agent-skills" },
 ];
 

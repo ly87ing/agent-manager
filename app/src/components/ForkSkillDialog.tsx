@@ -3,7 +3,7 @@ import { ConfirmModal } from "./ConfirmModal";
 
 /**
  * 改成我的版本：把技能现在用着的那一版复制到用户目录、登记为用户的本机集合，
- * 并把勾选的账号从原版本换到用户的版本。原集合以后更新不会改用户的文件，只会提示。
+ * 并把勾选的助手从原版本换到用户的版本。原集合以后更新不会改用户的文件，只会提示。
  */
 export function ForkSkillDialog({
   skill,
@@ -15,7 +15,7 @@ export function ForkSkillDialog({
 }: {
   skill: string;
   collection: string;
-  /** 现在用着这个技能的账号（键 + 名字）。 */
+  /** 现在用着这个技能的助手（键 + 名字）。 */
   accounts: { id: string; name: string }[];
   executing: boolean;
   onConfirm: (input: { dest: string; target: string; switchAccounts: string[] }) => void;
@@ -58,7 +58,7 @@ export function ForkSkillDialog({
         </label>
         {accounts.length > 0 && (
           <div>
-            <span className="text-xs text-muted-foreground">这些账号现在用着它，换成你的版本：</span>
+            <span className="text-xs text-muted-foreground">这些助手现在用着它，换成你的版本：</span>
             <div className="mt-1 flex flex-wrap gap-3">
               {accounts.map((account) => (
                 <label key={account.id} className="flex items-center gap-1.5 text-sm">

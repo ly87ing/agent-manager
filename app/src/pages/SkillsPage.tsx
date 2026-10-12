@@ -12,7 +12,7 @@ import { AccountCells, AccountHeader, AccountSwitch, ActionMenu, RowActions, TRA
 import { skillChip, skillNeedsUpdate } from "../lib/skillChip";
 import { SkillInstalledView } from "../components/SkillInstalledView";
 import { AttentionOnlyToggle, StateBadge } from "../components/StateBadge";
-import { shortRef, skillItems } from "../lib/inbox";
+import { skillItems } from "../lib/inbox";
 import { DependencyChips, dependenciesOf } from "../components/DependencyChips";
 import type { ProgramsData } from "../lib/programs";
 import type { InboxState } from "../lib/inbox";
@@ -40,7 +40,7 @@ import { Select } from "../components/Select";
 
 const ACTIVE = new Set(["linked", "missing-link", "dead-link", "drifted"]);
 
-/** 一个技能在各账号上的情况，压成一行：全部账号 / 某某除外 / 新发现，外加需要处理的标签。 */
+/** 一个技能在各助手上的情况，压成一行：全部助手 / 某某除外 / 新发现，外加需要处理的标签。 */
 function summarize(skill: EngineElement, cells: Record<string, SkillAgentCell>, nameOf: (agent: string) => string) {
   const entries = Object.entries(cells);
   const off = entries.filter(([, cell]) => !ACTIVE.has(cell.state) && cell.state !== "extra-link").map(([agent]) => nameOf(agent));
@@ -58,8 +58,8 @@ function summarize(skill: EngineElement, cells: Record<string, SkillAgentCell>, 
     : !anyActive
       ? "未启用"
       : off.length === 0
-        ? "全部账号"
-        : `全部账号（${off.join("、")} 除外）`;
+        ? "全部助手"
+        : `全部助手（${off.join("、")} 除外）`;
   return { text, badges, inbox };
 }
 
@@ -93,7 +93,7 @@ export default function SkillsPage({
   onOpenProgram?: (program: string) => void;
   /** 来源的添加、更新、换版本、纳入都在来源页：点「可更新」「尚未下载」等跳过去（名称；`unmanaged` 为未纳管）。 */
   onOpenSource?: (name: string | null) => void;
-  /** 从账号页进来：只看这个账号。 */
+  /** 从助手页进来：只看这个助手。 */
   initialAgent?: string | null;
   /** 从总览「去处理」进来时直接搜到那个技能。 */
   initialSearch?: string | null;
@@ -139,7 +139,7 @@ export default function SkillsPage({
   const collections = elements.filter(isCollection);
   const skills = elements.filter((element) => !isCollection(element));
 
-  // 其他来源里出现的账号也要有列，否则只装了别处技能的账号看不到
+  // 其他来源里出现的助手也要有列，否则只装了别处技能的助手看不到
   const agentOptions = Array.from(
     new Set([
       ...skills.flatMap((skill) => Object.keys(agentCellsOf(skill))),
@@ -196,7 +196,7 @@ export default function SkillsPage({
       }
       const path = (forked.data as { path?: string }).path ?? input.dest;
       (failed ? toast.error : toast.success)(
-        failed ? `已复制到 ${path}，但 ${failed} 个账号没换过去，详见任务记录` : `已复制到 ${path}，${input.switchAccounts.length} 个账号换成了你的版本`,
+        failed ? `已复制到 ${path}，但 ${failed} 个助手没换过去，详见任务记录` : `已复制到 ${path}，${input.switchAccounts.length} 个助手换成了你的版本`,
       );
       setForking(null);
     } finally {
@@ -205,7 +205,7 @@ export default function SkillsPage({
     }
   };
 
-  /** 单个账号上的动作：外部链接接管、移除来源里已删除的技能先确认，其余直接执行。 */
+  /** 单个助手上的动作：外部链接接管、移除来源里已删除的技能先确认，其余直接执行。 */
   const handleSkillAction = (skill: EngineElement, agent: string, action: string, cell: SkillAgentCell | null) => {
     if (cell?.source_missing && action === "remove") {
       setPendingDropped({ element: skill, agent, cell });
@@ -264,7 +264,7 @@ export default function SkillsPage({
 
   const cellsIn = (skill: EngineElement) =>
     Object.entries((skill.observed as SkillObserved).agents ?? {}).filter(([agent]) => agentFilter === "all" || agent === agentFilter);
-  /** 需要处理：待处理里有它（用户忽略的不算），且在所选账号上有黄色开关或是新发现。 */
+  /** 需要处理：待处理里有它（用户忽略的不算），且在所选助手上有黄色开关或是新发现。 */
   const needsAttention = (skill: EngineElement) =>
     attentionSubjects.has(skill.id)
     && ((skill.observed as SkillObserved).discovery_inbox === true || cellsIn(skill).some(([, cell]) => skillChip(cell).tone === "warn"));
@@ -279,7 +279,7 @@ export default function SkillsPage({
   const allOpen = visibleCollections.every((collection) => isOpen(collName(collection), skillsOf(collection)));
   const shownAgents = agentFilter === "all" ? agentOptions : [agentFilter];
   const groups = groupsOf(shownAgents);
-  /** 每个账号还缺哪些在用的技能：表头「补齐」逐个账号做。 */
+  /** 每个助手还缺哪些在用的技能：表头「补齐」逐个助手做。 */
   const fillOf = (agent: string) => pendingFill.filter((row) => row.agent === agent);
 
   return (
@@ -299,7 +299,7 @@ export default function SkillsPage({
           options={[{ value: "all", label: "全部集合" }, ...collections.map((col) => ({ value: collName(col), label: collName(col) }))]}
         />
         <Select
-          label="账号筛选"
+          label="助手筛选"
           testId="filter-agent-select"
           value={agentFilter}
           onChange={(next) => {
@@ -307,7 +307,7 @@ export default function SkillsPage({
             if (next === "all") onResetAgent?.();
           }}
           className="rounded-md border bg-card px-2 py-1.5 text-sm"
-          options={[{ value: "all", label: "全部账号" }, ...agentOptions.map((agent) => ({ value: agent, label: nameOf(agent) }))]}
+          options={[{ value: "all", label: "全部助手" }, ...agentOptions.map((agent) => ({ value: agent, label: nameOf(agent) }))]}
         />
         <AttentionOnlyToggle checked={attentionOnly} count={attentionSubjects.size} onChange={setAttentionOnly} />
         <div className="ml-auto flex items-center gap-2">
@@ -316,7 +316,7 @@ export default function SkillsPage({
               type="button"
               data-testid="skills-fill-all"
               disabled={batchApply.executing}
-              title="把在用的技能加到所有还缺它的账号；账号上停用的不动"
+              title="把在用的技能加到所有还缺它的助手；助手上停用的不动"
               onClick={() => void batchApply.applyBatch({ actionLabel: "补齐", rows: pendingFill })}
               className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/15 disabled:opacity-40"
             >
@@ -361,7 +361,7 @@ export default function SkillsPage({
           }
         />
       ) : (
-        <div role="region" aria-label="技能账号列表" tabIndex={0} className="table-scroll rounded-lg border bg-card" style={{ "--table-min-width": `${Math.max(704, 400 + groups.reduce((count, group) => count + group.columns.length * 64 + 16, 0))}px` } as CSSProperties}>
+        <div role="region" aria-label="技能助手列表" tabIndex={0} className="table-scroll rounded-lg border bg-card" style={{ "--table-min-width": `${Math.max(704, 400 + groups.reduce((count, group) => count + group.columns.length * 64 + 16, 0))}px` } as CSSProperties}>
           <AccountHeader
             className="sticky top-0 z-10"
             groups={groups}
@@ -373,7 +373,7 @@ export default function SkillsPage({
                   type="button"
                   data-testid={`skills-fill-${column.id}`}
                   disabled={batchApply.executing}
-                  title={`把在用的 ${rows.length} 个技能加到 ${column.fullName}；账号上停用的不动`}
+                  title={`把在用的 ${rows.length} 个技能加到 ${column.fullName}；助手上停用的不动`}
                   onClick={() => void batchApply.applyBatch({ actionLabel: "补齐", rows })}
                   className="text-primary hover:underline disabled:opacity-40"
                 >
@@ -396,17 +396,17 @@ export default function SkillsPage({
             return (
               <section key={collection.id} data-testid={`collection-card-${name}`} className="border-b last:border-b-0">
                 <header className={cn("group flex items-center gap-3 bg-muted/40 py-2 pl-3 pr-4", open && "border-b")}>
-                  <div className="flex min-w-0 flex-1 items-center gap-2 whitespace-nowrap [&>span]:shrink-0">
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 [&>span]:shrink-0">
                   <button
                     type="button"
                     data-testid={`collection-toggle-${name}`}
                     aria-expanded={open}
                     aria-label={`${open ? "收起" : "展开"}集合 ${name}`}
                     onClick={() => setOpen({ [name]: !open })}
-                    className="flex shrink-0 items-center gap-2 rounded text-left hover:text-primary"
+                    className="flex min-w-0 max-w-full flex-wrap items-center gap-2 rounded text-left hover:text-primary"
                   >
                     {open ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />}
-                    <span className="font-semibold">{name}</span>
+                    <span className="min-w-0 break-words [overflow-wrap:anywhere] font-semibold">{name}</span>
                     <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{rows.length} 个技能</span>
                   </button>
                   {attention > 0 && (
@@ -414,7 +414,7 @@ export default function SkillsPage({
                       {attention} 个待处理
                     </span>
                   )}
-                  <span className={cn("!shrink min-w-0 truncate font-mono text-xs text-muted-foreground", !open && "hidden")} title={spec.source_path ?? spec.url ?? undefined}>
+                  <span className={cn("!shrink min-w-0 w-full break-words [overflow-wrap:anywhere] font-mono text-xs text-muted-foreground", !open && "hidden")} title={spec.source_path ?? spec.url ?? undefined}>
                     {spec.source_path ?? spec.url ?? "（未填来源）"}
                   </span>
                   {!enabled && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">已停用</span>}
@@ -426,15 +426,15 @@ export default function SkillsPage({
                   {spec.url && observed.version?.current && (
                     <span
                       data-testid={`collection-version-${name}`}
-                      className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                      className="max-w-full break-words [overflow-wrap:anywhere] rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
                       title={`跟踪：${describeTrack(spec.track)}`}
                     >
                       {versionLabel(observed.version.current)}
                     </span>
                   )}
                   {collection.freshness.state === "behind" && (
-                    <button type="button" data-testid={`collection-behind-${name}`} onClick={() => onOpenSource?.(name)} title="到来源页预览并更新" className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info hover:underline">
-                      {collection.freshness.upstream ? `可更新到 ${shortRef(collection.freshness.upstream)}` : "可更新"}
+                    <button type="button" data-testid={`collection-behind-${name}`} onClick={() => onOpenSource?.(name)} title={collection.freshness.upstream ? `到来源页预览并更新到 ${collection.freshness.upstream}` : "到来源页预览并更新"} className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info hover:underline">
+                      可更新
                     </button>
                   )}
                   {observed.version?.track_error && (
@@ -456,7 +456,7 @@ export default function SkillsPage({
                       </span>
                     )}
                   />
-                  {/* 与表头、技能行的行尾操作列同宽，账号列才对得齐 */}
+                  {/* 与表头、技能行的行尾操作列同宽，助手列才对得齐 */}
                   <div className={TRAILING} />
                 </header>
                 {observed.discovery_error && (
@@ -519,7 +519,7 @@ export default function SkillsPage({
                               onClick={() => void batchApply.applyBatch({ actionLabel: "添加", rows: addRows })}
                               className="rounded-md border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-40"
                             >
-                              添加到全部账号
+                              添加到全部助手
                             </button>
                           )}
                         </div>
@@ -564,12 +564,12 @@ export default function SkillsPage({
           className="flex w-full items-center gap-2 rounded-lg border border-info/30 bg-info/5 px-4 py-2 text-left text-sm text-info hover:bg-info/10"
         >
           <Library className="h-4 w-4 shrink-0" aria-hidden />
-          各账号里有 {unmanagedCount} 个技能不来自任何来源，到来源页「未纳管」决定是否纳入
+          各助手里有 {unmanagedCount} 个技能不来自任何来源，到来源页「未纳管」决定是否纳入
         </button>
       )}
 
       <details className="border-t pt-3">
-        <summary className="w-fit cursor-pointer text-xs text-muted-foreground hover:text-foreground">各账号技能目录里的实际内容</summary>
+        <summary className="w-fit cursor-pointer text-xs text-muted-foreground hover:text-foreground">各助手技能目录里的实际内容</summary>
         <div className="mt-3 rounded-lg border bg-card p-3">
           <SkillInstalledView entries={installed} agents={agentOptions} />
         </div>
@@ -596,7 +596,7 @@ export default function SkillsPage({
               : pendingDropped.cell.state === "missing-link"
                 ? "（入口已经不在了，不改动任何文件）"
                 : "，并删除本工具建的入口链接"
-          }。不影响其他账号。`}
+          }。不影响其他助手。`}
           risk="write-local"
           confirmLabel="确认移除"
           executing={directApply.executing}

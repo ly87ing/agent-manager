@@ -152,7 +152,7 @@ function OperationDetail({ data }: { data: RunDetailData }) {
           title="撤回这次操作"
           description={
             pending.plan.kind === "skills"
-              ? `${pending.plan.label}。只动这一个账号上的这一个技能。`
+              ? `${pending.plan.label}。只动这一个助手上的这一个技能。`
               : pending.plan.kind === "adopt"
                 ? `${pending.plan.label}。原位置被别的内容占用时不动手。`
                 : `${pending.plan.label}（用当时另存的备份模板）。写入前核对文件；现在的内容如果对不上任何已知内容，会先另存一份备份。`

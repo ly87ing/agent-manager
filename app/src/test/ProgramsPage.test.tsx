@@ -144,10 +144,11 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     const wecom = screen.getByTestId("program-row-npm:@wecom/cli");
     expect(wecom).toHaveTextContent("代管");
     expect(wecom).toHaveTextContent("npm 全局 · ~/.npm-global/bin/wecom-cli");
-    expect(wecom).toHaveTextContent("可更新到 1.3.5");
+    expect(wecom).toHaveTextContent("可更新");
+    expect(within(wecom).getByRole("button", { name: "升级到 1.3.5" })).toBeInTheDocument();
     expect(wecom).toHaveTextContent("技能 wecomcli-doc");
     expect(screen.getByTestId("program-row-npm:json")).toHaveTextContent("缺 json");
-    expect(screen.getByTestId("program-row-git:example.com/mcp/code")).toHaveTextContent("没固定版本");
+    expect(screen.getByTestId("program-row-git:example.com/mcp/code")).toHaveTextContent("未固定版本");
   });
 
   it("代管升级：打开后先要计划（不写），列出步骤与自己执行的命令；确认后才执行", async () => {
@@ -251,7 +252,7 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     expect(calls.find((call) => call.command === "system:refresh-upstream")!.args).toEqual(["--only", "programs:npm:@wecom/cli"]);
   });
 
-  it("已固定的 MCP 可以取消固定：改回 @latest，写入后记下「跟最新版本」，以后不再报没固定版本", async () => {
+  it("已固定的 MCP 可以取消固定：改回 @latest，写入后记下「跟最新版本」，以后不再报未固定版本", async () => {
     const r = routes();
     const status = r["programs:status"] as Envelope<ProgramsData>;
     status.data.elements.push(program({

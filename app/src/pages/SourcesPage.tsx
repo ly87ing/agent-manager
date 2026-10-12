@@ -41,8 +41,8 @@ const TONE = { ok: "text-success", warn: "text-warning", muted: "text-muted-fore
 
 /**
  * 来源：内容从哪来、用哪个版本（docs/MULTI-ACCOUNT-DESIGN.md「管理体系」）。来源的整个生命周期只在这里：
- * 添加、推荐、编辑跟踪方式、检查与更新（git 先预览再换）、换版本、分享、停用、移除，以及把各账号里
- * 不来自任何来源的技能纳入进来。分配到哪些账号在技能、规则页，不在这里。
+ * 添加、推荐、编辑跟踪方式、检查与更新（git 先预览再换）、换版本、分享、停用、移除，以及把各助手里
+ * 不来自任何来源的技能纳入进来。分配到哪些助手在技能、规则页，不在这里。
  */
 export default function SourcesPage({
   focus,
@@ -164,8 +164,8 @@ export default function SourcesPage({
   };
 
   /**
-   * 把 git 来源换到某个版本（ref 为 null 时按跟踪方式到最新），再把各账号在用、内容有变化的
-   * 这个来源的技能换过去；停用的不动。镜像切换失败时账号一个都不动。
+   * 把 git 来源换到某个版本（ref 为 null 时按跟踪方式到最新），再把各助手在用、内容有变化的
+   * 这个来源的技能换过去；停用的不动。镜像切换失败时助手一个都不动。
    */
   const switchVersion = async (collection: EngineElement, ref: string | null, label: string): Promise<boolean> => {
     const name = nameOf(collection);
@@ -193,7 +193,7 @@ export default function SourcesPage({
         return false;
       }
       toast.success(`${name} 已${ref ? "切换" : "更新"}到 ${label}`, {
-        description: rows.length ? `${rows.length} 处技能换到了这个版本` : "各账号在用的技能内容没有变化",
+        description: rows.length ? `${rows.length} 处技能换到了这个版本` : "各助手在用的技能内容没有变化",
       });
       return true;
     } finally {
@@ -223,7 +223,7 @@ export default function SourcesPage({
   };
 
   /**
-   * 启用推荐来源：保存定义 → 下载 → 把其中的技能链接到全部账号。账号里已有同名技能目录或链接的，
+   * 启用推荐来源：保存定义 → 下载 → 把其中的技能链接到全部助手。助手里已有同名技能目录或链接的，
    * 引擎不给 add，跳过、不覆盖；规则不在这里写。任何一步失败就停在那一步，已做的如实保留。
    */
   const enableRecommended = async (item: SkillRecommendation) => {
@@ -306,7 +306,7 @@ export default function SourcesPage({
             type="button"
             data-testid="sources-update-all"
             disabled={busy || checking}
-            title={checking ? CHECKING_TITLE : "逐个取回来源的新内容，并把各账号在用的技能换到新版本；新发现的技能不会自动添加，账号上停用的不动"}
+            title={checking ? CHECKING_TITLE : "逐个取回来源的新内容，并把各助手在用的技能换到新版本；新发现的技能不会自动添加，助手上停用的不动"}
             onClick={() => void sourceUpdate.update(updatable)}
             className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40"
           >
@@ -421,7 +421,7 @@ export default function SourcesPage({
                                 label: enabled ? "停用来源" : "启用来源",
                                 testId: `source-toggle-${name}`,
                                 disabled: busy,
-                                title: enabled ? "停用：各账号里它的技能链接先移除，规则暂不出现；重新启用即恢复" : "启用：按之前的分配重新链接",
+                                title: enabled ? "停用：各助手里它的技能链接先移除，规则暂不出现；重新启用即恢复" : "启用：按之前的分配重新链接",
                                 onSelect: () => toggle(collection, !enabled),
                               },
                             ]
@@ -453,7 +453,7 @@ export default function SourcesPage({
                           label: source.enabled ? "停用来源" : "启用来源",
                           testId: `source-toggle-${source.name}`,
                           disabled: userSources.busy,
-                          title: source.enabled ? "停用：它的规则暂不出现，已写进账号的规则文件不动" : "启用",
+                          title: source.enabled ? "停用：它的规则暂不出现，已写进助手的规则文件不动" : "启用",
                           onSelect: () => void userSources.setEnabled(source, !source.enabled),
                         },
                         { label: "移除来源", testId: `source-remove-${source.name}`, danger: true, disabled: userSources.busy, onSelect: () => setRemovingSource(source) },
@@ -470,7 +470,7 @@ export default function SourcesPage({
         在此管理技能与规则的来源，以及更新与版本切换。
       </p>
 
-      {/* 未纳管：在账号里、但不来自任何来源的技能——识别出来源的纳入（只留一份源），外部目录登记为本机目录来源，残留链接清理 */}
+      {/* 未纳管：在助手里、但不来自任何来源的技能——识别出来源的纳入（只留一份源），外部目录登记为本机目录来源，残留链接清理 */}
       <div data-source-anchor="unmanaged" className={cn("space-y-3 rounded-lg", focus === "unmanaged" && "ring-2 ring-primary/40")}>
         {unmanaged && <SkillOtherSources view={unmanaged} groups={groupsOf(agentIds)} search="" agentFilter="all" onAdopt={setAdopting} />}
         <DiscoverPanel />

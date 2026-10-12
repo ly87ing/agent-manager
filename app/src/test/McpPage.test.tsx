@@ -52,10 +52,10 @@ describe("McpPage：实际条目为主", () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
     await expandAll();
     const card = await screen.findByTestId("mcp-card-mcp:fs");
-    // 每个账号一个开关，悬停看到这个账号里的那一条；内容不同时行上标出来
+    // 每个助手一个开关，悬停看到这个助手里的那一条；内容不同时行上标出来
     expect(within(card).getByTestId("action-disable-mcp:fs-claude-code").getAttribute("title")).toContain("npx -y fs-mcp");
     expect(within(card).getByTestId("action-disable-mcp:fs-codex").getAttribute("title")).toContain("npx -y fs-mcp@2");
-    expect(within(card).getByText(/各账号内容不同/)).toBeInTheDocument();
+    expect(within(card).getByText(/各助手内容不同/)).toBeInTheDocument();
     // 一句话说明取包名，完整命令在悬停里
     expect(within(card).getByText("本地命令 · fs-mcp")).toBeInTheDocument();
     expect(within(card).getByTestId("configure-secrets-mcp:fs")).toBeInTheDocument();
@@ -71,7 +71,7 @@ describe("McpPage：实际条目为主", () => {
     expect(calls.some((call) => call.command === "policy:get" || call.command === "policy:set")).toBe(false);
   });
 
-  it("测试连接：选账号后运行一次 mcp:check，显示服务与工具，不调用任何写命令", async () => {
+  it("测试连接：选助手后运行一次 mcp:check，显示服务与工具，不调用任何写命令", async () => {
     const checks: string[][] = [];
     const { calls } = renderWithEngine(<McpPage />, {
       ...routes(),
@@ -121,7 +121,7 @@ describe("McpPage：实际条目为主", () => {
     expect(screen.getByTestId("action-disable-mcp:fs-claude-code")).toBeInTheDocument();
   });
 
-  it("旧标记单独预览清理：取消不写，确认只提交所选账号及原摘要", async () => {
+  it("旧标记单独预览清理：取消不写，确认只提交所选助手及原摘要", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
     await expandAll();
     const open = async () => {
@@ -182,7 +182,7 @@ describe("McpPage：实际条目为主", () => {
     await waitFor(() => expect(screen.queryByTestId("check-result-mcp:fs-claude-code")).toBeNull());
   });
 
-  it("配置格式还不支持的账号不占列，只在表头说明里提一句", async () => {
+  it("配置格式还不支持的助手不占列，只在表头说明里提一句", async () => {
     const status = mcpStatusData();
     status.targets = mcpTargets({ codex: { error: "不支持的 MCP 配置格式: kimi-json" } });
     renderWithEngine(<McpPage />, routes(status));
@@ -212,7 +212,7 @@ describe("McpPage：实际条目为主", () => {
     let dialog = await screen.findByRole("dialog", { name: /编辑 fs/ });
     expect(within(dialog).getByTestId("server-agent-claude-code")).toBeChecked();
     expect(within(dialog).getByTestId("server-agent-codex")).not.toBeChecked();
-    // 两个账号内容不同：提示保存后统一，并可切换预填来源
+    // 两个助手内容不同：提示保存后统一，并可切换预填来源
     await chooseOption(within(dialog).getByTestId("server-edit-base"), "codex");
     dialog = await screen.findByRole("dialog", { name: /编辑 fs/ });
     expect(within(dialog).getByTestId("server-agent-codex")).toBeChecked();
@@ -266,7 +266,7 @@ describe("McpPage：实际条目为主", () => {
     expect(await within(dialog).findByTestId("mcp-remove-preview-content")).toHaveTextContent("删除后完整配置");
     expect(within(dialog).getByText("/isolated/codex/config")).toBeInTheDocument();
     const removePreview = calls.find((call) => call.command === "mcp:preview" && call.args.includes("remove"));
-    await userEvent.click(within(dialog).getByRole("button", { name: "从 1 个账号删除" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "从 1 个助手删除" }));
     await waitFor(() => expect(applyCalls(calls)).toHaveLength(3));
     expect(applyCalls(calls)[2].args).toEqual(["--only", "mcp:remote-api", "--agent", "codex", "--action", "remove", "--base", BASE_CODEX_REMOTE]);
     expect(removePreview?.args).toEqual(applyCalls(calls)[2].args);
@@ -291,7 +291,7 @@ describe("McpPage：实际条目为主", () => {
     const failed = renderWithEngine(<McpPage />, failing);
     const failedDialog = await openRemove("mcp:remote-api");
     expect(await within(failedDialog).findByRole("alert")).toHaveTextContent("配置文件已变化");
-    expect(within(failedDialog).getByRole("button", { name: "从 1 个账号删除" })).toBeDisabled();
+    expect(within(failedDialog).getByRole("button", { name: "从 1 个助手删除" })).toBeDisabled();
     expect(applyCalls(failed.calls)).toHaveLength(0);
   });
 
@@ -310,20 +310,20 @@ describe("McpPage：实际条目为主", () => {
     await userEvent.click(within(first).getByRole("button", { name: "取消" }));
     const second = await openRemove("mcp:remote-api");
     expect(within(second).queryByTestId("mcp-remove-preview-content")).toBeNull();
-    expect(within(second).getByRole("button", { name: "从 1 个账号删除" })).toBeDisabled();
+    expect(within(second).getByRole("button", { name: "从 1 个助手删除" })).toBeDisabled();
     await waitFor(() => expect(finishSecond).toBeDefined());
     finishSecond?.(makeEnvelope({ files: [{ path: "/isolated/codex/config", exists: true, content: "第二次的结果" }] }));
     expect(await within(second).findByTestId("mcp-remove-preview-content")).toHaveTextContent("第二次的结果");
   });
 
-  it("删除默认从所有有它的账号删，可以取消某个账号；只删勾选的，各带自己的 base", async () => {
+  it("删除默认从所有有它的助手删，可以取消某个助手；只删勾选的，各带自己的 base", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
     const dialog = await openRemove("mcp:fs");
     expect(within(dialog).getByTestId("mcp-remove-agent-claude-code")).toBeChecked();
     expect(within(dialog).getByTestId("mcp-remove-agent-codex")).toBeChecked();
     await userEvent.click(within(dialog).getByTestId("mcp-remove-agent-codex"));
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "从 1 个账号删除" })).toBeEnabled());
-    await userEvent.click(within(dialog).getByRole("button", { name: "从 1 个账号删除" }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "从 1 个助手删除" })).toBeEnabled());
+    await userEvent.click(within(dialog).getByRole("button", { name: "从 1 个助手删除" }));
     await waitFor(() => expect(applyCalls(calls)).toHaveLength(1));
     expect(applyCalls(calls)[0].args).toEqual(["--only", "mcp:fs", "--agent", "claude-code", "--action", "remove", "--base", BASE_CLAUDE_FS]);
   });
@@ -333,7 +333,7 @@ describe("McpPage：实际条目为主", () => {
     await userEvent.click(await screen.findByTestId("add-server-button"));
     const dialog = await screen.findByRole("dialog", { name: "新增服务" });
     await userEvent.type(within(dialog).getByTestId("server-name-input"), "new-srv");
-    // 新服务默认写到全部账号
+    // 新服务默认写到全部助手
     await userEvent.type(within(dialog).getByTestId("server-command-input"), "npx");
     await userEvent.type(within(dialog).getByTestId("server-args-input"), "-y{enter}new-pkg");
     const env = within(dialog).getByTestId("server-env-input");
@@ -403,7 +403,7 @@ describe("McpPage：实际条目为主", () => {
     infoSpy.mockRestore();
   });
 
-  it("账号开关直接在行上：没有这个服务的账号点一下，从有它的账号复制过来，带来源 base、不覆盖", async () => {
+  it("助手开关直接在行上：没有这个服务的助手点一下，从有它的助手复制过来，带来源 base、不覆盖", async () => {
     const status = mcpStatusData();
     const cell = (status.elements[1].observed as { agents: Record<string, Record<string, unknown>> }).agents.codex;
     Object.assign(cell, { entry: { url: "https://mcp.example.com/mcp", headers: {} }, copy_safe: true, actions: ["edit", "enable", "copy", "remove"] });
@@ -419,13 +419,13 @@ describe("McpPage：实际条目为主", () => {
     ]);
   });
 
-  it("补齐：表头按账号补齐，在用服务从同格式账号复制过来，带来源条目的 base", async () => {
+  it("补齐：表头按助手补齐，在用服务从同格式助手复制过来，带来源条目的 base", async () => {
     const status = mcpStatusData();
     status.targets = [...(status.targets ?? []), { ...(status.targets ?? [])[0], agent: "work", path: "/work/.claude.json" }];
     const safe = (status.elements[0].observed as { agents: Record<string, Record<string, unknown>> }).agents["claude-code"];
     Object.assign(safe, { entry: { command: "npx", args: ["-y", "fs-mcp"], env: {} }, vars: {}, copy_safe: true, actions: ["edit", "disable", "copy", "remove"] });
     const { calls } = renderWithEngine(<McpPage />, routes(status));
-    // 表头按账号补齐；Claude 主号和 Codex 已经齐了
+    // 表头按助手补齐；Claude 主号和 Codex 已经齐了
     await userEvent.click(await screen.findByTestId("mcp-fill-work"));
     expect(screen.queryByTestId("mcp-fill-codex")).toBeNull();
     await waitFor(() => expect(applyCalls(calls).length).toBeGreaterThan(0));
@@ -436,7 +436,7 @@ describe("McpPage：实际条目为主", () => {
     expect(applyCalls(calls).every((call) => call.args[call.args.indexOf("--to") + 1] === "work")).toBe(true);
   });
 
-  it("全部补齐：一次补所有账号，与按账号补齐是同样的复制", async () => {
+  it("全部补齐：一次补所有助手，与按助手补齐是同样的复制", async () => {
     const status = mcpStatusData();
     status.targets = [...(status.targets ?? []), { ...(status.targets ?? [])[0], agent: "work", path: "/work/.claude.json" }];
     const safe = (status.elements[0].observed as { agents: Record<string, Record<string, unknown>> }).agents["claude-code"];
