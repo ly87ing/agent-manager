@@ -188,9 +188,53 @@ fn resource_labels_do_not_read_invalid_authentication_files_or_initialize_genera
         .unwrap()
         .iter()
         .any(|target| target["id"] == "a" && target["name"] == "Resource A"));
+    let targets = result.data["targets"].as_array().unwrap();
+    let claude = targets
+        .iter()
+        .find(|target| target["id"] == "claude-code")
+        .unwrap();
+    assert_eq!(claude["skills_dir"], "~/.claude/skills");
+    assert_eq!(claude["mcp_path"], "~/.claude.json");
+    let a = targets.iter().find(|target| target["id"] == "a").unwrap();
+    assert_eq!(a["config_dir"], "~/.isolated-a");
+    assert_eq!(a["mcp_path"], "~/.isolated-a/.claude.json");
+    for target in targets {
+        let keys: Vec<_> = target
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert!(keys.iter().all(|key| [
+            "id",
+            "name",
+            "group",
+            "kind",
+            "config_dir",
+            "skills_dir",
+            "mcp_path"
+        ]
+        .contains(key)));
+    }
     assert_eq!(policy, store::effective_policy(&f.ctx).unwrap());
     assert_eq!(before, f.identity());
     assert!(!result.data.to_string().contains("preserve"));
+}
+
+#[test]
+fn resource_listing_leaves_a_fresh_home_and_data_absent_and_rejects_arguments() {
+    let f = Fixture::new();
+    for command in ["resources:targets", "resources.targets"] {
+        let result = f.run(command, &[]);
+        assert!(result.ok, "{:?}", result.errors);
+        assert_eq!(result.data["targets"].as_array().unwrap().len(), 2);
+        assert!(!result.lock.held);
+        assert!(!f.root.exists());
+        let rejected = f.run(command, &["--probe"]);
+        assert!(!rejected.ok);
+        assert_eq!(rejected.errors[0].code, "USAGE_ERROR");
+        assert!(!f.root.exists());
+    }
 }
 
 #[test]

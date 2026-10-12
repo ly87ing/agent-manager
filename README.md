@@ -6,6 +6,7 @@ Manage MCP servers, rules, skills, and their extension dependencies for existing
 
 ## Features
 
+- **Assistants:** list known assistant extension targets and their registered paths. This view is read-only and does not check installation, login identity, or credentials.
 - **Skills:** manage collections from Git repositories or local directories and their links in existing assistant skill directories. Fill missing links, disable individual assignments, preview versions, and adopt unmanaged skills after confirmation.
 - **MCP:** read and edit entries in actual assistant configuration files, with previews, external-change checks, and per-target actions. Shared JSON files preserve every byte outside the MCP container. Connection checks run a separate protocol session and do not establish that an assistant has loaded the service.
 - **Rules:** edit existing targets' `CLAUDE.md` / `AGENTS.md`, use local templates, or apply recommended rules from skill sources. Fill only targets without a rule file.
@@ -16,7 +17,7 @@ Manage MCP servers, rules, skills, and their extension dependencies for existing
 
 ## Experience
 
-Navigation contains Skills, MCP, Rules, Sources, Programs, and Settings. `⌘K` and `⌘⇧K` search extension resources and pages; `⌘F` searches the current page; `⌘,` opens Settings. Account and launch-command pages are removed.
+Navigation contains Skills, MCP, Rules, Sources, Programs, Assistants, and Settings. `⌘K` and `⌘⇧K` search extension resources and pages; `⌘F` searches the current page; `⌘,` opens Settings. Account and launch-command pages are removed.
 
 The app runs in the foreground and exits when its window closes. Search queries run only while search is open. Usage, quota, recent-session collection, tray residency, and automatic application update checks remain retired. See [resource bounds](docs/subsystems/resource-bounds.md).
 

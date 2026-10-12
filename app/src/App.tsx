@@ -1,4 +1,4 @@
-import { Library, Package, ScrollText, Server, Settings, Sparkles } from "lucide-react";
+import { Bot, Library, Package, ScrollText, Server, Settings, Sparkles } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
@@ -14,6 +14,7 @@ const SkillsPage = lazy(() => import("./pages/SkillsPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SourcesPage = lazy(() => import("./pages/SourcesPage"));
 const ProgramsPage = lazy(() => import("./pages/ProgramsPage"));
+const AgentsPage = lazy(() => import("./pages/AgentsPage"));
 
 // Keep resource queries in their pages; navigation does not collect global status.
 const NAV: NavItem[] = [
@@ -22,6 +23,7 @@ const NAV: NavItem[] = [
   { key: "rules", label: "规则", icon: ScrollText },
   { key: "sources", label: "来源", icon: Library },
   { key: "programs", label: "程序", icon: Package },
+  { key: "agents", label: "助手", icon: Bot },
 ];
 const SECONDARY_NAV: NavItem[] = [
   { key: "settings", label: "设置", icon: Settings, iconOnly: true },
@@ -154,6 +156,7 @@ export default function App() {
       <Suspense fallback={<PageLoading text="正在打开页面…" />}>
         <div key={`${activePage}:${activePage === "sources" ? sourceFocus ?? "" : activePage === "mcp" ? mcpSearch ?? "" : activePage === "programs" ? programFocus ?? "" : ""}`} className="animate-page-in">
           {activePage === "programs" && <ProgramsPage focus={programFocus} onOpen={handleNavigate} />}
+          {activePage === "agents" && <AgentsPage />}
           {activePage === "skills" && (
             <SkillsPage
               onOpenSource={(name) => handleNavigate(name ? `sources:${name}` : "sources")}

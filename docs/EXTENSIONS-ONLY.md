@@ -8,6 +8,11 @@ Account creation, registration edits, removal, switching, login/logout, launch c
 
 Historical registrations are immutable location metadata for existing extension targets. Reading a target label does not inspect authentication, account settings, or assistant executables. New account registration is unavailable. The default assistant resource locations remain available.
 
+**Assistants** lists those existing extension targets and their registered configuration,
+skill, and MCP paths. It reads metadata only, skips external secret-source loading,
+and offers no account or configuration actions. Records do not establish installation
+or login status; the page does not discover new accounts or scan assistant directories.
+
 Settings includes **More tips**, a read-only page for historical multi-account and
 shell-alias knowledge. It renders bundled guidance and generic `YOUR_*` examples.
 Copy buttons write only to the clipboard; there is no account discovery, command

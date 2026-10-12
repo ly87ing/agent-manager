@@ -20,6 +20,7 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
   { key: "skills", label: "技能", keywords: "skills 技能" },
   { key: "mcp", label: "MCP", keywords: "mcp 服务器" },
   { key: "rules", label: "规则", keywords: "rules 规则" },
+  { key: "agents", label: "助手", keywords: "agent agents 助手 只读 目录 扩展目标" },
   { key: "settings", label: "设置", keywords: "settings 偏好" },
   // 设置里的二级页面也要搜得到
   { key: "runs", label: "操作记录", keywords: "runs 任务 日志 记录" },

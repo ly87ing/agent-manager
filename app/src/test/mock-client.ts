@@ -600,8 +600,8 @@ function demoEnvelopes(): Record<string, Envelope> {
     "system:audit": audit,
     "agents:status": agentsStatus,
     "resources:targets": makeEnvelope({ domain: "resources", targets: [
-      { id: "claude-code", name: "Claude", group: "claude-code", kind: "claude" },
-      { id: "codex", name: "Codex", group: "codex", kind: "codex" },
+      { id: "claude-code", name: "Claude", group: "claude-code", kind: "claude", skills_dir: "~/.claude/skills", mcp_path: "~/.claude.json" },
+      { id: "codex", name: "Codex", group: "codex", kind: "codex", skills_dir: "~/.codex/skills", mcp_path: "~/.codex/config.toml" },
       { id: "kimi-code", name: "Kimi Code", group: "kimi-code", kind: null },
     ] }, { command: "resources.targets" }),
     "mcp:status": mcpStatus,

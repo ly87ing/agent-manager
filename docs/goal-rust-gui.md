@@ -2,6 +2,22 @@
 
 > Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
 
+## 2026-10-12: List Assistant Extension Targets Read-only
+
+Verification base: `494ddd8e5d6c521c21b221562d544f63c201af5f`, plus the assistant-list changes. **Assistants** appears in navigation and search. It lists built-in and historical extension-target labels and their registered paths. It does not detect installation or login status, scan directories, execute assistants, or offer account/configuration actions.
+
+`resources:targets` adds nullable configuration-directory, skill-directory, and MCP-file strings to its existing label response. It skips external secret-source loading. Account commands, immutable registration checks, and all extension write protections remain unchanged.
+
+Verification generated and read back locally:
+
+- Before implementation, both navigation/search tests and the native path-response assertion failed as expected. After implementation, the focused frontend checks passed 168 tests and the navigation suite passed 5. The new empty/error cases reject successful-looking fallbacks. A secret-cache regression proves listing skips refresh and that the missing-source fixture changes the cache when refresh is explicitly invoked.
+- Full serial engine: 456 passed, no failures or skips across 22 test targets. This includes 8 extension-boundary cases. Full desktop bridge: 27 passed. Full frontend: 57 files, 590 passed and 4 existing skips. The first frontend run found the old exact navigation expectation; it now includes Assistants without weakening the assertion. TypeScript, production frontend build, and the native debug build without bundling passed; existing dynamic-import and engine dead-code warnings remain.
+- Real isolated CLI: both command spellings returned metadata, and five retired account commands were refused. HOME/data remained absent. Native tests preserved fake authentication/session bytes and registration metadata.
+- Browser mock: default, long-path, empty, and read-error states passed at 1000 × 650 and 760 × 650. Search opened Assistants; list rows had no buttons or editable fields. There was no page overflow, browser error, account command, or resource write. Default and long-path renders were visually inspected.
+- The isolated macOS preview was opened with fresh HOME/data, a separate identifier, and no inherited credential environment. Its 1000 × 650 window displayed Claude Code and Codex through the actual desktop bridge. No account or shell paths were created in its HOME. Documentation links and whitespace passed.
+
+The preview remains open for review. Installed-package, Windows/Linux desktop, real-account, and user acceptance are not established by these checks. No real account files, installer, tag, or release were changed or published.
+
 ## 2026-10-12: Compact Empty Pages at the Default Window Size
 
 Verification base: `eeb2ca3cd05d029c5bb8fca7890d317f1520d028`, plus the layout changes. Shared empty states now use a small icon, left-aligned guidance, and an adjacent action. Skills' actual-content disclosure uses a secondary text entry. Data, resource actions, and account protections are unchanged.

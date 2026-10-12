@@ -196,7 +196,10 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     // 每次执行重新读取本机保存的凭据取值。必须在这里、而不是在 dispatch 里：
     // apply 的 preflight 在取锁前就跑了，比 dispatch 更早要用到取值。
     // 桌面端一个进程会连续执行很多次命令，用户刚填的值要当场生效。
-    crate::secret_values::refresh(ctx);
+    // Listing extension metadata must not load any external secret source.
+    if command != "resources:targets" {
+        crate::secret_values::refresh(ctx);
+    }
     // system:audit 叶子特判：DispatchResult 无法表达“有效 data + errors”，
     // 且 audit 永不取 apply lock、永不写库，直接在叶子路径组装 envelope。
     if request.command.replace('.', ":") == "system:audit" {
@@ -667,7 +670,10 @@ fn resource_targets(ctx: &Context, request: &Request) -> DispatchResult {
                 _ => None,
             };
             json!({"id": id, "name": raw.get("display_name").and_then(Value::as_str).unwrap_or(id),
-                "group": base, "kind": kind})
+                "group": base, "kind": kind,
+                "config_dir": raw.pointer("/profile/config_dir").and_then(Value::as_str),
+                "skills_dir": raw.get("skills_dir").and_then(Value::as_str),
+                "mcp_path": raw.pointer("/mcp_config/path").and_then(Value::as_str)})
         })
         .collect();
     Ok((json!({"domain": "resources", "targets": targets}), vec![]))
@@ -1553,6 +1559,26 @@ mod tests {
             args: args.iter().map(|s| s.to_string()).collect(),
             run_id: "run-test".to_string(),
         }
+    }
+
+    #[test]
+    fn resource_metadata_does_not_refresh_external_secret_sources() {
+        let (root, ctx) = temp_ctx("resource-metadata-secrets");
+        crate::secret_values::refresh(&ctx);
+        assert_eq!(crate::secret_values::source_state(), (None, None));
+        let settings = store::AppSettings {
+            secrets_file_path: "~/missing-private-source.env".into(),
+            ..store::default_settings()
+        };
+        store::write_settings(&store::open_write(&ctx).unwrap(), &settings).unwrap();
+        for command in ["resources:targets", "resources.targets"] {
+            assert!(execute(&ctx, &request(command, &[])).ok);
+            assert_eq!(crate::secret_values::source_state(), (None, None));
+        }
+        // The missing-source fixture must change the cache if refresh is invoked.
+        crate::secret_values::refresh(&ctx);
+        assert_ne!(crate::secret_values::source_state(), (None, None));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

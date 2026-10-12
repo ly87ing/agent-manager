@@ -1,11 +1,14 @@
 import type { AccountGroup } from "./accounts";
 import { useEngineQuery } from "./queries";
 
-interface ResourceTarget {
+export interface ResourceTarget {
   id: string;
   name: string;
   group: string;
   kind: "claude" | "codex" | null;
+  config_dir?: string | null;
+  skills_dir?: string | null;
+  mcp_path?: string | null;
 }
 
 /** Labels only: no account status, authentication, settings or launch commands. */
