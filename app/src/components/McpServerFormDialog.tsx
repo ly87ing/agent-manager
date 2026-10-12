@@ -117,7 +117,7 @@ export function McpServerFormDialog({
   const [name, setName] = useState(mode.kind === "edit" ? mode.name : (mode.initialName ?? ""));
   const [selectedAgents, setSelectedAgents] = useState<string[]>(
     // 新增默认给全部账号（产品规则：新服务默认分配给所有账号），可以取消
-    mode.kind === "edit" ? mode.targets.map((target) => target.agent) : writableTargets.map((target) => target.agent),
+    mode.kind === "edit" ? [mode.agent] : writableTargets.map((target) => target.agent),
   );
   const [command, setCommand] = useState(editEntry?.command ?? initial?.command ?? "");
   const [argsText, setArgsText] = useState((editEntry?.args ?? initial?.args ?? []).join("\n"));
@@ -366,13 +366,25 @@ export function McpServerFormDialog({
           )}
           {mode.kind === "edit" && (
             <div className="space-y-1.5 text-xs lg:col-span-2" data-testid="server-edit-targets">
+              <fieldset className="flex flex-wrap gap-3">
+                <legend className="mb-1 text-muted-foreground">保存到哪些助手</legend>
+                {mode.targets.map((target) => (
+                  <label key={target.agent} className="flex items-center gap-1.5">
+                    <input type="checkbox" data-testid={`server-agent-${target.agent}`}
+                      checked={selectedAgents.includes(target.agent)}
+                      onChange={(event) => setSelectedAgents((previous) => event.target.checked
+                        ? [...previous, target.agent] : previous.filter((agent) => agent !== target.agent))} />
+                    {nameOf(target.agent)}
+                  </label>
+                ))}
+              </fieldset>
               <p className="text-muted-foreground">
-                保存后写入：<span className="text-foreground">{mode.targets.map((target) => nameOf(target.agent)).join("、")}</span>
-                。各账号条目里没在这里列出的字段原样保留，环境变量写「（保留原值）」的保留各账号自己的原值。
+                保存后写入：<span className="text-foreground">{selectedAgents.map(nameOf).join("、") || "尚未选择"}</span>
+                。未勾选的助手不受影响；未列出的字段和「保留原值」均保留各助手自己的内容。
               </p>
               {mode.differs && (
                 <div className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-warning/10 px-2.5 py-1.5 text-warning">
-                  <span>各账号的内容不一样，保存后统一成下面这一份。以哪个账号的为准：</span>
+                  <span>各助手的内容不同。勾选多个目标时，将使用下面的内容。选择预填来源会重置目标选择：</span>
                   <Select
                     label="以哪个账号的内容为准"
                     testId="server-edit-base"

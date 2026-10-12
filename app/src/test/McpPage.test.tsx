@@ -192,15 +192,32 @@ describe("McpPage：实际条目为主", () => {
     expect(screen.getByTestId("action-disable-mcp:fs-claude-code")).toBeInTheDocument();
   });
 
-  it("编辑只有一个入口：写到所有有它的账号，各带自己条目的 base；内容不同时可选以哪个账号为准，字面量按保留原值提交", async () => {
+  it("单独编辑只预览和写入所选助手，不同步到其他助手", async () => {
+    const { calls } = renderWithEngine(<McpPage />, routes());
+    await expandAll();
+    await userEvent.click(screen.getByTestId("edit-mcp:fs"));
+    const dialog = await screen.findByRole("dialog", { name: /编辑 fs/ });
+    expect(await within(dialog).findByTestId("mcp-preview-content-claude-code")).toBeInTheDocument();
+    expect(within(dialog).queryByTestId("mcp-preview-content-codex")).toBeNull();
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+    await waitFor(() => expect(applyCalls(calls)).toHaveLength(1));
+    expect(applyCalls(calls)[0].args.slice(0, 8)).toEqual(["--only", "mcp:fs", "--agent", "claude-code", "--action", "edit", "--base", BASE_CLAUDE_FS]);
+    expect(calls.filter((call) => call.command === "mcp:preview").every((call) => call.args.includes("claude-code"))).toBe(true);
+  });
+
+  it("编辑默认仅选预填目标；显式勾选多个助手后各带自己的 base 与字面量", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
     await expandAll();
     await userEvent.click(screen.getByTestId("edit-mcp:fs"));
     let dialog = await screen.findByRole("dialog", { name: /编辑 fs/ });
-    expect(within(dialog).getByTestId("server-edit-targets")).toHaveTextContent("保存后写入：claude-code、codex");
+    expect(within(dialog).getByTestId("server-agent-claude-code")).toBeChecked();
+    expect(within(dialog).getByTestId("server-agent-codex")).not.toBeChecked();
     // 两个账号内容不同：提示保存后统一，并可切换预填来源
     await chooseOption(within(dialog).getByTestId("server-edit-base"), "codex");
     dialog = await screen.findByRole("dialog", { name: /编辑 fs/ });
+    expect(within(dialog).getByTestId("server-agent-codex")).toBeChecked();
+    expect(within(dialog).getByTestId("server-agent-claude-code")).not.toBeChecked();
+    await userEvent.click(within(dialog).getByTestId("server-agent-claude-code"));
     expect(within(dialog).getByTestId("server-name-input")).toBeDisabled();
     expect(within(dialog).getByTestId("server-transport-remote")).toBeDisabled();
     expect(within(dialog).getByTestId("server-args-input")).toHaveValue("-y\nfs-mcp@2");

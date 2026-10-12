@@ -28,6 +28,15 @@ Checks one account's actual MCP entry once. This is a separate protocol session,
 - Legacy SSE transports are refused with a reason.
 - The command holds a shared account lock while its process runs. Account, credential, and MCP writes require an exclusive lock and refuse an active check. It writes neither configuration nor the database.
 
+## Editing targets
+
+The MCP editor initially selects only the assistant used to prefill the form.
+Users must explicitly select additional assistants to synchronize modeled fields.
+Changing the prefill source resets selection to that assistant. Preview and apply
+use exactly the selected subset, with each entry's own digest and preserved
+literal/unknown values. A stale target fails without blocking other selected
+targets or affecting unselected assistants.
+
 ## Legacy marker recovery
 
 MCP rows expose legacy `_MANAGED_BY` fields as configuration warnings, independently of connection results. `mcp:preview` and `mcp:apply` accept `--action clean-markers --only mcp:<name> --agent <account> --base <digest>`. The action removes only the selected entry's top-level and env-container marker fields, preserving other values, enabled state and other accounts. Preview is read-only; apply rechecks the digest under the normal write lock. See the [configuration guide](../MCP-CONFIG-GUIDE.md).

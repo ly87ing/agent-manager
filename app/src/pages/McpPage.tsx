@@ -264,7 +264,7 @@ export default function McpPage({
     if (!mode) return;
     if (mode.kind === "edit") {
       // 各账号逐个写入，各自核对是否被外部改过：一个失败不拦其他
-      for (const target of mode.targets) {
+      for (const target of mode.targets.filter((target) => payload.agents.includes(target.agent))) {
         await apply(`编辑 ${payload.name} @ ${nameOfAgent(target.agent)}`, [
           "--only",
           `mcp:${payload.name}`,
