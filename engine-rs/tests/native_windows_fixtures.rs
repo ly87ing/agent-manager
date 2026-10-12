@@ -44,6 +44,16 @@ fn private_source_and_atomic_replacement_inherit_restricted_acl_and_broad_acl_is
         home_dir: root.0.join("home"),
         data_dir: root.0.join("data"),
     };
+    std::fs::create_dir_all(&ctx.home_dir).unwrap();
+    std::fs::write(
+        ctx.home_dir.join(".claude.json"),
+        json!({"mcpServers": {"fixture": {
+            "command": "YOUR_FAKE_MCP_COMMAND",
+            "env": {"API_KEY": "${YOUR_FIXTURE_KEY}"}
+        }}})
+        .to_string(),
+    )
+    .unwrap();
     let source = ctx.home_dir.join("private/account.env");
     let selected = run(
         &ctx,
