@@ -27,9 +27,9 @@ function server(name: string, agents: Record<string, { state: string; source?: s
 
 describe("MCP 补齐", () => {
   it("在用服务补到同格式缺它的账号；停用的账号、读不了的文件、另一种助手都不动", () => {
-    const rows = mcpFillRows([server("serena", { "claude-code": { state: "enabled" }, ds: { state: "disabled" } })], targets);
-    expect(rows).toEqual([{ elementId: "mcp:serena", name: "serena", from: "claude-code", base: "claude-code-base", to: "work" }]);
-    expect(mcpFillArgs(rows[0])).toEqual(["--only", "mcp:serena", "--agent", "claude-code", "--to", "work", "--action", "copy", "--base", "claude-code-base"]);
+    const rows = mcpFillRows([server("example-code", { "claude-code": { state: "enabled" }, ds: { state: "disabled" } })], targets);
+    expect(rows).toEqual([{ elementId: "mcp:example-code", name: "example-code", from: "claude-code", base: "claude-code-base", to: "work" }]);
+    expect(mcpFillArgs(rows[0])).toEqual(["--only", "mcp:example-code", "--agent", "claude-code", "--to", "work", "--action", "copy", "--base", "claude-code-base"]);
   });
 
   it("只有停用或已保存快照的服务不算在用", () => {

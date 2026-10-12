@@ -27,7 +27,7 @@ function routes(): Record<string, Envelope | ((args: string[]) => Promise<Envelo
         {
           run_id: id,
           operations: [
-            { id: "op-1", operation_type: "mcp:apply", target: "mcp:grok-search", detail: { result: "ok" }, created_at: "2026-09-05T23:59:00Z" },
+            { id: "op-1", operation_type: "mcp:apply", target: "mcp:example-search", detail: { result: "ok" }, created_at: "2026-09-05T23:59:00Z" },
           ],
         },
         { command: "runs.get" },
@@ -63,7 +63,7 @@ describe("执行中心", () => {
 
     await userEvent.click(within(row).getByText("详情"));
     expect(screen.getAllByText("mcp:apply")).toHaveLength(1);
-    expect(screen.getByText("mcp:grok-search")).toBeInTheDocument();
+    expect(screen.getByText("mcp:example-search")).toBeInTheDocument();
     expect(screen.getByText(/"result": "ok"/)).toBeInTheDocument();
 
     const getCall = calls.find((call) => call.command === "runs:get");
@@ -152,7 +152,7 @@ describe("执行中心", () => {
         run_id: "r",
         operations: [
           { id: "op-skill", operation_type: "skills:disable", target: "agent-skills/verification@claude-code", detail: { action: "disable" }, created_at: "2026-09-05T23:59:00Z" },
-          { id: "op-mcp", operation_type: "mcp:apply", target: "mcp:grok-search", detail: {}, created_at: "2026-09-05T23:59:00Z" },
+          { id: "op-mcp", operation_type: "mcp:apply", target: "mcp:example-search", detail: {}, created_at: "2026-09-05T23:59:00Z" },
         ],
       }, { command: "runs.get" }),
       "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
@@ -176,7 +176,7 @@ describe("执行中心", () => {
 
     const row = await screen.findByTestId("run-row-20260905T235900Z-legacy1");
     await userEvent.click(within(row).getByText("详情"));
-    expect(await screen.findByText("mcp:grok-search")).toBeInTheDocument();
+    expect(await screen.findByText("mcp:example-search")).toBeInTheDocument();
 
     const clearBtn = screen.getByTestId("clear-runs-button");
     await userEvent.click(clearBtn);
@@ -196,7 +196,7 @@ describe("执行中心", () => {
     await userEvent.click(within(reopenDialog).getByRole("button", { name: "确认清空" }));
 
     expect(calls.some((c) => c.command === "runs:clear")).toBe(true);
-    expect(screen.queryByText("mcp:grok-search")).toBeNull();
+    expect(screen.queryByText("mcp:example-search")).toBeNull();
     expect(await screen.findByRole("status")).toHaveTextContent("任务记录已清空");
   });
 
@@ -223,14 +223,14 @@ describe("执行中心", () => {
     const { calls } = renderWithEngine(<RunsPage />, r);
     const row = await screen.findByTestId("run-row-20260905T235900Z-legacy1");
     await userEvent.click(within(row).getByText("详情"));
-    expect(await screen.findByText("mcp:grok-search")).toBeInTheDocument();
+    expect(await screen.findByText("mcp:example-search")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("clear-runs-button"));
     const dialog = await screen.findByRole("dialog", { name: "清空任务记录" });
     await userEvent.click(within(dialog).getByRole("button", { name: "确认清空" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("清空任务记录失败：SQLite busy");
     expect(screen.getByRole("dialog", { name: "清空任务记录" })).toBeInTheDocument();
-    expect(screen.getByText("mcp:grok-search")).toBeInTheDocument();
+    expect(screen.getByText("mcp:example-search")).toBeInTheDocument();
     expect(row).toBeInTheDocument();
     expect(screen.queryByText(/任务记录已清空/)).toBeNull();
     expect(calls.filter(call => call.command === "runs:list")).toHaveLength(1);

@@ -4,7 +4,7 @@ Status: the user confirmed the direction on 2026-09-30 (section 16). Phases A, B
 
 ## 1. Problem
 
-Many skills require CLI programs (for example, wecom-cli skills call `wecom-cli`), and MCP services also need programs to launch (`npx chrome-devtools-mcp@1.9.0`, `uvx --from git+…serena@main`). These programs are installed separately through global npm, uv, Homebrew, or other applications. Agent Manager currently does not know who needs them, where they are installed, their versions, or available updates, so it cannot manage installation, upgrades, rollback, or cleanup.
+Many skills require CLI programs (for example, wecom-cli skills call `wecom-cli`), and MCP services also need programs to launch (`npx chrome-devtools-mcp@1.9.0`, `uvx --from git+https://example.com/mcp/server@main example-mcp`). These programs are installed separately through global npm, uv, Homebrew, or other applications. Agent Manager currently does not know who needs them, where they are installed, their versions, or available updates, so it cannot manage installation, upgrades, rollback, or cleanup.
 
 This design makes Programs a resource category alongside Skills and MCP: **declared dependencies, clear ownership, version records, previewable installation/upgrades, rollback, and cleanup when unused**, integrated with the existing Inbox workflow.
 
@@ -39,7 +39,7 @@ Evidence levels: **Observed** = local read-only inspection or isolated testing; 
 | Skill uses an undeclared program | `command -v playwright-cli` in xiaoyu-bug-loop body | Global npm | Observed |
 | Skill bundles scripts requiring only a runtime | archify bundles `bin/archify.mjs`, requiring only node | System node (x86_64) | Observed |
 | MCP fetches on demand, pinned version | `npx -y chrome-devtools-mcp@1.9.0` | npx cache | Observed |
-| MCP fetches on demand, follows a branch | `uvx --from git+…/serena@main` | uv cache | Observed |
+| MCP fetches on demand, follows a branch | `uvx --from git+https://example.com/mcp/server@main example-mcp` | uv cache | Observed launch pattern; example URL |
 | MCP uses another application's bundled program | node_repl inside `ChatGPT.app` | That application | Observed |
 | One npm package provides multiple commands | `chrome-devtools-mcp` provides 2, `lighthouse` 3, `cline` 2 | Global npm | Observed (independent review) |
 | Program owns global state | `~/.config/wecom` exists | Program itself | Observed (independent review) |
@@ -78,7 +78,7 @@ Account ──uses──► Skills, MCP (programs shared machine-wide, not per a
 
 | Field | Description |
 | --- | --- |
-| Identifier | `npm:@wecom/cli`, `pypi:serena`, `git:github.com/oraios/serena`, `github:owner/repo`, `go:module` |
+| Identifier | `npm:@wecom/cli`, `pypi:example-mcp`, `git:example.com/mcp/code`, `github:owner/repo`, `go:module` |
 | Commands | **All** executables provided by the package, read from package metadata, rather than only declared dependencies |
 | Management mode | **Delegated:** remains in place (global npm, uv tool); this tool calls the original package manager for upgrades/rollback. **Tool-managed:** installed in the tool's directory. **Observe-only:** Homebrew, system, bundled with applications, or unknown source |
 | Tracking | Automatic (latest stable release when releases exist), version (patterns such as `1.*` allowed), branch, pinned; same model as skill sources |
@@ -281,7 +281,7 @@ All verification uses isolated HOME, data directories, and test assistant paths.
 
 | Phase | Content | Status (2026-09-30) |
 | --- | --- | --- |
-| A | `programs:status`: declaration parsing (OpenClaw/shorthand), MCP command parsing, external installation recognition (all commands), three-mode user PATH probing, supplementary declaration candidates; skill/MCP dependency labels; Inbox integration | Implemented. Local read-only readback: wecom-cli (global npm 1.3.4, needed by 4 skills), chrome-devtools-mcp (npx pinned 1.9.0), serena/grok-search (uvx branch tracking, unpinned), node_repl (ChatGPT.app bundled, observe-only), playwright-cli (undeclared candidate). Data/user directories unchanged before/after queries |
+| A | `programs:status`: declaration parsing (OpenClaw/shorthand), MCP command parsing, external installation recognition (all commands), three-mode user PATH probing, supplementary declaration candidates; skill/MCP dependency labels; Inbox integration | Implemented. Local read-only readback: wecom-cli (global npm 1.3.4, needed by 4 skills), chrome-devtools-mcp (npx pinned 1.9.0), Git-backed uvx runners (branch tracking, unpinned), node_repl (ChatGPT.app bundled, observe-only), playwright-cli (undeclared candidate). Data/user directories unchanged before/after queries |
 | B | Delegated upgrade/switch/rollback (whole-package backups); tool installation: npm/PyPI/git backends, version directories, pointers, entry links, switches, old-version deletion, complete removal, cleanup eligibility | Implemented. Actual npm in isolated HOME: failed upgrade to nonexistent version restored byte for byte; rollback restored byte for byte; foreign same-name entry file rejected and untouched. Engine integration tests preserve these behaviors with fake npm. Actual isolated uv backend testing (uv 0.7.15, PyPI cowsay): tool-managed install/upgrade/switch/delete and delegated upgrade/rollback (uv tool directory byte-identical after rollback). **Unverified:** discovery of entry-directory programs by IDE-launched sessions |
 | C | Adoption (delegated → tool-installed), undo; MCP entry version pinning/upgrades | Implemented. At least one copy on PATH throughout adoption, exactly one at completion; undo only moves local directories and restores byte for byte; `npm link` packages rejected |
 | D | Update detection (programs/assistants); vulnerabilities, constraint conflicts, joint installation from Sources | Update detection implemented (Check for new versions writes only probe cache). **Not implemented:** OSV detection, constraint intersection/conflicts, integrity checks for tool-installed programs (tampering → Broken), running-process checks before directory deletion, GitHub Release / Go backends, joint installation from Sources |

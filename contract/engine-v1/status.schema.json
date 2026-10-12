@@ -300,7 +300,7 @@
       "additionalProperties": false,
       "properties": {
         "id": {
-          "description": "Element id, e.g. 'agents:claude-code', 'mcp:grok-search', 'skill:<collection>/<skill-name>', 'rules:claude_global'.",
+          "description": "Element id, e.g. 'agents:claude-code', 'mcp:example-search', 'skill:<collection>/<skill-name>', 'rules:claude_global'.",
           "type": "string"
         },
         "domain": {

@@ -224,7 +224,7 @@ export function makePolicyData(overrides: Partial<PolicyData> = {}): PolicyData 
     layers: { sqlite: { browser_us_sync: { enabled: false } } },
     effective: {
       agents: { "claude-code": { enabled: true } },
-      mcp: { "grok-search": { enabled: true } },
+      mcp: { "example-search": { enabled: true } },
       browser_us_sync: { enabled: false },
     },
     attribution: { agents: "builtin", mcp: "builtin", browser_us_sync: "sqlite" },

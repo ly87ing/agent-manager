@@ -76,7 +76,7 @@
           "type": "string"
         },
         "element": {
-          "description": "Element id such as 'mcp:grok-search', or null when the entry is not tied to one element.",
+          "description": "Element id such as 'mcp:example-search', or null when the entry is not tied to one element.",
           "type": ["string", "null"]
         },
         "message": {

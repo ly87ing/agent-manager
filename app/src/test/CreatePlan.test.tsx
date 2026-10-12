@@ -60,7 +60,7 @@ describe("创建前的动作清单", () => {
           commandName: "ds",
           api: { baseUrl: "https://api.deepseek.com/anthropic", model: "deepseek-v4", tokenVar: "DEEPSEEK_API_KEY", keyFile: "~/.config/agent-manager/secrets.env" },
           skills: 0,
-          extraMcp: ["grok-search"],
+          extraMcp: ["example-search"],
           loginCommand: null,
         }}
       />,
@@ -68,7 +68,7 @@ describe("创建前的动作清单", () => {
     const plan = screen.getByTestId("account-create-plan");
     expect(plan).toHaveTextContent("接口 https://api.deepseek.com/anthropic、模型 deepseek-v4、API Key（取自 DEEPSEEK_API_KEY）");
     expect(plan).toHaveTextContent("把 API Key 存进 ~/.config/agent-manager/secrets.env 的 DEEPSEEK_API_KEY");
-    expect(plan).toHaveTextContent("另从其他账号复制在用的 MCP：grok-search");
+    expect(plan).toHaveTextContent("另从其他账号复制在用的 MCP：example-search");
     expect(plan).not.toHaveTextContent("链接");
     expect(plan).not.toHaveTextContent("登录一次");
   });

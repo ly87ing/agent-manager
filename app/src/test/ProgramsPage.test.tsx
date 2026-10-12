@@ -58,13 +58,13 @@ function data(): ProgramsData {
         problems: [{ code: "missing", bins: ["json"] }],
       }),
       program({
-        program: "git:github.com/oraios/serena",
+        program: "git:example.com/mcp/code",
         kind: "git",
-        name: "github.com/oraios/serena",
+        name: "example.com/mcp/code",
         mode: "runner",
-        runners: [{ server: "serena", agent: "codex", runner: "uvx", version: "main", pinned: false }],
-        dependents: [{ kind: "mcp", name: "serena", agents: ["codex"], source: "mcp", bins: [], any: false }],
-        problems: [{ code: "unpinned", server: "serena", agent: "codex", version: "main" }],
+        runners: [{ server: "example-code", agent: "codex", runner: "uvx", version: "main", pinned: false }],
+        dependents: [{ kind: "mcp", name: "example-code", agents: ["codex"], source: "mcp", bins: [], any: false }],
+        problems: [{ code: "unpinned", server: "example-code", agent: "codex", version: "main" }],
         freshness: { ...unknown, upstream: "7a2968335f2198b966864de1ce3655c8e485a653" },
       }),
     ],
@@ -101,9 +101,9 @@ function routes(): Record<string, Envelope | ((args: string[]) => Promise<Envelo
       domain: "mcp",
       targets: [],
       elements: [makeElement({
-        id: "mcp:serena",
+        id: "mcp:example-code",
         domain: "mcp",
-        observed: { agents: { codex: { state: "enabled", source: "file", base: "b".repeat(64), actions: ["edit"], entry: { command: "uvx", args: ["--from", "git+https://github.com/oraios/serena@main", "serena", "start"], env: { K: "${K}" } } } } },
+        observed: { agents: { codex: { state: "enabled", source: "file", base: "b".repeat(64), actions: ["edit"], entry: { command: "uvx", args: ["--from", "git+https://example.com/mcp/code@main", "example-code", "start"], env: { K: "${K}" } } } } },
       })],
     }, { command: "mcp.status" }),
     "mcp:preview": makeEnvelope({ files: [{ path: "~/.codex/config.toml", exists: true, original: "args = [\"@main\"]\n", content: "args = [\"@7a29683\"]\n" }] }, { command: "mcp.preview" }),
@@ -139,7 +139,7 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     expect(rows.map((row) => row.getAttribute("data-testid"))).toEqual([
       "program-row-npm:json",
       "program-row-npm:@wecom/cli",
-      "program-row-git:github.com/oraios/serena",
+      "program-row-git:example.com/mcp/code",
     ]);
     const wecom = screen.getByTestId("program-row-npm:@wecom/cli");
     expect(wecom).toHaveTextContent("代管");
@@ -147,7 +147,7 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     expect(wecom).toHaveTextContent("可更新到 1.3.5");
     expect(wecom).toHaveTextContent("技能 wecomcli-doc");
     expect(screen.getByTestId("program-row-npm:json")).toHaveTextContent("缺 json");
-    expect(screen.getByTestId("program-row-git:github.com/oraios/serena")).toHaveTextContent("没固定版本");
+    expect(screen.getByTestId("program-row-git:example.com/mcp/code")).toHaveTextContent("没固定版本");
   });
 
   it("代管升级：打开后先要计划（不写），列出步骤与自己执行的命令；确认后才执行", async () => {
@@ -187,14 +187,14 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
 
   it("按需拉取的 MCP：固定版本改的是条目参数里版本那一段，env 原样；先预览改动，确认后逐个账号写入", async () => {
     const { calls } = renderWithEngine(<ProgramsPage />, routes());
-    await userEvent.click(await screen.findByTestId("program-pin-git:github.com/oraios/serena"));
+    await userEvent.click(await screen.findByTestId("program-pin-git:example.com/mcp/code"));
     const dialog = await screen.findByTestId("program-pin-dialog");
     expect(within(dialog).getByTestId("program-pin-version")).toHaveValue("7a2968335f2198b966864de1ce3655c8e485a653");
     await waitFor(() => expect(calls.some((call) => call.command === "mcp:preview")).toBe(true));
     const preview = calls.find((call) => call.command === "mcp:preview")!;
     const spec = JSON.parse(preview.args[preview.args.indexOf("--spec") + 1]);
-    expect(spec).toEqual({ command: "uvx", args: ["--from", "git+https://github.com/oraios/serena@7a2968335f2198b966864de1ce3655c8e485a653", "serena", "start"], env: { K: "${K}" } });
-    expect(preview.args.slice(0, 8)).toEqual(["--only", "mcp:serena", "--agent", "codex", "--action", "edit", "--base", "b".repeat(64)]);
+    expect(spec).toEqual({ command: "uvx", args: ["--from", "git+https://example.com/mcp/code@7a2968335f2198b966864de1ce3655c8e485a653", "example-code", "start"], env: { K: "${K}" } });
+    expect(preview.args.slice(0, 8)).toEqual(["--only", "mcp:example-code", "--agent", "codex", "--action", "edit", "--base", "b".repeat(64)]);
     expect(calls.some((call) => call.command === "mcp:apply")).toBe(false);
     await userEvent.click(await screen.findByRole("button", { name: "写入" }));
     await waitFor(() => expect(calls.some((call) => call.command === "mcp:apply")).toBe(true));
@@ -214,8 +214,8 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     renderWithEngine(<ProgramsPage onOpen={onOpen} />, routes());
     await userEvent.click(await screen.findByTestId("program-dependent-npm:@wecom/cli-wecomcli-doc"));
     expect(onOpen).toHaveBeenLastCalledWith("skills:wecomcli-doc");
-    await userEvent.click(screen.getByTestId("program-dependent-git:github.com/oraios/serena-serena"));
-    expect(onOpen).toHaveBeenLastCalledWith("mcp:serena");
+    await userEvent.click(screen.getByTestId("program-dependent-git:example.com/mcp/code-example-code"));
+    expect(onOpen).toHaveBeenLastCalledWith("mcp:example-code");
   });
 
   it("检查新版本进行中：升级、安装、固定版本都先不能点，结束后恢复", async () => {
@@ -233,7 +233,7 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     expect(await screen.findByTestId("programs-checking")).toBeInTheDocument();
     expect(screen.getByTestId("program-upgrade-npm:@wecom/cli")).toBeDisabled();
     expect(screen.getByTestId("program-install-npm:json")).toBeDisabled();
-    expect(screen.getByTestId("program-pin-git:github.com/oraios/serena")).toBeDisabled();
+    expect(screen.getByTestId("program-pin-git:example.com/mcp/code")).toBeDisabled();
     expect(screen.queryByRole("button", { name: "@wecom/cli 的更多操作" })).toBeNull();
     release!();
     await waitFor(() => expect(screen.queryByTestId("programs-checking")).toBeNull());

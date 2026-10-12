@@ -100,7 +100,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
 enum ArgValueKind {
     /// 纯开关（如 --allow-uninstall），不带值。
     Flag,
-    /// 元素 id，如 mcp:grok-search / skill:agent-skills/find-skills。
+    /// 元素 id，如 mcp:example-search / skill:agent-skills/find-skills。
     ElementId,
     /// 运行 id（runs:get 的 --run），字母数字与 _/-。
     RunId,
@@ -1015,7 +1015,7 @@ mod tests {
         for (command, args) in [
             (
                 "system:refresh-upstream",
-                vec!["--only".into(), "mcp:grok-search".into()],
+                vec!["--only".into(), "mcp:example-search".into()],
             ),
             ("system:discover", vec!["--only".into(), "skills".into()]),
             ("config:export", vec![]),
@@ -1052,7 +1052,7 @@ mod tests {
                 "mcp:apply",
                 vec![
                     "--only".into(),
-                    "mcp:grok-search".into(),
+                    "mcp:example-search".into(),
                     "--action".into(),
                     "disable".into(),
                 ],
@@ -2336,11 +2336,11 @@ mod tests {
         ));
         assert!(ok(
             "programs:declare",
-            &["--server", "serena", "--follow-latest", "true"]
+            &["--server", "example-code", "--follow-latest", "true"]
         ));
         assert!(!ok(
             "programs:declare",
-            &["--server", "serena", "--follow-latest", "maybe"]
+            &["--server", "example-code", "--follow-latest", "maybe"]
         ));
         assert!(
             !ok(

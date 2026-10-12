@@ -7,7 +7,7 @@ const stdio = (command: string, args: string[]) => ({ transport: "stdio", entry:
 describe("MCP 一句话说明", () => {
   it("npx / uvx 取包名，git 来源标出来", () => {
     expect(mcpBrief(stdio("npx", ["-y", "chrome-devtools-mcp@1.9.0", "--isolated"]))).toBe("本地命令 · chrome-devtools-mcp@1.9.0");
-    expect(mcpBrief(stdio("uvx", ["--from", "git+https://github.com/example/grok-search", "grok-search"]))).toBe("本地命令 · grok-search（git）");
+    expect(mcpBrief(stdio("uvx", ["--from", "git+https://example.com/mcp/search", "example-search"]))).toBe("本地命令 · example-search（git）");
   });
 
   it("其他命令取可执行文件名，不带路径", () => {

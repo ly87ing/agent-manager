@@ -70,7 +70,7 @@ function routes(): Record<string, TestRoute> {
     "mcp:status": makeEnvelope({
       domain: "mcp",
       targets: [],
-      elements: [makeElement({ id: "mcp:grok-search", domain: "mcp", observed: { agents: {} } })],
+      elements: [makeElement({ id: "mcp:example-search", domain: "mcp", observed: { agents: {} } })],
     }, { command: "mcp.status" }),
     "secrets:status": makeEnvelope({ domain: "secrets", elements: [] }, { command: "secrets.status" }),
     "rules:status": makeEnvelope({ domain: "rules", elements: [] }, { command: "rules.status" }),

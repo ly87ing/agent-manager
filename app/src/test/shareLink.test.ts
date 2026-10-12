@@ -16,7 +16,7 @@ describe("分享链接", () => {
   });
 
   it("MCP 与技能集合编码后原样解回（含中文与特殊字符）", () => {
-    const mcp = { kind: "mcp" as const, name: "grok-search", spec: { command: "uvx", args: ["--from", "git+https://example.com/x", "搜索"], env: { API_KEY: "${GROK_API_KEY}" } } };
+    const mcp = { kind: "mcp" as const, name: "example-search", spec: { command: "uvx", args: ["--from", "git+https://example.com/x", "搜索"], env: { API_KEY: "${SEARCH_API_KEY}" } } };
     expect(decodeShareLink(encodeShareLink(mcp))).toEqual(mcp);
     const skills = { kind: "skills" as const, name: "agent-skills", definition: { url: "https://github.com/example/agent-skills.git", skill_paths: ["skills"], rules_path: null } };
     expect(decodeShareLink(encodeShareLink(skills))).toEqual(skills);

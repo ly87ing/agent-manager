@@ -80,20 +80,20 @@ describe("dev-only mock 开关", () => {
     type Cells = { elements: Array<{ id: string; observed: { agents?: Record<string, { vars?: Record<string, { resolved?: boolean }> }> } }> };
 
     const before = await client.run("mcp:status");
-    const beforeGrok = (before.data as Cells).elements.find((element) => element.id === "mcp:grok-search");
-    expect(beforeGrok?.observed.agents?.["claude-code"].vars?.TAVILY_API_KEY.resolved).toBe(false);
+    const beforeSearch = (before.data as Cells).elements.find((element) => element.id === "mcp:example-search");
+    expect(beforeSearch?.observed.agents?.["claude-code"].vars?.CRAWL_API_KEY.resolved).toBe(false);
 
     const saved = await client.run(
       "secrets:set",
-      ["--var", "TAVILY_API_KEY", "--value", "test-only-value"],
+      ["--var", "CRAWL_API_KEY", "--value", "test-only-value"],
       { runId: "gui-mock-secret" },
     );
     expect(saved.ok).toBe(true);
     expect(saved.run_id).toBe("gui-mock-secret");
 
     const after = await client.run("mcp:status");
-    const afterGrok = (after.data as Cells).elements.find((element) => element.id === "mcp:grok-search");
-    expect(afterGrok?.observed.agents?.["claude-code"].vars?.TAVILY_API_KEY.resolved).toBe(true);
+    const afterSearch = (after.data as Cells).elements.find((element) => element.id === "mcp:example-search");
+    expect(afterSearch?.observed.agents?.["claude-code"].vars?.CRAWL_API_KEY.resolved).toBe(true);
   });
 
   it("mock 实例预览随定义变化且不写状态或回显凭据", async () => {

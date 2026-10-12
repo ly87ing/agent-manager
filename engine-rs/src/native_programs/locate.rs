@@ -197,7 +197,7 @@ pub struct Located {
     pub real: PathBuf,
     /// managed / npm-global / uv-tool / homebrew / app / agent / system / unknown
     pub owner: &'static str,
-    /// 归属能认出的包标识（`npm:@wecom/cli`、`pypi:serena-agent`、`brew:jq`）。
+    /// 归属能认出的包标识（`npm:@wecom/cli`、`pypi:example-mcp`、`brew:jq`）。
     pub program: Option<String>,
     pub version: Option<String>,
     /// 包目录（npm 全局的 node_modules/<包>、uv tool 的环境目录、Homebrew 的版本目录）。

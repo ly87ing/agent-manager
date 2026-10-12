@@ -907,13 +907,13 @@ mod tests {
                 "uvx",
                 &[
                     "--from",
-                    "git+https://github.com/oraios/serena@main",
-                    "serena",
+                    "git+https://example.com/mcp/code@main",
+                    "example-code",
                     "start"
                 ]
             ),
             Some((
-                "git:github.com/oraios/serena".into(),
+                "git:example.com/mcp/code".into(),
                 Some("main".into()),
                 false
             ))

@@ -107,8 +107,8 @@ describe("SecretsPage", () => {
           elements: [
             mcpEnvElement(
               [
-                { server: "grok-search", env_key: "GROK_API_KEY", placeholder: "GROK_API_KEY", resolved: true, stored: true },
-                { server: "grok-search", env_key: "TAVILY_API_KEY", placeholder: "TAVILY_API_KEY", resolved: false },
+                { server: "example-search", env_key: "SEARCH_API_KEY", placeholder: "SEARCH_API_KEY", resolved: true, stored: true },
+                { server: "example-search", env_key: "CRAWL_API_KEY", placeholder: "CRAWL_API_KEY", resolved: false },
                 // 哨兵：即使后端误带 value 字段，页面也绝不渲染
                 { server: "other", env_key: "OTHER_KEY", placeholder: "OTHER_KEY", resolved: false, value: sentinel },
               ],
@@ -122,8 +122,8 @@ describe("SecretsPage", () => {
     });
     await waitFor(() => expect(screen.getByTestId("secrets-env-matrix")).toBeInTheDocument());
     expect(screen.getByTestId("env-unresolved-summary")).toHaveTextContent("2 个变量未配置");
-    expect(screen.getByText("GROK_API_KEY")).toBeInTheDocument();
-    expect(screen.getByText("TAVILY_API_KEY")).toBeInTheDocument();
+    expect(screen.getByText("SEARCH_API_KEY")).toBeInTheDocument();
+    expect(screen.getByText("CRAWL_API_KEY")).toBeInTheDocument();
     // 区分「在这里填过」与「来自进程环境」：用户要知道改哪儿才有用
     expect(screen.getAllByText("外部文件")).toHaveLength(1);
     expect(screen.getAllByText("未配置")).toHaveLength(2);
@@ -217,7 +217,7 @@ describe("SecretsPage", () => {
           domain: "secrets",
           elements: [
             mcpEnvElement(
-              [{ server: "grok-search", env_key: "GROK_API_KEY", placeholder: "GROK_API_KEY", resolved: false, stored: false }],
+              [{ server: "example-search", env_key: "SEARCH_API_KEY", placeholder: "SEARCH_API_KEY", resolved: false, stored: false }],
               1,
               "missing",
             ),
@@ -225,11 +225,11 @@ describe("SecretsPage", () => {
         },
         { command: "secrets.status" },
       ),
-      "secrets:set": makeEnvelope({ domain: "secrets", variable: "GROK_API_KEY", stored: true }, { command: "secrets.set" }),
+      "secrets:set": makeEnvelope({ domain: "secrets", variable: "SEARCH_API_KEY", stored: true }, { command: "secrets.set" }),
     }, calls);
 
     await waitFor(() => expect(screen.getByTestId("secrets-env-matrix")).toBeInTheDocument());
-    await userEvent.click(screen.getByTestId("fill-secret-GROK_API_KEY"));
+    await userEvent.click(screen.getByTestId("fill-secret-SEARCH_API_KEY"));
     const input = await screen.findByTestId("secret-value-input");
     // 输入框是密码型：取值不以明文呈现
     expect(input).toHaveAttribute("type", "password");
@@ -239,7 +239,7 @@ describe("SecretsPage", () => {
 
     await waitFor(() => expect(calls.some((call) => call.command === "secrets:set")).toBe(true));
     const call = calls.find((item) => item.command === "secrets:set")!;
-    expect(call.args).toEqual(["--var", "GROK_API_KEY", "--value", "value-under-test"]);
+    expect(call.args).toEqual(["--var", "SEARCH_API_KEY", "--value", "value-under-test"]);
   });
 
   it("未选择外部文件时禁止填写，并说明先做什么", async () => {
@@ -249,7 +249,7 @@ describe("SecretsPage", () => {
           domain: "secrets",
           elements: [
             mcpEnvElement(
-              [{ server: "grok-search", env_key: "GROK_API_KEY", placeholder: "GROK_API_KEY", resolved: false, stored: false }],
+              [{ server: "example-search", env_key: "SEARCH_API_KEY", placeholder: "SEARCH_API_KEY", resolved: false, stored: false }],
               1,
               "missing",
               { configured: false, path: null, ready: false, error: null },
@@ -259,7 +259,7 @@ describe("SecretsPage", () => {
         { command: "secrets.status" },
       ),
     });
-    const button = await screen.findByTestId("fill-secret-GROK_API_KEY");
+    const button = await screen.findByTestId("fill-secret-SEARCH_API_KEY");
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("title", "先在上方选择可用的外部密钥文件");
     expect(screen.getByTestId("secrets-source-status")).toHaveTextContent("尚未选择");

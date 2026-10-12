@@ -189,9 +189,9 @@ function demoEnvelopes(): Record<string, Envelope> {
           freshness: makeFreshness({ state: "behind", current: "1.2.0", upstream: "1.8.0", checked_at: CHECKED_AT, probe: "npm-view", cache_age_sec: 1820 }),
         }),
         makeElement({
-          id: "mcp:grok-search",
+          id: "mcp:example-search",
           domain: "mcp",
-          spec: { name: "grok-search", saved: null },
+          spec: { name: "example-search", saved: null },
           observed: {
             agents: {
               "claude-code": {
@@ -200,13 +200,13 @@ function demoEnvelopes(): Record<string, Envelope> {
                 source: "file",
                 target: "/Users/demo/.claude.json",
                 transport: "stdio",
-                entry: { command: "uvx", args: ["--from", "git+https://github.com/GuDaStudio/GrokSearch@grok-with-tavily", "grok-search"], env: { GROK_API_KEY: "<literal>", TAVILY_API_KEY: "${TAVILY_API_KEY}" } },
-                vars: { TAVILY_API_KEY: { placeholder: "${TAVILY_API_KEY}", resolved: false, stored: false, kind: "env" } },
+                entry: { command: "uvx", args: ["--from", "git+https://example.com/mcp/search@main", "example-search"], env: { SEARCH_API_KEY: "<literal>", CRAWL_API_KEY: "${CRAWL_API_KEY}" } },
+                vars: { CRAWL_API_KEY: { placeholder: "${CRAWL_API_KEY}", resolved: false, stored: false, kind: "env" } },
                 base: "3".repeat(64),
                 command_available: true,
                 actions: ["edit", "disable", "copy", "remove"],
               },
-              codex: { ...mcpCellBase, state: "disabled", source: "file", target: "/Users/demo/.codex/config.toml", transport: "stdio", entry: { command: "uvx", args: ["grok-search"], env: { GROK_API_KEY: "<literal>" } }, base: "4".repeat(64), command_available: true, actions: ["edit", "enable", "copy", "remove"] },
+              codex: { ...mcpCellBase, state: "disabled", source: "file", target: "/Users/demo/.codex/config.toml", transport: "stdio", entry: { command: "uvx", args: ["example-search"], env: { SEARCH_API_KEY: "<literal>" } }, base: "4".repeat(64), command_available: true, actions: ["edit", "enable", "copy", "remove"] },
             },
           },
           state: "managed-ok",
@@ -237,12 +237,12 @@ function demoEnvelopes(): Record<string, Envelope> {
           freshness: makeFreshness({ state: "not-applicable" }),
         }),
         makeElement({
-          id: "mcp:serena",
+          id: "mcp:example-code",
           domain: "mcp",
           spec: {
-            name: "serena",
+            name: "example-code",
             saved: {
-              definition: { command: "uvx", args: ["--from", "git+https://github.com/oraios/serena@main", "serena", "start-mcp-server"], env: {}, extra_args_by_agent: { "claude-code": ["--context", "claude-code"], codex: ["--context", "codex"] } },
+              definition: { command: "uvx", args: ["--from", "git+https://example.com/mcp/code@main", "example-code", "serve"], env: {}, extra_args_by_agent: { "claude-code": ["--client", "claude-code"], codex: ["--client", "codex"] } },
               valid: true,
             },
           },
@@ -502,8 +502,8 @@ function demoEnvelopes(): Record<string, Envelope> {
           spec: { sources: ["external file", "process env"] },
           policy: { enabled: true },
           observed: { install_source: null, variables: [
-              { server: "grok-search", env_key: "GROK_API_KEY", placeholder: "GROK_API_KEY", resolved: true, kind: "env" },
-              { server: "grok-search", env_key: "TAVILY_API_KEY", placeholder: "TAVILY_API_KEY", resolved: false, kind: "env" },
+              { server: "example-search", env_key: "SEARCH_API_KEY", placeholder: "SEARCH_API_KEY", resolved: true, kind: "env" },
+              { server: "example-search", env_key: "CRAWL_API_KEY", placeholder: "CRAWL_API_KEY", resolved: false, kind: "env" },
               { server: "remote-api", env_key: "Authorization", placeholder: "DEMO_REMOTE_TOKEN", resolved: true, kind: "header" },
             ],
             unresolved: 1,
@@ -649,11 +649,11 @@ function demoEnvelopes(): Record<string, Envelope> {
             freshness: { state: "behind", current: "1.9.0", upstream: "1.10.1", checked_at: new Date().toISOString(), probe: "npm-view", cache_age_sec: 60 },
           },
           {
-            id: "programs:git:github.com/oraios/serena", program: "git:github.com/oraios/serena", kind: "git", name: "github.com/oraios/serena", bins: [], all_bins: [],
+            id: "programs:git:example.com/mcp/code", program: "git:example.com/mcp/code", kind: "git", name: "example.com/mcp/code", bins: [], all_bins: [],
             mode: "runner", owner: null, version: null, installs: [], install: [],
-            runners: [{ server: "serena", agent: "codex", runner: "uvx", version: "main", pinned: false }],
-            dependents: [{ kind: "mcp", name: "serena", agents: ["claude-code", "codex"], source: "mcp", bins: [], any: false }],
-            problems: [{ code: "unpinned", server: "serena", agent: "codex", version: "main" }], commands: {}, managed_versions: [], managed_current: null,
+            runners: [{ server: "example-code", agent: "codex", runner: "uvx", version: "main", pinned: false }],
+            dependents: [{ kind: "mcp", name: "example-code", agents: ["claude-code", "codex"], source: "mcp", bins: [], any: false }],
+            problems: [{ code: "unpinned", server: "example-code", agent: "codex", version: "main" }], commands: {}, managed_versions: [], managed_current: null,
             freshness: { state: "unknown", current: "main", upstream: "7a2968335f2198b966864de1ce3655c8e485a653", checked_at: new Date().toISOString(), probe: "git-ls-remote", cache_age_sec: 60 },
           },
           {
@@ -704,7 +704,7 @@ function demoEnvelopes(): Record<string, Envelope> {
           { id: "agents:claude-code", probe: "npm-view", state: "behind", current: "2.0.0", upstream: "2.1.3", error: null },
           { id: "agents:codex", probe: "npm-view", state: "ahead", current: "0.43.0-beta.1", upstream: "0.42.0", error: null },
           { id: "mcp:chrome-devtools", probe: "npm-view", state: "behind", current: "1.2.0", upstream: "1.8.0", error: null },
-          { id: "mcp:grok-search", probe: "git-ls-remote", state: "unknown", current: null, upstream: "8f0ae3c7f25ec419631ade7e431fa2531503433e", error: "uvx-local-unavailable" },
+          { id: "mcp:example-search", probe: "git-ls-remote", state: "unknown", current: null, upstream: "8f0ae3c7f25ec419631ade7e431fa2531503433e", error: "uvx-local-unavailable" },
           { id: "mcp:my-proxy", probe: "npm-view", state: "current", current: "0.3.1", upstream: "0.3.1", error: null },
           { id: "skill:agent-skills", probe: "git-ls-remote", state: "behind", current: "a1b2c3d4e5f60718293a4b5c6d7e8f9012a3b4c5", upstream: "f0e1d2c3b4a5968778695a4b3c2d1e0f9a8b7c6d", error: null },
         ],
@@ -1350,7 +1350,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       if (command === "runs:get") {
         const id = args[args.indexOf("--run") + 1];
         return makeEnvelope(
-          { run_id: id, operations: [{ id: "op-mock", operation_type: "mcp:apply", target: "mcp:grok-search", detail: { result: "ok" }, created_at: "2026-09-05T23:59:00Z" }] },
+          { run_id: id, operations: [{ id: "op-mock", operation_type: "mcp:apply", target: "mcp:example-search", detail: { result: "ok" }, created_at: "2026-09-05T23:59:00Z" }] },
           { command: "runs.get" },
         );
       }

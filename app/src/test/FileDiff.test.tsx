@@ -17,7 +17,7 @@ describe("FileDiff", () => {
     {
       numStartups: 208,
       tipsHistory: Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`tip-${i}`, i])),
-      mcpServers: { grok: { command: "npx", args: ["-y", "grok-mcp"] } },
+      mcpServers: { example: { command: "npx", args: ["-y", "example-mcp"] } },
     },
     null,
     2,
@@ -29,7 +29,7 @@ describe("FileDiff", () => {
     expect(box).toHaveTextContent("/Users/x/.claude.json");
     expect(box).toHaveTextContent("更新");
     expect(screen.getByTestId("d-stats")).toHaveTextContent("+9 −1");
-    expect(box).toHaveTextContent('"grok-mcp"');
+    expect(box).toHaveTextContent('"example-mcp"');
     expect(box).not.toHaveTextContent('"tip-5"');
     expect(screen.getByTestId("d-fold")).toHaveTextContent(/未改动 \d+ 行/);
     expect(screen.queryByTestId("d-full")).toBeNull();
