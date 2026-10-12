@@ -272,13 +272,51 @@ fn other_accounts(ctx: &Context, policy: &Value, exclude_id: Option<&str>) -> Re
 /// Shell command targets are never account configuration or manager data.
 /// Ordinary dotfile links remain supported, but resolving a link is not ownership.
 pub(crate) fn validate_shell_target(ctx: &Context, path: &Path, directory: bool) -> Result<()> {
+    validate_non_account_target(ctx, path, directory, true)
+}
+
+/// Dependency programs may own manager data, but never account or MCP identity files.
+pub(crate) fn validate_program_target(ctx: &Context, path: &Path, directory: bool) -> Result<()> {
+    if std::fs::symlink_metadata(path).is_ok_and(|metadata| is_link(&metadata)) {
+        let parent = path.parent().ok_or_else(|| anyhow!("程序目标缺少父目录"))?;
+        let location = resolved(parent)?.join(
+            path.file_name()
+                .ok_or_else(|| anyhow!("程序目标缺少名称"))?,
+        );
+        validate_non_account_location(ctx, &location, directory, false)?;
+        // Moving a package temporarily leaves its launcher links dangling. Check
+        // both the link's location and its destination without dereferencing it.
+        let target = crate::platform::read_link(path)?;
+        return validate_non_account_target(ctx, &parent.join(target), directory, false);
+    }
+    validate_non_account_target(ctx, path, directory, false)
+}
+
+pub(crate) fn validate_program_metadata_file(path: &Path) -> Result<()> {
+    check_identity_file(path, "extension-program")
+}
+
+fn validate_non_account_target(
+    ctx: &Context,
+    path: &Path,
+    directory: bool,
+    protect_manager_directory: bool,
+) -> Result<()> {
     let path = resolved(path)?;
+    validate_non_account_location(ctx, &path, directory, protect_manager_directory)
+}
+
+fn validate_non_account_location(
+    ctx: &Context,
+    path: &Path,
+    directory: bool,
+    protect_manager_directory: bool,
+) -> Result<()> {
     let policy = store::effective_policy(ctx)?;
-    let mut directories = vec![
-        ctx.home_dir.join(".claude"),
-        ctx.home_dir.join(".codex"),
-        ctx.data_dir.clone(),
-    ];
+    let mut directories = vec![ctx.home_dir.join(".claude"), ctx.home_dir.join(".codex")];
+    if protect_manager_directory {
+        directories.push(ctx.data_dir.clone());
+    }
     directories.extend(other_accounts(ctx, &policy, None)?);
     let mut files = vec![
         ctx.home_dir.join(".claude.json"),

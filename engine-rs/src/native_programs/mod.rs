@@ -4,6 +4,7 @@
 pub(crate) mod apply;
 pub(crate) mod declare;
 pub(crate) mod locate;
+mod scope;
 pub(crate) mod status;
 
 use anyhow::{bail, Result};

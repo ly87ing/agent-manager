@@ -681,6 +681,135 @@ fn declarations_are_saved_and_read_back() {
     let _ = std::fs::remove_dir_all(&env.base);
 }
 
+#[test]
+fn entry_directory_redirected_during_install_cannot_write_into_an_account() {
+    let env = setup("entry-race");
+    skill(&env, "dependency", "metadata:\n  requires:\n    bins: [\"tool-a\"]\n  openclaw:\n    install:\n      - kind: node\n        package: tool-a\n        bins: [\"tool-a\"]\n");
+    std::fs::create_dir_all(env.home.join(".codex")).unwrap();
+    let identity = env.home.join(".codex/auth.json");
+    std::fs::write(&identity, "unchanged-account-fixture\n").unwrap();
+    let original = tree_digest(&env.home.join(".codex"));
+    let npm = env.base.join("tools/npm");
+    std::fs::write(&npm, format!("{FAKE_NPM}\nmv \"$HOME/.local/bin\" \"$HOME/original-entry\"\nln -s \"$HOME/.codex\" \"$HOME/.local/bin\"\n")).unwrap();
+    let result = run(
+        &env,
+        "programs:apply",
+        &[
+            "--program",
+            "npm:tool-a",
+            "--action",
+            "install",
+            "--version",
+            "1.0.0",
+            "--entry-dir",
+            "~/.local/bin",
+        ],
+    );
+    assert!(
+        env.home.join("original-entry").is_dir(),
+        "installer never reached the redirect: {result}"
+    );
+    assert_eq!(result["ok"], false, "{result}");
+    assert!(result["errors"].to_string().contains("账号"), "{result}");
+    assert_eq!(original, tree_digest(&env.home.join(".codex")));
+    let policy = run(&env, "policy:get", &[]);
+    assert_eq!(policy["ok"], true, "{policy}");
+    assert!(policy["data"]["effective"].is_object(), "{policy}");
+    assert!(policy["data"]["effective"]["programs"]["entry_dir"].is_null());
+    let _ = std::fs::remove_dir_all(&env.base);
+}
+
+#[test]
+fn failed_upgrade_cannot_roll_back_through_an_account_directory_alias() {
+    let env = setup("rollback-alias");
+    skill(
+        &env,
+        "dependency",
+        "metadata:\n  requires:\n    bins: [tool-a]\n",
+    );
+    global_install(&env, "tool-a@1.2.0");
+    let account = env.home.join(".codex");
+    std::fs::create_dir_all(account.join("tool-a")).unwrap();
+    std::fs::write(
+        account.join("tool-a/session-sentinel"),
+        "unchanged-session\n",
+    )
+    .unwrap();
+    let original = tree_digest(&account);
+    let npm = env.base.join("tools/npm");
+    std::fs::write(&npm, format!("{FAKE_NPM}\nmv \"$HOME/.npm-global/lib/node_modules\" \"$HOME/original-packages\"\nln -s \"$HOME/.codex\" \"$HOME/.npm-global/lib/node_modules\"\nexit 1\n")).unwrap();
+    let result = run(
+        &env,
+        "programs:apply",
+        &[
+            "--program",
+            "npm:tool-a",
+            "--action",
+            "upgrade",
+            "--version",
+            "1.3.0",
+        ],
+    );
+    assert!(
+        env.home.join("original-packages").is_dir(),
+        "installer never reached the redirect: {result}"
+    );
+    assert_eq!(result["ok"], false, "{result}");
+    assert!(
+        result["errors"].to_string().contains("回滚或清理"),
+        "{result}"
+    );
+    assert_eq!(original, tree_digest(&account));
+    let backup = std::fs::read_dir(env.data.join("programs/backups"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path().join("package"))
+        .find(|package| package.is_dir())
+        .expect("the original package must remain in its backup");
+    assert_eq!(version_at(&backup), "1.2.0");
+    let _ = std::fs::remove_dir_all(&env.base);
+}
+
+#[test]
+fn dependency_metadata_cannot_overwrite_a_hardlinked_account_session_file() {
+    let env = setup("metadata-hardlink");
+    skill(&env, "dependency", "metadata:\n  openclaw:\n    requires:\n      bins: [tool-a]\n    install:\n      - kind: node\n        package: tool-a\n        bins: [tool-a]\n");
+    std::fs::create_dir_all(env.home.join(".codex")).unwrap();
+    let session = env.home.join(".codex/session-sentinel");
+    std::fs::write(&session, "unchanged-session-fixture\n").unwrap();
+    let npm = env.base.join("tools/npm");
+    std::fs::write(&npm, format!("{FAKE_NPM}\nln \"$HOME/.codex/session-sentinel\" \"$prefix/.agent-manager-program.json\"\n")).unwrap();
+    let result = run(
+        &env,
+        "programs:apply",
+        &[
+            "--program",
+            "npm:tool-a",
+            "--action",
+            "install",
+            "--version",
+            "1.0.0",
+            "--entry-dir",
+            "~/.local/bin",
+        ],
+    );
+    let program = env.data.join("programs/npm/tool-a");
+    assert!(
+        ["1.0.0", ".installing-1.0.0"].iter().any(|version| program
+            .join(version)
+            .join(".agent-manager-program.json")
+            .is_file()),
+        "installer never reached the metadata alias: {result}"
+    );
+    assert_eq!(result["ok"], false, "{result}");
+    assert!(result["errors"].to_string().contains("硬链接"), "{result}");
+    assert_eq!(
+        std::fs::read_to_string(&session).unwrap(),
+        "unchanged-session-fixture\n"
+    );
+    assert!(!program.join("current").exists());
+    let _ = std::fs::remove_dir_all(&env.base);
+}
+
 /// MCP 服务没固定版本会报出来；用户选择「跟最新版本」后不再报，改回去又报。只写库。
 #[test]
 fn follow_latest_choice_silences_unpinned() {

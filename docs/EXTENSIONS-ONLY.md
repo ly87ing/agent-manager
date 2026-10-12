@@ -16,6 +16,12 @@ Historical registrations are immutable location metadata for existing extension 
 - [Backups](../engine-rs/src/native_config.rs): exports omit account and alias definitions; imports preserve local metadata and reject changes. Historical alias sources are skipped without reading or changing shell files or legacy alias rows. Secret values and source paths remain excluded.
 - [MCP writes](../engine-rs/src/native_mcp/write.rs): JSON edits splice only the MCP container value, preserving every byte outside it, including login metadata. Missing containers are inserted without reformatting existing fields. Codex uses `toml_edit` and retains non-MCP configuration. Previews, CAS, scope checks, and conditional rollback remain required.
 - [Path protection](subsystems/account-path-isolation.md): extension target validation still rejects account identity aliases, cross-target paths, unsafe ancestors, and links to protected files. Regular MCP/rule files with multiple hard links are rejected before reads or writes on Unix and Windows.
+- [Dependency programs](subsystems/programs.md): assistant command names and npm packages are excluded at every installation location. Declarations and lifecycle requests refuse them. Plans and each execution step validate all filesystem targets against account boundaries.
+
+Dependency-program metadata and backup descriptions reject file links before writing.
+This also protects session files with hard-link aliases outside their account directory.
+Backup listing, automatic pruning, and failure rollback check the same account boundary.
+Unsafe cleanup is skipped; unsafe rollback reports an error and retains the original backup.
 - [MCP secrets](../engine-rs/src/native_secrets.rs): only variables referenced by active or saved MCP entries can be edited. Reserved assistant credentials and variables referenced by historical account metadata are protected and cannot be borrowed by MCP operations. Source changes are blocked when historical account metadata references credentials. Account and application-data files cannot be selected as secret sources. Legacy database secret migration is retired because its contents may include account credentials.
 
 An old custom target without a verifiable credential identity remains read-only for secret writes. The tool refuses the operation and preserves its metadata and source bytes; it does not repair or re-register an account to make an extension operation succeed.
@@ -34,6 +40,7 @@ Run the focused boundary checks first:
 
 ```sh
 cargo test --manifest-path engine-rs/Cargo.toml --test native_extension_scope --test native_account_paths --test native_account_skills --test native_mcp --test native_rules --test native_secrets
+cargo test --manifest-path engine-rs/Cargo.toml --test native_extension_program_scope
 ```
 
 Then run the repository checks:

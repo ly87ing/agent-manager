@@ -2,6 +2,22 @@
 
 > Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
 
+## 2026-10-12: Keep Dependency Programs Outside Account Boundaries
+
+Verification base: `29d3b250b51fc051d70099df130ea42b6918d586`, plus the dependency-program guards. Assistant commands and npm packages are excluded by built-in and immutable historical recognition metadata, regardless of installation location. Direct lifecycle requests and declarations refuse them. Account metadata is not edited.
+
+Programs now validates filesystem targets during planning and before each execution step. The checks cover account entry directories, historical cleanup links, backup restoration, internal directory aliases, metadata hard links, optional backup pruning, and failure rollback. Unsafe rollback preserves the original backup and reports the skipped targets. Ordinary dependency installation, upgrade, adoption, switching, and rollback still work. [Program Lifecycle](subsystems/programs.md) owns the contract.
+
+Verification generated and read back locally:
+
+- Isolated CLI boundary suite: 8 passed. The same first 7 cases against the untouched base passed the ordinary dependency control and failed all 6 boundary cases. Before their guards were added, further fixtures reproduced an overwritten fake account session through a metadata hard link and a deleted fake account backup directory through optional pruning.
+- Runtime fixtures: redirected entry directories and rollback paths were refused; exact fake session/account bytes and the original rollback package were read back. All 9 Unix program tests and the portable ordinary/scoped lifecycle harness passed. No network registry or real assistant account was used.
+- Full engine, serial (`cargo test --manifest-path engine-rs/Cargo.toml -- --test-threads=1`): 454 passed, 0 failed, including 241 library tests and all integration targets. The final default run stopped at 240 library passes and one `Parent did not finish` capture-fixture failure; its standalone retry also failed. The unchanged assertion passed in the complete serial run. Both failed logs remain evidence; no timeout or assertion was weakened.
+- Desktop bridge: 27 passed. Frontend: 56 files, 580 passed and 4 existing skips; TypeScript checking and production build passed. The existing ineffective-dynamic-import warning remains. No frontend source or layout changed in this slice.
+- Windows GNU source and test cross-check passed with the explicitly selected installed Rustup compiler. CLI smoke performed a real extension-policy write and structured readback under temporary HOME/data. Formatting, local links, documented test-target checks, and whitespace checks passed.
+
+This receipt establishes source and isolated CLI verification. Native Windows runtime and installed-application acceptance remain outstanding. No real account, credential, session, installed application, installer, tag, or release was changed or published.
+
 ## 2026-10-12: Remove Unused Account Frontend Code
 
 Verification base: `fda270f`, plus the frontend cleanup. Import-graph inspection from `main.tsx` and a repository reference sweep confirmed that 8 account/launch modules had no application callers: alias dialogs and their hook, runtime argument drafts, launch presets, connection presets, account seeding, and shared settings. They were removed with their 3 dedicated test files (31 tests). Active target recognition/grouping, resource assignment, and all 11 previously failing Rust tests remain.

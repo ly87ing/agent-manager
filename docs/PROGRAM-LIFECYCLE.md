@@ -1,5 +1,7 @@
 # Programs: Lifecycle of Programs Required by Skills and MCP (Design)
 
+> Current scope (2026-10-12): [Extensions only](EXTENSIONS-ONLY.md) supersedes the historical account diagnostics and launch requirements below. Programs excludes assistant commands and packages and protects account directories in every planned filesystem mutation. Current behavior and checks are in the [subsystem reference](subsystems/programs.md).
+
 Status: the user confirmed the direction on 2026-09-30 (section 16). Phases A, B, C and upstream version detection from phase D are implemented; see section 17 for unimplemented items.
 
 ## 1. Problem

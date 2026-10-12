@@ -315,6 +315,7 @@ fn tilde(path: &Path, home: &Path) -> String {
 
 pub fn status(ctx: &Context, refresh_path: bool) -> Result<Value> {
     let policy = store::effective_policy(ctx)?;
+    let scope = super::scope::Scope::new(&policy);
     let user_path = locate::user_path(ctx, refresh_path);
     let install_methods = policy_object(&policy, "install_methods");
     // 用户主动选择「跟最新版本」的 MCP 服务：不再报「没固定版本」
@@ -352,6 +353,9 @@ pub fn status(ctx: &Context, refresh_path: bool) -> Result<Value> {
                  dep: &Dependent,
                  locate_bin: &mut dyn FnMut(&str) -> Vec<Located>|
      -> Option<String> {
+        if scope.assistant_bin(bin) {
+            return None;
+        }
         let located = locate_bin(bin);
         if located.iter().any(|l| l.owner == "agent") {
             return None; // 智能体自己的程序不管
@@ -371,6 +375,9 @@ pub fn status(ctx: &Context, refresh_path: bool) -> Result<Value> {
                     .map(str::to_string)
             })
             .unwrap_or_else(|| format!("bin:{bin}"));
+        if scope.assistant_program(&id) {
+            return None;
+        }
         let program = programs.entry(id.clone()).or_insert_with(|| Program {
             id: id.clone(),
             ..Default::default()
@@ -437,7 +444,11 @@ pub fn status(ctx: &Context, refresh_path: bool) -> Result<Value> {
             .chain(&extra)
             .collect();
         for s in declare::suggestions(&text) {
-            if known.iter().any(|b| **b == s.bin)
+            if scope.assistant_bin(&s.bin)
+                || s.program
+                    .as_deref()
+                    .is_some_and(|id| scope.assistant_program(id))
+                || known.iter().any(|b| **b == s.bin)
                 || locate_bin(&s.bin).iter().any(|l| l.owner == "agent")
             {
                 continue;
@@ -452,7 +463,7 @@ pub fn status(ctx: &Context, refresh_path: bool) -> Result<Value> {
     for scan in &mcp.scans {
         for entry in &scan.entries {
             let Ok(view) = &entry.view else { continue };
-            if view.command.is_empty() {
+            if view.command.is_empty() || scope.assistant_bin(&view.command) {
                 continue;
             }
             let agent = scan.target.agent.clone();
@@ -469,6 +480,9 @@ pub fn status(ctx: &Context, refresh_path: bool) -> Result<Value> {
             };
             match need {
                 McpNeed::Runner(id, runner) => {
+                    if scope.assistant_program(&id) {
+                        continue;
+                    }
                     let program = programs.entry(id.clone()).or_insert_with(|| Program {
                         id,
                         ..Default::default()
@@ -561,6 +575,9 @@ pub fn status(ctx: &Context, refresh_path: bool) -> Result<Value> {
 
     // 托管着、但已经没有任何技能或 MCP 需要的程序：也列出来（可清理）
     for id in managed_ids(ctx) {
+        if scope.assistant_program(&id) {
+            continue;
+        }
         programs.entry(id.clone()).or_insert_with(|| Program {
             id,
             ..Default::default()
@@ -571,6 +588,16 @@ pub fn status(ctx: &Context, refresh_path: bool) -> Result<Value> {
     let elements: Vec<Value> = programs
         .into_values()
         .map(|p| program_json(ctx, p, &probes, &follow_latest))
+        .filter(|element| {
+            let bins = element["all_bins"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str);
+            scope
+                .ensure_extension(element["program"].as_str().unwrap_or_default(), bins)
+                .is_ok()
+        })
         .collect();
     let entry_dir = policy
         .pointer("/programs/entry_dir")

@@ -13,6 +13,12 @@ Skill destinations use the same account path guards. Main Claude and Codex targe
 
 Shell command targets have no account owner. Unix rc links may point to ordinary dotfiles, but their resolved destination cannot enter a main/registered account or manager data directory, or alias a known identity file or registered MCP target. Disabled and malformed account registrations still reserve their directory. Windows command directories also reject overlapping protected paths and linked ancestors. Status, preview and apply use the same observation guard before reading command contents or offering a write baseline.
 
+Dependency programs reuse these account boundaries while allowing their own manager
+data. Plans and execution check every filesystem mutation target, including backup
+restoration and historical cleanup. Launcher links are checked at both their location
+and destination, including the temporary dangling state during a package move.
+Account identity readers retain their stricter no-link requirement.
+
 ## Runtime path
 
 1. Resolve trusted HOME, expand the configured directory, and reject relative paths, parent traversal, control characters, and links in every account-directory component below HOME.
@@ -32,15 +38,13 @@ Shell command targets have no account owner. Unix rc links may point to ordinary
 
 ## Verification
 
-Run the focused regressions, the existing profile suite, and the engine suite:
+Run the current resource regressions and the engine suite:
 
 ```sh
-cargo test --manifest-path engine-rs/Cargo.toml --test native_profiles account_isolation
 cargo test --manifest-path engine-rs/Cargo.toml --test native_account_paths
 cargo test --manifest-path engine-rs/Cargo.toml --test native_account_skills
-cargo test --manifest-path engine-rs/Cargo.toml --test native_account_aliases
-cargo test --manifest-path engine-rs/Cargo.toml --test native_aliases --test native_aliases_bash --test native_aliases_windows
-cargo test --manifest-path engine-rs/Cargo.toml --test native_profiles
+cargo test --manifest-path engine-rs/Cargo.toml --test native_extension_scope --test native_extension_program_scope
+cargo test --manifest-path engine-rs/Cargo.toml --test native_mcp --test native_rules --test native_secrets
 cargo test --manifest-path engine-rs/Cargo.toml
 ```
 

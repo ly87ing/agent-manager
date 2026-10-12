@@ -50,7 +50,9 @@ fn program_dir(ctx: &Context, id: &str) -> Result<PathBuf> {
     {
         bail!("程序名不合法：{name}");
     }
-    Ok(programs_root(ctx).join(scheme).join(slug))
+    let path = programs_root(ctx).join(scheme).join(slug);
+    crate::native_profiles::paths::validate_program_target(ctx, &path, true)?;
+    Ok(path)
 }
 
 fn tilde(path: &Path, home: &Path) -> String {
@@ -759,6 +761,7 @@ fn scripts_allowed(status: &Value, id: &str) -> bool {
 /// 读一个备份的说明。
 fn read_backup(ctx: &Context, backup: &str) -> Result<(PathBuf, Value)> {
     let dir = backup_root(ctx).join(backup);
+    validate_program_metadata(ctx, &dir.join(BACKUP_META))?;
     let meta: Value = serde_json::from_str(
         &std::fs::read_to_string(dir.join(BACKUP_META))
             .with_context(|| format!("找不到备份 {backup}"))?,
@@ -992,6 +995,8 @@ fn entry_links(
 fn resolve_entry_dir(ctx: &Context, status: &Value, args: &Args) -> Result<(PathBuf, bool)> {
     let saved = status.get("entry_dir").and_then(Value::as_str);
     let chosen = args.entry_dir.as_deref().or(saved).ok_or_else(|| anyhow!("还没有选入口目录：在 PATH 上选一个目录（例如 ~/.local/bin），本工具只在那里放登记过的链接"))?;
+    let path = expand(chosen, &ctx.home_dir);
+    crate::native_profiles::paths::validate_shell_target(ctx, &path, true)?;
     let candidates: Vec<&str> = status
         .pointer("/user_path/entry_candidates")
         .and_then(Value::as_array)
@@ -1000,7 +1005,7 @@ fn resolve_entry_dir(ctx: &Context, status: &Value, args: &Args) -> Result<(Path
     if !candidates.contains(&chosen) {
         bail!("{chosen} 不在三种 shell 启动方式的 PATH 上都能看到，或不可写，不能做入口目录");
     }
-    Ok((expand(chosen, &ctx.home_dir), saved != Some(chosen)))
+    Ok((path, saved != Some(chosen)))
 }
 
 fn plan_managed(
@@ -1312,13 +1317,21 @@ fn plan_unadopt(ctx: &Context, status: &Value, args: &Args) -> Result<Plan> {
 
 pub fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
     let args = parse_args(req)?;
+    let scope = super::scope::Scope::new(&store::effective_policy(ctx)?);
+    scope.ensure_extension(&args.program, std::iter::empty())?;
+    let bins = super::status::managed_dir(ctx, &args.program)
+        .map(|dir| {
+            super::status::managed_bins(&dir, args.program.split(':').next().unwrap_or_default())
+        })
+        .unwrap_or_default();
+    scope.ensure_extension(&args.program, bins.iter().map(String::as_str))?;
     let user_path = super::locate::user_path(ctx, false);
     let status = super::status::status(ctx, false)?;
     if args.action == Action::Restore {
-        return plan_restore(ctx, &args);
+        return validate_plan_targets(ctx, plan_restore(ctx, &args)?);
     }
     if args.action == Action::Unadopt {
-        return plan_unadopt(ctx, &status, &args);
+        return validate_plan_targets(ctx, plan_unadopt(ctx, &status, &args)?);
     }
     let element = element_of(&status, &args.program).ok();
     let mode = element
@@ -1353,6 +1366,49 @@ pub fn plan(ctx: &Context, req: &Request) -> Result<Plan> {
         _ => plan_managed(ctx, &status, element.as_ref(), &args, &user_path)?,
     };
     plan.notes.dedup();
+    validate_plan_targets(ctx, plan)
+}
+
+fn validate_program_path(ctx: &Context, path: &Path) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| anyhow!("程序目标缺少父目录"))?;
+    crate::native_profiles::paths::validate_program_target(ctx, parent, false)?;
+    crate::native_profiles::paths::validate_program_target(ctx, path, true)
+}
+
+fn validate_step_targets(ctx: &Context, step: &Step) -> Result<()> {
+    match step {
+        Step::Move { from, to } => {
+            validate_program_path(ctx, from)?;
+            validate_program_path(ctx, to)
+        }
+        Step::Link { path, target, .. } => {
+            validate_program_path(ctx, path)?;
+            validate_program_path(ctx, target)
+        }
+        Step::Unlink { path } | Step::RemoveDir { path } => validate_program_path(ctx, path),
+        Step::SetCurrent { program_dir, .. } => {
+            validate_program_path(ctx, &program_dir.join("current"))
+        }
+        Step::WriteMeta { dir, .. } => validate_program_metadata(ctx, &dir.join(META_FILE)),
+        Step::WriteBackupMeta { dir, .. } => validate_program_metadata(ctx, &dir.join(BACKUP_META)),
+        Step::SaveEntryDir { dir } => crate::native_profiles::paths::validate_shell_target(
+            ctx,
+            &expand(dir, &ctx.home_dir),
+            true,
+        ),
+        Step::Exec { .. } => Ok(()),
+    }
+}
+
+fn validate_program_metadata(ctx: &Context, path: &Path) -> Result<()> {
+    validate_program_path(ctx, path)?;
+    crate::native_profiles::paths::validate_program_metadata_file(path)
+}
+
+fn validate_plan_targets(ctx: &Context, plan: Plan) -> Result<Plan> {
+    for step in &plan.steps {
+        validate_step_targets(ctx, step)?;
+    }
     Ok(plan)
 }
 
@@ -1578,6 +1634,7 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
     let mut removed_links: Vec<String> = Vec::new();
     let result = (|| -> Result<()> {
         for step in &plan.steps {
+            validate_step_targets(ctx, step)?;
             match step {
                 Step::Move { from, to } => {
                     if let Some(parent) = to.parent() {
@@ -1684,8 +1741,13 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
         Ok(())
     })();
     if let Err(err) = result {
+        let mut rollback_blocked = false;
         // 失败回滚：按相反顺序撤回已做的移动与链接；新装出来的包目录（在备份位置之外）删掉
         for step in done.iter().rev() {
+            if validate_step_targets(ctx, step).is_err() {
+                rollback_blocked = true;
+                continue;
+            }
             match step {
                 Step::Move { from, to } => {
                     if from.exists() {
@@ -1713,7 +1775,11 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
         // 已经原样移回：这次的备份记录没有内容了，删掉
         if let Some(backup) = &plan.backup_dir {
             if backup.exists() && !backup.join("package").exists() {
-                let _ = std::fs::remove_dir_all(backup);
+                if validate_program_path(ctx, backup).is_ok() {
+                    let _ = std::fs::remove_dir_all(backup);
+                } else {
+                    rollback_blocked = true;
+                }
             }
         }
         let _ = record(
@@ -1722,7 +1788,11 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
             &plan.program,
             json!({"action": format!("{:?}", plan.action).to_lowercase(), "ok": false}),
         );
-        return Err(err);
+        return Err(if rollback_blocked {
+            anyhow!("{err:#}；路径保护阻止了部分回滚或清理，已跳过不安全目标，请检查保留的备份")
+        } else {
+            err
+        });
     }
     // 登记新放的入口链接、去掉删掉的；已经不指向本工具目录的旧登记一并去掉
     for (path, _) in &registered {
@@ -1770,12 +1840,16 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
 
 /// 同一程序只留最近几份备份；纳入时的备份（撤回要用）不清。
 fn prune_backups(ctx: &Context, id: &str) {
+    if validate_program_path(ctx, &backup_root(ctx)).is_err() {
+        return;
+    }
     let Ok(rd) = std::fs::read_dir(backup_root(ctx)) else {
         return;
     };
     let mut mine: Vec<(String, PathBuf)> = rd
         .filter_map(|e| e.ok())
         .filter_map(|e| {
+            validate_program_metadata(ctx, &e.path().join(BACKUP_META)).ok()?;
             let meta: Value =
                 serde_json::from_str(&std::fs::read_to_string(e.path().join(BACKUP_META)).ok()?)
                     .ok()?;
@@ -1787,18 +1861,24 @@ fn prune_backups(ctx: &Context, id: &str) {
     mine.sort();
     while mine.len() > KEEP_BACKUPS {
         let (_, path) = mine.remove(0);
-        let _ = std::fs::remove_dir_all(path);
+        if validate_program_path(ctx, &path).is_ok() {
+            let _ = std::fs::remove_dir_all(path);
+        }
     }
 }
 
 /// 某个程序的备份（新的在前）：回退与撤回纳入时选用。
 pub fn backups(ctx: &Context) -> Vec<Value> {
+    if validate_program_path(ctx, &backup_root(ctx)).is_err() {
+        return Vec::new();
+    }
     let Ok(rd) = std::fs::read_dir(backup_root(ctx)) else {
         return Vec::new();
     };
     let mut out: Vec<(String, Value)> = rd
         .filter_map(|e| e.ok())
         .filter_map(|e| {
+            validate_program_metadata(ctx, &e.path().join(BACKUP_META)).ok()?;
             let meta: Value = serde_json::from_str(&std::fs::read_to_string(e.path().join(BACKUP_META)).ok()?).ok()?;
             let id = e.file_name().to_string_lossy().to_string();
             Some((id.clone(), json!({"id": id, "program": meta.get("program"), "version": meta.get("version"), "reason": meta.get("reason"), "created_at": meta.get("created_at")})))
@@ -1810,6 +1890,11 @@ pub fn backups(ctx: &Context) -> Vec<Value> {
 
 /// 保存补充声明、安装方式、允许安装脚本（只写库）。
 pub fn declare(ctx: &Context, req: &Request) -> Result<Value> {
+    let scope = super::scope::Scope::new(&store::effective_policy(ctx)?);
+    scope.ensure_extension(
+        req.value("--program").unwrap_or_default(),
+        req.value("--bin"),
+    )?;
     let known = [
         "--skill",
         "--bins",
@@ -1864,6 +1949,7 @@ pub fn declare(ctx: &Context, req: &Request) -> Result<Value> {
         if bins.iter().any(|b| !super::declare::valid_bin(b)) {
             bail!("命令名不合法");
         }
+        scope.ensure_extension("", bins.iter().map(String::as_str))?;
         let skill = skill.to_string();
         update_programs_policy(ctx, req, "declarations", |p| {
             let decl = p.entry("declarations").or_insert_with(|| json!({}));

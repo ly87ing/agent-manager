@@ -8,6 +8,15 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Validate every dependency-program mutation, including backup and internal paths.**
+- Checking only a chosen entry directory missed historical cleanup links, backup destinations inside an account, and a `programs/bin` alias into an account. Isolated CLI regressions reproduced each path; plans and execution now share checks for every filesystem mutation step.
+- A first version of the step guard rejected legitimate upgrades after moving a package made its launcher link temporarily dangling. Check the link location and destination separately, and retain the existing ordinary/scoped npm upgrade, rollback, and adoption acceptance. Account identity files still reject links.
+- Directory ownership alone does not protect arbitrary session files with hard-link aliases. A fake installer linked its metadata to an isolated account session file; the later metadata write overwrote that session. Metadata and backup-description writes now reject linked files before writing, including after installation.
+- Planned steps do not cover optional cleanup. A backup-root alias let pruning remove an isolated account's matching directory after an ordinary link action. Backup listing, pruning, and failure rollback now check their own targets; retain original backups when a changed path makes rollback unsafe.
+- Program entry arguments use the displayed PATH candidate (for example `~/.local/bin`). An absolute spelling in a fixture failed at candidate selection and did not exercise account isolation. Confirm the expected failure reason and a working ordinary-entry control before accepting a negative result.
+- Keep baseline and candidate Cargo output directories separate. Sharing the executable output left the archived baseline binary in the candidate path; the later race probe ran that old binary. Rebuild the package and verify the executable before counting candidate results.
+- Seen 1× (2026-10-12).
+
 **Prepare lightweight native fixtures before measuring short process deadlines.**
 - The 2026-10-12 unchanged engine binary failed 6 capture tests at its Cargo output path; a SHA-256-identical copy passed all 12 capture tests from a private temporary directory. Several failures occurred before the descendant readiness marker, so they did not establish a cleanup defect. The OS mechanism behind that path-dependent startup delay remains unverified.
 - Compile the small std-only capture fixture before the timed region, following the existing native CLI fixture pattern. Keep the same deadlines, readiness and parent-exit markers, delayed-write checks, output limits, and Windows handle-inheritance protection. Do not enlarge production timeouts or remove valid assertions to accommodate test-program startup.
