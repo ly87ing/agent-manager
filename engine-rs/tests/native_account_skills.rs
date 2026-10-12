@@ -123,7 +123,7 @@ fn registration_and_import_refuse_foreign_skill_targets_before_creating_data() {
         );
         assert!(!result.ok, "accepted {target}");
         assert!(
-            result.errors.iter().any(|e| e.message.contains("技能")),
+            result.errors.iter().any(|e| e.code == "FEATURE_RETIRED"),
             "{:?}",
             result.errors
         );
@@ -132,7 +132,10 @@ fn registration_and_import_refuse_foreign_skill_targets_before_creating_data() {
         let imported = f.run("config:import", &["--value", &payload]);
         assert!(!imported.ok, "import accepted {target}");
         assert!(
-            imported.errors.iter().any(|e| e.message.contains("技能")),
+            imported
+                .errors
+                .iter()
+                .any(|e| e.message.contains("账号定义只读")),
             "{:?}",
             imported.errors
         );
@@ -281,19 +284,10 @@ fn legacy_skill_fallback_changes_are_validated_and_custom_targets_remain_support
         rejected.errors
     );
     assert_eq!(store::effective_policy(&f.ctx).unwrap(), before);
-    let custom = json!({"bin":"custom-cli", "skills_dir":f.root.join("custom-skills")}).to_string();
-    let registered = f.run(
-        "policy:set",
-        &[
-            "--layer",
-            "local",
-            "--key",
-            "agents.definitions.custom",
-            "--value",
-            &custom,
-        ],
-    );
-    assert!(registered.ok, "{:?}", registered.errors);
+    let mut policy = before;
+    policy["agents"]["definitions"]["custom"] =
+        json!({"bin":"custom-cli", "skills_dir":f.root.join("custom-skills")});
+    f.legacy(&policy);
     let added = f.apply("custom");
     assert!(added.ok, "{:?}", added.errors);
     assert_eq!(

@@ -606,36 +606,7 @@ fn status_element(
         "management".into(),
         crate::native_agent_adapters::management_for_bin(&def.bin),
     );
-    // 实例（带 profile 段的定义）的登录状态与实际配置在它自己的配置目录里，由 profiles:status
-    // 报告；这里读主目录会把主实例的值错当成实例的
-    let is_instance = def.spec.get("profile").is_some();
-    if let Some(kind) =
-        crate::native_agent_adapters::kind_for_bin(&def.bin).filter(|_| !is_instance)
-    {
-        // 会压过主配置里官方账号的外部设置：只报来源与变量名，只读
-        let auth_kind = match kind {
-            crate::native_agent_adapters::AdapterKind::Claude => {
-                crate::native_auth::AuthKind::Claude
-            }
-            crate::native_agent_adapters::AdapterKind::Codex => crate::native_auth::AuthKind::Codex,
-        };
-        observed.insert(
-            "credential_overrides".into(),
-            Value::Array(crate::native_auth::credential_overrides(
-                &ctx.home_dir,
-                auth_kind,
-                &|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()),
-            )),
-        );
-        // 实际值、写入基准与是否官方账号；只读零写
-        let current_config = crate::native_agent_settings::current_config_status(
-            ctx,
-            &def.id,
-            def.config_path(),
-            kind,
-        );
-        observed.insert("current_config".into(), current_config);
-    }
+    // Client diagnostics never inspect authentication or effective account settings.
 
     let element_id = format!("agents:{}", def.id);
     // 上游轴：仅 enabled 且首选 provider install 命令可解析出 npm 包的 agent 参与
@@ -650,12 +621,12 @@ fn status_element(
     json!({
         "id": element_id,
         "domain": "agents",
-        "spec": def.spec.clone(),
+        "spec": {"display_name": def.display_name, "bin": def.bin},
         "policy": {"enabled": def.enabled},
         "observed": Value::Object(observed),
         "state": state,
         "freshness": freshness,
-        "actions": actions,
+        "actions": [],
     })
 }
 
@@ -778,7 +749,7 @@ fn prepare_apply(ctx: &Context, req: &Request) -> Result<(ActionRequest, AgentDe
 
 /// Apply preflight is read-only and runs before the process lock is created.
 /// 通过完整安全预检（含 --dry-run 拒绝）后 apply 一律真实执行，调用方恒取全局锁。
-pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
+pub(crate) fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     prepare_apply(ctx, req)?;
     Ok(())
 }
@@ -831,7 +802,7 @@ fn record_apply_operation(
 
 // ---------- handle ----------
 
-pub fn handle(ctx: &Context, req: &Request) -> Result<Value> {
+pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let defs = load_definitions(ctx)?;
     match canonical_command(&req.command).as_str() {
         "agents:status" => {

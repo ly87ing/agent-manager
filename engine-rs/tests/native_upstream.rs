@@ -42,6 +42,18 @@ fn request(command: &str, args: &[&str]) -> Request {
 }
 
 fn policy_set(ctx: &Context, key: &str, value: Value) {
+    if let Some(id) = key.strip_prefix("agents.definitions.") {
+        let mut policy = store::effective_policy(ctx).unwrap();
+        policy["agents"]["definitions"][id] = value;
+        store::write_policy(&store::open_write(ctx).unwrap(), &policy).unwrap();
+        return;
+    }
+    if let Some(id) = key.strip_prefix("agents.") {
+        let mut policy = store::effective_policy(ctx).unwrap();
+        policy["agents"][id] = value;
+        store::write_policy(&store::open_write(ctx).unwrap(), &policy).unwrap();
+        return;
+    }
     let env = execute(
         ctx,
         &request(
@@ -338,20 +350,8 @@ fn fresh_context_status_unknown_and_zero_write() {
     assert_eq!(skills.data["recommendations"][0]["name"], "agent-skills");
     assert!(skills.data["recommendations"][0].get("freshness").is_none());
     let agents = execute(&ctx, &request("agents:status", &[]));
-    assert!(agents.ok);
-    for el in agents.data["elements"].as_array().unwrap() {
-        let id = el["id"].as_str().unwrap();
-        // 声明了 upstream_npm 的助手参与探测（官方安装器装的也算——包名从命令里推不出来，
-        // 但 npm 上发的是同一份版本号），没探测过时是 unknown；
-        // 没声明又推不出包名的（opencode 是 system provider）才是「没有最新版这个概念」。
-        let expected = if matches!(id, "agents:claude-code" | "agents:codex") {
-            "unknown"
-        } else {
-            "not-applicable"
-        };
-        assert_eq!(el["freshness"]["state"], expected, "{id} 的新鲜度状态");
-        assert_eq!(el["freshness"]["checked_at"], Value::Null);
-    }
+    assert!(!agents.ok);
+    assert_eq!(agents.errors[0].code, "FEATURE_RETIRED");
     assert!(!store::db_path(&ctx).exists(), "status 不得创建数据库");
 
     // 1b. 有 DB（policy:set 首次写入）但从未 refresh：probeable 元素仍全
@@ -370,7 +370,6 @@ fn fresh_context_status_unknown_and_zero_write() {
     assert!(store::db_path(&ctx).exists());
 
     for (command, id) in [
-        ("agents:status", "agents:npm-agent"),
         ("mcp:status", "mcp:npx-srv"),
         ("skills:status", "skill:coll"),
     ] {
@@ -405,16 +404,21 @@ fn offline_is_rejected_and_cache_untouched() {
         Some("behind-agent version 1.0.0"),
     );
 
+    set_mcp_definition(
+        &ctx,
+        "npx-current",
+        json!({"command":"npx", "args":["-y", "npx-current-pkg"]}),
+    );
     let env = refresh(&ctx, &[]);
     assert!(env.ok, "{:?}", env.errors);
-    let (_, _, checked_at) = cached_row(&ctx, "agents:behind-agent").unwrap();
+    let (_, _, checked_at) = cached_row(&ctx, "mcp:npx-current").unwrap();
 
     let env = refresh(&ctx, &["--offline"]);
     assert!(!env.ok);
     assert_eq!(env.errors[0].code, "OFFLINE_NETWORK_DENIED");
     assert!(env.mode.offline);
     assert!(!env.lock.held);
-    let (_, _, after) = cached_row(&ctx, "agents:behind-agent").unwrap();
+    let (_, _, after) = cached_row(&ctx, "mcp:npx-current").unwrap();
     assert_eq!(checked_at, after, "offline 拒绝不得改写缓存");
 
     let (fresh_base, fresh_ctx) = temp_ctx("offline-fresh");
@@ -453,7 +457,7 @@ fn probe_state_matrix_and_summary() {
         .collect();
     // 14 = 原先的 11 + 两个内置助手（显式声明了 upstream_npm 后一并进探测宇宙）
     // + 停用的 MCP 条目 disabled-npx（库级开关退役，停用条目照样探测）
-    assert_eq!(elements.len(), 14, "探测宇宙大小: {elements:?}");
+    assert_eq!(elements.len(), 7, "探测宇宙大小: {elements:?}");
     // 输出按元素 id 字典序稳定排序
     let ids: Vec<&str> = elements
         .iter()
@@ -484,41 +488,9 @@ fn probe_state_matrix_and_summary() {
         }
     };
 
-    case(
-        "agents:behind-agent",
-        "behind",
-        Some("1.0.0"),
-        Some("2.0.0"),
-        None,
-    );
-    case(
-        "agents:current-agent",
-        "current",
-        Some("2.0.0"),
-        Some("2.0.0"),
-        None,
-    );
-    case(
-        "agents:ahead-agent",
-        "ahead",
-        Some("3.0.0"),
-        Some("2.0.0"),
-        None,
-    );
-    case(
-        "agents:broken-agent",
-        "unknown",
-        None,
-        Some("1.0.0"),
-        Some("local-version-missing"),
-    );
-    case(
-        "agents:fail-agent",
-        "unknown",
-        Some("1.0.0"),
-        None,
-        Some("npm-view-failed"),
-    );
+    assert!(elements
+        .iter()
+        .all(|el| !el["id"].as_str().unwrap().starts_with("agents:")));
     case(
         "mcp:npx-current",
         "current",
@@ -597,7 +569,7 @@ fn probe_state_matrix_and_summary() {
         env.data["summary"],
         // 两个内置助手声明 upstream_npm 后进了探测宇宙；测试环境的 npm 只认夹具里的包，
         // 它们探测不到结果，计入 unknown
-        json!({"probed": 14, "current": 4, "behind": 2, "ahead": 1, "unknown": 7})
+        json!({"probed": 7, "current": 3, "behind": 1, "ahead": 0, "unknown": 3})
     );
 
     // 缓存落库可回读（含 error 类别），checked_at 已写入
@@ -623,21 +595,15 @@ fn status_reflects_cache_after_refresh() {
 
     let env = refresh(&ctx, &[]);
     assert!(env.ok, "{:?}", env.errors);
-    let (_, _, first_checked) = cached_row(&ctx, "agents:behind-agent").unwrap();
-
-    let freshness = status_element_freshness(&ctx, "agents:status", "agents:behind-agent");
-    assert_eq!(freshness["state"], "behind");
-    assert_eq!(freshness["current"], "1.0.0");
-    assert_eq!(freshness["upstream"], "2.0.0");
+    let (_, _, first_checked) = cached_row(&ctx, "mcp:npx-current").unwrap();
+    let freshness = status_element_freshness(&ctx, "mcp:status", "mcp:npx-current");
+    assert_eq!(freshness["state"], "current");
+    assert_eq!(freshness["current"], "1.5.0");
+    assert_eq!(freshness["upstream"], "1.5.0");
     assert_eq!(freshness["checked_at"], first_checked);
     assert_eq!(freshness["probe"], "npm-view");
     assert!(freshness["cache_age_sec"].as_i64().unwrap() >= 0);
-
-    // 探测失败元素：status 如实回填 unknown + upstream 空
-    let freshness = status_element_freshness(&ctx, "agents:status", "agents:fail-agent");
-    assert_eq!(freshness["state"], "unknown");
-    assert_eq!(freshness["upstream"], Value::Null);
-
+    assert!(cached_row(&ctx, "agents:behind-agent").is_none());
     let freshness = status_element_freshness(&ctx, "mcp:status", "mcp:uvx-srv");
     assert_eq!(freshness["state"], "unknown");
     assert_eq!(freshness["upstream"], HASH_UVX_REMOTE);
@@ -654,13 +620,11 @@ fn status_reflects_cache_after_refresh() {
     assert_eq!(freshness["state"], "not-applicable");
     let freshness = status_element_freshness(&ctx, "skills:status", "skill:disabled-coll");
     assert_eq!(freshness["state"], "not-applicable");
-    let freshness = status_element_freshness(&ctx, "agents:status", "agents:disabled-agent");
-    assert_eq!(freshness["state"], "not-applicable");
 
     // 再次 refresh：checked_at 单调不回退
     let env = refresh(&ctx, &[]);
     assert!(env.ok);
-    let (_, _, second_checked) = cached_row(&ctx, "agents:behind-agent").unwrap();
+    let (_, _, second_checked) = cached_row(&ctx, "mcp:npx-current").unwrap();
     assert!(second_checked >= first_checked);
 
     let _ = std::fs::remove_dir_all(base);
@@ -675,12 +639,12 @@ fn only_filters_probe_universe() {
     let _path = PathGuard::prepend(&shim_dir);
     setup_full_universe(&ctx);
 
-    let env = refresh(&ctx, &["--only", "agents:behind-agent"]);
+    let env = refresh(&ctx, &["--only", "mcp:npx-current"]);
     assert!(env.ok, "{:?}", env.errors);
     let elements = env.data["elements"].as_array().unwrap();
     assert_eq!(elements.len(), 1);
-    assert_eq!(elements[0]["id"], "agents:behind-agent");
-    assert_eq!(elements[0]["state"], "behind");
+    assert_eq!(elements[0]["id"], "mcp:npx-current");
+    assert_eq!(elements[0]["state"], "current");
     assert_eq!(env.data["summary"]["probed"], 1);
 
     // 其他宇宙元素未探测：缓存只有一行，status 仍 unknown

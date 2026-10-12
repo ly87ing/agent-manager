@@ -180,6 +180,17 @@ pub fn validate_target_path(path: &Path) -> Result<()> {
         if !meta.is_file() {
             bail!("目标路径不是普通文件，拒绝操作: {}", path.display());
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if meta.nlink() > 1 {
+                bail!("目标文件有硬链接，拒绝读取或写入: {}", path.display());
+            }
+        }
+        #[cfg(windows)]
+        if crate::native_profiles::paths::windows_file_information(path)?.nNumberOfLinks > 1 {
+            bail!("目标文件有硬链接，拒绝读取或写入: {}", path.display());
+        }
     }
     for ancestor in path.ancestors().skip(1) {
         if ancestor.as_os_str().is_empty() || ancestor == Path::new("/") {

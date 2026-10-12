@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
-  Activity,
   ArrowLeft,
   ChevronRight,
   History,
@@ -21,7 +20,6 @@ import { useAutostart, useSetAutostart } from "../lib/autostart";
 import { useTheme, type Theme } from "../lib/theme";
 import { cn } from "../lib/utils";
 import { ConfigBackupSection } from "../components/ConfigBackupSection";
-import ClientDiagnosticsPage from "./ClientDiagnosticsPage";
 import SecretsPage from "./SecretsPage";
 
 const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
@@ -116,12 +114,6 @@ const ADVANCED_ENTRIES = [
     title: "操作记录",
     description: "每次写入的记录：做了什么、成功与否、失败原因。",
     icon: History,
-  },
-  {
-    key: "client-diagnostics",
-    title: "客户端诊断",
-    description: "只读查看 AI CLI 的版本与安装来源。",
-    icon: Activity,
   },
   {
     key: "secrets",
@@ -297,7 +289,6 @@ export default function SettingsPage({
           </button>
           <span className="text-xs text-muted-foreground">/ 工具 / {currentEntry?.title}</span>
         </div>
-        {activeAdvanced === "client-diagnostics" && <ClientDiagnosticsPage />}
         {activeAdvanced === "secrets" && <SecretsPage />}
       </div>
     );

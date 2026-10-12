@@ -6,9 +6,8 @@
 //!
 //! Hooks 已不再由本工具管理（2026-09-29）：不导出；旧备份里的 `hooks.*` 来源照常接受整份导入，
 //! 但这一段跳过不写，在结果的 `skipped` 里列出。
-//! 终端快捷命令同理：rc 文件受管区块里的实际别名不进备份，只有旧版本保存、与内置推荐不同的
-//! 别名（`alias_sources` 里仍有候选的行）以 `aliases.shell` 来源导出；导入写回旧表，在别名页
-//! 作为「已保存未生效」建议出现，不改 rc 文件。
+//! Account and alias policy are excluded from exports and immutable during imports.
+//! Historical alias sources are skipped; existing shell files and legacy rows are preserved.
 //!
 //! 导出只读零写；导入是整体替换，走与逐条保存相同的校验闸门（疑似凭据拒绝、
 //! MCP 定义校验、来源结构校验），并在一个事务里完成——要么整份生效，要么原样不动。
@@ -28,7 +27,6 @@ use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
 use crate::native::{Context, Request};
-use crate::native_aliases::legacy as alias_legacy;
 use crate::native_mcp::saved::{self as mcp_saved, SavedRow};
 use crate::native_rules::templates::{self, Template};
 use crate::store;
@@ -36,26 +34,8 @@ use crate::store;
 /// 备份格式标识：导入时严格比对，不认识的格式直接拒绝而不是尽力解析。
 const FORMAT: &str = "agent-manager/config-backup/v1";
 
-/// 参与备份的来源键，顺序固定，便于逐份比对。都是旧版本保存、还没生效的内容，只在有
-/// 候选时出现。
-const SOURCE_KEYS: &[&str] = &[alias_legacy::LEGACY_KEY];
-
 /// 已退役功能的来源键：旧备份里可能有，接受但不导入。
-const RETIRED_SOURCE_KEYS: &[&str] = &["hooks.claude", "hooks.codex"];
-
-fn collect_sources(ctx: &Context) -> Result<Map<String, Value>> {
-    let mut legacy = BTreeMap::new();
-    if let Some(text) = alias_legacy::exportable(alias_legacy::read_row_readonly(ctx)?.as_ref()) {
-        legacy.insert(alias_legacy::LEGACY_KEY.to_string(), text);
-    }
-    let mut out = Map::new();
-    for key in SOURCE_KEYS {
-        if let Some(text) = legacy.get(*key) {
-            out.insert((*key).to_string(), Value::String(text.clone()));
-        }
-    }
-    Ok(out)
-}
+const RETIRED_SOURCE_KEYS: &[&str] = &["hooks.claude", "hooks.codex", "aliases.shell"];
 
 /// 只读导出：定义树 + 来源正文 + 规则模板 + MCP 已保存项。零写，不创建数据目录或数据库。
 pub(crate) fn export(ctx: &Context, req: &Request) -> Result<Value> {
@@ -63,7 +43,16 @@ pub(crate) fn export(ctx: &Context, req: &Request) -> Result<Value> {
         bail!("config:export 不接受参数，得到 '{}'", arg);
     }
     let mut policy = store::effective_policy(ctx)?;
-    let sources = collect_sources(ctx)?;
+    // Backups contain extensions only; historical account registrations stay local.
+    policy
+        .as_object_mut()
+        .expect("policy object")
+        .remove("agents");
+    policy
+        .as_object_mut()
+        .expect("policy object")
+        .remove("aliases");
+    let sources = Map::<String, Value>::new();
     let (_, rule_templates) = crate::native_rules::status::load_snapshot(ctx)?;
     // 旧库里还没迁移的 MCP 定义按迁移规则推导成已保存项导出，策略里不再重复带。
     let mcp = crate::native_mcp::inventory::load(ctx)?;
@@ -86,11 +75,10 @@ pub(crate) fn export(ctx: &Context, req: &Request) -> Result<Value> {
     }))
 }
 
-/// 校验后的备份内容：policy、来源（不含旧规则键）、规则模板（None = 备份没带这一段）、
+/// 校验后的备份内容：policy、规则模板（None = 备份没带这一段）、
 /// 旧规则来源（旧备份的 rules.* 键）、MCP 已保存项。
 struct Payload {
     policy: Value,
-    sources: Map<String, Value>,
     rule_templates: Option<Vec<(String, String, String)>>,
     legacy_rules: BTreeMap<String, String>,
     mcp_saved: Vec<SavedRow>,
@@ -175,22 +163,13 @@ fn validate_payload(payload: &Value) -> Result<Payload> {
         .map(|key| key.to_string())
         .collect();
     for (key, value) in &sources {
-        if !SOURCE_KEYS.contains(&key.as_str()) && !templates::LEGACY_KEYS.contains(&key.as_str()) {
+        if !templates::LEGACY_KEYS.contains(&key.as_str()) {
             bail!("备份里有不认识的来源键，拒绝导入");
         }
         let text = value
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("来源 {key} 必须是字符串"))?;
         crate::native::reject_secrets_value(&Value::String(text.to_string()))?;
-        // JSON 形态的来源按各自域的结构校验，坏结构不写进去
-        if key == alias_legacy::LEGACY_KEY {
-            let parsed: Value = serde_json::from_str(text)
-                .map_err(|_| anyhow::anyhow!("来源 {key} 不是合法 JSON"))?;
-            let map = parsed
-                .as_object()
-                .ok_or_else(|| anyhow::anyhow!("来源 {key} 不是 JSON 对象"))?;
-            crate::native_aliases::model::validate_source(map)?;
-        }
     }
 
     // 旧版可能把明文放在 secrets 段。空段兼容；非空一律拒绝，避免重新落入数据库。
@@ -232,7 +211,6 @@ fn validate_payload(payload: &Value) -> Result<Payload> {
 
     Ok(Payload {
         policy,
-        sources,
         rule_templates,
         legacy_rules,
         mcp_saved,
@@ -257,6 +235,13 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
         serde_json::from_str(raw).map_err(|_| anyhow::anyhow!("备份内容不是合法 JSON"))?;
     let mut payload = validate_payload(&payload)?;
     let before = store::effective_policy(ctx)?;
+    for key in ["agents", "aliases"] {
+        if payload.policy.get(key).is_none() {
+            if let Some(value) = before.get(key) {
+                payload.policy[key] = value.clone();
+            }
+        }
+    }
     crate::native::prepare_account_generations(&before, &mut payload.policy, true, None)?;
     crate::native::validate_account_policy_change(ctx, &before, &payload.policy)?;
     crate::native_mcp::saved::validate_saved_rows(ctx, &payload.policy, &payload.mcp_saved)?;
@@ -268,6 +253,9 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
     // 本机旧库先迁移（本机的已保存项因此不会随策略替换而丢失），再换策略；
     // 备份策略里的旧版 MCP 定义随即转成未分配的已保存定义。
     let current = store::policy_from_connection(&tx)?;
+    if current.get("agents") != payload.policy.get("agents") {
+        bail!("账号定义只读；导入期间账号元数据发生变化，未写入");
+    }
     if !store::policy_matches_write_snapshot(&tx, &current, &before)? {
         bail!("账号登记在导入预检后发生变化，未导入；请刷新后重试");
     }
@@ -295,17 +283,6 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
             }
             mcp_saved::upsert(&tx, row)?;
         }
-    }
-    let mut restored = Vec::new();
-    for (key, value) in &payload.sources {
-        let text = value.as_str().unwrap_or("");
-        // 旧版本保存的别名：写回旧表，作为已保存未生效的建议出现
-        let parsed: Value = serde_json::from_str(text)?;
-        let map = parsed
-            .as_object()
-            .ok_or_else(|| anyhow::anyhow!("来源 {key} 不是 JSON 对象"))?;
-        alias_legacy::write_row_in_tx(&tx, map)?;
-        restored.push(key.clone());
     }
     let now = templates::now();
     let mut restored_templates = 0usize;
@@ -344,7 +321,7 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
         None,
         Some(&json!({
             "action": "import",
-            "sources": restored,
+            "sources": [],
             "rule_templates": restored_templates,
             "mcp_saved": payload.mcp_saved.len(),
         })),

@@ -52,6 +52,7 @@ fn configured_path(ctx: &Context) -> Result<Option<(String, PathBuf)>> {
     if !path.is_absolute() {
         bail!("外部密钥文件必须使用绝对路径或 ~/ 开头的路径");
     }
+    crate::native_profiles::paths::validate_shell_target(ctx, &path, false)?;
     Ok(Some((trimmed.to_string(), path)))
 }
 

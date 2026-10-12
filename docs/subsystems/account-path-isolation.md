@@ -1,5 +1,8 @@
 # Account Path Isolation
 
+> [Extensions only](../EXTENSIONS-ONLY.md) is the current scope. Account-writing callers described below are retired; the same path guards remain active for MCP, rules, skills, and MCP secret files. `native_mcp::targets::validate_target_path` also rejects multiply-linked files on Unix and Windows before reading them. Account directories and credentials remain unchanged; existing registration metadata only locates extension targets.
+
+
 ## Responsibilities and sources of truth
 
 Independent accounts own their configuration directory and account settings. Main accounts (`~/.claude`, `~/.codex`), other registered accounts, and Agent Manager's data directory are protected boundaries. Account definitions identify the intended directory; filesystem resolution determines its actual destination.

@@ -2,8 +2,8 @@
 
 ## Current goal
 
-- Implement a Tauri 2 interface and a native Rust backend. Product scope and phases are in `docs/MULTI-ACCOUNT-DESIGN.md` (parallel accounts: account = configuration directory + launch command; skills, MCP, and rules are assigned to all accounts by default). Data semantics and write protection are in `docs/GUI-REDESIGN.md`; the multi-account design takes precedence if they conflict. Implementation and acceptance records are in `docs/goal-rust-gui.md`.
-- Main accounts (`~/.claude`, `~/.codex`) hold official logins only. Do not develop third-party switching in the main configuration, connection-preset libraries, or other features listed in Appendix A. Remove existing implementations according to the phased plan.
+- Implement a Tauri 2 interface and a native Rust backend for MCP, rules, skills, and their extension dependencies only. [docs/EXTENSIONS-ONLY.md](docs/EXTENSIONS-ONLY.md) takes precedence over earlier account designs. Data semantics remain in `docs/GUI-REDESIGN.md`; acceptance history is in `docs/goal-rust-gui.md`.
+- Never manage accounts: no creation, registration edits, removal, switching, login/logout, launch commands, credentials, provider/model/runtime changes, or assistant lifecycle actions. Historical account registrations are immutable resource-location metadata. Preserve real account files, sessions, directories, and existing scripts.
 - The desktop app and CLI reuse the same Rust library. The new version does not depend on Python, `manage.sh`, legacy adapters, or the source directory.
 - Python is no longer maintained, and the user has authorized its removal. Do not add Python features, projection compatibility layers, or obligations to compare two implementations.
 - A goal is not an implemented state. Do not call a candidate complete until it has passed compilation, actual operation, and independent acceptance.

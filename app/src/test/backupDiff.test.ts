@@ -47,9 +47,9 @@ describe("备份导入差异", () => {
     const diff = diffBackup(current, incoming);
     const byLabel = Object.fromEntries(diff.sections.map((s) => [s.label, s]));
 
-    expect(byLabel["助手定义"]).toMatchObject({ added: ["newcomer"], changed: [], removed: ["will-go"] });
+    expect(byLabel["助手定义"]).toBeUndefined();
     // 带 profile 段的定义单列为实例，不和普通助手混在一起
-    expect(byLabel["实例"]).toMatchObject({ added: ["cx-work"], changed: [], removed: [] });
+    expect(byLabel["实例"]).toBeUndefined();
     expect(byLabel["MCP 已保存项"]).toMatchObject({ added: ["legacy"], changed: ["edit @ claude-code"], removed: [] });
     // 完全没变的类别不出现
     expect(byLabel["技能集合"]).toBeUndefined();
@@ -71,15 +71,15 @@ describe("备份导入差异", () => {
   it("空备份导入会清空现有定义，如实报为消失；本机的 MCP 已保存项不会消失", () => {
     const diff = diffBackup(current, { policy: {}, sources: {} });
     const byLabel = Object.fromEntries(diff.sections.map((s) => [s.label, s]));
-    expect(byLabel["助手定义"].removed).toEqual(["claude-code", "will-go"]);
-    expect(byLabel["实例"].removed).toEqual(["cc-ly"]);
+    expect(byLabel["助手定义"]).toBeUndefined();
+    expect(byLabel["实例"]).toBeUndefined();
     // 导入对 MCP 已保存项只增改不删（原先断言服务库定义会被清空，该模型已退役）
     expect(byLabel["MCP 已保存项"]).toBeUndefined();
   });
 
   it("来源键有可读名称；旧备份的规则来源标明导入后转为模板", () => {
     // 快捷命令以 rc 文件为准：备份里的 aliases.shell 只是旧版保存、还没生效的那些
-    expect(sourceLabel("aliases.shell")).toContain("未生效");
+    expect(sourceLabel("aliases.shell")).toContain("跳过");
     expect(sourceLabel("unknown.key")).toBe("unknown.key");
     expect(sourceLabel("rules.shared")).toContain("导入后转为模板");
     // Hooks 已不再管理：旧备份里的 hooks.* 导入时跳过

@@ -75,9 +75,8 @@ pub(crate) fn probe(target: &Target) -> Probe {
     }
     match check_symlink_metadata(path) {
         Ok(None) => {
-            let reason = (target.needs_existing_dir && !parent_is_dir(path)).then(|| {
-                "这个账号的配置目录还不存在；先在账号页把它准备好，再编辑规则".to_string()
-            });
+            let reason = (target.needs_existing_dir && !parent_is_dir(path))
+                .then(|| "这个目标的配置目录还不存在；请先在助手中准备好，再编辑规则".to_string());
             return Probe::Missing { reason };
         }
         Ok(Some(meta)) if !meta.is_file() => {

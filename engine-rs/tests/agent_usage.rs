@@ -4,7 +4,7 @@
 mod common;
 
 use agent_manager_engine::platform::Canon;
-use agent_manager_engine::{execute, Context, Request};
+use agent_manager_engine::{execute, store, Context, Request};
 use serde_json::{json, Value};
 use std::{fs, path::PathBuf};
 
@@ -38,21 +38,9 @@ fn request(command: &str, args: Vec<String>) -> Request {
 }
 
 fn define(ctx: &Context, id: &str, definition: Value) {
-    let result = execute(
-        ctx,
-        &request(
-            "policy:set",
-            vec![
-                "--layer".into(),
-                "local".into(),
-                "--key".into(),
-                format!("agents.definitions.{id}"),
-                "--value".into(),
-                definition.to_string(),
-            ],
-        ),
-    );
-    assert!(result.ok, "{:?}", result.errors);
+    let mut policy = store::effective_policy(ctx).unwrap();
+    policy["agents"]["definitions"][id] = definition;
+    store::write_policy(&store::open_write(ctx).unwrap(), &policy).unwrap();
 }
 
 fn quota_files(ctx: &Context, claude: &str, codex: &str) -> Vec<(PathBuf, Vec<u8>)> {
@@ -78,17 +66,11 @@ fn quota_files(ctx: &Context, claude: &str, codex: &str) -> Vec<(PathBuf, Vec<u8
         .collect()
 }
 
-fn assert_no_quota(ctx: &Context, command: &str, ids: &[&str]) {
+fn assert_no_quota(ctx: &Context, command: &str, _ids: &[&str]) {
     let result = execute(ctx, &request(command, vec![]));
-    assert!(result.ok, "{:?}", result.errors);
-    let elements = result.data["elements"].as_array().unwrap();
-    for id in ids {
-        let element = elements
-            .iter()
-            .find(|element| element["id"] == *id)
-            .expect("account is present");
-        assert_eq!(element["observed"].get("usage"), Some(&Value::Null));
-    }
+    assert!(!result.ok);
+    assert_eq!(result.errors[0].code, "FEATURE_RETIRED");
+    assert_eq!(result.data, json!({}));
 }
 
 #[test]

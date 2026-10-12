@@ -292,14 +292,9 @@ fn discover_ignores_unsupported_agent() {
     let _guard = PathGuard::only(&bin_dir);
 
     let env = execute(&ctx, &request("system:discover", &["--only", "agents"]));
-    assert!(env.ok, "{:?}", env.errors);
-    let agents = env.data["agents"].as_array().unwrap();
-    assert!(
-        agents.is_empty(),
-        "只支持 Claude Code 与 Codex，不发现 Qwen"
-    );
-    assert!(!agents.iter().any(|item| item["id"] == "claude-code"));
-    assert!(!ctx.data_dir.exists(), "agents 发现同样零写");
+    assert!(!env.ok);
+    assert_eq!(env.errors[0].code, "DISCOVER_ERROR");
+    assert!(!ctx.data_dir.exists());
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -322,12 +317,9 @@ fn discover_ignores_unsupported_npm_agent() {
     let _guard = PathGuard::only(&bin_dir);
 
     let env = execute(&ctx, &request("system:discover", &["--only", "agents"]));
-    assert!(env.ok, "{:?}", env.errors);
-    let agents = env.data["agents"].as_array().unwrap();
-    assert!(
-        agents.is_empty(),
-        "只支持 Claude Code 与 Codex，不发现 Gemini"
-    );
+    assert!(!env.ok);
+    assert_eq!(env.errors[0].code, "DISCOVER_ERROR");
+    assert!(!ctx.data_dir.exists());
     let _ = std::fs::remove_dir_all(root);
 }
 

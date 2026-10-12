@@ -49,21 +49,6 @@ fn sha(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-/// 按当前实际内容写入实例（profiles:status 给出基准）。
-fn apply_profile(ctx: &Context, id: &str) -> Envelope {
-    let st = run(ctx, "profiles:status", &[]);
-    let base = st.data["elements"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|e| e["id"] == id)
-        .unwrap_or_else(|| panic!("缺实例 {id}"))["observed"]["base"]
-        .as_str()
-        .unwrap_or_else(|| panic!("{id} 没有 base"))
-        .to_string();
-    run(ctx, "profiles:apply", &["--only", id, "--base", &base])
-}
-
 fn status(ctx: &Context) -> Value {
     let env = run(ctx, "rules:status", &[]);
     assert!(env.ok, "{:?}", env.errors);
@@ -891,19 +876,9 @@ fn status_is_zero_write_on_existing_db() {
 }
 
 fn save_profile(ctx: &Context, id: &str, value: &str) {
-    let env = run(
-        ctx,
-        "policy:set",
-        &[
-            "--layer",
-            "local",
-            "--key",
-            &format!("agents.definitions.{id}"),
-            "--value",
-            value,
-        ],
-    );
-    assert!(env.ok, "{:?}", env.errors);
+    let mut policy = store::effective_policy(ctx).unwrap();
+    policy["agents"]["definitions"][id] = serde_json::from_str(value).unwrap();
+    store::write_policy(&store::open_write(ctx).unwrap(), &policy).unwrap();
 }
 
 /// 实例规则文件是规则目标；profiles:apply 不再写它。
@@ -924,8 +899,7 @@ fn profile_rules_file_is_a_target_and_profiles_apply_leaves_it_alone() {
     assert_eq!(target["actions"], serde_json::json!([]));
 
     // profiles:apply 建目录，但不生成规则文件
-    let env = apply_profile(&ctx, "profiles:cx-work");
-    assert!(env.ok, "{:?}", env.errors);
+    std::fs::create_dir_all(ctx.home_dir.join(".codex-work")).unwrap();
     let rules = ctx.home_dir.join(".codex-work/AGENTS.md");
     assert!(!rules.exists(), "新建实例不自动写规则文件");
 
@@ -951,8 +925,12 @@ fn profile_rules_file_is_a_target_and_profiles_apply_leaves_it_alone() {
     // 用户改了实例规则后 profiles:apply：规则文件字节不变，也不因它拒绝
     write_file(&rules, "实例自己的规则\n");
     let before = std::fs::read(&rules).unwrap();
-    let env = apply_profile(&ctx, "profiles:cx-work");
-    assert!(env.ok, "规则文件不再是实例域的写入面: {:?}", env.errors);
+    let env = run(
+        &ctx,
+        "profiles:apply",
+        &["--only", "profiles:cx-work", "--base", "missing"],
+    );
+    assert_eq!(env.errors[0].code, "FEATURE_RETIRED");
     assert_eq!(std::fs::read(&rules).unwrap(), before);
     let st = status(&ctx);
     assert_eq!(

@@ -50,6 +50,12 @@ fn run(ctx: &Context, command: &str, args: &[&str]) -> Envelope {
     execute(ctx, &request(command, args))
 }
 
+fn seed_resource_target(ctx: &Context, id: &str, definition: Value) {
+    let mut policy = store::effective_policy(ctx).unwrap();
+    policy["agents"]["definitions"][id] = definition;
+    store::write_policy(&store::open_write(ctx).unwrap(), &policy).unwrap();
+}
+
 fn errors(env: &Envelope) -> String {
     env.errors
         .iter()
@@ -1274,19 +1280,7 @@ fn snapshot_enable_is_refused_when_same_name_entry_exists() {
 #[test]
 fn opencode_target_toggles_official_enabled_field() {
     let (root, ctx) = temp_ctx("opencode");
-    let set = run(
-        &ctx,
-        "policy:set",
-        &[
-            "--layer",
-            "local",
-            "--key",
-            "agents.definitions.opencode",
-            "--value",
-            r#"{"display_name":"OpenCode","bin":"opencode","providers":{"native":{}},"preferred_provider":"native","mcp_config":{"path":"~/.config/opencode/opencode.json","format":"opencode"}}"#,
-        ],
-    );
-    assert!(set.ok, "{}", errors(&set));
+    seed_resource_target(&ctx, "opencode", serde_json::from_str(r#"{"display_name":"OpenCode","bin":"opencode","providers":{"native":{}},"preferred_provider":"native","mcp_config":{"path":"~/.config/opencode/opencode.json","format":"opencode"}}"#).unwrap());
     let path = ctx.home_dir.join(".config/opencode/opencode.json");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(
@@ -1332,19 +1326,7 @@ fn add_writes_official_fields_only_for_all_clients() {
         ));
     }
     std::fs::write(&source, values).unwrap();
-    let set = run(
-        &ctx,
-        "policy:set",
-        &[
-            "--layer",
-            "local",
-            "--key",
-            "agents.definitions.opencode",
-            "--value",
-            r#"{"display_name":"OpenCode","bin":"opencode","providers":{"native":{}},"preferred_provider":"native","mcp_config":{"path":"~/.config/opencode/opencode.json","format":"opencode"}}"#,
-        ],
-    );
-    assert!(set.ok);
+    seed_resource_target(&ctx, "opencode", serde_json::from_str(r#"{"display_name":"OpenCode","bin":"opencode","providers":{"native":{}},"preferred_provider":"native","mcp_config":{"path":"~/.config/opencode/opencode.json","format":"opencode"}}"#).unwrap());
     for (agent, suffix) in [
         ("claude-code", "CLAUDE"),
         ("codex", "CODEX"),
@@ -2753,19 +2735,7 @@ fn removed_account_is_not_a_target_and_cannot_receive_copies() {
         "_replace": true,
     })
     .to_string();
-    let set = run(
-        &ctx,
-        "policy:set",
-        &[
-            "--layer",
-            "local",
-            "--key",
-            "agents.definitions.gone",
-            "--value",
-            &definition,
-        ],
-    );
-    assert!(set.ok, "{}", errors(&set));
+    seed_resource_target(&ctx, "gone", serde_json::from_str(&definition).unwrap());
     let listed = status(&ctx);
     assert!(listed["targets"]
         .as_array()
@@ -2774,19 +2744,7 @@ fn removed_account_is_not_a_target_and_cannot_receive_copies() {
         .any(|t| t["agent"] == "gone"));
 
     // 移除账号只留删除标记（目录保留）
-    let removed = run(
-        &ctx,
-        "policy:set",
-        &[
-            "--layer",
-            "local",
-            "--key",
-            "agents.definitions.gone",
-            "--value",
-            r#"{"_delete": true}"#,
-        ],
-    );
-    assert!(removed.ok, "{}", errors(&removed));
+    seed_resource_target(&ctx, "gone", json!({"_delete":true}));
     let after = status(&ctx);
     assert!(
         after["targets"]
@@ -3595,14 +3553,9 @@ fn check_stops_before_running_when_a_variable_has_no_value() {
 #[test]
 fn check_reports_a_failing_server_without_leaking_the_secret_it_was_given() {
     let (root, ctx) = temp_ctx("check-fail");
-    configure_secrets_file(&ctx);
+    let source = configure_secrets_file(&ctx);
     const SECRET: &str = "plainvalue-qq83hz-moonlight";
-    let set = run(
-        &ctx,
-        "secrets:set",
-        &["--var", "AM_CHECK_TOKEN", "--value", SECRET],
-    );
-    assert!(set.ok, "{}", errors(&set));
+    std::fs::write(source, format!("AM_CHECK_TOKEN={SECRET}\n")).unwrap();
     let server = fake_server(
         &ctx,
         "#!/bin/sh\nIFS= read -r initialize || exit 2\necho \"auth failed for token $TOKEN\" >&2\nexit 1\n",
@@ -3885,18 +3838,8 @@ fn fake_http_server(
 #[test]
 fn check_talks_streamable_http_with_session_and_resolved_headers() {
     let (root, ctx) = temp_ctx("check-http");
-    configure_secrets_file(&ctx);
-    let set = run(
-        &ctx,
-        "secrets:set",
-        &[
-            "--var",
-            "AM_REMOTE_TOKEN",
-            "--value",
-            "remote-plain-token-77",
-        ],
-    );
-    assert!(set.ok, "{}", errors(&set));
+    let source = configure_secrets_file(&ctx);
+    std::fs::write(source, "AM_REMOTE_TOKEN=remote-plain-token-77\n").unwrap();
     // curl must ignore account-external defaults even in the captured HOME.
     std::fs::write(
         ctx.home_dir.join(".curlrc"),

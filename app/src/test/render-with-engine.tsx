@@ -21,7 +21,23 @@ export function renderWithEngine(
   routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)>,
 ) {
   const calls: RecordedCall[] = [];
-  const base = createFakeEngineClient(routes);
+  const resourceTargets: { id: string; name: string; group: string; kind: string | null }[] = [];
+  for (const domain of ["agents", "profiles"]) {
+    const route = routes[domain + ":status"];
+    if (!route || typeof route === "function") continue;
+    const data = route.data as { elements?: { id: string; spec: Record<string, unknown> }[] };
+    for (const item of data.elements ?? []) {
+      const id = item.id.replace(/^(agents|profiles):/, "");
+      const base = domain === "profiles" ? String(item.spec.base_agent ?? id) : id;
+      resourceTargets.push({ id, name: String(item.spec.display_name ?? id), group: base,
+        kind: base === "claude-code" ? "claude" : base === "codex" ? "codex" : null });
+    }
+  }
+  const base = createFakeEngineClient({
+    "resources:targets": { contract: "agent-manager/engine/v1", run_id: "targets-fixture", command: "resources.targets", ok: true,
+      mode: { offline: true }, lock: { held: false, pid: null }, errors: [], warnings: [], data: { targets: resourceTargets } },
+    ...routes,
+  });
   setEngineClient({
     async run(command, args = [], options) {
       calls.push({ command, args: [...args], options });

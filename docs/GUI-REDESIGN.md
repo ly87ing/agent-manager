@@ -1,5 +1,8 @@
 # GUI Redesign: Current Contract
 
+> Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
+
+
 **Product positioning follows the [Multi-Account Parallel Design](MULTI-ACCOUNT-DESIGN.md) (decision dated 2026-09-28).** This document continues to govern the data model, write protection, and resource-domain behavior. Switching the main configuration to third-party connections, the saved connection library, default-environment cards, runtime-settings forms, overview, operation-history page, command-palette switching entries, and a separate Hooks page are retired under Appendix A of that design. Their UI and engine commands were removed on 2026-09-28; the corresponding sections below remain historical records. If the documents conflict, the multi-account design takes precedence.
 
 ## Data model: the actual configuration is authoritative

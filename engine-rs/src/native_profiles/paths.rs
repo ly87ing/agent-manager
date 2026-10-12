@@ -89,7 +89,7 @@ fn check_identity_file(path: &Path, id: &str) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn windows_file_information(
+pub(crate) fn windows_file_information(
     path: &Path,
 ) -> Result<windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION> {
     use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};

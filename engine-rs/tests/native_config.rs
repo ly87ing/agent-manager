@@ -407,7 +407,7 @@ fn retired_hooks_sources_are_skipped_on_import() {
 /// 终端快捷命令以 rc 文件受管区块为准，不进备份；只有旧版本保存、与内置推荐不同的别名以
 /// aliases.shell 来源导出，导入（含旧备份）后在别名页作为已保存未生效建议出现，不改 rc 文件。
 #[test]
-fn only_unapplied_legacy_aliases_travel_in_backups() {
+fn legacy_alias_sources_are_skipped_without_changing_shell_or_metadata() {
     let (root, ctx) = temp_ctx("aliases-backup");
     // 实际区块里的别名不进备份
     let zshrc = ctx.home_dir.join(".zshrc");
@@ -435,47 +435,10 @@ fn only_unapplied_legacy_aliases_travel_in_backups() {
     );
     assert!(env.ok, "{:?}", env.errors);
     assert_eq!(std::fs::read(&zshrc).unwrap(), before, "导入不改 rc 文件");
-    let names = |ctx: &Context| -> Vec<String> {
-        let status = execute(ctx, &request("aliases:status", &[]));
-        status.data["alias_legacy"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|item| item["name"].as_str().unwrap().to_string())
-            .collect()
-    };
-    assert_eq!(names(&ctx), ["ll"]);
-
-    // 仍有未生效的别名：导出带上这一行，换机器导入后照样是建议
+    assert_eq!(env.data["skipped"], serde_json::json!(["aliases.shell"]));
     let exported = execute(&ctx, &request("config:export", &[]));
-    let text = exported.data["sources"]["aliases.shell"].as_str().unwrap();
-    assert!(text.contains("ls -l"));
-    let (root2, ctx2) = temp_ctx("aliases-backup-2");
-    let env = execute(
-        &ctx2,
-        &request(
-            "config:import",
-            &["--value", &serde_json::to_string(&exported.data).unwrap()],
-        ),
-    );
-    assert!(env.ok, "{:?}", env.errors);
-    assert!(
-        std::fs::read_dir(&ctx2.home_dir)
-            .map(|mut dir| dir.next().is_none())
-            .unwrap_or(true),
-        "导入不写 home"
-    );
-    assert_eq!(names(&ctx2), ["ll"]);
-
-    // 结构非法的 aliases.shell 整份拒绝
-    let mut bad = exported.data.clone();
-    bad["sources"]["aliases.shell"] = serde_json::json!(r#"{"aliases":{"bad name":"x"}}"#);
-    let env = execute(
-        &ctx2,
-        &request("config:import", &["--value", &bad.to_string()]),
-    );
-    assert!(!env.ok);
-    assert_eq!(env.errors[0].code, "CONFIG_ERROR");
+    assert!(exported.data["sources"].get("aliases.shell").is_none());
+    assert!(exported.data["policy"].get("aliases").is_none());
+    assert_eq!(std::fs::read(&zshrc).unwrap(), before);
     let _ = std::fs::remove_dir_all(root);
-    let _ = std::fs::remove_dir_all(root2);
 }

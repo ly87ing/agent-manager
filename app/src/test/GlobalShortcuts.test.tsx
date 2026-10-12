@@ -28,22 +28,22 @@ function routes() {
 
 describe("全局快捷键", () => {
   beforeAll(async () => {
-    await Promise.all([import("../pages/AccountsPage"), import("../pages/SettingsPage"), import("../pages/McpPage")]);
+    await Promise.all([import("../pages/SkillsPage"), import("../pages/SettingsPage"), import("../pages/McpPage")]);
   });
   it("Cmd/Ctrl+, 跳到设置页", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
 
     const nav = await screen.findByRole("navigation");
-    expect(await screen.findByRole("heading", { name: "账号" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "技能" })).toBeInTheDocument();
 
     await userEvent.keyboard("{Meta>},{/Meta}");
     expect(within(nav).getByRole("button", { name: "设置" })).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
 
     // Ctrl 变体（非 macOS 约定）：先回账号页再用 Ctrl+, 进设置
-    await userEvent.click(within(nav).getByRole("button", { name: "账号" }));
-    expect(within(nav).getByRole("button", { name: "账号" })).toHaveAttribute("aria-current", "page");
+    await userEvent.click(within(nav).getByRole("button", { name: "技能" }));
+    expect(within(nav).getByRole("button", { name: "技能" })).toHaveAttribute("aria-current", "page");
     await userEvent.keyboard("{Control>},{/Control}");
     expect(within(nav).getByRole("button", { name: "设置" })).toHaveAttribute("aria-current", "page");
   }, 15000);

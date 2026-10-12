@@ -16,7 +16,6 @@ export default function SecretsPage() {
   const directApply = useDirectApply();
   const [editing, setEditing] = useState<{ variable: string; stored: boolean } | null>(null);
   const [clearing, setClearing] = useState<string | null>(null);
-  const [confirmMigration, setConfirmMigration] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [sourcePath, setSourcePath] = useState("");
   const [sourceTouched, setSourceTouched] = useState(false);
@@ -36,8 +35,6 @@ export default function SecretsPage() {
   const variables = envObserved.variables ?? [];
   const unresolved = envObserved.unresolved ?? variables.filter((item) => item.resolved === false).length;
   const servers = Array.from(new Set(variables.map((item) => item.server ?? "?")));
-  const legacyCount = envObserved.legacy_database_values ?? 0;
-  const providerKeys = envObserved.provider_keys ?? [];
   const sourceReady = source.ready === true;
   const currentSourcePath = source.path ?? "";
   const sourceChanged = sourcePath.trim() !== currentSourcePath;
@@ -168,84 +165,10 @@ export default function SecretsPage() {
         )}
       </section>
 
-      {legacyCount > 0 && (
-        <section data-testid="legacy-secrets-warning" className="rounded-lg border border-warning/40 bg-warning/10 p-4">
-          <h3 className="text-sm font-semibold text-warning">旧数据库里还有 {legacyCount} 个明文密钥</h3>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            当前版本不会再读取这些旧值。先确认上面的外部文件可用，再把它们迁移过去并从数据库删除；同名但取值不同会拒绝覆盖。
-          </p>
-          <button
-            type="button"
-            data-testid="migrate-legacy-secrets"
-            disabled={!sourceReady || directApply.executing}
-            title={sourceReady ? "迁移后删除旧数据库表" : "先选择可用的外部密钥文件"}
-            onClick={() => setConfirmMigration(true)}
-            className="mt-3 rounded border border-warning/40 bg-card px-3 py-1.5 text-xs font-medium text-warning hover:bg-warning/15 disabled:opacity-50"
-          >
-            迁移并清除旧值
-          </button>
-        </section>
-      )}
-
       <div className="flex items-start gap-2 rounded-lg border bg-muted px-4 py-2.5 text-xs text-muted-foreground">
         <EyeOff className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-        <p>页面只显示变量名和来源，不读取回显密钥。进程环境仅用于只读状态提示；账号启动、认证和配置写入必须使用所选外部文件。</p>
+        <p>页面只显示变量名和来源，不读取回显密钥。这里只允许修改 MCP 专用变量；账号凭据与其他变量只读。</p>
       </div>
-
-      {mcpEnv && providerKeys.length > 0 && (
-        <section data-testid="secrets-provider-keys" className="rounded-lg border bg-card p-5 shadow-sm">
-          <h3 className="text-sm font-semibold text-foreground">接入与独立环境用到的密钥</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            独立环境写配置时把取值写进了自己的配置文件（仅本人可读）。在这里改了取值后，用到它的独立环境卡片会提示「密钥换过了」，点卡片上的「写入新密钥」才生效。
-          </p>
-          <table className="mt-3 w-full text-left text-sm">
-            <thead>
-              <tr className="border-b text-xs text-muted-foreground">
-                <th className="py-2 pr-4 font-medium">变量名</th>
-                <th className="py-2 pr-4 font-medium">用在</th>
-                <th className="py-2 pr-4 font-medium">当前来源</th>
-                <th className="py-2 font-medium">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {providerKeys.map((item) => (
-                <tr key={item.variable} data-testid={`provider-key-${item.variable}`} className="border-b last:border-0">
-                  <td className="py-2 pr-4 font-mono text-xs text-foreground">{item.variable}</td>
-                  <td className="py-2 pr-4 text-xs text-muted-foreground">
-                    {item.used_by
-                      .map((use) => (use.kind === "connection" ? `接入 ${use.label}（${use.agent}）` : `独立环境 ${use.label}（${use.id}）`))
-                      .join("、")}
-                  </td>
-                  <td className="py-2 pr-4">
-                    {item.resolved ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-success">
-                        <Check className="h-3.5 w-3.5" aria-hidden />
-                        {item.stored ? "外部文件" : "进程环境"}
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-xs text-destructive">
-                        <X className="h-3.5 w-3.5" aria-hidden /> 未配置
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-2">
-                    <button
-                      type="button"
-                      data-testid={`fill-provider-key-${item.variable}`}
-                      disabled={directApply.executing || !sourceReady}
-                      title={sourceReady ? `写入 ${currentSourcePath}` : "先在上方选择可用的外部密钥文件"}
-                      onClick={() => setEditing({ variable: item.variable, stored: item.stored })}
-                      className="rounded border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {item.stored ? "修改" : "写入外部文件"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
 
       {mcpEnv && (
         <section data-testid="secrets-env-matrix" className="rounded-lg border bg-card p-5 shadow-sm">
@@ -351,7 +274,7 @@ export default function SecretsPage() {
       {clearing && (
         <ConfirmModal
           title={`删除 ${clearing} 的取值`}
-          description={`只从外部密钥文件 ${currentSourcePath} 删除这一项；接入配置与 MCP 条目里的变量引用不变。删除后，相关受控操作会因缺少密钥而停止。`}
+          description={`只从外部密钥文件 ${currentSourcePath} 删除这一项；MCP 条目里的变量引用不变。删除后，相关受控操作会因缺少密钥而停止。`}
           risk="write-local"
           riskLabel="删除外部密钥"
           confirmLabel="确认删除"
@@ -371,29 +294,10 @@ export default function SecretsPage() {
         />
       )}
 
-      {confirmMigration && (
-        <ConfirmModal
-          title="迁移旧数据库密钥"
-          description={`先把 ${legacyCount} 个旧取值写入 ${currentSourcePath}，全部成功后才删除数据库里的旧密钥表。同名不同值会拒绝并保持数据库不变。`}
-          risk="install-remove"
-          riskLabel="迁移并删除旧值"
-          requireText="迁移"
-          confirmLabel="迁移并清除"
-          executing={directApply.executing}
-          onClose={() => setConfirmMigration(false)}
-          onConfirm={() => {
-            setConfirmMigration(false);
-            void directApply
-              .apply({ command: "secrets:migrate-legacy", label: "迁移旧数据库密钥" })
-              .then((envelope) => envelope?.ok && void query.refetch());
-          }}
-        />
-      )}
-
       {confirmDisconnect && (
         <ConfirmModal
           title="停止使用外部密钥文件"
-          description="只会取消本应用对该文件的引用，不会删除或修改文件。依赖密钥的账号启动、认证和配置写入将停止，直到重新选择可用文件。"
+          description="只会取消本应用对该文件的引用，不会删除或修改文件。依赖此文件的 MCP 凭据解析将停止，直到重新选择可用文件。"
           risk="write-local"
           confirmLabel="确认停止使用"
           executing={directApply.executing}

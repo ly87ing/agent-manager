@@ -1,5 +1,8 @@
 # Secrets Configuration
 
+> Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
+
+
 ## Manual configuration
 
 Installation and use require neither the author's secrets repository nor a GitHub account.

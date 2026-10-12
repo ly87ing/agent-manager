@@ -27,63 +27,27 @@ impl EngineError {
 
 // ---------- 命令面白名单 ----------
 
-/// 桌面界面仍使用 status + apply 的域；助手安装生命周期只保留在 CLI。
-const READ_WRITE_DOMAINS: &[&str] = &["mcp", "skills", "rules", "aliases", "profiles"];
+/// The desktop exposes extension operations only; account operations are retired.
+const READ_WRITE_DOMAINS: &[&str] = &["mcp", "skills", "rules"];
 
 pub fn validate_command(command: &str) -> Result<(), EngineError> {
-    let rejected = || {
-        EngineError::new(
-            "unknown_command",
-            format!(
-                "命令 '{command}' 不在契约命令面内（允许 mcp/skills/rules/aliases/profiles:status|apply / mcp:preview|aliases:preview / rules:save-template|delete-template / aliases:discard-legacy / profiles:preview|apply-definition|adopt|seed|shared-status|shared-apply / agents:status|configure|preview-runtime|auth-status / secrets:status|set|source|migrate-legacy / system:audit|discover|refresh-upstream / runs:* / policy:* / db:*）"
-            ),
-        )
-    };
     let Some((domain, verb)) = command.split_once(':') else {
-        return Err(rejected());
+        return Err(EngineError::new(
+            "unknown_command",
+            "命令必须使用 domain:verb 形式",
+        ));
     };
-    if domain.is_empty() || verb.is_empty() || verb.contains(':') {
-        return Err(rejected());
-    }
     let allowed = match (domain, verb) {
+        ("resources", "targets") => true,
         ("system", "audit" | "discover" | "refresh-upstream") => true,
-        ("secrets", "status" | "set" | "source" | "migrate-legacy") => true,
-        ("runs", "list" | "get" | "clear") => true,
-        // 长操作的进度：只读系统临时目录里的进度文件
-        ("runs", "progress") => true,
+        ("secrets", "status" | "set" | "source") => true,
+        ("runs", "list" | "get" | "clear" | "progress") => true,
         ("policy", "get" | "set" | "delete") => true,
         ("db", "status" | "migrate") => true,
         ("config", "export" | "import") => true,
-        // 规则模板只写库：保存与删除，不动规则文件
         ("rules", "save-template" | "delete-template") => true,
-        // 丢弃旧版本保存的终端快捷命令：只写库，不动 rc 文件
-        ("aliases", "discard-legacy") => true,
-        // 以实例的实际配置更新实例定义：只写库，不动实例文件
-        ("profiles", "adopt") => true,
-        ("mcp" | "aliases", "preview") => true,
-        // 测试连接：运行条目里的命令或请求地址一次，只返回结果，不写文件、不写库
-        ("mcp", "check") => true,
-        // 用户逐环境确认后同时更新定义与实际配置文件
-        ("profiles", "apply-definition" | "create") => true,
-        ("accounts", "command") => true,
-        // 把默认环境的权限、状态栏、规则与 MCP 一次性带进实例：只补实例没有的
-        ("profiles", "seed") => true,
-        ("profiles", "shared-status" | "shared-apply" | "preview") => true,
-        // 运行参数写助手自己的配置文件（如实时额度状态栏）：与装卸升级的 apply 分开
-        ("agents", "configure" | "preview-runtime") => true,
-        // 官方账号登录状态：只读，用官方命令查一次
-        ("agents", "auth-status") => true,
-        ("agents", "status") => true,
-        // 「改成我的版本」：把技能复制到用户目录并登记为用户的本机集合
-        ("skills", "fork") => true,
-        // 列出 git 来源可选的版本：只读网络，不写库、不动镜像
-        ("skills", "versions") => true,
-        // 换版本前的文件变化预览：只取目标提交进本工具的镜像缓存，不动账号目录、不写库
-        ("skills", "preview") => true,
-        // 纳入管理：预览只读；执行会移动账号目录里的内容并建链接（引擎内取排他锁、先备份、可撤回）
-        ("skills", "adopt-preview" | "adopt") => true,
-        // 程序：技能与 MCP 依赖的程序。status 只读；preview 只算计划；apply 在引擎内取排他锁、改动前备份；
-        // declare 只写库（补充声明、安装方式、允许安装脚本）
+        ("mcp", "preview" | "check") => true,
+        ("skills", "fork" | "versions" | "preview" | "adopt-preview" | "adopt") => true,
         ("programs", "status" | "preview" | "apply" | "declare") => true,
         (d, "status" | "apply") => READ_WRITE_DOMAINS.contains(&d),
         _ => false,
@@ -91,7 +55,10 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
     if allowed {
         Ok(())
     } else {
-        Err(rejected())
+        Err(EngineError::new(
+            "unknown_command",
+            "本工具仅允许 MCP、规则、技能及其扩展依赖操作",
+        ))
     }
 }
 
@@ -811,9 +778,9 @@ mod tests {
 
     #[test]
     fn controlled_account_commands_reject_unsupported_operations_and_secret_flags() {
-        assert!(validate_command("accounts:command").is_ok());
+        assert!(validate_command("accounts:command").is_err());
         assert!(validate_command("accounts:launch").is_err());
-        assert!(validate_command("profiles:create").is_ok());
+        assert!(validate_command("profiles:create").is_err());
         let args = |items: &[&str]| {
             items
                 .iter()
@@ -868,10 +835,6 @@ mod tests {
     #[test]
     fn command_whitelist_covers_contract_surface_and_rejects_injection() {
         for command in [
-            "agents:status",
-            "agents:configure",
-            "agents:preview-runtime",
-            "agents:auth-status",
             "mcp:status",
             "mcp:preview",
             "mcp:check",
@@ -882,22 +845,9 @@ mod tests {
             "rules:apply",
             "rules:save-template",
             "rules:delete-template",
-            "aliases:status",
-            "aliases:preview",
-            "aliases:apply",
-            "aliases:discard-legacy",
-            "profiles:status",
-            "profiles:preview",
-            "profiles:apply",
-            "profiles:apply-definition",
-            "profiles:adopt",
-            "profiles:seed",
-            "profiles:shared-status",
-            "profiles:shared-apply",
             "secrets:status",
             "secrets:set",
             "secrets:source",
-            "secrets:migrate-legacy",
             "system:audit",
             "system:discover",
             "system:refresh-upstream",
@@ -911,11 +861,29 @@ mod tests {
             "db:migrate",
             "config:export",
             "config:import",
+            "resources:targets",
         ] {
             assert!(validate_command(command).is_ok(), "{command} should pass");
         }
 
         for command in [
+            "agents:status",
+            "agents:configure",
+            "agents:preview-runtime",
+            "agents:auth-status",
+            "aliases:status",
+            "aliases:preview",
+            "aliases:apply",
+            "aliases:discard-legacy",
+            "profiles:status",
+            "profiles:preview",
+            "profiles:apply",
+            "profiles:apply-definition",
+            "profiles:adopt",
+            "profiles:seed",
+            "profiles:shared-status",
+            "profiles:shared-apply",
+            "secrets:migrate-legacy",
             "usage:status",
             "usage:scan",
             "usage:clear",
@@ -1520,7 +1488,7 @@ mod tests {
     fn agents_runtime_and_auth_args_follow_the_contract() {
         let base = "c".repeat(64);
         let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert!(validate_command("agents:preview-runtime").is_ok());
+        assert!(validate_command("agents:preview-runtime").is_err());
         assert!(validate_args(
             "agents:configure",
             &args(&[
@@ -1571,8 +1539,8 @@ mod tests {
     fn profiles_args_follow_the_actual_config_contract() {
         let base = "b".repeat(64);
         let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert!(validate_command("profiles:adopt").is_ok());
-        assert!(validate_command("profiles:preview").is_ok());
+        assert!(validate_command("profiles:adopt").is_err());
+        assert!(validate_command("profiles:preview").is_err());
         assert!(validate_args(
             "profiles:preview",
             &args(&[
@@ -1955,10 +1923,9 @@ mod tests {
             envelope.data["status"].as_str(),
             Some("warning" | "healthy")
         ));
-        for entry in envelope.data["sections"]["aliases"].as_array().unwrap() {
-            assert_eq!(entry["status"], "notice", "{entry}");
-        }
-        assert!(envelope.data["sections"].as_object().unwrap().len() >= 8);
+        assert!(envelope.data["sections"].get("aliases").is_none());
+        assert!(envelope.data["sections"].get("agents").is_none());
+        assert_eq!(envelope.data["sections"].as_object().unwrap().len(), 6);
         assert!(!base.join("data").exists(), "audit 不得创建数据目录");
         assert!(!base.join("home").exists(), "audit 不得创建 home 目录");
         let _ = std::fs::remove_dir_all(&base);
@@ -2091,7 +2058,7 @@ mod tests {
         // 端到端：bridge 直连引擎，status 只读零写
         let root = std::env::temp_dir().join(format!("am-aliases-bridge-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let env = dispatch_native(
+        let result = dispatch_native(
             agent_manager_engine::Context {
                 data_dir: root.join("data"),
                 home_dir: root.join("home"),
@@ -2099,20 +2066,9 @@ mod tests {
             "aliases:status".into(),
             vec![],
             "aliases-bridge".into(),
-        )
-        .unwrap();
-        assert!(env.ok, "{:?}", env.errors);
-        // 推荐快捷命令不编进程序：没有来源时不推荐，只给推荐来源
-        assert_eq!(
-            env.data["alias_recommendations"].as_array().unwrap().len(),
-            0
         );
-        assert_eq!(
-            env.data["alias_suggested_sources"][0]["name"],
-            "agent-skills"
-        );
-        assert!(!root.join("data").exists(), "aliases:status 零写");
-        assert!(!root.join("home").exists(), "aliases:status 零写");
+        assert!(result.is_err());
+        assert!(!root.exists());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -2152,6 +2108,20 @@ mod tests {
             data_dir: root.join("data"),
             home_dir: root.join("home"),
         };
+        let targets =
+            dispatch_native(c(), "resources:targets".into(), vec![], "labels".into()).unwrap();
+        assert!(targets.ok);
+        assert!(targets.data["targets"].is_array());
+        for command in [
+            "agents:status",
+            "profiles:create",
+            "accounts:command",
+            "aliases:apply",
+            "secrets:migrate-legacy",
+        ] {
+            assert!(dispatch_native(c(), command.into(), vec![], "retired".into()).is_err());
+        }
+        assert!(!root.exists());
         assert!(
             dispatch_native(c(), "policy:get".into(), vec![], "read".into())
                 .unwrap()
@@ -2166,7 +2136,7 @@ mod tests {
                     "--layer".into(),
                     "local".into(),
                     "--key".into(),
-                    "agents.x".into(),
+                    "skills.x".into(),
                     "--value".into(),
                     "true".into()
                 ],
@@ -2178,7 +2148,7 @@ mod tests {
         assert_eq!(
             dispatch_native(c(), "policy:get".into(), vec![], "read".into())
                 .unwrap()
-                .data["effective"]["agents"]["x"],
+                .data["effective"]["skills"]["x"],
             true
         );
 

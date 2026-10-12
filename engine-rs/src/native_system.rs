@@ -25,7 +25,7 @@ pub(crate) struct AuditOutcome {
     pub errors: Vec<Diagnostic>,
 }
 
-const WIRED_DOMAINS: &[&str] = &["agents", "skills", "mcp", "rules", "aliases", "secrets"];
+const WIRED_DOMAINS: &[&str] = &["skills", "mcp", "rules", "secrets"];
 
 const MSG_OK: &str = "状态正常";
 const MSG_DISABLED: &str = "已禁用，未纳入管理";

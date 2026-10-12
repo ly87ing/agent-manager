@@ -261,18 +261,6 @@ struct ProbeTarget {
 fn collect_targets(ctx: &Context) -> Result<Vec<ProbeTarget>> {
     let mut targets = Vec::new();
 
-    for def in native_agents::load_definitions(ctx)? {
-        if let Some(package) = agent_probe_package(&def) {
-            targets.push(ProbeTarget {
-                id: format!("agents:{}", def.id),
-                kind: ProbeKind::AgentNpm {
-                    bin: def.bin.clone(),
-                    package,
-                },
-            });
-        }
-    }
-
     // MCP：各助手实际条目与已保存项里的 npx 包 / uvx git 源，每个服务名取一份
     // （选取规则与 mcp:status 的 freshness 一致）。
     let mcp = crate::native_mcp::inventory::load(ctx)?;

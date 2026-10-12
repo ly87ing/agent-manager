@@ -103,19 +103,16 @@ function routes(data: DiscoverData = discoverData()) {
   };
 }
 
-describe("扫描本机已有内容：账号页的未登记助手、来源页的外部技能目录", () => {
+describe("扫描外部技能目录与残留链接", () => {
   it("按来源分类展示，原生安装项只标识不可勾选", async () => {
     renderWithEngine(
-      <>
-        <DiscoverPanel scope="agents" />
-        <DiscoverPanel scope="skills" />
-      </>,
+      <DiscoverPanel />,
       routes(),
     );
-    await waitFor(() => expect(screen.getByTestId("takeover-agents")).toBeInTheDocument());
+    await screen.findByTestId("takeover-skill-group-vendor");
 
     // 可接管项带勾选框
-    expect(screen.getByTestId("takeover-agent-opencode").querySelector("input[type=checkbox]")).toBeTruthy();
+    expect(screen.queryByTestId("takeover-agents")).toBeNull();
     expect(screen.getByTestId("takeover-skill-group-vendor").querySelector("input[type=checkbox]")).toBeTruthy();
     // MCP 条目以各助手配置文件为准，直接在 MCP 页编辑，接管中心不再有 MCP 分区
     expect(screen.queryByTestId("takeover-mcp")).toBeNull();
@@ -126,11 +123,11 @@ describe("扫描本机已有内容：账号页的未登记助手、来源页的�
     // 残留链接可勾选，但走的是清理而不是纳管
     expect(screen.getByTestId("takeover-dead-ghost-codex").querySelector("input[type=checkbox]")).toBeTruthy();
     // 助手登记只服务于识别和配置，软件生命周期一律交还原安装渠道。
-    expect(screen.getByTestId("takeover-agent-opencode")).toHaveTextContent("仅登记配置，软件由原渠道维护");
+    expect(screen.queryByTestId("takeover-agent-opencode")).toBeNull();
   });
 
   it("外部技能组接管：先登记本地来源集合定义，再逐助手 add（不带接管旗标）", async () => {
-    const { calls } = renderWithEngine(<DiscoverPanel scope="skills" />, routes());
+    const { calls } = renderWithEngine(<DiscoverPanel />, routes());
     await waitFor(() => expect(screen.getByTestId("takeover-skill-group-vendor")).toBeInTheDocument());
 
     await userEvent.click(screen.getByTestId("takeover-skill-group-vendor").querySelector("input[type=checkbox]")!);
@@ -154,7 +151,7 @@ describe("扫描本机已有内容：账号页的未登记助手、来源页的�
   });
 
   it("已定义集合的计划外链接走既有接管通道（带 --allow-takeover）", async () => {
-    const { calls } = renderWithEngine(<DiscoverPanel scope="skills" />, routes());
+    const { calls } = renderWithEngine(<DiscoverPanel />, routes());
     await waitFor(() => expect(screen.getByTestId("takeover-skill-extra-safe-merge-review-claude-code")).toBeInTheDocument());
 
     await userEvent.click(
@@ -176,21 +173,8 @@ describe("扫描本机已有内容：账号页的未登记助手、来源页的�
     ]);
   });
 
-  it("助手登记只写定义，不执行任何 agents:apply", async () => {
-    const { calls } = renderWithEngine(<DiscoverPanel scope="agents" />, routes());
-    await waitFor(() => expect(screen.getByTestId("takeover-agent-opencode")).toBeInTheDocument());
-
-    await userEvent.click(screen.getByTestId("takeover-agent-opencode").querySelector("input[type=checkbox]")!);
-    await userEvent.click(screen.getByTestId("takeover-run"));
-    await userEvent.click(await screen.findByRole("button", { name: "开始接管" }));
-
-    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
-    expect(calls.find((call) => call.command === "policy:set")?.args[3]).toBe("agents.definitions.opencode");
-    expect(calls.some((call) => call.command === "agents:apply")).toBe(false);
-  });
-
   it("残留链接可勾选清理：只删链接本身，确认文案分开说明", async () => {
-    const { calls } = renderWithEngine(<DiscoverPanel scope="skills" />, {
+    const { calls } = renderWithEngine(<DiscoverPanel />, {
       ...routes(),
       "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
     });
@@ -218,7 +202,7 @@ describe("扫描本机已有内容：账号页的未登记助手、来源页的�
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    renderWithEngine(<DiscoverPanel scope="skills" />, {
+    renderWithEngine(<DiscoverPanel />, {
       ...routes(),
       "policy:set": async () => {
         await gate;
@@ -249,10 +233,7 @@ describe("扫描本机已有内容：账号页的未登记助手、来源页的�
       summary: {},
     };
     const { calls } = renderWithEngine(
-      <>
-        <DiscoverPanel scope="agents" />
-        <DiscoverPanel scope="skills" />
-      </>,
+      <DiscoverPanel />,
       routes(empty),
     );
     await waitFor(() => expect(calls.some((call) => call.command === "system:discover")).toBe(true));

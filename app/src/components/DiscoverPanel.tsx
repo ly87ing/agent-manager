@@ -1,10 +1,9 @@
 import { useMemo, useState } from "react";
-import { Bot, FolderSymlink, Link2Off, PackageCheck, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
+import { FolderSymlink, Link2Off, PackageCheck, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import { ConfirmModal } from "./ConfirmModal";
 import { PageError } from "./PageState";
 import { ErrorPanel } from "./ErrorPanel";
 import type {
-  DiscoverAgentCandidate,
   DiscoverData,
   DiscoverSkillGroup,
   DiscoverSkillItem,
@@ -13,14 +12,6 @@ import { definitionKeyPrefix } from "../lib/definitionOverlay";
 import { useEngineQuery } from "../lib/queries";
 import { useTakeover, type TakeoverTask } from "../lib/useTakeover";
 import { cn } from "../lib/utils";
-
-/** 助手来源 → 展示文案：官方安装器/Homebrew/npm 全局/其他路径。 */
-const AGENT_ORIGIN_LABEL: Record<string, string> = {
-  native: "官方安装器",
-  brew: "Homebrew",
-  npm: "npm 全局",
-  system: "其他路径",
-};
 
 function Badge({ tone, children }: { tone: "info" | "success" | "warning" | "muted"; children: React.ReactNode }) {
   const toneClass = {
@@ -39,7 +30,7 @@ function SectionCard({
   children,
   testId,
 }: {
-  icon: typeof Bot;
+  icon: typeof FolderSymlink;
   title: string;
   description: string;
   children: React.ReactNode;
@@ -79,20 +70,14 @@ function SelectableRow({
   );
 }
 
-/**
- * 扫描本机已有、还没管理的内容并批量纳入（system:discover，只读扫描）。按管理体系分在两处
- * （docs/MULTI-ACCOUNT-DESIGN.md「管理体系」）：`agents` 是未登记的助手，放在账号页；`skills` 是外部技能
- * 目录（登记为本机目录来源后直链源目录）、已有来源的计划外链接与残留链接，放在来源页「未纳管」。
- * 没有可处理的内容时整块不显示。原生安装的技能目录只标识、不接管。MCP 条目直接在 MCP 页查看与编辑。
- */
-export function DiscoverPanel({ scope }: { scope: "agents" | "skills" }) {
-  const query = useEngineQuery<DiscoverData>("system:discover");
+/** Discover external skill directories and removable links without scanning accounts. */
+export function DiscoverPanel() {
+  const query = useEngineQuery<DiscoverData>("system:discover", ["--only", "skills"]);
   const takeover = useTakeover();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirming, setConfirming] = useState(false);
 
   const data = query.data?.ok ? query.data.data : null;
-  const agents = data?.agents ?? [];
   const skillItems = data?.skills?.items ?? [];
   const skillGroups = data?.skills?.groups ?? [];
 
@@ -102,17 +87,7 @@ export function DiscoverPanel({ scope }: { scope: "agents" | "skills" }) {
 
   const tasks = useMemo<Map<string, TakeoverTask>>(() => {
     const map = new Map<string, TakeoverTask>();
-    for (const agent of scope === "agents" ? agents : []) {
-      map.set(`agent:${agent.id}`, {
-        key: `agent:${agent.id}`,
-        label: `助手 ${agent.display_name}`,
-        // 登记定义即可：安装/升级/卸载仍由来源渠道决定，本步不执行任何命令。
-        steps: [
-          { kind: "policy", key: `${definitionKeyPrefix("agents")}.${agent.id}`, definition: agent.suggested_definition },
-        ],
-      });
-    }
-    for (const group of scope === "skills" ? skillGroups : []) {
+    for (const group of skillGroups) {
       const steps: TakeoverTask["steps"] = [];
       if (!group.existing_collection) {
         steps.push({
@@ -132,7 +107,7 @@ export function DiscoverPanel({ scope }: { scope: "agents" | "skills" }) {
       }
       map.set(`skill-group:${group.name}`, { key: `skill-group:${group.name}`, label: `技能来源 ${group.name}`, steps });
     }
-    for (const item of scope === "skills" ? extraLinks : []) {
+    for (const item of extraLinks) {
       if (!item.collection) continue;
       const key = `skill-extra:${item.collection}/${item.name}@${item.agent}`;
       map.set(key, {
@@ -148,7 +123,7 @@ export function DiscoverPanel({ scope }: { scope: "agents" | "skills" }) {
         ],
       });
     }
-    for (const item of scope === "skills" ? deadLinks : []) {
+    for (const item of deadLinks) {
       const key = `skill-cleanup:${item.name}@${item.agent}`;
       map.set(key, {
         key,
@@ -164,7 +139,7 @@ export function DiscoverPanel({ scope }: { scope: "agents" | "skills" }) {
       });
     }
     return map;
-  }, [scope, agents, skillGroups, extraLinks, deadLinks]);
+  }, [skillGroups, extraLinks, deadLinks]);
 
   const toggle = (key: string) => {
     setSelected((prev) => {
@@ -184,7 +159,7 @@ export function DiscoverPanel({ scope }: { scope: "agents" | "skills" }) {
   ).length;
   /** 选中的清理项数量：确认文案要分开说，它删的是链接而不是纳管。 */
   const cleanupCount = selectedKeys.filter((key) => key.startsWith("skill-cleanup:")).length;
-  // 嵌在账号页、来源页里：扫描中或没有可处理的内容时不占地方
+  // Hide the panel while scanning or when there is nothing to manage.
   if (query.isPending) return null;
   if (query.isError) return <PageError title="扫描本机已有内容失败" error={query.error} />;
   if (tasks.size === 0 && query.data?.ok) return null;
@@ -200,14 +175,12 @@ export function DiscoverPanel({ scope }: { scope: "agents" | "skills" }) {
   };
 
   return (
-    <div data-testid={`discover-${scope}`} className="space-y-3 rounded-lg border bg-card p-4">
+    <div data-testid="discover-skills" className="space-y-3 rounded-lg border bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold">{scope === "agents" ? "未登记的助手" : "外部技能目录与残留链接"}</h2>
+          <h2 className="text-sm font-semibold">外部技能目录与残留链接</h2>
           <p className="text-xs text-muted-foreground">
-            {scope === "agents"
-              ? "本机已安装、但还没有登记的助手。登记只保存识别所需的定义，软件继续由原安装渠道维护。"
-              : "各账号技能目录里本工具之外的链接：外部目录可登记为本机目录来源，计划外链接并回已有来源，残留链接可以清理。"}
+            技能目标目录里本工具之外的链接：外部目录可登记为本机目录来源，计划外链接并回已有来源，残留链接可以清理。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -269,28 +242,7 @@ export function DiscoverPanel({ scope }: { scope: "agents" | "skills" }) {
 
       {query.data && !query.data.ok && <ErrorPanel title="扫描被拒绝" errors={query.data.errors} />}
 
-      {scope === "agents" && (
-        <div data-testid="takeover-agents" className="space-y-2">
-          {agents.map((agent: DiscoverAgentCandidate) => (
-            <SelectableRow
-              key={agent.id}
-              testId={`takeover-agent-${agent.id}`}
-              checked={selected.has(`agent:${agent.id}`)}
-              onToggle={() => toggle(`agent:${agent.id}`)}
-            >
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs font-semibold text-foreground">{agent.display_name}</span>
-                <Badge tone="muted">{AGENT_ORIGIN_LABEL[agent.origin] ?? agent.origin}</Badge>
-                <Badge tone="info">仅登记配置，软件由原渠道维护</Badge>
-                {agent.version && <Badge tone="muted">{agent.version}</Badge>}
-              </div>
-              <p className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{agent.bin_path}</p>
-            </SelectableRow>
-          ))}
-        </div>
-      )}
-
-      {scope === "skills" && skillGroups.length > 0 && (
+      {skillGroups.length > 0 && (
         <SectionCard
           icon={FolderSymlink}
           testId="takeover-skill-groups"
@@ -320,7 +272,7 @@ export function DiscoverPanel({ scope }: { scope: "agents" | "skills" }) {
         </SectionCard>
       )}
 
-      {scope === "skills" && extraLinks.length > 0 && (
+      {extraLinks.length > 0 && (
         <SectionCard
           icon={Sparkles}
           testId="takeover-skill-extras"
@@ -344,7 +296,7 @@ export function DiscoverPanel({ scope }: { scope: "agents" | "skills" }) {
         </SectionCard>
       )}
 
-      {scope === "skills" && nativeItems.length > 0 && (
+      {nativeItems.length > 0 && (
         <SectionCard
           icon={ShieldCheck}
           testId="takeover-native"
@@ -364,7 +316,7 @@ export function DiscoverPanel({ scope }: { scope: "agents" | "skills" }) {
         </SectionCard>
       )}
 
-      {scope === "skills" && deadLinks.length > 0 && (
+      {deadLinks.length > 0 && (
         <SectionCard
           icon={Link2Off}
           testId="takeover-dead-links"

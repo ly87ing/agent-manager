@@ -801,22 +801,9 @@ fn skills_enable_rejected_when_collection_or_agent_disabled() {
     );
     assert!(en_coll.ok);
 
-    let dis_agent = execute(
-        &ctx,
-        &request(
-            "policy:set",
-            &[
-                "--layer",
-                "local",
-                "--key",
-                "agents.codex.enabled",
-                "--value",
-                "false",
-            ],
-        ),
-    );
-    assert!(dis_agent.ok);
-
+    let mut policy = store::effective_policy(&ctx).unwrap();
+    policy["agents"]["codex"]["enabled"] = serde_json::json!(false);
+    store::write_policy(&store::open_write(&ctx).unwrap(), &policy).unwrap();
     // Agent 停用时：preflight 同样在取锁前拒绝 apply，且不写任何目标
     let apply_fail_2 = execute(
         &ctx,

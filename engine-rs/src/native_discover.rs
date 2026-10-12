@@ -1,16 +1,15 @@
 //! 只读 `system:discover`：扫描本机已存在、但还没纳入 Agent Manager 管理的
-//! agents / skills 资源，按来源分类并给出接管方式建议。MCP 条目以各助手配置
+//! skills 资源，按来源分类并给出接管方式建议。MCP 条目以各助手配置
 //! 文件为准，直接在 MCP 页查看与编辑，不再经过「导入」。
 //!
 //! 统一分类词汇（`manage` 字段，前端据此决定可做什么）：
 //! - `native`：位于助手官方路径、由各自原生安装方案管理 —— 只标识，不接管；
 //! - `symlink`：外部路径资源 —— 登记本地来源集合后由 manager 以软链接纳管；
 //! - `collection`：已定义集合的计划外链接 —— 走既有集合接管通道；
-//! - `register`：无文件系统链接语义的资源（助手 CLI）—— 登记定义后纳管；
 //! - `cleanup`：断链或旧体系残留 —— 只建议清理。
 //!
 //! 零写零网络：各域发现复用其 status 侧的只读视图（effective_policy + binding +
-//! 目录 symlink 级扫描 + 既有有界 `--version` 探测），不创建 data_dir/DB/目录，
+//! 目录 symlink 级扫描），不探测助手 CLI，不创建 data_dir/DB/目录，
 //! 不取 apply 锁，不写 operation_logs。域内失败不谎报空结果，直接失败。
 
 use anyhow::{bail, Result};
@@ -18,7 +17,7 @@ use serde_json::{json, Map, Value};
 
 use crate::native::{Context, Request};
 
-const DOMAINS: &[&str] = &["agents", "skills"];
+const DOMAINS: &[&str] = &["skills"];
 
 fn parse_only(req: &Request) -> Result<Vec<String>> {
     let mut idx = 0;
@@ -31,7 +30,7 @@ fn parse_only(req: &Request) -> Result<Vec<String>> {
                 .get(idx + 1)
                 .ok_or_else(|| anyhow::anyhow!("--only 缺少取值"))?;
             if !DOMAINS.contains(&value.as_str()) {
-                bail!("--only 仅支持 agents/skills，得到 '{}'", value);
+                bail!("--only 仅支持 skills，得到 '{}'", value);
             }
             if !selected.contains(value) {
                 selected.push(value.clone());

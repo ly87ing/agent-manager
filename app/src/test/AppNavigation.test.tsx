@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { MOD } from "../lib/platform";
-import { agentManagementFixture, makeAuditData, makeElement, makeEnvelope, makeFreshness, makeMode } from "./fixtures";
+import { makeAuditData, makeElement, makeEnvelope, makeMode } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 import { setSettingsClient } from "../lib/settings";
 import * as shareLinks from "../lib/shareLink";
@@ -38,13 +38,13 @@ describe("App 顶层导航", () => {
   // Load lazy modules before timing UI interactions; these imports issue no queries.
   beforeAll(async () => {
     await Promise.all([
-      import("../pages/AccountsPage"), import("../pages/SettingsPage"),
+      import("../pages/SkillsPage"), import("../pages/SettingsPage"),
       import("../pages/RulesPage"), import("../pages/SourcesPage"),
       import("../pages/McpPage"), import("../pages/SkillsPage"),
     ]);
   });
 
-  it("keeps account and resource navigation without the global inbox", async () => {
+  it("keeps extension resource navigation without the global inbox", async () => {
     setSettingsClient({
       get: async () => dummySettings,
       save: async (preferences) => ({ ...dummySettings, preferences }),
@@ -57,11 +57,9 @@ describe("App 顶层导航", () => {
 
     // Settings uses an icon; check its accessible name.
     expect(navButtons.map((b) => b.getAttribute("aria-label") ?? b.textContent?.trim())).toEqual([
-      "账号",
       "技能",
       "MCP",
       "规则",
-      "命令",
       "来源",
       "程序",
       `搜索（${MOD}K）`,
@@ -76,9 +74,9 @@ describe("App 顶层导航", () => {
     await userEvent.click(within(nav).getByTestId("theme-toggle"));
     expect(document.documentElement).not.toHaveClass("dark");
 
-    const accountsNav = within(nav).getByRole("button", { name: "账号" });
+    const accountsNav = within(nav).getByRole("button", { name: "技能" });
     expect(accountsNav).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("heading", { name: "账号" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "技能" })).toBeInTheDocument();
 
     const settingsNav = within(nav).getByRole("button", { name: "设置" });
     await userEvent.click(settingsNav);
@@ -112,11 +110,11 @@ describe("App 顶层导航", () => {
       }, { command: "skills.status" }),
     });
     const nav = await screen.findByRole("navigation");
-    await screen.findByRole("heading", { name: "账号" });
+    await screen.findByRole("heading", { name: "技能" });
     expect(within(nav).queryByTestId("nav-badge-skills")).toBeNull();
     expect(within(nav).getByRole("button", { name: "技能" })).toBeInTheDocument();
     expect(within(nav).queryByTestId("nav-badge-mcp")).toBeNull();
-    expect(calls.filter((call) => ["rules:status", "mcp:status", "programs:status"].includes(call.command))).toEqual([]);
+    expect(calls.filter((call) => ["rules:status", "mcp:status", "agents:status", "profiles:status", "aliases:status"].includes(call.command))).toEqual([]);
   });
 
   it("从分享链接导入：来源页打开，带明文取值的链接拦下，合法的跳到 MCP 页并预填新增表单", async () => {
@@ -162,127 +160,6 @@ describe("App 顶层导航", () => {
     expect(stop).toHaveBeenCalledOnce();
   });
 
-  it("从账号行进入技能页并预选对应账号，点击顶栏「技能」重置为全部助手", async () => {
-    setSettingsClient({
-      get: async () => dummySettings,
-      save: async (preferences) => ({ ...dummySettings, preferences }),
-    });
-
-    const customRoutes = {
-      ...routes(),
-      "agents:status": makeEnvelope(
-        {
-          domain: "agents",
-          elements: [
-            makeElement({
-              id: "agents:claude-code",
-              domain: "agents",
-              spec: { display_name: "Claude Code", bin: "claude", preferred_provider: "npm", providers: { npm: { managed: true } } },
-              policy: { enabled: true },
-              observed: { install_source: "npm", installed: true, management: agentManagementFixture("claude") },
-              state: "managed-ok",
-              freshness: makeFreshness(),
-              actions: [],
-            }),
-            makeElement({
-              id: "agents:cc-work",
-              domain: "agents",
-              spec: {
-                display_name: "Claude Code · 工作号",
-                bin: "claude",
-                profile: { base_agent: "claude-code", kind: "claude", config_dir: "~/.claude-cc-work" },
-              },
-              policy: { enabled: true },
-              observed: { installed: true },
-              state: "managed-ok",
-              freshness: makeFreshness(),
-              actions: [],
-            }),
-          ],
-        },
-        { command: "agents.status" },
-      ),
-      "profiles:status": makeEnvelope(
-        {
-          domain: "profiles",
-          elements: [makeElement({
-            id: "profiles:cc-work",
-            domain: "profiles",
-            spec: {
-              display_name: "Claude Code · 工作号",
-              base_agent: "claude-code",
-              kind: "claude",
-              config_dir: "~/.claude-cc-work",
-            },
-            policy: { enabled: true },
-            observed: {
-              base_agent: "claude-code",
-              kind: "claude",
-              config_env: "CLAUDE_CONFIG_DIR",
-              config_dir: "~/.claude-cc-work",
-              env_refs: [],
-            },
-            state: "not-materialized",
-            freshness: makeFreshness({ state: "not-applicable" }),
-            actions: [],
-          })],
-        },
-        { command: "profiles.status" },
-      ),
-      "skills:status": makeEnvelope(
-        {
-          domain: "skills",
-          elements: [
-            makeElement({
-              id: "skill:agent-skills",
-              domain: "skills",
-              spec: { url: "https://github.com/example/agent-skills.git", skill_paths: ["alpha"], agents: ["cc-work"] },
-              observed: { install_source: null, repo_cache: "/repo/agent-skills", repo_cached: true, owner_marked: true, discovered: ["alpha"], discovery_inbox: [] },
-              state: "managed-ok",
-            }),
-            makeElement({
-              id: "skill:agent-skills/alpha",
-              domain: "skills",
-              spec: { collection: "agent-skills", name: "alpha", source_path: "/repo/.../alpha" },
-              policy: { enabled: true, agents: { "cc-work": true } },
-              observed: {
-                agents: {
-                  "cc-work": {
-                    state: "linked",
-                    link_path: "/home/.claude/skills/alpha",
-                    target_dir_exists: true,
-                    actions: ["disable"],
-                  },
-                },
-                discovery_inbox: false,
-              },
-              state: "managed-ok",
-            }),
-          ],
-        },
-        { command: "skills.status" },
-      ),
-    };
-
-    renderWithEngine(<App />, customRoutes);
-
-    // 账号行的「技能」直达技能页，并预选这个账号
-    const row = await screen.findByTestId("account-row-profiles:cc-work");
-    await userEvent.click(within(row).getByRole("button", { name: "更多操作" }));
-    await userEvent.click(screen.getByRole("menuitem", { name: "技能" }));
-
-    // 跳转到技能页，并且助手筛选预选为 cc-work
-    const nav = screen.getByRole("navigation");
-    const skillsNav = within(nav).getByRole("button", { name: "技能" });
-    expect(skillsNav).toHaveAttribute("aria-current", "page");
-
-    const agentSelect = await screen.findByTestId("filter-agent-select");
-    expect(agentSelect).toHaveAttribute("data-value", "cc-work");
-
-    // 点击顶栏「技能」，重置为全部账号
-    await userEvent.click(skillsNav);
-    expect(agentSelect).toHaveAttribute("data-value", "all");
-  }, 15000);
 
   it("未实现的 mcp/rules status 返回 ok:false 与 data:{} 时，页面展示错误，顶层导航仍在且可切回账号", async () => {
     setSettingsClient({
@@ -323,10 +200,10 @@ describe("App 顶层导航", () => {
     expect(screen.getByText("MCP 域尚未实现")).toBeInTheDocument();
 
     // 顶层导航仍在，切回账号
-    const accountsNav = within(nav).getByRole("button", { name: "账号" });
+    const accountsNav = within(nav).getByRole("button", { name: "技能" });
     await userEvent.click(accountsNav);
     expect(accountsNav).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("heading", { name: "账号" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "技能" })).toBeInTheDocument();
 
     // 切换至规则页：展示 Rules 错误
     const rulesNav = within(nav).getByRole("button", { name: "规则" });
@@ -339,6 +216,6 @@ describe("App 顶层导航", () => {
     // 顶层导航仍在，再次切回账号
     await userEvent.click(accountsNav);
     expect(accountsNav).toHaveAttribute("aria-current", "page");
-    expect(await screen.findByRole("heading", { name: "账号" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "技能" })).toBeInTheDocument();
   }, 15000);
 });

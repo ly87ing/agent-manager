@@ -634,7 +634,7 @@ describe("来源页：未纳管", () => {
     expect(within(block).getByTestId("adopt-archify")).toHaveTextContent("纳入管理");
     expect(within(block).queryByTestId("adopt-synced")).toBeNull();
     expect(within(block).getByTestId("dedupe-xiaoyu-bug-loop-codex")).toHaveTextContent("清理多余");
-    expect(calls.every((call) => call.command.endsWith(":status") || call.command === "policy:get" || call.command === "system:discover")).toBe(true);
+    expect(calls.every((call) => call.command.endsWith(":status") || ["policy:get", "resources:targets"].includes(call.command) || call.command === "system:discover")).toBe(true);
   });
 });
 

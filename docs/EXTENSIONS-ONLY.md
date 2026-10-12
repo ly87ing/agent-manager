@@ -1,0 +1,48 @@
+# Extensions Only
+
+The 2026-10-11 user requirement supersedes earlier account designs: Agent Manager manages MCP, rules, skills, their sources, and their extension dependencies. It must never manage accounts.
+
+## Product boundary
+
+Account creation, registration edits, removal, switching, login/logout, launch commands, credentials, provider/model/runtime settings, and assistant installation/upgrades are retired. Existing account directories, authentication files, sessions, configuration, shell files, and historical launch scripts are preserved. Official assistant tools remain responsible for them.
+
+Historical registrations are immutable location metadata for existing extension targets. Reading a target label does not inspect authentication, account settings, or assistant executables. New account registration is unavailable. The default assistant resource locations remain available.
+
+## Runtime and write constraints
+
+- [Native entry point](../engine-rs/src/native.rs): every `agents`, `accounts`, `profiles`, `profile`, and `aliases` command, including dotted aliases, returns `FEATURE_RETIRED` before loading secrets, preflight, locks, or state creation. Policy writes cannot modify account or alias trees. All remaining policy/import paths compare those trees unchanged.
+- [Old controlled launcher](../engine-rs/src/native_account_context.rs): `run_cli` immediately refuses execution without resolving an account, reading its files, or starting an assistant. Existing scripts are left on disk.
+- [Desktop bridge](../app/src-tauri/src/engine.rs): its whitelist contains extension operations only. The resource UI uses `resources:targets` for labels rather than account status queries. Account, launch-command, and assistant-diagnostic pages are removed; search only queries extension resources.
+- [Backups](../engine-rs/src/native_config.rs): exports omit account and alias definitions; imports preserve local metadata and reject changes. Historical alias sources are skipped without reading or changing shell files or legacy alias rows. Secret values and source paths remain excluded.
+- [MCP writes](../engine-rs/src/native_mcp/write.rs): JSON edits splice only the MCP container value, preserving every byte outside it, including login metadata. Missing containers are inserted without reformatting existing fields. Codex uses `toml_edit` and retains non-MCP configuration. Previews, CAS, scope checks, and conditional rollback remain required.
+- [Path protection](subsystems/account-path-isolation.md): extension target validation still rejects account identity aliases, cross-target paths, unsafe ancestors, and links to protected files. Regular MCP/rule files with multiple hard links are rejected before reads or writes on Unix and Windows.
+- [MCP secrets](../engine-rs/src/native_secrets.rs): only variables referenced by active or saved MCP entries can be edited. Reserved assistant credentials and variables referenced by historical account metadata are protected and cannot be borrowed by MCP operations. Source changes are blocked when historical account metadata references credentials. Account and application-data files cannot be selected as secret sources. Legacy database secret migration is retired because its contents may include account credentials.
+
+An old custom target without a verifiable credential identity remains read-only for secret writes. The tool refuses the operation and preserves its metadata and source bytes; it does not repair or re-register an account to make an extension operation succeed.
+
+Assistant and provider environment namespaces are reserved using the existing identity-variable guard, including OAuth, AWS, Azure, and Google variables. MCP entries must reference dedicated variable names outside those namespaces.
+
+Account-named internal helpers that remain in the engine protect extension paths, locks, and credential ownership. Their presence does not expose account operations. Cleanup of unreachable legacy implementations is separate from this behavior change.
+
+## Verification
+
+[Scope acceptance](../engine-rs/tests/native_extension_scope.rs) uses temporary HOME/data and fake assistant directories. It verifies retired commands, real CLI extension writes with file readback, immutable registration/import behavior, shared JSON byte preservation, dedicated MCP variables, and identity-file hard links. Existing resource tests retain cross-target, external-change, malformed-path, shared-credential, and rollback cases. Tests whose purpose was successful account mutation are retired; resource fixtures seed historical metadata directly instead of invoking account writers.
+
+Run the focused boundary checks first:
+
+```sh
+cargo test --manifest-path engine-rs/Cargo.toml --test native_extension_scope --test native_account_paths --test native_account_skills --test native_mcp --test native_rules --test native_secrets
+```
+
+Then run the repository checks:
+
+```sh
+cargo test --manifest-path engine-rs/Cargo.toml
+cargo test --manifest-path app/src-tauri/Cargo.toml
+pnpm --dir app test:unit run
+pnpm --dir app typecheck
+pnpm --dir app build
+./scripts/ci-smoke.sh
+```
+
+Browser mock acceptance covers extension navigation, search, and affected pages at 1000 px and 760 px. It establishes frontend behavior, not installed Tauri or real-assistant acceptance. Test/build receipts and remaining failures are recorded in [implementation history](goal-rust-gui.md). No installed application, package, release, or real account environment is changed by this source milestone.

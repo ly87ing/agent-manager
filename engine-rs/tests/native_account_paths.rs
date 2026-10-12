@@ -87,13 +87,13 @@ fn request(command: &str, args: &[&str]) -> Request {
 }
 
 fn status(ctx: &Context, id: &str) -> Value {
-    let result = execute(ctx, &request("profiles:status", &["--offline"]));
+    let result = execute(ctx, &request("rules:status", &["--offline"]));
     assert!(result.ok, "{:?}", result.errors);
     result.data["elements"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|item| item["id"] == format!("profiles:{id}"))
+        .find(|item| item["id"] == format!("rules:profile:{id}"))
         .unwrap()
         .clone()
 }
@@ -102,7 +102,7 @@ fn apply(ctx: &Context, id: &str) -> Envelope {
     execute(
         ctx,
         &request(
-            "profiles:apply",
+            "rules:apply",
             &["--only", &format!("profiles:{id}"), "--base", "missing"],
         ),
     )
@@ -111,7 +111,7 @@ fn apply(ctx: &Context, id: &str) -> Envelope {
 fn assert_blocked(fixture: &Fixture, id: &str) {
     let policy = store::effective_policy(&fixture.ctx).unwrap();
     let item = status(&fixture.ctx, id);
-    assert_eq!(item["state"], "unsupported", "{item}");
+    assert_eq!(item["state"], "unmanaged-detected", "{item}");
     assert!(item["observed"]["base"].is_null());
     assert!(item["actions"].as_array().unwrap().is_empty());
     assert!(!apply(&fixture.ctx, id).ok, "unsafe operation was accepted");
@@ -131,7 +131,12 @@ fn legacy_equal_directories_remain_reserved_across_kind_disabled_and_malformed_d
         fixture.legacy("account-a", "~/.account-a", "claude", false, false);
         fixture.legacy("account-b", "~/.account-a", kind, malformed, disabled);
         assert_blocked(&fixture, "account-a");
-        assert_eq!(status(&fixture.ctx, "account-b")["state"], "unsupported");
+        if !malformed && !disabled {
+            assert_eq!(
+                status(&fixture.ctx, "account-b")["state"],
+                "unmanaged-detected"
+            );
+        }
     }
 }
 
@@ -149,7 +154,7 @@ fn every_identity_file_rejects_hardlink_aliases_before_status_or_apply() {
         std::fs::hard_link(&protected, &target).unwrap();
         let item = status(&fixture.ctx, "account-a");
         assert_eq!(
-            item["state"], "unsupported",
+            item["state"], "unmanaged-detected",
             "identity alias {name} was accepted: {item}"
         );
         assert!(!apply(&fixture.ctx, "account-a").ok);
@@ -194,7 +199,10 @@ fn every_identity_file_rejects_main_other_independent_and_dangling_links() {
             std::os::unix::fs::symlink(&protected, &target).unwrap();
             let before = std::fs::read(&protected).ok();
             let item = status(&fixture.ctx, "account-a");
-            assert_eq!(item["state"], "unsupported", "{name}/{source}: {item}");
+            assert_eq!(
+                item["state"], "unmanaged-detected",
+                "{name}/{source}: {item}"
+            );
             assert!(item["observed"]["base"].is_null());
             assert!(!apply(&fixture.ctx, "account-a").ok);
             assert_eq!(std::fs::read(&protected).ok(), before);
@@ -260,7 +268,7 @@ fn trusted_home_alias_and_shared_resource_links_do_not_create_identity_aliases()
     for id in ["account-a", "account-b"] {
         let item = status(&context, id);
         assert_ne!(
-            item["state"], "unsupported",
+            item["state"], "unmanaged-detected",
             "ordinary account was rejected: {item}"
         );
         assert!(item["observed"]["base"].is_string());

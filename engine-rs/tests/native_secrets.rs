@@ -363,22 +363,13 @@ fn legacy_database_values_require_explicit_migration_to_external_file() {
     .unwrap();
     drop(conn);
 
-    let before = secrets_status(&ctx, &[]);
-    assert_eq!(
-        mcp_env_element(&before)["observed"]["legacy_database_values"],
-        1
-    );
+    let before_file = std::fs::read(&path).unwrap();
+    let before_db = std::fs::read(store::db_path(&ctx)).unwrap();
     let migrated = execute(&ctx, &request("secrets:migrate-legacy", &[]));
-    assert!(migrated.ok, "{:?}", migrated.errors);
-    assert_eq!(migrated.data["migrated"], json!(["LEGACY_TOKEN"]));
-    assert!(std::fs::read_to_string(&path)
-        .unwrap()
-        .contains("legacy-value-under-test"));
-    assert_eq!(
-        mcp_env_element(&secrets_status(&ctx, &[]))["observed"]["legacy_database_values"],
-        0
-    );
-
+    assert!(!migrated.ok);
+    assert_eq!(migrated.errors[0].code, "FEATURE_RETIRED");
+    assert_eq!(std::fs::read(&path).unwrap(), before_file);
+    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), before_db);
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -410,18 +401,7 @@ fn provider_key_variables_list_their_connections_and_instances() {
     let env = secrets_status(&ctx, &[]);
     assert!(env.ok, "{:?}", env.errors);
     let keys = mcp_env_element(&env)["observed"]["provider_keys"].clone();
-    assert_eq!(
-        keys,
-        json!([
-            {"variable": "AM_TEST_PK_GLM", "resolved": false, "stored": false, "used_by": [
-                {"kind": "connection", "agent": "claude-code", "name": "glm", "label": "智谱"},
-                {"kind": "profile", "id": "cc-glm", "label": "Claude · GLM"}
-            ]},
-            {"variable": "AM_TEST_PK_KIMI", "resolved": true, "stored": false, "used_by": [
-                {"kind": "profile", "id": "cx-kimi", "label": "Codex · Kimi"}
-            ]}
-        ])
-    );
+    assert_eq!(keys, json!([]));
     assert!(!env.data.to_string().contains("pk-secret-value"));
     assert_eq!(
         std::fs::read(ctx.data_dir.join("native-manager.db")).unwrap(),
@@ -461,6 +441,10 @@ fn 密钥文件可以就地新建_仅本人可读_已有的不覆盖_不能建�
     assert_eq!(file_mode, 0o600);
     assert_eq!(dir_mode, 0o700);
 
+    write_claude(
+        &ctx,
+        json!({"demo":{"command":"echo","env":{"KEY":"${KIMI_API_KEY}"}}}),
+    );
     // 写进去的密钥只在这个文件里；状态只报变量名
     let set = execute(
         &ctx,
@@ -678,14 +662,7 @@ fn new_profile_existing_native_mcp_ref_cannot_take_another_accounts_credential()
         !result.ok,
         "candidate ownership must inspect implicit native MCP files"
     );
-    assert!(
-        result
-            .errors
-            .iter()
-            .any(|error| error.message.contains("密钥变量")),
-        "{:?}",
-        result.errors
-    );
+    assert_eq!(result.errors[0].code, "FEATURE_RETIRED");
     assert!(
         store::effective_policy(&ctx).unwrap()["agents"]["definitions"]
             .get("account-a")
@@ -856,135 +833,7 @@ fn source_registration_failure_removes_only_its_empty_created_file() {
 }
 
 #[test]
-fn removed_account_claim_cannot_be_reused_by_a_new_registration_incarnation() {
-    let (base, ctx) = temp_ctx("retired-incarnation");
-    std::fs::create_dir_all(&ctx.home_dir).unwrap();
-    let source = base.join("private.env");
-    std::fs::write(
-        &source,
-        "INCARNATION_OLD_KEY=dummy-old\nINCARNATION_NEW_KEY=dummy-new\n",
-    )
-    .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
-    }
-    assert!(
-        execute(
-            &ctx,
-            &request("secrets:source", &["--path", source.to_str().unwrap()])
-        )
-        .ok
-    );
-    let definition = json!({"bin":"claude", "profile":{"base_agent":"claude-code", "config_dir":"~/.claude-incarnation", "env":{"ANTHROPIC_AUTH_TOKEN":"${INCARNATION_OLD_KEY}"}}, "_delete":false,"_replace":true});
-    let register = |value: &Value| {
-        execute(
-            &ctx,
-            &request(
-                "policy:set",
-                &[
-                    "--layer",
-                    "local",
-                    "--key",
-                    "agents.definitions.incarnation",
-                    "--value",
-                    &value.to_string(),
-                ],
-            ),
-        )
-    };
-    let first = register(&definition);
-    assert!(first.ok, "{:?}", first.errors);
-    let first_generation = store::effective_policy(&ctx).unwrap()["agents"]["definitions"]
-        ["incarnation"]["account_generation"]
-        .clone();
-    assert!(first_generation.is_string());
-    let removed = register(&json!({"_delete":true}));
-    assert!(removed.ok, "{:?}", removed.errors);
-    let before = std::fs::read(&source).unwrap();
-    let reused = register(&definition);
-    assert!(
-        !reused.ok,
-        "a new registration cannot reuse the retired account credential claim"
-    );
-    assert!(
-        reused
-            .errors
-            .iter()
-            .any(|error| error.message.contains("退役") || error.message.contains("密钥变量")),
-        "{:?}",
-        reused.errors
-    );
-    assert_eq!(std::fs::read(&source).unwrap(), before);
-    let retired_set = execute(
-        &ctx,
-        &request(
-            "secrets:set",
-            &[
-                "--var",
-                "INCARNATION_OLD_KEY",
-                "--value",
-                "dummy-replacement",
-            ],
-        ),
-    );
-    assert!(
-        !retired_set.ok,
-        "retired credential values cannot be changed for a new identity"
-    );
-    assert_eq!(std::fs::read(&source).unwrap(), before);
-    let mut fresh = definition;
-    fresh["profile"]["env"]["ANTHROPIC_AUTH_TOKEN"] = json!("${INCARNATION_NEW_KEY}");
-    let recreated = register(&fresh);
-    assert!(
-        recreated.ok,
-        "a fresh explicit account variable remains available: {:?}",
-        recreated.errors
-    );
-    assert_ne!(
-        store::effective_policy(&ctx).unwrap()["agents"]["definitions"]["incarnation"]
-            ["account_generation"],
-        first_generation
-    );
-    let next_source = base.join("next-private.env");
-    std::fs::write(&next_source, "INCARNATION_NEW_KEY=dummy-next-source\n").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&next_source, std::fs::Permissions::from_mode(0o600)).unwrap();
-    }
-    let source_change = execute(
-        &ctx,
-        &request("secrets:source", &["--path", next_source.to_str().unwrap()]),
-    );
-    assert!(
-        source_change.ok,
-        "unrelated retired claim must not block a live account source: {:?}",
-        source_change.errors
-    );
-    let live_set = execute(
-        &ctx,
-        &request(
-            "secrets:set",
-            &[
-                "--var",
-                "INCARNATION_NEW_KEY",
-                "--value",
-                "dummy-live-updated",
-            ],
-        ),
-    );
-    assert!(live_set.ok, "{:?}", live_set.errors);
-    assert_eq!(std::fs::read(&source).unwrap(), before);
-    assert!(std::fs::read_to_string(&next_source)
-        .unwrap()
-        .contains("dummy-live-updated"));
-    let _ = std::fs::remove_dir_all(base);
-}
-
-#[test]
-fn explicit_unchanged_legacy_mcp_account_save_initializes_reference_generation() {
+fn legacy_resource_without_identity_refuses_secret_writes_without_repairing_account_metadata() {
     let (base, ctx) = temp_ctx("legacy-mcp-generation");
     std::fs::create_dir_all(&ctx.home_dir).unwrap();
     let source = base.join("private.env");
@@ -1007,7 +856,7 @@ fn explicit_unchanged_legacy_mcp_account_save_initializes_reference_generation()
     policy["agents"]["definitions"]["mcp-work"] = definition.clone();
     persist_policy(&ctx, &policy);
     let actual = ctx.home_dir.join(".mcp-account.json");
-    std::fs::write(&actual, json!({"mcp":{"owned":{"type":"local","command":["echo"],"environment":{"TOKEN":"${LEGACY_MCP_ACCOUNT_KEY}"}}}}).to_string()).unwrap();
+    std::fs::write(&actual, json!({"mcp":{"owned":{"type":"local","command":["echo"],"environment":{"TOKEN":"{env:LEGACY_MCP_ACCOUNT_KEY}"}}}}).to_string()).unwrap();
     let before = std::fs::read(&actual).unwrap();
     let source_before = std::fs::read(&source).unwrap();
     let saved = execute(
@@ -1024,11 +873,12 @@ fn explicit_unchanged_legacy_mcp_account_save_initializes_reference_generation()
             ],
         ),
     );
-    assert!(saved.ok, "{:?}", saved.errors);
+    assert!(!saved.ok);
+    assert_eq!(saved.errors[0].code, "FEATURE_RETIRED");
     assert!(
         store::effective_policy(&ctx).unwrap()["agents"]["definitions"]["mcp-work"]
             ["account_generation"]
-            .is_string()
+            .is_null()
     );
     assert_eq!(std::fs::read(&actual).unwrap(), before);
     assert_eq!(std::fs::read(&source).unwrap(), source_before);
@@ -1044,106 +894,13 @@ fn explicit_unchanged_legacy_mcp_account_save_initializes_reference_generation()
             ],
         ),
     );
-    assert!(changed.ok, "{:?}", changed.errors);
+    assert!(!changed.ok);
+    assert!(changed.errors[0].message.contains("缺少历史安全标识"));
     assert_eq!(std::fs::read(&actual).unwrap(), before);
-    let conn = store::open_readonly(&ctx).unwrap().unwrap();
-    let owner: String = conn
-        .query_row(
-            "SELECT account FROM secret_variable_owners WHERE name='LEGACY_MCP_ACCOUNT_KEY'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(owner, "mcp-work");
-    drop(conn);
-    let _ = std::fs::remove_dir_all(base);
-}
-
-#[test]
-fn removed_account_saved_refs_stay_retired_without_blocking_live_source_or_migration() {
-    let (base, ctx) = temp_ctx("retired-snapshot-live-source");
-    std::fs::create_dir_all(&ctx.home_dir).unwrap();
-    let source = base.join("private.env");
-    std::fs::write(
-        &source,
-        "RETIRED_SNAPSHOT_A=dummy-a\nLIVE_SNAPSHOT_B=dummy-b\n",
-    )
-    .unwrap();
-    let next = base.join("next.env");
-    std::fs::write(&next, "LIVE_SNAPSHOT_B=dummy-b\n").unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        for path in [&source, &next] {
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
-        }
-    }
-    assert!(
-        execute(
-            &ctx,
-            &request("secrets:source", &["--path", source.to_str().unwrap()])
-        )
-        .ok
-    );
-    let register = |id: &str, raw: Value| {
-        execute(
-            &ctx,
-            &request(
-                "policy:set",
-                &[
-                    "--layer",
-                    "local",
-                    "--key",
-                    &format!("agents.definitions.{id}"),
-                    "--value",
-                    &raw.to_string(),
-                ],
-            ),
-        )
-    };
-    for (id, key) in [
-        ("snapshot-a", "RETIRED_SNAPSHOT_A"),
-        ("snapshot-b", "LIVE_SNAPSHOT_B"),
-    ] {
-        let saved = register(
-            id,
-            json!({"bin":"claude", "profile":{"base_agent":"claude-code","config_dir":format!("~/.{id}"),"env":{"ANTHROPIC_AUTH_TOKEN":format!("${{{key}}}")}}}),
-        );
-        assert!(saved.ok, "{:?}", saved.errors);
-    }
-    let conn = store::open_write(&ctx).unwrap();
-    conn.execute_batch("CREATE TABLE mcp_saved(server TEXT NOT NULL,agent TEXT NOT NULL,entry_json TEXT NOT NULL,resolve_json TEXT NOT NULL,origin TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(server,agent));").unwrap();
-    conn.execute("INSERT INTO mcp_saved VALUES ('old','snapshot-a',?1,'{\"env\":[],\"headers\":[]}','disabled','test')", [json!({"command":"echo","env":{"TOKEN":"${RETIRED_SNAPSHOT_A}"}}).to_string()]).unwrap();
-    drop(conn);
-    let deleted = register("snapshot-a", json!({"_delete":true}));
-    assert!(deleted.ok, "{:?}", deleted.errors);
-    let before = std::fs::read(&source).unwrap();
-    let changed = execute(
-        &ctx,
-        &request("secrets:source", &["--path", next.to_str().unwrap()]),
-    );
-    assert!(changed.ok, "{:?}", changed.errors);
-    let retired = execute(
-        &ctx,
-        &request(
-            "secrets:set",
-            &["--var", "RETIRED_SNAPSHOT_A", "--value", "dummy-reassigned"],
-        ),
-    );
-    assert!(!retired.ok, "deleted snapshot credentials remain reserved");
-    let conn = store::open_write(&ctx).unwrap();
-    conn.execute_batch("CREATE TABLE secret_values(name TEXT PRIMARY KEY NOT NULL,value TEXT NOT NULL,updated_at TEXT NOT NULL);").unwrap();
-    conn.execute(
-        "INSERT INTO secret_values VALUES ('LIVE_SNAPSHOT_B','dummy-b','test')",
-        [],
-    )
-    .unwrap();
-    drop(conn);
-    let migrated = execute(&ctx, &request("secrets:migrate-legacy", &[]));
-    assert!(migrated.ok, "{:?}", migrated.errors);
-    assert_eq!(std::fs::read(&source).unwrap(), before);
-    assert_eq!(std::fs::read(&next).unwrap(), b"LIVE_SNAPSHOT_B=dummy-b\n");
-    assert!(!ctx.home_dir.join(".snapshot-a/settings.json").exists());
-    assert!(!ctx.home_dir.join(".snapshot-b/settings.json").exists());
+    assert_eq!(std::fs::read(&source).unwrap(), source_before);
+    assert_eq!(store::effective_policy(&ctx).unwrap(), policy);
+    assert!(!serde_json::to_string(&changed)
+        .unwrap()
+        .contains("dummy-legacy-mcp-value"));
     let _ = std::fs::remove_dir_all(base);
 }

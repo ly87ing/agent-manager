@@ -1,5 +1,8 @@
 # Lightweight desktop goal
 
+> Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
+
+
 The desktop app is a foreground configuration tool. Keep Accounts, MCP, Skills,
 Rules, Commands, Sources, dependency programs, and essential settings. Desktop
 and CLI continue to share the Rust engine. This scope supersedes the monitoring

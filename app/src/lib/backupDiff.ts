@@ -28,18 +28,6 @@ function asObject(value: unknown): Json {
   return typeof value === "object" && value !== null ? (value as Json) : {};
 }
 
-/** 取某个定义容器，并按是否带 profile 段拆成「助手」与「实例」两类。 */
-function agentBuckets(policy: Json): { agents: Json; profiles: Json } {
-  const defs = asObject(asObject(policy.agents).definitions);
-  const agents: Json = {};
-  const profiles: Json = {};
-  for (const [name, value] of Object.entries(defs)) {
-    if (asObject(value).profile) profiles[name] = value;
-    else agents[name] = value;
-  }
-  return { agents, profiles };
-}
-
 /** 已保存的 MCP 项：键为「服务 @ 助手」（未分配的只写服务名）；旧备份的服务库定义按未分配处理。 */
 function mcpSavedItems(backup: Json): Json {
   const out: Json = {};
@@ -89,7 +77,7 @@ const SOURCE_LABELS: Record<string, string> = {
   "hooks.claude": "旧版 Claude Hooks（已不再管理，导入时跳过）",
   "hooks.codex": "旧版 Codex Hooks（已不再管理，导入时跳过）",
   // 旧版本保存、还没写进终端配置的快捷命令：导入后在快捷命令页作为已保存未生效建议出现
-  "aliases.shell": "旧版已保存的终端快捷命令（未生效）",
+  "aliases.shell": "旧版终端快捷命令（已不再管理，导入时跳过）",
 };
 
 export function sourceLabel(key: string): string {
@@ -99,12 +87,8 @@ export function sourceLabel(key: string): string {
 export function diffBackup(current: Json, incoming: Json): BackupDiff {
   const currentPolicy = asObject(current.policy);
   const incomingPolicy = asObject(incoming.policy);
-  const currentAgents = agentBuckets(currentPolicy);
-  const incomingAgents = agentBuckets(incomingPolicy);
 
   const sections = [
-    diffMaps("助手定义", currentAgents.agents, incomingAgents.agents),
-    diffMaps("实例", currentAgents.profiles, incomingAgents.profiles),
     // 导入只新增或覆盖同名项，本机已有的 MCP 已保存项不会消失
     { ...diffMaps("MCP 已保存项", mcpSavedItems(current), mcpSavedItems(incoming)), removed: [] },
     diffMaps(
@@ -121,6 +105,7 @@ export function diffBackup(current: Json, incoming: Json): BackupDiff {
   const currentSources = asObject(current.sources);
   const incomingSources = asObject(incoming.sources);
   const sourcesChanged = Object.keys(incomingSources)
+    .filter((key) => !["aliases.shell", "hooks.claude", "hooks.codex"].includes(key))
     .filter((key) => JSON.stringify(currentSources[key] ?? "") !== JSON.stringify(incomingSources[key]))
     .sort();
 

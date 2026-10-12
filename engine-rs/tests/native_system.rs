@@ -88,9 +88,7 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
             serde_json::json!({ "commit": commit, "date": date })
         };
     assert_eq!(env.data["version"], expected_version);
-    for name in [
-        "agents", "skills", "mcp", "rules", "aliases", "secrets", "runtime", "storage",
-    ] {
+    for name in ["skills", "mcp", "rules", "secrets", "runtime", "storage"] {
         section(&env, name);
     }
     // tools 域已退役：不再出现在审计 sections 中
@@ -99,24 +97,8 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
         "已退役 tools 域不得出现在审计结果: {}",
         env.data
     );
-    // aliases 以 rc 文件受管区块为准：fresh 上下文两文件都没有区块 → notice（内置别名只是推荐，
-    // 不再是「待生成」的产物）
-    let aliases = section(&env, "aliases");
-    // Unix 是三个 rc 文件（顺序随用户的 shell：主目标在前）；Windows 是命令脚本目录
-    let ids: &[&str] = if cfg!(windows) {
-        &["aliases:cmd"]
-    } else {
-        &["aliases:zshrc", "aliases:zprofile", "aliases:bashrc"]
-    };
-    assert_eq!(aliases.len(), ids.len());
-    for id in ids {
-        let item = aliases
-            .iter()
-            .find(|item| item["name"] == *id)
-            .unwrap_or_else(|| panic!("缺 {id}"));
-        assert_eq!(item["status"], "notice");
-        assert!(item.get("category").is_none());
-    }
+    assert!(env.data["sections"].get("agents").is_none());
+    assert!(env.data["sections"].get("aliases").is_none());
     // secrets 已接线：fresh 上下文无已启用定义 → 单条 ok（managed-ok 映射）
     let secrets = section(&env, "secrets");
     assert_eq!(secrets.len(), 1);
@@ -124,17 +106,15 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     assert_eq!(secrets[0]["name"], "secrets:mcp-env");
     let summary = &env.data["summary"];
     assert_eq!(summary["errors"], 0);
-    let total_warnings: u64 = [
-        "agents", "skills", "mcp", "rules", "aliases", "secrets", "runtime", "storage",
-    ]
-    .iter()
-    .map(|name| {
-        section(&env, name)
-            .iter()
-            .filter(|entry| entry["status"] == "warning")
-            .count() as u64
-    })
-    .sum();
+    let total_warnings: u64 = ["skills", "mcp", "rules", "secrets", "runtime", "storage"]
+        .iter()
+        .map(|name| {
+            section(&env, name)
+                .iter()
+                .filter(|entry| entry["status"] == "warning")
+                .count() as u64
+        })
+        .sum();
     // 规则以实际文件为准：没有文件是正常空状态（notice），不再算「未生成」warning
     for name in ["rules"] {
         let entries = section(&env, name);
@@ -144,12 +124,7 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
             assert!(entry.get("category").is_none(), "{entry}");
         }
     }
-    // 其余域在 fresh 上下文里都不产生 warning；只有 agents 可能（取决于 PATH）
-    let agent_warnings = section(&env, "agents")
-        .iter()
-        .filter(|entry| entry["status"] == "warning")
-        .count() as u64;
-    assert_eq!(total_warnings, agent_warnings);
+    assert_eq!(total_warnings, 0);
     assert_eq!(summary["warnings"].as_u64().unwrap(), total_warnings);
     let expected_status = if total_warnings > 0 {
         "warning"
@@ -159,17 +134,15 @@ fn fresh_context_audit_is_complete_warning_and_zero_write() {
     assert_eq!(env.data["status"], expected_status);
     assert_eq!(summary["warning_categories"]["optional_tools"], 0);
     assert_eq!(summary["warning_categories"]["official_gaps"], 0);
-    let categorized: u64 = [
-        "agents", "skills", "mcp", "rules", "aliases", "secrets", "runtime", "storage",
-    ]
-    .iter()
-    .map(|name| {
-        section(&env, name)
-            .iter()
-            .filter(|entry| entry["status"] == "warning" && entry.get("category").is_some())
-            .count() as u64
-    })
-    .sum();
+    let categorized: u64 = ["skills", "mcp", "rules", "secrets", "runtime", "storage"]
+        .iter()
+        .map(|name| {
+            section(&env, name)
+                .iter()
+                .filter(|entry| entry["status"] == "warning" && entry.get("category").is_some())
+                .count() as u64
+        })
+        .sum();
     assert_eq!(
         summary["warning_categories"]["unmaterialized"]
             .as_u64()
@@ -246,7 +219,7 @@ fn failing_domain_degrades_only_its_section_without_leaks() {
     let rules = section(&env, "rules");
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0]["status"], "error");
-    for name in ["agents", "skills", "mcp", "runtime", "storage"] {
+    for name in ["skills", "mcp", "runtime", "storage"] {
         assert!(
             section(&env, name)
                 .iter()
@@ -333,40 +306,22 @@ fn wired_domain_elements_map_into_sections() {
     let before_source = std::fs::read(&source).unwrap();
     let env = audit(&ctx, &[]);
     assert!(env.ok, "{:?}", env.errors);
-    let agents = section(&env, "agents");
-    assert!(!agents.is_empty());
-    for entry in agents {
-        // fresh home 下仅允许 missing→warning(unmaterialized) 或 builtin 禁用→notice
-        let status = entry["status"].as_str().unwrap();
-        assert!(status == "warning" || status == "notice", "{entry}");
-        if status == "warning" {
-            assert_eq!(entry["category"], "unmaterialized");
-        }
-        let name = entry["name"].as_str().unwrap();
-        assert!(name.starts_with("agents:"), "{name}");
-        assert!(entry.get("spec").is_none());
-        assert!(entry.get("observed").is_none());
-    }
+    assert!(env.data["sections"].get("agents").is_none());
+    assert!(env.data["sections"].get("aliases").is_none());
     let unmaterialized = env.data["summary"]["warning_categories"]["unmaterialized"]
         .as_u64()
         .unwrap();
-    let agent_warnings = agents
-        .iter()
-        .filter(|entry| entry["status"] == "warning")
-        .count() as u64;
     assert_eq!(section(&env, "secrets")[0]["category"], "unmaterialized");
-    assert!(unmaterialized > agent_warnings);
-    let expected: u64 = [
-        "agents", "skills", "mcp", "rules", "aliases", "secrets", "runtime", "storage",
-    ]
-    .iter()
-    .map(|name| {
-        section(&env, name)
-            .iter()
-            .filter(|entry| entry["status"] == "warning")
-            .count() as u64
-    })
-    .sum();
+    assert!(unmaterialized > 0);
+    let expected: u64 = ["skills", "mcp", "rules", "secrets", "runtime", "storage"]
+        .iter()
+        .map(|name| {
+            section(&env, name)
+                .iter()
+                .filter(|entry| entry["status"] == "warning")
+                .count() as u64
+        })
+        .sum();
     assert_eq!(env.data["summary"]["warnings"].as_u64().unwrap(), expected);
     // 分类 warning 非零 → envelope 携带分类诊断（沿用旧语义，仅计数）
     let unmat = env

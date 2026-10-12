@@ -47,7 +47,7 @@ export function ConfigBackupSection() {
       };
       const policy = (data.policy ?? {}) as Record<string, any>;
       const count = (obj: unknown) => Object.keys((obj ?? {}) as Record<string, unknown>).length;
-      const definitions = count(policy.agents?.definitions) + count(policy.skills?.repositories);
+      const definitions = count(policy.skills?.repositories);
       const mcpSaved = data.mcp_saved?.length ?? 0;
       setExported(JSON.stringify(envelope.data, null, 2));
       setExportSummary(
@@ -138,7 +138,7 @@ export function ConfigBackupSection() {
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
           <div className="min-w-0 flex-1">
             <div className="text-sm">导出配置</div>
-            <div className="text-xs text-muted-foreground">助手、技能、MCP、账号定义与规则来源；不含密钥取值与外部文件路径</div>
+            <div className="text-xs text-muted-foreground">技能来源、规则模板与 MCP 已保存项；不含密钥取值与外部文件路径</div>
           </div>
           <button
             type="button"
@@ -211,7 +211,7 @@ export function ConfigBackupSection() {
           )}
           {imported && (
             <p data-testid="config-import-success" className="w-full text-xs text-success">
-              定义与来源已恢复，助手配置未改动。请到账号、技能、MCP、规则等对应页面逐项预览和应用；密钥需另行配置。
+              定义与来源已恢复，助手配置未改动。请到技能、MCP、规则等对应页面逐项预览和应用；密钥需另行配置。
             </p>
           )}
         </div>

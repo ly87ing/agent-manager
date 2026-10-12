@@ -1,5 +1,8 @@
 # Concurrent Accounts: Redesign and Implementation Plan
 
+> Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
+
+
 Current scope amendment (2026-10-10): [Lightweight desktop goal](goal-lightweight.md)
 retires monitoring and background residency. Accounts, launch commands, resource
 assignment, Sources, and dependency programs remain. Earlier quota, tray, and

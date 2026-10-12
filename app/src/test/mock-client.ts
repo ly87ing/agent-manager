@@ -599,6 +599,11 @@ function demoEnvelopes(): Record<string, Envelope> {
   return {
     "system:audit": audit,
     "agents:status": agentsStatus,
+    "resources:targets": makeEnvelope({ domain: "resources", targets: [
+      { id: "claude-code", name: "Claude", group: "claude-code", kind: "claude" },
+      { id: "codex", name: "Codex", group: "codex", kind: "codex" },
+      { id: "kimi-code", name: "Kimi Code", group: "kimi-code", kind: null },
+    ] }, { command: "resources.targets" }),
     "mcp:status": mcpStatus,
     "skills:status": skillsStatus,
     "rules:status": rulesStatus,
@@ -1300,6 +1305,13 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
       await new Promise((resolve) => setTimeout(resolve, 120));
       const runId = runOptions.runId ?? "20260906T020000Z-mockrun";
 
+      const domain = command.replaceAll(".", ":").split(":")[0];
+      const key = argOf(args, "--key") ?? "";
+      if (["agents", "accounts", "profiles", "profile", "aliases"].includes(domain)
+          || command === "secrets:migrate-legacy"
+          || (["policy:set", "policy:delete"].includes(command) && /^(agents|aliases)(\.|$)/.test(key))) {
+        return makeEnvelope({}, { command, ok: false, errors: [{ code: "FEATURE_RETIRED", element: null, message: "账号与启动命令管理已移除；本工具仅管理扩展。" }] });
+      }
       // ---- 写路径与有状态命令 ----
       if (command === "policy:get") return policyGet();
       if (command === "policy:set") return policySet(args);

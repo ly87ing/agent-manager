@@ -131,7 +131,7 @@ describe("来源页", () => {
     await userEvent.click(await menuItem("source-suggest-dismiss-team-skills"));
     expect(screen.queryByTestId("source-suggest-team-skills")).toBeNull();
     // 只有只读查询（各 status、policy:get、本机扫描），没有任何写入
-    expect(calls.filter((call) => !call.command.endsWith(":status") && call.command !== "policy:get" && call.command !== "system:discover")).toEqual([]);
+    expect(calls.filter((call) => !call.command.endsWith(":status") && !["policy:get", "resources:targets"].includes(call.command) && call.command !== "system:discover")).toEqual([]);
   });
 
   it("添加推荐来源只保存定义（不限账号、不分配），不下载", async () => {

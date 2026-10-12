@@ -1,5 +1,8 @@
 # Engine Contract v1
 
+> Current scope: [Extensions only](../docs/EXTENSIONS-ONLY.md) supersedes the historical account, assistant lifecycle, authentication, runtime, and alias contracts below. Those domains return `FEATURE_RETIRED`; Tauri rejects them at its command whitelist. `resources:targets` accepts no arguments and returns `{domain:"resources", targets:[{id,name,group,kind}]}` from immutable registration metadata, without opening authentication/settings files or executing assistants. `system:discover` accepts only `--only skills`; audit and upstream refresh exclude assistants and aliases. Backups omit account/alias policy, imports cannot change it, and legacy alias sources are skipped. Secret editing is limited to MCP-specific variables.
+
+
 `contract/engine-v1/` describes the JSON envelope, status, actions, and policy shapes shared by CLI and Tauri. The implementation entry point is `engine-rs`; the repository does not depend on Python or the old shell pipeline.
 
 `native-manager.db` stores this tool's definitions, preferences, and saved but inactive alternatives. Actual contents of assistant configuration files are authoritative for active configuration. Settings are in SQLite `app_settings`. Policy reports only `builtin` or `sqlite` ownership; there is no three-layer JSON model, writable settings JSON, or profile synchronization layer.

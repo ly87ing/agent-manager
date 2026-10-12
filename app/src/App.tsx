@@ -1,4 +1,4 @@
-import { Library, Package, ScrollText, Server, Settings, Sparkles, SquareTerminal, Users } from "lucide-react";
+import { Library, Package, ScrollText, Server, Settings, Sparkles } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
@@ -7,23 +7,19 @@ import { subscribeImportLinks, type SharePayload } from "./lib/shareLink";
 import { useSettings } from "./lib/settings";
 import { PageError, PageLoading } from "./components/PageState";
 
-const AccountsPage = lazy(() => import("./pages/AccountsPage"));
 const McpPage = lazy(() => import("./pages/McpPage"));
 const RulesPage = lazy(() => import("./pages/RulesPage"));
 const RunsPage = lazy(() => import("./pages/RunsPage"));
 const SkillsPage = lazy(() => import("./pages/SkillsPage"));
-const AliasesPage = lazy(() => import("./pages/AliasesPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SourcesPage = lazy(() => import("./pages/SourcesPage"));
 const ProgramsPage = lazy(() => import("./pages/ProgramsPage"));
 
 // Keep resource queries in their pages; navigation does not collect global status.
 const NAV: NavItem[] = [
-  { key: "accounts", label: "账号", icon: Users },
   { key: "skills", label: "技能", icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
   { key: "rules", label: "规则", icon: ScrollText },
-  { key: "commands", label: "命令", icon: SquareTerminal },
   { key: "sources", label: "来源", icon: Library },
   { key: "programs", label: "程序", icon: Package },
 ];
@@ -47,7 +43,7 @@ function isTextEditableTarget(target: EventTarget | null): boolean {
 export default function App() {
   // 预加载本机偏好，确保首次打开任意预览时已有默认演练值。
   const settings = useSettings();
-  const [activePage, setActivePage] = useState<string>("accounts");
+  const [activePage, setActivePage] = useState<string>("skills");
   const [selectedSkillAgent, setSelectedSkillAgent] = useState<string | null>(null);
   /** 「skills:<名称>」跳转带进来的技能搜索词：直接定位到那一行。 */
   const [skillSearch, setSkillSearch] = useState<string | null>(null);
@@ -72,9 +68,9 @@ export default function App() {
         event.preventDefault();
         setActivePage("settings");
       } else if (event.key.toLowerCase() === "k") {
-        // ⌘K 搜全部；⌘⇧K 只看账号。
+        // Both shortcuts search extension resources.
         event.preventDefault();
-        const nextScope = event.shiftKey ? "quick" : "all";
+        const nextScope = "all";
         setPaletteTarget(null);
         setPaletteOpen((prev) => (prev && paletteScope === nextScope ? false : true));
         setPaletteScope(nextScope);
@@ -103,7 +99,7 @@ export default function App() {
       return;
     }
     if (page === "settings:aliases") {
-      setActivePage("commands");
+      setActivePage("skills");
       return;
     }
     if (page.startsWith("skills:")) {
@@ -134,7 +130,7 @@ export default function App() {
     if (page === "sources") setSourceFocus(null);
     if (page === "mcp") setMcpSearch(null);
     if (page === "programs") setProgramFocus(null);
-    setActivePage(page);
+    setActivePage(page === "accounts" || page === "commands" ? "skills" : page);
   };
 
   return (
@@ -158,17 +154,6 @@ export default function App() {
       <Suspense fallback={<PageLoading text="正在打开页面…" />}>
         <div key={`${activePage}:${activePage === "sources" ? sourceFocus ?? "" : activePage === "mcp" ? mcpSearch ?? "" : activePage === "programs" ? programFocus ?? "" : ""}`} className="animate-page-in">
           {activePage === "programs" && <ProgramsPage focus={programFocus} onOpen={handleNavigate} />}
-          {activePage === "accounts" && (
-            <AccountsPage
-              onManageSkills={(accountId) => {
-                setSelectedSkillAgent(accountId);
-                setSkillSearch(null);
-                setActivePage("skills");
-              }}
-              onOpenSources={() => handleNavigate("sources")}
-              onOpenSecrets={() => handleNavigate("settings:secrets")}
-            />
-          )}
           {activePage === "skills" && (
             <SkillsPage
               onOpenSource={(name) => handleNavigate(name ? `sources:${name}` : "sources")}
@@ -181,7 +166,6 @@ export default function App() {
           {activePage === "mcp" && (
             <McpPage importPayload={importPayload?.kind === "mcp" ? importPayload : null} onImportConsumed={() => setImportPayload(null)} initialSearch={mcpSearch} onOpenProgram={(program) => handleNavigate(`programs:${program}`)} />
           )}
-          {activePage === "commands" && <AliasesPage onOpenSkills={() => handleNavigate("skills")} />}
           {activePage === "sources" && (
             <SourcesPage
               focus={sourceFocus}

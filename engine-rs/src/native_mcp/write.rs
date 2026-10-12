@@ -1,7 +1,7 @@
 //! 单条目写入：在内存里算出目标文件的新字节，并在落盘前自检。
 //!
 //! - JSON（Claude/OpenCode）：在解析出的文档上替换/插入/删除该键（键顺序保留），
-//!   整份以 2 空格缩进重新序列化，与既有行为一致。
+//!   仅替换扩展容器的值，容器之外的字节（含登录元数据与格式）原样保留。
 //! - Codex TOML：已有条目用 `toml_edit` 原位同步（只动变化的键，注释、未建模字段、
 //!   其他表逐字节保留）；新增条目在文件末尾追加文本块；表头形式的条目按既有文本规则
 //!   删除（保留表头上方的用户注释、连带删除紧邻的旧版注释）。
@@ -59,7 +59,39 @@ fn render_json(scan: &TargetScan, name: &str, change: &Change) -> Result<Vec<u8>
             }
         }
     }
-    Ok(serde_json::to_string_pretty(&Value::Object(doc))?.into_bytes())
+    let value = serde_json::to_vec_pretty(&doc[key])?;
+    let Some(bytes) = &scan.old_bytes else {
+        return Ok(serde_json::to_vec_pretty(&Value::Object(doc))?);
+    };
+    // Claude keeps login metadata beside mcpServers. Splice only that value,
+    // preserving every byte outside the extension container, including formatting.
+    let fields: std::collections::BTreeMap<String, &serde_json::value::RawValue> =
+        serde_json::from_slice(bytes)?;
+    if let Some(raw) = fields.get(key) {
+        let start = raw.get().as_ptr() as usize - bytes.as_ptr() as usize;
+        let end = start + raw.get().len();
+        let mut out = bytes[..start].to_vec();
+        out.extend_from_slice(&value);
+        out.extend_from_slice(&bytes[end..]);
+        Ok(out)
+    } else {
+        let end = bytes
+            .iter()
+            .rposition(|byte| !byte.is_ascii_whitespace())
+            .ok_or_else(|| anyhow!("配置文件为空"))?;
+        if bytes[end] != b'}' {
+            bail!("配置文件根节点不是对象");
+        }
+        let mut out = bytes[..end].to_vec();
+        if !fields.is_empty() {
+            out.push(b',');
+        }
+        out.extend_from_slice(&serde_json::to_vec(key)?);
+        out.push(b':');
+        out.extend_from_slice(&value);
+        out.extend_from_slice(&bytes[end..]);
+        Ok(out)
+    }
 }
 
 fn json_to_toml(value: &Value) -> Result<toml_edit::Value> {

@@ -29,10 +29,10 @@ mkdir -p "$HOME"
 run "$ENGINE_BIN" db:status --json
 run "$ENGINE_BIN" policy:get --json
 # --dry-run 已退役（请求会被拒绝），这里执行真实写入；不运行任何会下载/安装软件的 apply。
-run "$ENGINE_BIN" policy:set --layer local --key agents.codex.enabled --value false --json
+run "$ENGINE_BIN" policy:set --layer local --key skills.enabled --value false --json
 printf '==> %s\n' "$ENGINE_BIN policy:get --json（回读校验）"
 "$ENGINE_BIN" policy:get --json > "$RUNTIME_DIR/policy-readback.json"
-# 回读断言：agents.codex.enabled 已生效为 false
-grep -A1 '^[[:space:]]*"codex": {' "$RUNTIME_DIR/policy-readback.json" | grep -q '"enabled": false'
+# 回读断言：按 JSON 结构检查 skills.enabled，不依赖字段排列。
+node -e 'const result = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")); process.exit(result.ok && result.data.effective.skills.enabled === false ? 0 : 1);' "$RUNTIME_DIR/policy-readback.json"
 test -f "$AGENT_MANAGER_DATA_DIR/native-manager.db"
 printf '==> ok：policy:set 真实写入并经 policy:get 回读确认；全部写入仅限隔离目录 %s\n' "$RUNTIME_DIR"

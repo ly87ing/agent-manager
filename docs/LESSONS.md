@@ -239,3 +239,13 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   inheritance on its captured stdout/stderr handles before spawning. Assert that
   capture returns before the delayed marker, then retain the later absence check.
   See [Windows handle inheritance](https://learn.microsoft.com/en-us/windows/win32/procthread/inheritance).
+
+
+### 2026-10-11: extension-only retirement needs backend and byte-level proof
+
+- Removing account UI is insufficient: reject every historical account command before loading secrets, preflight, locks, or state creation, including old controlled launch scripts and generic policy/import paths.
+- JSON semantic equality does not prove account preservation when MCP shares a file with login metadata. Preserve bytes outside the MCP container and verify both existing-container replacement and missing-container insertion.
+- Extension tests seed immutable historical target metadata directly. They must not create fixture targets through retired account writers. Keep cross-target path, identity-alias, credential ownership, and external-change negative cases in resource tests; retire tests whose purpose was successful account mutation.
+- Verify real CLI resource writes in isolated HOME/data and read back account-file bytes, target metadata, and unselected targets. Development mock success is UI evidence only.
+- A short API-key denylist misses OAuth and cloud-provider identity variables. Reuse the existing identity-variable guard and test protected names even when MCP explicitly references them; dedicated MCP names remain editable.
+- Parse smoke-test JSON readback structurally. Matching the line after an object key failed once other fields preceded the extension flag, despite a successful write.

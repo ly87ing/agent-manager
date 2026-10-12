@@ -24,7 +24,7 @@ import { encodeShareLink, type SharePayload } from "../lib/shareLink";
 import { availableSkills, fullSkillDefinition, isCollection } from "../lib/skillCollections";
 import { addToAllRows, versionUpdateRows } from "../lib/skillFill";
 import { describeTrack, versionLabel } from "../lib/skillTrack";
-import { useAccountGroups, useAccountList, useAccountNames } from "../lib/useAccountNames";
+import { useAccountGroups, useResourceTargets, useAccountNames } from "../lib/useAccountNames";
 import { useBatchApply } from "../lib/useBatchApply";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useDirectApply } from "../lib/useDirectApply";
@@ -67,7 +67,7 @@ export default function SourcesPage({
   const { execute } = useExecutions();
   const queryClient = useQueryClient();
   const nameOfAccount = useAccountNames();
-  const accounts = useAccountList();
+  const targets = useResourceTargets();
   const groupsOf = useAccountGroups();
   const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
   const [adding, setAdding] = useState<"collection" | "rule" | null>(null);
@@ -122,7 +122,7 @@ export default function SourcesPage({
   const ruleCount = (name: string) => sourceRules.filter((rule) => rule.collection === name).length;
   const agentIds = Array.from(
     new Set([
-      ...accounts.flatMap(group => group.accounts.map(account => account.elementId.replace(/^(agents|profiles):/, ""))),
+      ...targets.map(target => target.id),
       ...(unmanaged?.skills ?? []).flatMap((skill) => skill.locations.flatMap((location) => (location.agent ? [location.agent] : []))),
       ...(unmanaged?.duplicates ?? []).map((dup) => dup.agent),
     ]),
@@ -345,7 +345,7 @@ export default function SourcesPage({
           </div>
         ))}
         {total === 0 ? (
-          <EmptyState compact title="尚未添加来源（可选）" description="不添加也可管理本机账号与配置。需要更多技能或规则时，再选择仓库、本机目录或规则文件。" testId="sources-empty" />
+          <EmptyState compact title="尚未添加来源（可选）" description="不添加也可管理本机扩展。需要更多技能或规则时，再选择仓库、本机目录或规则文件。" testId="sources-empty" />
         ) : (
           <ul className="divide-y">
             {collections.map((collection) => {
@@ -451,13 +451,13 @@ export default function SourcesPage({
         )}
       </DataTable>
       <p className="px-1 text-xs text-muted-foreground">
-        在此管理技能、规则和命令的来源，以及更新与版本切换。
+        在此管理技能与规则的来源，以及更新与版本切换。
       </p>
 
       {/* 未纳管：在账号里、但不来自任何来源的技能——识别出来源的纳入（只留一份源），外部目录登记为本机目录来源，残留链接清理 */}
       <div data-source-anchor="unmanaged" className={cn("space-y-3 rounded-lg", focus === "unmanaged" && "ring-2 ring-primary/40")}>
         {unmanaged && <SkillOtherSources view={unmanaged} groups={groupsOf(agentIds)} search="" agentFilter="all" onAdopt={setAdopting} />}
-        <DiscoverPanel scope="skills" />
+        <DiscoverPanel />
       </div>
       {adopting && (
         <SkillAdoptDialog

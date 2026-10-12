@@ -295,7 +295,7 @@ pub(crate) fn process_override_env(name: &str) -> bool {
     )
 }
 
-fn identity_override_env(name: &str) -> bool {
+pub(crate) fn identity_override_env(name: &str) -> bool {
     let name = name.to_ascii_uppercase();
     [
         "ANTHROPIC_",
@@ -1010,117 +1010,8 @@ fn validate_cli_args(args: &[String]) -> Result<()> {
 /// Native desktop and engine CLI call this before their ordinary startup paths.
 /// `args` excludes the leading `--account-launch` marker. No JSON envelope is
 /// emitted into the assistant's interactive terminal stream.
-pub fn run_cli(args: &[String]) -> Result<i32> {
-    prepare_terminal_console()?;
-    let mut home = None;
-    let mut data = None;
-    let mut only = None;
-    let mut operation = None;
-    let mut binding = None;
-    let mut index = 0;
-    while index < args.len() && args[index] != "--" {
-        let slot = match args[index].as_str() {
-            "--home" => &mut home,
-            "--data-dir" => &mut data,
-            "--only" => &mut only,
-            "--operation" => &mut operation,
-            "--binding" => &mut binding,
-            _ => bail!("受控入口存在未知参数"),
-        };
-        if slot.is_some() {
-            bail!("受控入口参数重复");
-        }
-        index += 1;
-        let value = args
-            .get(index)
-            .filter(|value| !value.starts_with("--"))
-            .ok_or_else(|| anyhow!("受控入口参数缺少取值"))?;
-        *slot = Some(value.clone());
-        index += 1;
-    }
-    if args.get(index).map(String::as_str) != Some("--") {
-        bail!("受控入口需要显式参数分隔符");
-    }
-    let home = PathBuf::from(home.ok_or_else(|| anyhow!("缺少可信 HOME"))?);
-    let data = PathBuf::from(data.ok_or_else(|| anyhow!("缺少数据目录"))?);
-    if !home.is_absolute() || !data.is_absolute() {
-        bail!("受控入口 HOME 与数据目录必须是绝对路径");
-    }
-    let ctx = Context {
-        home_dir: home.canon()?,
-        data_dir: data,
-    };
-    let only = only.ok_or_else(|| anyhow!("缺少账号"))?;
-    let operation = operation.ok_or_else(|| anyhow!("缺少操作"))?;
-    let binding = binding.ok_or_else(|| anyhow!("启动命令没有账号代际绑定，请重新生成命令"))?;
-    let cli_args = &args[index + 1..];
-    validate_cli_args(cli_args)?;
-    if operation != "launch" && !cli_args.is_empty() {
-        bail!("认证操作不接受附加 CLI 参数");
-    }
-    if !matches!(operation.as_str(), "launch" | "login" | "logout" | "status") {
-        bail!("未知账号操作");
-    }
-    crate::secret_values::refresh(&ctx);
-    let before = resolve_account(&ctx, &only)?;
-    if account_binding(&ctx, &before)? != binding {
-        bail!("启动命令的账号身份绑定已失效，请重新生成命令");
-    }
-    let _lock = lock_directory(
-        &ctx,
-        &before.dir,
-        matches!(operation.as_str(), "login" | "logout"),
-    )?;
-    let account = resolve_account(&ctx, &only)?;
-    if before.dir != account.dir || account_binding(&ctx, &account)? != binding {
-        bail!("账号登记在预检期间已改变，请重试");
-    }
-    validate_auth(&ctx, &account)?;
-    if matches!(operation.as_str(), "login" | "logout") && account.mode != AccountAuthMode::Official
-    {
-        bail!("API 或显式令牌账号不能执行官方登录/退出");
-    }
-    let neutral_cwd = if operation == "launch" {
-        None
-    } else {
-        Some(NeutralWorkingDir::new()?)
-    };
-    let cwd = match &neutral_cwd {
-        Some(dir) => dir.path().to_path_buf(),
-        None => std::env::current_dir()?.canon()?,
-    };
-    validate_layers(&account, &cwd)?;
-    validate_cli_version(&ctx, &account)?;
-    if account.kind == ProfileKind::Claude && account.mode != AccountAuthMode::Official {
-        match crate::native_auth::official_login(
-            &ctx.home_dir,
-            crate::native_auth::AuthKind::Claude,
-            &account.bin,
-            &account.dir,
-        ) {
-            Ok(false) => {}
-            Ok(true) => bail!("账号的凭据存储中存在另一个官方登录，拒绝 API 或显式令牌启动"),
-            Err(_) => bail!("无法确认账号凭据存储没有另一份官方登录，拒绝启动"),
-        }
-    }
-    let mut command = command_for(&ctx, &account)?;
-    command.current_dir(cwd);
-    match (account.kind, operation.as_str()) {
-        (_, "launch") => {
-            command.args(cli_args);
-        }
-        (ProfileKind::Claude, action) => {
-            command.args(["auth", action]);
-        }
-        (ProfileKind::Codex, "status") => {
-            command.args(["login", "status"]);
-        }
-        (ProfileKind::Codex, action) => {
-            command.arg(action);
-        }
-    }
-    let status = command.status().context("受控账号 CLI 未正常启动")?;
-    Ok(status.code().unwrap_or(1))
+pub fn run_cli(_args: &[String]) -> Result<i32> {
+    bail!("账号与启动命令管理已移除；请直接使用助手自己的官方命令")
 }
 
 /// A Windows GUI host must attach to the invoking terminal before it starts an

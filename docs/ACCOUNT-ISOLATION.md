@@ -1,5 +1,8 @@
 # Account Isolation
 
+> Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
+
+
 Agent Manager's controlled commands bind one registered account to one configuration directory, authentication mode, credential owner, and endpoint. When supported CLI behavior or local configuration cannot establish that context, the command stops before launching or changing credentials. Existing unsafe definitions receive a diagnostic; the tool does not migrate or overwrite their credentials automatically.
 
 | Constraint | Source | Consequence |

@@ -1,5 +1,12 @@
 # Account Context
 
+> Account operations are retired. The current [extension-only contract](../EXTENSIONS-ONLY.md) overrides the historical paths below. `native::execute` rejects all `agents`, `accounts`, `profiles`, `profile`, and `aliases` commands before credential loading. `native_account_context::run_cli` rejects old launch scripts without parsing or executing them. Policy writes freeze account and alias definitions; backups omit them and imports preserve them unchanged.
+>
+> Remaining account-named helpers protect extension targets, locks, and MCP variable ownership. They do not authorize account operations. Resource labels come from `resources:targets`, which reads registration metadata only. Cross-target path and credential checks remain mandatory for skills, MCP, and rules.
+>
+> Verify the current boundary with `cargo test --manifest-path engine-rs/Cargo.toml --test native_extension_scope --test native_account_paths --test native_account_skills --test native_mcp --test native_rules --test native_secrets`. Actual account creation, launch, and authentication acceptance recorded below is historical.
+
+
 ## Responsibilities and sources of truth
 
 Actual assistant files hold active authentication and configuration. Registrations hold the account's directory, declared mode, key reference, endpoint, and local generation. The selected external secrets file supplies values. The database holds registration metadata, ownership fingerprints, and inactive MCP snapshots; it does not store plaintext credentials.

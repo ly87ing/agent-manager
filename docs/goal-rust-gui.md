@@ -1,6 +1,27 @@
 # Rust Native GUI Goals and Boundaries
 
-## Current Conclusions
+> Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
+
+
+## 2026-10-11: Extensions-only Source Candidate
+
+Verification base: `3d9ef60c4e47391c98f92c50cf6ce6968c7252e1`, plus the extension-only changes. The user authorized commit and push after receiving the scope and test limitations below. [Extensions only](EXTENSIONS-ONLY.md) owns the current product boundary.
+
+Account, authentication, launch-command, provider/runtime-setting, and assistant-lifecycle operations are retired at the native entry point and desktop command whitelist. Navigation and search expose extension resources. Existing registration metadata is frozen and used only to locate and protect resource targets. Backups omit account/alias trees and refuse imports that change them. MCP edits preserve bytes outside the extension container; extension secrets cannot edit or borrow protected account variables.
+
+Verification generated and read back locally:
+
+- Boundary acceptance: 7 passed, including actual CLI MCP/rules/skills writes under temporary HOME/data, preserved identity/settings/session bytes, untouched other targets, immutable imports, shared-configuration byte preservation, and protected secret sources. The same 7 tests against the base source failed, establishing a negative control.
+- Resource safety: account-path guards 5, skill-target guards 6, configuration backup 9, core 16, discovery 7, MCP 53, rules 24, secrets 15, skills 36, system audit 6, and upstream 7 passed. The final secrets check explicitly refuses a legacy target without a verifiable credential identity and preserves its source and registration instead of repairing the account.
+- Desktop bridge: 27 passed. Frontend: 59 files, 611 passed and 4 existing skips; typecheck and production build passed. The production JavaScript contains none of the retired account-status, account-command, alias-status, or secret-migration endpoints.
+- Browser mock: skills, MCP, rules, sources, programs, settings, MCP secrets, and search were checked at 1000 px and 760 px, with screenshots and no page-level horizontal overflow. Account and launch-command navigation and search entries were absent. This is frontend acceptance, not installed Tauri or real-assistant acceptance.
+- CLI smoke: real extension-policy write and JSON-structured readback passed under temporary HOME/data. Formatting, shell syntax, local Markdown file links, and whitespace checks passed.
+
+The full engine check is **not green**. The complete serial run finished with 432 passed and 11 failed; every integration-test target passed, and only the library target failed. Its failures concern CLI probing, program capture, shell-path capture, upstream capture, and detached-process cleanup. The earlier default run also had two MCP initialize timeouts; both cases passed in the complete 53-test serial run. Fixture expectations that still attempted retired account writes were corrected and rechecked; no deadline was enlarged and no valid failing assertion was skipped.
+
+Windows source and test cross-check passed for `x86_64-pc-windows-gnu` using the installed Rustup toolchain. The first attempt with the active Homebrew compiler stopped before project validation because that compiler lacked the target `core` crate. No toolchain was installed or changed. Windows runtime acceptance remains outstanding. No real account, credential, session, installed application, package, tag, or release was changed or published. This receipt establishes source verification, not installer acceptance or a full-suite pass.
+
+## Historical Conclusions
 
 - **Current version (2026-09-29)**: implementation follows the [multi-account design](MULTI-ACCOUNT-DESIGN.md). Resource domains are accounts, skills, MCP, rules, launch commands, and sources. Hooks, third-party switching in the main configuration, connection alternatives, runtime settings forms, Overview, and operation history have been retired. The x86_64 DMG based on `2e70d14` passed independent package acceptance. An API account was created through the GUI under an isolated HOME and read back with real Claude; see "Delivery Receipt (2026-09-29, Multi-account Version)". The following conclusions describe earlier stages; references to Hooks, six resource domains, Overview, provider switching, and switching back to the official account no longer apply.
 - The core is ready: a shared Rust/SQLite/Tauri library. Since 2026-09-22, actual configuration is the source of truth (see the decision below and `GUI-REDESIGN.md`). Source, isolated live checks, and x86_64 package acceptance on a real machine are complete; see the 2026-09-23 delivery receipt.

@@ -1,21 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
-import { toast } from "sonner";
-import { buildAccounts } from "../lib/accounts";
 import type { StatusData } from "../lib/contract";
 import { useEngineQuery, useRefreshUpstream } from "../lib/queries";
 import { cn } from "../lib/utils";
 import { matchesKeyword } from "./SearchInput";
-import { useQueries } from "@tanstack/react-query";
-import { accountCommand, type AccountCommand } from "../lib/accountCommand";
-import { runEngine } from "../lib/engine";
-import { engineKeys } from "../lib/queries";
-import { defaultAuthShell } from "../lib/profileDefinition";
 
 export interface CommandItem {
   id: string;
   label: string;
-  /** 右侧说明：分类、启动命令或动作结果。 */
+  /** 右侧说明：分类或动作结果。 */
   hint?: string;
   /** 额外匹配词（英文名、命令名、目录等）。 */
   keywords?: string;
@@ -24,7 +17,6 @@ export interface CommandItem {
 }
 
 const PAGES: { key: string; label: string; keywords: string }[] = [
-  { key: "accounts", label: "账号", keywords: "accounts 账号 claude codex 启动命令" },
   { key: "skills", label: "技能", keywords: "skills 技能" },
   { key: "mcp", label: "MCP", keywords: "mcp 服务器" },
   { key: "rules", label: "规则", keywords: "rules 规则" },
@@ -32,16 +24,14 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
   // 设置里的二级页面也要搜得到
   { key: "runs", label: "操作记录", keywords: "runs 任务 日志 记录" },
   { key: "settings:secrets", label: "密钥", keywords: "secrets 密钥 变量 token api key 凭据" },
-  { key: "commands", label: "命令", keywords: "aliases alias 别名 启动命令 终端快捷命令 时区" },
   { key: "programs", label: "程序", keywords: "programs 程序 cli 命令行 依赖 npm npx uvx 安装 升级 版本" },
   { key: "sources", label: "来源", keywords: "sources 来源 集合 仓库 规则来源 添加 更新 版本 停用 移除 未纳管 纳入 接管 扫描 agent-skills" },
 ];
 
 /**
- * 命令面板（⌘K）：一个入口搜到页面、账号与资源，键盘直接完成。⌘⇧K 只列账号。
+ * 命令面板（⌘K / ⌘⇧K）：搜索页面和扩展资源。
  *
- * Queries run only while open. Selecting an account copies its launch command;
- * the palette never writes configuration.
+ * Queries run only while open; the palette never writes configuration.
  */
 export function CommandPalette({
   open,
@@ -50,11 +40,10 @@ export function CommandPalette({
   initialItemId,
   onClose,
   onNavigate,
-  onOpenAgentSkills,
 }: {
   open: boolean;
   scope?: "all" | "quick";
-  /** 托盘目标会带精确查询，打开后直接把焦点落在对应账号。 */
+  /** 精确查询可将焦点落在对应资源。 */
   initialKeyword?: string | null;
   initialItemId?: string | null;
   onClose: () => void;
@@ -68,28 +57,8 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const refreshUpstream = useRefreshUpstream();
 
-  const agents = useEngineQuery<StatusData>("agents:status", ["--metadata-only"], { enabled: open });
-  const profiles = useEngineQuery<StatusData>("profiles:status", [], { enabled: open });
-  const aliases = useEngineQuery<StatusData>("aliases:status", [], { enabled: open });
-  const skills = useEngineQuery<StatusData>("skills:status", [], { enabled: open && scope === "all" });
-  const mcp = useEngineQuery<StatusData>("mcp:status", [], { enabled: open && scope === "all" });
-
-  const groups = useMemo(() => {
-    const aliasValues = Object.fromEntries(
-      (aliases.data?.ok ? aliases.data.data.aliases ?? [] : [])
-        .filter((item) => item.value !== null)
-        .map((item) => [item.name, item.value as string]),
-    );
-    return agents.data?.ok
-      ? buildAccounts(agents.data.data.elements, profiles.data?.ok ? profiles.data.data.elements : [], aliasValues)
-      : [];
-  }, [agents.data, profiles.data, aliases.data]);
-  const accountIds = groups.flatMap((group) => group.accounts.map((account) => account.elementId));
-  const controlledQueries = useQueries({ queries: accountIds.map((id) => {
-    const args = ["--only", id, "--operation", "launch", "--shell", defaultAuthShell()];
-    return { enabled: open, queryKey: engineKeys.request("accounts:command", args), queryFn: () => runEngine<AccountCommand>("accounts:command", args) };
-  }) });
-  const controlledCommands = new Map(accountIds.map((id, index) => [id, controlledQueries[index].data?.ok ? controlledQueries[index].data.data.terminal_command : null]));
+  const skills = useEngineQuery<StatusData>("skills:status", [], { enabled: open });
+  const mcp = useEngineQuery<StatusData>("mcp:status", [], { enabled: open });
 
   useEffect(() => {
     if (open) {
@@ -109,37 +78,6 @@ export function CommandPalette({
       group: "前往",
       run: () => onNavigate(page.key),
     }));
-    for (const group of groups) {
-      for (const account of group.accounts) {
-        const name = account.isMain ? "主账号" : account.name;
-        const command = controlledCommands.get(account.elementId) ?? null;
-        out.push({
-          id: `account:${account.elementId}`,
-          label: `${group.label} · ${name}`,
-          hint: command ? "复制受控命令" : "账号检查未通过",
-          keywords: `${group.agentId} ${account.command ?? ""} ${account.configDir} ${account.apiHost ?? ""} 账号`,
-          group: "账号",
-          run: () => {
-            if (!command) {
-              onNavigate("accounts");
-              return;
-            }
-            void accountCommand(account.elementId, "launch", defaultAuthShell()).then((fresh) => navigator.clipboard.writeText(fresh.terminal_command))
-              .then(() => toast.success(`已复制启动命令 ${command}`))
-              .catch(() => toast.error("复制失败，请到账号页查看启动命令"));
-          },
-        });
-        const skillsId = account.isMain ? group.agentId : account.elementId.replace(/^profiles:/, "");
-        out.push({
-          id: `account-skills:${skillsId}`,
-          label: `${group.label} · ${name} 的技能`,
-          hint: "技能",
-          keywords: `${skillsId} skills`,
-          group: "资源",
-          run: () => onOpenAgentSkills(skillsId),
-        });
-      }
-    }
     for (const element of skills.data?.ok ? skills.data.data.elements : []) {
       const id = element.id.replace(/^skill:/, "");
       if (id.includes("/")) continue;
@@ -166,10 +104,10 @@ export function CommandPalette({
       run: () => refreshUpstream.mutate(undefined),
     });
     return out;
-  }, [groups, skills.data, mcp.data, refreshUpstream, onNavigate, onOpenAgentSkills, JSON.stringify([...controlledCommands])]);
+  }, [skills.data, mcp.data, refreshUpstream, onNavigate]);
 
   const filtered = useMemo(() => {
-    const scoped = scope === "quick" ? items.filter((item) => item.group === "账号") : items;
+    const scoped = items;
     return targetItemId
       ? scoped.filter((item) => item.id === targetItemId)
       : scoped.filter((item) => matchesKeyword(keyword, [item.label, item.hint, item.keywords]));
@@ -200,7 +138,7 @@ export function CommandPalette({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={scope === "quick" ? "账号" : "命令面板"}
+        aria-label={"命令面板"}
         data-testid="command-palette"
         className="w-full max-w-xl overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
         onKeyDown={(event) => {
@@ -231,15 +169,15 @@ export function CommandPalette({
               setKeyword(event.target.value);
             }}
             data-testid="command-palette-input"
-            aria-label={scope === "quick" ? "搜索账号" : "搜索页面、账号与资源"}
-            placeholder={scope === "quick" ? "搜索账号或启动命令…" : "搜索页面、账号、技能、MCP…"}
+            aria-label={"搜索页面与资源"}
+            placeholder={"搜索页面、技能、MCP…"}
             className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
         <div className="max-h-[50vh] overflow-y-auto p-2">
           {filtered.length === 0 ? (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-              {scope === "quick" ? "没有匹配的账号。" : "没有匹配的页面、账号或资源。"}
+              {"没有匹配的页面或资源。"}
             </p>
           ) : (
             Object.entries(grouped).map(([group, groupItems]) => (

@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, waitFor } from "@testing-library/react";
 import { CommandPalette } from "../components/CommandPalette";
 import { useState } from "react";
@@ -7,7 +7,7 @@ import App from "../App";
 import type { Envelope, SettingsData } from "../lib/contract";
 import { setSettingsClient } from "../lib/settings";
 import { encodeShareLink } from "../lib/shareLink";
-import { accountCommandRoute, controlledCommand, agentManagementFixture, makeAliasStatus, makeAuditData, makeElement, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
+import { accountCommandRoute, agentManagementFixture, makeAliasStatus, makeAuditData, makeElement, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
 /** 按事件名记下界面订阅的桌面壳事件（托盘动作、点开的分享链接）。 */
@@ -80,18 +80,11 @@ function routes(): Record<string, TestRoute> {
   };
 }
 
-function mockClipboard() {
-  const writeText = vi.fn(async () => undefined);
-  const original = navigator.clipboard;
-  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
-  onTestFinished(() => { Object.defineProperty(navigator, "clipboard", { configurable: true, value: original }); });
-  return writeText;
-}
 
 async function renderApp() {
   setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
   const view = renderWithEngine(<App />, routes());
-  await screen.findByRole("heading", { name: "账号" }, { timeout: 10_000 });
+  await screen.findByRole("heading", { name: "技能" }, { timeout: 10_000 });
   return view;
 }
 
@@ -102,7 +95,7 @@ function writes(calls: { command: string }[]) {
 
 describe("命令面板", () => {
   beforeAll(async () => {
-    await Promise.all([import("../pages/AccountsPage"), import("../pages/SettingsPage")]);
+    await Promise.all([import("../pages/SkillsPage"), import("../pages/SettingsPage")]);
   });
   beforeEach(() => trayEvents.byName.clear());
 
@@ -110,8 +103,8 @@ describe("命令面板", () => {
     await renderApp();
     await userEvent.keyboard("{Meta>}k{/Meta}");
     const palette = await screen.findByTestId("command-palette");
-    expect(within(palette).getByTestId("command-item-account:agents:claude-code")).toHaveTextContent("Claude · 主账号");
-    await waitFor(() => expect(within(palette).getByTestId("command-item-account:profiles:work")).toHaveTextContent("复制受控命令"));
+    expect(within(palette).queryByTestId("command-item-account:agents:claude-code")).toBeNull();
+    expect(within(palette).queryByTestId("command-item-page:accounts")).toBeNull();
     expect(await within(palette).findByTestId("command-item-skill:agent-skills")).toBeInTheDocument();
     await userEvent.type(screen.getByTestId("command-palette-input"), "MCP");
     await userEvent.click(within(palette).getByTestId("command-item-page:mcp"));
@@ -125,31 +118,12 @@ describe("命令面板", () => {
     expect(await screen.findByTestId("command-palette")).toBeInTheDocument();
   });
 
-  it("⌘⇧K 只列账号；有无旧 alias 都复制引擎受控命令；全程不写配置", async () => {
-    const writeText = mockClipboard();
-    const { calls } = await renderApp();
-    await userEvent.keyboard("{Meta>}{Shift>}k{/Shift}{/Meta}");
-    const palette = await screen.findByRole("dialog", { name: "账号" });
-    expect(within(palette).queryByTestId("command-item-page:mcp")).toBeNull();
-    expect(within(palette).queryByTestId("command-item-skill:agent-skills")).toBeNull();
-    await waitFor(() => expect(within(palette).getByTestId("command-item-account:profiles:relay")).toHaveTextContent("复制受控命令"));
-
-    await userEvent.type(screen.getByTestId("command-palette-input"), "cw");
-    await userEvent.click(within(palette).getByTestId("command-item-account:profiles:work"));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(controlledCommand("profiles:work")));
-
-    await userEvent.keyboard("{Meta>}{Shift>}k{/Shift}{/Meta}");
-    await userEvent.click(await screen.findByTestId("command-item-account:profiles:relay"));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(controlledCommand("profiles:relay")));
-    expect(within(screen.getByRole("navigation")).getByRole("button", { name: "账号" })).toHaveAttribute("aria-current", "page");
-    expect(writes(calls)).toEqual([]);
-  });
 
   it("不再有切换主配置的入口", async () => {
     await renderApp();
     await userEvent.keyboard("{Meta>}k{/Meta}");
     await userEvent.type(screen.getByTestId("command-palette-input"), "切回");
-    expect(screen.getByText("没有匹配的页面、账号或资源。")).toBeInTheDocument();
+    expect(screen.getByText("没有匹配的页面或资源。")).toBeInTheDocument();
   });
 
   it("键盘可完成：方向键选择、回车执行、Esc 关闭", async () => {
@@ -183,10 +157,11 @@ describe("命令面板", () => {
     }
   });
 
-  it("quick account search does not scan skills or MCP", async () => {
+  it("legacy quick search only queries extension resources", async () => {
     const { calls } = renderWithEngine(<CommandPalette open scope="quick" onClose={() => {}} onNavigate={() => {}} onOpenAgentSkills={() => {}} />, routes());
-    await waitFor(() => expect(screen.getByTestId("command-item-account:profiles:work")).toHaveTextContent("复制受控命令"));
-    expect([...new Set(calls.map((call) => call.command))].sort()).toEqual(["accounts:command", "agents:status", "aliases:status", "profiles:status"]);
+    await screen.findByTestId("command-item-skill:agent-skills");
+    expect([...new Set(calls.map(call => call.command))].sort()).toEqual(["mcp:status", "skills:status"]);
+    expect(screen.queryByTestId("command-item-page:accounts")).toBeNull();
   });
 
   it("closed search does not refresh controlled commands cached while open", async () => {
@@ -198,7 +173,7 @@ describe("命令面板", () => {
       </>;
     }
     const { calls, queryClient } = renderWithEngine(<Harness />, routes());
-    await waitFor(() => expect(screen.getByTestId("command-item-account:profiles:work")).toHaveTextContent("复制受控命令"));
+    await screen.findByTestId("command-item-skill:agent-skills");
     await userEvent.click(screen.getByRole("button", { name: "Close search" }));
     const count = calls.length;
     await act(async () => { await queryClient.invalidateQueries({ queryKey: engineKeys.all }); });

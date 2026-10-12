@@ -10,7 +10,7 @@
 //!
 //! `secrets:set --var NAME --value V` 只写用户明确选择的外部文件（空值即删除）；
 //! MCP 不自动收养或复制明文凭据；变量归属和账号代际只记录名称与身份绑定。
-//! `secrets:migrate-legacy` 需显式触发，先迁移旧表取值再删表。错误消息一律不回显取值。
+//! `secrets:migrate-legacy` 已退役，旧表原样保留。错误消息一律不回显取值。
 
 use std::collections::BTreeSet;
 
@@ -50,57 +50,55 @@ fn mcp_references(ctx: &Context) -> Result<BTreeSet<VarRef>> {
     Ok(refs)
 }
 
-/// 接入配置与独立环境引用的凭据变量：变量名 → 用在哪些地方。只看变量名，不读取值。
-///
-/// 独立环境写配置时把取值写进了自己的文件，改了取值要到那个环境重新写入；接入配置只在检查或
-/// 建成独立环境时解析。界面据此说明「改了之后要做什么」。
-fn provider_key_references(ctx: &Context) -> std::collections::BTreeMap<String, Vec<Value>> {
-    let mut refs: std::collections::BTreeMap<String, Vec<Value>> = Default::default();
-    if let Ok(defs) = crate::native_agents::load_definitions(ctx) {
-        for def in defs
-            .iter()
-            .filter(|def| def.spec_ref().get("profile").is_none())
-        {
-            let Ok(settings) = crate::native_agent_settings::parse(def.spec_ref()) else {
-                continue;
-            };
-            for (name, profile) in &settings.profiles {
-                if let Some(var) = &profile.token_var {
-                    refs.entry(var.clone()).or_default().push(json!({
-                        "kind": "connection",
-                        "agent": def.id,
-                        "name": name,
-                        "label": profile.label.clone().unwrap_or_else(|| name.clone()),
-                    }));
+/// Historical account references are protected metadata, never editable secrets.
+fn account_variable_references(ctx: &Context) -> Result<BTreeSet<String>> {
+    let policy = store::effective_policy(ctx)?;
+    let mut names = BTreeSet::new();
+    for raw in policy
+        .pointer("/agents/definitions")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|defs| defs.values())
+    {
+        if let Some(profile) = raw.get("profile") {
+            collect_placeholders(profile, &mut names);
+            if let Some(name) = profile.get("env_key").and_then(Value::as_str) {
+                names.insert(name.into());
+            }
+        }
+        if let Some(profiles) = raw.pointer("/settings/profiles").and_then(Value::as_object) {
+            for profile in profiles.values() {
+                if let Some(name) = profile.get("token_var").and_then(Value::as_str) {
+                    names.insert(name.into());
                 }
             }
         }
     }
-    if let Ok(policy) = store::effective_policy(ctx) {
-        for def in crate::native_profiles::model::load_definitions(&policy)
-            .into_iter()
-            .flatten()
-        {
-            let mut vars: Vec<String> = def
-                .env
-                .values()
-                .filter_map(Value::as_str)
-                .filter_map(|text| text.strip_prefix("${")?.strip_suffix('}'))
-                .map(str::to_string)
-                .collect();
-            vars.extend(def.env_key.clone());
-            vars.sort();
-            vars.dedup();
-            for var in vars {
-                refs.entry(var).or_default().push(json!({
-                    "kind": "profile",
-                    "id": def.id,
-                    "label": def.display_name,
-                }));
-            }
-        }
+    Ok(names
+        .into_iter()
+        .map(|name| name.to_ascii_uppercase())
+        .collect())
+}
+
+fn protected_account_variable(name: &str, references: &BTreeSet<String>) -> bool {
+    crate::native_account_context::identity_override_env(name)
+        || references.contains(&name.to_ascii_uppercase())
+}
+
+fn validate_mcp_variable(ctx: &Context, name: &str) -> Result<()> {
+    let mut refs = mcp_references(ctx)?;
+    let inventory = crate::native_mcp::inventory::load(ctx)?;
+    for row in inventory.saved.iter().filter(|row| row.agent.is_empty()) {
+        add_entry_refs(&mut refs, &row.server, &Format::ClaudeJson, &row.entry);
     }
-    refs
+    if protected_account_variable(name, &account_variable_references(ctx)?)
+        || !refs
+            .iter()
+            .any(|(_, _, _, var)| var.eq_ignore_ascii_case(name))
+    {
+        bail!("只能修改 MCP 专用变量；账号凭据及未被 MCP 引用的变量只读");
+    }
+    Ok(())
 }
 
 /// Credential references are account-owned, including disabled and malformed registrations.
@@ -240,9 +238,7 @@ fn credential_claim_binding(
             .get("account_generation")
             .and_then(Value::as_str)
             .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "账号缺少安全登记代际，请显式重新保存定义后操作密钥；没有迁移或覆盖凭据"
-                )
+                anyhow::anyhow!("扩展目标缺少历史安全标识，无法验证密钥归属；未修改账号登记或凭据")
             })?;
         if generation.len() != 36
             || !generation.chars().enumerate().all(|(i, c)| {
@@ -760,6 +756,13 @@ pub(crate) fn validate_vars_ownership(
     if names.is_empty() {
         return Ok(());
     }
+    let protected = account_variable_references(ctx)?;
+    if names
+        .iter()
+        .any(|name| protected_account_variable(name, &protected))
+    {
+        bail!("账号凭据不能用于扩展操作；请配置 MCP 专用变量");
+    }
     crate::secret_values::ensure_source_ready()?;
     let owners = account_secret_owners(ctx)?;
     for name in names {
@@ -796,7 +799,11 @@ pub(crate) fn validate_variable_owners(
 fn status(ctx: &Context) -> Result<Value> {
     let mut variables = Vec::new();
     let mut unresolved = 0i64;
+    let protected = account_variable_references(ctx)?;
     for (server, key, kind, placeholder) in mcp_references(ctx)? {
+        if protected_account_variable(&placeholder, &protected) {
+            continue;
+        }
         let resolved = crate::secret_values::is_set(&placeholder);
         if !resolved {
             unresolved += 1;
@@ -848,7 +855,6 @@ fn status(ctx: &Context) -> Result<Value> {
         "missing"
     };
     let source_ready = source_path.is_some() && source_error.is_none();
-    let legacy_count = crate::secret_values::legacy_count(ctx)?;
     Ok(json!({
         "domain": "secrets",
         "elements": [{
@@ -866,25 +872,19 @@ fn status(ctx: &Context) -> Result<Value> {
                     "error": source_error,
                     // 文件里已有哪些变量（只有名字）：表单据此说明这个变量有没有值
                     "names": if source_ready {
-                        crate::secret_values::stored_names().into_iter().collect::<Vec<_>>()
+                        variables.iter().filter_map(|item| item["placeholder"].as_str())
+                            .filter(|name| !protected_account_variable(name, &protected) && crate::secret_values::is_stored(name))
+                            .collect::<BTreeSet<_>>().into_iter().collect::<Vec<_>>()
                     } else {
                         Vec::new()
                     },
                 },
-                "legacy_database_values": legacy_count,
+                "legacy_database_values": 0,
                 "ownership_conflict": ownership_conflict,
                 "retired_ownership": retired_ownership,
                 "account_source_missing": account_source_missing,
                 "ownership_error": ownership.err().map(|err| format!("{err:#}")),
-                "provider_keys": provider_key_references(ctx)
-                    .into_iter()
-                    .map(|(var, used_by)| json!({
-                        "variable": var,
-                        "resolved": crate::secret_values::is_set(&var),
-                        "stored": crate::secret_values::is_stored(&var),
-                        "used_by": used_by,
-                    }))
-                    .collect::<Vec<_>>(),
+                "provider_keys": [],
             },
             "state": state,
             "freshness": {"state": "not-applicable", "current": Value::Null, "upstream": Value::Null, "checked_at": Value::Null, "probe": Value::Null, "cache_age_sec": Value::Null},
@@ -930,6 +930,11 @@ fn set_value(ctx: &Context, req: &Request) -> Result<Value> {
         bail!("参数错误: 缺少 --var");
     };
     let value = value.unwrap_or_default();
+    validate_mcp_variable(ctx, &var)?;
+    if let (Some(path), _) = crate::secret_values::source_state() {
+        let path = crate::native_mcp::targets::expand_home(&path, &ctx.home_dir);
+        crate::native_profiles::paths::validate_shell_target(ctx, &path, false)?;
+    }
     if value.contains('\0') {
         bail!("参数错误: 取值含非法字符");
     }
@@ -947,6 +952,7 @@ fn set_value(ctx: &Context, req: &Request) -> Result<Value> {
     // Repeat the provenance check after acquiring the DB writer. Persist it before
     // source writes, including deletion, so removing a value never releases its owner.
     let current = account_secret_owners_in_policy(ctx, &store::policy_from_connection(&tx)?)?;
+    validate_mcp_variable(ctx, &var)?;
     let current_ids = current
         .get(&var.to_ascii_uppercase())
         .cloned()
@@ -1000,6 +1006,13 @@ fn set_source(ctx: &Context, req: &Request) -> Result<Value> {
         }
     }
     let path = path.ok_or_else(|| anyhow::anyhow!("参数错误: 缺少 --path"))?;
+    if !path.is_empty() {
+        let target = crate::native_mcp::targets::expand_home(&path, &ctx.home_dir);
+        crate::native_profiles::paths::validate_shell_target(ctx, &target, false)?;
+    }
+    if !account_variable_references(ctx)?.is_empty() {
+        bail!("既有密钥来源被账号引用，禁止更换；本工具仅管理 MCP 专用密钥");
+    }
     if create && path.is_empty() {
         bail!("参数错误: --create 需要 --path");
     }

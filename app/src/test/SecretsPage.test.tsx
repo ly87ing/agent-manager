@@ -60,7 +60,7 @@ function mcpEnvElement(
 }
 
 describe("SecretsPage", () => {
-  it("接入与独立环境用到的密钥：列出用在哪里、有没有取值，并说明改了之后要重新写入独立环境", async () => {
+  it("旧账号凭据不会出现在扩展密钥页面", async () => {
     const element = mcpEnvElement([], 0, "managed-ok");
     (element.observed as Record<string, unknown>).provider_keys = [
       {
@@ -77,13 +77,10 @@ describe("SecretsPage", () => {
     renderSecrets({
       "secrets:status": makeEnvelope({ domain: "secrets", elements: [element] }, { command: "secrets.status" }),
     });
-    const section = await screen.findByTestId("secrets-provider-keys");
-    expect(section).toHaveTextContent("用到它的独立环境卡片会提示「密钥换过了」，点卡片上的「写入新密钥」才生效");
-    expect(screen.getByTestId("provider-key-GLM_API_KEY")).toHaveTextContent("接入 智谱（claude-code）、独立环境 Claude · GLM（cc-glm）");
-    expect(screen.getByTestId("provider-key-GLM_API_KEY")).toHaveTextContent("外部文件");
-    expect(screen.getByTestId("provider-key-KIMI_API_KEY")).toHaveTextContent("未配置");
-    await userEvent.click(screen.getByTestId("fill-provider-key-KIMI_API_KEY"));
-    expect(await screen.findByRole("dialog")).toHaveTextContent("KIMI_API_KEY");
+    await screen.findByTestId("secrets-env-matrix");
+    expect(screen.queryByTestId("secrets-provider-keys")).toBeNull();
+    expect(screen.queryByTestId("fill-provider-key-KIMI_API_KEY")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("无变量时显示空态且全部为已配置", async () => {
@@ -184,7 +181,7 @@ describe("SecretsPage", () => {
     ]);
   });
 
-  it("旧数据库密钥必须输入确认词后才执行迁移", async () => {
+  it("旧数据库密钥迁移入口已移除", async () => {
     const calls: { command: string; args: string[] }[] = [];
     renderSecrets({
       "secrets:status": makeEnvelope(
@@ -197,16 +194,9 @@ describe("SecretsPage", () => {
       ),
     }, calls);
 
-    await userEvent.click(await screen.findByTestId("migrate-legacy-secrets"));
-    const dialog = await screen.findByRole("dialog", { name: "迁移旧数据库密钥" });
-    expect(dialog).toHaveTextContent("全部成功后才删除数据库里的旧密钥表");
-    expect(screen.getByTestId("confirm-modal-confirm")).toBeDisabled();
+    await screen.findByTestId("secrets-env-matrix");
+    expect(screen.queryByTestId("migrate-legacy-secrets")).toBeNull();
     expect(calls.some((call) => call.command === "secrets:migrate-legacy")).toBe(false);
-
-    await userEvent.type(screen.getByTestId("confirm-modal-input"), "迁移");
-    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-    await waitFor(() => expect(calls.some((call) => call.command === "secrets:migrate-legacy")).toBe(true));
-    expect(calls.find((call) => call.command === "secrets:migrate-legacy")?.args).toEqual([]);
   });
 
   it("填取值：明确写入外部文件且不回显，保存走 secrets:set", async () => {

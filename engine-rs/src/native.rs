@@ -62,8 +62,23 @@ impl Request {
 }
 
 const KNOWN_DOMAINS: &[&str] = &[
-    "agents", "mcp", "skills", "rules", "aliases", "profiles", "secrets", "profile", "programs",
-    "policy", "system", "runs", "db", "logs", "config", "accounts",
+    "agents",
+    "mcp",
+    "skills",
+    "rules",
+    "aliases",
+    "profiles",
+    "secrets",
+    "profile",
+    "programs",
+    "policy",
+    "system",
+    "runs",
+    "db",
+    "logs",
+    "config",
+    "accounts",
+    "resources",
 ];
 
 fn mode_of(request: &Request) -> Mode {
@@ -131,6 +146,38 @@ fn acquire_apply_lock(ctx: &Context, domain: &str) -> Result<ApplyLock> {
 /// The single native entry point. Pure with respect to process state: no exit
 /// codes here (CLI maps errors to exit codes); status never writes the DB.
 pub fn execute(ctx: &Context, request: &Request) -> Envelope {
+    // Retired entry points must stop before loading secrets, preflight or locks.
+    let command = request.command.replace('.', ":");
+    let domain = command.split(':').next().unwrap_or("");
+    let account_operation = matches!(
+        domain,
+        "agents" | "accounts" | "profiles" | "profile" | "aliases"
+    ) || command == "secrets:migrate-legacy"
+        || (matches!(command.as_str(), "policy:set" | "policy:delete")
+            && request.value("--key").is_some_and(|key| {
+                key == "agents"
+                    || key.starts_with("agents.")
+                    || key == "aliases"
+                    || key.starts_with("aliases.")
+            }));
+    if account_operation {
+        return Envelope::new(
+            request.command.replacen(':', ".", 1),
+            mode_of(request),
+            Lock {
+                held: false,
+                pid: None,
+            },
+            request.run_id.clone(),
+            Value::Object(Map::new()),
+            vec![],
+            vec![diagnostic(
+                "FEATURE_RETIRED",
+                None,
+                "账号与启动命令管理已移除；本工具仅管理 MCP、规则、技能及其扩展依赖。".into(),
+            )],
+        );
+    }
     if request.command.replace('.', ":").split(':').next() == Some("usage") {
         return Envelope::new(
             request.command.replacen(':', ".", 1),
@@ -496,6 +543,7 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ));
     }
     match (domain, verb) {
+        ("resources", "targets") => resource_targets(ctx, request),
         ("accounts", "command") => crate::native_account_context::command_request(ctx, request)
             .map(|data| (data, vec![]))
             .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}"))),
@@ -591,6 +639,38 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
             format!("未知动词 '{verb}'（域 '{domain}' 的命令面内没有该动词）"),
         )),
     }
+}
+
+/// Resource labels come only from registration metadata, never login files or CLI probes.
+fn resource_targets(ctx: &Context, request: &Request) -> DispatchResult {
+    if !request.args.is_empty() {
+        return Err(DispatchError::new(
+            "USAGE_ERROR",
+            "resources:targets 不接受参数",
+        ));
+    }
+    let policy = store::effective_policy(ctx).map_err(DispatchError::from)?;
+    let targets: Vec<Value> = policy
+        .pointer("/agents/definitions")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|defs| defs.iter())
+        .filter(|(_, raw)| raw.is_object() && raw.get("_delete") != Some(&Value::Bool(true)))
+        .map(|(id, raw)| {
+            let base = raw
+                .pointer("/profile/base_agent")
+                .and_then(Value::as_str)
+                .unwrap_or(id);
+            let kind = match base {
+                "claude-code" => Some("claude"),
+                "codex" => Some("codex"),
+                _ => None,
+            };
+            json!({"id": id, "name": raw.get("display_name").and_then(Value::as_str).unwrap_or(id),
+                "group": base, "kind": kind})
+        })
+        .collect();
+    Ok((json!({"domain": "resources", "targets": targets}), vec![]))
 }
 
 // ---------------------------------------------------------------------------
@@ -1072,61 +1152,18 @@ fn check_expected_agent_definition(
     Ok(())
 }
 
-/// Account incarnations are local registration metadata, never credentials. Only
-/// an explicit registration/update initializes a legacy profile; queries stay read-only.
+/// Historical registration and alias metadata are immutable for every policy write.
 pub(crate) fn prepare_account_generations(
     before: &Value,
     after: &mut Value,
-    imported: bool,
-    explicit_key: Option<&str>,
+    _imported: bool,
+    _explicit_key: Option<&str>,
 ) -> anyhow::Result<()> {
-    let old = before
-        .pointer("/agents/definitions")
-        .and_then(Value::as_object);
-    let Some(definitions) = after
-        .pointer_mut("/agents/definitions")
-        .and_then(Value::as_object_mut)
-    else {
-        return Ok(());
-    };
-    for (id, raw) in definitions {
-        let previous = old.and_then(|definitions| definitions.get(id));
-        let explicitly_saved = imported
-            || explicit_key.is_some_and(|key| {
-                key == "agents"
-                    || key == "agents.definitions"
-                    || key == format!("agents.definitions.{id}")
-                    || key.starts_with(&format!("agents.definitions.{id}."))
-            });
-        let initialize_legacy = explicitly_saved && raw.get("account_generation").is_none();
-        let independent = raw.get("profile").is_some()
-            || (raw.get("mcp_config").is_some()
-                && !matches!(id.as_str(), "claude-code" | "codex" | "opencode"));
-        if (previous == Some(raw) && !initialize_legacy)
-            || !independent
-            || raw.get("_delete") == Some(&Value::Bool(true))
-        {
-            continue;
-        }
-        let registered = previous.filter(|previous| {
-            (previous.get("profile").is_some() || previous.get("mcp_config").is_some())
-                && previous.get("profile").is_some() == raw.get("profile").is_some()
-                && previous.get("_delete") != Some(&Value::Bool(true))
-        });
-        let generation = registered.and_then(|raw| raw.get("account_generation"));
-        let inherited_stale = registered.is_none()
-            && raw.get("account_generation")
-                == previous.and_then(|raw| raw.get("account_generation"));
-        if !imported && raw.get("account_generation") != generation && !inherited_stale {
-            anyhow::bail!("账号代际由本工具维护，拒绝更改或提交自定义代际；请刷新定义后重试");
-        }
-        let generation = match generation {
-            Some(generation) => generation.clone(),
-            None => Value::String(store::new_account_generation()?),
-        };
-        raw.as_object_mut()
-            .ok_or_else(|| anyhow::anyhow!("账号定义必须是对象"))?
-            .insert("account_generation".into(), generation);
+    if before.get("agents") != after.get("agents") {
+        anyhow::bail!("账号定义只读；不能通过策略编辑或配置导入变更账号");
+    }
+    if before.get("aliases") != after.get("aliases") {
+        anyhow::bail!("启动命令只读；不能通过配置导入变更命令");
     }
     Ok(())
 }
@@ -1627,11 +1664,9 @@ mod tests {
     fn six_domain_plan_is_unknown_verb() {
         let (root, context) = temp_ctx("plan-unknown");
         for command in [
-            "agents:plan",
             "skills:plan",
             "mcp:plan",
             "rules:plan",
-            "aliases:plan",
             "skills.plan", // 点号形式同样归一化为 UNKNOWN_VERB
         ] {
             let env = execute(&context, &request(command, &[]));
@@ -1659,7 +1694,7 @@ mod tests {
                     "--layer",
                     "local",
                     "--key",
-                    "agents.x",
+                    "skills.x",
                     "--value",
                     "1",
                     "--dry-run",
@@ -1667,7 +1702,7 @@ mod tests {
             ),
             (
                 "policy:delete",
-                &["--layer", "local", "--key", "agents.x", "--dry-run"][..],
+                &["--layer", "local", "--key", "skills.x", "--dry-run"][..],
             ),
             ("db:migrate", &["--dry-run"][..]),
         ] {
@@ -1693,12 +1728,12 @@ mod tests {
             (
                 "policy:set",
                 &[
-                    "--layer", "local", "--key", "agents.x", "--value", "1", "--bogus",
+                    "--layer", "local", "--key", "skills.x", "--value", "1", "--bogus",
                 ][..],
             ),
             (
                 "policy:delete",
-                &["--layer", "local", "--key", "agents.x", "--bogus"][..],
+                &["--layer", "local", "--key", "skills.x", "--bogus"][..],
             ),
             ("db:migrate", &["--bogus"][..]),
             ("db:migrate", &["positional"][..]),
@@ -1728,7 +1763,7 @@ mod tests {
                     "--layer",
                     "local",
                     "--key",
-                    "agents.x",
+                    "skills.x",
                     "--value",
                     "1",
                     "--dry-run",
@@ -1753,7 +1788,7 @@ mod tests {
                     "--layer",
                     "local",
                     "--key",
-                    "agents.claude-code.enabled",
+                    "skills.enabled",
                     "--value",
                     "false",
                 ],
@@ -1762,10 +1797,7 @@ mod tests {
         assert!(env.ok, "{:?}", env.errors);
         assert!(store::db_path(&context).exists());
         let policy = store::effective_policy(&context).unwrap();
-        assert_eq!(
-            policy["agents"]["claude-code"]["enabled"],
-            Value::Bool(false)
-        );
+        assert_eq!(policy["skills"]["enabled"], Value::Bool(false));
         let _ = std::fs::remove_dir_all(root);
     }
 

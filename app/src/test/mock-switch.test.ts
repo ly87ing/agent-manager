@@ -15,16 +15,15 @@ describe("dev-only mock 开关", () => {
     expect(mockModeFromSearch("?other=1", true)).toBeNull();
   });
 
-  it("mock client 覆盖全部页面命令，fixture 含五态 freshness 与七态收敛", async () => {
+  it("mock client 覆盖扩展页面命令及其资源状态", async () => {
     const client = createMockEngineClient();
     for (const command of [
       "system:audit",
-      "agents:status",
+      "resources:targets",
       "mcp:status",
       "skills:status",
       "rules:status",
       "secrets:status",
-      "profiles:status",
       "usage:status",
       "usage:scan",
       "mcp:apply",
@@ -50,15 +49,14 @@ describe("dev-only mock 开关", () => {
     }
 
     const mcp = await client.run("mcp:status");
-    const agents = await client.run("agents:status");
     const skills = await client.run("skills:status");
     const rules = await client.run("rules:status");
 
-    const all = [mcp, agents, skills, rules].flatMap(
+    const all = [mcp, skills, rules].flatMap(
       (env) => (env.data as { elements: Array<{ freshness: { state: string }; state: string }> }).elements,
     );
     const freshnessStates = new Set(all.map((el) => el.freshness.state));
-    for (const state of ["current", "behind", "ahead", "unknown", "not-applicable"]) {
+    for (const state of ["current", "behind", "unknown", "not-applicable"]) {
       expect(freshnessStates.has(state), `freshness ${state}`).toBe(true);
     }
     const convergenceStates = new Set(all.map((el) => el.state));
@@ -67,8 +65,6 @@ describe("dev-only mock 开关", () => {
       "drifted",
       "missing",
       "not-materialized",
-      "unmanaged-detected",
-      "unsupported",
       "disabled",
     ]) {
       expect(convergenceStates.has(state), `convergence ${state}`).toBe(true);
@@ -96,29 +92,12 @@ describe("dev-only mock 开关", () => {
     expect(afterSearch?.observed.agents?.["claude-code"].vars?.CRAWL_API_KEY.resolved).toBe(true);
   });
 
-  it("mock 实例预览随定义变化且不写状态或回显凭据", async () => {
+  it("mock rejects all retired account operations", async () => {
     const client = createMockEngineClient();
-    const before = await client.run("profiles:status");
-    const definition = { profile: { kind: "claude", config_dir: "~/.claude-preview-demo", model: "demo-one" } };
-    const preview = async (model: string) => client.run("profiles:preview", [
-      "--only", "profiles:preview-demo", "--definition",
-      JSON.stringify({ ...definition, profile: { ...definition.profile, model } }),
-      "--on-save", "--items", "permissions,mcp",
-    ]);
-    const first = await preview("demo-one");
-    const second = await preview("demo-two");
-    expect(first.data).toMatchObject({ path: "~/.claude-preview-demo/settings.json", exists: false, will_write: true });
-    expect(JSON.stringify(first.data)).toContain("demo-one");
-    expect(JSON.stringify(second.data)).toContain("demo-two");
-    expect(JSON.stringify(second.data)).not.toContain("demo-one");
-
-    const candidate = await client.run("profiles:preview", [
-      "--only", "profiles:preview-demo", "--base", "missing", "--definition-base", "missing",
-      "--candidate", JSON.stringify(definition), "--exact",
-      "--preview-secret-var", "YOUR_DEMO_KEY", "--preview-secret-value", "YOUR_DEMO_TOKEN",
-    ]);
-    expect(candidate.data).toMatchObject({ file_base: "missing", content_base: "d".repeat(64) });
-    expect(JSON.stringify(candidate)).not.toContain("YOUR_DEMO_TOKEN");
-    expect(await client.run("profiles:status")).toEqual(before);
+    for (const command of ["agents:status", "agents:configure", "profiles:preview", "profiles:create", "accounts:command", "aliases:apply", "secrets:migrate-legacy"]) {
+      const result = await client.run(command);
+      expect(result.ok).toBe(false);
+      expect(result.errors[0].code).toBe("FEATURE_RETIRED");
+    }
   });
 });
