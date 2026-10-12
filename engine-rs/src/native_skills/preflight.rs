@@ -26,12 +26,14 @@ pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
         .value("--action")
         .ok_or_else(|| anyhow!("缺少 --action 参数"))?;
     if action == "remove-link" {
+        validate_replace_options(req, action, false)?;
         return preflight_remove_link(ctx, req);
     }
     let only = req
         .value("--only")
         .ok_or_else(|| anyhow!("缺少 --only 参数"))?;
     let target = parse_only(only)?;
+    validate_replace_options(req, action, target.skill.is_some())?;
     // 显式接管通道：仅逐 skill 的 add/remove 可携带，其余动作与集合级一律拒绝。
     if req.flag("--allow-takeover")
         && !(target.skill.is_some() && matches!(action, "add" | "remove"))
@@ -195,7 +197,61 @@ fn preflight_skill_action(
     let bindings = load_bindings_readonly(ctx)?;
     let existing_binding = bindings.get(&(coll.name.clone(), skill.to_string(), agent.to_string()));
     preflight_verify_skill_binding(ctx, coll, action, skill, agent, existing_binding)?;
+    replacement(ctx, req, coll, skill, agent, &bindings, meta)?;
     Ok(())
+}
+
+pub(super) fn validate_replace_options(req: &Request, action: &str, single: bool) -> Result<()> {
+    if req.flag("--replace-from") || req.flag("--replace-version") {
+        if action != "add" || !single || req.flag("--allow-takeover") {
+            bail!("技能替换仅支持逐项 add，且不能同时接管外部链接");
+        }
+        if req.value("--replace-from").is_none() || req.value("--replace-version").is_none() {
+            bail!("技能替换需要 --replace-from 与 --replace-version");
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn replacement(
+    ctx: &Context,
+    req: &Request,
+    coll: &CollectionDef,
+    skill: &str,
+    agent: &str,
+    bindings: &BTreeMap<(String, String, String), super::BindingEntry>,
+    meta: &DomainMetadata,
+) -> Result<Option<(String, String)>> {
+    let Some(from) = req.value("--replace-from") else {
+        return Ok(None);
+    };
+    let from = parse_only(from)?;
+    if from.skill.as_deref() != Some(skill) || from.collection == coll.name {
+        bail!("只能替换另一来源的同名技能");
+    }
+    let binding = bindings
+        .get(&(
+            from.collection.clone(),
+            skill.to_string(),
+            agent.to_string(),
+        ))
+        .filter(|binding| binding.assigned)
+        .ok_or_else(|| anyhow!("原技能分配已变化，请刷新后重试"))?;
+    if Some(binding.version.as_str()) != req.value("--replace-version") {
+        bail!("原技能版本已变化，请刷新后重试");
+    }
+    let origin = meta
+        .collections
+        .get(&from.collection)
+        .ok_or_else(|| anyhow!("原技能来源不存在，请刷新后重试"))?;
+    let link = meta.agents[agent].skills_dir.join(skill);
+    if is_link_entry(&link) {
+        let expected = expected_link_target(ctx, origin, skill, &binding.version)?;
+        if super::paths::resolve_link_target(&link)? != super::paths::resolve_loose(&expected) {
+            bail!("技能链接已被外部更改，拒绝替换");
+        }
+    }
+    Ok(Some((from.collection, binding.version.clone())))
 }
 
 fn preflight_verify_skill_binding(

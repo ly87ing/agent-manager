@@ -29,6 +29,7 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         .ok_or_else(|| anyhow!("缺少 --action 参数"))?;
     // 清理孤立链接：不属于任何集合，因此不要 --only，用 --link 指名
     if action == "remove-link" {
+        super::preflight::validate_replace_options(req, action, false)?;
         apply_remove_link(ctx, req)?;
         let link = req.value("--link").unwrap_or("");
         return Ok(json!({
@@ -41,6 +42,7 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         .value("--only")
         .ok_or_else(|| anyhow!("缺少 --only 参数"))?;
     let target = parse_only(only)?;
+    super::preflight::validate_replace_options(req, action, target.skill.is_some())?;
     // 显式接管通道：仅逐 skill 的 add/remove 可携带，其余动作与集合级一律拒绝。
     if req.flag("--allow-takeover")
         && !(target.skill.is_some() && matches!(action, "add" | "remove"))
@@ -358,6 +360,15 @@ fn apply_skill_add(
     // 显式接管：--allow-takeover 仅放行非受管符号链接的替换；真实文件/目录仍 fail-closed。
     let allow_takeover = req.flag("--allow-takeover");
     check_not_external_conflict_with_takeover(link_path, bases, allow_takeover)?;
+    let replacement = super::preflight::replacement(
+        ctx,
+        req,
+        coll,
+        skill,
+        agent,
+        &load_bindings_from_conn(&tx)?,
+        &load_metadata(ctx)?,
+    )?;
     let takeover = is_unmanaged_link(link_path, bases);
     let version = hash_skill_dir(source_dir)?;
     // 本地来源集合直链源目录（内容归外部所有、跟随其更新）；git 集合落内容快照。
@@ -381,13 +392,18 @@ fn apply_skill_add(
     );
 
     let res = (move || -> Result<()> {
+        if let Some((origin, version)) = &replacement {
+            write_binding(&tx, origin, skill, agent, version, false, false)?;
+        }
         write_binding(&tx, &coll.name, skill, agent, &version, true, true)?;
         store::record_operation(
             &tx,
             Some(&req.run_id),
             "skills:add",
             Some(&format!("{}/{}@{}", coll.name, skill, agent)),
-            Some(&json!({"action": "add", "version": version, "takeover": takeover})),
+            Some(
+                &json!({"action": "add", "version": version, "takeover": takeover, "replaced_from": replacement}),
+            ),
         )?;
         tx.commit()?;
         Ok(())

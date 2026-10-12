@@ -63,8 +63,8 @@ function skillsRoutes() {
             policy: { enabled: true, agents: { "claude-code": true, codex: true } },
             observed: {
               agents: {
-                "claude-code": { state: "linked", link_path: "/home/.claude/skills/alpha", target_dir_exists: true, assigned: true, enabled: true, actions: ["disable", "remove"] },
-                codex: { state: "dead-link", link_path: "/home/.codex/skills/alpha", target_dir_exists: true, assigned: true, enabled: true, actions: ["update", "disable", "remove"] },
+                "claude-code": { state: "linked", version: "original-version", link_path: "/home/.claude/skills/alpha", target_dir_exists: true, assigned: true, enabled: true, actions: ["disable", "remove"] },
+                codex: { state: "dead-link", version: "original-version", link_path: "/home/.codex/skills/alpha", target_dir_exists: true, assigned: true, enabled: true, actions: ["update", "disable", "remove"] },
                 "kimi-cli": { state: "unsupported", assigned: false, enabled: false, actions: [] },
               },
               discovery_inbox: false,
@@ -448,12 +448,11 @@ describe("改成我的版本", () => {
     expect(calls.some((call) => call.command === "skills:fork" || call.command === "skills:apply")).toBe(false);
     await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
 
-    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
+    await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
     const writes = calls.filter((call) => call.command === "skills:fork" || call.command === "skills:apply").map((call) => [call.command, ...call.args]);
     expect(writes).toEqual([
       ["skills:fork", "--only", "skill:agent-skills/alpha", "--dest", "~/my-skills", "--collection", "my-skills"],
-      ["skills:apply", "--only", "skill:agent-skills/alpha", "--action", "remove", "--agent", "claude-code"],
-      ["skills:apply", "--only", "skill:my-skills/alpha", "--action", "add", "--agent", "claude-code"],
+      ["skills:apply", "--only", "skill:my-skills/alpha", "--action", "add", "--agent", "claude-code", "--replace-from", "skill:agent-skills/alpha", "--replace-version", "original-version"],
     ]);
   });
 

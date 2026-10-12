@@ -20,6 +20,9 @@ const SKILL_REVERSE: Record<string, { action: string; verb: string }> = {
 };
 
 export function rollbackPlan(operation: RunOperation): RollbackPlan {
+  if (operation.operation_type === "skills:add" && (operation.detail as { replaced_from?: unknown } | null)?.replaced_from) {
+    return { kind: "none", reason: "这是来源切换，不能通过移除新分配恢复旧版本；请在技能页选择所需来源" };
+  }
   const reverse = SKILL_REVERSE[operation.operation_type];
   if (reverse) {
     const match = /^([^/@]+)\/([^@]+)@(.+)$/.exec(operation.target ?? "");

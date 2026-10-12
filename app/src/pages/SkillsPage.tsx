@@ -168,8 +168,7 @@ export default function SkillsPage({
   const pendingFill = fillRows(elements, agentFilter === "all" ? undefined : [agentFilter]);
 
   /**
-   * 改成我的版本：先复制并登记（skills:fork），成功后把勾选的账号逐个换过去——
-   * 先取消原集合的分配，再加上用户的版本；每一步照常核对，某个账号失败不影响其余。
+   * 复制并登记后，逐个目标原子替换链接与分配；失败保留原版本。
    */
   const runFork = async (skill: EngineElement, input: { dest: string; target: string; switchAccounts: string[] }) => {
     const spec = skill.spec as SkillSpec;
@@ -188,10 +187,10 @@ export default function SkillsPage({
       }
       let failed = 0;
       for (const agent of input.switchAccounts) {
-        const removed = await execute({ command: "skills:apply", label: `换掉原版本 ${name} @ ${nameOf(agent)}`, args: ["--only", skill.id, "--action", "remove", "--agent", agent], silent: true });
-        const added = removed?.ok
-          ? await execute({ command: "skills:apply", label: `换成我的版本 ${name} @ ${nameOf(agent)}`, args: ["--only", `skill:${input.target}/${name}`, "--action", "add", "--agent", agent], silent: true })
-          : null;
+        const version = (skill.observed as SkillObserved).agents?.[agent]?.version;
+        const added = version ? await execute({ command: "skills:apply", label: `切换技能版本 ${name} @ ${nameOf(agent)}`,
+          args: ["--only", `skill:${input.target}/${name}`, "--action", "add", "--agent", agent,
+            "--replace-from", skill.id, "--replace-version", version], silent: true }) : null;
         if (!added?.ok) failed += 1;
       }
       const path = (forked.data as { path?: string }).path ?? input.dest;

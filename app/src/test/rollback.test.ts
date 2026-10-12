@@ -4,6 +4,9 @@ import { rollbackPlan } from "../lib/rollback";
 const op = (operation_type: string, target: string | null, detail: unknown = {}) => ({ id: "x", operation_type, target, detail, created_at: "2026-09-29T00:00:00Z" });
 
 describe("操作记录的撤回", () => {
+  it("来源切换不能用移除新分配冒充恢复旧版本", () => {
+    expect(rollbackPlan(op("skills:add", "mine/alpha@codex", { replaced_from: ["upstream", "v1"] }))).toMatchObject({ kind: "none" });
+  });
   it("技能：首次启用撤回为取消分配，启用与停用互为撤回，只动那一个账号", () => {
     expect(rollbackPlan(op("skills:add", "agent-skills/verification@claude-code"))).toEqual({
       kind: "skills", label: "取消分配 verification @ claude-code", elementId: "skill:agent-skills/verification", agent: "claude-code", action: "remove",

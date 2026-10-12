@@ -330,11 +330,24 @@ pub fn atomic_create_or_replace_link(source: &Path, link_path: &Path) -> Result<
         .ok_or_else(|| anyhow!("链接路径无文件名: {}", link_path.display()))?
         .to_string_lossy();
     let tmp = parent.join(format!(".{}.tmp-{}", file_name, store::uuid_v4()));
+    let previous_target = if is_link_entry(link_path) {
+        Some(resolve_link_target(link_path)?)
+    } else {
+        None
+    };
     crate::platform::link_dir(&source, &tmp)
         .with_context(|| format!("创建临时符号链接失败: {}", tmp.display()))?;
 
     if let Err(err) = crate::platform::replace_link(&tmp, link_path) {
         let _ = crate::platform::remove_link(&tmp);
+        // Windows replacement removes the old directory link before rename.
+        if previous_target.is_some()
+            && std::fs::symlink_metadata(link_path)
+                .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        {
+            restore_link_guarded(link_path, previous_target, &ExpectedLinkState::Absent)
+                .context("链接替换失败，恢复原链接失败")?;
+        }
         return Err(err).with_context(|| format!("原子替换链接失败: {}", link_path.display()));
     }
     Ok(())

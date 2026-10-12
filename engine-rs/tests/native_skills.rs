@@ -3194,6 +3194,110 @@ fn forking_a_skill_copies_it_into_the_users_collection_and_tracks_upstream() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[test]
+fn replacing_a_skill_is_atomic_and_refuses_stale_bindings_or_changed_links() {
+    let (root, context) = temp_ctx("skills-atomic-replace");
+    let repo = context.data_dir.join("repositories/upstream");
+    std::fs::create_dir_all(repo.join("alpha")).unwrap();
+    std::fs::write(repo.join("alpha/SKILL.md"), "# Original\n").unwrap();
+    std::fs::write(repo.join(".agent-manager-owned"), "{}").unwrap();
+    set_collection(
+        &context,
+        "upstream",
+        r#"{"url":"https://example.com/upstream.git","skill_paths":["alpha"]}"#,
+    );
+    for agent in ["claude-code", "codex"] {
+        assert!(skill_action(&context, "skill:upstream/alpha", "add", agent).ok);
+    }
+    let before_policy = store::effective_policy(&context).unwrap();
+    let dest = root.join("mine");
+    assert!(
+        execute(
+            &context,
+            &request(
+                "skills:fork",
+                &[
+                    "--only",
+                    "skill:upstream/alpha",
+                    "--dest",
+                    dest.to_str().unwrap()
+                ]
+            )
+        )
+        .ok
+    );
+    let conn = rusqlite::Connection::open(store::db_path(&context)).unwrap();
+    let version: String = conn.query_row("SELECT version FROM skill_bindings WHERE collection='upstream' AND agent='claude-code'", [], |row| row.get(0)).unwrap();
+    let link = context.home_dir.join(".claude/skills/alpha");
+    let original = agent_manager_engine::platform::read_link(&link).unwrap();
+    let switch = |version: &str| {
+        execute(
+            &context,
+            &request(
+                "skills:apply",
+                &[
+                    "--only",
+                    "skill:my-skills/alpha",
+                    "--action",
+                    "add",
+                    "--agent",
+                    "claude-code",
+                    "--replace-from",
+                    "skill:upstream/alpha",
+                    "--replace-version",
+                    version,
+                ],
+            ),
+        )
+    };
+    let assert_original = || {
+        assert_eq!(
+            agent_manager_engine::platform::read_link(&link).unwrap(),
+            original
+        );
+        assert_eq!(conn.query_row("SELECT assigned FROM skill_bindings WHERE collection='upstream' AND agent='claude-code'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+    };
+    assert!(!switch("stale-version").ok);
+    assert_original();
+    // Failure before link replacement leaves the original usable.
+    std::fs::remove_file(dest.join("alpha/SKILL.md")).unwrap();
+    assert!(!switch(&version).ok);
+    assert_original();
+    std::fs::write(dest.join("alpha/SKILL.md"), "# My version\n").unwrap();
+    // A real commit failure after replacement must restore the original link and binding.
+    conn.execute_batch("CREATE TRIGGER fail_replace BEFORE INSERT ON operation_logs WHEN NEW.operation_type='skills:add' BEGIN SELECT RAISE(ABORT, 'injected replacement failure'); END;").unwrap();
+    assert!(!switch(&version).ok);
+    assert_original();
+    conn.execute_batch("DROP TRIGGER fail_replace").unwrap();
+    // Even a link into a different managed source must not be overwritten.
+    agent_manager_engine::platform::remove_link(&link).unwrap();
+    link_dir(&dest.join("alpha"), &link).unwrap();
+    let changed = agent_manager_engine::platform::read_link(&link).unwrap();
+    assert!(!switch(&version).ok);
+    assert_eq!(
+        agent_manager_engine::platform::read_link(&link).unwrap(),
+        changed
+    );
+    agent_manager_engine::platform::remove_link(&link).unwrap();
+    link_dir(&original, &link).unwrap();
+    let result = switch(&version);
+    assert!(result.ok, "{:?}", result.errors);
+    assert_eq!(
+        std::fs::read_to_string(link.join("SKILL.md")).unwrap(),
+        "# My version\n"
+    );
+    assert_eq!(conn.query_row("SELECT assigned FROM skill_bindings WHERE collection='upstream' AND agent='claude-code'", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    assert_eq!(
+        std::fs::read_to_string(context.home_dir.join(".codex/skills/alpha/SKILL.md")).unwrap(),
+        "# Original\n"
+    );
+    assert_eq!(
+        store::effective_policy(&context).unwrap()["agents"],
+        before_policy["agents"]
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
 /// 回归：换成用户的版本后，停用或移除原集合只动它自己的链接，不碰已归用户集合的同名链接。
 #[test]
 fn disabling_or_removing_the_origin_keeps_the_users_version_linked() {

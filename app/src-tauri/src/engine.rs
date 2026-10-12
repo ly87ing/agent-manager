@@ -323,6 +323,8 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--purge", ArgValueKind::Flag));
                 // 更新 git 来源到指定版本（切换 / 回滚）
                 specs.push(("--ref", ArgValueKind::GitRef));
+                specs.push(("--replace-from", ArgValueKind::ElementId));
+                specs.push(("--replace-version", ArgValueKind::GitRef));
             }
             // MCP 逐条写入：条目内容（--spec，JSON）、写入基准摘要（--base，
             // 复制覆盖同名时另带目标的 --to-base）、复制目标助手（--to）。
