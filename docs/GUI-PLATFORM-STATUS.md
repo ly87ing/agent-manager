@@ -1,6 +1,37 @@
 # GUI Platform Status
 
-This page reflects the actual Rust/Tauri implementation on the current branch. A capability is marked complete only after it has been wired up and passed the relevant verification.
+The current product manages extensions only. Account, login, provider, launch,
+alias, quota, and assistant lifecycle capabilities described in older records
+below are retired. The Assistants page lists immutable extension-target metadata;
+it does not restore account management. See [current architecture](ARCHITECTURE.md)
+and [scope](EXTENSIONS-ONLY.md).
+
+## Current acceptance boundary (2026-10-12)
+
+- macOS isolated CLI and UI checks exercise extension operations with temporary
+  HOME/data directories; real accounts and sessions are not test targets.
+- A Windows CI failure at `41707c4` reproduced dependency unlink reporting success
+  while its `.cmd` file remained. `adc5973` fixes the platform filename. Native
+  Windows CI at `a21feff` passed the actual link/unlink and private-file ACL tests;
+  the ACL fixture now declares its dedicated MCP variable reference so it reaches
+  the permission assertions without relaxing secret scope.
+  [GUI CI receipt](https://github.com/ly87ing/agent-manager/actions/runs/38252731593).
+- Current correction work adds atomic skill source replacement, local-source
+  personal copies, selected-module definition restore with stale-preview refusal,
+  grouped batch outcomes and failed-only retries, and complete dependency action
+  labels. Local acceptance and remaining limits are recorded in
+  [the implementation history](goal-rust-gui.md#2026-10-12-extension-workflow-corrections).
+- Source changes, native tests and installer builds are separate evidence. Earlier
+  downloadable previews predate extension-only scope and must not be treated as
+  acceptance of current source. Real Windows desktop installation, real arm64
+  execution, signing/notarization and actual automatic updates remain unverified.
+- No new Release, tag, or installer publication is part of this correction.
+
+## Historical platform records
+
+The following dated records apply only to their named revisions. Statements about
+accounts, aliases, commands, quotas or secret migration describe those old builds,
+not current supported functionality.
 
 ## Release Verification on 2026-10-08
 

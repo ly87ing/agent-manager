@@ -1139,3 +1139,38 @@ ordinary dotfiles links remain supported. Old-source negative controls and actua
 isolated CLI writes/readback accompany the regressions. No real account or login
 was changed. See [the account review](ACCOUNT-ISOLATION.md#2026-10-10-configuration-and-account-review)
 for exact source/CI evidence, retained local failures and acceptance boundaries.
+
+### 2026-10-12: extension workflow corrections
+
+The current product remains extensions-only; historical account registrations are
+immutable target metadata. This correction includes explicit single-assistant MCP
+edit defaults, atomic personal skill switching, local-source personal copies,
+selected-module definition restore with a stale-preview digest, per-target batch
+outcomes and checked failed-only retries, and complete dependency action labels.
+Assistant and MCP-secret labels replace account-management wording in active
+extension workflows. Skill collection summaries wrap independently of assistant
+columns; long dependency versions and actions wrap without overlapping.
+
+Local verification passed 459 engine tests, 27 Tauri tests and 600 frontend tests
+(4 platform-specific skips), TypeScript checking and the production frontend build.
+The staged batch snapshot separately passed type checking and 85 related tests.
+Isolated CLI acceptance copied an assigned local skill, switched only Claude,
+preserved Codex's link, restored rules without changing skill definitions, rejected
+a stale restore and retired account commands, and read back simulated account
+files byte-for-byte unchanged. The skill regression rejects stale versions and
+external links and restores the old link and binding after an injected database
+failure; old source accepted the stale version and failed the regression.
+
+Browser acceptance checked 14 populated/empty pages, menus and dialogs at each of
+1000 and 760 px. Command traces verified single-assistant MCP previews, explicit
+multi-assistant selection, cancellation without apply/import writes, mixed batch
+outcomes and retries that did not repeat successful targets. Screenshots were
+inspected in addition to overflow and button-bound checks. The isolated macOS
+debug app starts at the committed 1000 by 650 geometry with a separate identifier.
+
+Native Windows CI at `a21feff` passed actual command-entry unlink and private-file
+ACL checks after the MCP-reference fixture correction. Native Windows/Linux/macOS
+engine checks also passed at `bb9edd6`. These are revision-specific receipts, not
+physical desktop or current-installer acceptance. See [platform status](GUI-PLATFORM-STATUS.md).
+Real Windows installation, real arm64 execution, signing/notarization and actual
+automatic updates remain unverified. No release, tag or installer was published.
