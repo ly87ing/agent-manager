@@ -532,12 +532,18 @@ fn bypass_hosts<'a>(hosts: impl Iterator<Item = &'a str>) -> Option<Option<Strin
 
 #[cfg(test)]
 pub(crate) mod capture_test_support {
-    use std::io::Write;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
+    use std::sync::OnceLock;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     pub fn root(label: &str) -> PathBuf {
+        // Compile before callers start their short capture deadlines.
+        executable();
+        fresh_root(label)
+    }
+
+    fn fresh_root(label: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!(
             "am-capture-{label}-{}-{}",
             std::process::id(),
@@ -546,18 +552,61 @@ pub(crate) mod capture_test_support {
                 .unwrap()
                 .as_nanos()
         ));
-        std::fs::create_dir(&root).unwrap();
+        let builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        let mut builder = builder;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder.create(&root).unwrap();
         root
     }
 
+    fn executable() -> &'static Path {
+        static EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
+        EXECUTABLE.get_or_init(|| {
+            let executable = fresh_root("fixture").join("capture-fixture.exe");
+            let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+            let mut child = Command::new(compiler)
+                .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common/capture_fixture.rs"))
+                .args([
+                    "--crate-name",
+                    "capture_fixture",
+                    "--edition=2021",
+                    "-C",
+                    "debuginfo=0",
+                    "-o",
+                ])
+                .arg(&executable)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .spawn()
+                .expect("the installed Rust toolchain must build the native capture fixture");
+            let start = Instant::now();
+            loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    assert!(
+                        status.success(),
+                        "native capture fixture compilation failed"
+                    );
+                    break;
+                }
+                if start.elapsed() >= Duration::from_secs(60) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!("native capture fixture compilation timed out");
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            executable
+        })
+    }
+
     pub fn command(root: &Path, mode: &str) -> Command {
-        let mut command = Command::new(std::env::current_exe().unwrap());
+        let mut command = Command::new(executable());
         command
-            .args([
-                "--exact",
-                "process::capture_test_support::helper",
-                "--nocapture",
-            ])
             .env("AM_CAPTURE_MODE", mode)
             .env("AM_CAPTURE_ROOT", root);
         command
@@ -572,77 +621,6 @@ pub(crate) mod capture_test_support {
             "Descendant survived the timeout"
         );
         std::fs::remove_dir_all(root).unwrap();
-    }
-
-    // Execute the test binary itself, so the same inherited-pipe regression runs on Windows.
-    #[test]
-    fn helper() {
-        let Ok(mode) = std::env::var("AM_CAPTURE_MODE") else {
-            return;
-        };
-        let root = PathBuf::from(std::env::var_os("AM_CAPTURE_ROOT").unwrap());
-        match mode.as_str() {
-            "stdout" | "stderr" | "delayed-stdout" | "detached" => {
-                #[cfg(windows)]
-                if mode == "detached" {
-                    use std::os::windows::io::AsRawHandle;
-                    use windows_sys::Win32::Foundation::{
-                        SetHandleInformation, HANDLE_FLAG_INHERIT,
-                    };
-                    // NUL stdio alone still inherits other inheritable handles.
-                    // This fixture must close captured pipes before the descendant exits.
-                    for handle in [
-                        std::io::stdout().as_raw_handle(),
-                        std::io::stderr().as_raw_handle(),
-                    ] {
-                        assert_ne!(
-                            unsafe { SetHandleInformation(handle as _, HANDLE_FLAG_INHERIT, 0) },
-                            0
-                        );
-                    }
-                }
-                let mut command = command(&root, "hold");
-                command.stdin(Stdio::null());
-                if mode == "detached" {
-                    command.stdout(Stdio::null()).stderr(Stdio::null());
-                } else if mode != "stderr" {
-                    command.stdout(Stdio::inherit()).stderr(Stdio::null());
-                } else {
-                    command.stdout(Stdio::null()).stderr(Stdio::inherit());
-                }
-                let _descendant = command.spawn().unwrap();
-                let start = Instant::now();
-                while !root.join("ready").exists() {
-                    assert!(start.elapsed() < Duration::from_secs(5));
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-                if mode == "delayed-stdout" {
-                    std::thread::sleep(Duration::from_secs(2));
-                }
-                std::fs::write(root.join("parent-exited"), "done").unwrap();
-            }
-            "hold" => {
-                std::fs::write(root.join("ready"), "ready").unwrap();
-                std::thread::sleep(Duration::from_secs(5));
-                std::fs::write(root.join("late"), "survived").unwrap();
-            }
-            "large-output" => {
-                let stdout = [b'o'; 8192];
-                let stderr = [b'e'; 8192];
-                for _ in 0..640 {
-                    std::io::stdout().write_all(&stdout).unwrap();
-                    std::io::stderr().write_all(&stderr).unwrap();
-                }
-            }
-            "output" => {
-                println!("retained standard output");
-                for line in 0..10 {
-                    eprintln!("diagnostic-{line}");
-                }
-                std::process::exit(7);
-            }
-            _ => panic!("Unknown capture fixture mode"),
-        }
     }
 }
 

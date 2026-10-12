@@ -2,6 +2,19 @@
 
 > Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
 
+## 2026-10-12: Reliable Command Capture Fixtures
+
+Verification base: `67317b331f6dc549023b44604f08416e6cbe48ba`, plus the test-fixture changes. The unchanged engine test binary failed 6 of 12 focused capture tests at its Cargo output path; a SHA-256-identical private-directory copy passed all 12. The copied binary also passed the previously failing npm CLI probe and detached-descendant test. This establishes a startup-path effect, not its underlying OS mechanism or a product cleanup defect.
+
+Short capture tests now compile a small std-only native parent/descendant fixture before starting their deadlines, following the existing integration-fixture pattern. Production command execution, timeouts, output limits, and account protections are unchanged. All readiness, parent-exit, delayed-write, and Windows handle-inheritance assertions remain. The helper moved out of the library test harness; it is no longer counted as a separate test.
+
+Verification generated and read back locally:
+
+- Full engine: 442 passed, 0 failed, including all 240 library tests and all integration targets. The 11 failures recorded on 2026-10-11 did not recur. Extension-only boundary acceptance remains 7 passed.
+- Focused capture checks: 12 passed at the original Cargo output path. A negative-control copy with Unix guard-drop cleanup disabled failed the retained detached-descendant assertion with `Descendant survived the timeout`.
+- Desktop bridge: 27 passed. Windows GNU source/tests and the standalone Windows fixture metadata cross-check passed using the explicitly selected installed Rustup compiler. Earlier compiler-selection attempts stopped at missing target standard libraries and are not project-validation results.
+- Formatting and whitespace checks passed. No real account files, credentials, sessions, installed application, package, tag, or release were changed. Native Windows and installed-application acceptance remain outstanding.
+
 
 ## 2026-10-11: Extensions-only Source Candidate
 

@@ -8,6 +8,12 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Prepare lightweight native fixtures before measuring short process deadlines.**
+- The 2026-10-12 unchanged engine binary failed 6 capture tests at its Cargo output path; a SHA-256-identical copy passed all 12 capture tests from a private temporary directory. Several failures occurred before the descendant readiness marker, so they did not establish a cleanup defect. The OS mechanism behind that path-dependent startup delay remains unverified.
+- Compile the small std-only capture fixture before the timed region, following the existing native CLI fixture pattern. Keep the same deadlines, readiness and parent-exit markers, delayed-write checks, output limits, and Windows handle-inheritance protection. Do not enlarge production timeouts or remove valid assertions to accommodate test-program startup.
+- A filtered command that reports zero tests is not validation. Check the executed count as well as the exit status.
+- Seen 1× (2026-10-12).
+
 **Resolving an ordinary file does not establish its owner.**
 - The rc-file symlink compatibility path accepted `.zshrc` pointing at main Codex's `config.toml`; an actual isolated CLI alias write appended shell content to that configuration. Retain ordinary dotfiles links, but check the resolved target against all account directories, known identity files, registered MCP targets and manager data before reading or planning a write.
 - Cover external identity links, hard links, disabled/malformed registrations, stale baselines and Windows command-directory junctions. The prior ordinary-dotfile compatibility test remains necessary and passes alongside the rejection cases.
