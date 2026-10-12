@@ -426,7 +426,7 @@ export function McpServerFormDialog({
                   rows={5}
                   data-testid="server-headers-input"
                   className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
-                  placeholder="Authorization=${GROK_API_KEY}"
+                  placeholder="Authorization=${EXAMPLE_API_KEY}"
                 />
               </div>
             </>
@@ -463,7 +463,7 @@ export function McpServerFormDialog({
                   rows={6}
                   data-testid="server-env-input"
                   className="w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
-                  placeholder={"API_KEY=${GROK_API_KEY}\nNODE_ENV=production"}
+                  placeholder={"API_KEY=${EXAMPLE_API_KEY}\nNODE_ENV=production"}
                 />
               </div>
               {involvesCodex && (

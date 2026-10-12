@@ -917,7 +917,7 @@ mod tests {
 
     #[test]
     fn var_name_rules_match_placeholder_shape() {
-        assert!(valid_var_name("GROK_API_KEY"));
+        assert!(valid_var_name("EXAMPLE_API_KEY"));
         assert!(valid_var_name("_x1"));
         assert!(!valid_var_name(""));
         assert!(!valid_var_name("1BAD"));
