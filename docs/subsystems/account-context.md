@@ -4,6 +4,8 @@
 >
 > Remaining account-named helpers protect extension targets, locks, and MCP variable ownership. They do not authorize account operations. Resource labels come from `resources:targets`, which reads registration metadata only. Cross-target path and credential checks remain mandatory for skills, MCP, and rules.
 >
+> Historical multi-account and alias knowledge is available as bundled, read-only [More tips](../../app/src/pages/TipsPage.tsx) in Settings. The page has no engine, filesystem, or process access; it copies generic examples only. `SettingsPage.test.tsx` and `CommandPalette.test.tsx` cover navigation, copying, zero engine calls on the page, and the absence of account operations.
+>
 > Verify the current boundary with `cargo test --manifest-path engine-rs/Cargo.toml --test native_extension_scope --test native_account_paths --test native_account_skills --test native_mcp --test native_rules --test native_secrets`. Actual account creation, launch, and authentication acceptance recorded below is historical.
 
 

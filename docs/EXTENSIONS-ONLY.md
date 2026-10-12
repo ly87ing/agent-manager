@@ -8,6 +8,12 @@ Account creation, registration edits, removal, switching, login/logout, launch c
 
 Historical registrations are immutable location metadata for existing extension targets. Reading a target label does not inspect authentication, account settings, or assistant executables. New account registration is unavailable. The default assistant resource locations remain available.
 
+Settings includes **More tips**, a read-only page for historical multi-account and
+shell-alias knowledge. It renders bundled guidance and generic `YOUR_*` examples.
+Copy buttons write only to the clipboard; there is no account discovery, command
+generation or execution, file access, or persistence. This does not restore any
+account or alias management operation.
+
 ## Runtime and write constraints
 
 - [Native entry point](../engine-rs/src/native.rs): every `agents`, `accounts`, `profiles`, `profile`, and `aliases` command, including dotted aliases, returns `FEATURE_RETIRED` before loading secrets, preflight, locks, or state creation. Policy writes cannot modify account or alias trees. All remaining policy/import paths compare those trees unchanged.

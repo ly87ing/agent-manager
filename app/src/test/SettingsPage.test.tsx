@@ -22,6 +22,33 @@ const settings: SettingsData = {
 };
 
 describe("SettingsPage", () => {
+  it("shares account and alias tips without engine calls or settings writes", async () => {
+    const save = vi.fn(async () => settings);
+    const setAutostart = vi.fn(async () => false);
+    setSettingsClient({ get: async () => settings, save });
+    setAutostartClient({ get: async () => false, set: setAutostart });
+    const user = userEvent.setup();
+    const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined);
+    const { calls } = renderWithEngine(<SettingsPage />, {});
+
+    await user.click(await screen.findByRole("button", { name: /更多技巧/ }));
+    expect(await screen.findByRole("heading", { name: "更多技巧" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "多账号与独立环境" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "终端别名" })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("link")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "复制别名示例" }));
+    expect(copy).toHaveBeenLastCalledWith("alias YOUR_SHORTCUT='YOUR_COMMAND'");
+    await user.click(screen.getByRole("button", { name: "复制函数示例" }));
+    expect(copy).toHaveBeenLastCalledWith('YOUR_SHORTCUT() {\n  YOUR_COMMAND "$@"\n}');
+    expect(calls).toEqual([]);
+    expect(save).not.toHaveBeenCalled();
+    expect(setAutostart).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "返回设置" }));
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    copy.mockRestore();
+  });
+
   it("reads the old OS login state without writing, then removes it explicitly", async () => {
     let enabled = true;
     const set = vi.fn(async (next: boolean) => (enabled = next));

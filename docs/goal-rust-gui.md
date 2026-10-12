@@ -2,6 +2,22 @@
 
 > Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
 
+## 2026-10-12: Share Read-only Account and Alias Tips
+
+Verification base: `0cb7e6799673c06e4492223b752842489b32ddca`, plus the tips page. Settings and search now open **More tips**, with guidance about independent environments and terminal aliases. The page contains bundled text and generic `YOUR_*` examples. Its only action copies example text to the clipboard. It has no engine, filesystem, or process access and does not restore account or alias management.
+
+The guidance distinguishes configuration directories from verified login isolation. It asks users to confirm identity through official tools, avoid copying credentials or sessions between environments, and check inherited environment variables. Bash/Zsh alias and function examples are illustrative; users must check and apply any command themselves.
+
+Verification generated and read back locally:
+
+- The two new interaction cases failed against the unchanged base because the entry and page were absent, then passed with the implementation. Affected navigation, settings, search, and UI-copy suites: 186 passed.
+- Full frontend: 56 files, 584 passed and 4 existing skips. TypeScript checking and production build passed; the existing ineffective-dynamic-import warning remains.
+- Isolated extension-boundary CLI suite: 7 passed. Fake account, settings, and session contents were preserved. Both example snippets passed Bash and Zsh syntax checks without executing their contents.
+- Browser mock: Settings, More tips, and search were inspected at 1000 px and 760 px. Text and controls were readable, with no horizontal overflow. Both copied snippets were read back exactly. The tips page made zero engine calls; search made only resource-status reads. There were no page errors or account commands.
+- Local documentation links and whitespace checks passed. Full engine and desktop-bridge suites were not rerun: this slice changes only frontend guidance, navigation, tests, and documentation. The focused CLI boundary check covers the continuing account restriction.
+
+This receipt establishes source and browser-mock acceptance. Installed-application and native Windows runtime acceptance remain outstanding. No real account files or shell files were accessed by the tips page, no example command was executed, and no installer, tag, or release was published.
+
 ## 2026-10-12: Keep Dependency Programs Outside Account Boundaries
 
 Verification base: `29d3b250b51fc051d70099df130ea42b6918d586`, plus the dependency-program guards. Assistant commands and npm packages are excluded by built-in and immutable historical recognition metadata, regardless of installation location. Direct lifecycle requests and declarations refuse them. Account metadata is not edited.

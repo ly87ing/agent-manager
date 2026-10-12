@@ -11,6 +11,7 @@ Manage MCP servers, rules, skills, and their extension dependencies for existing
 - **Rules:** edit existing targets' `CLAUDE.md` / `AGENTS.md`, use local templates, or apply recommended rules from skill sources. Fill only targets without a rule file.
 - **Sources:** manage optional skill and rule repositories, versions, local sources, and resource share links. No external repository is required for local extension management.
 - **Programs:** manage command-line dependencies used by skills and MCP. Assistant installation and updates remain outside this tool.
+- **More tips:** read-only guidance about independent environments and shell aliases in Settings. Copying a generic example does not execute it or edit files.
 - **Settings:** themes, operation history, MCP-specific secret files, extension configuration backups, and manual application updates. Account credentials and unrelated secret variables are read-only.
 
 ## Experience

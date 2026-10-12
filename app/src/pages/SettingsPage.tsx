@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
+  BookOpen,
   ChevronRight,
   History,
   KeyRound,
@@ -21,6 +22,7 @@ import { useTheme, type Theme } from "../lib/theme";
 import { cn } from "../lib/utils";
 import { ConfigBackupSection } from "../components/ConfigBackupSection";
 import SecretsPage from "./SecretsPage";
+import TipsPage from "./TipsPage";
 
 const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
   { value: "light", label: "浅色", icon: Sun },
@@ -109,6 +111,12 @@ interface AvailableUpdate {
 }
 
 const ADVANCED_ENTRIES = [
+  {
+    key: "tips",
+    title: "更多技巧",
+    description: "多账号与终端别名的使用经验，只读分享。",
+    icon: BookOpen,
+  },
   {
     key: "runs",
     title: "操作记录",
@@ -290,6 +298,7 @@ export default function SettingsPage({
           <span className="text-xs text-muted-foreground">/ 工具 / {currentEntry?.title}</span>
         </div>
         {activeAdvanced === "secrets" && <SecretsPage />}
+        {activeAdvanced === "tips" && <TipsPage />}
       </div>
     );
   }

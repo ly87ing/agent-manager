@@ -99,6 +99,17 @@ describe("命令面板", () => {
   });
   beforeEach(() => trayEvents.byName.clear());
 
+  it("finds alias guidance without restoring account operations", async () => {
+    const { calls } = await renderApp();
+    await userEvent.keyboard("{Meta>}k{/Meta}");
+    await userEvent.type(screen.getByTestId("command-palette-input"), "别名");
+    await userEvent.click(await screen.findByTestId("command-item-page:settings:tips"));
+    expect(await screen.findByRole("heading", { name: "更多技巧" })).toBeInTheDocument();
+    expect(writes(calls)).toEqual([]);
+    expect(calls.filter((call) => /^(agents|accounts|profiles?|aliases):/.test(call.command))).toEqual([]);
+    expect(screen.queryByRole("button", { name: "创建账号" })).toBeNull();
+  });
+
   it("⌘K 搜到页面、账号与资源，选中页面跳过去", async () => {
     await renderApp();
     await userEvent.keyboard("{Meta>}k{/Meta}");
