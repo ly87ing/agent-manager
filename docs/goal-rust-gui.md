@@ -2,6 +2,12 @@
 
 > Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
 
+## 2026-10-12: Remove Unused Account Frontend Code
+
+Verification base: `fda270f`, plus the frontend cleanup. Import-graph inspection from `main.tsx` and a repository reference sweep confirmed that 8 account/launch modules had no application callers: alias dialogs and their hook, runtime argument drafts, launch presets, connection presets, account seeding, and shared settings. They were removed with their 3 dedicated test files (31 tests). Active target recognition/grouping, resource assignment, and all 11 previously failing Rust tests remain.
+
+Frontend verification: 56 files passed, 580 tests passed, and 4 existing skips; TypeScript checking and the production build passed. The prior frontend count of 611 decreases only by those 31 obsolete tests. The existing ineffective-dynamic-import build warning remains. Local links and whitespace checks passed. No active UI layout or real assistant environment changed; no installer was published. Backend legacy implementations still unreachable behind the retired-command gate are not claimed to be removed by this frontend slice.
+
 ## 2026-10-12: Reliable Command Capture Fixtures
 
 Verification base: `67317b331f6dc549023b44604f08416e6cbe48ba`, plus the test-fixture changes. The unchanged engine test binary failed 6 of 12 focused capture tests at its Cargo output path; a SHA-256-identical private-directory copy passed all 12. The copied binary also passed the previously failing npm CLI probe and detached-descendant test. This establishes a startup-path effect, not its underlying OS mechanism or a product cleanup defect.
