@@ -46,8 +46,8 @@
     "targets": [
       "app"
     ],
-    "shortDescription": "集中管理 AI 编程助手的桌面工具",
-    "longDescription": "Agent Manager 集中管理 Claude Code、Codex、OpenCode 等 AI 编程助手的安装、Skills、MCP 服务器、规则、Hooks 与 Shell 别名。",
+    "shortDescription": "Manage MCP servers, rules, and skills",
+    "longDescription": "Agent Manager manages MCP servers, rules, skills, their sources, and extension dependencies for existing assistant configuration directories. It does not manage accounts, authentication, launch commands, or assistant installation and upgrades.",
     "copyright": "Copyright (c) 2026 ly87ing",
     "publisher": "ly87ing",
     "category": "DeveloperTool",
