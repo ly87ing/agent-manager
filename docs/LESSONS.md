@@ -132,6 +132,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Acceptance on the real desktop
 
+**Open secondary actions when checking page copy and layout.**
+- Previous Sources acceptance inspected the empty page without opening its recommendation menu. The user then found informal labels and literal ellipses in the action text.
+- Inspect open menus and their confirmation dialogs at both required widths. Check complete action labels, text bounds, and long paths; a visible page or a passing interaction test alone does not prove these details are readable.
+- Seen 1× (2026-10-12).
+
 **Use committed window geometry for the preview users review.**
 - The tips preview overrode the committed 1000 × 650 window with 1000 × 800. Earlier browser captures used a tall viewport, so the checks did not establish the default-window proportions. The user reported the excessive space in the empty Skills page.
 - Inherit the committed window settings in isolated native previews; change only the identifier and title. Inspect empty and populated pages at the normal height, plus the required narrow browser width. Keep user-resized window memory intact.

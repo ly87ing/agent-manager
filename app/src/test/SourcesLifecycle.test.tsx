@@ -508,9 +508,9 @@ function recommendationRoutes(opts: { added?: boolean; collections?: boolean } =
   };
 }
 
-describe("首次使用：推荐启用 agent-skills，可以不用", () => {
+describe("optional recommended sources", () => {
 
-  it("没添加过就在顶部推荐；「不用了」之后不再出现，也不写任何东西", async () => {
+  it("dismissal hides the recommendation without engine writes", async () => {
     const first = renderWithEngine(<SourcesPage />, recommendationRoutes());
     const banner = await screen.findByTestId("source-suggest-agent-skills-rec");
     expect(banner).toHaveTextContent("agent-skills-rec推荐");
@@ -565,11 +565,11 @@ describe("首次使用：推荐启用 agent-skills，可以不用", () => {
     };
     const { calls } = renderWithEngine(<SourcesPage />, routes);
     await userEvent.click(await screen.findByTestId("source-suggest-enable-agent-skills-rec"));
-    const dialog = await screen.findByRole("dialog", { name: "启用 agent-skills-rec" });
+    const dialog = await screen.findByRole("dialog", { name: "添加并启用 agent-skills-rec" });
     expect(within(dialog).getByTestId("recommend-enable-steps")).toHaveTextContent("不覆盖");
-    expect(within(dialog).getByTestId("recommend-enable-steps")).toHaveTextContent("规则、MCP、启动命令都不动");
+    expect(within(dialog).getByTestId("recommend-enable-steps")).toHaveTextContent("规则、MCP 和启动命令保持不变");
     expect(calls.some((call) => call.command === "policy:set" || call.command === "skills:apply")).toBe(false);
-    await userEvent.click(within(dialog).getByRole("button", { name: "启用" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "添加并启用" }));
 
     await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2));
     const writes = calls.filter((call) => call.command === "policy:set" || call.command === "skills:apply");

@@ -43,11 +43,11 @@ describe("来源页", () => {
     expect(git).toHaveTextContent("可更新");
     expect(within(git).getByRole("button", { name: "更新" })).toBeVisible();
     await userEvent.click(within(git).getByRole("button", { name: "agent-skills 的更多操作" }));
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["换版本…", "复制分享链接", "编辑…", "停用", "移除…"]);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["切换版本", "复制分享链接", "编辑来源", "停用来源", "移除来源"]);
     await userEvent.keyboard("{Escape}");
     const local = screen.getByTestId("source-row-local-pack");
     expect(local).toHaveTextContent("已停用");
-    expect((await menuItem("source-toggle-local-pack")).textContent).toBe("启用");
+    expect((await menuItem("source-toggle-local-pack")).textContent).toBe("启用来源");
     await userEvent.keyboard("{Escape}");
     const notes = screen.getByTestId("source-row-notes");
     expect(notes).toHaveTextContent("规则 · ~/notes/rules");
@@ -112,7 +112,7 @@ describe("来源页", () => {
     expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
   });
 
-  it("推荐来源在表里：「添加…」打开预填好的表单，保存前不写；「不用了」就不再出现", async () => {
+  it("recommendation actions use complete labels; adding opens a draft and dismissal hides the suggestion", async () => {
     localStorage.clear();
     const r = routes();
     const status = r["skills:status"] as Envelope<{ recommendations: unknown[] }>;
@@ -122,8 +122,11 @@ describe("来源页", () => {
     ];
     const { calls } = renderWithEngine(<SourcesPage />, r);
     await screen.findByTestId("source-suggest-team-skills");
+    expect(screen.getByTestId("source-suggest-enable-team-skills")).toHaveAccessibleName("添加并启用");
     expect(screen.queryByTestId("source-suggest-agent-skills")).toBeNull();
-    await userEvent.click(await menuItem("source-suggest-add-team-skills"));
+    const add = await menuItem("source-suggest-add-team-skills");
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["仅添加来源（不下载）", "不再推荐"]);
+    await userEvent.click(add);
     const dialog = await screen.findByRole("dialog", { name: "添加来源" });
     expect(within(dialog).getByDisplayValue("team-skills")).toBeInTheDocument();
     await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));

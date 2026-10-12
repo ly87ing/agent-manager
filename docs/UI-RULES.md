@@ -13,6 +13,7 @@ pages within that viewport; a tall full-page capture does not prove default-wind
 
 1. No horizontal scroll bar anywhere. The top navigation folds extra pages into More; content never overflows.
 2. Key information (launch commands, repository URLs, versions) is shown in full and wraps at spaces. Only secondary information may truncate, and then it carries a hover title.
+   Action buttons and menu items display their complete labels. Use an explicit verb and object; prefer wrapping or moving controls to another line over truncation. Do not replace action text with ellipses or informal phrases such as “不用了”.
 3. No column whose value is almost always the same. Show only the abnormal case, inline.
 4. Nothing looks clickable unless it is. A note that is only a tooltip goes as small text under the table instead.
 5. One item per row, fixed columns, headers aligned with rows, status tags on one line, and one primary action per row with the rest under ⋯ (see [Concurrent Accounts](MULTI-ACCOUNT-DESIGN.md) §3.6).

@@ -385,7 +385,7 @@ function demoEnvelopes(): Record<string, Envelope> {
       recommendations: [
         {
           name: "agent-skills",
-          description: "本项目作者维护的通用工作技能：合并审查、方案设计、改动纪律、验证、临时产物整理、面向读者写作、技术图示。",
+          description: "提供代码审查、方案设计、改动验证、文档写作等通用技能。推荐规则可在规则页预览后单独应用。",
           url: "https://github.com/ly87ing/agent-skills.git",
           skill_paths: ["safe-merge-review", "solution-shaping", "change-discipline", "verification", "artifact-hygiene", "reader-facing-writing", "technical-diagramming"],
           added: true,

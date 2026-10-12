@@ -2,6 +2,20 @@
 
 > Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
 
+## 2026-10-12: Clear Source Actions and Complete Labels
+
+Verification base: `07a3671f2cac420dc608d014ab437e1716984538`, plus the source-copy changes. Sources now uses explicit action labels: **添加并启用**, **仅添加来源（不下载）**, and **不再推荐**. Existing-source menus use **切换版本**, **编辑来源**, **停用来源**, and **移除来源**. Buttons retain their complete text; source URLs, paths, descriptions, and problem details wrap. Recommendation copy no longer refers to the retired terminal-shortcuts page. Operation handlers and account protections are unchanged.
+
+Verification generated and read back locally:
+
+- The unchanged page reproduced the literal ellipses and informal dismissal label at both widths. Three updated interaction assertions failed against that source. Focused frontend checks then passed 196 tests; the final source/mock suites passed 53. Full frontend: 57 files, 590 passed and 4 existing skips.
+- The focused native recommendation case passed. Full serial engine: 456 passed across 22 test targets, including 8 extension-boundary cases. Desktop bridge: 27 passed. TypeScript checking, production frontend build, and the native debug build without bundling passed. Existing dynamic-import and engine dead-code warnings remain.
+- Browser mock at 1000 × 650 and 760 × 650: recommendation and existing-source menus, confirmation, draft cancellation, dismissal, and long Git/local/rule paths passed. Rendered text bounds fit the controls and paths; no horizontal overflow or page errors occurred. Opening and cancelling dialogs made only resource reads; dismissal made no engine call. Screenshots were visually inspected.
+- The isolated macOS preview displayed the revised recommendation, open menu, and confirmation through the actual desktop bridge in a 1000 × 650 window. Confirmation was cancelled. Its HOME contains no account or shell paths; no inherited credential environment was used.
+- Formatting, documentation links, and whitespace checks passed. One intermediate browser rerun missed the timestamped fixture module after a source edit; matching that module and tracing its actual client restored the same checks without a product change.
+
+The revised preview remains open for review. Installed-package, Windows/Linux desktop, and user acceptance are not established by these checks. No real account configuration, installer, tag, or release was changed or published.
+
 ## 2026-10-12: List Assistant Extension Targets Read-only
 
 Verification base: `494ddd8e5d6c521c21b221562d544f63c201af5f`, plus the assistant-list changes. **Assistants** appears in navigation and search. It lists built-in and historical extension-target labels and their registered paths. It does not detect installation or login status, scan directories, execute assistants, or offer account/configuration actions.

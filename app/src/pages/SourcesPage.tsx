@@ -226,7 +226,7 @@ export default function SourcesPage({
       if (!(await definitionOps.saveDefinition({ name: item.name, definition: item.definition, isNew: true }))) return;
       const fetched = await execute({ command: "skills:apply", label: `下载 ${item.name}`, args: ["--only", `skill:${item.name}`, "--action", "update"], silent: true });
       if (!fetched?.ok) {
-        toast.error(`${item.name} 已登记，但下载失败：${fetched?.errors[0]?.message ?? "详见任务记录"}。稍后在来源上点「更新」重试`);
+        toast.error(`${item.name} 已添加，但下载失败：${fetched?.errors[0]?.message ?? "详见任务记录"}。请在来源列表选择「更新」重试。`);
         return;
       }
       const fresh = await runEngine<StatusData>("skills:status", []);
@@ -234,7 +234,7 @@ export default function SourcesPage({
         .filter((element) => (element.spec as SkillSpec).collection === item.name)
         .flatMap(addToAllRows);
       await batchApply.applyBatch({ actionLabel: "添加", rows });
-      toast.info(`${item.name} 已启用。规则没有改动：想用它的规则，到规则页看过差异再应用。`);
+      toast.info(`${item.name} 已添加并启用。推荐规则需在规则页预览后单独应用。`);
     } finally {
       setEnablingBusy(false);
       setEnabling(null);
@@ -297,14 +297,14 @@ export default function SourcesPage({
             <RefreshCw className={cn("h-4 w-4", sourceUpdate.updating && "animate-spin")} aria-hidden /> {sourceUpdate.updating ? "正在更新…" : "全部更新"}
           </button>
         )}
-        <button type="button" data-testid="source-add-collection" onClick={() => setAdding("collection")} className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40">
-          <Plus className="h-4 w-4" aria-hidden /> git 仓库或目录
+        <button type="button" data-testid="source-add-collection" onClick={() => setAdding("collection")} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40">
+          <Plus className="h-4 w-4" aria-hidden /> 添加 Git 仓库或目录
         </button>
-        <button type="button" data-testid="source-add-rule" onClick={() => setAdding("rule")} className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40">
-          <Plus className="h-4 w-4" aria-hidden /> 规则文件或目录
+        <button type="button" data-testid="source-add-rule" onClick={() => setAdding("rule")} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40">
+          <Plus className="h-4 w-4" aria-hidden /> 添加规则文件或目录
         </button>
         {onImportLink && (
-          <button type="button" data-testid="source-import-link" onClick={onImportLink} className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40">
+          <button type="button" data-testid="source-import-link" onClick={onImportLink} className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40">
             <Link2 className="h-4 w-4" aria-hidden /> 从链接导入
           </button>
         )}
@@ -328,17 +328,17 @@ export default function SourcesPage({
                 {item.name}
                 <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] font-normal text-primary">推荐</span>
               </div>
-              <div className="truncate text-xs text-muted-foreground">{item.description}</div>
+              <div className="break-words text-xs text-muted-foreground">{item.description}</div>
             </div>
             <div className={ACTIONS}>
-              <button type="button" data-testid={`source-suggest-enable-${item.name}`} onClick={() => setEnabling(item)} className="rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:bg-primary/90">
-                启用…
+              <button type="button" data-testid={`source-suggest-enable-${item.name}`} onClick={() => setEnabling(item)} className="shrink-0 whitespace-nowrap rounded-md bg-primary px-2.5 py-1 text-xs text-primary-foreground hover:bg-primary/90">
+                添加并启用
               </button>
               <ActionMenu
                 label={`${item.name} 的更多操作`}
                 items={[
-                  { label: "只登记，不下载…", testId: `source-suggest-add-${item.name}`, onSelect: () => setDraft({ name: item.name, definition: item.definition }) },
-                  { label: "不用了", testId: `source-suggest-dismiss-${item.name}`, onSelect: () => setDismissed(dismissRecommendation(item.name)) },
+                  { label: "仅添加来源（不下载）", testId: `source-suggest-add-${item.name}`, onSelect: () => setDraft({ name: item.name, definition: item.definition }) },
+                  { label: "不再推荐", testId: `source-suggest-dismiss-${item.name}`, onSelect: () => setDismissed(dismissRecommendation(item.name)) },
                 ]}
               />
             </div>
@@ -367,11 +367,11 @@ export default function SourcesPage({
                         </span>
                       )}
                     </div>
-                    <div className="truncate font-mono text-xs text-muted-foreground" title={spec.source_path ?? spec.url ?? undefined}>
+                    <div className="break-all font-mono text-xs text-muted-foreground">
                       {spec.source_path ? `本机目录 · ${spec.source_path}` : `git · ${spec.url ?? ""}`}
                     </div>
                     {(observed.discovery_error || observed.version?.track_error || observed.blocked_reason) && (
-                      <div data-testid={`source-problem-${name}`} className="truncate text-xs text-warning">
+                      <div data-testid={`source-problem-${name}`} className="break-words text-xs text-warning">
                         {observed.discovery_error?.message ?? observed.version?.track_error ?? observed.blocked_reason}
                       </div>
                     )}
@@ -394,15 +394,15 @@ export default function SourcesPage({
                       items={[
                         ...(spec.url
                           ? [
-                              { label: "换版本…", testId: `source-versions-${name}`, disabled: busy || checking, title: checking ? CHECKING_TITLE : undefined, onSelect: () => setVersionsOf({ collection, openLatest: false }) },
+                              { label: "切换版本", testId: `source-versions-${name}`, disabled: busy || checking, title: checking ? CHECKING_TITLE : undefined, onSelect: () => setVersionsOf({ collection, openLatest: false }) },
                               { label: "复制分享链接", testId: `source-share-${name}`, onSelect: () => void share(name, spec) },
                             ]
                           : []),
-                        { label: "编辑…", testId: `source-edit-${name}`, onSelect: () => setEditing(collection) },
+                        { label: "编辑来源", testId: `source-edit-${name}`, onSelect: () => setEditing(collection) },
                         ...(actions.includes(enabled ? "disable" : "enable")
                           ? [
                               {
-                                label: enabled ? "停用" : "启用",
+                                label: enabled ? "停用来源" : "启用来源",
                                 testId: `source-toggle-${name}`,
                                 disabled: busy,
                                 title: enabled ? "停用：各账号里它的技能链接先移除，规则暂不出现；重新启用即恢复" : "启用：按之前的分配重新链接",
@@ -410,7 +410,7 @@ export default function SourcesPage({
                               },
                             ]
                           : []),
-                        ...(actions.includes("remove") ? [{ label: "移除…", testId: `source-remove-${name}`, danger: true, disabled: busy, onSelect: () => setRemovingCollection(collection) }] : []),
+                        ...(actions.includes("remove") ? [{ label: "移除来源", testId: `source-remove-${name}`, danger: true, disabled: busy, onSelect: () => setRemovingCollection(collection) }] : []),
                       ]}
                     />
                   </div>
@@ -423,24 +423,24 @@ export default function SourcesPage({
                 <li key={`rule:${source.name}`} data-testid={`source-row-${source.name}`} data-source-anchor={source.name} className={cn(ROW, highlight(source.name))}>
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium">{source.name}</div>
-                    <div className="truncate font-mono text-xs text-muted-foreground" title={source.path}>规则 · {source.path}</div>
+                    <div className="break-all font-mono text-xs text-muted-foreground">规则 · {source.path}</div>
                   </div>
                   <span className={cn(COL_PROVIDES, "text-sm text-muted-foreground")}>{source.enabled ? `${count} 条规则` : "—"}</span>
                   <span className={cn(COL_NARROW, "text-xs", !source.enabled ? TONE.muted : count ? TONE.ok : TONE.warn)}>
-                    {!source.enabled ? "已停用" : count ? "正常" : "没读到"}
+                    {!source.enabled ? "已停用" : count ? "正常" : "未发现规则"}
                   </span>
                   <div className={ACTIONS}>
                     <ActionMenu
                       label={`${source.name} 的更多操作`}
                       items={[
                         {
-                          label: source.enabled ? "停用" : "启用",
+                          label: source.enabled ? "停用来源" : "启用来源",
                           testId: `source-toggle-${source.name}`,
                           disabled: userSources.busy,
                           title: source.enabled ? "停用：它的规则暂不出现，已写进账号的规则文件不动" : "启用",
                           onSelect: () => void userSources.setEnabled(source, !source.enabled),
                         },
-                        { label: "移除…", testId: `source-remove-${source.name}`, danger: true, disabled: userSources.busy, onSelect: () => setRemovingSource(source) },
+                        { label: "移除来源", testId: `source-remove-${source.name}`, danger: true, disabled: userSources.busy, onSelect: () => setRemovingSource(source) },
                       ]}
                     />
                   </div>
@@ -544,21 +544,21 @@ export default function SourcesPage({
       )}
       {enabling && (
         <ConfirmModal
-          title={`启用 ${enabling.name}`}
-          description="确认后依次执行，只做下面这些，不改动其他任何配置："
+          title={`添加并启用 ${enabling.name}`}
+          description="确认后将添加来源、下载仓库，并应用其中的技能。"
           risk="write-local"
-          confirmLabel="启用"
+          confirmLabel="添加并启用"
           executing={enablingBusy}
           onConfirm={() => void enableRecommended(enabling)}
           onClose={() => !enablingBusy && setEnabling(null)}
         >
           <ol data-testid="recommend-enable-steps" className="mt-3 list-decimal space-y-1.5 pl-5 text-sm">
-            <li>登记来源 {enabling.name}（{enabling.url}）</li>
-            <li>把仓库下载到本工具的数据目录</li>
-            <li>把其中的技能链接到全部账号；账号里已有同名技能目录或链接的跳过，不覆盖</li>
-            <li className="text-muted-foreground">规则、MCP、启动命令都不动；它带的规则可以到规则页看过差异再决定</li>
+            <li>添加来源 {enabling.name}（{enabling.url}）</li>
+            <li>将仓库下载到本工具的数据目录</li>
+            <li>将技能链接到所有已有扩展目标；已有同名目录或链接时跳过，不覆盖</li>
+            <li className="text-muted-foreground">规则、MCP 和启动命令保持不变。推荐规则可在规则页预览后单独应用。</li>
           </ol>
-          <p className="mt-2 text-xs text-muted-foreground">以后不想用了：在来源上停用或移除，账号里的链接随之移除。</p>
+          <p className="mt-2 text-xs text-muted-foreground">停用或移除来源时，将移除对应的技能链接。</p>
         </ConfirmModal>
       )}
     </div>
