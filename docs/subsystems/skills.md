@@ -33,6 +33,11 @@ Collection summaries wrap names, source paths and status marks inside their own
 column while assistant counts keep fixed aligned columns. Source locations remain
 fully readable at narrow widths.
 
+An unassigned same-name row whose actual link matches another active assignment
+is `other-source`, with no takeover or removal action. Ordinary add, including
+external takeover, refuses another active assignment; changing sources requires
+the explicit original collection/version replacement contract above.
+
 ## Verification
 
 ```sh

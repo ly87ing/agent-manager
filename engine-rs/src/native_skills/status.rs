@@ -374,6 +374,31 @@ fn aggregate_skill_agents(
         let mut ev = eval_agent_cell(
             coll, agent_info, agent_id, binding, &link_path, bases, available,
         );
+        if !assigned && ev.link_exists {
+            if let Ok(actual) = resolve_link_target(&link_path) {
+                for ((owner, name, target), other) in bindings {
+                    if owner != coll_name
+                        && name == skill_name
+                        && target == agent_id
+                        && other.assigned
+                        && other.enabled
+                    {
+                        if let Some(origin) = meta.collections.get(owner) {
+                            let expected =
+                                expected_link_path(ctx, origin, skill_name, Some(&other.version));
+                            if actual == resolve_loose(&expected) {
+                                ev.state = "other-source";
+                                ev.actions.clear();
+                                ev.blocked_reason = Some(format!(
+                                    "该助手正在使用来源 {owner} 的同名技能，请在该来源行操作"
+                                ));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // 来源已取回且发现正常，却没有这个技能：上游删掉了它。启用、停用、更新都做不成，
         // 只剩移除这条分配（连同残留入口）
         if source_missing && assigned {

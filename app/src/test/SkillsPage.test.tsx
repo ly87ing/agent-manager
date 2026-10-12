@@ -134,6 +134,19 @@ function skillsRoutes() {
 }
 
 describe("SkillsPage 三级视图", () => {
+  it("其他来源的同名技能只读显示归属，不提供接管或移除入口", async () => {
+    const routes = skillsRoutes();
+    const elements = (routes["skills:status"] as Envelope<{ elements: ReturnType<typeof makeElement>[] }>).data.elements;
+    const alpha = elements.find(element => element.id === "skill:agent-skills/alpha")!;
+    (alpha.observed as { agents: Record<string, unknown> }).agents.codex = {
+      state: "other-source", assigned: false, actions: [], blocked_reason: "该助手正在使用来源 personal 的同名技能，请在该来源行操作",
+    };
+    const { calls } = renderWithEngine(<SkillsPage />, routes);
+    await expandAll();
+    expect(screen.getByRole("switch", { name: /codex：该助手正在使用来源 personal/ })).toBeDisabled();
+    expect(screen.queryByTestId("action-remove-skill:agent-skills/alpha-codex")).toBeNull();
+    expect(calls.some(call => call.command === "skills:apply")).toBe(false);
+  });
 
   it("集合标题行：只提示异常与新发现数量，不展示来源猜测徽标", async () => {
     renderWithEngine(<SkillsPage />, skillsRoutes());

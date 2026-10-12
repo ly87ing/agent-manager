@@ -223,6 +223,19 @@ pub(super) fn replacement(
     meta: &DomainMetadata,
 ) -> Result<Option<(String, String)>> {
     let Some(from) = req.value("--replace-from") else {
+        if req.value("--action") == Some("add")
+            && bindings
+                .iter()
+                .any(|((collection, name, target), binding)| {
+                    collection != &coll.name
+                        && name == skill
+                        && target == agent
+                        && binding.assigned
+                        && binding.enabled
+                })
+        {
+            bail!("该助手已分配其他来源的同名技能；请明确选择原来源和版本后替换");
+        }
         return Ok(None);
     };
     let from = parse_only(from)?;

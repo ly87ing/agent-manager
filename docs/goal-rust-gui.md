@@ -1151,7 +1151,7 @@ Assistant and MCP-secret labels replace account-management wording in active
 extension workflows. Skill collection summaries wrap independently of assistant
 columns; long dependency versions and actions wrap without overlapping.
 
-Local verification passed 459 engine tests, 27 Tauri tests and 600 frontend tests
+Local verification passed 459 engine tests, 27 Tauri tests and 601 frontend tests
 (4 platform-specific skips), TypeScript checking and the production frontend build.
 The staged batch snapshot separately passed type checking and 85 related tests.
 Isolated CLI acceptance copied an assigned local skill, switched only Claude,
@@ -1174,3 +1174,11 @@ engine checks also passed at `bb9edd6`. These are revision-specific receipts, no
 physical desktop or current-installer acceptance. See [platform status](GUI-PLATFORM-STATUS.md).
 Real Windows installation, real arm64 execution, signing/notarization and actual
 automatic updates remain unverified. No release, tag or installer was published.
+
+Native populated-preview readback then found that a same-name skill owned by
+another source was incorrectly offered as an external-link takeover. Status now
+identifies the actual other assignment as read-only `other-source`, and ordinary
+add, including takeover, refuses another active assignment. Switching requires
+the original-source/version replacement flags. Integration and actual isolated
+CLI readback verify ownership and unchanged links; the UI regression verifies
+that the misleading takeover/removal controls are absent.

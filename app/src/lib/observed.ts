@@ -286,7 +286,7 @@ export interface AliasesSpec {
 // ---------- skills ----------
 
 /** skill × agent 单元格词汇表（引擎 _skill_cell_state）。 */
-export type SkillCellState = "linked" | "missing-link" | "dead-link" | "drifted" | "extra-link" | "disabled";
+export type SkillCellState = "linked" | "missing-link" | "dead-link" | "drifted" | "extra-link" | "other-source" | "disabled";
 
 export interface SkillAgentCell {
   state: SkillCellState | string;

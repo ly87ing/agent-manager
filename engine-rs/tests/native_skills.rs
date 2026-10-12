@@ -3275,6 +3275,30 @@ fn replacing_a_skill_is_atomic_and_refuses_stale_bindings_or_changed_links() {
     let version: String = conn.query_row("SELECT version FROM skill_bindings WHERE collection='upstream' AND agent='claude-code'", [], |row| row.get(0)).unwrap();
     let link = context.home_dir.join(".claude/skills/alpha");
     let original = agent_manager_engine::platform::read_link(&link).unwrap();
+    // Ordinary add must not replace another active assignment, even with takeover.
+    assert!(!skill_action(&context, "skill:my-skills/alpha", "add", "claude-code").ok);
+    assert!(
+        !execute(
+            &context,
+            &request(
+                "skills:apply",
+                &[
+                    "--only",
+                    "skill:my-skills/alpha",
+                    "--action",
+                    "add",
+                    "--agent",
+                    "claude-code",
+                    "--allow-takeover",
+                ]
+            )
+        )
+        .ok
+    );
+    assert_eq!(
+        agent_manager_engine::platform::read_link(&link).unwrap(),
+        original
+    );
     let switch = |version: &str| {
         execute(
             &context,
@@ -3340,6 +3364,23 @@ fn replacing_a_skill_is_atomic_and_refuses_stale_bindings_or_changed_links() {
         store::effective_policy(&context).unwrap()["agents"],
         before_policy["agents"]
     );
+    let status = execute(&context, &request("skills:status", &[]));
+    for (id, agent) in [
+        ("skill:upstream/alpha", "claude-code"),
+        ("skill:my-skills/alpha", "codex"),
+    ] {
+        let row = status.data["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id)
+            .unwrap();
+        assert_eq!(row["observed"]["agents"][agent]["state"], "other-source");
+        assert_eq!(
+            row["observed"]["agents"][agent]["actions"],
+            serde_json::json!([])
+        );
+    }
     let _ = std::fs::remove_dir_all(root);
 }
 
