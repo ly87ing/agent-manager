@@ -7,6 +7,7 @@ import { engineErrorMessage, runEngine } from "./engine";
 import type { Diagnostic, Envelope } from "./contract";
 import { invalidateEngineQueries } from "./queries";
 import { newRunId } from "./runId";
+import type { BatchResult } from "./batchResult";
 
 /**
  * GUI 发起的写路径执行记录（执行中心数据源）。
@@ -27,6 +28,8 @@ export interface ExecutionRecord {
 
 interface ExecutionContextValue {
   executions: ExecutionRecord[];
+  batches: BatchResult[];
+  recordBatch: (batch: BatchResult) => void;
   execute: (request: ExecuteRequest) => Promise<Envelope | null>;
 }
 
@@ -68,6 +71,12 @@ const ExecutionContext = createContext<ExecutionContextValue | null>(null);
 
 export function ExecutionProvider({ children }: { children: ReactNode }) {
   const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
+  const [batches, setBatches] = useState<BatchResult[]>([]);
+  const recordBatch = useCallback((batch: BatchResult) => setBatches((previous) => {
+    let completed = 0;
+    return [batch, ...previous.filter((item) => item.id !== batch.id)]
+      .filter((item) => item.running || ++completed <= COMPLETED_EXECUTION_LIMIT);
+  }), []);
   const queryClient = useQueryClient();
 
   const execute = useCallback(
@@ -128,7 +137,7 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
     [queryClient],
   );
 
-  const value = useMemo(() => ({ executions, execute }), [executions, execute]);
+  const value = useMemo(() => ({ executions, execute, batches, recordBatch }), [executions, execute, batches, recordBatch]);
   return <ExecutionContext.Provider value={value}>{children}</ExecutionContext.Provider>;
 }
 

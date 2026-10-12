@@ -32,6 +32,7 @@ import { useExecutions } from "../lib/execution";
 import { isCollection } from "../lib/skillCollections";
 import { ForkSkillDialog } from "../components/ForkSkillDialog";
 import { useBatchApply } from "../lib/useBatchApply";
+import { BatchResultPanel } from "../components/BatchResultPanel";
 import { useAccountGroups, useAccountNames } from "../lib/useAccountNames";
 import { useDirectApply } from "../lib/useDirectApply";
 import { cn } from "../lib/utils";
@@ -283,6 +284,7 @@ export default function SkillsPage({
 
   return (
     <div className="space-y-3">
+      {batchApply.result && <BatchResultPanel batch={batchApply.result} busy={batchApply.executing} onRetry={() => void batchApply.retryFailed(batchApply.result!)} />}
       <h1 className="text-lg font-semibold tracking-tight">技能</h1>
       {query.data.errors.length > 0 && <ErrorPanel title="技能状态读取失败" errors={query.data.errors} />}
 

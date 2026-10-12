@@ -714,6 +714,23 @@ function versionRoutes() {
 
 describe("来源页：版本", () => {
 
+  it("来源已更新但技能应用失败时保留逐项目标结果，不报告全部完成", async () => {
+    const routes: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = versionRoutes();
+    routes["skills:apply"] = async (args: string[]) => makeEnvelope({}, {
+      ok: !args.includes("skill:archify/archify"),
+      errors: args.includes("skill:archify/archify") ? [{ code: "FIXTURE", element: null, message: "Fixture skill update failed" }] : [],
+    });
+    const { calls } = renderWithEngine(<SourcesPage />, routes);
+    await userEvent.click(await screen.findByTestId("source-update-archify"));
+    const dialog = await screen.findByRole("dialog", { name: "archify 的版本" });
+    await within(dialog).findByTestId("preview-skill-archify");
+    await userEvent.click(within(dialog).getByTestId("versions-preview-confirm"));
+    await screen.findByText("成功 0 · 失败 1");
+    expect(screen.getByText(/Fixture skill update failed/)).toBeInTheDocument();
+    expect(await screen.findByText(/来源已更新，但技能应用未全部完成/)).toBeInTheDocument();
+    expect(calls.filter(call => call.command === "skills:apply")).toHaveLength(2);
+  });
+
   it("来源行显示当前版本与可更新到的版本", async () => {
     renderWithEngine(<SourcesPage />, versionRoutes());
     expect(await screen.findByTestId("source-version-archify")).toHaveTextContent("v3.0.0");

@@ -26,6 +26,7 @@ import { addToAllRows, versionUpdateRows } from "../lib/skillFill";
 import { describeTrack, versionLabel } from "../lib/skillTrack";
 import { useAccountGroups, useResourceTargets, useAccountNames } from "../lib/useAccountNames";
 import { useBatchApply } from "../lib/useBatchApply";
+import { BatchResultPanel } from "../components/BatchResultPanel";
 import { useDefinitionOps } from "../lib/useDefinitionOps";
 import { useDirectApply } from "../lib/useDirectApply";
 import { updatableSources, useSourceUpdate } from "../lib/useSourceUpdate";
@@ -185,7 +186,12 @@ export default function SourcesPage({
       const rows = fresh.ok
         ? versionUpdateRows(fresh.data.elements ?? []).filter((row) => row.elementId.startsWith(`${collection.id}/`))
         : [];
-      await batchApply.applyBatch({ actionLabel: "更新", rows });
+      const result = await batchApply.applyBatch({ actionLabel: "更新", rows });
+      const failed = result?.rows.filter((item) => item.status === "failed").length ?? 0;
+      if (!fresh.ok || failed || (rows.length > 0 && !result)) {
+        toast.error(`${name} 来源已${ref ? "切换" : "更新"}，但技能应用未全部完成，请查看批量结果`);
+        return false;
+      }
       toast.success(`${name} 已${ref ? "切换" : "更新"}到 ${label}`, {
         description: rows.length ? `${rows.length} 处技能换到了这个版本` : "各账号在用的技能内容没有变化",
       });
@@ -230,11 +236,20 @@ export default function SourcesPage({
         return;
       }
       const fresh = await runEngine<StatusData>("skills:status", []);
+      if (!fresh.ok) {
+        toast.error(`${item.name} 来源已添加，但读取技能状态失败，请刷新后应用`);
+        return;
+      }
       const rows = (fresh.ok ? fresh.data.elements ?? [] : [])
         .filter((element) => (element.spec as SkillSpec).collection === item.name)
         .flatMap(addToAllRows);
-      await batchApply.applyBatch({ actionLabel: "添加", rows });
-      toast.info(`${item.name} 已添加并启用。推荐规则需在规则页预览后单独应用。`);
+      const result = await batchApply.applyBatch({ actionLabel: "添加", rows });
+      const failed = result?.rows.filter((item) => item.status === "failed").length ?? 0;
+      if (failed || (rows.length > 0 && !result)) {
+        toast.error(`${item.name} 来源已添加，但技能应用未全部完成，请查看批量结果`);
+      } else {
+        toast.info(`${item.name} 已添加并启用。推荐规则需在规则页预览后单独应用。`);
+      }
     } finally {
       setEnablingBusy(false);
       setEnabling(null);
@@ -283,6 +298,7 @@ export default function SourcesPage({
 
   return (
     <div className="space-y-3">
+      {batchApply.result && <BatchResultPanel batch={batchApply.result} busy={batchApply.executing} onRetry={() => void batchApply.retryFailed(batchApply.result!)} />}
       <h1 className="text-lg font-semibold tracking-tight">来源</h1>
       <div className="flex flex-wrap items-center justify-end gap-2">
         {updatable.length > 0 && (

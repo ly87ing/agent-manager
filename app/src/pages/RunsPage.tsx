@@ -14,6 +14,8 @@ import { engineErrorMessage, runEngine } from "../lib/engine";
 import { useExecutions, type ExecutionRecord } from "../lib/execution";
 import { engineKeys } from "../lib/queries";
 import { cn, formatCheckedAt } from "../lib/utils";
+import { BatchResultPanel } from "../components/BatchResultPanel";
+import { useBatchApply } from "../lib/useBatchApply";
 
 const STEP_STATUS = {
   ok: { icon: CheckCircle2, className: "text-success" },
@@ -167,8 +169,9 @@ function OperationDetail({ data }: { data: RunDetailData }) {
 }
 
 export default function RunsPage() {
+  const batchApply = useBatchApply();
   const queryClient = useQueryClient();
-  const { executions } = useExecutions();
+  const { executions, batches } = useExecutions();
   const [selectedRun, setSelectedRun] = useState<string | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
@@ -259,6 +262,9 @@ export default function RunsPage() {
           ))}
         </div>
       )}
+
+      {batches.filter((batch) => matchesKeyword(search, [batch.label, ...batch.rows.map((item) => item.row.label)])).map((batch) =>
+        <BatchResultPanel key={batch.id} batch={batch} busy={batchApply.executing || batches.some((item) => item.running)} onRetry={() => void batchApply.retryFailed(batch)} />)}
 
       {selectedRun && (
         <section className="rounded-lg border bg-card p-4 shadow-sm">

@@ -42,17 +42,21 @@ the conservative all-domain refresh. Batch resource writes refresh once in final
 including partial failures. Runs polls only while an operation is running, and
 progress polls cannot overlap.
 
-Account creation seeds shared settings and fills skills/MCP without refreshing
-queries per item. After all items (including rejected writes), it refreshes once;
-the launch-alias write retains its separate alias refresh.
+The session retains the newest 50 completed batch summaries and all running
+batches. Summaries keep target identities, status and at most 2,048 characters
+per error, without command payloads or credentials. Skills and Sources show the
+latest result; Runs lists grouped results alongside individual audit records.
+Retry selects failed rows only, re-reads `skills:status` before each target and
+requires the action to remain available. External takeover is not replayed.
+Completed groups do not persist across application restarts; individual audit
+records do. A partial source application must not report full success.
 
-Account selectors use agents:status --metadata-only, which skips CLI version
-processes. Accounts and controlled launch compatibility checks keep their normal
-version validation. Sources and the account onboarding source-presence check use
-skills:status --collections-only: it discovers
-names and source metadata without building skill fingerprints. Per-skill health is
-deferred (discovery_inbox is omitted); update/copy actions fetch full status before
-planning writes. Dependency status runs only when its owning page is mounted and
+Account and controlled-launch operations are retired. Extension selectors and
+Assistants use `resources:targets`: immutable metadata only, without loading
+secrets or invoking assistant executables. Sources uses
+`skills:status --collections-only`, discovering names and source metadata without
+building skill fingerprints. Per-skill health is deferred; update/copy actions
+fetch full status before planning writes. Dependency status runs only when its owning page is mounted and
 performs no executable version probes or network access.
 
 ## Process output and previews

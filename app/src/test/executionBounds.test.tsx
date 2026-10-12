@@ -6,6 +6,17 @@ import { boundedExecutions, executionSummary, ExecutionProvider, useExecutions, 
 import { affectedDomains, createQueryClient, engineKeys, invalidateEngineQueries } from "../lib/queries";
 import { makeEnvelope } from "./fixtures";
 
+it("keeps running batches and only the newest fifty completed summaries", () => {
+  const client = createQueryClient({ retry: false });
+  const { result } = renderHook(() => useExecutions(), { wrapper: ({ children }) => <QueryClientProvider client={client}><ExecutionProvider>{children}</ExecutionProvider></QueryClientProvider> });
+  act(() => {
+    result.current.recordBatch({ id: "running", command: "skills:apply", label: "running", running: true, rows: [] });
+    for (let i = 0; i < 80; i++) result.current.recordBatch({ id: String(i), command: "skills:apply", label: String(i), running: false, rows: [] });
+  });
+  expect(result.current.batches.map(batch => batch.id)).toEqual([...Array.from({ length: 50 }, (_, i) => String(79 - i)), "running"]);
+  client.clear();
+});
+
 it("keeps running operations when older completed history is discarded", () => {
   const row = (runId: string, status: ExecutionRecord["status"]): ExecutionRecord => ({ runId, status, command: "mcp:apply", label: runId, startedAt: 0, finishedAt: null, envelope: null, bridgeError: null });
   const kept = boundedExecutions([row("first", "running"), ...Array.from({ length: 80 }, (_, i) => row(String(i), "ok")), row("last", "running")]);
