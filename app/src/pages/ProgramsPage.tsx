@@ -77,8 +77,8 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
   }, [focus, query.data]);
 
   if (query.isPending) return <PageLoading text={t("正在查找技能与 MCP 用到的程序…")} />;
-  if (query.isError) return <PageError title={t("依赖程序读取失败")} error={query.error} />;
-  if (!query.data.ok) return <PageError title={t("依赖程序读取失败")} error={new Error(query.data.errors[0]?.message ?? t("读取失败"))} />;
+  if (query.isError) return <PageError title={t("依赖程序读取失败")} error={query.error} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
+  if (!query.data.ok) return <PageError title={t("依赖程序读取失败")} errors={query.data.errors} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
   const data = query.data.data;
   const programs = [...data.elements].sort((a, b) => severity(a) - severity(b) || a.name.localeCompare(b.name));
 

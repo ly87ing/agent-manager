@@ -131,7 +131,8 @@ export default function SkillsPage({
 
 
   if (query.isPending) return <PageLoading />;
-  if (query.isError) return <PageError title={t("技能状态读取失败")} error={query.error} />;
+  if (query.isError) return <PageError title={t("技能状态读取失败")} error={query.error} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
+  if (!query.data.ok) return <PageError title={t("技能状态读取失败")} errors={query.data.errors} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
 
   const elements = query.data.data.elements ?? [];
   const installed = query.data.data.installed ?? [];

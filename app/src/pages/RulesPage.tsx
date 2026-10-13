@@ -96,12 +96,12 @@ export default function RulesPage({
   const accountName = useAccountNames();
 
   if (query.isPending) return <PageLoading />;
-  if (query.isError) return <PageError title={t("规则状态读取失败")} error={query.error} />;
+  if (query.isError) return <PageError title={t("规则状态读取失败")} error={query.error} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
   if (!query.data.ok) {
     return (
       <div className="space-y-4">
         <h1 className="text-lg font-semibold tracking-tight">{t("规则")}</h1>
-        <ErrorPanel title={t("规则状态读取失败")} errors={query.data.errors} />
+        <PageError title={t("规则状态读取失败")} errors={query.data.errors} onRetry={() => void query.refetch()} retrying={query.isFetching} />
       </div>
     );
   }

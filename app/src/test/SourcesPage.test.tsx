@@ -35,6 +35,24 @@ function routes(): Record<string, Envelope | ((args: string[]) => Promise<Envelo
 }
 
 describe("来源页", () => {
+  it("读取失败后可原地重试并显示真实来源，不触发写入", async () => {
+    let reads = 0;
+    const r = routes();
+    const healthy = r["skills:status"] as Envelope;
+    r["skills:status"] = async () => {
+      reads += 1;
+      return reads === 1
+        ? makeEnvelope({}, { ok: false, errors: [{ code: "SOURCE_READ_FAILED", element: null, message: "来源暂不可读" }] })
+        : healthy;
+    };
+    const { calls } = renderWithEngine(<SourcesPage />, r);
+    expect(await screen.findByRole("alert")).toHaveTextContent("来源暂不可读");
+    await userEvent.click(screen.getByRole("button", { name: "重新读取" }));
+    expect(await screen.findByTestId("source-row-agent-skills")).toBeInTheDocument();
+    expect(reads).toBe(2);
+    expect(calls.some((call) => ["skills:apply", "policy:set", "rules:apply"].includes(call.command))).toBe(false);
+  });
+
   it.each(["skills:status", "rules:status", "policy:get"])("%s 返回失败时展示原因，不伪装成空来源且不提供写操作", async (command) => {
     const r = routes();
     r[command] = makeEnvelope({}, { ok: false, errors: [{ code: "SOURCE_READ_FAILED", element: null, message: "来源数据暂不可读" }] });

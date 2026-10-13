@@ -7,7 +7,6 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { ActionMenu } from "../components/AccountGrid";
 import { COL_NARROW, DataTable, PILL, ROW } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
-import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import { RemoveCollectionDialog } from "../components/RemoveCollectionDialog";
 import { RuleSourceFormDialog, RemoveSourceDialog, useRuleSources, type UserSource } from "../components/RuleSources";
@@ -111,14 +110,14 @@ export default function SourcesPage({
   }, [focus, skills.data]);
 
   if (skills.isPending) return <PageLoading />;
-  if (skills.isError) return <PageError title={t("来源读取失败")} error={skills.error} />;
-  if (!skills.data.ok) return <ErrorPanel title={t("来源读取失败")} errors={skills.data.errors} className="break-all" />;
+  if (skills.isError) return <PageError title={t("来源读取失败")} error={skills.error} onRetry={() => void skills.refetch()} retrying={skills.isFetching} />;
+  if (!skills.data.ok) return <PageError title={t("来源读取失败")} errors={skills.data.errors} onRetry={() => void skills.refetch()} retrying={skills.isFetching} className="break-all" />;
   if (policy.isPending) return <PageLoading />;
-  if (policy.isError) return <PageError title={t("来源定义读取失败")} error={policy.error} />;
-  if (!policy.data.ok) return <ErrorPanel title={t("来源定义读取失败")} errors={policy.data.errors} className="break-all" />;
+  if (policy.isError) return <PageError title={t("来源定义读取失败")} error={policy.error} onRetry={() => void policy.refetch()} retrying={policy.isFetching} />;
+  if (!policy.data.ok) return <PageError title={t("来源定义读取失败")} errors={policy.data.errors} onRetry={() => void policy.refetch()} retrying={policy.isFetching} className="break-all" />;
   if (rules.isPending) return <PageLoading />;
-  if (rules.isError) return <PageError title={t("规则内容读取失败")} error={rules.error} />;
-  if (!rules.data.ok) return <ErrorPanel title={t("规则内容读取失败")} errors={rules.data.errors} className="break-all" />;
+  if (rules.isError) return <PageError title={t("规则内容读取失败")} error={rules.error} onRetry={() => void rules.refetch()} retrying={rules.isFetching} />;
+  if (!rules.data.ok) return <PageError title={t("规则内容读取失败")} errors={rules.data.errors} onRetry={() => void rules.refetch()} retrying={rules.isFetching} className="break-all" />;
 
   const skillElements = elements.filter((element) => !isCollection(element));
   const recommendations = skills.data.ok ? skills.data.data.recommendations ?? [] : [];

@@ -100,12 +100,12 @@ export default function McpPage({
     onImportConsumed?.();
   }, [importPayload, query.data]);
   if (query.isPending) return <PageLoading />;
-  if (query.isError) return <PageError title={t("MCP 状态读取失败")} error={query.error} />;
+  if (query.isError) return <PageError title={t("MCP 状态读取失败")} error={query.error} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
   if (!query.data.ok) {
     return (
       <div className="space-y-3">
         <h1 className="text-lg font-semibold tracking-tight">MCP</h1>
-        <ErrorPanel title={t("MCP 状态读取失败")} errors={query.data.errors} />
+        <PageError title={t("MCP 状态读取失败")} errors={query.data.errors} onRetry={() => void query.refetch()} retrying={query.isFetching} />
       </div>
     );
   }

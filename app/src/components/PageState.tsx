@@ -1,5 +1,6 @@
 import { t } from "../lib/i18n";
 import { toDiagnostic } from "../lib/engine";
+import type { Diagnostic } from "../lib/contract";
 import { ErrorPanel } from "./ErrorPanel";
 import { Skeleton } from "./Skeleton";
 
@@ -23,8 +24,20 @@ export function PageLoading({ text = t("正在读取数据…") }: { text?: stri
 }
 
 /** 页面级桥错误（非 envelope 响应）。 */
-export function PageError({ title, error }: { title: string; error: unknown }) {
-  return <ErrorPanel title={title} errors={[toDiagnostic(error)]} />;
+export function PageError({ title, error, errors, onRetry, retrying = false, className }: {
+  title: string;
+  error?: unknown;
+  errors?: Diagnostic[];
+  onRetry: () => void;
+  retrying?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <ErrorPanel title={title} errors={errors ?? [toDiagnostic(error)]} className={className} />
+      <button type="button" disabled={retrying} onClick={onRetry} className="rounded border px-3 py-1.5 text-sm hover:bg-accent disabled:opacity-40">{retrying ? t("正在读取数据…") : t("重新读取")}</button>
+    </div>
+  );
 }
 
 export function PageHeader({ title, description }: { title: string; description?: string }) {

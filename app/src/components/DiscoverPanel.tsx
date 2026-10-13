@@ -165,7 +165,7 @@ export function DiscoverPanel() {
   const confirmingCleanup = confirming?.every((key) => key.startsWith("skill-cleanup:")) ?? false;
   // Hide the panel while scanning or when there is nothing to manage.
   if (query.isPending) return null;
-  if (query.isError) return <PageError title={t("扫描本机已有内容失败")} error={query.error} />;
+  if (query.isError) return <PageError title={t("扫描本机已有内容失败")} error={query.error} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
   if (tasks.size === 0 && query.data?.ok) return null;
 
   const runTakeover = async () => {

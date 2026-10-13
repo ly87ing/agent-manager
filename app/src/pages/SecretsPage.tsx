@@ -31,7 +31,8 @@ export default function SecretsPage() {
   }, [source.path, sourceTouched]);
 
   if (query.isPending) return <PageLoading />;
-  if (query.isError) return <PageError title={t("密钥状态读取失败")} error={query.error} />;
+  if (query.isError) return <PageError title={t("密钥状态读取失败")} error={query.error} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
+  if (!query.data.ok) return <PageError title={t("密钥状态读取失败")} errors={query.data.errors} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
 
   const variables = envObserved.variables ?? [];
   const unresolved = envObserved.unresolved ?? variables.filter((item) => item.resolved === false).length;

@@ -1,7 +1,6 @@
 import { t } from "../lib/i18n";
 import { Bot } from "lucide-react";
 import { EmptyState } from "../components/EmptyState";
-import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageHeader, PageLoading } from "../components/PageState";
 import { useEngineQuery } from "../lib/queries";
 import type { ResourceTarget } from "../lib/useAccountNames";
@@ -9,8 +8,8 @@ import type { ResourceTarget } from "../lib/useAccountNames";
 export default function AgentsPage() {
   const query = useEngineQuery<{ targets: ResourceTarget[] }>("resources:targets");
   if (query.isPending) return <PageLoading text={t("正在读取助手列表…")} />;
-  if (query.isError) return <PageError title={t("助手列表加载失败")} error={query.error} />;
-  if (!query.data.ok) return <ErrorPanel title={t("助手列表加载失败")} errors={query.data.errors} />;
+  if (query.isError) return <PageError title={t("助手列表加载失败")} error={query.error} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
+  if (!query.data.ok) return <PageError title={t("助手列表加载失败")} errors={query.data.errors} onRetry={() => void query.refetch()} retrying={query.isFetching} />;
   const targets = query.data.data.targets ?? [];
 
   return (

@@ -97,7 +97,7 @@ export default function App() {
   useEffect(() => subscribeImportLinks((url) => setImportText(url)), []);
 
   if (settings.isPending) return <PageLoading text={t("正在读取应用设置…")} />;
-  if (settings.isError) return <PageError title={t("应用设置加载失败")} error={settings.error} />;
+  if (settings.isError) return <PageError title={t("应用设置加载失败")} error={settings.error} onRetry={() => void settings.refetch()} retrying={settings.isFetching} />;
 
   const handleNavigate = (page: string) => {
     if (page === "import-link") {

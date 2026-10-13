@@ -211,7 +211,8 @@ export default function RunsPage() {
   };
 
   if (listQuery.isPending) return <PageLoading />;
-  if (listQuery.isError) return <PageError title={t("任务记录读取失败")} error={listQuery.error} />;
+  if (listQuery.isError) return <PageError title={t("任务记录读取失败")} error={listQuery.error} onRetry={() => void listQuery.refetch()} retrying={listQuery.isFetching} />;
+  if (!listQuery.data.ok) return <PageError title={t("任务记录读取失败")} errors={listQuery.data.errors} onRetry={() => void listQuery.refetch()} retrying={listQuery.isFetching} />;
 
   const runs: RunEntry[] = listQuery.data.data.runs;
   const currentRunIds = new Set(executions.map((record) => record.runId));

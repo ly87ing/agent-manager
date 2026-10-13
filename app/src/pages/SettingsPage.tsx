@@ -188,7 +188,7 @@ export default function SettingsPage({
   }, [settings.data]);
 
   if (settings.isPending) return <PageLoading />;
-  if (settings.isError) return <PageError title={t("设置加载失败")} error={settings.error} />;
+  if (settings.isError) return <PageError title={t("设置加载失败")} error={settings.error} onRetry={() => void settings.refetch()} retrying={settings.isFetching} />;
   const data = settings.data;
   const changed = JSON.stringify(preferences) !== JSON.stringify(data.preferences);
 
