@@ -135,9 +135,23 @@ describe("McpPage：实际条目为主", () => {
   it("某个助手的文件读不了：顶部说明，其他助手照常", async () => {
     const status = mcpStatusData();
     status.targets = mcpTargets({ codex: { error: "配置文件解析失败: TOML 语法错误" } });
-    renderWithEngine(<McpPage />, routes(status));
-    expect(await screen.findByTestId("mcp-target-error-codex")).toHaveTextContent("配置文件解析失败");
+    const healthy = mcpStatusData();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    let reads = 0;
+    const { calls } = renderWithEngine(<McpPage />, {
+      ...routes(status),
+      "mcp:status": async () => makeEnvelope(++reads === 1 ? status : healthy),
+    });
+    const warning = await screen.findByTestId("mcp-target-error-codex");
+    expect(warning).toHaveTextContent("配置文件解析失败");
     expect(screen.getByTestId("action-disable-mcp:fs-claude-code")).toBeInTheDocument();
+    await userEvent.click(within(warning).getByRole("button", { name: "复制配置路径" }));
+    expect(writeText).toHaveBeenCalledWith(status.targets[1].path);
+    await userEvent.click(within(warning).getByRole("button", { name: "重新读取" }));
+    await waitFor(() => expect(screen.queryByTestId("mcp-target-error-codex")).toBeNull());
+    expect(reads).toBe(2);
+    expect(calls.some((call) => call.command === "mcp:apply" || call.command === "mcp:preview")).toBe(false);
   });
 
   it("旧标记单独预览清理：取消不写，确认只提交所选助手及原摘要", async () => {

@@ -355,6 +355,10 @@ export default function McpPage({
         >
           <span className="font-medium">{nameOfAgent(target.agent)}</span>{(" " + t("的 MCP 配置读不了："))}{target.error}
           <span className="block break-all font-mono text-[11px] opacity-80">{target.path}</span>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button type="button" onClick={() => void navigator.clipboard.writeText(target.path).then(() => toast.success(t("已复制到剪贴板"))).catch(() => toast.error(t("复制失败，请手动选中文本复制")))} className="rounded border border-warning/40 px-2 py-1 hover:bg-warning/10">{t("复制配置路径")}</button>
+            <button type="button" disabled={query.isFetching} onClick={() => void query.refetch()} className="rounded border border-warning/40 px-2 py-1 hover:bg-warning/10 disabled:opacity-40">{query.isFetching ? t("正在读取数据…") : t("重新读取")}</button>
+          </div>
         </div>
       ))}
 

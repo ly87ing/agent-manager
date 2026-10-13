@@ -513,6 +513,7 @@ export const messages = {
   "复制到剪贴板": "Copy to clipboard",
   "复制失败，可直接选中示例文字复制": "Unable to copy. Select the example text and copy it manually.",
   "复制失败，请手动选中文本复制": "Unable to copy. Select the text and copy it manually.",
+  "复制配置路径": "Copy configuration path",
   "复制并换过去": "Copy and switch",
   "复制示例": "Copy example",
   "外观": "Appearance",
