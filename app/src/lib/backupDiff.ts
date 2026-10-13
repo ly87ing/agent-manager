@@ -93,7 +93,7 @@ const SOURCE_LABELS: Record<string, string> = {
   // Hooks 已不再管理：旧备份里的这两段导入时跳过
   get "hooks.claude"() { return t("旧版 Claude Hooks（已不再管理，导入时跳过）"); },
   get "hooks.codex"() { return t("旧版 Codex Hooks（已不再管理，导入时跳过）"); },
-  // 旧版本保存、还没写进终端配置的快捷命令：导入后在快捷命令页作为已保存未生效建议出现
+  // 旧版终端快捷命令不再导入或管理
   get "aliases.shell"() { return t("旧版终端快捷命令（已不再管理，导入时跳过）"); },
 };
 

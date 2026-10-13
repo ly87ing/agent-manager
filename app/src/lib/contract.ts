@@ -1,4 +1,4 @@
-import type { AgentUsage } from "./observed";
+
 /**
  * Contract v1（contract/engine-v1/*.schema.json）的 TypeScript 镜像。
  * 字段命名与 schema 完全一致（snake_case），可空字段遵循 schema 的
@@ -112,44 +112,6 @@ export interface StatusData {
   source_rules?: RuleSourceRule[];
   /** 仅 rules 域：没有来源规则时的推荐来源；collection 为已登记的同名/同地址集合。 */
   suggested_sources?: SuggestedSource[];
-  /** 仅 aliases 域：两个 rc 文件受管区块里的实际别名，按名合并。这就是当前配置。 */
-  aliases?: AliasCurrent[];
-  /** 仅 aliases 域：来源推荐别名（技能来源里的 aliases/*.json；任一文件里已有同名的不推荐）。只读，不计入待同步。 */
-  alias_recommendations?: AliasRecommendation[];
-  /** 仅 aliases 域：没有来源别名时的推荐来源；collection 为已登记的同名/同地址集合。 */
-  alias_suggested_sources?: SuggestedSource[];
-  /** 仅 aliases 域：旧版本保存、实际区块里还没有的别名（已保存未生效）。 */
-  alias_legacy?: AliasLegacySuggestion[];
-}
-
-// ---------- aliases:status 顶层 ----------
-
-export interface AliasCurrent {
-  name: string;
-  /** 本工具写法 alias name='value' 时的取值；其他写法为 null（只能整条改写或删除）。 */
-  value: string | null;
-  line: string;
-  /** 区块里定义了它的文件（元素 id）。 */
-  targets: string[];
-  /** false = 两个文件里的写法不一样。 */
-  consistent: boolean;
-}
-
-export interface AliasRecommendation {
-  name: string;
-  value: string;
-  line: string;
-  /** 提供它的技能来源（集合名）。 */
-  source: string;
-}
-
-export interface AliasLegacySuggestion {
-  id: string;
-  name: string;
-  value: string;
-  line: string;
-  /** 区块里现在定义这个名字的那一行；没有为 null。 */
-  actual: string | null;
 }
 
 // ---------- rules:status templates / recommended ----------
@@ -265,97 +227,13 @@ export interface McpTarget {
   error: string | null;
 }
 
-// ---------- profiles（助手实例） ----------
-
-/** 实例类型：决定配置目录变量与目标文件格式。 */
-export type ProfileKind = "claude" | "codex";
-
-export interface ProfileSpec {
-  display_name: string;
-  base_agent: string;
-  kind: ProfileKind | string;
-  config_dir: string;
-  base_url: string | null;
-  model: string | null;
-}
-
-export interface ProfileEnvRef {
-  name: string;
-  kind: "reference" | "literal" | string;
-  /** 引用形式时的变量名；直接写值时为 null。 */
-  variable: string | null;
-  /** 当前环境里是否给得出取值；直接写值时为 null。 */
-  resolved: boolean | null;
-}
-
-export interface ProfileObserved {
-  base_agent: string;
-  kind: ProfileKind | string;
-  /** 启动时指向独立配置目录的环境变量名（CLAUDE_CONFIG_DIR / CODEX_HOME）。 */
-  config_env: string;
-  config_dir: string;
-  config_dir_exists: boolean;
-  target: string;
-  target_exists: boolean;
-  env_refs: ProfileEnvRef[];
-  /** 建议的启动命令取值，可直接存成同名快捷命令。 */
-  launch_value: string;
-  /** 这个实例自己的额度：实例多半是另一个账号，各算各的。 */
-  usage?: AgentUsage | null;
-  /** 用第三方接口或凭据：目录里不能有官方账号登录。 */
-  third_party?: boolean;
-  /** 库里的定义按现在的规则解析不了：只有 blocked_reason，界面只给编辑与移除。 */
-  invalid?: boolean;
-  /** 实例目录挡不住的系统级设置（组织下发的设置、共享的联合身份档案等）：只有来源与键名。 */
-  system_overrides?: { source: string; name: string }[];
-  /** 写入基准：实例目标文件本工具负责部分的摘要，文件不存在为 missing；读不了时为 null。 */
-  base?: string | null;
-  /** 当前完整实例定义的摘要，更新定义和实际文件时一起做写前比对。 */
-  definition_base?: string | null;
-  /** 从实际配置解析的可编辑接入字段；凭据仍为引用，缺省表示不能安全预填。 */
-  editable_profile?: Record<string, unknown>;
-  edit_blocked_reason?: string;
-  /** 实际文件中的模型与当前接口；null 表示文件里没有该字段。 */
-  current_connection?: { model: string | null; base_url: string | null };
-  /** 实例定义与实际文件逐字段对比；凭据只给是否一致，取值为 <hidden>。 */
-  fields?: ProfileField[];
-  blocked_reason: string | null;
-}
-
-export interface ProfileField {
-  /** env.<变量名> / model，Codex 另有 model_provider、provider.base_url 等。 */
-  field: string;
-  /** same = 一致；differs = 不同；missing = 实际里没有；unresolved = 定义引用的变量取不到值。 */
-  state: "same" | "differs" | "missing" | "unresolved" | string;
-  definition: string | null;
-  live: string | null;
-  /** credential = 第三方凭据（定义里是变量名，实际写的是取值），界面单独说明。 */
-  purpose?: "credential" | string;
-  /** credential 项引用的变量名。 */
-  variable?: string | null;
-}
-
 // ---------- system:discover（只读接管发现） ----------
 
 /** 接管方式词汇表（引擎侧 manage 字段）：
  * native = 官方路径/原生安装方案，只标识不接管；symlink = 外部资源以软链接纳管；
  * collection = 走已定义集合的接管通道；register = 登记定义（助手 CLI）；
  * cleanup = 断链或旧体系残留，只建议清理。 */
-export type TakeoverManage = "native" | "symlink" | "collection" | "register" | "cleanup";
-
-export interface DiscoverAgentCandidate {
-  id: string;
-  display_name: string;
-  bin: string;
-  bin_path: string;
-  version: string | null;
-  origin: "npm" | "brew" | "native" | "system" | string;
-  npm_package: string | null;
-  manage: "register";
-  /** 兼容引擎探测字段；当前 UI 不据此提供安装、升级或卸载入口。 */
-  managed_after_takeover: boolean;
-  suggested_definition: Record<string, unknown>;
-}
+export type TakeoverManage = "native" | "symlink" | "collection" | "cleanup";
 
 export interface DiscoverSkillItem {
   agent: string;
@@ -386,7 +264,6 @@ export interface DiscoverSkillGroup {
 
 export interface DiscoverData {
   domain: "discover";
-  agents?: DiscoverAgentCandidate[];
   skills?: { items: DiscoverSkillItem[]; groups: DiscoverSkillGroup[] };
   summary: Record<string, number>;
 }

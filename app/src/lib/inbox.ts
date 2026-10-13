@@ -1,18 +1,8 @@
 import { t } from "./i18n";
-import { buildAccounts } from "./accounts";
 import type { EngineElement, McpTarget, StatusData } from "./contract";
 import { mcpFillRows, type McpFillRow } from "./mcpFill";
 import { missingVariables } from "./mcpVariables";
-import type {
-  AliasesObserved,
-  McpObserved,
-  RulesObserved,
-  RulesSpec,
-  SkillCollectionObserved,
-  SkillCollectionSpec,
-  SkillObserved,
-  SkillSpec,
-} from "./observed";
+import type { McpObserved, RulesObserved, RulesSpec, SkillCollectionObserved, SkillCollectionSpec, SkillObserved, SkillSpec } from "./observed";
 import { displayName, type ProgramElement } from "./programs";
 import { rulesFillRows, type RulesFillRow } from "./rulesFill";
 import { isCollection } from "./skillCollections";
@@ -20,7 +10,7 @@ import { addToAllRows, fillRows, versionUpdateRows } from "./skillFill";
 import type { BatchApplyRow } from "./useBatchApply";
 
 /**
- * 管理闭环（docs/MULTI-ACCOUNT-DESIGN.md「管理体系」）：各领域的实际状态统一成同一套「需要处理」的状态，
+ * 各扩展领域的实际状态统一成同一套「需要处理」的状态，
  * 每条只对应一个处理动作；动作经写入管线执行、回读后状态回到正常，这一条就从待处理里消失。
  * 导航角标、待处理页都只从这里算，页面里不再各算各的。数据全部来自只读的 status 查询。
  */
@@ -42,11 +32,11 @@ export type InboxFix =
   | { kind: "rules-fill"; label: string; rows: RulesFillRow[] }
   | { kind: "open"; label: string; target: string };
 
-export type InboxPage = "accounts" | "skills" | "mcp" | "rules" | "commands" | "sources" | "programs";
+export type InboxPage = "skills" | "mcp" | "rules" | "sources" | "programs";
 
 export interface InboxItem {
   id: string;
-  /** 这一项落在哪个元素上（引擎元素 id；命令为 `command:<名称>`）：资源页的「只看待处理」按它筛选。 */
+  /** 这一项落在哪个元素上（引擎元素 id）：资源页的「只看待处理」按它筛选。 */
   subject: string;
   page: InboxPage;
   state: InboxState;
@@ -63,19 +53,14 @@ export interface InboxInput {
   mcp: EngineElement[];
   mcpTargets: McpTarget[];
   rules: EngineElement[];
-  agents: EngineElement[];
-  profiles: EngineElement[];
-  aliases: EngineElement[];
   programs?: ProgramElement[];
   nameOf?: (agent: string) => string;
 }
 
 const PAGE_LABEL: Record<InboxPage, string> = {
-  get accounts() { return t("账号"); },
   get skills() { return t("技能"); },
   mcp: "MCP",
   get rules() { return t("规则"); },
-  get commands() { return t("命令"); },
   get sources() { return t("来源"); },
   get programs() { return t("程序"); },
 };
@@ -249,28 +234,6 @@ function ruleItems(elements: EngineElement[]): InboxItem[] {
   });
 }
 
-function accountItems(agents: EngineElement[], profiles: EngineElement[], aliases: EngineElement[]): InboxItem[] {
-  const lines = aliases.flatMap((element) => (element.observed as unknown as AliasesObserved).entries ?? []);
-  const managed = Object.fromEntries(lines.filter((line) => line.value).map((line) => [line.name, line.value as string]));
-  return buildAccounts(agents, profiles, managed).flatMap((group) =>
-    group.accounts.flatMap((account): InboxItem[] => {
-      const title = account.isMain ? `${group.label} 主号` : account.name;
-      const open = (label: string) => ({ kind: "open" as const, label, target: "accounts" });
-      const base = { page: "accounts" as const, subject: account.elementId, title };
-      if (account.blockedReason) return [{ ...base, id: `account:${account.elementId}:blocked`, state: "broken", detail: account.blockedReason, fix: open("去处理") }];
-      const out: InboxItem[] = [];
-      if (account.mainHasThirdParty) out.push({ ...base, id: `account:${account.elementId}:third`, state: "drifted", detail: "主账号里混进了第三方接入", fix: open("去处理") });
-      if (account.drifted) out.push({ ...base, id: `account:${account.elementId}:drifted`, state: "drifted", detail: "目录内容被外部改过", fix: open("去查看") });
-      if (!account.isMain && !account.command) out.push({ ...base, id: `account:${account.elementId}:command`, state: "missing", detail: "还没有启动命令", fix: open("去写入") });
-      return out;
-    }),
-  );
-}
-
-/**
- * 启动命令：只比较已经有受管区块的文件。~/.zprofile 没有区块时本工具不新建它，只在 ~/.zshrc 里的
- * 命令不算「缺一处」。
- */
 /**
  * 程序：缺失的去安装（或补安装方式）、按需拉取却没固定版本的去固定、有新版本的去升级、同名多份算已偏离、
  * 运行器（npx / uvx）不在算损坏、本工具装了却没人用的算可清理。都到程序页处理（要看计划、选入口目录）。
@@ -309,27 +272,6 @@ function programItems(programs: ProgramElement[]): InboxItem[] {
   });
 }
 
-function commandItems(targets: EngineElement[]): InboxItem[] {
-  const managed = targets
-    .map((target) => target.observed as unknown as AliasesObserved)
-    .filter((observed) => observed.base !== null && observed.base !== "missing");
-  const lines = new Map<string, string[]>();
-  for (const observed of managed) {
-    for (const entry of observed.entries ?? []) lines.set(entry.name, [...(lines.get(entry.name) ?? []), entry.line]);
-  }
-  return [...lines.entries()]
-    .filter(([, found]) => found.length < managed.length || new Set(found).size > 1)
-    .map(([name, found]): InboxItem => ({
-      id: `command:${name}`,
-      subject: `command:${name}`,
-      page: "commands",
-      state: "drifted",
-      title: `${name}`,
-      detail: found.length < managed.length ? "只在部分终端配置文件里" : "几个终端配置文件里写法不同",
-      fix: { kind: "open", label: "去查看", target: "commands" },
-    }));
-}
-
 export function buildInbox(input: InboxInput): InboxItem[] {
   const nameOf = input.nameOf ?? ((agent: string) => agent);
   return [
@@ -338,8 +280,8 @@ export function buildInbox(input: InboxInput): InboxItem[] {
     ...skillItems(input.skills, nameOf),
     ...mcpItems(input.mcp, input.mcpTargets, nameOf),
     ...ruleItems(input.rules),
-    ...accountItems(input.agents, input.profiles, input.aliases),
-    ...commandItems(input.aliases),
+
+
     ...programItems(input.programs ?? []),
   ];
 }

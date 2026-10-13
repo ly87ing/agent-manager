@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ActionMenu } from "../components/AccountGrid";
 import { Select } from "../components/Select";
-import { listTimeZones } from "../lib/aliasCommand";
+import { listTimeZones } from "../lib/launch";
 import { engineErrorMessage } from "../lib/engine";
 import { t, useLanguage } from "../lib/i18n";
 import { launchRequest, type LaunchCatalog, type LaunchEntry, type LaunchRecipe, type SavedLaunch } from "../lib/launch";

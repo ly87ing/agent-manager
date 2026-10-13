@@ -11,7 +11,7 @@ Each page describes how one subsystem works now: what it is responsible for, whe
 | Selective extension definition restore | [Extension backups](extension-backups.md) |
 | External commands, timeout groups and system proxy fallback | [External commands](external-commands.md) |
 | Desktop installation warning and OS login entries | [Desktop startup](desktop-startup.md) |
-| Independent account directories and settings targets | [Account path isolation](account-path-isolation.md) |
+| Extension target paths and protected assistant data | [Account path isolation](account-path-isolation.md) |
 | Retired account operations and extension safety boundary | [Account context](account-context.md) |
 | Signed updater artifacts and platform selection | [Updater manifest](updater-manifest.md) |
 | Managed program versions, npm layouts and executable discovery | [Programs](programs.md) |

@@ -61,7 +61,7 @@ describe("MCP 条目里的版本号改写：只改版本那一段", () => {
 });
 
 describe("待处理里的程序：只汇总，处理去程序页", () => {
-  const input = (programs: ProgramElement[]) => ({ skills: [], mcp: [], mcpTargets: [], rules: [], agents: [], profiles: [], aliases: [], programs });
+  const input = (programs: ProgramElement[]) => ({ skills: [], mcp: [], mcpTargets: [], rules: [], programs });
 
   it("缺失、没固定版本、有新版本、同名多份、运行器缺失、可清理各自归到统一状态", () => {
     const items = buildInbox(input([

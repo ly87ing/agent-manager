@@ -5,11 +5,11 @@
   "additionalProperties": false,
   "properties": {
     "id": {
-      "description": "Element id, e.g. 'agents:claude-code', 'mcp:example-search', 'skill:<collection>/<skill-name>', 'rules:claude_global'.",
+      "description": "Element id, e.g. 'mcp:example-search', 'skill:<collection>/<skill-name>', 'rules:claude_global'.",
       "type": "string"
     },
     "domain": {
-      "description": "Owning domain, e.g. 'agents', 'mcp', 'skills', 'rules', 'hooks', 'aliases' or 'secrets'.",
+      "description": "Owning domain, e.g. 'mcp', 'skills', 'rules' or 'secrets'.",
       "type": "string"
     },
     "spec": {

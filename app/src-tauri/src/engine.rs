@@ -88,16 +88,12 @@ enum ArgValueKind {
     SecretValue,
     /// 用户选择的外部密钥文件路径。允许空值表示停止使用，但拒绝控制字符与超长输入。
     FilePath,
-    /// 写入基准：status 给出的 64 位小写十六进制摘要（agents:configure 的 --base；
-    /// mcp:apply 的 --base / --to-base）。
+    /// 写入基准：status 给出的 64 位小写十六进制摘要。
     Digest,
     /// 规则正文（整份文件内容）：任意文本，换行等照常；NUL 等内容规则由引擎判定。
     RuleText,
-    /// 规则、Hooks 与终端快捷命令写入的 CAS 基准：64 位小写 sha256，或没有内容时的 missing。
+    /// 规则写入的 CAS 基准：64 位小写 sha256，或没有内容时的 missing。
     RuleBase,
-    /// Hooks / 终端快捷命令的建议 id：cleanup-/legacy- 前缀加 16 位小写十六进制
-    /// （引擎再校验前缀与来源）。
-    SuggestionId,
     /// 规则模板 id：小写字母、数字与连字符。
     TemplateId,
     /// 来源规则 id：`<集合>/<名字>`，两段只含字母、数字与 `-_.`，且不是 `.`/`..`。
@@ -106,8 +102,6 @@ enum ArgValueKind {
     TemplateName,
     /// 规则模板 revision：64 位小写 sha256。
     Revision,
-    /// profiles:seed 要带的项：逗号分隔，只能是引擎认得的几项（引擎再校验一次）。
-    SeedItems,
     /// 技能来源要切换到的版本：标签、分支或提交（字母数字与 `._/+-`，不以 `-` 开头）。
     GitRef,
     /// 逗号分隔的账号 id：每个只含字母数字与 `-_.`，至少一个。
@@ -116,8 +110,6 @@ enum ArgValueKind {
     ProgramAction,
     /// true / false
     BoolText,
-    AccountOperation,
-    AccountShell,
 }
 
 /// 每个命令允许的 flag 集合（命令感知白名单）。
@@ -138,21 +130,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--name", ArgValueKind::LaunchName));
             specs.push(("--confirm", ArgValueKind::Flag));
         }
-        ("accounts", "command") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--operation", ArgValueKind::AccountOperation));
-            specs.push(("--definition", ArgValueKind::JsonValue));
-            specs.push(("--shell", ArgValueKind::AccountShell));
-        }
-        ("profiles", "create") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--definition", ArgValueKind::JsonValue));
-            specs.push(("--base", ArgValueKind::RuleBase));
-            specs.push(("--preview-file-base", ArgValueKind::RuleBase));
-            specs.push(("--preview-content-base", ArgValueKind::RuleBase));
-            specs.push(("--secret-var", ArgValueKind::VarName));
-            specs.push(("--secret-value", ArgValueKind::SecretValue));
-        }
         ("secrets", "set") => {
             specs.push(("--var", ArgValueKind::VarName));
             specs.push(("--value", ArgValueKind::SecretValue));
@@ -164,7 +141,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         }
         ("system", "refresh-upstream") => specs.push(("--only", ArgValueKind::ElementId)),
         ("programs", "status") => specs.push(("--rescan", ArgValueKind::Flag)),
-        ("agents", "status") => specs.push(("--metadata-only", ArgValueKind::Flag)),
         ("skills", "status") => specs.push(("--collections-only", ArgValueKind::Flag)),
         ("programs", "preview" | "apply") => {
             specs.push(("--program", ArgValueKind::ElementId));
@@ -199,62 +175,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--revision", ArgValueKind::Revision));
         }
         ("rules", "delete-template") => specs.push(("--template", ArgValueKind::TemplateId)),
-        // 终端快捷命令以 rc 文件受管区块为准：按名编辑一条，要写的文件各带自己的 base 做 CAS；
-        // 操作四选一（引擎再强制恰好一个）。名称与元素 id 同一把尺子，取值由引擎校验。
-        ("aliases", "apply" | "preview") => {
-            specs.push(("--zshrc-base", ArgValueKind::RuleBase));
-            specs.push(("--zprofile-base", ArgValueKind::RuleBase));
-            // bash 用户（多数 Linux）的 ~/.bashrc
-            specs.push(("--bashrc-base", ArgValueKind::RuleBase));
-            // Windows：命令脚本目录的写入基准
-            specs.push(("--cmd-base", ArgValueKind::RuleBase));
-            specs.push(("--set", ArgValueKind::ElementId));
-            specs.push(("--value", ArgValueKind::RuleText));
-            specs.push(("--rename-from", ArgValueKind::ElementId));
-            specs.push(("--remove", ArgValueKind::ElementId));
-            specs.push(("--recommended", ArgValueKind::ElementId));
-            specs.push(("--legacy", ArgValueKind::SuggestionId));
-        }
-        ("aliases", "discard-legacy") => specs.push(("--legacy", ArgValueKind::SuggestionId)),
-        // 以实际配置更新实例定义：同样带基准，确认采纳的就是用户看到的那份实际内容
-        ("profiles", "adopt") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--base", ArgValueKind::RuleBase));
-        }
-        ("profiles", "apply-definition") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--base", ArgValueKind::RuleBase));
-            specs.push(("--definition-base", ArgValueKind::Digest));
-            specs.push(("--candidate", ArgValueKind::JsonValue));
-            specs.push(("--preview-file-base", ArgValueKind::RuleBase));
-            specs.push(("--preview-content-base", ArgValueKind::Digest));
-            specs.push(("--secret-var", ArgValueKind::VarName));
-            specs.push(("--secret-value", ArgValueKind::SecretValue));
-        }
-        // 只读发现：--only 取域名（agents/skills/mcp），引擎侧再做词汇表校验
-        ("profiles", "seed") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--items", ArgValueKind::SeedItems));
-        }
-        ("profiles", "shared-status") => specs.push(("--only", ArgValueKind::ElementId)),
-        ("profiles", "preview") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--definition", ArgValueKind::JsonValue));
-            specs.push(("--on-save", ArgValueKind::Flag));
-            specs.push(("--items", ArgValueKind::SeedItems));
-            specs.push(("--base", ArgValueKind::RuleBase));
-            specs.push(("--definition-base", ArgValueKind::Digest));
-            specs.push(("--candidate", ArgValueKind::JsonValue));
-            specs.push(("--exact", ArgValueKind::Flag));
-            specs.push(("--preview-secret-var", ArgValueKind::VarName));
-            specs.push(("--preview-secret-value", ArgValueKind::SecretValue));
-        }
-        ("profiles", "shared-apply") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--item", ArgValueKind::ElementId));
-            specs.push(("--source-base", ArgValueKind::RuleBase));
-            specs.push(("--target-base", ArgValueKind::RuleBase));
-        }
         ("system", "discover") => specs.push(("--only", ArgValueKind::ElementId)),
         ("runs", "get" | "progress") => {
             specs.push(("--run", ArgValueKind::RunId));
@@ -286,25 +206,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--base", ArgValueKind::Digest));
             specs.push(("--cwd", ArgValueKind::FilePath));
         }
-        ("agents", "auth-status") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            // 用户点「确认」时才带：用官方命令查
-            specs.push(("--probe", ArgValueKind::Flag));
-        }
-        // 运行参数写助手配置文件：每次写入都带 status 给出的基准，外部改过就被拒；
-        // 降安全等级要显式标志。主账号只放官方登录，不再有切换与保存实际配置。
-        ("agents", "configure") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--base", ArgValueKind::Digest));
-            specs.push(("--preview-file-base", ArgValueKind::RuleBase));
-            specs.push(("--runtime", ArgValueKind::JsonValue));
-            specs.push(("--allow-yolo", ArgValueKind::Flag));
-        }
-        ("agents", "preview-runtime") => {
-            specs.push(("--only", ArgValueKind::ElementId));
-            specs.push(("--base", ArgValueKind::Digest));
-            specs.push(("--runtime", ArgValueKind::JsonValue));
-        }
         ("skills", "versions") => {
             specs.push(("--only", ArgValueKind::ElementId));
         }
@@ -331,7 +232,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             // 纳入时要链接的账号（逗号分隔；默认全部账号）
             specs.push(("--agents", ArgValueKind::AgentList));
         }
-        (_, "apply") | ("mcp", "preview") => {
+        ("skills" | "mcp", "apply") | ("mcp", "preview") => {
             specs.push(("--only", ArgValueKind::ElementId));
             if domain == "skills" {
                 specs.push(("--agent", ArgValueKind::ElementId));
@@ -357,12 +258,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
                 specs.push(("--to", ArgValueKind::ElementId));
                 specs.push(("--to-base", ArgValueKind::Digest));
                 specs.push(("--replace", ArgValueKind::Flag));
-            }
-            // 实例配置以实际文件为准：写入带 status 给出的基准，外部改过就被拒；「接管」已退役
-            if domain == "profiles" {
-                specs.push(("--base", ArgValueKind::RuleBase));
-                specs.push(("--preview-file-base", ArgValueKind::RuleBase));
-                specs.push(("--preview-content-base", ArgValueKind::Digest));
             }
         }
         _ => {}
@@ -417,33 +312,8 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
                 && value.chars().all(|c|c.is_ascii_alphanumeric() || matches!(c,'_'|'-')) {Ok(())}
             else {Err(EngineError::new("invalid_args", "Invalid launch shortcut name"))}
         }
-        ArgValueKind::AccountShell => {
-            if ["posix", "powershell"].contains(&value) {
-                Ok(())
-            } else {
-                Err(EngineError::new("invalid_args", "非法的账号终端类型"))
-            }
-        }
-        ArgValueKind::AccountOperation => {
-            if ["launch", "login", "logout", "status"].contains(&value) {
-                Ok(())
-            } else {
-                Err(EngineError::new("invalid_args", "非法的账号操作"))
-            }
-        }
         ArgValueKind::Flag => Ok(()),
         ArgValueKind::ElementId => validate_element_id(value),
-        ArgValueKind::SeedItems => {
-            const ITEMS: &[&str] = &["permissions", "statusline", "rules", "mcp"];
-            if !value.is_empty() && value.split(',').all(|item| ITEMS.contains(&item)) {
-                Ok(())
-            } else {
-                Err(EngineError::new(
-                    "invalid_args",
-                    format!("非法的带入项 '{value}'（只能从 {} 里选）", ITEMS.join("、")),
-                ))
-            }
-        }
         ArgValueKind::AgentList => {
             let ok = !value.is_empty()
                 && value.split(',').all(|agent| {
@@ -594,21 +464,6 @@ fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError
                 ))
             }
         }
-        ArgValueKind::SuggestionId => {
-            let ok = ["cleanup-", "legacy-"].iter().any(|prefix| {
-                value.strip_prefix(prefix).is_some_and(|hex| {
-                    hex.len() == 16
-                        && hex
-                            .chars()
-                            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
-                })
-            });
-            if ok {
-                Ok(())
-            } else {
-                Err(EngineError::new("invalid_args", "非法 Hooks 建议 id"))
-            }
-        }
         ArgValueKind::Revision => {
             if is_sha256_hex(value) {
                 Ok(())
@@ -712,8 +567,8 @@ pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> 
     let specs = allowed_arg_specs(command);
     let (domain, _) = command.split_once(':').unwrap_or(("", ""));
     let is_rules = domain == "rules";
-    // rules 与 aliases 同 native 严格参数保持一致：拒绝重复 flag。
-    let reject_duplicates = is_rules || domain == "aliases" || domain == "launch";
+    // Rules and launch commands reject duplicate flags.
+    let reject_duplicates = is_rules || domain == "launch";
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut index = 0;
     while index < args.len() {
@@ -834,62 +689,6 @@ mod tests {
         }
         assert!(validate_command("aliases:apply").is_err());
         assert!(validate_command("accounts:launch").is_err());
-    }
-
-    #[test]
-    fn controlled_account_commands_reject_unsupported_operations_and_secret_flags() {
-        assert!(validate_command("accounts:command").is_err());
-        assert!(validate_command("accounts:launch").is_err());
-        assert!(validate_command("profiles:create").is_err());
-        let args = |items: &[&str]| {
-            items
-                .iter()
-                .map(|item| (*item).to_string())
-                .collect::<Vec<_>>()
-        };
-        assert!(validate_args(
-            "accounts:command",
-            &args(&[
-                "--only",
-                "profiles:work",
-                "--operation",
-                "logout",
-                "--shell",
-                "powershell"
-            ])
-        )
-        .is_ok());
-        assert!(validate_args("accounts:command", &args(&["--shell", "cmd"])).is_err());
-        assert!(validate_args("accounts:command", &args(&["--operation", "shell"])).is_err());
-        assert!(validate_args(
-            "accounts:command",
-            &args(&["--secret-value", "YOUR_TEST_KEY"])
-        )
-        .is_err());
-        let digest = "a".repeat(64);
-        let create = args(&[
-            "--only",
-            "profiles:work",
-            "--definition",
-            "{}",
-            "--base",
-            "missing",
-            "--preview-file-base",
-            "missing",
-            "--preview-content-base",
-            &digest,
-            "--secret-var",
-            "AM_WORK_KEY",
-            "--secret-value",
-            "YOUR_TEST_KEY",
-        ]);
-        assert!(validate_args("profiles:create", &create).is_ok());
-        assert!(validate_args(
-            "profiles:create",
-            &args(&["--secret-value", "YOUR_TEST_KEY\n"])
-        )
-        .is_err());
-        assert!(validate_args("profiles:create", &args(&["--allow-takeover"])).is_err());
     }
 
     #[test]
@@ -1060,7 +859,6 @@ mod tests {
                     "--create".into(),
                 ],
             ),
-            ("secrets:migrate-legacy", vec![]),
             (
                 "config:import",
                 vec!["--value".into(), "{\"format\":\"x\"}".into()],
@@ -1339,19 +1137,6 @@ mod tests {
             "mcp:apply 已不再接受 --allow-takeover"
         );
         assert!(validate_command("secrets:adopt").is_err());
-        // aliases 以 rc 文件受管区块的实际行为准：按 base 直接编辑，「接管」已退役
-        assert!(
-            validate_args(
-                "aliases:apply",
-                &[
-                    "--only".into(),
-                    "aliases:zshrc".into(),
-                    "--allow-takeover".into()
-                ]
-            )
-            .is_err(),
-            "aliases:apply --allow-takeover should fail"
-        );
         // skills:apply 放行（逐 skill add/remove 显式接管，引擎侧再强制动作范围）
         assert!(
             validate_args(
@@ -1545,391 +1330,6 @@ mod tests {
     }
 
     #[test]
-    fn agents_runtime_and_auth_args_follow_the_contract() {
-        let base = "c".repeat(64);
-        let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert!(validate_command("agents:preview-runtime").is_err());
-        assert!(validate_args(
-            "agents:configure",
-            &args(&[
-                "--only",
-                "agents:claude-code",
-                "--base",
-                &base,
-                "--runtime",
-                r#"{"statusline":"builtin"}"#,
-                "--preview-file-base",
-                &base
-            ])
-        )
-        .is_ok());
-        assert!(validate_args("agents:auth-status", &args(&["--only", "profiles:cc-ly"])).is_ok());
-        assert!(validate_args(
-            "agents:auth-status",
-            &args(&["--only", "profiles:cc-ly", "--probe"])
-        )
-        .is_ok());
-        assert!(validate_command("skills:fork").is_ok());
-        assert!(validate_args(
-            "skills:fork",
-            &args(&[
-                "--only",
-                "skill:agent-skills/verification",
-                "--dest",
-                "~/my-skills",
-                "--collection",
-                "my-skills"
-            ])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "skills:fork",
-            &args(&["--only", "skill:a/b", "--action", "remove"])
-        )
-        .is_err());
-        assert!(validate_args(
-            "agents:auth-status",
-            &args(&["--only", "agents:claude-code", "--base", &base])
-        )
-        .is_err());
-    }
-
-    /// 实例以实际文件为准：写入与采纳都带基准；「接管」参数已退役。
-    #[test]
-    fn profiles_args_follow_the_actual_config_contract() {
-        let base = "b".repeat(64);
-        let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert!(validate_command("profiles:adopt").is_err());
-        assert!(validate_command("profiles:preview").is_err());
-        assert!(validate_args(
-            "profiles:preview",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--definition",
-                "{\"profile\":{}}"
-            ])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "profiles:preview",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--definition",
-                "{\"profile\":{}}",
-                "--on-save",
-                "--items",
-                "permissions,statusline,rules,mcp"
-            ])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "profiles:preview",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--definition",
-                "{\"profile\":{}}",
-                "--items",
-                "permissions,statusline,rules,mcp"
-            ])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "profiles:preview",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--definition",
-                "{\"profile\":{}}",
-                "--items",
-                "env"
-            ])
-        )
-        .is_err());
-        assert!(validate_args(
-            "profiles:preview",
-            &args(&["--only", "profiles:cc-ly", "--definition", "not json"])
-        )
-        .is_err());
-        assert!(validate_args(
-            "profiles:preview",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--base",
-                &base,
-                "--definition-base",
-                &base,
-                "--candidate",
-                "{\"source_connection\":\"relay\"}"
-            ])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "profiles:preview",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--base",
-                &base,
-                "--definition-base",
-                &base,
-                "--candidate",
-                "{}",
-                "--exact",
-                "--preview-secret-var",
-                "RELAY_KEY",
-                "--preview-secret-value",
-                "draft-key",
-            ])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "profiles:preview",
-            &args(&[
-                "--preview-secret-var",
-                "RELAY_KEY",
-                "--preview-secret-value",
-                "bad\nkey"
-            ])
-        )
-        .is_err());
-        for command in ["profiles:apply", "profiles:adopt"] {
-            assert!(
-                validate_args(
-                    command,
-                    &args(&["--only", "profiles:cc-ly", "--base", &base])
-                )
-                .is_ok(),
-                "{command} 带 base 应放行"
-            );
-            assert!(validate_args(
-                command,
-                &args(&["--only", "profiles:cc-ly", "--base", "missing"])
-            )
-            .is_ok());
-            assert!(validate_args(
-                command,
-                &args(&["--only", "profiles:cc-ly", "--base", "XYZ"])
-            )
-            .is_err());
-        }
-        assert!(validate_args(
-            "profiles:preview",
-            &args(&["--only", "profiles:cc-ly", "--base", &base])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "profiles:apply",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--base",
-                &base,
-                "--preview-file-base",
-                "missing",
-                "--preview-content-base",
-                &base
-            ])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "profiles:apply",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--base",
-                &base,
-                "--preview-content-base",
-                "missing"
-            ])
-        )
-        .is_err());
-        assert!(validate_args(
-            "profiles:adopt",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--base",
-                &base,
-                "--preview-file-base",
-                "missing"
-            ])
-        )
-        .is_err());
-        assert!(validate_args(
-            "profiles:apply",
-            &args(&["--only", "profiles:cc-ly", "--allow-takeover"])
-        )
-        .is_err());
-        let candidate = r#"{"source_connection":"relay","model":"new-model"}"#;
-        assert!(validate_args(
-            "profiles:apply-definition",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--base",
-                "missing",
-                "--definition-base",
-                &base,
-                "--candidate",
-                candidate,
-                "--preview-file-base",
-                "missing",
-                "--preview-content-base",
-                &base,
-            ])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "profiles:apply-definition",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--base",
-                "missing",
-                "--definition-base",
-                "XYZ",
-                "--candidate",
-                candidate,
-            ])
-        )
-        .is_err());
-        // seed：只认那几项，逗号分隔；凭据相关的 env / apiKeyHelper 不在其中
-        assert!(validate_args(
-            "profiles:seed",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--items",
-                "permissions,rules,mcp"
-            ])
-        )
-        .is_ok());
-        for items in [
-            "",
-            "env",
-            "permissions,env",
-            "mcp;rm",
-            "permissions, rules",
-            "permissions,hooks",
-        ] {
-            assert!(
-                validate_args(
-                    "profiles:seed",
-                    &args(&["--only", "profiles:cc-ly", "--items", items])
-                )
-                .is_err(),
-                "--items {items:?} 应拒绝"
-            );
-        }
-        assert!(validate_args(
-            "profiles:seed",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--items",
-                "mcp",
-                "--base",
-                &base
-            ])
-        )
-        .is_err());
-        assert!(validate_args(
-            "profiles:shared-status",
-            &args(&["--only", "profiles:cc-ly"])
-        )
-        .is_ok());
-        assert!(validate_command("profiles:shared-preview").is_err());
-        assert!(validate_args(
-            "profiles:shared-apply",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--item",
-                "mcp:fs",
-                "--source-base",
-                &base,
-                "--target-base",
-                "missing"
-            ])
-        )
-        .is_ok());
-        assert!(validate_args(
-            "profiles:shared-apply",
-            &args(&[
-                "--only",
-                "profiles:cc-ly",
-                "--item",
-                "permissions",
-                "--source-base",
-                "stale",
-                "--target-base",
-                "missing"
-            ])
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn agents_configure_args_require_digest_shape_and_reject_retired_takeover() {
-        let digest = "a".repeat(64);
-        for extra in [vec![
-            "--runtime".to_string(),
-            r#"{"automation_mode":"full"}"#.into(),
-            "--allow-yolo".into(),
-        ]] {
-            let mut args = vec![
-                "--only".to_string(),
-                "agents:claude-code".into(),
-                "--base".into(),
-                digest.clone(),
-            ];
-            args.extend(extra);
-            assert!(validate_args("agents:configure", &args).is_ok(), "{args:?}");
-        }
-        for (flag, value) in [
-            ("--base", "ABC"),
-            ("--base", "g".repeat(64).as_str()),
-            ("--runtime", "{not json"),
-            // 主账号只放官方登录：写入第三方、切回官方、保存实际配置在桥上就不放行
-            ("--use", "relay"),
-            ("--connection", r#"{"base_url":"https://x"}"#),
-            ("--use-default", ""),
-            ("--save-current", ""),
-            ("--discard-live", ""),
-        ] {
-            assert!(
-                validate_args(
-                    "agents:configure",
-                    &[
-                        "--only".into(),
-                        "agents:codex".into(),
-                        flag.into(),
-                        value.into()
-                    ]
-                )
-                .is_err(),
-                "{flag} {value} should fail"
-            );
-        }
-        assert!(validate_args(
-            "agents:configure",
-            &[
-                "--only".into(),
-                "agents:codex".into(),
-                "--base".into(),
-                digest,
-                "--use-default".into(),
-                "--allow-takeover".into()
-            ]
-        )
-        .is_err());
-    }
-
-    #[test]
     fn run_id_validation_covers_valid_and_typical_invalid_values() {
         for value in [
             "read",
@@ -2017,119 +1417,6 @@ mod tests {
         assert!(!base.join("data").exists(), "status 不得创建数据目录");
         assert!(!base.join("home").exists(), "status 不得创建 home 目录");
         let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn aliases_args_follow_the_actual_block_contract() {
-        let base = "a".repeat(64);
-        let args = |items: &[&str]| items.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        for (command, list) in [
-            (
-                "aliases:apply",
-                args(&[
-                    "--zshrc-base",
-                    &base,
-                    "--zprofile-base",
-                    "missing",
-                    "--set",
-                    "cc-work",
-                    "--value",
-                    "TZ=\"UTC\" claude --model opus",
-                    "--rename-from",
-                    "cc",
-                ]),
-            ),
-            (
-                "aliases:preview",
-                args(&[
-                    "--zshrc-base",
-                    &base,
-                    "--zprofile-base",
-                    "missing",
-                    "--set",
-                    "cc-work",
-                    "--value",
-                    "CLAUDE_CONFIG_DIR=\"$HOME/.claude-cc-work\" claude",
-                ]),
-            ),
-            (
-                "aliases:apply",
-                args(&["--zprofile-base", "missing", "--remove", "ll"]),
-            ),
-            // Windows：命令脚本目录的写入基准
-            (
-                "aliases:apply",
-                args(&["--cmd-base", &base, "--remove", "ll"]),
-            ),
-            // bash 用户的 ~/.bashrc
-            (
-                "aliases:apply",
-                args(&["--bashrc-base", &base, "--remove", "ll"]),
-            ),
-            (
-                "aliases:apply",
-                args(&["--zshrc-base", &base, "--recommended", "claude"]),
-            ),
-            (
-                "aliases:apply",
-                args(&["--zshrc-base", &base, "--legacy", "legacy-0123456789abcdef"]),
-            ),
-            (
-                "aliases:discard-legacy",
-                args(&["--legacy", "legacy-0123456789abcdef"]),
-            ),
-        ] {
-            assert!(
-                validate_args(command, &list).is_ok(),
-                "{command} {list:?} should pass"
-            );
-        }
-        for (command, list) in [
-            ("aliases:status", args(&["--offline"])),
-            ("aliases:apply", args(&["--only", "aliases:zshrc"])),
-            ("aliases:apply", args(&["--zshrc-base", "nothex"])),
-            ("aliases:preview", args(&["--zshrc-base", "nothex"])),
-            ("aliases:apply", args(&["--cmd-base", "nothex"])),
-            (
-                "aliases:apply",
-                args(&["--zshrc-base", "missing", "--zshrc-base", "missing"]),
-            ),
-            (
-                "aliases:apply",
-                args(&["--zshrc-base", "missing", "--remove", "bad name"]),
-            ),
-            (
-                "aliases:apply",
-                args(&["--zshrc-base", "missing", "--legacy", "legacy-xyz"]),
-            ),
-            (
-                "aliases:apply",
-                args(&["--zshrc-base", "missing", "--dry-run"]),
-            ),
-            ("aliases:discard-legacy", args(&["--legacy", "Bad"])),
-            ("aliases:discard-legacy", args(&["--remove", "ll"])),
-        ] {
-            assert!(
-                validate_args(command, &list).is_err(),
-                "{command} {list:?} should fail"
-            );
-        }
-
-        // 端到端：bridge 直连引擎，status 只读零写
-        let root = std::env::temp_dir().join(format!("am-aliases-bridge-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let result = dispatch_native(
-            agent_manager_engine::Context {
-                data_dir: root.join("data"),
-                home_dir: root.join("home"),
-            },
-            "aliases:status".into(),
-            vec![],
-            "aliases-bridge".into(),
-        );
-        assert!(result.is_err());
-        assert!(!root.exists());
-        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

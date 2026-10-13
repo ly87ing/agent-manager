@@ -112,9 +112,6 @@ describe("SettingsPage", () => {
     const runtimeWarning = "请先退出应用，将 Agent Manager 拖到应用程序后再打开。";
     setSettingsClient({ get: async () => ({ ...settings, updaterConfigured: true, runtimeWarning }), save: async () => settings });
     renderWithEngine(<App />, {
-      "agents:status": makeEnvelope({ domain: "agents", elements: [] }),
-      "profiles:status": makeEnvelope({ domain: "profiles", elements: [] }),
-      "aliases:status": makeEnvelope({ domain: "aliases", elements: [] }),
       "skills:status": makeEnvelope({ domain: "skills", elements: [] }),
     });
     expect(await screen.findByRole("alert")).toHaveTextContent(runtimeWarning);
@@ -490,7 +487,6 @@ describe("SettingsPage", () => {
 
     renderWithEngine(<SettingsPage />, {
       "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
-      "agents:status": makeEnvelope({ domain: "agents", elements: [] }, { command: "agents.status" }),
       "mcp:status": makeEnvelope({ domain: "mcp", elements: [] }, { command: "mcp.status" }),
       "skills:status": makeEnvelope({ domain: "skills", elements: [] }, { command: "skills.status" }),
       "git:status": makeEnvelope({ clean: true, branch: "main", ahead: 0, behind: 0, remote_configured: false }, { command: "git.status" }),

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mockModeFromSearch } from "../lib/engine";
+import type { DiscoverData } from "../lib/contract";
 import { createMockEngineClient } from "./mock-client";
 
 describe("dev-only mock 开关", () => {
@@ -24,8 +25,6 @@ describe("dev-only mock 开关", () => {
       "skills:status",
       "rules:status",
       "secrets:status",
-      "usage:status",
-      "usage:scan",
       "mcp:apply",
       "skills:apply",
       "rules:apply",
@@ -92,9 +91,20 @@ describe("dev-only mock 开关", () => {
     expect(afterSearch?.observed.agents?.["claude-code"].vars?.CRAWL_API_KEY.resolved).toBe(true);
   });
 
+  it("mock discovery keeps skill assignment arrays needed by Sources", async () => {
+    const result = await createMockEngineClient().run("system:discover", ["--only", "skills"]);
+    const groups = (result.data as DiscoverData).skills?.groups ?? [];
+    expect(groups.length).toBeGreaterThan(0);
+    for (const group of groups) {
+      expect(Array.isArray(group.agents)).toBe(true);
+      expect(group.skills.every((skill) => Array.isArray(skill.agents))).toBe(true);
+      expect(Array.isArray(group.suggested_definition.agents)).toBe(true);
+    }
+  });
+
   it("mock rejects all retired account operations", async () => {
     const client = createMockEngineClient();
-    for (const command of ["agents:status", "agents:configure", "profiles:preview", "profiles:create", "accounts:command", "aliases:apply", "secrets:migrate-legacy"]) {
+    for (const command of ["agents:status", "agents:configure", "profiles:preview", "profiles:create", "accounts:command", "aliases:apply", "usage:status", "secrets:migrate-legacy"]) {
       const result = await client.run(command);
       expect(result.ok).toBe(false);
       expect(result.errors[0].code).toBe("FEATURE_RETIRED");

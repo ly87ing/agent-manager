@@ -72,7 +72,7 @@ export default function SourcesPage({
   const nameOfAccount = useAccountNames();
   const targets = useResourceTargets();
   const groupsOf = useAccountGroups();
-  const definitionOps = useDefinitionOps({ section: "skills", domain: "skills" });
+  const definitionOps = useDefinitionOps();
   const [adding, setAdding] = useState<"collection" | "rule" | null>(null);
   const [editing, setEditing] = useState<EngineElement | null>(null);
   // 检查新版本进行中（任何页面或命令面板发起）：先不更新、不换版本，免得检查按更新前的版本记下「可更新」
@@ -519,7 +519,6 @@ export default function SourcesPage({
           }}
         />
       )}
-      {definitionOps.modals}
       {adding === "rule" && (
         <AddSourceDialog
           taken={userSources.taken}

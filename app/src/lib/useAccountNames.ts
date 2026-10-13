@@ -1,5 +1,17 @@
-import type { AccountGroup } from "./accounts";
 import { useEngineQuery } from "./queries";
+
+export interface AccountColumn {
+  id: string;
+  name: string;
+  fullName: string;
+}
+
+export interface AccountGroup {
+  key: string;
+  label: string;
+  kind: "claude" | "codex" | null;
+  columns: AccountColumn[];
+}
 
 export interface ResourceTarget {
   id: string;

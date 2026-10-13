@@ -9,7 +9,6 @@ import type {
   DiscoverSkillGroup,
   DiscoverSkillItem,
 } from "../lib/contract";
-import { definitionKeyPrefix } from "../lib/definitionOverlay";
 import { useEngineQuery } from "../lib/queries";
 import { useTakeover, type TakeoverTask } from "../lib/useTakeover";
 import { cn } from "../lib/utils";
@@ -93,7 +92,7 @@ export function DiscoverPanel() {
       if (!group.existing_collection) {
         steps.push({
           kind: "policy",
-          key: `${definitionKeyPrefix("skills")}.${group.name}`,
+          key: `skills.repositories.${group.name}`,
           definition: group.suggested_definition as unknown as Record<string, unknown>,
         });
       }

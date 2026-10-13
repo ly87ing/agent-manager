@@ -87,10 +87,9 @@ export function useRefreshUpstream() {
 export function affectedDomains(command: string): string[] | null {
   const domain = command.replaceAll(".", ":").split(":")[0];
   const dependencies: Record<string, string[]> = {
-    mcp: ["mcp", "agents", "profiles", "secrets", "programs"],
-    skills: ["skills", "rules", "aliases", "programs"],
-    rules: ["rules", "agents", "profiles"],
-    aliases: ["aliases", "accounts"],
+    mcp: ["mcp", "secrets", "programs"],
+    skills: ["skills", "rules", "programs"],
+    rules: ["rules"],
     runs: ["runs"],
   };
   return dependencies[domain] ? [...new Set([...dependencies[domain], "runs", "system"])] : null;

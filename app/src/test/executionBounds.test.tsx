@@ -50,7 +50,8 @@ it("refreshes rules and audit without invalidating unrelated skill content", asy
   expect(client.getQueryState(engineKeys.command("rules:status"))?.isInvalidated).toBe(true);
   expect(client.getQueryState(engineKeys.command("runs:list"))?.isInvalidated).toBe(true);
   expect(client.getQueryState(engineKeys.command("skills:status"))?.isInvalidated).toBe(false);
-  expect(affectedDomains("skills.apply")).toEqual(expect.arrayContaining(["rules", "aliases", "programs"]));
+  expect(affectedDomains("skills.apply")).toEqual(expect.arrayContaining(["skills", "rules", "programs"]));
+  expect(affectedDomains("skills.apply")).not.toContain("aliases");
   await invalidateEngineQueries(client, "policy:set");
   expect(client.getQueryState(engineKeys.command("skills:status"))?.isInvalidated).toBe(true);
   client.clear();

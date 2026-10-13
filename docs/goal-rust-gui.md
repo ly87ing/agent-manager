@@ -1404,3 +1404,37 @@ Local links in the four updated architecture references passed checking.
 No installed application, user environment, installer, tag or Release was changed.
 Native Windows/Linux interaction and desktop update acceptance were not rerun.
 Frontend helper, mock, bridge-argument and contract cleanup remains a follow-up.
+
+### 2026-10-13 Follow-up: Remove retired frontend and bridge paths
+
+The frontend no longer includes account/profile form models, shell-alias editors,
+default-environment builders, retired inbox/search routes, or agent-definition
+write branches. Resource target grouping and the Launch page time-zone picker
+retain their active behavior in current modules. The desktop bridge no longer
+parses parameters for retired account, profile, agent-runtime, or alias commands;
+its explicit rejection tests remain. Status schemas and current contract/design
+references now describe only active extension and general-launch behavior.
+
+Verification generated and read back locally:
+
+- Full native engine suite, including isolated extension scope, paths, MCP,
+  rules, secrets, programs, launch and dependency lifecycle, passed. Desktop
+  bridge passed 23 tests; frontend passed 562 tests in 53 files; TypeScript
+  checking, production build, Rust formatting and schema parsing passed.
+- Browser development mock rendered Launch, Skills, MCP, Rules, Sources,
+  Dependency Programs and Assistants at 1000 × 650 and 760 × 650. No page-level
+  horizontal overflow remained. The first Sources visit exposed missing nested
+  skill-assignment arrays in the mock despite a passing unit suite; those arrays
+  were restored, a contract regression added, and the page was reloaded and
+  inspected successfully. The 760 px Launch form retains an internal scroll area
+  that clips the long program-type label; this layout predates the retirement
+  cleanup and was not changed here.
+- Local documentation links, source diff whitespace and retired-command
+  rejection checks passed. `scripts/ci-smoke.sh` also passed its isolated
+  policy write and readback. The old account-launch entry still refuses before
+  creating application state; existing user files and database contents were
+  not migrated or deleted.
+
+These checks establish source, isolated CLI and browser-mock behavior. Installed
+desktop, native Windows/Linux interaction, real assistant sessions and updater
+acceptance were not exercised. No installer, tag or Release was produced.

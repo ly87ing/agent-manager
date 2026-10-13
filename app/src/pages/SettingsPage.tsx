@@ -157,7 +157,7 @@ export default function SettingsPage({
   const settings = useSettings();
   const save = useSaveSettings();
   const [preferences, setPreferences] = useState<SettingsPreferences>(() => initialPreferences());
-  // 命令面板可以直达二级页（密钥、终端快捷命令），不用先进设置再找一次
+  // 命令面板可以直达二级页，不用先进设置再找一次
   const [activeAdvanced, setActiveAdvanced] = useState<string | null>(initialAdvanced ?? null);
   const [update, setUpdate] = useState<AvailableUpdate | null>(null);
   const [updateState, setUpdateState] = useState<"idle" | "checking" | "installing">("idle");

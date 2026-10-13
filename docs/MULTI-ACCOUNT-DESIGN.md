@@ -14,7 +14,7 @@ Status: **Design confirmed and implemented (2026-09-28)**. P0–P7 are complete 
 
 **Agent Manager lets multiple Claude Code / Codex accounts run simultaneously: each account has its own configuration directory and controlled launch command. Skills, rules, and credential-free MCP entries can be shared. Credential references and authentication settings belong to one account.**
 
-The 2026-10-10 account-isolation decision supersedes earlier credential inheritance and automatic MCP copying. [Account Isolation](ACCOUNT-ISOLATION.md) defines the controlled-entry boundary, compatibility diagnostics, and acceptance requirements.
+The 2026-10-10 account-isolation decision was part of this historical design. [Extension Target Isolation](ACCOUNT-ISOLATION.md) now documents the retained path and credential protections for extension operations.
 
 - Use case: work in parallel with one account per terminal; when an account is nearly out of quota, continue in another account's terminal.
 - Deployment model: a single-user local desktop application plus a CLI using the same Rust library. The assistant CLI owns official login and logout. The tool reads local identity metadata and resolves explicitly selected account-owned API/MCP secrets; it does not store their values in SQLite or backups.

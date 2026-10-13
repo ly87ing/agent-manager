@@ -13,10 +13,6 @@ export function effectHint(command: string, args: readonly string[] = []): strin
   })();
 
   switch (command) {
-    case "aliases:apply":
-      return "新开一个终端窗口后生效；已经开着的窗口不受影响。";
-    case "profiles:apply":
-      return "下次用这个实例的命令启动时生效；已经在跑的会话不受影响。";
     case "mcp:apply":
       return t("助手下次启动时读取；正在运行的会话要重开才能用上。");
     case "rules:apply":

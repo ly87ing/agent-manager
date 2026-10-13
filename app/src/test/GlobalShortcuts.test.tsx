@@ -17,7 +17,6 @@ const dummySettings: SettingsData = {
 function routes() {
   return {
     "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
-    "agents:status": makeEnvelope({ domain: "agents", elements: [] }, { command: "agents.status" }),
     "skills:status": makeEnvelope({ domain: "skills", elements: [] }, { command: "skills.status" }),
     "mcp:status": makeEnvelope({ domain: "mcp", elements: [] }, { command: "mcp.status" }),
     "rules:status": makeEnvelope({ domain: "rules", elements: [] }, { command: "rules.status" }),
@@ -41,7 +40,7 @@ describe("全局快捷键", () => {
     expect(within(nav).getByRole("button", { name: "设置" })).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
 
-    // Ctrl 变体（非 macOS 约定）：先回账号页再用 Ctrl+, 进设置
+    // Ctrl 变体（非 macOS 约定）：先回技能页再用 Ctrl+, 进设置
     await userEvent.click(within(nav).getByRole("button", { name: "技能" }));
     expect(within(nav).getByRole("button", { name: "技能" })).toHaveAttribute("aria-current", "page");
     await userEvent.keyboard("{Control>},{/Control}");

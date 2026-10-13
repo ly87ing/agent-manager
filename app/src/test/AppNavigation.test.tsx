@@ -21,13 +21,12 @@ const dummySettings: SettingsData = {
 function routes() {
   return {
     "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
-    "agents:status": makeEnvelope({ domain: "agents", elements: [] }, { command: "agents.status" }),
     "skills:status": makeEnvelope({ domain: "skills", elements: [] }, { command: "skills.status" }),
     "mcp:status": makeEnvelope({ domain: "mcp", elements: [] }, { command: "mcp.status" }),
     "rules:status": makeEnvelope({ domain: "rules", elements: [] }, { command: "rules.status" }),
     "runs:list": makeEnvelope({ runs: [] }, { command: "runs.list" }),
     "system:discover": makeEnvelope(
-      { domain: "discover", agents: [], skills: { items: [], groups: [] }, mcp: [], summary: {} },
+      { domain: "discover", skills: { items: [], groups: [] }, summary: {} },
       { command: "system.discover" },
     ),
     "policy:get": makeEnvelope({ layers: { sqlite: null } }, { command: "policy.get" }),

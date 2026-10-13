@@ -4,7 +4,7 @@ import { buildInbox, countByPage, type InboxInput, type InboxItem } from "../lib
 import { makeElement, makeFreshness } from "./fixtures";
 
 function input(overrides: Partial<InboxInput>): InboxInput {
-  return { skills: [], mcp: [], mcpTargets: [], rules: [], agents: [], profiles: [], aliases: [], ...overrides };
+  return { skills: [], mcp: [], mcpTargets: [], rules: [], ...overrides };
 }
 
 const byId = (items: InboxItem[]) => Object.fromEntries(items.map((item) => [item.id, item]));
@@ -103,21 +103,6 @@ describe("统一状态：各领域的实际状态映射成同一套待处理项"
     expect(items["rules:rules:claude_global:update"]).toMatchObject({ state: "update", fix: { kind: "open", target: "rules" } });
     expect(items["rules:rules:profile:w:missing"]).toMatchObject({ state: "missing", fix: { kind: "rules-fill", rows: [{ from: "rules:claude_global" }] } });
     expect(items["rules:rules:codex_global:drifted"].state).toBe("drifted");
-  });
-
-  it("启动命令：只比较有受管区块的文件；~/.zprofile 没有区块（不新建）时只在 ~/.zshrc 的命令不算缺一处", () => {
-    const aliasTarget = (id: string, base: string | null, entries: { name: string; line: string }[]) =>
-      makeElement({ id, domain: "aliases", observed: { base, entries: entries.map((entry) => ({ ...entry, value: null })), external: [] } });
-    expect(buildInbox(input({
-      aliases: [aliasTarget("aliases:zshrc", "b", [{ name: "cc2", line: "alias cc2='x'" }]), aliasTarget("aliases:zprofile", "missing", [])],
-    }))).toEqual([]);
-    const items = buildInbox(input({
-      aliases: [
-        aliasTarget("aliases:zshrc", "b", [{ name: "a", line: "alias a='1'" }, { name: "b", line: "alias b='b'" }]),
-        aliasTarget("aliases:zprofile", "c", [{ name: "a", line: "alias a='2'" }]),
-      ],
-    }));
-    expect(items.map((item) => [item.id, item.state])).toEqual([["command:a", "drifted"], ["command:b", "drifted"]]);
   });
 
   it("导航角标按负责的页面数有待处理的对象（同一个技能两条只算一个），「待处理」数全部条目", () => {

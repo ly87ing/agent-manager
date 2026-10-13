@@ -8,6 +8,14 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Run the development mock through each affected page after changing its data shape.**
+- Removing retired account fields from the mock also removed `agents` arrays nested
+  inside skill discovery groups. The TypeScript build and 561 frontend unit tests
+  passed, but opening Sources in the browser failed at `skill.agents` iteration.
+  Keep nested skill assignments when removing top-level assistant discovery;
+  verify the mock contract and render the affected page at both target widths.
+- Seen 1× (2026-10-13; browser mock check after frontend retirement).
+
 **Saving a launch configuration must be tested independently of applying it.**
 - The first launch builder retained generated commands only in page memory and
   persisted nothing unless the user wrote local shortcuts. Separate copy and

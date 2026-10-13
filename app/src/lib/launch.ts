@@ -19,3 +19,33 @@ export async function launchRequest<T>(operation: string, args: string[] = []): 
   if (!result.ok) throw new Error(result.errors.map((error) => error.message).join("\n"));
   return result.data;
 }
+
+const COMMON_TIMEZONES = [
+  "America/Los_Angeles",
+  "America/New_York",
+  "Asia/Shanghai",
+  "Asia/Hong_Kong",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Europe/London",
+  "Europe/Berlin",
+  "UTC",
+];
+
+/**
+ * 可选时区列表：常用时区置顶（否则要在几百项里翻找），其后接运行环境的完整 IANA 列表；
+ * 环境不提供完整列表时只返回常用时区。
+ */
+export function listTimeZones(): string[] {
+  const supported = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf;
+  let all: string[] = [];
+  if (typeof supported === "function") {
+    try {
+      const values = supported("timeZone");
+      if (Array.isArray(values)) all = values;
+    } catch {
+      all = [];
+    }
+  }
+  return Array.from(new Set([...COMMON_TIMEZONES, ...all]));
+}

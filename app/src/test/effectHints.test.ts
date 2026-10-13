@@ -3,8 +3,8 @@ import { effectHint } from "../lib/effectHints";
 
 describe("生效提示", () => {
   it("按目标给出何时生效", () => {
-    expect(effectHint("aliases:apply")).toContain("新开一个终端窗口");
-    expect(effectHint("profiles:apply")).toContain("下次用这个实例的命令启动");
+
+
     expect(effectHint("mcp:apply")).toContain("下次启动");
     expect(effectHint("skills:apply")).toContain("技能目录");
   });

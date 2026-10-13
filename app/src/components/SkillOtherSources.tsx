@@ -2,7 +2,7 @@ import { t } from "../lib/i18n";
 import { AccountCells, AccountHeader, RowActions } from "./AccountGrid";
 import { matchesKeyword } from "./SearchInput";
 import type { SkillUnmanaged, SkillUnmanagedView } from "../lib/contract";
-import type { AccountGroup } from "../lib/accounts";
+import type { AccountGroup } from "../lib/useAccountNames";
 
 /** `https://github.com/owner/repo.git`、`git@host:owner/repo.git` → `owner/repo`。 */
 export function shortRepository(url: string): string {

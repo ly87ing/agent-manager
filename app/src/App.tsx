@@ -104,10 +104,6 @@ export default function App() {
       setImportText("");
       return;
     }
-    if (page === "settings:aliases") {
-      setActivePage("skills");
-      return;
-    }
     if (page === "settings:launch") {
       setActivePage("launch");
       return;
@@ -140,7 +136,7 @@ export default function App() {
     if (page === "sources") setSourceFocus(null);
     if (page === "mcp") setMcpSearch(null);
     if (page === "programs") setProgramFocus(null);
-    setActivePage(page === "accounts" || page === "commands" ? "skills" : page);
+    setActivePage(page);
   };
 
   return (

@@ -2,7 +2,7 @@ import { t } from "../lib/i18n";
 import type { EngineElement } from "../lib/contract";
 import type { McpAgentCell, McpObserved, McpSpec } from "../lib/observed";
 import { Pencil, PlugZap, Share2, Trash2 } from "lucide-react";
-import type { AccountGroup } from "../lib/accounts";
+import type { AccountGroup } from "../lib/useAccountNames";
 import { AccountCells, AccountSwitch, RowActions, type CellTone } from "./AccountGrid";
 import { mcpBrief, mcpEntrySummary } from "./McpAssignmentRow";
 import { missingVariables } from "../lib/mcpVariables";

@@ -1,7 +1,7 @@
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { AccountColumn, AccountGroup } from "../lib/accounts";
+import type { AccountColumn, AccountGroup } from "../lib/useAccountNames";
 import { cn } from "../lib/utils";
 import { AgentIcon } from "./AgentIcon";
 

@@ -8,20 +8,6 @@ import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 function discoverData(overrides: Partial<DiscoverData> = {}): DiscoverData {
   return {
     domain: "discover",
-    agents: [
-      {
-        id: "opencode",
-        display_name: "OpenCode",
-        bin: "opencode",
-        bin_path: "~/.local/bin/opencode",
-        version: "1.2.3",
-        origin: "native",
-        npm_package: null,
-        manage: "register",
-        managed_after_takeover: false,
-        suggested_definition: { display_name: "OpenCode", bin: "opencode", preferred_provider: "native", providers: { native: { managed: false } } },
-      },
-    ],
     skills: {
       items: [
         {
@@ -90,7 +76,7 @@ function discoverData(overrides: Partial<DiscoverData> = {}): DiscoverData {
         },
       ],
     },
-    summary: { agents: 1, skills_symlink: 1, skills_collection: 1, skills_native: 1, skills_cleanup: 1 },
+    summary: { skills_symlink: 1, skills_collection: 1, skills_native: 1, skills_cleanup: 1 },
     ...overrides,
   };
 }
@@ -228,7 +214,6 @@ describe("扫描外部技能目录与残留链接", () => {
   it("没有可处理的内容时两处都不显示，也不占地方", async () => {
     const empty: DiscoverData = {
       domain: "discover",
-      agents: [],
       skills: { items: [], groups: [] },
       summary: {},
     };
@@ -237,7 +222,6 @@ describe("扫描外部技能目录与残留链接", () => {
       routes(empty),
     );
     await waitFor(() => expect(calls.some((call) => call.command === "system:discover")).toBe(true));
-    await waitFor(() => expect(screen.queryByTestId("discover-agents")).toBeNull());
     expect(screen.queryByTestId("discover-skills")).toBeNull();
     expect(screen.queryByTestId("takeover-run")).toBeNull();
   });

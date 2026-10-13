@@ -1,51 +1,34 @@
-# Account Path Isolation
-
-> [Extensions only](../EXTENSIONS-ONLY.md) is the current scope. Account-writing callers described below are retired; the same path guards remain active for MCP, rules, skills, and MCP secret files. `native_mcp::targets::validate_target_path` also rejects multiply-linked files on Unix and Windows before reading them. Account directories and credentials remain unchanged; existing registration metadata only locates extension targets.
-
+# Extension Target Path Isolation
 
 ## Responsibilities and sources of truth
 
-Independent accounts own their configuration directory and account settings. Main accounts (`~/.claude`, `~/.codex`), other registered accounts, and Agent Manager's data directory are protected boundaries. Account definitions identify the intended directory; filesystem resolution determines its actual destination.
+Historical registrations identify existing assistant extension locations; actual MCP files, rule files, and skill directories determine active state. [Path guards](../../engine-rs/src/native_profiles/paths.rs) resolve those locations and protect main and registered assistant directories, identity files, manager data, and cross-target resources. They do not create, edit, or switch accounts.
 
-[Profile path guards](../../engine-rs/src/native_profiles/paths.rs) are shared by profile status, previews, apply/adopt, and the profile-owned seed/shared-settings readers and writers. Rules target selection, login probing, and session-root discovery also use the account-directory guard. Identity and authentication configuration paths reject links; intentional shared skill/rule links remain resource-domain responsibilities.
-
-Skill destinations use the same account path guards. Main Claude and Codex targets are fixed to their own `skills` directories; independent accounts use `<config_dir>/skills`, including when `skills_dir` is omitted. An explicit target or historical `skills.agents` fallback must resolve to that destination. Custom assistants may retain separate destinations, but cannot overlap main accounts, registered accounts, manager data, or Codex's shared `~/.agents/skills`. Destination directories reject links and Windows reparse points; individual installed skill links may still point to a shared source.
-
-Shell command targets have no account owner. Unix rc links may point to ordinary dotfiles, but their resolved destination cannot enter a main/registered account or manager data directory, or alias a known identity file or registered MCP target. Disabled and malformed account registrations still reserve their directory. Windows command directories also reject overlapping protected paths and linked ancestors. Status, preview and apply use the same observation guard before reading command contents or offering a write baseline.
-
-Dependency programs reuse these account boundaries while allowing their own manager
-data. Plans and execution check every filesystem mutation target, including backup
-restoration and historical cleanup. Launcher links are checked at both their location
-and destination, including the temporary dangling state during a package move.
-Account identity readers retain their stricter no-link requirement.
+The `validate_shell_target` helper has a historical name but remains in use for skill source and fork paths, external MCP secret files, and dependency program destinations. It does not write shell aliases. MCP and rule inventory additionally use [target validation](../../engine-rs/src/native_mcp/targets.rs) to reject unsafe file types, links, and multiply linked files before reading or writing.
 
 ## Runtime path
 
-1. Resolve trusted HOME, expand the configured directory, and reject relative paths, parent traversal, control characters, and links in every account-directory component below HOME.
-2. Canonicalize existing components, including the nearest existing ancestor when several trailing directories do not exist. Dangling links and resolution errors fail closed.
-3. Require the resolved directory to remain below resolved HOME and use its canonical spelling for controlled CLI identity. Reject overlapping main-account, other-account, and data directories, including identical paths, parent/child overlaps, and disabled account registrations.
-4. Validate known settings and authentication files before reading them or deriving a write baseline. Reject final links and multiply linked identity files. Check protected directory boundaries and protected final files, including main Claude's `HOME/.claude.json`. Existing hard links are compared by filesystem identity (device/inode on Unix; volume/file index on Windows).
-5. Apply recomputes its plan under the write lock, then checks the paths again after the external login check and after directory creation. Existing byte-baseline and conditional rollback checks remain in force.
+1. Resolve trusted HOME and the registered configuration directory. Reject relative paths, parent traversal, control characters, linked account-directory components, and overlapping main, registered, or manager data directories. Disabled registrations still reserve their locations.
+2. Resolve each selected extension destination against its target and protected files. Skill assignments must land in the selected assistant's skill directory; explicit and historical fallback destinations receive the same check. User-owned local skill sources are read in place, while tool-created links remain distinct from their source.
+3. Recheck destination and file identity at the resource operation. Existing target content is compared with the status or preview baseline under the write lock. MCP, rules, skills, secrets, and programs apply their own resource-specific validation and rollback.
+4. Reject unsafe links, hard links to known identity files, and redirected protected targets. A failed check does not repair historical metadata or move existing assistant files.
+
+Dependency Program plans and every filesystem execution step validate installation, launcher, backup, restore, and cleanup locations. Unsafe cleanup is skipped; unsafe rollback reports the condition and retains its backup. External MCP secret sources cannot be selected from protected assistant or manager data paths.
 
 ## Constraints and failure behavior
 
-- Unsafe targets are reported as unsupported, with no write baseline or available write action. Rejected operations leave protected file bytes unchanged.
-- Skill metadata fails closed when any registered destination is unsafe, so status/discovery and all skill add, collection, adoption and cleanup paths cannot use an unvalidated destination. Saving or importing a changed destination also validates it before writing registration; invalid historical definitions require explicit correction, with no automatic relocation or deletion of existing files.
-- Both assistant types are protected, regardless of the selected account's type. The main Claude login record and known authentication files for every account (including the target account) are also protected, even when linked outside the account directory.
-- Windows rejects normal configuration-path components ending in a dot or space before directory creation, avoiding Win32 normalization onto a protected name. Windows uses canonical paths without an unnecessary verbatim prefix. Junction regressions create a real junction directly; they do not depend on administrator access or symlink privileges.
-- Windows/macOS comparisons conservatively reject case-only aliases, including not-yet-created names. This also rejects case-distinct account paths on case-sensitive Windows/macOS volumes. Linux keeps case-sensitive path comparisons. Canonicalization and file identity checks handle existing aliases.
-- These checks close aliasing and stale-plan errors; they do not make multi-file filesystem and database operations atomic or eliminate every adversarial rename race. No claim of native Windows/macOS acceptance follows from a Linux test or a cross-compile.
+- Only the selected extension target may change. Other assistants, identity files, sessions, and external source directories remain untouched.
+- Existing symlink targets and missing path components are resolved conservatively. Windows junctions and reparse points, Unix links, case aliases on Windows/macOS, and hard-link identity are covered by platform-specific guards.
+- Rejected status targets offer no write baseline. Baseline mismatch rejects without overwriting external edits. Conditional rollback cannot make unrelated multi-file operations globally atomic or prevent every concurrent rename by a hostile process with the same OS identity.
+- The general launch domain does not use these registrations; its recipe storage and explicit application start are documented in [launch configurations](launch-configurations.md).
 
 ## Verification
 
-Run the current resource regressions and the engine suite:
-
 ```sh
-cargo test --manifest-path engine-rs/Cargo.toml --test native_account_paths
-cargo test --manifest-path engine-rs/Cargo.toml --test native_account_skills
+cargo test --manifest-path engine-rs/Cargo.toml --test native_account_paths --test native_account_skills
 cargo test --manifest-path engine-rs/Cargo.toml --test native_extension_scope --test native_extension_program_scope
 cargo test --manifest-path engine-rs/Cargo.toml --test native_mcp --test native_rules --test native_secrets
 cargo test --manifest-path engine-rs/Cargo.toml
 ```
 
-The fixtures use isolated HOME/data directories. Negative tests read back the original protected contents and cover ancestor aliases, multiple missing components, data/other-account collisions, file links, redirected main-account dotfiles, hard links, and a link changed after status. Windows/macOS additionally exercise case aliases; the portable ancestor tests use Windows junctions on Windows.
+Fixtures use isolated HOME/data and test-assistant paths. Negative cases read back protected contents after rejection and cover overlapping directories, linked ancestors, hard links, stale baselines, redirected destinations, and platform path aliases. Native desktop and real-assistant acceptance require separate evidence.

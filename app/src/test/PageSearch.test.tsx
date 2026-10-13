@@ -86,10 +86,6 @@ function skillsRoutes(): Record<string, Envelope> {
       },
       { command: "skills.status" },
     ),
-    "agents:status": makeEnvelope(
-      { domain: "agents", elements: [makeElement({ id: "agents:claude-code", domain: "agents" })] },
-      { command: "agents.status" },
-    ),
     "policy:get": makeEnvelope(makePolicyData(), { command: "policy.get" }),
   };
 }

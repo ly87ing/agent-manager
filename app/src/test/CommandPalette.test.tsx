@@ -7,7 +7,7 @@ import App from "../App";
 import type { Envelope, SettingsData } from "../lib/contract";
 import { setSettingsClient } from "../lib/settings";
 import { encodeShareLink } from "../lib/shareLink";
-import { accountCommandRoute, agentManagementFixture, makeAliasStatus, makeAuditData, makeElement, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
+import { makeAuditData, makeElement, makeEnvelope, makeMode, makePolicyData } from "./fixtures";
 import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
 
 /** 按事件名记下界面订阅的桌面壳事件（托盘动作、点开的分享链接）。 */
@@ -41,28 +41,7 @@ type TestRoute = Envelope | ((args: string[]) => Promise<Envelope>);
 /** 主账号 claude + 有启动命令的 work + 还没有启动命令的 relay。 */
 function routes(): Record<string, TestRoute> {
   return {
-    "accounts:command": accountCommandRoute,
     "system:audit": makeEnvelope(makeAuditData(), { command: "system.audit", mode: makeMode() }),
-    "agents:status": makeEnvelope({
-      domain: "agents",
-      elements: [makeElement({
-        id: "agents:claude-code",
-        domain: "agents",
-        spec: { display_name: "Claude Code", bin: "claude" },
-        observed: { management: agentManagementFixture("claude") },
-      })],
-    }, { command: "agents.status" }),
-    "profiles:status": makeEnvelope({
-      domain: "profiles",
-      elements: ["work", "relay"].map((id) => makeElement({
-        id: `profiles:${id}`,
-        domain: "profiles",
-        spec: { display_name: id === "work" ? "工作账号" : "中转", base_agent: "claude-code", kind: "claude", config_dir: `~/.claude-${id}`, base_url: null, model: null },
-        observed: { config_dir: `~/.claude-${id}`, blocked_reason: null },
-        state: "managed-ok",
-      })),
-    }, { command: "profiles.status" }),
-    "aliases:status": makeEnvelope(makeAliasStatus({ cw: 'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude' }), { command: "aliases.status" }),
     "skills:status": makeEnvelope({
       domain: "skills",
       elements: [makeElement({ id: "skill:agent-skills", domain: "skills", spec: { url: "https://example.com/x.git" }, observed: { repo_cached: true } })],
@@ -76,7 +55,6 @@ function routes(): Record<string, TestRoute> {
     "rules:status": makeEnvelope({ domain: "rules", elements: [] }, { command: "rules.status" }),
     "runs:list": makeEnvelope({ runs: [] }, { command: "runs.list" }),
     "policy:get": makeEnvelope(makePolicyData({ layers: { sqlite: null } }), { command: "policy.get" }),
-    "agents:auth-status": makeEnvelope({ state: "logged-in", logged_in: true, method: null, third_party: false, mixed: false, reason: null }, { command: "agents.auth-status" }),
   };
 }
 
