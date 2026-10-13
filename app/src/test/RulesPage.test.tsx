@@ -357,6 +357,35 @@ describe("RulesPage：实际文件为准", () => {
     expect(screen.getByTestId("rules-update-from-source-rules:codex_global")).toHaveTextContent("查看新版本");
   });
 
+  it("跟随的来源已失效：有替代规则时从主操作查看差异，不直接写入", async () => {
+    const routes = rulesRoutes();
+    const status = routes["rules:status"].data as { elements: Array<{ id: string; observed: Record<string, unknown> }> };
+    const codex = status.elements.find((element) => element.id === "rules:codex_global")!;
+    codex.observed.matched_source_rule = null;
+    codex.observed.source_follow = { rule: "lost/core", applied_revision: "rev-old", current_revision: null, file_unchanged: true, update_available: false };
+    const { calls } = renderWithEngine(<RulesPage />, routes);
+    const row = await screen.findByTestId("rules-target-rules:codex_global");
+    expect(row).toHaveTextContent("来源已不在");
+    await userEvent.click(within(row).getByTestId("rules-replace-missing-source-rules:codex_global"));
+    expect(screen.getByRole("dialog", { name: "更换 Codex 全局规则 的规则" })).toBeInTheDocument();
+    expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
+  });
+
+  it("跟随的来源已失效且无替代项：从主操作进入对应来源，不写规则文件", async () => {
+    const routes = rulesRoutes();
+    const status = routes["rules:status"].data as { elements: Array<{ id: string; observed: Record<string, unknown> }>; source_rules: unknown[]; templates: unknown[] };
+    const codex = status.elements.find((element) => element.id === "rules:codex_global")!;
+    codex.observed.matched_source_rule = null;
+    codex.observed.source_follow = { rule: "lost/core", applied_revision: "rev-old", current_revision: null, file_unchanged: true, update_available: false };
+    status.source_rules = [];
+    status.templates = [];
+    const onOpenSource = vi.fn();
+    const { calls } = renderWithEngine(<RulesPage onOpenSource={onOpenSource} />, routes);
+    await userEvent.click(await screen.findByTestId("rules-repair-missing-source-rules:codex_global"));
+    expect(onOpenSource).toHaveBeenCalledWith("lost");
+    expect(calls.some((call) => call.command === "rules:apply")).toBe(false);
+  });
+
 
   it("还没有来源规则：推荐来源给「到来源页取回 / 添加」，规则页自己不取回", async () => {
     const routes = rulesRoutes();

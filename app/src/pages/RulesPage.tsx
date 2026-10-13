@@ -196,6 +196,7 @@ export default function RulesPage({
                   setDialog({ kind: "apply", title: t("用{0}更新 {1}", sourceRuleLabel(rule), nameOf(element)), targets: [element], sources: [ruleSource(rule)] })
                 }
                 onFollow={(rule) => follow(element, rule)}
+                onOpenSource={onOpenSource}
                 onCopy={
                   typeof content === "string" && others.length > 0
                     ? () =>
@@ -285,6 +286,7 @@ function TargetRow({
   onSwitch,
   onApplyRule,
   onFollow,
+  onOpenSource,
   onCopy,
   fill,
   onFill,
@@ -300,6 +302,7 @@ function TargetRow({
   onSwitch?: () => void;
   onApplyRule: (rule: RuleSourceRule) => void;
   onFollow: (rule: RuleSourceRule) => void;
+  onOpenSource?: (name: string | null) => void;
   onCopy?: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -323,6 +326,10 @@ function TargetRow({
             title: t("先看差异，确认后写入；覆盖前先备份现有内容"),
             run: () => onApplyRule(followedRule),
           }
+        : follow?.current_revision === null && onSwitch
+          ? { testId: `rules-replace-missing-source-${element.id}`, label: t("更换规则"), title: t("来源已不在；先看差异，确认后写入"), run: onSwitch }
+        : follow?.current_revision === null && onOpenSource
+          ? { testId: `rules-repair-missing-source-${element.id}`, label: t("管理来源"), title: t("到来源页检查这条规则的来源"), run: () => onOpenSource(follow.rule.split("/")[0]) }
         : matchedRule && !follow
           ? { testId: `rules-follow-${element.id}`, label: t("跟随更新"), title: t("文件不动，只记下它来自这条规则；来源出新版本时这里会提示"), run: () => onFollow(matchedRule) }
           : null;
