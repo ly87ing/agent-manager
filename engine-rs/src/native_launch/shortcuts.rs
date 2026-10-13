@@ -43,9 +43,13 @@ fn read(ctx: &Context, path: &Path) -> Result<(PathBuf, Option<Vec<u8>>)> {
 }
 
 fn shell(req: &Request) -> Result<String> {
-    let value = req
-        .value("--shell")
-        .unwrap_or(if cfg!(windows) { "powershell" } else { "zsh" });
+    let value = req.value("--shell").unwrap_or(if cfg!(windows) {
+        "powershell"
+    } else if cfg!(target_os = "macos") {
+        "zsh"
+    } else {
+        "bash"
+    });
     if (cfg!(windows) && value != "powershell")
         || (!cfg!(windows) && !matches!(value, "zsh" | "bash"))
     {

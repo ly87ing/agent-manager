@@ -38,7 +38,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ));
     };
     let allowed = match (domain, verb) {
-        ("launch", "build" | "status" | "preview" | "apply") => true,
+        ("launch", "build" | "status" | "preview" | "apply" | "catalog" | "run") => true,
         ("resources", "targets") => true,
         ("system", "audit" | "discover" | "refresh-upstream") => true,
         ("secrets", "status" | "set" | "source") => true,
@@ -127,6 +127,11 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
     let mut specs: Vec<(&'static str, ArgValueKind)> = Vec::new();
     match (domain, verb) {
         ("launch", "build") => specs.push(("--spec", ArgValueKind::JsonValue)),
+        ("launch", "run") => {
+            specs.push(("--spec", ArgValueKind::JsonValue));
+            specs.push(("--name", ArgValueKind::LaunchName));
+            specs.push(("--confirm", ArgValueKind::Flag));
+        }
         ("launch", "status") => specs.push(("--shell", ArgValueKind::LaunchShell)),
         ("launch", "preview" | "apply") => {
             specs.push(("--spec", ArgValueKind::JsonValue));
@@ -810,6 +815,21 @@ mod tests {
     #[test]
     fn launch_generation_is_exposed_without_retired_account_commands() {
         assert!(validate_command("launch:build").is_ok());
+        assert!(validate_command("launch:catalog").is_ok());
+        assert!(validate_args("launch:catalog", &[]).is_ok());
+        assert!(validate_args("launch:catalog", &["--confirm".into()]).is_err());
+        assert!(validate_command("launch:run").is_ok());
+        assert!(validate_args(
+            "launch:run",
+            &[
+                "--spec".into(),
+                "{}".into(),
+                "--name".into(),
+                "example-sg".into(),
+                "--confirm".into()
+            ]
+        )
+        .is_ok());
         assert!(validate_args("launch:build", &["--spec".into(), "{}".into()]).is_ok());
         assert!(validate_args("launch:build", &["--secret-value".into(), "value".into()]).is_err());
         assert!(validate_command("aliases:apply").is_err());

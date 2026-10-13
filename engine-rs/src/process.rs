@@ -10,6 +10,14 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
     command_with_env(program, std::iter::empty())
 }
 
+/// User-launched applications inherit the environment without manager proxy fallback.
+/// Spawn directly: these applications must outlive temporary command-job cleanup.
+pub fn launch_command(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    hide_window(&mut command);
+    command
+}
+
 pub fn command_with_env<'a>(
     program: impl AsRef<OsStr>,
     env: impl IntoIterator<Item = (&'a str, &'a str)>,

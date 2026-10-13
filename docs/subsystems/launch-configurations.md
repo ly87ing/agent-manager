@@ -26,6 +26,19 @@ Windows scripts are invoked by their displayed full path; PATH and execution
 policy are never changed. The actual files are authoritative; there is no second
 database copy of active shortcut commands.
 
+`launch:catalog` reports the local platform, a default shell, and installed macOS
+application bundles. Other executable paths can be chosen in the desktop's file
+picker or entered manually. `launch:run --spec <JSON> --name <variant> --confirm`
+launches a local graphical application once. It refuses an already-running target
+and never quits or restarts applications. Windows checks executable names
+conservatively; Linux checks `/proc` executable paths; macOS checks bundle process
+paths. A launch request does not prove the application accepted its time zone.
+
+Launched GUI applications do not belong to the manager's temporary command jobs
+and survive its exit. Command-line programs are copied to the user's terminal for
+normal interactive input and output. Launch audits record requests, never process
+arguments or commands.
+
 ## Constraints and failure behavior
 
 - Unknown fields, duplicate names, incompatible platform/shell combinations, and
@@ -48,6 +61,7 @@ database copy of active shortcut commands.
 cargo test --manifest-path engine-rs/Cargo.toml --test native_launch
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_launch
 cargo test --manifest-path engine-rs/Cargo.toml --test native_launch_shortcuts
+cargo test --manifest-path engine-rs/Cargo.toml --test native_launch_runtime
 ```
 
 The literal-argument regression executes generated aliases through Bash and zsh

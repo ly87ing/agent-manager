@@ -1,5 +1,6 @@
 //! General launch recipes are independent of assistant accounts and MCP secrets.
 mod render;
+mod runtime;
 mod shortcuts;
 
 use crate::{diagnostic, Context, Envelope, Lock, Mode, Request};
@@ -92,11 +93,11 @@ pub(super) fn recipe(req: &Request) -> Result<Recipe> {
 
 fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let command = req.command.replace('.', ":");
-    if command != "launch:build" {
-        return shortcuts::handle(ctx, req);
+    if matches!(command.as_str(), "launch:catalog" | "launch:run") {
+        return runtime::handle(ctx, req);
     }
     if command != "launch:build" {
-        bail!("Unknown launch operation");
+        return shortcuts::handle(ctx, req);
     }
     if req.args.len() != 2 || req.args[0] != "--spec" {
         bail!("build accepts exactly one --spec argument");
