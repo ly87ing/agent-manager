@@ -2,7 +2,7 @@
 
 The 2026-10-11 user requirement supersedes earlier account designs: Agent Manager manages MCP, rules, skills, their sources, and their extension dependencies. It must never manage accounts.
 
-The 2026-10-13 user request adds an independent general launch tool: configurable
+The 2026-10-12 user request adds an independent general launch tool: configurable
 applications or executables, arguments, time zones, and shortcut names. Generating
 or copying commands is read-only. Local shortcut writes require a preview and
 confirmation; application launch is a separate explicit action. This exception
@@ -11,7 +11,7 @@ does not enable the retired account or `aliases` APIs. See
 
 ## Product boundary
 
-Account creation, registration edits, removal, switching, login/logout, launch commands, credentials, provider/model/runtime settings, and assistant installation/upgrades are retired. Existing account directories, authentication files, sessions, configuration, shell files, and historical launch scripts are preserved. Official assistant tools remain responsible for them.
+Account creation, registration edits, removal, switching, login/logout, account-bound launch commands, credentials, provider/model/runtime settings, and assistant installation/upgrades are retired. Existing account directories, authentication files, sessions, configuration, shell files, and historical launch scripts are preserved. Official assistant tools remain responsible for them.
 
 Historical registrations are immutable location metadata for existing extension targets. Reading a target label does not inspect authentication, account settings, or assistant executables. New account registration is unavailable. The default assistant resource locations remain available.
 
@@ -34,7 +34,7 @@ restore the historical `aliases` domain or synchronize `.zprofile`.
 
 - [Native entry point](../engine-rs/src/native.rs): every `agents`, `accounts`, `profiles`, `profile`, and `aliases` command, including dotted aliases, returns `FEATURE_RETIRED` before loading secrets, preflight, locks, or state creation. Policy writes cannot modify account or alias trees. All remaining policy/import paths compare those trees unchanged.
 - [Old controlled launcher](../engine-rs/src/native_account_context.rs): `run_cli` immediately refuses execution without resolving an account, reading its files, or starting an assistant. Existing scripts are left on disk.
-- [Desktop bridge](../app/src-tauri/src/engine.rs): its whitelist contains extension operations only. The resource UI uses `resources:targets` for labels rather than account status queries. Account, launch-command, and assistant-diagnostic pages are removed; search only queries extension resources.
+- [Desktop bridge](../app/src-tauri/src/engine.rs): its whitelist contains extension operations and the independent general `launch` domain. The resource UI uses `resources:targets` for labels rather than account status queries. Account, historical account-launch, and assistant-diagnostic pages are removed; search only queries extension resources.
 - [Backups](../engine-rs/src/native_config.rs): exports omit account and alias definitions; imports preserve local metadata and reject changes. Historical alias sources are skipped without reading or changing shell files or legacy alias rows. Secret values and source paths remain excluded.
 - [MCP writes](../engine-rs/src/native_mcp/write.rs): JSON edits splice only the MCP container value, preserving every byte outside it, including login metadata. Missing containers are inserted without reformatting existing fields. Codex uses `toml_edit` and retains non-MCP configuration. Previews, CAS, scope checks, and conditional rollback remain required.
 - [Path protection](subsystems/account-path-isolation.md): extension target validation still rejects account identity aliases, cross-target paths, unsafe ancestors, and links to protected files. Regular MCP/rule files with multiple hard links are rejected before reads or writes on Unix and Windows.

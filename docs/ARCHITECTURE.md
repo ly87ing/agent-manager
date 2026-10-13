@@ -10,11 +10,17 @@ Product scope is governed by [Extensions only](EXTENSIONS-ONLY.md).
 The primary pages are Skills, MCP, Rules, Sources, Dependency Programs, and
 Assistants. Assistants lists immutable extension-target metadata only: type,
 display name, and extension paths. It does not inspect login identity or invoke
-assistant executables. Account, profile, alias, launch, authentication and
+assistant executables. Account, profile, historical alias, account launch, authentication and
 assistant lifecycle operations are rejected before secret loading, preflight,
 locks, or state creation. Historical registrations remain local and immutable.
 Multi-account and alias examples in More Tips are static text with clipboard
 copy only.
+
+Settings → Launch configurations uses the independent `launch` domain to build
+general commands, preview and confirm local shortcut writes, and explicitly launch
+graphical applications. It never resolves account identity or credentials. The
+desktop uses the shared Rust renderer; actual shell files and PowerShell scripts
+are authoritative. See [launch configurations](subsystems/launch-configurations.md).
 
 Dependency Programs manages programs explicitly required by skills or MCP.
 Assistant packages and command names are excluded, and filesystem mutation

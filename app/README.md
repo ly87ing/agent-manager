@@ -2,8 +2,11 @@
 
 This directory contains the Tauri 2 app. The React UI calls `engine-rs` through the bridge; CLI and desktop share one native Rust library. Runtime does not depend on Python, `manage.sh`, or source-tree resources.
 
-Current scope: [the lightweight goal](../docs/goal-lightweight.md). Accounts, Skills,
-MCP, Rules, Commands, Sources, and dependency programs remain. The app exits on
+Current scope: [the extension boundary](../docs/EXTENSIONS-ONLY.md). Skills, MCP,
+Rules, Sources, dependency programs and read-only assistant targets remain. The
+independent [Launch configurations](../docs/subsystems/launch-configurations.md)
+tool is available under Settings for copying commands, confirmed shortcut writes,
+and explicit graphical application launches. The app exits on
 window close, loads resource queries on demand, and has no quota/session collector,
 tray webview, notifications, automatic update check, or OS-login enabling.
 

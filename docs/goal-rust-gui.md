@@ -1319,3 +1319,32 @@ updates remain outside this acceptance. No real account files were changed and
 no Release, tag or installer was published. Downgrading to a pre-language binary
 requires removing only the new app preference row as described in
 [Interface language](subsystems/interface-language.md).
+
+### 2026-10-12: General launch configurations
+
+Settings now offers a general launch builder independent of assistant accounts.
+Users select or enter an application, executable, arguments, time zones and
+shortcut names. Generation returns complete commands and definitions without
+writing. Applying shortcuts shows the exact file changes, then requires a
+separate confirmation and a matching file baseline. A graphical application can
+be launched once after its own confirmation. CLI commands are copied to a
+terminal for interaction. Zsh writes only `.zshrc`; Bash writes `.bashrc`;
+Windows writes one PowerShell script per shortcut. System time-zone settings are
+never changed, and each application's handling of `TZ` remains unverified until
+the application itself is checked.
+
+Local acceptance used 479 full engine tests, 28 Tauri tests and 631 frontend
+tests, with no failures, plus the production frontend build. An isolated compiled
+application read back `Asia/Singapore` and literal arguments, remained running
+after the CLI exited, and rejected a repeated launch. The native macOS debug
+window used a separate identifier and isolated HOME/data: the application file
+picker returned an installed bundle, the 1000 × 650 window displayed generated
+commands, cancel left `.zshrc` absent, and confirmed apply wrote exactly the two
+previewed aliases. `.zprofile` stayed byte-identical. Mock browser captures at
+1000 and 760 px showed no document overflow and kept the confirm buttons visible.
+
+Remote Linux and Windows engine tests initially exposed fixture assumptions:
+the Linux fixture relied on the former zsh default, and piped CLI output delayed
+the Windows independent-child check. The fixtures now select zsh explicitly and
+read CLI JSON from a private file. Native Windows/Linux desktop operation and
+time-zone display in real applications have not been accepted on this host.

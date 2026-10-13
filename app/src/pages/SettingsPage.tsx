@@ -9,6 +9,7 @@ import {
   Moon,
   RefreshCw,
   Save,
+  Terminal,
   Sun,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -23,6 +24,7 @@ import { cn } from "../lib/utils";
 import { ConfigBackupSection } from "../components/ConfigBackupSection";
 import SecretsPage from "./SecretsPage";
 import TipsPage from "./TipsPage";
+import LaunchPage from "./LaunchPage";
 import { Select } from "../components/Select";
 import { t, useLanguage } from "../lib/i18n";
 
@@ -111,6 +113,12 @@ interface AvailableUpdate {
 }
 
 const ADVANCED_ENTRIES = [
+  {
+    key: "launch",
+    get title() { return t("启动配置"); },
+    get description() { return t("选择程序与时区，复制命令或确认后应用到本机。"); },
+    icon: Terminal,
+  },
   {
     key: "tips",
     get title() { return t("更多技巧"); },
@@ -298,6 +306,7 @@ export default function SettingsPage({
         </div>
         {activeAdvanced === "secrets" && <SecretsPage />}
         {activeAdvanced === "tips" && <TipsPage />}
+        {activeAdvanced === "launch" && <LaunchPage />}
       </div>
     );
   }

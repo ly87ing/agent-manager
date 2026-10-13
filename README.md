@@ -1,8 +1,8 @@
 # Agent Manager
 
-Manage MCP servers, rules, skills, and their extension dependencies for existing assistant configuration directories. Built with Tauri 2, React, and Rust/SQLite, the desktop app and CLI share one Rust engine.
+Manage MCP servers, rules, skills, and their extension dependencies for existing assistant configuration directories. Build general launch commands with chosen applications, time zones and shortcut names. Built with Tauri 2, React, and Rust/SQLite, the desktop app and CLI share one Rust engine.
 
-**Agent Manager does not manage accounts.** It cannot create, edit, delete, switch, launch, log in to, or log out of an account; change its credentials, provider, model, or runtime settings; or create shell launch commands. Historical target registrations are read-only metadata used to locate extensions. See the [extension-only contract](docs/EXTENSIONS-ONLY.md).
+**Agent Manager does not manage accounts.** It cannot create, edit, delete, switch, launch, log in to, or log out of an account; change its credentials, provider, model, or runtime settings; or create account-bound launch commands. Historical target registrations are read-only metadata used to locate extensions. See the [extension-only contract](docs/EXTENSIONS-ONLY.md).
 
 ## Features
 
@@ -13,11 +13,12 @@ Manage MCP servers, rules, skills, and their extension dependencies for existing
 - **Sources:** manage optional skill and rule repositories, versions, local sources, and resource share links. No external repository is required for local extension management.
 - **Programs:** manage command-line dependencies used by skills and MCP. Assistant installation and updates remain outside this tool.
 - **More tips:** read-only guidance about independent environments and shell aliases in Settings. Copying a generic example does not execute it or edit files.
+- **Launch configurations:** Settings → Launch configurations selects an application or executable, literal arguments, custom time zones and shortcut names. Copy complete commands without changing files, preview and confirm local shortcut writes, or explicitly launch a graphical application once. Zsh uses only `.zshrc`; Bash uses `.bashrc`; Windows uses individual PowerShell scripts. See [launch configurations](docs/subsystems/launch-configurations.md).
 - **Settings:** English by default, with Simplified Chinese available under Language; themes, operation history, MCP-specific secret files, extension configuration backups, and manual application updates. Account credentials and unrelated secret variables are read-only.
 
 ## Experience
 
-Navigation contains Skills, MCP, Rules, Sources, Programs, Assistants, and Settings. `⌘K` and `⌘⇧K` search extension resources and pages; `⌘F` searches the current page; `⌘,` opens Settings. Account and launch-command pages are removed.
+Navigation contains Skills, MCP, Rules, Sources, Programs, Assistants, and Settings. `⌘K` and `⌘⇧K` search extension resources and pages; `⌘F` searches the current page; `⌘,` opens Settings. General launch configurations are available under Settings and search. Account pages remain removed.
 
 The app runs in the foreground and exits when its window closes. Search queries run only while search is open. Usage, quota, recent-session collection, tray residency, and automatic application update checks remain retired. See [resource bounds](docs/subsystems/resource-bounds.md).
 
@@ -53,7 +54,7 @@ Outputs are in `app/src-tauri/target/release/bundle/dmg/`. Verify the standalone
 3. If an MCP service needs a secret, select a dedicated external `.env` file and fill only its MCP-specific variables.
 4. Review file previews before applying changes. The assistant itself controls when changed extensions are loaded.
 
-AI CLI installation, accounts, authentication, launch commands, and runtime settings are handled outside this tool.
+AI CLI installation, accounts, authentication, account-bound launches, and runtime settings are handled outside this tool. General launch shortcuts are independent of accounts and never change the system time zone. An application may ignore `TZ`; verify its displayed time separately.
 
 Apply includes these safety guarantees:
 
@@ -66,9 +67,9 @@ Destructive actions, such as removing definitions or clearing logs, require conf
 
 ## Data and security
 
-- **Actual configuration is authoritative:** real extension files determine active state. `native-manager.db` stores preferences, immutable historical target metadata, ownership records, and inactive extension alternatives. Status reads do not create a missing database.
+- **Actual configuration is authoritative:** real extension and shortcut files determine active state. `native-manager.db` stores preferences, immutable historical target metadata, ownership records, and inactive extension alternatives. Status reads do not create a missing database.
 - **Account boundary:** account commands return `FEATURE_RETIRED` before loading credentials, preflight, or locks. Policy writes and backup imports cannot alter historical account or alias definitions; exports omit them. Existing account directories, credentials, sessions, and launch scripts are preserved.
-- **Write scope:** MCP containers, rule files, skill links, extension dependencies, and the tool's own extension state. Shared configuration files preserve non-MCP content. Ambiguous paths, identity aliases, hard links, and external changes fail closed.
+- **Write scope:** MCP containers, rule files, skill links, extension dependencies, explicitly confirmed general launch shortcuts, and the tool's own extension state. Shared configuration files preserve non-MCP content. Ambiguous paths, identity aliases, hard links, and external changes fail closed.
 - **Secrets:** only variables referenced by MCP may be edited, excluding reserved assistant credentials and variables referenced by historical account metadata. Account files cannot be selected as secret sources. Backups exclude secret values and source paths. Legacy database secret migration is retired because its contents may include account credentials.
 - **Local data:** logs stay in the application data directory and are redacted and retained according to settings.
 

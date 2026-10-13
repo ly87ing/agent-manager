@@ -77,6 +77,7 @@ fn main() {
         )
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // 分享链接 agentmanager://import?data=…：只把链接文字交给界面的导入对话框，
             // 由界面校验、展示并等用户确认；这里不解析、不写任何东西。其他链接一律忽略。
