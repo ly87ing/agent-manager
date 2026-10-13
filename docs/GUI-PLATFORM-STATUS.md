@@ -21,6 +21,9 @@ and [scope](EXTENSIONS-ONLY.md).
   grouped batch outcomes and failed-only retries, and complete dependency action
   labels. Local acceptance and remaining limits are recorded in
   [the implementation history](goal-rust-gui.md#2026-10-12-extension-workflow-corrections).
+- The follow-up [source ownership audit](goal-rust-gui.md#2026-10-12-source-ownership-and-failure-reporting-audit)
+  records copy/restore safeguards, duplicate-name refusal, orphan cleanup,
+  accurate update outcomes, and native macOS click verification at `26db532`.
 - Source changes, native tests and installer builds are separate evidence. Earlier
   downloadable previews predate extension-only scope and must not be treated as
   acceptance of current source. Real Windows desktop installation, real arm64

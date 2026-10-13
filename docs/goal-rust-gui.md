@@ -1209,3 +1209,48 @@ unverified. Current Windows runtime acceptance is pending CI; prior platform
 receipts do not establish acceptance of this revision. No real account files,
 registrations, sessions or launch scripts were changed. No release, tag or
 installer was published.
+
+### 2026-10-12: source ownership and failure reporting audit
+
+The audit corrections are pushed in `1f8cc7f`, `7a5dc35` and `26db532`.
+Skill copies share the apply lock and recheck their destination. Definition edits
+and restores refuse to move or remove assigned sources, including disabled
+assignments. Duplicate names show both conflicting paths and block deployment.
+Missing definitions retain visible assignments that can be removed individually.
+
+Source-query failures show errors instead of an empty inventory. Updates wait
+for deployment results and report partial failures or unreadable fresh status.
+MCP writes refresh dependency status. Uncalled authentication-command generators
+and their retired tests were removed; active extension boundary tests remain.
+
+At `26db532`, local checks passed 466 engine tests with `--test-threads=1`,
+27 Tauri tests, 610 frontend tests without skips, 14 repository-script tests,
+and production frontend and native debug builds.
+
+Isolated CLI checks compared the candidate with `d7d0737`. The old binary accepted
+duplicate-name deployment, removal of an assigned source during restore, and
+copying while the apply lock was held; the candidate refused all three. Orphan
+cleanup preserved source content and simulated identity/session files.
+
+Browser checks inspected source and skill states at 1000 and 760 px, including
+long errors and missing definitions. Native macOS checks inspected empty and
+populated Skills/Sources pages at the committed 1000 by 650 geometry, with isolated
+HOME/data and a separate identifier. Orphan menus exposed removal only.
+
+A native confirmation removed one orphan skill and preserved the other
+assistant's link. This closes the earlier macOS Accessibility verification gap
+for these paths. Empty-page queries created no database or source cache.
+
+Default parallel engine runs retain intermittent subprocess capture-timing
+failures under local build load. The final serial run passed without changing
+assertions or timeouts; the cause of the intermittent failures is unconfirmed.
+
+At readback, `26db532` passed all three native engine jobs and the Windows/Linux
+installer jobs in [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/38332619824).
+macOS installer jobs and [regular CI](https://github.com/ly87ing/agent-manager/actions/runs/38332619815)
+were still running. Windows frontend tests passed, superseding the retired timeout in
+[the prior GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/38327719809).
+
+Real Windows desktop operation, real arm64 execution, signing/notarization and
+automatic updates remain unverified. No real account files or registrations
+were changed, and no Release, tag or installer was published.
