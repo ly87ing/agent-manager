@@ -1,5 +1,6 @@
 //! General launch recipes are independent of assistant accounts and MCP secrets.
 mod render;
+mod shortcuts;
 
 use crate::{diagnostic, Context, Envelope, Lock, Mode, Request};
 use anyhow::{bail, Result};
@@ -50,9 +51,19 @@ impl Recipe {
         }
         let mut names = BTreeSet::new();
         for variant in &self.variants {
+            let normalized = if self.platform == "windows" {
+                variant.name.to_ascii_lowercase()
+            } else {
+                variant.name.clone()
+            };
+            let reserved = matches!(normalized.as_str(), "con" | "prn" | "aux" | "nul")
+                || (normalized.len() == 4
+                    && (normalized.starts_with("com") || normalized.starts_with("lpt"))
+                    && matches!(normalized.as_bytes()[3], b'1'..=b'9'));
             if !crate::native_aliases::model::valid_alias_name(&variant.name)
                 || variant.name.len() > 80
-                || !names.insert(&variant.name)
+                || !names.insert(normalized)
+                || (self.platform == "windows" && reserved)
             {
                 bail!("Alias names must be unique and use letters, digits, underscores or hyphens");
             }
@@ -79,8 +90,11 @@ pub(super) fn recipe(req: &Request) -> Result<Recipe> {
     Ok(spec)
 }
 
-fn handle(_ctx: &Context, req: &Request) -> Result<Value> {
+fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let command = req.command.replace('.', ":");
+    if command != "launch:build" {
+        return shortcuts::handle(ctx, req);
+    }
     if command != "launch:build" {
         bail!("Unknown launch operation");
     }

@@ -38,7 +38,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ));
     };
     let allowed = match (domain, verb) {
-        ("launch", "build") => true,
+        ("launch", "build" | "status" | "preview" | "apply") => true,
         ("resources", "targets") => true,
         ("system", "audit" | "discover" | "refresh-upstream") => true,
         ("secrets", "status" | "set" | "source") => true,
@@ -66,6 +66,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
 /// 参数取值类型（按类型校验；不经 shell，argv 直传引擎）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArgValueKind {
+    LaunchShell,
+    LaunchName,
     /// 纯开关（如 --allow-uninstall），不带值。
     Flag,
     /// 元素 id，如 mcp:example-search / skill:agent-skills/find-skills。
@@ -125,6 +127,16 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
     let mut specs: Vec<(&'static str, ArgValueKind)> = Vec::new();
     match (domain, verb) {
         ("launch", "build") => specs.push(("--spec", ArgValueKind::JsonValue)),
+        ("launch", "status") => specs.push(("--shell", ArgValueKind::LaunchShell)),
+        ("launch", "preview" | "apply") => {
+            specs.push(("--spec", ArgValueKind::JsonValue));
+            specs.push(("--shell", ArgValueKind::LaunchShell));
+            specs.push(("--base", ArgValueKind::RuleBase));
+            specs.push(("--remove", ArgValueKind::LaunchName));
+            if verb == "apply" {
+                specs.push(("--confirm", ArgValueKind::Flag));
+            }
+        }
         ("accounts", "command") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--operation", ArgValueKind::AccountOperation));
@@ -399,6 +411,15 @@ pub fn validate_run_id(value: &str) -> Result<(), EngineError> {
 
 fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError> {
     match kind {
+        ArgValueKind::LaunchShell => {
+            if ["zsh", "bash", "powershell"].contains(&value) {Ok(())}
+            else {Err(EngineError::new("invalid_args", "Unsupported launch shell"))}
+        }
+        ArgValueKind::LaunchName => {
+            if value.len() <= 80 && value.chars().next().is_some_and(|c|c.is_ascii_alphabetic() || c=='_')
+                && value.chars().all(|c|c.is_ascii_alphanumeric() || matches!(c,'_'|'-')) {Ok(())}
+            else {Err(EngineError::new("invalid_args", "Invalid launch shortcut name"))}
+        }
         ArgValueKind::AccountShell => {
             if ["posix", "powershell"].contains(&value) {
                 Ok(())
@@ -695,7 +716,7 @@ pub fn validate_args(command: &str, args: &[String]) -> Result<(), EngineError> 
     let (domain, _) = command.split_once(':').unwrap_or(("", ""));
     let is_rules = domain == "rules";
     // rules 与 aliases 同 native 严格参数保持一致：拒绝重复 flag。
-    let reject_duplicates = is_rules || domain == "aliases";
+    let reject_duplicates = is_rules || domain == "aliases" || domain == "launch";
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut index = 0;
     while index < args.len() {

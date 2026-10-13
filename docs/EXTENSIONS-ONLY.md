@@ -26,6 +26,10 @@ Copy buttons write only to the clipboard; there is no account discovery, command
 generation or execution, file access, or persistence. This does not restore any
 account or alias management operation.
 
+The separate **Launch configurations** tool uses the `launch` domain. Only an
+explicitly confirmed apply request writes general shell shortcuts. It does not
+restore the historical `aliases` domain or synchronize `.zprofile`.
+
 ## Runtime and write constraints
 
 - [Native entry point](../engine-rs/src/native.rs): every `agents`, `accounts`, `profiles`, `profile`, and `aliases` command, including dotted aliases, returns `FEATURE_RETIRED` before loading secrets, preflight, locks, or state creation. Policy writes cannot modify account or alias trees. All remaining policy/import paths compare those trees unchanged.

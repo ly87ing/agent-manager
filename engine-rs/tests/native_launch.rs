@@ -60,6 +60,23 @@ fn rejects_duplicate_names_unknown_fields_and_mismatched_shells() {
     }
 }
 
+#[test]
+fn windows_shortcut_names_are_case_insensitive_and_not_device_names() {
+    for name in ["CON", "com1", "example-SG"] {
+        let mut input = spec("windows", "powershell");
+        input["variants"][1]["name"] = json!(name);
+        let result = execute(
+            &context(),
+            &Request {
+                command: "launch:build".into(),
+                args: vec!["--spec".into(), input.to_string()],
+                run_id: "windows-name".into(),
+            },
+        );
+        assert!(!result.ok);
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn generated_alias_executes_literal_arguments_under_both_shells() {

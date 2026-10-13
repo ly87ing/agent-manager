@@ -44,7 +44,12 @@ pub(super) fn build(spec: &Recipe, variant: &Variant) -> Built {
             .map(|v| windows_arg(v))
             .collect::<Vec<_>>()
             .join(" ");
-        format!("& {{ $p = New-Object System.Diagnostics.ProcessStartInfo; $p.FileName = {}; $p.UseShellExecute = $false; $p.Arguments = {}; $p.EnvironmentVariables['TZ'] = {}; [System.Diagnostics.Process]::Start($p) | Out-Null }}",
+        let completion = if spec.kind == "command" {
+            "$c = [System.Diagnostics.Process]::Start($p); $c.WaitForExit(); $global:LASTEXITCODE = $c.ExitCode"
+        } else {
+            "[System.Diagnostics.Process]::Start($p) | Out-Null"
+        };
+        format!("& {{ $p = New-Object System.Diagnostics.ProcessStartInfo; $p.FileName = {}; $p.UseShellExecute = $false; $p.Arguments = {}; $p.EnvironmentVariables['TZ'] = {}; {completion} }}",
             powershell(&spec.target), powershell(&args), powershell(&variant.timezone))
     } else if spec.platform == "macos" && spec.kind == "app" {
         let mut value = format!(
