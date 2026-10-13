@@ -8,6 +8,14 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Saving a launch configuration must be tested independently of applying it.**
+- The first launch builder retained generated commands only in page memory and
+  persisted nothing unless the user wrote local shortcuts. Separate copy and
+  apply buttons did not prove that a configuration could be saved without
+  applying it. Exercise save, process restart, reload, edit and deletion, while
+  reading back unchanged shell files and checking that no application ran.
+- Seen 1× (2026-10-12; user correction after `596a88e`).
+
 **Cross-platform launch fixtures must select their shell and avoid piped CLI output.**
 - The Linux shortcut test expected `.zshrc` after status used the new Linux default (Bash). Specify zsh in every fixture operation that reads or writes that file.
 - The Windows launch test used `Command::output()` and reached its 15-second application deadline before checking whether the application was still running. Redirect CLI JSON to an isolated file and read it after the CLI exits, without waiting for pipe EOF from an independent child.

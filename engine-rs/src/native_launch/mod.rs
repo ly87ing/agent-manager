@@ -1,6 +1,7 @@
 //! General launch recipes are independent of assistant accounts and MCP secrets.
 mod render;
 mod runtime;
+mod saved;
 mod shortcuts;
 
 use crate::{diagnostic, Context, Envelope, Lock, Mode, Request};
@@ -95,6 +96,12 @@ fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let command = req.command.replace('.', ":");
     if matches!(command.as_str(), "launch:catalog" | "launch:run") {
         return runtime::handle(ctx, req);
+    }
+    if matches!(
+        command.as_str(),
+        "launch:list" | "launch:save" | "launch:delete"
+    ) {
+        return saved::handle(ctx, req);
     }
     if command != "launch:build" {
         return shortcuts::handle(ctx, req);

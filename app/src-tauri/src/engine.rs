@@ -38,7 +38,11 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ));
     };
     let allowed = match (domain, verb) {
-        ("launch", "build" | "status" | "preview" | "apply" | "catalog" | "run") => true,
+        (
+            "launch",
+            "build" | "status" | "preview" | "apply" | "catalog" | "run" | "list" | "save"
+            | "delete",
+        ) => true,
         ("resources", "targets") => true,
         ("system", "audit" | "discover" | "refresh-upstream") => true,
         ("secrets", "status" | "set" | "source") => true,
@@ -127,6 +131,13 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
     let mut specs: Vec<(&'static str, ArgValueKind)> = Vec::new();
     match (domain, verb) {
         ("launch", "build") => specs.push(("--spec", ArgValueKind::JsonValue)),
+        ("launch", "save" | "delete") => {
+            if verb == "save" {
+                specs.push(("--spec", ArgValueKind::JsonValue));
+            }
+            specs.push(("--id", ArgValueKind::TemplateId));
+            specs.push(("--base", ArgValueKind::Digest));
+        }
         ("launch", "run") => {
             specs.push(("--spec", ArgValueKind::JsonValue));
             specs.push(("--name", ArgValueKind::LaunchName));
@@ -814,6 +825,11 @@ mod tests {
 
     #[test]
     fn launch_generation_is_exposed_without_retired_account_commands() {
+        for command in ["launch:list", "launch:save", "launch:delete"] {
+            assert!(validate_command(command).is_ok());
+        }
+        assert!(validate_args("launch:save", &["--spec".into(), "{}".into()]).is_ok());
+        assert!(validate_args("launch:save", &["--confirm".into()]).is_err());
         assert!(validate_command("launch:build").is_ok());
         assert!(validate_command("launch:catalog").is_ok());
         assert!(validate_args("launch:catalog", &[]).is_ok());

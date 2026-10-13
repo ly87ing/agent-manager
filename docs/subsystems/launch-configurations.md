@@ -7,6 +7,11 @@ structured recipe contains a platform, shell, application or executable target,
 literal argument list, and one or more explicitly named time-zone variants.
 `la` and `sg` are examples, not required names or a fixed list of time zones.
 
+Saved recipes live in the `launch_recipes` table of `native-manager.db`. They are
+inactive application data, independent of local shortcuts. Only the recipe is
+stored; complete commands are rendered from it when read. Saving does not inspect
+or change shell files and does not start a process.
+
 ## Runtime path
 
 `launch:build --spec <JSON>` returns each complete launch command and shortcut
@@ -14,6 +19,15 @@ definition. The CLI and desktop bridge use the same Rust renderer. Building does
 not read shell files, load secret sources, create HOME/data, or execute commands.
 POSIX alias definitions quote the complete command as well as each argument.
 Windows output uses PowerShell and a child-specific ProcessStartInfo environment.
+
+`launch:list` reads saved recipes without creating a database or table.
+`launch:save --spec <JSON>` creates a saved recipe. Updating uses the returned
+`--id` and `--base` revision; `launch:delete --id <id> --base <revision>` removes
+only that saved recipe. Both mutations compare the revision inside a database
+transaction and record an audit without command bodies. A stale edit or failed
+audit leaves the saved recipe unchanged. Recognized credential literals cannot
+be saved. Recipes for another platform and programs that are not installed can
+be saved without applying them.
 
 `launch:status --shell zsh|bash|powershell` reads actual shortcuts and their file
 baseline. `launch:preview --spec <JSON> --base <baseline>` returns complete file
@@ -62,6 +76,7 @@ cargo test --manifest-path engine-rs/Cargo.toml --test native_launch
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_launch
 cargo test --manifest-path engine-rs/Cargo.toml --test native_launch_shortcuts
 cargo test --manifest-path engine-rs/Cargo.toml --test native_launch_runtime
+cargo test --manifest-path engine-rs/Cargo.toml --test native_launch_saved
 ```
 
 The literal-argument regression executes generated aliases through Bash and zsh
