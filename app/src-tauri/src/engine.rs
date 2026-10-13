@@ -300,10 +300,12 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("skills", "adopt-preview") => {
             specs.push(("--name", ArgValueKind::ElementId));
             specs.push(("--collection", ArgValueKind::ElementId));
+            specs.push(("--dest", ArgValueKind::FilePath));
         }
         ("skills", "adopt") => {
             specs.push(("--name", ArgValueKind::ElementId));
             specs.push(("--collection", ArgValueKind::ElementId));
+            specs.push(("--dest", ArgValueKind::FilePath));
             specs.push(("--digest", ArgValueKind::Digest));
             specs.push(("--ref", ArgValueKind::GitRef));
             // 技能在来源仓库里的相对位置：与版本名同一套字符规则
@@ -2210,6 +2212,16 @@ mod tests {
         assert!(
             validate_args("skills:adopt-preview", &["--name".into(), "archify".into()]).is_ok()
         );
+        assert!(validate_args(
+            "skills:adopt-preview",
+            &[
+                "--name".into(),
+                "archify".into(),
+                "--dest".into(),
+                "~/skills/my-skills".into()
+            ]
+        )
+        .is_ok());
         let digest = "a".repeat(64);
         assert!(validate_args(
             "skills:adopt",

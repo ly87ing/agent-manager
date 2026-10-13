@@ -3195,6 +3195,241 @@ fn forking_a_skill_copies_it_into_the_users_collection_and_tracks_upstream() {
 }
 
 #[test]
+fn personal_skill_collections_group_new_copies_and_preserve_existing_locations() {
+    let (root, ctx) = temp_ctx("personal-directories");
+    let source = root.join("upstream");
+    for name in ["alpha", "beta", "gamma"] {
+        std::fs::create_dir_all(source.join(name)).unwrap();
+        std::fs::write(source.join(name).join("SKILL.md"), format!("# {name}\n")).unwrap();
+    }
+    set_collection(
+        &ctx,
+        "upstream",
+        &serde_json::json!({"source_path": source}).to_string(),
+    );
+    let agents_before = store::effective_policy(&ctx).unwrap()["agents"].clone();
+    let fork = |name: &str, collection: &str, dest: Option<&str>| {
+        let only = format!("skill:upstream/{name}");
+        let mut args = vec!["--only", only.as_str(), "--collection", collection];
+        if let Some(dest) = dest {
+            args.extend(["--dest", dest]);
+        }
+        execute(&ctx, &request("skills:fork", &args))
+    };
+    let grouped = fork("alpha", "personal", None);
+    assert!(grouped.ok, "{:?}", grouped.errors);
+    assert_eq!(
+        std::fs::read_to_string(ctx.home_dir.join("skills/personal/alpha/SKILL.md")).unwrap(),
+        "# alpha\n"
+    );
+    let custom = root.join("custom library/team");
+    assert!(fork("beta", "team", Some(custom.to_str().unwrap())).ok);
+    assert!(
+        fork("gamma", "team", None).ok,
+        "existing custom directory must be reused"
+    );
+    assert!(custom.join("gamma/SKILL.md").is_file());
+    assert!(!ctx.home_dir.join("skills/team").exists());
+    let legacy = ctx.home_dir.join("my-skills");
+    std::fs::create_dir_all(&legacy).unwrap();
+    set_collection(&ctx, "my-skills", r#"{"source_path":"~/my-skills"}"#);
+    assert!(fork("alpha", "my-skills", None).ok);
+    assert!(legacy.join("alpha/SKILL.md").is_file());
+    assert!(!ctx.home_dir.join("skills/my-skills").exists());
+    assert!(
+        !fork("alpha", "personal", None).ok,
+        "existing copies must not be overwritten"
+    );
+    assert_eq!(
+        std::fs::read_to_string(source.join("alpha/SKILL.md")).unwrap(),
+        "# alpha\n"
+    );
+    assert_eq!(
+        store::effective_policy(&ctx).unwrap()["agents"],
+        agents_before
+    );
+    assert!(
+        !ctx.home_dir.join(".claude").exists(),
+        "copying never deploys a skill"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn personal_skill_destinations_refuse_account_data_source_overlap_and_directory_aliases() {
+    let (root, ctx) = temp_ctx("personal-directory-safety");
+    let source = root.join("upstream/alpha");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("SKILL.md"), "# alpha\n").unwrap();
+    set_collection(
+        &ctx,
+        "upstream",
+        &serde_json::json!({"source_path": source.parent().unwrap()}).to_string(),
+    );
+    std::fs::create_dir_all(ctx.home_dir.join(".codex")).unwrap();
+    let identity = ctx.home_dir.join(".codex/auth.json");
+    std::fs::write(&identity, "{\"fixture\":\"YOUR_FAKE_AUTH\"}\n").unwrap();
+    let alias = root.join("account-alias");
+    link_dir(ctx.home_dir.join(".codex"), &alias).unwrap();
+    let before = store::effective_policy(&ctx).unwrap();
+    for dest in [
+        ctx.home_dir.join(".codex/personal"),
+        ctx.home_dir.join(".claude/skills/personal"),
+        ctx.data_dir.join("personal"),
+        ctx.home_dir.clone(),
+        ctx.home_dir.join("skills/../escaped"),
+        source.parent().unwrap().join("personal"),
+        alias.join("personal"),
+    ] {
+        let result = execute(
+            &ctx,
+            &request(
+                "skills:fork",
+                &[
+                    "--only",
+                    "skill:upstream/alpha",
+                    "--collection",
+                    "personal",
+                    "--dest",
+                    dest.to_str().unwrap(),
+                ],
+            ),
+        );
+        assert!(
+            !result.ok,
+            "unsafe destination accepted: {}",
+            dest.display()
+        );
+        assert!(!dest.join("alpha").exists());
+        assert_eq!(store::effective_policy(&ctx).unwrap(), before);
+        assert_eq!(
+            std::fs::read_to_string(&identity).unwrap(),
+            "{\"fixture\":\"YOUR_FAKE_AUTH\"}\n"
+        );
+    }
+    #[cfg(windows)]
+    for alias in [".codex.", ".codex ", ".claude.", "skills:stream"] {
+        let dest = ctx.home_dir.join(alias).join("personal");
+        let result = execute(
+            &ctx,
+            &request(
+                "skills:fork",
+                &[
+                    "--only",
+                    "skill:upstream/alpha",
+                    "--collection",
+                    "personal",
+                    "--dest",
+                    dest.to_str().unwrap(),
+                ],
+            ),
+        );
+        assert!(
+            !result.ok,
+            "ambiguous Windows destination accepted: {}",
+            dest.display()
+        );
+        assert!(format!("{:?}", result.errors).contains("Windows 集合目录"));
+        assert_eq!(store::effective_policy(&ctx).unwrap(), before);
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn personal_skill_adoption_checks_the_previewed_custom_directory_and_can_undo() {
+    let (root, ctx) = temp_ctx("personal-adopt-directory");
+    let original = ctx.home_dir.join(".claude/skills/mine");
+    std::fs::create_dir_all(&original).unwrap();
+    std::fs::write(original.join("SKILL.md"), "# My local skill\n").unwrap();
+    let preview = execute(&ctx, &request("skills:adopt-preview", &["--name", "mine"]));
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(preview.data["local"]["dest"], "~/skills/my-skills/mine");
+    assert!(
+        !ctx.data_dir.exists(),
+        "preview must not create application data"
+    );
+    assert!(
+        !ctx.home_dir.join("skills").exists(),
+        "preview must not create the library"
+    );
+    let dest = root.join("custom library/my-skills");
+    let args = ["--name", "mine", "--dest", dest.to_str().unwrap()];
+    let custom = execute(&ctx, &request("skills:adopt-preview", &args));
+    assert!(custom.ok, "{:?}", custom.errors);
+    assert_ne!(
+        custom.data["local"]["digest"],
+        preview.data["local"]["digest"]
+    );
+    let stale = execute(
+        &ctx,
+        &request(
+            "skills:adopt",
+            &[
+                "--name",
+                "mine",
+                "--digest",
+                preview.data["local"]["digest"].as_str().unwrap(),
+                "--keep-local",
+                "--dest",
+                dest.to_str().unwrap(),
+                "--agents",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(!stale.ok);
+    assert!(format!("{:?}", stale.errors).contains("预览后"));
+    assert!(!dest.exists());
+    assert!(!store::db_path(&ctx).exists());
+    assert!(!ctx.data_dir.join("adopt-backups").exists());
+    assert_eq!(
+        std::fs::read_to_string(original.join("SKILL.md")).unwrap(),
+        "# My local skill\n"
+    );
+    let applied = execute(
+        &ctx,
+        &request(
+            "skills:adopt",
+            &[
+                "--name",
+                "mine",
+                "--digest",
+                custom.data["local"]["digest"].as_str().unwrap(),
+                "--keep-local",
+                "--dest",
+                dest.to_str().unwrap(),
+                "--agents",
+                "claude-code",
+            ],
+        ),
+    );
+    assert!(applied.ok, "{:?}", applied.errors);
+    assert_eq!(
+        std::fs::read_to_string(dest.join("mine/SKILL.md")).unwrap(),
+        "# My local skill\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(original.join("SKILL.md")).unwrap(),
+        "# My local skill\n"
+    );
+    assert!(
+        !ctx.home_dir.join(".codex").exists(),
+        "unselected assistant stays untouched"
+    );
+    let undone = execute(
+        &ctx,
+        &request(
+            "skills:adopt",
+            &["--undo", applied.data["backup"].as_str().unwrap()],
+        ),
+    );
+    assert!(undone.ok, "{:?}", undone.errors);
+    assert!(original.is_dir() && !original.is_symlink());
+    assert!(!dest.join("mine").exists());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn forking_an_assigned_local_skill_copies_current_source_without_a_snapshot() {
     let (root, context) = temp_ctx("skills-fork-local");
     let source = root.join("local/alpha");
@@ -4225,11 +4460,11 @@ fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
         local_src.join("dup")
     );
 
-    // 7. 认不出来源的 mine：保留本地内容，放进 ~/my-skills 作为本机来源；可撤回
+    // 7. 认不出来源的 mine：保留本地内容，放进 ~/skills/my-skills 作为本机来源；可撤回
     let p = preview("mine");
     assert!(p.data["source_check"]["error"].is_string());
     let local = &p.data["local"];
-    assert_eq!(local["dest"], "~/my-skills/mine");
+    assert_eq!(local["dest"], "~/skills/my-skills/mine");
     // 原来只在 Claude 上：预览标出原来就有的账号；只勾 Claude 时 Codex 不链接
     assert_eq!(
         p.data["current_accounts"],
@@ -4251,7 +4486,7 @@ fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
         "拒绝后原样恢复"
     );
     assert!(
-        !home.join("my-skills/mine").exists(),
+        !home.join("skills/my-skills/mine").exists(),
         "拒绝后复制出的目录也撤掉"
     );
     let m = adopt(&[
@@ -4266,7 +4501,7 @@ fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
     assert!(m.ok, "{:?}", m.errors);
     assert_eq!(m.data["linked"], serde_json::json!(["claude-code"]));
     assert_eq!(
-        std::fs::read_to_string(home.join("my-skills/mine/SKILL.md")).unwrap(),
+        std::fs::read_to_string(home.join("skills/my-skills/mine/SKILL.md")).unwrap(),
         "# 我自己写的"
     );
     assert!(
@@ -4279,7 +4514,7 @@ fn adopt_unmanaged_skills_keeps_one_source_and_can_be_undone() {
         "操作结束后进度文件删掉"
     );
     assert!(adopt(&["--undo", m.data["backup"].as_str().unwrap()]).ok);
-    assert!(!home.join("my-skills/mine").exists());
+    assert!(!home.join("skills/my-skills/mine").exists());
     assert_eq!(
         std::fs::read_to_string(claude.join("mine/SKILL.md")).unwrap(),
         "# 我自己写的"

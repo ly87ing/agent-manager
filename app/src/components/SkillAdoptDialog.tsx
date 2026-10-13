@@ -41,7 +41,8 @@ export interface AdoptPreview {
         error?: undefined;
       }
     | { error: string };
-  local?: { dest: string; dest_exists: boolean; collection: string; digest: string; accounts: string[]; from: string | null; variants: number };
+  local_error?: string;
+  local?: { root?: string; dest: string; dest_exists: boolean; collection: string; digest: string; accounts: string[]; from: string | null; variants: number };
 }
 
 const FILE_STATUS: Record<string, string> = {
@@ -77,6 +78,8 @@ export function SkillAdoptDialog({
   const [previewId, setPreviewId] = useState<string | null>(null);
   /** 要链接的助手；预览回来后默认全选。 */
   const [selected, setSelected] = useState<string[]>([]);
+  const [dest, setDest] = useState("");
+  const [requestedDest, setRequestedDest] = useState<string | null>(null);
   const running = runningId !== null;
   const progress = useEngineProgress(runningId ?? previewId);
   const close = () => {
@@ -87,18 +90,24 @@ export function SkillAdoptDialog({
   useEffect(() => {
     let alive = true;
     const runId = newRunId();
+    setPreview(null);
+    setError(null);
     setPreviewId(runId);
-    runEngine<AdoptPreview>("skills:adopt-preview", ["--name", name], { runId })
+    const args = ["--name", name];
+    if (requestedDest !== null) args.push("--dest", requestedDest);
+    runEngine<AdoptPreview>("skills:adopt-preview", args, { runId })
       .then((envelope) => {
         if (!alive) return;
         if (envelope.ok) {
           setPreview(envelope.data);
+          setDest(envelope.data.local?.root ?? envelope.data.local?.dest.replace(/[\\/][^\\/]+$/, "") ?? requestedDest ?? "~/skills/my-skills");
           const check = envelope.data.source_check;
           const sourceOk = Boolean(check && !("error" in check && check.error));
           // 认不出来源或取不到来源：只能保留本地内容
           if (!sourceOk) setChoice("local");
           const accounts = sourceOk ? (check as { accounts: string[] }).accounts : envelope.data.local?.accounts ?? [];
-          setSelected(accounts);
+          if (requestedDest === null) setSelected(accounts);
+          else setSelected((previous) => previous.filter((agent) => accounts.includes(agent)));
         } else {
           setError(envelope.errors[0]?.message ?? "预览失败");
         }
@@ -108,7 +117,7 @@ export function SkillAdoptDialog({
     return () => {
       alive = false;
     };
-  }, [name]);
+  }, [name, requestedDest]);
 
   const check = preview?.source_check && !("error" in preview.source_check && preview.source_check.error)
     ? (preview.source_check as Extract<AdoptPreview["source_check"], { same: boolean }>)
@@ -117,12 +126,16 @@ export function SkillAdoptDialog({
   const dedupe = preview?.kind === "dedupe";
   const accounts = dedupe ? [] : choice === "source" ? check?.accounts ?? [] : preview?.local?.accounts ?? [];
   const chosen = accounts.filter((agent) => selected.includes(agent));
+  const previewRoot = preview?.local?.root ?? preview?.local?.dest.replace(/[\\/][^\\/]+$/, "");
+  const destDirty = dest.trim() !== previewRoot;
+  const destOk = /^(~\/|\/|[a-zA-Z]:[\\/])/.test(dest.trim());
   const canConfirm =
-    Boolean(preview) &&
+    Boolean(preview) && !previewId &&
+    (dedupe || choice !== "local" || !destDirty) &&
     (dedupe || ((choice === "source" ? Boolean(check) : Boolean(preview?.local && !preview.local.dest_exists)) && chosen.length > 0));
 
   const confirm = async () => {
-    if (!preview) return;
+    if (!preview || !canConfirm) return;
     let args: string[];
     let label: string;
     if (dedupe) {
@@ -130,6 +143,7 @@ export function SkillAdoptDialog({
       label = `清理 ${name} 的多余副本`;
     } else if (choice === "local") {
       args = ["--name", name, "--digest", preview.local?.digest ?? "", "--keep-local"];
+      args.push("--dest", previewRoot!);
       label = `纳入 ${name}（保留本地内容）`;
     } else {
       args = ["--name", name, "--digest", check!.digest, "--path", check!.path];
@@ -239,6 +253,21 @@ export function SkillAdoptDialog({
                   </label>
                 </fieldset>
               )}
+              {choice === "local" && (
+                <section className="space-y-2 text-xs">
+                  <label className="block">
+                    <span className="text-muted-foreground">个人集合目录（可自定义）</span>
+                    <input data-testid="adopt-dest" value={dest} onChange={(event) => setDest(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 font-mono text-xs" />
+                  </label>
+                  {preview.local_error && <p className="text-destructive">{preview.local_error}</p>}
+                  {destDirty && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-muted-foreground">目录已修改，请更新预览。</span>
+                      <button type="button" data-testid="adopt-refresh-preview" disabled={!destOk} onClick={() => setRequestedDest(dest.trim())} className="rounded-md border px-2 py-1 disabled:opacity-40">更新预览</button>
+                    </div>
+                  )}
+                </section>
+              )}
             </>
           )}
 
@@ -266,7 +295,7 @@ export function SkillAdoptDialog({
           )}
 
           {preview && !running && (
-            <section data-testid="adopt-plan" className="space-y-1 rounded-md border bg-muted/30 p-3 text-xs">
+            <section data-testid="adopt-plan" className="space-y-1 break-words rounded-md border bg-muted/30 p-3 text-xs [overflow-wrap:anywhere]">
               <p className="font-medium text-foreground">点确认后会：</p>
               <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
                 {preview.removes.map((path) => (

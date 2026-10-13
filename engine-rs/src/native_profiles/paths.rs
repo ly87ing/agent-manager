@@ -110,7 +110,7 @@ pub(crate) fn windows_file_information(
 
 /// Resolve all existing ancestors, even when several final components do not exist.
 /// A dangling link or an unreadable ancestor is an error, not a missing directory.
-pub(super) fn resolved(path: &Path) -> Result<PathBuf> {
+pub(crate) fn resolved(path: &Path) -> Result<PathBuf> {
     match std::fs::symlink_metadata(path) {
         Ok(_) => Ok(path.canon()?),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -173,7 +173,7 @@ fn starts_with(path: &Path, parent: &Path) -> bool {
     false
 }
 
-fn overlaps(a: &Path, b: &Path) -> bool {
+pub(crate) fn overlaps(a: &Path, b: &Path) -> bool {
     starts_with(a, b) || starts_with(b, a)
 }
 

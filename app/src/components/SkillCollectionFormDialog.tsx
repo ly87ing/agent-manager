@@ -207,7 +207,7 @@ export function SkillCollectionFormDialog({
               </>
             ) : (
               <>
-                <input value={sourcePath} onChange={(e) => setSourcePath(e.target.value)} data-testid="collection-source-path-input" aria-label="本机位置" className={inputClass} placeholder="~/.some-tool/skills 或 ~/my-skills/review" />
+                <input value={sourcePath} onChange={(e) => setSourcePath(e.target.value)} data-testid="collection-source-path-input" aria-label="本机位置" className={inputClass} placeholder={`~/skills/${name || "my-skills"}`} />
                 <p className="mt-1 text-[11px] text-muted-foreground">装着多个技能的目录，或直接是一个技能文件夹。助手里的链接直接指向它，内容在原处维护。</p>
               </>
             )}

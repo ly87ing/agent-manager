@@ -10,7 +10,7 @@ use rusqlite::TransactionBehavior;
 use serde_json::{json, Map, Value};
 use std::path::Path;
 
-use super::paths::{collection_source_root, expand_home, resolve_loose};
+use super::paths::{collection_source_root, expand_home, personal_source_path, resolve_loose};
 use super::persistence::load_bindings_readonly;
 use super::snapshot::{
     copy_dir_recursive, discover_repo_skills, hash_skill_dir, verify_skill_version,
@@ -20,16 +20,7 @@ use super::CollectionDef;
 use crate::native::{Context, Request};
 use crate::store;
 
-pub(super) const DEFAULT_DEST: &str = "~/my-skills";
 pub(super) const DEFAULT_COLLECTION: &str = "my-skills";
-
-fn valid_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        && !name.starts_with('-')
-}
 
 /// 复制出来的文件要能改：快照里的文件是只读的。
 #[cfg_attr(not(unix), allow(unused_variables))]
@@ -63,38 +54,22 @@ pub(crate) fn fork(ctx: &Context, req: &Request) -> Result<Value> {
         bail!("技能名不合法: {skill}");
     }
     let target = req.value("--collection").unwrap_or(DEFAULT_COLLECTION);
-    if !valid_name(target) {
-        bail!("集合名只能用小写字母、数字和连字符: {target}");
-    }
     if target == coll_name {
         bail!("要放进另一个集合，不能是 {coll_name} 自己");
     }
-    let dest_raw = req.value("--dest").unwrap_or(DEFAULT_DEST);
-    if !(std::path::Path::new(dest_raw).is_absolute() || dest_raw.starts_with("~/")) {
-        bail!("目录要写绝对路径或以 ~/ 开头: {dest_raw}");
-    }
-    let dest_root = resolve_loose(&expand_home(dest_raw, &ctx.home_dir));
+    let meta = load_metadata(ctx)?;
+    let dest_raw = personal_source_path(ctx, &meta, target, req.value("--dest"))?;
+    let dest_root = resolve_loose(&expand_home(&dest_raw, &ctx.home_dir));
     let dest = dest_root.join(skill);
     if dest.exists() || std::fs::symlink_metadata(&dest).is_ok() {
         bail!("{} 已经存在，不覆盖；换个目录或先把它移走", dest.display());
     }
 
-    let meta = load_metadata(ctx)?;
     let origin = meta
         .collections
         .get(coll_name)
         .filter(|coll| !coll.deleted)
         .ok_or_else(|| anyhow!("没有集合 {coll_name}"))?;
-    if let Some(existing) = meta.collections.get(target).filter(|coll| !coll.deleted) {
-        let same_dir = existing
-            .source_path
-            .as_deref()
-            .map(|raw| resolve_loose(&expand_home(raw, &ctx.home_dir)) == dest_root)
-            .unwrap_or(false);
-        if !same_dir {
-            bail!("集合 {target} 已经指向别处；换个集合名或目录");
-        }
-    }
 
     // Git assignments use snapshots; local assignments follow the actual source.
     let bindings = load_bindings_readonly(ctx)?;

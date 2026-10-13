@@ -7,7 +7,7 @@ Manage MCP servers, rules, skills, and their extension dependencies for existing
 ## Features
 
 - **Assistants:** list known assistant extension targets and their registered paths. This view is read-only and does not check installation, login identity, or credentials.
-- **Skills:** manage collections from Git repositories or local directories and their links in existing assistant skill directories. Fill missing links, disable individual assignments, preview versions, and adopt unmanaged skills after confirmation.
+- **Skills:** manage collections from Git repositories or local directories and their links in existing assistant skill directories. New personal collections default to `~/skills/<collection>`, with custom locations and existing paths preserved. Fill missing links, disable individual assignments, preview versions, and adopt unmanaged skills after confirmation. See [skill directories and source switching](docs/subsystems/skills.md).
 - **MCP:** read and edit entries in actual assistant configuration files, with previews, external-change checks, and per-target actions. Shared JSON files preserve every byte outside the MCP container. Connection checks run a separate protocol session and do not establish that an assistant has loaded the service.
 - **Rules:** edit existing targets' `CLAUDE.md` / `AGENTS.md`, use local templates, or apply recommended rules from skill sources. Fill only targets without a rule file.
 - **Sources:** manage optional skill and rule repositories, versions, local sources, and resource share links. No external repository is required for local extension management.

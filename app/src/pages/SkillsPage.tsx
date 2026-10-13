@@ -579,6 +579,9 @@ export default function SkillsPage({
         <ForkSkillDialog
           skill={(forking.spec as SkillSpec).name ?? forking.id}
           collection={(forking.spec as SkillSpec).collection ?? ""}
+          collectionPaths={Object.fromEntries(collections
+            .filter((item) => Boolean((item.spec as SkillCollectionSpec).source_path))
+            .map((item) => [collName(item), (item.spec as SkillCollectionSpec).source_path!]))}
           accounts={Object.entries((forking.observed as SkillObserved).agents ?? {})
             .filter(([, cell]) => cell.state === "linked" || cell.state === "missing-link" || cell.state === "dead-link")
             .map(([id]) => ({ id, name: nameOf(id) }))}

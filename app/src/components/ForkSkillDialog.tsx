@@ -9,6 +9,7 @@ export function ForkSkillDialog({
   skill,
   collection,
   accounts,
+  collectionPaths = {},
   executing,
   onConfirm,
   onClose,
@@ -17,14 +18,16 @@ export function ForkSkillDialog({
   collection: string;
   /** 现在用着这个技能的助手（键 + 名字）。 */
   accounts: { id: string; name: string }[];
+  collectionPaths?: Record<string, string>;
   executing: boolean;
   onConfirm: (input: { dest: string; target: string; switchAccounts: string[] }) => void;
   onClose: () => void;
 }) {
-  const [dest, setDest] = useState("~/my-skills");
   const [target, setTarget] = useState("my-skills");
+  const [customDest, setCustomDest] = useState<string | null>(null);
+  const dest = customDest ?? collectionPaths[target] ?? `~/skills/${target}`;
   const [picked, setPicked] = useState<string[]>(accounts.map((account) => account.id));
-  const destOk = /^(~\/|\/)/.test(dest.trim());
+  const destOk = /^(~\/|\/|[a-zA-Z]:[\\/])/.test(dest.trim());
   const targetOk = /^[a-z0-9][a-z0-9-]*$/.test(target) && target !== collection;
   return (
     <ConfirmModal
@@ -39,14 +42,15 @@ export function ForkSkillDialog({
     >
       <div className="mt-3 space-y-3 text-sm">
         <label className="block">
-          <span className="text-xs text-muted-foreground">放到哪个目录（会在里面建 {skill}/）</span>
+          <span className="text-xs text-muted-foreground">集合目录（可自定义，已有集合沿用原位置）</span>
           <input
             data-testid="fork-dest"
             value={dest}
-            onChange={(event) => setDest(event.target.value)}
+            onChange={(event) => setCustomDest(event.target.value)}
             className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 font-mono text-xs"
           />
         </label>
+        <p data-testid="fork-target-path" className="break-all rounded-md bg-muted/30 p-2 font-mono text-xs">{dest.trim().replace(/[\\/]+$/, "")}/{skill}/</p>
         <label className="block">
           <span className="text-xs text-muted-foreground">登记成哪个集合（已有同名集合须指向同一个目录）</span>
           <input

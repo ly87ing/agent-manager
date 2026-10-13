@@ -453,7 +453,7 @@ describe("改成我的版本", () => {
     await expandAll();
     await clickAction("fork-skill:agent-skills/alpha");
     const dialog = await screen.findByRole("dialog", { name: "把 alpha 改成我的版本" });
-    expect(within(dialog).getByTestId("fork-dest")).toHaveValue("~/my-skills");
+    expect(within(dialog).getByTestId("fork-dest")).toHaveValue("~/skills/my-skills");
     expect(within(dialog).getByTestId("fork-switch-claude-code")).toBeChecked();
     // codex 那条链接损坏也算在用
     expect(within(dialog).getByTestId("fork-switch-codex")).toBeChecked();
@@ -464,7 +464,7 @@ describe("改成我的版本", () => {
     await waitFor(() => expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(1));
     const writes = calls.filter((call) => call.command === "skills:fork" || call.command === "skills:apply").map((call) => [call.command, ...call.args]);
     expect(writes).toEqual([
-      ["skills:fork", "--only", "skill:agent-skills/alpha", "--dest", "~/my-skills", "--collection", "my-skills"],
+      ["skills:fork", "--only", "skill:agent-skills/alpha", "--dest", "~/skills/my-skills", "--collection", "my-skills"],
       ["skills:apply", "--only", "skill:my-skills/alpha", "--action", "add", "--agent", "claude-code", "--replace-from", "skill:agent-skills/alpha", "--replace-version", "original-version"],
     ]);
   });
@@ -489,6 +489,37 @@ describe("改成我的版本", () => {
     await expandAll();
     expect(await screen.findByTestId("forked-from-skill:my-skills/alpha")).toHaveTextContent("基于 agent-skills");
     expect(screen.getByTestId("upstream-changed-skill:my-skills/alpha")).toHaveTextContent("原版有更新");
+  });
+
+  it("个人集合默认按名称分目录；自定义目录显示完整技能路径，取消不写", async () => {
+    const { calls } = renderWithEngine(<SkillsPage />, skillsRoutes());
+    await expandAll();
+    await clickAction("fork-skill:agent-skills/alpha");
+    const dialog = await screen.findByRole("dialog", { name: "把 alpha 改成我的版本" });
+    const collection = within(dialog).getByTestId("fork-collection");
+    await userEvent.clear(collection);
+    await userEvent.type(collection, "team");
+    expect(within(dialog).getByTestId("fork-dest")).toHaveValue("~/skills/team");
+    expect(within(dialog).getByTestId("fork-target-path")).toHaveTextContent("~/skills/team/alpha/");
+    const dest = within(dialog).getByTestId("fork-dest");
+    await userEvent.clear(dest);
+    await userEvent.type(dest, "D:\\skill library\\team");
+    expect(within(dialog).getByTestId("confirm-modal-confirm")).toBeEnabled();
+    expect(within(dialog).getByTestId("fork-target-path")).toHaveTextContent("D:\\skill library\\team/alpha/");
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-cancel"));
+    expect(calls.some((call) => call.command === "skills:fork" || call.command === "skills:apply")).toBe(false);
+  });
+
+  it("已有个人集合沿用原位置，不迁移到新的默认目录", async () => {
+    const routes = skillsRoutes();
+    const status = routes["skills:status"] as Envelope<{ elements: ReturnType<typeof makeElement>[] }>;
+    status.data.elements.push(makeElement({ id: "skill:my-skills", domain: "skills", spec: { source_path: "~/my-skills" }, observed: { discovered: [] } }));
+    renderWithEngine(<SkillsPage />, routes);
+    await expandAll();
+    await clickAction("fork-skill:agent-skills/alpha");
+    const dialog = await screen.findByRole("dialog", { name: "把 alpha 改成我的版本" });
+    expect(within(dialog).getByTestId("fork-dest")).toHaveValue("~/my-skills");
+    expect(within(dialog).getByTestId("fork-target-path")).toHaveTextContent("~/my-skills/alpha/");
   });
 });
 

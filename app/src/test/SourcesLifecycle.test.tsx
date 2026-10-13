@@ -825,7 +825,7 @@ const ADOPT_BASE = {
   removes: ["~/.claude/skills/archify", "~/.agents/skills/archify"],
   source: { repository: "https://github.com/tt-a1i/archify.git", path: "archify", version: "3.0.0", installer: "npx-skills" },
   collection: { name: "archify", exists: false, url: "https://github.com/tt-a1i/archify.git", path: "archify", linked_as: "archify" },
-  local: { dest: "~/my-skills/archify", dest_exists: false, collection: "my-skills", digest: "l".repeat(64), accounts: ["claude-code", "codex"], from: "~/.claude/skills/archify", variants: 1 },
+  local: { root: "~/skills/my-skills", dest: "~/skills/my-skills/archify", dest_exists: false, collection: "my-skills", digest: "l".repeat(64), accounts: ["claude-code", "codex"], from: "~/.claude/skills/archify", variants: 1 },
 };
 const DIGEST = "d".repeat(64);
 
@@ -882,10 +882,10 @@ describe("来源页：纳入管理", () => {
     const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
     expect(await within(dialog).findByTestId("adopt-source-error")).toHaveTextContent("只能作为本机来源纳入");
     expect(within(dialog).getByTestId("adopt-choice-source")).toBeDisabled();
-    expect(within(dialog).getByTestId("adopt-plan")).toHaveTextContent("复制到 ~/my-skills/archify");
+    expect(within(dialog).getByTestId("adopt-plan")).toHaveTextContent("复制到 ~/skills/my-skills/archify");
     await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
     await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
-    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", "l".repeat(64), "--keep-local", "--agents", "claude-code,codex"]);
+    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", "l".repeat(64), "--keep-local", "--dest", "~/skills/my-skills", "--agents", "claude-code,codex"]);
   });
 
   it("重名清理：写明已由哪个来源管理，只移走共用目录那份", async () => {
@@ -899,6 +899,33 @@ describe("来源页：纳入管理", () => {
     await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
     await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
     expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "xiaoyu-bug-loop", "--digest", DIGEST]);
+  });
+
+  it("修改个人集合目录后必须重新预览，确认只使用新目录和新指纹", async () => {
+    const customRoot = "/custom skill library/my-skills";
+    const customDigest = "c".repeat(64);
+    const { calls } = renderWithEngine(<SourcesPage />, {
+      ...adoptRoutes(ADOPT_BASE),
+      "skills:adopt-preview": async (args) => {
+        const custom = args.includes("--dest");
+        return makeEnvelope({ ...ADOPT_BASE, source: null, source_check: { error: "认不出来源仓库" }, local: { ...ADOPT_BASE.local, ...(custom ? { root: customRoot, dest: `${customRoot}/archify`, digest: customDigest } : {}) } });
+      },
+    });
+    await userEvent.click(await screen.findByTestId("adopt-archify"));
+    const dialog = await screen.findByRole("dialog", { name: "纳入管理 archify" });
+    const dest = await within(dialog).findByTestId("adopt-dest");
+    await userEvent.click(within(dialog).getByTestId("adopt-account-codex"));
+    fireEvent.change(dest, { target: { value: customRoot } });
+    expect(within(dialog).getByTestId("adopt-confirm")).toBeDisabled();
+    expect(calls.filter((call) => call.command === "skills:adopt-preview")).toHaveLength(1);
+    expect(calls.some((call) => call.command === "skills:adopt")).toBe(false);
+    await userEvent.click(within(dialog).getByTestId("adopt-refresh-preview"));
+    await waitFor(() => expect(within(dialog).getByTestId("adopt-plan")).toHaveTextContent(`${customRoot}/archify`));
+    expect(within(dialog).getByTestId("adopt-account-codex")).not.toBeChecked();
+    expect(calls.filter((call) => call.command === "skills:adopt-preview")[1].args).toEqual(["--name", "archify", "--dest", customRoot]);
+    await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
+    await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
+    expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", customDigest, "--keep-local", "--dest", customRoot, "--agents", "claude-code"]);
   });
 });
 

@@ -9,6 +9,34 @@ Git sources provide verified content snapshots.
 
 ## Runtime path and failure behavior
 
+Personal collections default to `~/skills/<collection>/<skill>/SKILL.md`.
+`skills:fork --collection NAME` derives the collection directory from its name;
+`--dest PATH` selects a custom collection directory. An existing local collection
+always reuses its registered `source_path`, including historical `~/my-skills`
+locations. The interface shows the complete destination before confirmation.
+
+Git repository caches remain grouped by collection under the application data
+directory. Existing sources and assistant entries are never moved automatically.
+
+For unmanaged skills, `skills:adopt-preview --name NAME [--dest PATH]` previews
+the personal `my-skills` collection. The local digest includes its resolved
+directory and existing definition. `skills:adopt --keep-local` must use that
+same preview and directory; a changed directory or definition requires a new
+preview before any content is copied or moved. Editing the destination in the
+interface disables confirmation until the preview is refreshed and retains the
+selected assistants. Source adoption
+and duplicate cleanup do not depend on a usable personal-copy destination.
+
+Personal-copy destinations reject account and application-data directories,
+assistant skill roots, directory aliases, ambiguous paths, and overlap with other
+local collections. Comparisons resolve existing ancestors even when the final
+directory does not exist. Copies never overwrite an existing skill directory.
+
+Collection folders organize the source library. Assistant entries remain
+`<assistant-skills>/<skill>` links: nested deployment is not enabled without
+actual discovery acceptance for the affected assistant. Collection directories
+do not namespace skill names or bypass same-name ownership checks.
+
 Creating a personal version first copies and registers the skill with `skills:fork`.
 Git assignments copy their verified content snapshot. Local assignments copy the
 current source directory because their active links follow that source directly;
@@ -42,7 +70,8 @@ the explicit original collection/version replacement contract above.
 
 ```sh
 cargo test --manifest-path engine-rs/Cargo.toml --test native_skills replacing_a_skill
-cd app && pnpm vitest run src/test/SkillsPage.test.tsx src/test/rollback.test.ts
+cargo test --manifest-path engine-rs/Cargo.toml --test native_skills personal_skill
+cd app && pnpm vitest run src/test/SkillsPage.test.tsx src/test/SourcesLifecycle.test.tsx src/test/rollback.test.ts
 ```
 
 The integration case reads actual links and assignments after stale-version,

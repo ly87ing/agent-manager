@@ -6,7 +6,7 @@
 //! - `skills:adopt --name <技能> --digest <指纹> [--ref <版本>] [--keep-local] [--accept-source]`：
 //!   重算本地内容与远端目标，指纹对不上就拒绝（预览后内容变了）。先把原目录 / 链接移进
 //!   `adopt-backups/<id>/` 并写备份清单，再登记来源、下载、链接到同类的全部账号；任何一步失败都按
-//!   清单原样恢复。`--keep-local` 把现有内容复制到 `~/my-skills/<技能>` 作为本机来源。
+//!   清单原样恢复。`--keep-local` 默认复制到 `~/skills/my-skills/<技能>`，也可用 `--dest` 指定集合目录。
 //! - 已被本工具管理、只是在 Codex 共用目录（`~/.agents/skills`）里还有一份的，纳入只做清理。
 //! - `skills:adopt --undo <id>`：按清单撤回——解除这次的链接与登记，把原目录放回原处。
 //!
@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::paths::{expand_home, resolve_loose};
+use super::paths::{expand_home, personal_source_path, resolve_loose};
 use super::persistence::load_bindings_readonly;
 use super::snapshot::{copy_dir_recursive, hash_skill_dir};
 use super::status::load_metadata;
@@ -607,8 +607,20 @@ fn link_agents(ctx: &Context, restrict: Option<&Vec<String>>) -> Result<Vec<Stri
         .collect())
 }
 
+fn local_destination(ctx: &Context, req: &Request) -> Result<(String, Value)> {
+    let meta = load_metadata(ctx)?;
+    let collection = super::fork::DEFAULT_COLLECTION;
+    let raw = personal_source_path(ctx, &meta, collection, req.value("--dest"))?;
+    let fingerprint = json!({
+        "collection": collection,
+        "path": crate::native_profiles::paths::resolved(&expand_home(&raw, &ctx.home_dir))?,
+        "definition": meta.collections.get(collection).filter(|c| !c.deleted).map(|c| &c.raw),
+    });
+    Ok((raw, fingerprint))
+}
+
 pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
-    strict_args(req, &["--name", "--collection"], &[])?;
+    strict_args(req, &["--name", "--collection", "--dest"], &[])?;
     let name = req
         .value("--name")
         .ok_or_else(|| anyhow!("需要 --name <技能>"))?;
@@ -644,18 +656,23 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
         out["digest"] = json!(digest(&plan, "dedupe", &Value::Null));
         return Ok(out);
     }
-    let local_digest = digest(&plan, "local", &Value::Null);
-    let dest = expand_home(super::fork::DEFAULT_DEST, home).join(&plan.name);
-    out["local"] = json!({
-        "dest": tilde(&dest, home),
-        "dest_exists": std::fs::symlink_metadata(&dest).is_ok(),
-        "collection": super::fork::DEFAULT_COLLECTION,
-        "digest": local_digest,
-        "accounts": link_agents(ctx, None)?,
-        // 保留本地内容时以哪一份为准：第一处有 SKILL.md 的
-        "from": plan.locations.iter().find(|l| l.hash.is_some()).map(|l| tilde(&l.path, home)),
-        "variants": plan.locations.iter().filter_map(|l| l.hash.clone()).collect::<std::collections::BTreeSet<_>>().len(),
-    });
+    match local_destination(ctx, req) {
+        Ok((raw, fingerprint)) => {
+            let dest = expand_home(&raw, home).join(&plan.name);
+            out["local"] = json!({
+            "dest": tilde(&dest, home),
+            "dest_exists": std::fs::symlink_metadata(&dest).is_ok(),
+            "collection": super::fork::DEFAULT_COLLECTION,
+            "root": raw,
+            "digest": digest(&plan, "local", &fingerprint),
+            "accounts": link_agents(ctx, None)?,
+            // 保留本地内容时以哪一份为准：第一处有 SKILL.md 的
+            "from": plan.locations.iter().find(|l| l.hash.is_some()).map(|l| tilde(&l.path, home)),
+            "variants": plan.locations.iter().filter_map(|l| l.hash.clone()).collect::<std::collections::BTreeSet<_>>().len(),
+                });
+        }
+        Err(error) => out["local_error"] = json!(error.to_string()),
+    }
     let Some(repository) = plan.source["repository"].as_str().map(str::to_string) else {
         out["source_check"] = json!({"error": "认不出来源仓库，只能作为本机来源纳入"});
         return Ok(out);
@@ -754,6 +771,7 @@ pub(crate) fn preflight(ctx: &Context, req: &Request) -> Result<()> {
             "--path",
             "--agents",
             "--undo",
+            "--dest",
         ],
         &["--keep-local", "--accept-source"],
     )?;
@@ -772,6 +790,9 @@ pub(crate) fn preflight(ctx: &Context, req: &Request) -> Result<()> {
     }
     req.value("--digest")
         .ok_or_else(|| anyhow!("需要 --digest（先预览）"))?;
+    if req.value("--dest").is_some() && !req.flag("--keep-local") {
+        bail!("--dest 只用于保留本地内容（--keep-local）");
+    }
     if let Some(reference) = req.value("--ref") {
         if !track::valid_ref_name(reference) || reference.contains('*') {
             bail!("--ref 不合法：{reference}");
@@ -1074,6 +1095,11 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     progress.start("check", None);
     let plan = local_plan(ctx, name)?;
     let home = ctx.home_dir.clone();
+    let local = if keep_local {
+        Some(local_destination(ctx, req)?)
+    } else {
+        None
+    };
 
     // 重算指纹：本地内容、处理方式、目标版本都要与预览一致
     let (mode, collection, reference, target_path, repository, restrict) = if plan.kind == "dedupe"
@@ -1090,7 +1116,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
             None,
         )
     } else if keep_local {
-        if digest(&plan, "local", &Value::Null) != expected {
+        if digest(&plan, "local", &local.as_ref().unwrap().1) != expected {
             bail!("预览后内容变了，没有动手；请重新预览");
         }
         (
@@ -1169,7 +1195,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
         ],
         "local" => &[
             ("check", "核对预览后有没有变化"),
-            ("copy", "复制到 ~/my-skills"),
+            ("copy", "复制到个人集合目录"),
             ("backup", "备份并移走原来的目录"),
             ("register", "登记来源"),
             ("link", "链接到账号"),
@@ -1197,7 +1223,7 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
     journal.save(name, mode, false)?;
 
     let run = |journal: &mut Journal, progress: &mut Progress| -> Result<()> {
-        // 保留本地内容：先复制到 ~/my-skills/<技能>
+        // Preserve local content in the previewed collection directory.
         if mode == "local" {
             progress.start("copy", None);
             let from = plan
@@ -1206,7 +1232,11 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
                 .find(|l| l.hash.is_some())
                 .and_then(|l| l.content.clone())
                 .ok_or_else(|| anyhow!("找不到 {name} 的内容"))?;
-            let dest_root = resolve_loose(&expand_home(super::fork::DEFAULT_DEST, &home));
+            let dest_root = resolve_loose(&expand_home(&local.as_ref().unwrap().0, &home));
+            let current = local_destination(ctx, req)?;
+            if current != *local.as_ref().unwrap() {
+                bail!("预览后个人集合目录变了，请重新预览");
+            }
             let dest = dest_root.join(name);
             if std::fs::symlink_metadata(&dest).is_ok() {
                 bail!("{} 已经存在，不覆盖", dest.display());
@@ -1241,13 +1271,13 @@ pub(crate) fn apply(ctx: &Context, req: &Request) -> Result<Value> {
                 let mut def = previous.clone().unwrap_or_else(|| json!({}));
                 let same_dir = def["source_path"].as_str().is_some_and(|raw| {
                     resolve_loose(&expand_home(raw, &home))
-                        == resolve_loose(&expand_home(super::fork::DEFAULT_DEST, &home))
+                        == resolve_loose(&expand_home(&local.as_ref().unwrap().0, &home))
                 });
                 if previous.is_some() && !same_dir {
                     bail!("来源 {collection} 已经指向别处");
                 }
                 if previous.is_none() {
-                    def = json!({"source_path": super::fork::DEFAULT_DEST});
+                    def = json!({"source_path": local.as_ref().unwrap().0});
                 }
                 def
             }

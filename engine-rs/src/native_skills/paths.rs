@@ -119,6 +119,81 @@ pub fn collection_source_root(ctx: &Context, coll: &CollectionDef) -> PathBuf {
     }
 }
 
+/// New personal collections live below ~/skills; existing locations never move.
+pub(super) fn personal_source_path(
+    ctx: &Context,
+    meta: &super::status::DomainMetadata,
+    collection: &str,
+    requested: Option<&str>,
+) -> Result<String> {
+    if collection.is_empty()
+        || collection.starts_with('-')
+        || !collection
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        bail!("集合名只能用小写字母、数字和连字符: {collection}");
+    }
+    let existing = meta.collections.get(collection).filter(|c| !c.deleted);
+    if existing.is_some_and(|c| c.source_path.is_none()) {
+        bail!("集合 {collection} 不是本地来源，请选择其他集合");
+    }
+    let raw = requested
+        .map(str::to_string)
+        .or_else(|| existing.and_then(|c| c.source_path.clone()))
+        .unwrap_or_else(|| format!("~/skills/{collection}"));
+    let root = expand_home(&raw, &ctx.home_dir);
+    if !root.is_absolute()
+        || raw.chars().any(char::is_control)
+        || root
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        bail!("目录要写无歧义的绝对路径或以 ~/ 开头");
+    }
+    #[cfg(windows)]
+    if root.components().any(|component| matches!(component, std::path::Component::Normal(name) if name.to_string_lossy().ends_with(['.', ' ']) || name.to_string_lossy().contains(':'))) {
+        bail!("Windows 集合目录的路径段不能以点或空格结尾，也不能包含冒号");
+    }
+    let resolved = crate::native_profiles::paths::resolved;
+    let real_root = resolved(&root)?;
+    if let Some(existing) = existing {
+        if resolved(&collection_source_root(ctx, existing))? != real_root {
+            bail!("集合 {collection} 已经指向别处；换个集合名或目录");
+        }
+    }
+    crate::native_profiles::paths::validate_shell_target(ctx, &root, true)?;
+    crate::native_mcp::targets::validate_target_path(&root.join(".agent-manager-path-check"))?;
+    #[cfg(windows)]
+    for ancestor in root.ancestors() {
+        use std::os::windows::fs::MetadataExt;
+        if std::fs::symlink_metadata(ancestor).is_ok_and(|metadata| {
+            metadata.file_attributes()
+                & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+                != 0
+        }) {
+            bail!("个人集合目录不能包含联接或重解析点");
+        }
+    }
+    for agent in meta.agents.values() {
+        let target = resolved(&agent.skills_dir)?;
+        if crate::native_profiles::paths::overlaps(&real_root, &target) {
+            bail!("个人集合目录与助手技能目录重叠，拒绝复制");
+        }
+    }
+    for other in meta
+        .collections
+        .values()
+        .filter(|c| !c.deleted && c.name != collection && c.source_path.is_some())
+    {
+        let source = resolved(&collection_source_root(ctx, other))?;
+        if crate::native_profiles::paths::overlaps(&real_root, &source) {
+            bail!("个人集合目录与来源 {} 重叠，请选择独立目录", other.name);
+        }
+    }
+    Ok(raw)
+}
+
 /// 本地来源里某个技能的实际目录：按发现结果取（来源本身就是一个技能文件夹、或 skill_paths
 /// 指向更深的目录时都对得上），发现不到时退回「源根/技能名」。
 fn local_skill_dir(ctx: &Context, coll: &CollectionDef, skill: &str) -> PathBuf {

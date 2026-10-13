@@ -1182,3 +1182,30 @@ add, including takeover, refuses another active assignment. Switching requires
 the original-source/version replacement flags. Integration and actual isolated
 CLI readback verify ownership and unchanged links; the UI regression verifies
 that the misleading takeover/removal controls are absent.
+
+### 2026-10-12: personal skill collection directories
+
+New personal copies default to `~/skills/<collection>/<skill>/SKILL.md` and
+support a custom collection directory. Existing local collections retain their
+registered paths. Unmanaged-skill adoption previews the complete destination;
+changing it requires a fresh digest and preserves the selected assistants.
+Account directories, manager data, assistant skill roots, directory aliases,
+and overlapping local sources are rejected as personal-copy destinations.
+Assistant entries remain compatible one-level skill links; existing content is
+not migrated and nested assistant discovery is not assumed.
+
+Local checks passed 462 engine tests, 27 Tauri tests and 604 frontend tests
+(four platform-specific skips), plus the production frontend and native debug
+builds. Isolated CLI readback verified default and custom directories, custom
+directory reuse, single-assistant source switching, stale-directory refusal,
+adoption undo, and unchanged simulated account files. All three new integration
+cases failed against the previous source for the expected missing behavior.
+Browser acceptance inspected 12 dialog states across 1000 and 760 px, including
+long paths, read-only preview refresh and cancellation without writes.
+
+The isolated macOS native preview launched at the committed window geometry.
+Native click acceptance was blocked by macOS Accessibility access and remains
+unverified. Current Windows runtime acceptance is pending CI; prior platform
+receipts do not establish acceptance of this revision. No real account files,
+registrations, sessions or launch scripts were changed. No release, tag or
+installer was published.
