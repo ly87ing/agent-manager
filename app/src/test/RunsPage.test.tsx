@@ -52,6 +52,22 @@ function routes(): Record<string, Envelope | ((args: string[]) => Promise<Envelo
 }
 
 describe("执行中心", () => {
+  it("历史操作详情读取失败后可原地重试，不触发写操作", async () => {
+    const r = routes();
+    const healthy = r["runs:get"] as (args: string[]) => Promise<Envelope>;
+    let reads = 0;
+    r["runs:get"] = async (args) => ++reads === 1
+      ? makeEnvelope(null, { ok: false, errors: [{ code: "DETAIL_READ_FAILED", element: null, message: "详情暂不可读" }] })
+      : healthy(args);
+    const { calls } = renderWithEngine(<RunsPage />, r);
+    await userEvent.click(within(await screen.findByTestId("run-row-20260905T235900Z-legacy1")).getByText("详情"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("详情暂不可读");
+    await userEvent.click(screen.getByRole("button", { name: "重新读取" }));
+    expect(await screen.findByText("mcp:example-search")).toBeInTheDocument();
+    expect(reads).toBe(2);
+    expect(calls.some((call) => call.command === "mcp:apply" || call.command === "runs:clear")).toBe(false);
+  });
+
   it("历史列表展示运行 ID、操作数、最后时间，并查看结构化操作详情", async () => {
     const { calls } = renderWithEngine(<RunsPage />, routes());
     const row = await screen.findByTestId("run-row-20260905T235900Z-legacy1");

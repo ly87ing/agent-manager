@@ -275,7 +275,9 @@ export default function RunsPage() {
               <Skeleton className="h-14 w-full" />
             </div>
           ) : detailQuery.isError ? (
-            <p className="text-xs text-destructive">{t("操作详情读取失败")}</p>
+            <PageError title={t("操作详情读取失败")} error={detailQuery.error} onRetry={() => void detailQuery.refetch()} retrying={detailQuery.isFetching} />
+          ) : !detailQuery.data.ok ? (
+            <PageError title={t("操作详情读取失败")} errors={detailQuery.data.errors} onRetry={() => void detailQuery.refetch()} retrying={detailQuery.isFetching} />
           ) : (
             <OperationDetail data={detailQuery.data.data} />
           )}
