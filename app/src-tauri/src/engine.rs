@@ -38,6 +38,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ));
     };
     let allowed = match (domain, verb) {
+        ("launch", "build") => true,
         ("resources", "targets") => true,
         ("system", "audit" | "discover" | "refresh-upstream") => true,
         ("secrets", "status" | "set" | "source") => true,
@@ -123,6 +124,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
     let (domain, verb) = command.split_once(':').unwrap_or(("", ""));
     let mut specs: Vec<(&'static str, ArgValueKind)> = Vec::new();
     match (domain, verb) {
+        ("launch", "build") => specs.push(("--spec", ArgValueKind::JsonValue)),
         ("accounts", "command") => {
             specs.push(("--only", ArgValueKind::ElementId));
             specs.push(("--operation", ArgValueKind::AccountOperation));
@@ -783,6 +785,15 @@ pub async fn engine_invoke(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_generation_is_exposed_without_retired_account_commands() {
+        assert!(validate_command("launch:build").is_ok());
+        assert!(validate_args("launch:build", &["--spec".into(), "{}".into()]).is_ok());
+        assert!(validate_args("launch:build", &["--secret-value".into(), "value".into()]).is_err());
+        assert!(validate_command("aliases:apply").is_err());
+        assert!(validate_command("accounts:launch").is_err());
+    }
 
     #[test]
     fn controlled_account_commands_reject_unsupported_operations_and_secret_flags() {

@@ -2,6 +2,13 @@
 
 The 2026-10-11 user requirement supersedes earlier account designs: Agent Manager manages MCP, rules, skills, their sources, and their extension dependencies. It must never manage accounts.
 
+The 2026-10-13 user request adds an independent general launch tool: configurable
+applications or executables, arguments, time zones, and shortcut names. Generating
+or copying commands is read-only. Local shortcut writes require a preview and
+confirmation; application launch is a separate explicit action. This exception
+does not enable the retired account or `aliases` APIs. See
+[Launch configurations](subsystems/launch-configurations.md).
+
 ## Product boundary
 
 Account creation, registration edits, removal, switching, login/logout, launch commands, credentials, provider/model/runtime settings, and assistant installation/upgrades are retired. Existing account directories, authentication files, sessions, configuration, shell files, and historical launch scripts are preserved. Official assistant tools remain responsible for them.

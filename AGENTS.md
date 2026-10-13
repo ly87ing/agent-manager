@@ -2,8 +2,8 @@
 
 ## Current goal
 
-- Implement a Tauri 2 interface and a native Rust backend for MCP, rules, skills, and their extension dependencies only. [docs/EXTENSIONS-ONLY.md](docs/EXTENSIONS-ONLY.md) takes precedence over earlier account designs. Data semantics remain in `docs/GUI-REDESIGN.md`; acceptance history is in `docs/goal-rust-gui.md`.
-- Never manage accounts: no creation, registration edits, removal, switching, login/logout, launch commands, credentials, provider/model/runtime changes, or assistant lifecycle actions. Historical account registrations are immutable resource-location metadata. Preserve real account files, sessions, directories, and existing scripts.
+- Implement a Tauri 2 interface and a native Rust backend for MCP, rules, skills, their extension dependencies, and user-controlled general launch configurations. The 2026-10-13 launch-tool request adds command generation, confirmed shortcut writes, and explicit application launch; it does not restore account management. [docs/EXTENSIONS-ONLY.md](docs/EXTENSIONS-ONLY.md) takes precedence over earlier account designs. Data semantics remain in `docs/GUI-REDESIGN.md`; acceptance history is in `docs/goal-rust-gui.md`.
+- Never manage accounts: no creation, registration edits, removal, switching, login/logout, account-bound launch commands, credentials, provider/model/runtime changes, or assistant lifecycle actions. General launch configurations never inspect account identity or credentials. Historical account registrations are immutable resource-location metadata. Preserve real account files, sessions, directories, and existing scripts.
 - The desktop app and CLI reuse the same Rust library. The new version does not depend on Python, `manage.sh`, legacy adapters, or the source directory.
 - Python is no longer maintained, and the user has authorized its removal. Do not add Python features, projection compatibility layers, or obligations to compare two implementations.
 - A goal is not an implemented state. Do not call a candidate complete until it has passed compilation, actual operation, and independent acceptance.
