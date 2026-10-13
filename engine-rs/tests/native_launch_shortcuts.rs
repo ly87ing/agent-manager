@@ -27,7 +27,12 @@ impl Fixture {
         .unwrap();
         Self { root, ctx }
     }
-    fn run(&self, command: &str, args: Vec<String>) -> agent_manager_engine::Envelope {
+    fn run(&self, command: &str, mut args: Vec<String>) -> agent_manager_engine::Envelope {
+        // This fixture exercises zsh on every Unix host, including Linux where
+        // the product's default shell is Bash.
+        if !cfg!(windows) && !args.iter().any(|arg| arg == "--shell") {
+            args.extend(["--shell".into(), "zsh".into()]);
+        }
         execute(
             &self.ctx,
             &Request {

@@ -126,9 +126,11 @@ fn real_cli_launches_an_independent_application_with_literal_args_and_scoped_tim
     };
     let mut recipe = spec(target.to_str().unwrap());
     recipe["args"] = json!([ready, done, "O'Brien", "$(touch unexpected)", ""]);
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
+    let output_file = f.root.join("launch-result.json");
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
         .env("HOME", &f.ctx.home_dir)
         .env("AGENT_MANAGER_DATA_DIR", &f.ctx.data_dir)
+        .stdout(std::fs::File::create(&output_file).unwrap())
         .args([
             "launch:run",
             "--spec",
@@ -138,14 +140,10 @@ fn real_cli_launches_an_independent_application_with_literal_args_and_scoped_tim
             "--confirm",
             "--json",
         ])
-        .output()
+        .status()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(status.success(), "CLI launch request failed: {status}");
+    let result: Value = serde_json::from_slice(&std::fs::read(output_file).unwrap()).unwrap();
     assert_eq!(result["ok"], true, "{result}");
     assert_eq!(result["data"]["timezone_verified"], false);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
