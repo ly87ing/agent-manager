@@ -100,7 +100,7 @@ export default function LaunchPage() {
     setSelected(null);
     setEditing(true);
   }
-  function closeEditor() {
+  function cancelEditing() {
     setEditing(false);
     setSelected(null);
     setBuilt(null);
@@ -186,7 +186,7 @@ export default function LaunchPage() {
         <h2 className="text-sm font-medium">{selected ? t("编辑配置") : t("新建配置")}</h2>
         <div className="flex flex-wrap gap-2">
           {selected && <button type="button" className={button} disabled={busy} onClick={startNew}>{t("新增配置")}</button>}
-          <button type="button" className={button} disabled={busy} onClick={closeEditor}>{t("关闭编辑")}</button>
+          <button type="button" className={button} disabled={busy} onClick={cancelEditing}>{t("取消")}</button>
         </div>
       </div>
       <fieldset disabled={busy} className="min-w-0 space-y-3 disabled:opacity-70">

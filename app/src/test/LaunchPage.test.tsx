@@ -78,7 +78,7 @@ describe("launch configuration controls", () => {
     expect(screen.queryByRole("textbox", { name: "程序路径或命令" })).toBeNull();
     await startNew();
     expect(screen.getByRole("textbox", { name: "程序路径或命令" })).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "关闭编辑" }));
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.queryByRole("textbox", { name: "程序路径或命令" })).toBeNull();
   });
 

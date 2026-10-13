@@ -9,7 +9,6 @@ export const messages = {
   "已保存配置": "Saved configurations",
   "尚未保存配置。点击“新增配置”创建常用应用或命令。": "No saved configurations. Choose New configuration to add a frequently used application or command.",
   "新增配置": "New configuration",
-  "关闭编辑": "Close editor",
   "打开配置": "Open configuration",
   "配置操作": "Configuration actions",
   "删除配置": "Delete configuration",
