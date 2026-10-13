@@ -1384,3 +1384,23 @@ and real applications' displayed time remain unaccepted.
 - macOS refuses enabling from translocated or read-only locations. Agent Manager
   does not enable startup automatically as part of installation, launch, or this
   change.
+
+### 2026-10-13: Remove retired backend implementations
+
+Retired account writers, authentication probes, controlled command rendering,
+assistant installation, runtime settings, shell-alias writers and old database
+credential migration are deleted. Immutable extension metadata, path protection,
+location locks, clean MCP subprocesses and credential ownership remain. The old
+launcher only refuses execution; user files and database contents are untouched.
+
+The backend slice passed the full engine suite and dependency lifecycle harness,
+28 Tauri tests, 635 frontend tests, type checking, production frontend build,
+Rust formatting and all-target engine checking. Focused isolated CLI scope,
+MCP/rules/secrets, dependency and path regressions passed with file readback.
+Independent source review found no removed active extension guard. The two
+candidate-path unit tests now exercise the retained resource guards directly.
+Local links in the four updated architecture references passed checking.
+
+No installed application, user environment, installer, tag or Release was changed.
+Native Windows/Linux interaction and desktop update acceptance were not rerun.
+Frontend helper, mock, bridge-argument and contract cleanup remains a follow-up.

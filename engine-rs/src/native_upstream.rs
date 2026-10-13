@@ -1,27 +1,8 @@
-//! Rust 原生 system:refresh-upstream：上游探测宇宙（agents/mcp/skills）的唯一
-//! 写探测值命令，及三域 status freshness 回填的只读缓存读取。
+//! Explicit upstream checks for MCP, skills and extension dependency programs.
 //!
-//! 语义契约（冻结）：
-//! - 探测缓存落 SQLite `upstream_probes` 表（store::UPSTREAM_PROBES_DDL）；只有
-//!   refresh-upstream 写（Immediate 事务逐元素 upsert），status 经
-//!   `load_probe_cache` 只读连接读取，缺表/缺行一律 freshness unknown 且不建表。
-//! - 探测宇宙：enabled 且首选 provider install 命令可解析出 npm 包的 agents
-//!   （detect-only 语义不变：可探测但不因此获得收敛动作）+ 各助手实际 MCP 条目与
-//!   已保存项中的 npx 包与 uvx `git+repo@branch` 源（每个服务名一份）+ enabled 且有
-//!   url 的 skills 集合仓库。
-//!   rules/aliases/secrets 恒 not-applicable，不参与。
-//! - 探测器带超时（网络 ≤30s）：npm 包 `npm view <pkg> version`；agents 本地版本
-//!   沿用 bin --version；MCP npx 本地版本读 npx 缓存
-//!   （~/.npm/_npx/*/node_modules/<pkg>/package.json）；skills 集合本地 HEAD
-//!   `git rev-parse HEAD`、上游 `git ls-remote <url> HEAD`；uvx git 源上游
-//!   git ls-remote、本地 current=null → state unknown（对齐旧语义）。单元素失败
-//!   → 该元素 unknown+error 类别，不拖垮整批。
-//! - 比较：语义化版本元组可比 → current/behind/ahead；commit 等不可比 → 相同
-//!   current、不同 behind；current/upstream 缺失 → unknown。
-//! - 缓存不存任何凭据：只写版本/commit 字符串、探测机制名与固定错误类别
-//!   （不拼接 URL/命令/环境值，错误类别无需再脱敏）。
-//! - refresh-upstream --offline 拒绝（OFFLINE_NETWORK_DENIED）；--only 过滤未知
-//!   元素报 USAGE_ERROR；不取全局 apply 锁、不改任何用户配置/策略。
+//! Only refresh-upstream writes the probe cache; status reads it without writes.
+//! Network calls have bounded deadlines and store only versions, commits and fixed
+//! error categories. Assistant lifecycle and version probes are retired.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -33,7 +14,6 @@ use rusqlite::TransactionBehavior;
 use serde_json::{json, Value};
 
 use crate::native::{Context, DispatchError, DispatchResult, Request};
-use crate::native_agents::{self, AgentDef};
 use crate::store;
 
 const NETWORK_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -148,54 +128,6 @@ pub(crate) fn freshness_from_cache(
 // 探测宇宙分类
 // ---------------------------------------------------------------------------
 
-/// 从 `npm install [-g] <pkg>...` 命令提取包名（对齐旧 Python
-/// _extract_npm_package_name：scoped 包只有第二个 @ 才是版本分隔）。
-fn extract_npm_package_name(command: &str) -> Option<String> {
-    let tokens: Vec<&str> = command.split_whitespace().collect();
-    if tokens.len() < 3 || tokens[0] != "npm" || tokens[1] != "install" {
-        return None;
-    }
-    for token in &tokens[2..] {
-        if token.starts_with('-') {
-            continue;
-        }
-        let name = if let Some(stripped) = token.strip_prefix('@') {
-            match stripped.find('@') {
-                Some(pos) => &token[..pos + 1],
-                None => token,
-            }
-        } else {
-            token.split('@').next().unwrap_or(token)
-        };
-        if name.is_empty() {
-            return None;
-        }
-        return Some(name.to_string());
-    }
-    None
-}
-
-/// agent 是否在探测宇宙内：enabled 且首选 provider 的 install 命令可解析出
-/// npm 包。detect-only（安装来源不可管理）不改变可探测性。
-pub(crate) fn agent_probe_package(def: &AgentDef) -> Option<String> {
-    if !def.enabled {
-        return None;
-    }
-    // 显式声明优先：官方安装器装的助手没有包名可从命令里推，但 npm 上发的是同一份版本号
-    if let Some(explicit) = def.upstream_npm() {
-        return Some(explicit.to_string());
-    }
-    // 旧版本存下的定义没有这个字段：按助手 id 回落到内置定义里的包名（只用于查新版本，不安装）
-    if let Some(builtin) = store::builtin_policy()
-        .pointer(&format!("/agents/definitions/{}/upstream_npm", def.id))
-        .and_then(Value::as_str)
-    {
-        return Some(builtin.to_string());
-    }
-    let (install, _) = def.commands.install.as_ref()?;
-    extract_npm_package_name(install)
-}
-
 pub(crate) enum McpProbeSpec {
     Npx(String),
     UvxGit { repo: String, branch: String },
@@ -228,10 +160,6 @@ pub(crate) fn classify_mcp_probe(definition: &Value) -> Option<McpProbeSpec> {
 }
 
 enum ProbeKind {
-    AgentNpm {
-        bin: String,
-        package: String,
-    },
     McpNpx {
         package: String,
     },
@@ -700,29 +628,6 @@ fn probe_target(ctx: &Context, target: &ProbeTarget) -> ProbeRecord {
         Option<String>,
         Option<&'static str>,
     ) = match &target.kind {
-        ProbeKind::AgentNpm { bin, package } => {
-            let current = native_agents::resolve_bin(&ctx.home_dir, bin)
-                .as_deref()
-                .and_then(native_agents::probe_version);
-            match npm_view(ctx, package) {
-                None => (
-                    PROBE_NPM_VIEW,
-                    "unknown",
-                    current,
-                    None,
-                    Some(ERR_NPM_VIEW_FAILED),
-                ),
-                Some(upstream) => {
-                    let state = compare_freshness(current.as_deref(), Some(&upstream));
-                    let error = if state == "unknown" {
-                        Some(ERR_LOCAL_VERSION_MISSING)
-                    } else {
-                        None
-                    };
-                    (PROBE_NPM_VIEW, state, current, Some(upstream), error)
-                }
-            }
-        }
         ProbeKind::McpNpx { package } => {
             let (name, pinned) = split_package_spec(package);
             // 定义里钉死了版本，跑的就是它；没钉死才去看本机缓存拉到过哪些。

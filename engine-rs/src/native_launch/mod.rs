@@ -95,7 +95,7 @@ impl Recipe {
                 || (normalized.len() == 4
                     && (normalized.starts_with("com") || normalized.starts_with("lpt"))
                     && matches!(normalized.as_bytes()[3], b'1'..=b'9'));
-            if !crate::native_aliases::model::valid_alias_name(&variant.name)
+            if !valid_alias_name(&variant.name)
                 || variant.name.len() > 80
                 || !names.insert(normalized)
                 || (self.platform == "windows" && reserved)
@@ -132,6 +132,15 @@ impl Recipe {
         }
         values
     }
+}
+
+fn valid_alias_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 fn text(value: &str, max: usize) -> Result<()> {

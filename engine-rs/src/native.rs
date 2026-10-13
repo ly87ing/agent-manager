@@ -227,7 +227,6 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
         );
         return envelope;
     }
-    let is_agent_apply = request.command.replace('.', ":") == "agents:apply";
     // 纳入管理会移动账号目录里的内容并建链接：与 skills:apply 同样取排他锁
     let is_skill_apply = matches!(
         request.command.replace('.', ":").as_str(),
@@ -235,49 +234,13 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     );
     let is_mcp_apply = request.command.replace('.', ":") == "mcp:apply";
     let is_rule_apply = request.command.replace('.', ":") == "rules:apply";
-    let is_alias_apply = request.command.replace('.', ":") == "aliases:apply";
-    let is_profile_apply = matches!(
-        request.command.replace('.', ":").as_str(),
-        "profiles:apply" | "profiles:apply-definition" | "profiles:create"
-    );
-    let is_profile_seed = request.command.replace('.', ":") == "profiles:seed";
-    let is_profile_shared_apply = request.command.replace('.', ":") == "profiles:shared-apply";
-    // 运行参数写助手配置文件，与别的写动作同样要排他；校验在 configure 内部做，
-    // 这里只负责取锁。
-    let is_agent_configure = matches!(
-        request.command.replace('.', ":").as_str(),
-        "agents:configure"
-    );
     // 程序：安装、升级、回退、纳入会动数据目录与用户的全局安装，取排他锁
     let is_program_apply = request.command.replace('.', ":") == "programs:apply";
     let is_secret_write = matches!(
         request.command.replace('.', ":").as_str(),
         "secrets:set" | "secrets:source" | "secrets:migrate-legacy"
     );
-    let (needs_lock, domain_label, diag_code) = if is_agent_apply {
-        match crate::native_agents::preflight_apply(ctx, request) {
-            Ok(()) => (true, "Agent", "AGENT_ERROR"),
-            Err(err) => {
-                let env = Envelope::new(
-                    request.command.replacen(':', ".", 1),
-                    mode_of(request),
-                    Lock {
-                        held: false,
-                        pid: None,
-                    },
-                    request.run_id.clone(),
-                    Value::Object(Map::new()),
-                    vec![],
-                    vec![diagnostic(
-                        "AGENT_ERROR",
-                        None,
-                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
-                    )],
-                );
-                return env;
-            }
-        }
-    } else if is_skill_apply {
+    let (needs_lock, domain_label, diag_code) = if is_skill_apply {
         match crate::native_skills::preflight_apply(ctx, request) {
             Ok(()) => (true, "Skill", "SKILL_ERROR"),
             Err(err) => {
@@ -346,82 +309,6 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
                 return env;
             }
         }
-    } else if is_alias_apply {
-        match crate::native_aliases::preflight_apply(ctx, request) {
-            Ok(()) => (true, "Aliases", "ALIAS_ERROR"),
-            Err(err) => {
-                let env = Envelope::new(
-                    request.command.replacen(':', ".", 1),
-                    mode_of(request),
-                    Lock {
-                        held: false,
-                        pid: None,
-                    },
-                    request.run_id.clone(),
-                    Value::Object(Map::new()),
-                    vec![],
-                    vec![diagnostic(
-                        crate::native_aliases::error_code(&err),
-                        None,
-                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
-                    )],
-                );
-                return env;
-            }
-        }
-    } else if is_profile_apply {
-        match crate::native_profiles::preflight_apply(ctx, request) {
-            Ok(()) => (true, "Profiles", "PROFILE_ERROR"),
-            Err(err) => {
-                let env = Envelope::new(
-                    request.command.replacen(':', ".", 1),
-                    mode_of(request),
-                    Lock {
-                        held: false,
-                        pid: None,
-                    },
-                    request.run_id.clone(),
-                    Value::Object(Map::new()),
-                    vec![],
-                    vec![diagnostic(
-                        "PROFILE_ERROR",
-                        None,
-                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
-                    )],
-                );
-                return env;
-            }
-        }
-    } else if is_profile_seed || is_profile_shared_apply {
-        let preflight = if is_profile_seed {
-            crate::native_profiles::preflight_seed(ctx, request)
-        } else {
-            crate::native_profiles::preflight_shared(ctx, request)
-        };
-        match preflight {
-            Ok(()) => (true, "Profiles", "PROFILE_ERROR"),
-            Err(err) => {
-                let env = Envelope::new(
-                    request.command.replacen(':', ".", 1),
-                    mode_of(request),
-                    Lock {
-                        held: false,
-                        pid: None,
-                    },
-                    request.run_id.clone(),
-                    Value::Object(Map::new()),
-                    vec![],
-                    vec![diagnostic(
-                        "PROFILE_ERROR",
-                        None,
-                        crate::sanitize::sanitize_diagnostic_message(&format!("{err:#}")),
-                    )],
-                );
-                return env;
-            }
-        }
-    } else if is_agent_configure {
-        (true, "Agent", "AGENT_ERROR")
     } else if is_secret_write {
         (true, "Secrets", "SECRET_ERROR")
     } else if is_program_apply {
@@ -550,23 +437,6 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
     }
     match (domain, verb) {
         ("resources", "targets") => resource_targets(ctx, request),
-        ("accounts", "command") => crate::native_account_context::command_request(ctx, request)
-            .map(|data| (data, vec![]))
-            .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}"))),
-        ("agents", "status" | "apply") => crate::native_agents::handle(ctx, request)
-            .map(|data| (data, vec![]))
-            .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
-        // 运行参数落到助手自己的配置文件；与装卸升级分开，那条走 shell 命令，这条写文件
-        ("agents", "configure") => {
-            crate::native_agent_settings::apply(ctx, request).map(|data| (data, vec![]))
-        }
-        ("agents", "preview-runtime") => {
-            crate::native_agent_settings::preview_runtime(ctx, request).map(|data| (data, vec![]))
-        }
-        // 官方账号登录状态：用官方命令查一次，只读零写；一次要一两秒，只在界面上点它时才调
-        ("agents", "auth-status") => crate::native_auth::status_command(ctx, request)
-            .map(|data| (data, vec![]))
-            .map_err(|err| DispatchError::new("AGENT_ERROR", format!("{err:#}"))),
         (
             "skills",
             "status" | "apply" | "fork" | "versions" | "preview" | "adopt-preview" | "adopt",
@@ -589,21 +459,6 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
             crate::native_rules::handle(ctx, request)
                 .map(|data| (data, vec![]))
                 .map_err(|err| DispatchError::new("RULE_ERROR", format!("{err:#}")))
-        }
-        (
-            "profiles",
-            "status" | "preview" | "apply" | "apply-definition" | "create" | "adopt" | "seed"
-            | "shared-status" | "shared-apply",
-        ) => crate::native_profiles::handle(ctx, request)
-            .map(|data| (data, vec![]))
-            .map_err(|err| DispatchError::new("PROFILE_ERROR", format!("{err:#}"))),
-        // 别名以 rc 文件受管区块的实际行为准：apply 写文件（取锁），丢弃旧版保存的别名只写库
-        ("aliases", "status" | "preview" | "apply" | "discard-legacy") => {
-            crate::native_aliases::handle(ctx, request)
-                .map(|data| (data, vec![]))
-                .map_err(|err| {
-                    DispatchError::new(crate::native_aliases::error_code(&err), format!("{err:#}"))
-                })
         }
         ("secrets", "status" | "set" | "adopt" | "source" | "migrate-legacy") => {
             crate::native_secrets::handle(ctx, request)
@@ -842,14 +697,6 @@ fn url_userinfo_end(url: &str) -> Option<(usize, usize)> {
 /// 地址里是否内嵌了账号密码。这部分是凭据：不存库、不展示。
 pub(crate) fn url_has_userinfo(url: &str) -> bool {
     url_userinfo_end(url).is_some()
-}
-
-/// 展示地址时把内嵌的账号密码换成 `***`，其余原样。
-pub(crate) fn redact_url_userinfo(url: &str) -> String {
-    match url_userinfo_end(url) {
-        Some((start, end)) => format!("{}***{}", &url[..start], &url[end..]),
-        None => url.to_string(),
-    }
 }
 
 /// 变量名、请求头或配置键看起来是否承载凭据。
@@ -1638,19 +1485,11 @@ mod tests {
     }
 
     #[test]
-    fn url_userinfo_is_detected_and_redacted() {
+    fn url_userinfo_is_detected() {
         assert!(url_has_userinfo("https://u:p@gw.example.com/v1"));
         assert!(url_has_userinfo("http://token@10.0.0.5:8080"));
         assert!(!url_has_userinfo("https://gw.example.com/v1/users/@me"));
         assert!(!url_has_userinfo("https://gw.example.com/v1?x=a@b"));
-        assert_eq!(
-            redact_url_userinfo("https://u:p@gw.example.com/v1?q=1"),
-            "https://***@gw.example.com/v1?q=1"
-        );
-        assert_eq!(
-            redact_url_userinfo("https://gw.example.com/a@b"),
-            "https://gw.example.com/a@b"
-        );
     }
 
     #[test]

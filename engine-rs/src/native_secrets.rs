@@ -637,39 +637,6 @@ pub(crate) fn account_reference_names(
     Ok(names)
 }
 
-/// Actual runtime references for this account only. Saved/disabled snapshots own names
-/// but are not injected into a running CLI.
-pub(crate) fn account_mcp_secret_names(ctx: &Context, account: &str) -> Result<BTreeSet<String>> {
-    let raw = account
-        .strip_prefix("profiles:")
-        .or_else(|| account.strip_prefix("agents:"))
-        .unwrap_or(account);
-    let inv = crate::native_mcp::inventory::load(ctx)?;
-    let mut names = BTreeSet::new();
-    if let Some(scan) = inv.scan(raw) {
-        if scan.error.is_some() {
-            bail!("账号 MCP 配置不可读取或解析，拒绝启动");
-        }
-        for item in &scan.entries {
-            let view = item
-                .view
-                .as_ref()
-                .map_err(|_| anyhow::anyhow!("账号 MCP 条目不可解析，拒绝启动"))?;
-            if !view.enabled {
-                continue;
-            }
-            names.extend(all_referenced_vars(&scan.target.format, view)?);
-        }
-    }
-    let policy = store::effective_policy(ctx)?;
-    let native = implicit_native_mcp_refs(ctx, &policy, true, Some(raw))?;
-    if let Some(native_names) = native.get(raw) {
-        names.extend(native_names.iter().cloned());
-    }
-    validate_vars_ownership(ctx, raw, &names)?;
-    Ok(names)
-}
-
 /// The same location lock protects MCP-only accounts as controlled CLI accounts.
 pub(crate) fn lock_credential_account(
     ctx: &Context,
@@ -1072,24 +1039,6 @@ fn set_source(ctx: &Context, req: &Request) -> Result<Value> {
     Ok(json!({"domain": "secrets", "configured": !path.is_empty(), "created": created.is_some()}))
 }
 
-fn migrate_legacy(ctx: &Context, req: &Request) -> Result<Value> {
-    if !req.args.is_empty() {
-        bail!("secrets:migrate-legacy 不接受参数");
-    }
-    let owners = account_secret_owners(ctx)?;
-    if owners.values().any(|ids| ids.len() > 1) {
-        bail!("既有密钥变量被不同账号共同引用，拒绝迁移；原来源与数据库保持不变");
-    }
-    let ids = owners
-        .values()
-        .flat_map(|ids| ids.iter().cloned())
-        .collect();
-    let _account_locks = lock_owned_accounts(ctx, &ids)?;
-    let migrated = crate::secret_values::migrate_legacy(ctx)?;
-    crate::secret_values::refresh(ctx);
-    Ok(json!({"domain": "secrets", "migrated": migrated}))
-}
-
 pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let cmd = req.command.replace('.', ":");
     match cmd.as_str() {
@@ -1106,7 +1055,6 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         }
         "secrets:set" => set_value(ctx, req),
         "secrets:source" => set_source(ctx, req),
-        "secrets:migrate-legacy" => migrate_legacy(ctx, req),
         _ => bail!("secrets 域不支持命令 '{cmd}'"),
     }
 }

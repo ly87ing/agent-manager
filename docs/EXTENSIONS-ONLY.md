@@ -56,7 +56,11 @@ Assistant and provider environment namespaces are reserved using the existing id
 Unused frontend alias editors and hooks, account runtime drafts, connection presets, authentication command generators and shell selectors, and
 account seed/shared-setting builders are removed. Active extension target recognition and grouping remain.
 
-Account-named internal helpers that remain in the engine protect extension paths, locks, and credential ownership. Their presence does not expose account operations. Unreachable backend account implementations remain isolated behind the retired-command gate; their cleanup is separate from extension behavior changes.
+Retired backend account writers, authentication probes, controlled launch rendering,
+assistant installers, runtime-setting editors, and shell-alias writers are removed.
+Account-named helpers that remain protect extension paths, locks, immutable target
+metadata, and MCP credential ownership. They expose no account operation. The old
+launcher keeps only an immediate refusal so existing scripts cannot start an assistant.
 
 ## Verification
 

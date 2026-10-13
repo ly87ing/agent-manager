@@ -11,7 +11,6 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context as _, Result};
-use rusqlite::Connection;
 
 use crate::native::Context;
 
@@ -560,11 +559,6 @@ pub fn source_state() -> (Option<String>, Option<String>) {
     })
 }
 
-/// 外部密钥文件里已有的变量名（含空值）；只返回名字。
-pub fn stored_names() -> BTreeSet<String> {
-    CACHE.with(|cache| cache.borrow().values.keys().cloned().collect())
-}
-
 fn render_line(name: &str, value: &str) -> Result<String> {
     Ok(format!("{name}={}", serde_json::to_string(value)?))
 }
@@ -651,13 +645,6 @@ pub(crate) struct SecretWrite {
     new: Vec<u8>,
 }
 
-pub(crate) fn plan_set(ctx: &Context, name: &str, value: &str) -> Result<SecretWrite> {
-    if !valid_var_name(name) || value.is_empty() || value.chars().any(char::is_control) {
-        bail!("账号密钥变量或取值格式不正确");
-    }
-    plan_change(ctx, name, value)
-}
-
 pub(crate) fn plan_change(ctx: &Context, name: &str, value: &str) -> Result<SecretWrite> {
     if !valid_var_name(name) || value.contains('\0') {
         bail!("密钥变量或取值格式不正确");
@@ -716,146 +703,6 @@ impl SecretWrite {
 }
 
 /// 只补缺失值的合并结果：同名不同值时拒绝；没有要补的返回 None。不落盘。
-fn plan_merge_named(
-    ctx: &Context,
-    incoming: &BTreeMap<String, String>,
-) -> Result<(SecretWrite, Vec<String>)> {
-    let (_, path) = validated_source_path(ctx)?;
-    let text = read_secret_text(&path)?;
-    let current = parse_env(&text)?;
-    let mut updates = BTreeMap::new();
-    let mut merged = Vec::new();
-    for (name, value) in incoming {
-        if !valid_var_name(name) {
-            bail!("旧凭据变量名不合法，拒绝迁移或丢弃原记录");
-        }
-        match current.get(name) {
-            Some(existing) if existing.is_empty() => {
-                updates.insert(name.clone(), Some(value.clone()));
-            }
-            Some(existing) if existing != value => {
-                bail!("外部密钥文件中的变量 {name} 已存在且取值不同，拒绝覆盖")
-            }
-            Some(_) => {}
-            None => {
-                updates.insert(name.clone(), Some(value.clone()));
-            }
-        }
-        merged.push(name.clone());
-    }
-    merged.sort();
-    merged.dedup();
-    let new = if updates.is_empty() {
-        text.as_bytes().to_vec()
-    } else {
-        render_updated(&text, &updates)?.into_bytes()
-    };
-    if new.len() as u64 > MAX_SECRET_BYTES {
-        bail!("外部密钥文件超过安全写入上限");
-    }
-    Ok((
-        SecretWrite {
-            path,
-            old: text.into_bytes(),
-            new,
-        },
-        merged,
-    ))
-}
-
-pub fn legacy_count(ctx: &Context) -> Result<usize> {
-    let Some(conn) = crate::store::open_readonly(ctx)? else {
-        return Ok(0);
-    };
-    let exists: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'secret_values'",
-        [],
-        |row| row.get(0),
-    )?;
-    if exists == 0 {
-        return Ok(0);
-    }
-    Ok(
-        conn.query_row("SELECT COUNT(*) FROM secret_values", [], |row| {
-            row.get::<_, i64>(0)
-        })? as usize,
-    )
-}
-
-fn read_legacy(conn: &Connection) -> Result<BTreeMap<String, String>> {
-    let mut stmt = conn.prepare("SELECT name, value FROM secret_values ORDER BY name")?;
-    let rows = stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    })?;
-    let mut out = BTreeMap::new();
-    for row in rows {
-        let (name, value) = row?;
-        out.insert(name, value);
-    }
-    Ok(out)
-}
-
-/// Explicit migration holds a DB transaction and restores its own source write on failure.
-/// Account locks and reference ownership are checked by the command entry point.
-pub fn migrate_legacy(ctx: &Context) -> Result<Vec<String>> {
-    if legacy_count(ctx)? == 0 {
-        return Ok(Vec::new());
-    }
-    let Some(conn) = crate::store::open_readonly(ctx)? else {
-        return Ok(Vec::new());
-    };
-    let values = read_legacy(&conn)?;
-    drop(conn);
-    for name in values.keys() {
-        crate::native_secrets::validate_variable_owners(ctx, name, None)?;
-    }
-    let (write, migrated) = plan_merge_named(ctx, &values)?;
-    let mut conn = crate::store::open_write(ctx)?;
-    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    if read_legacy(&tx)? != values {
-        bail!("旧凭据已变化，没有迁移；请重新检查");
-    }
-    let owners = crate::native_secrets::account_secret_owners_in_policy(
-        ctx,
-        &crate::store::policy_from_connection(&tx)?,
-    )?;
-    for name in values.keys() {
-        let ids = owners
-            .get(&name.to_ascii_uppercase())
-            .cloned()
-            .unwrap_or_default();
-        if ids.len() > 1 || ids.iter().any(|id| id.starts_with("retired:")) {
-            bail!("旧凭据归属冲突或已退役，未迁移任何值");
-        }
-        if let Some(account) = ids.iter().next() {
-            crate::native_secrets::claim_variable_ownership(
-                ctx,
-                &tx,
-                account,
-                &std::collections::BTreeSet::from([name.clone()]),
-            )?;
-        }
-    }
-    write.validate(ctx)?;
-    tx.execute("DROP TABLE IF EXISTS secret_values", [])?;
-    let changed = write.old != write.new;
-    if changed {
-        write.commit(ctx)?;
-    }
-    let result = write
-        .verify_committed(ctx)
-        .and_then(|()| tx.commit().map_err(Into::into));
-    if let Err(err) = result {
-        if changed {
-            write.rollback(ctx).map_err(|_| {
-                anyhow::anyhow!("凭据迁移未提交，且外部来源发生并发变化；拒绝覆盖，请检查来源文件")
-            })?;
-        }
-        return Err(err.context("凭据迁移未提交，来源文件已恢复"));
-    }
-    Ok(migrated)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

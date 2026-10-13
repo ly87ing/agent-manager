@@ -1,8 +1,9 @@
 # GUI Platform Status
 
-The current product manages extensions only. Account, login, provider, launch,
-alias, quota, and assistant lifecycle capabilities described in older records
-below are retired. The Assistants page lists immutable extension-target metadata;
+The current product manages extensions and independent general launch recipes.
+Account management, login, provider settings, account-bound launch commands,
+shell-file alias management, quota, and assistant lifecycle capabilities described
+in older records below are retired. The Assistants page lists immutable extension-target metadata;
 it does not restore account management. See [current architecture](ARCHITECTURE.md)
 and [scope](EXTENSIONS-ONLY.md).
 

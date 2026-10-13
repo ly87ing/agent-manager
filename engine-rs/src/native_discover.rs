@@ -51,14 +51,6 @@ pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let mut data = Map::new();
     let mut summary = Map::new();
 
-    if selected.iter().any(|d| d == "agents") {
-        let agents = crate::native_agents::discover(ctx)?;
-        summary.insert(
-            "agents".into(),
-            json!(agents.as_array().map(Vec::len).unwrap_or(0)),
-        );
-        data.insert("agents".into(), agents);
-    }
     if selected.iter().any(|d| d == "skills") {
         let skills = crate::native_skills::discover_unmanaged(ctx)?;
         let items = skills["items"].as_array().cloned().unwrap_or_default();

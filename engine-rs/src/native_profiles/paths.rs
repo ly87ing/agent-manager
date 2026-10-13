@@ -428,14 +428,11 @@ fn path_definition(id: &str, kind: ProfileKind, raw: &str) -> ProfileDef {
     ProfileDef {
         id: id.to_string(),
         display_name: id.to_string(),
-        base_agent: kind.as_str().to_string(),
         kind,
         config_dir_raw: raw.to_string(),
         env: serde_json::Map::new(),
         base_url: None,
         env_key: None,
-        wire_api: None,
-        model: None,
         enabled: true,
     }
 }
@@ -452,42 +449,6 @@ pub(crate) fn validate_account_dir(
         &path_definition(id, kind, raw),
         &store::effective_policy(ctx)?,
     )
-}
-
-/// Validate the complete candidate, including collisions between newly imported accounts.
-pub(crate) fn validate_policy_account_paths(ctx: &Context, policy: &Value) -> Result<()> {
-    if let Some(definitions) = policy
-        .pointer("/agents/definitions")
-        .and_then(Value::as_object)
-    {
-        for (id, raw) in definitions {
-            if raw.get("_delete") == Some(&Value::Bool(true)) {
-                continue;
-            }
-            skills_dir_in_policy(ctx, policy, id)?;
-            if raw.get("profile").is_some() {
-                let dir = raw
-                    .pointer("/profile/config_dir")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| anyhow!("[{id}] 账号定义缺少可用的配置目录"))?;
-                config_dir_in_policy(ctx, &path_definition(id, ProfileKind::Claude, dir), policy)?;
-            }
-            if let Some(mcp) = raw.get("mcp_config") {
-                let target = mcp
-                    .get("path")
-                    .unwrap_or(mcp)
-                    .as_str()
-                    .ok_or_else(|| anyhow!("[{id}] MCP 目标路径必须是字符串"))?;
-                validate_account_resource_path(
-                    ctx,
-                    policy,
-                    id,
-                    &model::expand_home(target, &ctx.home_dir),
-                )?;
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Skill links may share their source, but their destination belongs to one account.
@@ -773,11 +734,6 @@ pub(crate) fn validate_account_resource_path(
     Ok(actual)
 }
 
-/// Resolve and check the final file before reading it or deriving a write baseline.
-pub(super) fn target(ctx: &Context, def: &ProfileDef, path: &Path) -> Result<PathBuf> {
-    target_in_policy(ctx, def, path, &store::effective_policy(ctx)?)
-}
-
 pub(crate) fn target_in_policy(
     ctx: &Context,
     def: &ProfileDef,
@@ -827,10 +783,20 @@ mod tests {
             "account-a":{"profile":{"config_dir":"~/independent"}},
             "account-b":{"profile":{"config_dir":"~/independent","env":"invalid"}},
         }}});
-        assert!(validate_policy_account_paths(&fixture.ctx, &policy).is_err());
+        assert!(config_dir_in_policy(
+            &fixture.ctx,
+            &path_definition("account-a", ProfileKind::Claude, "~/independent"),
+            &policy
+        )
+        .is_err());
         assert!(!fixture.ctx.home_dir.join("independent").exists());
         policy["agents"]["definitions"]["account-b"]["_delete"] = json!(true);
-        assert!(validate_policy_account_paths(&fixture.ctx, &policy).is_ok());
+        assert!(config_dir_in_policy(
+            &fixture.ctx,
+            &path_definition("account-a", ProfileKind::Claude, "~/independent"),
+            &policy
+        )
+        .is_ok());
         assert!(
             !fixture.ctx.data_dir.exists(),
             "validation must not initialize storage"
@@ -911,16 +877,55 @@ mod tests {
             "account-a":{"bin":"claude","profile":{"base_agent":"claude-code","config_dir":"~/independent"},
                 "mcp_config":{"path":"~/.claude.json","format":"json"}},
         }}});
-        assert!(validate_policy_account_paths(&fixture.ctx, &policy).is_err());
+        assert!(validate_account_resource_path(
+            &fixture.ctx,
+            &policy,
+            "account-a",
+            &model::expand_home(
+                policy["agents"]["definitions"]["account-a"]["mcp_config"]["path"]
+                    .as_str()
+                    .unwrap(),
+                &fixture.ctx.home_dir
+            )
+        )
+        .is_err());
         policy["agents"]["definitions"]["account-a"]["mcp_config"]["path"] =
             json!("~/independent/.claude.json");
-        assert!(validate_policy_account_paths(&fixture.ctx, &policy).is_ok());
+        assert!(validate_account_resource_path(
+            &fixture.ctx,
+            &policy,
+            "account-a",
+            &model::expand_home(
+                policy["agents"]["definitions"]["account-a"]["mcp_config"]["path"]
+                    .as_str()
+                    .unwrap(),
+                &fixture.ctx.home_dir
+            )
+        )
+        .is_ok());
         policy["agents"]["definitions"]["account-a"]["mcp_config"]["format"] = json!("toml");
-        assert!(validate_policy_account_paths(&fixture.ctx, &policy).is_err());
+        assert!(validate_account_resource_path(
+            &fixture.ctx,
+            &policy,
+            "account-a",
+            &model::expand_home(
+                policy["agents"]["definitions"]["account-a"]["mcp_config"]["path"]
+                    .as_str()
+                    .unwrap(),
+                &fixture.ctx.home_dir
+            )
+        )
+        .is_err());
         policy["agents"]["definitions"]["account-a"]["mcp_config"]["format"] = json!("json");
         policy["agents"]["definitions"]["claude-code"] =
             json!({"bin":"/dummy/claude-fixture","mcp_config":{"path":"~/wrong.json"}});
-        assert!(validate_policy_account_paths(&fixture.ctx, &policy).is_err());
+        assert!(validate_account_resource_path(
+            &fixture.ctx,
+            &policy,
+            "claude-code",
+            &fixture.ctx.home_dir.join("wrong.json")
+        )
+        .is_err());
         assert!(!fixture.ctx.home_dir.join("independent").exists());
         assert!(!fixture.ctx.home_dir.join("wrong.json").exists());
         assert!(!fixture.ctx.data_dir.exists());

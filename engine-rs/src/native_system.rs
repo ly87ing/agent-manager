@@ -1,5 +1,5 @@
 //! Rust 原生 system:audit：只读聚合已实现域
-//!（agents/skills/mcp/rules/aliases/secrets）的 status 元素，加原生
+//!（skills/mcp/rules/secrets）的 status 元素，加原生
 //! runtime/storage 状态，输出冻结的 AuditData 形状
 //! （status/version/sections/summary，对齐 app/src/lib/contract.ts）。
 //!
@@ -36,7 +36,6 @@ const MSG_UNSUPPORTED: &str = "当前来源或环境不受支持";
 const MSG_ABNORMAL: &str = "状态数据异常";
 const MSG_DOMAIN_FAILED: &str = "状态查询失败（已脱敏）";
 const MSG_RULES_ABSENT: &str = "还没有规则文件";
-const MSG_ALIASES_ABSENT: &str = "还没有终端快捷命令区块";
 
 fn entry(name: &str, status: &str, message: &str, category: Option<&str>) -> Value {
     let mut map = Map::new();
@@ -83,11 +82,9 @@ fn domain_status(ctx: &Context, domain: &str, offline: bool) -> anyhow::Result<V
         run_id: String::new(),
     };
     match domain {
-        "agents" => crate::native_agents::handle(ctx, &request),
         "skills" => crate::native_skills::handle(ctx, &request),
         "mcp" => crate::native_mcp::handle(ctx, &request),
         "rules" => crate::native_rules::handle(ctx, &request),
-        "aliases" => crate::native_aliases::handle(ctx, &request),
         "secrets" => crate::native_secrets::handle(ctx, &request),
         other => anyhow::bail!("未知审计子域 '{other}'"),
     }
@@ -102,11 +99,9 @@ fn wired_section(ctx: &Context, domain: &str, offline: bool) -> Vec<Value> {
                     let state = element.get("state").and_then(Value::as_str);
                     let item =
                         map_element_entry(element.get("id").and_then(Value::as_str), state, domain);
-                    // 规则与别名以实际文件为准：没有文件（区块）是正常的空状态，
-                    // 不是待生成的产物
+                    // An absent rule file is a normal empty state.
                     let absent = match domain {
                         "rules" => Some(MSG_RULES_ABSENT),
-                        "aliases" => Some(MSG_ALIASES_ABSENT),
                         _ => None,
                     };
                     if let Some(message) =
