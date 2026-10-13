@@ -159,19 +159,29 @@ describe("扫描外部技能目录与残留链接", () => {
     ]);
   });
 
-  it("残留链接可勾选清理：只删链接本身，确认文案分开说明", async () => {
+  it("残留链接可在本行清理，确认后重新扫描并消失", async () => {
+    let removed = false;
+    const initial = discoverData();
+    const afterRemoval = discoverData({
+      skills: { items: initial.skills?.items.filter((item) => item.name !== "ghost") ?? [], groups: initial.skills?.groups ?? [] },
+    });
     const { calls } = renderWithEngine(<DiscoverPanel />, {
       ...routes(),
-      "skills:apply": makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" }),
+      "system:discover": async () => makeEnvelope(removed ? afterRemoval : initial),
+      "skills:apply": async () => {
+        removed = true;
+        return makeEnvelope(makeApplyResult({ domain: "skills" }), { command: "skills.apply" });
+      },
     });
     await waitFor(() => expect(screen.getByTestId("takeover-dead-ghost-codex")).toBeInTheDocument());
 
-    await userEvent.click(screen.getByTestId("takeover-dead-ghost-codex").querySelector("input[type=checkbox]")!);
-    await userEvent.click(screen.getByTestId("takeover-run"));
-    expect(await screen.findByText(/条残留链接会被删除（只删链接本身，不动源目录）/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "开始接管" }));
+    await userEvent.click(screen.getByTestId("cleanup-link-ghost-codex"));
+    expect(await screen.findByText(/将删除所选的 1 条链接本身/)).toBeInTheDocument();
+    expect(screen.getByText("原目标：~/gone/ghost")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
 
     await waitFor(() => expect(calls.some((call) => call.command === "skills:apply")).toBe(true));
+    await waitFor(() => expect(screen.queryByTestId("takeover-dead-ghost-codex")).toBeNull());
     expect(calls.find((call) => call.command === "skills:apply")?.args).toEqual([
       "--action",
       "remove-link",
@@ -180,6 +190,45 @@ describe("扫描外部技能目录与残留链接", () => {
       "--link",
       "ghost",
     ]);
+  });
+
+  it("清理失败后显示原因并保留选择，接管按钮不包含清理项", async () => {
+    renderWithEngine(<DiscoverPanel />, {
+      ...routes(),
+      "skills:apply": makeEnvelope({}, { ok: false, errors: [{ code: "LINK_CHANGED", element: null, message: "链接已被外部修改" }] }),
+    });
+    const row = await screen.findByTestId("takeover-dead-ghost-codex");
+    await userEvent.click(row.querySelector("input[type=checkbox]")!);
+    expect(screen.getByTestId("takeover-run")).toHaveTextContent("一键接管所选（0）");
+    await userEvent.click(screen.getByTestId("cleanup-selected"));
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("链接已被外部修改"));
+    expect(row.querySelector("input[type=checkbox]")).toBeChecked();
+  });
+
+  it("后续扫描仍见链接时不报成功，保留该项供重试", async () => {
+    let attempts = 0;
+    const initial = discoverData();
+    const afterRemoval = discoverData({
+      skills: { items: initial.skills?.items.filter((item) => item.name !== "ghost") ?? [], groups: initial.skills?.groups ?? [] },
+    });
+    renderWithEngine(<DiscoverPanel />, {
+      ...routes(),
+      "system:discover": async () => makeEnvelope(attempts > 1 ? afterRemoval : initial),
+      "skills:apply": async () => {
+        attempts += 1;
+        return makeEnvelope(makeApplyResult({ domain: "skills" }));
+      },
+    });
+    const row = await screen.findByTestId("takeover-dead-ghost-codex");
+    await userEvent.click(screen.getByTestId("cleanup-link-ghost-codex"));
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(row).toHaveTextContent("重新扫描后链接仍在"));
+    expect(row.querySelector("input[type=checkbox]")).toBeChecked();
+    await userEvent.click(screen.getByTestId("cleanup-selected"));
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(() => expect(screen.queryByTestId("takeover-dead-ghost-codex")).toBeNull());
+    expect(attempts).toBe(2);
   });
 
   it("批量执行时显示进度：第几项、正在做哪一项", async () => {
@@ -197,18 +246,19 @@ describe("扫描外部技能目录与残留链接", () => {
     });
     await waitFor(() => expect(screen.getByTestId("takeover-skill-group-vendor")).toBeInTheDocument());
 
-    // 两项：技能集合 + 残留链接清理
+    // 勾选两类项目后，接管只执行技能集合，不混入残留链接清理。
     await userEvent.click(screen.getByTestId("takeover-skill-group-vendor").querySelector("input[type=checkbox]")!);
     await userEvent.click(screen.getByTestId("takeover-dead-ghost-codex").querySelector("input[type=checkbox]")!);
     await userEvent.click(screen.getByTestId("takeover-run"));
     await userEvent.click(await screen.findByRole("button", { name: "开始接管" }));
 
     const progress = await screen.findByTestId("takeover-progress");
-    expect(progress).toHaveTextContent("正在处理第 1 / 2 项：技能来源 vendor");
-    expect(screen.getByTestId("takeover-run")).toHaveTextContent("正在接管 1/2…");
+    expect(progress).toHaveTextContent("正在处理第 1 / 1 项：技能来源 vendor");
+    expect(screen.getByTestId("takeover-run")).toHaveTextContent("正在接管 1/1…");
 
     release!();
     await waitFor(() => expect(screen.queryByTestId("takeover-progress")).toBeNull());
+    expect(screen.getByTestId("takeover-dead-ghost-codex").querySelector("input[type=checkbox]")).toBeChecked();
   });
 
   it("没有可处理的内容时两处都不显示，也不占地方", async () => {

@@ -1,6 +1,5 @@
 import { t } from "./i18n";
 import { useRef, useState } from "react";
-import { toast } from "sonner";
 import { useExecutions } from "./execution";
 
 /**
@@ -11,7 +10,7 @@ import { useExecutions } from "./execution";
  * - `apply`：真实 apply（各域内部保留 preflight/写前校验、锁、外部修改检测、CAS 与审计）。
  *
  * 每一步都走与单项操作相同的执行通道（独立 run_id、执行记录、查询刷新），
- * silent 压掉逐步 toast，由本 hook 汇总反馈。
+ * silent 压掉逐步 toast，由调用页在回读后汇总反馈。
  */
 export type TakeoverStep =
   | { kind: "policy"; key: string; definition: Record<string, unknown> }
@@ -26,8 +25,8 @@ export interface TakeoverTask {
 }
 
 export interface TakeoverOutcome {
-  succeeded: number;
-  failures: { label: string; message: string }[];
+  succeededKeys: string[];
+  failures: { key: string; label: string; message: string }[];
 }
 
 /** 批量执行进度：批量任务可能跑几十秒，界面要说清「跑到第几项、正在做哪一项」。 */
@@ -50,8 +49,8 @@ export function useTakeover() {
     if (busyRef.current || tasks.length === 0) return null;
     busyRef.current = true;
     setExecuting(true);
-    let succeeded = 0;
-    const failures: { label: string; message: string }[] = [];
+    const succeededKeys: string[] = [];
+    const failures: TakeoverOutcome["failures"] = [];
     try {
       for (const [index, task] of tasks.entries()) {
         setProgress({ done: index, total: tasks.length, current: task.label });
@@ -74,30 +73,20 @@ export function useTakeover() {
           const envelope = await execute({ ...request, label: `${verb} ${task.label}`, silent: true });
           if (!envelope?.ok) {
             const message = envelope?.errors[0]?.message ?? t("引擎调用失败，详见任务记录");
-            failures.push({ label: task.label, message });
+            failures.push({ key: task.key, label: task.label, message });
             console.error(t("[{0}] {1} 失败：{2}", verb, task.label, message));
             ok = false;
             break;
           }
         }
-        if (ok) succeeded += 1;
+        if (ok) succeededKeys.push(task.key);
       }
     } finally {
       busyRef.current = false;
       setExecuting(false);
       setProgress(null);
     }
-    const summary = t("{0}完成：成功 {1}，失败 {2}", verb, succeeded, failures.length);
-    if (failures.length > 0) {
-      const visibleLabels = failures.slice(0, 2).map((item) => item.label).join("、");
-      const remaining = failures.length - 2;
-      toast.error(summary, {
-        description: t("{0}{1}未完成。请到对应项目处理，完整原因见操作记录。", visibleLabels, remaining > 0 ? (" " + t("等 {0} 项", failures.length)) : ""),
-      });
-    } else {
-      toast.success(summary);
-    }
-    return { succeeded, failures };
+    return { succeededKeys, failures };
   };
 
   return { run, executing, progress };
