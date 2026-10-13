@@ -1256,3 +1256,26 @@ tests passed, superseding the retired timeout in
 Interactive Windows and arm64 macOS desktop operation, signing/notarization and
 automatic updates remain unverified. No real account files or registrations
 were changed, and no Release, tag or installer was published.
+
+### 2026-10-12: capture fixture startup preparation
+
+The capture fixture now completes its existing output mode before short test
+deadlines begin. Both streams are suppressed and its expected exit code 7 is
+required. Compilation and startup each retain a 60-second preparation limit.
+The change is confined to `cfg(test)` setup; production capture code, fixture
+modes, deadlines and descendant-cleanup assertions are unchanged.
+
+Before correction, the focused run passed 10 cases and failed two parent-exit
+assertions. Tracing observed fixture entry about 2.19 seconds after the test
+started; completed I/O preparation reduced entry latency to 8–13 ms. An empty
+warmup still failed on repetition and was replaced with the existing output
+mode. The underlying OS cause of the cold-start delay remains unconfirmed.
+
+The final setup passed three consecutive 12-case capture runs, including a run
+with 12 test threads, and all 466 engine tests under default parallel execution.
+Tauri passed 27 tests, frontend passed 610 tests, and the production frontend
+build passed. Evidence was collected from actual native fixture processes and
+their readiness, parent-exit and delayed-write markers. Native Windows checks
+of this correction are pending CI; interactive Windows/arm64 macOS desktop and
+automatic-update acceptance remain open. No real account files were changed,
+and no Release or installer was published.

@@ -538,7 +538,7 @@ pub(crate) mod capture_test_support {
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     pub fn root(label: &str) -> PathBuf {
-        // Compile before callers start their short capture deadlines.
+        // Compile and complete cold startup before short capture deadlines.
         executable();
         fresh_root(label)
     }
@@ -567,9 +567,11 @@ pub(crate) mod capture_test_support {
     fn executable() -> &'static Path {
         static EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
         EXECUTABLE.get_or_init(|| {
-            let executable = fresh_root("fixture").join("capture-fixture.exe");
+            let root = fresh_root("fixture");
+            let executable = root.join("capture-fixture.exe");
             let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-            let mut child = Command::new(compiler)
+            let mut compile = Command::new(compiler);
+            compile
                 .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/common/capture_fixture.rs"))
                 .args([
                     "--crate-name",
@@ -579,26 +581,37 @@ pub(crate) mod capture_test_support {
                     "debuginfo=0",
                     "-o",
                 ])
-                .arg(&executable)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .spawn()
-                .expect("the installed Rust toolchain must build the native capture fixture");
-            let start = Instant::now();
-            loop {
-                if let Some(status) = child.try_wait().unwrap() {
-                    assert!(
-                        status.success(),
-                        "native capture fixture compilation failed"
-                    );
-                    break;
+                .arg(&executable);
+            let mut warmup = Command::new(&executable);
+            warmup
+                .env("AM_CAPTURE_MODE", "output")
+                .env("AM_CAPTURE_ROOT", &root)
+                .stderr(Stdio::null());
+            for (mut command, stage, exit_code) in
+                [(compile, "compilation", 0), (warmup, "startup", 7)]
+            {
+                let mut child = command
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .spawn()
+                    .unwrap_or_else(|error| panic!("capture fixture {stage}: {error}"));
+                let start = Instant::now();
+                loop {
+                    if let Some(status) = child.try_wait().unwrap() {
+                        assert_eq!(
+                            status.code(),
+                            Some(exit_code),
+                            "capture fixture {stage} failed: {status}"
+                        );
+                        break;
+                    }
+                    if start.elapsed() >= Duration::from_secs(60) {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        panic!("capture fixture {stage} timed out");
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
                 }
-                if start.elapsed() >= Duration::from_secs(60) {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    panic!("native capture fixture compilation timed out");
-                }
-                std::thread::sleep(Duration::from_millis(20));
             }
             executable
         })

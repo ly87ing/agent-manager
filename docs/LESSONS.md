@@ -31,9 +31,16 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Keep baseline and candidate Cargo output directories separate. Sharing the executable output left the archived baseline binary in the candidate path; the later race probe ran that old binary. Rebuild the package and verify the executable before counting candidate results.
 - Seen 1× (2026-10-12).
 
-**Prepare lightweight native fixtures before measuring short process deadlines.**
+**Prepare and warm lightweight native fixtures before short process deadlines.**
 - The 2026-10-12 unchanged engine binary failed 6 capture tests at its Cargo output path; a SHA-256-identical copy passed all 12 capture tests from a private temporary directory. Several failures occurred before the descendant readiness marker, so they did not establish a cleanup defect. The OS mechanism behind that path-dependent startup delay remains unverified.
 - Compile the small std-only capture fixture before the timed region, following the existing native CLI fixture pattern. Keep the same deadlines, readiness and parent-exit markers, delayed-write checks, output limits, and Windows handle-inheritance protection. Do not enlarge production timeouts or remove valid assertions to accommodate test-program startup.
+- Compilation alone did not finish preparation: a fresh fixture entered `main`
+  about 2.19 seconds after the timed test started during concurrent first launches.
+  Tracing reproduced missing parent-exit markers; a completed I/O warmup before the
+  timer reduced entry latency to 8–13 ms and passed the same 12 cases. Both compile
+  and warmup stages have a 60-second preparation limit. An empty warmup still
+  failed on repetition; use the existing output fixture to exercise I/O too.
+  The underlying OS cause of the cold-start delay remains unverified.
 - A filtered command that reports zero tests is not validation. Check the executed count as well as the exit status.
 - Seen 1× (2026-10-12).
 
