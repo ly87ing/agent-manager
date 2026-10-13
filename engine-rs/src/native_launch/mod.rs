@@ -9,6 +9,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct EnvironmentVariable {
+    pub name: String,
+    pub value: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Variant {
@@ -25,6 +32,8 @@ pub(super) struct Recipe {
     pub target: String,
     #[serde(default)]
     pub args: Vec<String>,
+    #[serde(default)]
+    pub env: Vec<EnvironmentVariable>,
     pub variants: Vec<Variant>,
 }
 
@@ -45,6 +54,31 @@ impl Recipe {
         for arg in &self.args {
             if arg.len() > 16384 || arg.chars().any(char::is_control) {
                 bail!("Arguments cannot contain control characters or exceed 16384 bytes");
+            }
+        }
+        if self.env.len() > 64 {
+            bail!("Choose no more than 64 environment variables");
+        }
+        let mut environment_names = BTreeSet::new();
+        for variable in &self.env {
+            let mut bytes = variable.name.bytes();
+            if variable.name.len() > 128
+                || !bytes
+                    .next()
+                    .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+                || !bytes.all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                || variable.value.len() > 16384
+                || variable.value.chars().any(char::is_control)
+            {
+                bail!("Environment variables need a portable name and a value without control characters");
+            }
+            let normalized = if self.platform == "windows" {
+                variable.name.to_ascii_lowercase()
+            } else {
+                variable.name.clone()
+            };
+            if !environment_names.insert(normalized) {
+                bail!("Environment variable names must be unique");
             }
         }
         if self.variants.is_empty() || self.variants.len() > 32 {
@@ -68,9 +102,35 @@ impl Recipe {
             {
                 bail!("Alias names must be unique and use letters, digits, underscores or hyphens");
             }
-            text(&variant.timezone, 128)?;
+            if !variant.timezone.is_empty() {
+                text(&variant.timezone, 128)?;
+            }
         }
         Ok(())
+    }
+
+    fn environment<'a>(&'a self, variant: &'a Variant) -> Vec<(&'a str, &'a str)> {
+        let mut values = self
+            .env
+            .iter()
+            .map(|variable| (variable.name.as_str(), variable.value.as_str()))
+            .collect::<Vec<_>>();
+        if variant.timezone.is_empty() {
+            return values;
+        }
+        let timezone = values.iter_mut().find(|(name, _)| {
+            if self.platform == "windows" {
+                name.eq_ignore_ascii_case("TZ")
+            } else {
+                *name == "TZ"
+            }
+        });
+        if let Some((_, value)) = timezone {
+            *value = &variant.timezone;
+        } else {
+            values.insert(0, ("TZ", &variant.timezone));
+        }
+        values
     }
 }
 

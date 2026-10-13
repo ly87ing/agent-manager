@@ -13,6 +13,7 @@ fn context() -> Context {
 fn spec(platform: &str, shell: &str) -> serde_json::Value {
     json!({"platform":platform,"shell":shell,"kind":"app","target":"/Applications/Example App.app",
         "args":["O'Brien", "$(touch unexpected)", ""],
+        "env":[{"name":"LANG","value":"en_US.UTF-8"},{"name":"CUSTOM_ENV","value":"literal $HOME"}],
         "variants":[{"name":"example-sg","timezone":"Asia/Singapore"},
             {"name":"example-la","timezone":"America/Los_Angeles"}]})
 }
@@ -85,6 +86,109 @@ fn rejects_duplicate_names_unknown_fields_and_mismatched_shells() {
 }
 
 #[test]
+fn validates_generic_environment_and_allows_a_variant_without_timezone() {
+    let mut input = spec("linux", "bash");
+    input["variants"][0]["timezone"] = json!("");
+    let result = execute(
+        &context(),
+        &Request {
+            command: "launch:build".into(),
+            args: vec!["--spec".into(), input.to_string()],
+            run_id: "environment".into(),
+        },
+    );
+    assert!(result.ok, "{:?}", result.errors);
+    let command = result.data["entries"][0]["command"].as_str().unwrap();
+    assert!(command.starts_with("LANG='en_US.UTF-8' CUSTOM_ENV='literal $HOME' command "));
+    assert!(!command.contains("TZ="));
+
+    let mut override_input = spec("linux", "bash");
+    override_input["env"] =
+        json!([{"name":"TZ","value":"UTC"},{"name":"LANG","value":"en_US.UTF-8"}]);
+    let override_result = execute(
+        &context(),
+        &Request {
+            command: "launch:build".into(),
+            args: vec!["--spec".into(), override_input.to_string()],
+            run_id: "timezone-override".into(),
+        },
+    );
+    let command = override_result.data["entries"][0]["command"]
+        .as_str()
+        .unwrap();
+    assert!(command.starts_with("TZ='Asia/Singapore' LANG='en_US.UTF-8' command "));
+    assert!(!command.contains("TZ='UTC'"));
+
+    override_input["variants"][0]["timezone"] = json!("");
+    let common_result = execute(
+        &context(),
+        &Request {
+            command: "launch:build".into(),
+            args: vec!["--spec".into(), override_input.to_string()],
+            run_id: "common-timezone".into(),
+        },
+    );
+    assert_eq!(common_result.data["entries"][0]["timezone"], "UTC");
+    assert!(common_result.data["entries"][0]["command"]
+        .as_str()
+        .unwrap()
+        .starts_with("TZ='UTC' LANG='en_US.UTF-8' command "));
+
+    for env in [
+        json!([{"name":"BAD-NAME","value":"value"}]),
+        json!([{"name":"LANG","value":"one"},{"name":"LANG","value":"two"}]),
+        json!([{"name":"LANG","value":"line\nbreak"}]),
+    ] {
+        let mut invalid = spec("linux", "bash");
+        invalid["env"] = env;
+        assert!(
+            !execute(
+                &context(),
+                &Request {
+                    command: "launch:build".into(),
+                    args: vec!["--spec".into(), invalid.to_string()],
+                    run_id: "invalid-environment".into(),
+                },
+            )
+            .ok
+        );
+    }
+
+    let mut windows_duplicate = spec("windows", "powershell");
+    windows_duplicate["env"] = json!([{"name":"Path","value":"one"},{"name":"PATH","value":"two"}]);
+    assert!(
+        !execute(
+            &context(),
+            &Request {
+                command: "launch:build".into(),
+                args: vec!["--spec".into(), windows_duplicate.to_string()],
+                run_id: "windows-environment".into(),
+            },
+        )
+        .ok
+    );
+}
+
+#[test]
+fn recipes_saved_before_generic_environment_support_still_build() {
+    let mut input = spec("macos", "zsh");
+    input.as_object_mut().unwrap().remove("env");
+    let result = execute(
+        &context(),
+        &Request {
+            command: "launch:build".into(),
+            args: vec!["--spec".into(), input.to_string()],
+            run_id: "legacy-recipe".into(),
+        },
+    );
+    assert!(result.ok, "{:?}", result.errors);
+    assert!(result.data["entries"][0]["command"]
+        .as_str()
+        .unwrap()
+        .starts_with("open --env 'TZ=Asia/Singapore' -a "));
+}
+
+#[test]
 fn windows_shortcut_names_are_case_insensitive_and_not_device_names() {
     for name in ["CON", "com1", "example-SG"] {
         let mut input = spec("windows", "powershell");
@@ -108,7 +212,11 @@ fn generated_alias_executes_literal_arguments_under_both_shells() {
     let root = std::env::temp_dir().join(format!("launch-literals-{}", std::process::id()));
     std::fs::create_dir_all(&root).unwrap();
     let executable = root.join("example tool");
-    std::fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$TZ\" \"$@\"\n").unwrap();
+    std::fs::write(
+        &executable,
+        "#!/bin/sh\nprintf '%s\\n' \"$TZ\" \"$LANG\" \"$CUSTOM_ENV\" \"$@\"\n",
+    )
+    .unwrap();
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
     for shell in ["/bin/bash", "/bin/zsh"] {
         if !PathBuf::from(shell).exists() {
@@ -148,7 +256,7 @@ fn generated_alias_executes_literal_arguments_under_both_shells() {
         );
         assert_eq!(
             String::from_utf8(output.stdout).unwrap(),
-            "Asia/Singapore\nO'Brien\n$(touch unexpected)\n\n"
+            "Asia/Singapore\nen_US.UTF-8\nliteral $HOME\nO'Brien\n$(touch unexpected)\n\n"
         );
     }
     std::fs::remove_dir_all(root).unwrap();

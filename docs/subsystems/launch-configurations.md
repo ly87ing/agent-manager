@@ -4,8 +4,10 @@
 
 The `launch` domain is independent of assistant accounts and MCP secrets. Its
 structured recipe contains a platform, shell, application or executable target,
-literal argument list, and one or more explicitly named time-zone variants.
-`la` and `sg` are examples, not required names or a fixed list of time zones.
+literal argument list, generic environment-variable list, and one or more named
+variants. Each variant can optionally set `TZ`; `la` and `sg` are examples, not
+required names or a fixed list of time zones. A variant's time zone overrides a
+recipe-level `TZ` variable so regional shortcuts remain concise.
 
 Saved recipes live in the `launch_recipes` table of `native-manager.db`. They are
 inactive application data. Only the recipe is stored; complete commands are
@@ -30,18 +32,21 @@ be saved. Recipes for another platform and programs that are not installed can
 be saved and copied.
 
 The desktop exposes separate actions to copy one launch command, copy one complete
-alias/function definition, or copy all definitions. Users decide whether and
-where to paste the result. Agent Manager has no `launch:status`, `launch:preview`,
-or `launch:apply` operation and does not write `.zshrc`, `.bashrc`, `.zprofile`,
+alias/function definition, or copy all definitions. Saved entries retain these
+copy actions without reopening the editor. Users decide whether and where to
+paste the result. Agent Manager has no `launch:status`, `launch:preview`, or
+`launch:apply` operation and does not write `.zshrc`, `.bashrc`, `.zprofile`,
 PowerShell profiles, PATH, or script execution settings.
 
 `launch:catalog` reports the local platform, a default shell, and installed macOS
 application bundles. Other executable paths can be chosen in the desktop file
-picker or entered manually. `launch:run --spec <JSON> --name <variant> --confirm`
-launches a local graphical application once. It refuses an already-running target
-and never quits or restarts applications. Windows checks executable names
+picker or entered manually. A saved local graphical application's variant has a
+direct Launch action. That click supplies the explicit `--confirm` marker to
+`launch:run --spec <JSON> --name <variant> --confirm`; no second dialog is needed.
+The operation refuses an already-running target and never quits or restarts it.
+Windows checks executable names
 conservatively; Linux checks `/proc` executable paths; macOS checks bundle process
-paths. A launch request does not prove the application accepted its time zone.
+paths. A launch request does not prove the application accepted its environment.
 
 Launched GUI applications do not belong to the manager's temporary command jobs
 and survive its exit. Command-line programs are copied to the user's terminal for
@@ -50,14 +55,15 @@ never process arguments, rendered commands, or definitions.
 
 ## Constraints and failure behavior
 
-- Unknown fields, duplicate names, incompatible platform/shell combinations, and
+- Unknown fields, duplicate alias or environment-variable names, non-portable
+  environment-variable names, incompatible platform/shell combinations, and
   control characters are rejected before work begins.
 - An application need not be installed to save or generate a command for another
   machine. Only a local graphical application can be launched from the UI.
-- macOS applications use `open --env`; Linux and CLI commands receive a scoped
-  environment. Windows output injects an environment variable into the child
-  process. None of these change the system time zone, and each application's
-  handling of `TZ` needs separate verification.
+- macOS applications use repeated `open --env` options; Linux and CLI commands
+  receive a scoped environment. Windows output injects each variable into the
+  child process. None of these change the system environment or time zone, and
+  each application's handling of the variables needs separate verification.
 - The old `agents`, `accounts`, `profiles`, and `aliases` APIs remain retired.
 - Saving and copying cannot modify a shell file. A user who pastes a definition
   into shell configuration owns that change outside Agent Manager.
@@ -75,7 +81,9 @@ pnpm --dir app test:unit --run src/test/LaunchPage.test.tsx
 ```
 
 The literal-argument regression executes generated aliases through Bash and zsh
-when installed, including apostrophes, spaces, empty arguments, and command-like
-text. Saved-recipe tests restart the CLI and read the recipe back while checking
-that shell files are unchanged and no target process starts. Windows rendering
-tests are source-level evidence, not native Windows application acceptance.
+when installed, including apostrophes, spaces, empty arguments, command-like
+text, and generic environment variables. The runtime regression reads back the
+scoped environment from a real child process. Saved-recipe tests restart the CLI
+and read the recipe back while checking that shell files are unchanged and no
+target process starts. Windows rendering tests are source-level evidence, not
+native Windows application acceptance.

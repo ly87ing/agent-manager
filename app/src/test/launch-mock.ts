@@ -8,8 +8,9 @@ export function createLaunchMock() {
   let saved: SavedLaunch[] = [];
   function entries(spec: LaunchRecipe): LaunchEntry[] {
     return spec.variants.map((variant) => {
-      const command = spec.platform === "windows" ? `& { $env:TZ = '${variant.timezone}'; & '${spec.target}' } # mock preview`
-        : (spec.kind === "app" && spec.platform === "macos" ? `open --env ${quote(`TZ=${variant.timezone}`)} -a ${quote(spec.target)}` : `TZ=${quote(variant.timezone)} command ${quote(spec.target)}`)
+      const environment = [...(spec.env ?? []).filter((item) => item.name !== "TZ"), ...(variant.timezone ? [{ name: "TZ", value: variant.timezone }] : [])];
+      const command = spec.platform === "windows" ? `& { ${environment.map((item) => `$env:${item.name} = '${item.value}';`).join(" ")} & '${spec.target}' } # mock preview`
+        : (spec.kind === "app" && spec.platform === "macos" ? `open ${environment.map((item) => `--env ${quote(`${item.name}=${item.value}`)}`).join(" ")} -a ${quote(spec.target)}` : `${environment.map((item) => `${item.name}=${quote(item.value)}`).join(" ")} command ${quote(spec.target)}`)
           + (spec.args.length ? ` ${spec.platform === "macos" && spec.kind === "app" ? "--args " : ""}${spec.args.map(quote).join(" ")}` : "");
       const definition = spec.platform === "windows" ? `function ${variant.name} { ${command} }` : `alias ${variant.name}=${quote(command)}`;
       return { ...variant, command, definition };

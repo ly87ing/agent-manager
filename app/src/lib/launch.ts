@@ -6,6 +6,7 @@ export interface LaunchRecipe {
   kind: "app" | "command";
   target: string;
   args: string[];
+  env: { name: string; value: string }[];
   variants: { name: string; timezone: string }[];
 }
 export interface LaunchEntry { name: string; timezone: string; command: string; definition: string }

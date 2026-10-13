@@ -1,6 +1,6 @@
 # Engine Contract v1
 
-> Current general launch APIs: `launch:catalog/build/list/save/delete/run` are independent of accounts. Saved recipes are inactive app data and do not require a local application. Building is read-only; Agent Manager does not write shell configuration. Graphical launch requires a separate confirmation. See [launch configurations](../docs/subsystems/launch-configurations.md).
+> Current general launch APIs: `launch:catalog/build/list/save/delete/run` are independent of accounts. Saved recipes are inactive app data and do not require a local application. Building is read-only; Agent Manager does not write shell configuration. Clicking a graphical application's Launch action is the explicit launch confirmation. See [launch configurations](../docs/subsystems/launch-configurations.md).
 
 > Current scope: [Extensions only](../docs/EXTENSIONS-ONLY.md) supersedes the historical account, assistant lifecycle, authentication, runtime, and alias contracts below. Those domains return `FEATURE_RETIRED`; Tauri rejects them at its command whitelist. `resources:targets` accepts no arguments and returns `{domain:"resources", targets:[{id,name,group,kind}]}` from immutable registration metadata, without opening authentication/settings files or executing assistants. `system:discover` accepts only `--only skills`; audit and upstream refresh exclude assistants and aliases. Backups omit account/alias policy, imports cannot change it, and legacy alias sources are skipped. Secret editing is limited to MCP-specific variables.
 

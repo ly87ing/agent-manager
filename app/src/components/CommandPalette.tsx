@@ -26,7 +26,7 @@ const PAGES: { key: string; label: string; keywords: string }[] = [
   // 设置里的二级页面也要搜得到
   { key: "runs", get label() { return t("操作记录"); }, keywords: "runs 任务 日志 记录" },
   { key: "settings:secrets", get label() { return t("MCP 密钥"); }, keywords: "secrets 密钥 变量 token api key 凭据" },
-  { key: "settings:launch", get label() { return t("启动配置"); }, keywords: "launch timezone alias shell 时区 别名 启动 la sg" },
+  { key: "settings:launch", get label() { return t("启动配置"); }, keywords: "launch app cli command environment env args timezone alias shell 应用 命令 环境变量 参数 时区 别名 启动 la sg" },
   { key: "settings:tips", get label() { return t("更多技巧"); }, keywords: "tips 技巧 分享 多账号 独立环境 别名 alias shell" },
   { key: "programs", get label() { return t("依赖程序"); }, keywords: "programs 程序 cli 命令行 依赖 npm npx uvx 安装 升级 版本" },
   { key: "sources", get label() { return t("来源"); }, keywords: "sources 来源 集合 仓库 规则来源 添加 更新 版本 停用 移除 未纳管 纳入 接管 扫描 agent-skills" },

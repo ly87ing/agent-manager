@@ -41,7 +41,9 @@ impl Drop for Fixture {
 }
 fn spec(target: &str) -> Value {
     json!({"platform":std::env::consts::OS,"shell":if cfg!(windows) {"powershell"} else {"zsh"},
-        "kind":"app","target":target,"args":[],"variants":[{"name":"example-sg","timezone":"Asia/Singapore"}]})
+        "kind":"app","target":target,"args":[],
+        "env":[{"name":"LANG","value":"en_US.UTF-8"},{"name":"CUSTOM_ENV","value":"literal $HOME"}],
+        "variants":[{"name":"example-sg","timezone":"Asia/Singapore"}]})
 }
 
 #[test]
@@ -94,7 +96,7 @@ fn real_cli_launches_an_independent_application_with_literal_args_and_scoped_tim
     let source = f.root.join("probe.rs");
     std::fs::write(&source, r#"fn main() {
         let args: Vec<String> = std::env::args().skip(1).collect();
-        std::fs::write(&args[0], format!("{}\n{:?}", std::env::var("TZ").unwrap_or_default(), &args[1..])).unwrap();
+        std::fs::write(&args[0], format!("{}\n{}\n{}\n{:?}", std::env::var("TZ").unwrap_or_default(), std::env::var("LANG").unwrap_or_default(), std::env::var("CUSTOM_ENV").unwrap_or_default(), &args[1..])).unwrap();
         let release = std::path::Path::new(&args[1]).with_extension("release");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         while !release.exists() && std::time::Instant::now() < deadline { std::thread::sleep(std::time::Duration::from_millis(20)); }
@@ -151,7 +153,10 @@ fn real_cli_launches_an_independent_application_with_literal_args_and_scoped_tim
         std::thread::sleep(std::time::Duration::from_millis(30));
     }
     let content = std::fs::read_to_string(&ready).unwrap();
-    assert!(content.starts_with("Asia/Singapore\n"), "{content}");
+    assert!(
+        content.starts_with("Asia/Singapore\nen_US.UTF-8\nliteral $HOME\n"),
+        "{content}"
+    );
     assert!(
         content.contains("O'Brien")
             && content.contains("$(touch unexpected)")

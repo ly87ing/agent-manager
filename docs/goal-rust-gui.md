@@ -1323,27 +1323,37 @@ requires removing only the new app preference row as described in
 ### 2026-10-12–13: General launch configurations
 
 Settings now offers a general launch builder independent of assistant accounts.
-Users select or enter an application, executable, arguments, time zones and
-shortcut names. Recipes save in Agent Manager without generating a command,
-running a process, or changing shell configuration. Opening a saved recipe makes
-it editable. Users can copy one complete launch command, one complete POSIX alias
-or PowerShell function, or all definitions and decide where to paste them.
+Users select either a graphical application or a terminal command, then add
+generic environment variables, literal arguments, optional per-shortcut time
+zones and shortcut names. This distinguishes values such as `LANG` and `LC_ALL`
+from program arguments such as `--lang=en-US`. Recipes save in Agent Manager
+without generating a command, running a process, or changing shell configuration.
+Opening a saved recipe makes it editable. Recipes saved before the generic
+environment field was added remain readable.
+
+Each saved shortcut retains copy actions for the complete launch command and its
+complete POSIX alias or PowerShell function. A saved local graphical application
+also has a direct launch action; that click is the explicit launch request and
+does not add a second confirmation dialog. Terminal commands remain copy-only so
+their normal interactive input and output stay in the user's terminal.
 `launch:status`, `launch:preview`, and `launch:apply` were removed after user
 feedback established that direct shell-file management was the wrong boundary.
-A local graphical application can still be launched once after its own separate
-confirmation. System time-zone settings are never changed, and each application's
-handling of `TZ` remains unverified until the application itself is checked.
+System environment and time-zone settings are never changed, and each
+application's handling of injected variables remains unverified until the
+application itself is checked.
 
-Local acceptance used 479 full engine tests, 28 Tauri tests and 632 frontend
+Local acceptance used 481 full engine tests, 28 Tauri tests and 634 frontend
 tests, with no failures, plus the production frontend build. An isolated CLI save
-survived a new process and read back both variants; `.zshrc`, `.zprofile`,
-`.bashrc`, and a PowerShell profile remained byte-identical, the target did not
-run, and the retired apply operation was rejected. The launch runtime regression
-also started an isolated compiled application with `Asia/Singapore` and literal
-arguments, kept it alive after the CLI exited, and rejected a repeated launch.
-The browser mock at 1000 px and 760 px showed the saved item, both copy actions,
-and the save action with no document overflow, legacy apply entry, or console
-error.
+survived a new process and read back both variants, `LANG`, `LC_ALL`, and a
+component-specific argument; `.zshrc`, `.zprofile`, `.bashrc`, and a PowerShell
+profile remained byte-identical and the target did not run. The launch runtime
+regression started an isolated compiled application and read back
+`Asia/Singapore`, `LANG`, a custom variable, and literal arguments from the child
+process; it kept running after the CLI exited and rejected a repeated launch.
+The browser mock at 1000 by 650 and 760 by 650 exercised environment/argument
+editing, saving, saved-card copying, and direct launch. Both widths matched their
+document scroll widths, the direct launch opened no dialog, and console/page
+errors were empty.
 
 macOS rendering and local launch execution were accepted on this host. Windows
 PowerShell rendering is covered by source tests, and Linux command rendering is

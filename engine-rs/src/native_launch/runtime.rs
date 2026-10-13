@@ -126,10 +126,10 @@ fn run(ctx: &Context, req: &Request, spec: Recipe) -> Result<Value> {
     let mut cmd;
     if cfg!(target_os = "macos") {
         cmd = crate::process::launch_command("/usr/bin/open");
-        cmd.arg("--env")
-            .arg(format!("TZ={}", variant.timezone))
-            .arg("-a")
-            .arg(&target);
+        for (name, value) in spec.environment(variant) {
+            cmd.arg("--env").arg(format!("{name}={value}"));
+        }
+        cmd.arg("-a").arg(&target);
         if !spec.args.is_empty() {
             cmd.arg("--args").args(&spec.args);
         }
@@ -144,7 +144,7 @@ fn run(ctx: &Context, req: &Request, spec: Recipe) -> Result<Value> {
         Ok(json!({"state":"requested","name":variant.name,"timezone_verified":false}))
     } else {
         cmd = crate::process::launch_command(&target);
-        cmd.args(&spec.args).env("TZ", &variant.timezone);
+        cmd.args(&spec.args).envs(spec.environment(variant));
         // GUI applications are independent of the manager's temporary command jobs.
         let mut child = cmd
             .stdin(Stdio::null())

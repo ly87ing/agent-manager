@@ -62,6 +62,7 @@ impl Drop for Fixture {
 fn spec(platform: &str, shell: &str) -> Value {
     json!({"platform":platform,"shell":shell,"kind":"command","target":"not-installed",
         "args":["O'Brien", "$(touch executed)", ""],
+        "env":[{"name":"LANG","value":"en_US.UTF-8"}],
         "variants":[{"name":"custom-sg","timezone":"Asia/Singapore"},
             {"name":"custom-la","timezone":"America/Los_Angeles"}]})
 }

@@ -11,7 +11,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 beforeEach(() => vi.mocked(isTauri).mockReturnValue(false));
 
 const recipe: LaunchRecipe = {
-  platform: "macos", shell: "zsh", kind: "app", target: "/Applications/Example.app", args: [],
+  platform: "macos", shell: "zsh", kind: "app", target: "/Applications/Example.app", args: [], env: [],
   variants: [{ name: "example-sg", timezone: "Asia/Singapore" }, { name: "example-la", timezone: "America/Los_Angeles" }],
 };
 const savedItem: SavedLaunch = { id: "saved-1", revision: "a".repeat(64), recipe, entries: entries(recipe) };
@@ -101,7 +101,7 @@ describe("launch configuration controls", () => {
     expect(saved.args).not.toContain("--confirm");
     expect(saved.options?.runId).toBeTruthy();
     expect(calls.some((call) => ["launch:build", "launch:run", "launch:status", "launch:preview", "launch:apply"].includes(call.command))).toBe(false);
-    expect(await screen.findByText("example-sg, example-la")).toBeVisible();
+    expect((await screen.findAllByText("example-sg"))[0]).toBeVisible();
   });
 
   it("opens and updates a saved configuration with its revision", async () => {
@@ -111,7 +111,7 @@ describe("launch configuration controls", () => {
     await userEvent.clear(screen.getByRole("textbox", { name: "别名 1" }));
     await userEvent.type(screen.getByRole("textbox", { name: "别名 1" }), "example-sin");
     await userEvent.click(screen.getByRole("button", { name: "保存修改" }));
-    await screen.findByText("example-sin, example-la");
+    expect((await screen.findAllByText("example-sin"))[0]).toBeVisible();
     const saves = calls.filter((call) => call.command === "launch:save");
     const saved = saves[saves.length - 1]!;
     expect(saved.args).toEqual(expect.arrayContaining(["--id", savedItem.id, "--base", savedItem.revision]));
@@ -119,7 +119,7 @@ describe("launch configuration controls", () => {
 
   it("deletes only after a separate confirmation", async () => {
     const { calls } = setup({ items: [savedItem] });
-    await screen.findByText("example-sg, example-la");
+    await screen.findAllByText("example-sg");
     await userEvent.click(screen.getByRole("button", { name: "配置操作" }));
     await userEvent.click(await screen.findByTestId(`delete-launch-${savedItem.id}`));
     expect(await screen.findByRole("dialog")).toHaveTextContent("你自行添加的别名不受影响");
@@ -130,16 +130,46 @@ describe("launch configuration controls", () => {
     expect(calls.some((call) => ["launch:status", "launch:preview", "launch:apply"].includes(call.command))).toBe(false);
   });
 
-  it("requires a separate launch confirmation and does not save", async () => {
+  it("treats the launch button as confirmation and does not save", async () => {
     const { calls } = setup();
     await generate();
     await userEvent.click(screen.getAllByRole("button", { name: "启动一次" })[0]);
-    expect(await screen.findByRole("dialog")).toHaveTextContent(entries(recipe)[0].command);
-    expect(calls.some((call) => call.command === "launch:run")).toBe(false);
-    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-    expect(await screen.findByRole("status")).toHaveTextContent("已发送启动请求。请在应用中确认时间。");
+    expect(await screen.findByRole("status")).toHaveTextContent("已发送启动请求。请在应用中确认时间和环境。");
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(calls.find((call) => call.command === "launch:run")?.args).toContain("--confirm");
     expect(calls.some((call) => call.command === "launch:save")).toBe(false);
+  });
+
+  it("copies and directly launches a saved graphical application without opening the editor", async () => {
+    const { calls } = setup({ items: [savedItem] });
+    const write = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
+    await userEvent.click((await screen.findAllByRole("button", { name: "复制运行命令" }))[0]);
+    expect(write).toHaveBeenLastCalledWith(savedItem.entries[0].command);
+    await userEvent.click(screen.getByTestId("run-saved-saved-1-example-sg"));
+    expect(await screen.findByRole("status")).toHaveTextContent("已发送启动请求");
+    expect(calls.find((call) => call.command === "launch:run")?.args).toEqual([
+      "--spec", JSON.stringify(recipe), "--name", "example-sg", "--confirm",
+    ]);
+    expect(screen.getByRole("heading", { name: "新建配置" })).toBeVisible();
+  });
+
+  it("saves generic environment variables and component-specific arguments", async () => {
+    const { calls } = setup();
+    await chooseExample();
+    await userEvent.click(screen.getByText("环境变量（0）"));
+    await userEvent.click(screen.getByRole("button", { name: "添加环境变量" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "环境变量名称 1" }), "LANG");
+    await userEvent.type(screen.getByRole("textbox", { name: "环境变量取值 1" }), "en_US.UTF-8");
+    await userEvent.click(screen.getByText("启动参数（0）"));
+    await userEvent.click(screen.getByRole("button", { name: "添加参数" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "启动参数 1" }), "--lang=en-US");
+    await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+    await screen.findByRole("status");
+    const saved = calls.find((call) => call.command === "launch:save")!;
+    expect(JSON.parse(saved.args[1])).toMatchObject({
+      env: [{ name: "LANG", value: "en_US.UTF-8" }], args: ["--lang=en-US"],
+    });
   });
 
   it("keeps a stale save error visible without retrying", async () => {

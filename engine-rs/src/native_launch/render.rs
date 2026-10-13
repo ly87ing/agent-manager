@@ -37,6 +37,19 @@ fn windows_arg(value: &str) -> String {
 }
 
 pub(super) fn build(spec: &Recipe, variant: &Variant) -> Built {
+    let environment = spec.environment(variant);
+    let timezone = environment
+        .iter()
+        .find(|(name, _)| {
+            if spec.platform == "windows" {
+                name.eq_ignore_ascii_case("TZ")
+            } else {
+                *name == "TZ"
+            }
+        })
+        .map(|(_, value)| *value)
+        .unwrap_or_default()
+        .to_owned();
     let command = if spec.platform == "windows" {
         let args = spec
             .args
@@ -49,14 +62,27 @@ pub(super) fn build(spec: &Recipe, variant: &Variant) -> Built {
         } else {
             "[System.Diagnostics.Process]::Start($p) | Out-Null"
         };
-        format!("& {{ $p = New-Object System.Diagnostics.ProcessStartInfo; $p.FileName = {}; $p.UseShellExecute = $false; $p.Arguments = {}; $p.EnvironmentVariables['TZ'] = {}; {completion} }}",
-            powershell(&spec.target), powershell(&args), powershell(&variant.timezone))
+        let environment = environment
+            .iter()
+            .map(|(name, value)| {
+                format!(
+                    "$p.EnvironmentVariables[{}] = {};",
+                    powershell(name),
+                    powershell(value)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!("& {{ $p = New-Object System.Diagnostics.ProcessStartInfo; $p.FileName = {}; $p.UseShellExecute = $false; $p.Arguments = {}; {environment} {completion} }}",
+            powershell(&spec.target), powershell(&args))
     } else if spec.platform == "macos" && spec.kind == "app" {
-        let mut value = format!(
-            "open --env {} -a {}",
-            posix(&format!("TZ={}", variant.timezone)),
-            posix(&spec.target)
-        );
+        let mut value = String::from("open");
+        for (name, environment_value) in environment {
+            value.push_str(" --env ");
+            value.push_str(&posix(&format!("{name}={environment_value}")));
+        }
+        value.push_str(" -a ");
+        value.push_str(&posix(&spec.target));
         if !spec.args.is_empty() {
             value.push_str(" --args ");
             value.push_str(
@@ -70,9 +96,17 @@ pub(super) fn build(spec: &Recipe, variant: &Variant) -> Built {
         }
         value
     } else {
+        let environment = environment
+            .iter()
+            .map(|(name, value)| format!("{name}={}", posix(value)))
+            .collect::<Vec<_>>();
+        let prefix = if environment.is_empty() {
+            String::new()
+        } else {
+            format!("{} ", environment.join(" "))
+        };
         format!(
-            "TZ={} command {}{}",
-            posix(&variant.timezone),
+            "{prefix}command {}{}",
             posix(&spec.target),
             spec.args
                 .iter()
@@ -88,7 +122,7 @@ pub(super) fn build(spec: &Recipe, variant: &Variant) -> Built {
     };
     Built {
         name: variant.name.clone(),
-        timezone: variant.timezone.clone(),
+        timezone,
         command,
         definition,
     }
@@ -110,6 +144,7 @@ mod tests {
                 kind: "app".into(),
                 target: r"C:\Apps\Example.exe".into(),
                 args: vec![],
+                env: vec![],
                 variants: vec![Variant {
                     name: "example-sg".into(),
                     timezone: "Asia/Singapore".into(),

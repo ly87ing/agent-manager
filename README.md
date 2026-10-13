@@ -1,6 +1,6 @@
 # Agent Manager
 
-Manage MCP servers, rules, skills, and their extension dependencies for existing assistant configuration directories. Build general launch commands with chosen applications, time zones and shortcut names. Built with Tauri 2, React, and Rust/SQLite, the desktop app and CLI share one Rust engine.
+Manage MCP servers, rules, skills, and their extension dependencies for existing assistant configuration directories. Build general launch commands with chosen applications or terminal commands, environment variables, arguments, optional time zones and shortcut names. Built with Tauri 2, React, and Rust/SQLite, the desktop app and CLI share one Rust engine.
 
 **Agent Manager does not manage accounts.** It cannot create, edit, delete, switch, launch, log in to, or log out of an account; change its credentials, provider, model, or runtime settings; or create account-bound launch commands. Historical target registrations are read-only metadata used to locate extensions. See the [extension-only contract](docs/EXTENSIONS-ONLY.md).
 
@@ -13,7 +13,7 @@ Manage MCP servers, rules, skills, and their extension dependencies for existing
 - **Sources:** manage optional skill and rule repositories, versions, local sources, and resource share links. No external repository is required for local extension management.
 - **Programs:** manage command-line dependencies used by skills and MCP. Assistant installation and updates remain outside this tool.
 - **More tips:** read-only guidance about independent environments and shell aliases in Settings. Copying a generic example does not execute it or edit files.
-- **Launch configurations:** Settings → Launch configurations saves an application or executable, literal arguments, custom time zones and shortcut names in Agent Manager. Copy a complete launch command or a complete alias/function definition for manual use, or explicitly launch a local graphical application once. Agent Manager does not write shell configuration. See [launch configurations](docs/subsystems/launch-configurations.md).
+- **Launch configurations:** Settings → Launch configurations saves an application or terminal command, generic environment variables, literal arguments, optional time zones and shortcut names in Agent Manager. Saved graphical applications can be launched directly; terminal commands provide complete commands and alias/function definitions for manual use. Agent Manager does not write shell configuration. See [launch configurations](docs/subsystems/launch-configurations.md).
 - **Settings:** English by default, with Simplified Chinese available under Language; themes, operation history, MCP-specific secret files, extension configuration backups, and manual application updates. Account credentials and unrelated secret variables are read-only.
 
 ## Experience
@@ -54,7 +54,7 @@ Outputs are in `app/src-tauri/target/release/bundle/dmg/`. Verify the standalone
 3. If an MCP service needs a secret, select a dedicated external `.env` file and fill only its MCP-specific variables.
 4. Review file previews before applying changes. The assistant itself controls when changed extensions are loaded.
 
-AI CLI installation, accounts, authentication, account-bound launches, and runtime settings are handled outside this tool. General launch recipes are independent of accounts and never change the system time zone. An application may ignore `TZ`; verify its displayed time separately.
+AI CLI installation, accounts, authentication, account-bound launches, and runtime settings are handled outside this tool. General launch recipes are independent of accounts and never change the system environment or time zone. An application may ignore injected variables; verify its behavior separately.
 
 Apply includes these safety guarantees:
 

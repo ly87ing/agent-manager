@@ -3,7 +3,8 @@
 The 2026-10-11 user requirement supersedes earlier account designs: Agent Manager manages MCP, rules, skills, their sources, and their extension dependencies. It must never manage accounts.
 
 The 2026-10-12 user request adds an independent general launch tool: configurable
-applications or executables, arguments, time zones, and shortcut names. Generating
+applications or executables, environment variables, arguments, optional time zones,
+and shortcut names. Generating
 or copying commands is read-only. Recipes can be saved in Agent Manager without
 running the application or changing shell configuration. Application launch is a
 separate explicit action. This exception does not enable the retired account or
