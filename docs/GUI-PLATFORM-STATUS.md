@@ -24,10 +24,12 @@ and [scope](EXTENSIONS-ONLY.md).
 - The follow-up [source ownership audit](goal-rust-gui.md#2026-10-12-source-ownership-and-failure-reporting-audit)
   records copy/restore safeguards, duplicate-name refusal, orphan cleanup,
   accurate update outcomes, and native macOS click verification at `26db532`.
+  That revision passed all regular and GUI CI jobs, including four installer
+  builds and native-architecture macOS DMG / isolated Linux launch verification.
 - Source changes, native tests and installer builds are separate evidence. Earlier
   downloadable previews predate extension-only scope and must not be treated as
-  acceptance of current source. Real Windows desktop installation, real arm64
-  execution, signing/notarization and actual automatic updates remain unverified.
+  acceptance of current source. Interactive Windows and arm64 macOS desktop
+  operation, signing/notarization and actual automatic updates remain unverified.
 - No new Release, tag, or installer publication is part of this correction.
 
 ## Historical platform records

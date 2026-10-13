@@ -1245,12 +1245,14 @@ Default parallel engine runs retain intermittent subprocess capture-timing
 failures under local build load. The final serial run passed without changing
 assertions or timeouts; the cause of the intermittent failures is unconfirmed.
 
-At readback, `26db532` passed all three native engine jobs and the Windows/Linux
-installer jobs in [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/38332619824).
-macOS installer jobs and [regular CI](https://github.com/ly87ing/agent-manager/actions/runs/38332619815)
-were still running. Windows frontend tests passed, superseding the retired timeout in
+At final readback, `26db532` passed all seven
+[GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38332619824)
+and both [regular CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38332619815).
+This includes three native engine jobs, four installer builds, native-architecture
+macOS DMG verification and isolated Linux package launch checks. Windows frontend
+tests passed, superseding the retired timeout in
 [the prior GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/38327719809).
 
-Real Windows desktop operation, real arm64 execution, signing/notarization and
+Interactive Windows and arm64 macOS desktop operation, signing/notarization and
 automatic updates remain unverified. No real account files or registrations
 were changed, and no Release, tag or installer was published.
