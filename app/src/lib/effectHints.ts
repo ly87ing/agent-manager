@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 /**
  * 「什么时候真正生效」的提示。
  *
@@ -17,14 +18,14 @@ export function effectHint(command: string, args: readonly string[] = []): strin
     case "profiles:apply":
       return "下次用这个实例的命令启动时生效；已经在跑的会话不受影响。";
     case "mcp:apply":
-      return "助手下次启动时读取；正在运行的会话要重开才能用上。";
+      return t("助手下次启动时读取；正在运行的会话要重开才能用上。");
     case "rules:apply":
-      if (only === "rules:codex_global") return "Codex 下次启动时读取新规则。";
-      if (only === "rules:claude_global") return "Claude Code 下次启动时读取新规则；正在跑的会话不受影响。";
+      if (only === "rules:codex_global") return t("Codex 下次启动时读取新规则。");
+      if (only === "rules:claude_global") return t("Claude Code 下次启动时读取新规则；正在跑的会话不受影响。");
       // 实例目标（rules:profile:*）的 id 看不出是哪种助手，给通用说法
-      return "助手下次启动时读取新规则；正在跑的会话不受影响。";
+      return t("助手下次启动时读取新规则；正在跑的会话不受影响。");
     case "skills:apply":
-      return "助手下次启动时扫描技能目录；正在跑的会话看不到刚加的技能。";
+      return t("助手下次启动时扫描技能目录；正在跑的会话看不到刚加的技能。");
     default:
       return null;
   }

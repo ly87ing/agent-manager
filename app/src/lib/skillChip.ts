@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { CellTone } from "../components/AccountGrid";
 import type { SkillAgentCell } from "./observed";
 
@@ -29,48 +30,48 @@ function chipOf(cell: SkillAgentCell): { tone: CellTone; hint: string; primary: 
   if (cell.source_missing) {
     return {
       tone: "warn",
-      hint: "来源里已经没有这个技能，点击移除这条分配",
-      primary: has("remove") ? { action: "remove", label: "移除" } : null,
+      hint: t("来源里已经没有这个技能，点击移除这条分配"),
+      primary: has("remove") ? { action: "remove", label: t("移除") } : null,
       secondary: [],
     };
   }
   if (cell.state === "extra-link") {
     return {
       tone: "warn",
-      hint: cell.blocked_reason ?? "技能目录里有一条本工具以外的链接，点击纳入管理",
-      primary: has("add") ? { action: "add", label: "纳入管理" } : null,
-      secondary: has("remove") ? [{ action: "remove", label: "取消这条外部链接" }] : [],
+      hint: cell.blocked_reason ?? t("技能目录里有一条本工具以外的链接，点击纳入管理"),
+      primary: has("add") ? { action: "add", label: t("纳入管理") } : null,
+      secondary: has("remove") ? [{ action: "remove", label: t("取消这条外部链接") }] : [],
     };
   }
   if ((cell.state === "missing-link" || cell.state === "dead-link") && has("update")) {
     return {
       tone: "warn",
-      hint: "链接损坏，点击修复",
-      primary: { action: "update", label: "修复" },
-      secondary: has("disable") ? [{ action: "disable", label: "停用" }] : [],
+      hint: t("链接损坏，点击修复"),
+      primary: { action: "update", label: t("修复") },
+      secondary: has("disable") ? [{ action: "disable", label: t("停用") }] : [],
     };
   }
   if (cell.state === "drifted") {
     return {
       tone: "warn",
-      hint: cell.blocked_reason ?? "入口被本工具以外的内容占用",
+      hint: cell.blocked_reason ?? t("入口被本工具以外的内容占用"),
       primary: null,
-      secondary: has("disable") ? [{ action: "disable", label: "停用" }] : [],
+      secondary: has("disable") ? [{ action: "disable", label: t("停用") }] : [],
     };
   }
-  const update = skillNeedsUpdate(cell) ? [{ action: "update", label: "更新到新版本" }] : [];
+  const update = skillNeedsUpdate(cell) ? [{ action: "update", label: t("更新到新版本") }] : [];
   if (cell.state === "linked" && has("disable")) {
-    return { tone: "on", hint: update.length ? "已启用，有新版本；点击停用" : "已启用，点击停用", primary: { action: "disable", label: "停用" }, secondary: update };
+    return { tone: "on", hint: update.length ? t("已启用，有新版本；点击停用") : t("已启用，点击停用"), primary: { action: "disable", label: t("停用") }, secondary: update };
   }
   if (cell.state === "disabled" && has("enable")) {
-    return { tone: "off", hint: "已停用，点击启用", primary: { action: "enable", label: "启用" }, secondary: update };
+    return { tone: "off", hint: t("已停用，点击启用"), primary: { action: "enable", label: t("启用") }, secondary: update };
   }
   if (cell.state === "not-assigned" && has("add")) {
-    return { tone: "off", hint: "未启用，点击启用", primary: { action: "add", label: "启用" }, secondary: [] };
+    return { tone: "off", hint: t("未启用，点击启用"), primary: { action: "add", label: t("启用") }, secondary: [] };
   }
   return {
     tone: cell.state === "linked" ? "on" : "blocked",
-    hint: cell.blocked_reason ?? "这里没有可做的",
+    hint: cell.blocked_reason ?? t("这里没有可做的"),
     primary: null,
     secondary: update,
   };

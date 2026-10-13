@@ -39,9 +39,20 @@ fn default_log_retention_days() -> u32 {
     DEFAULT_LOG_RETENTION_DAYS
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub enum AppLanguage {
+    #[default]
+    #[serde(rename = "en")]
+    English,
+    #[serde(rename = "zh-CN")]
+    SimplifiedChinese,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct AppSettings {
+    #[serde(default)]
+    pub language: AppLanguage,
     #[serde(default = "default_log_retention_days")]
     pub log_retention_days: u32,
     /// 外部私有凭据文件路径；只存路径，凭据取值永不进入本数据库。
@@ -52,6 +63,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            language: AppLanguage::default(),
             log_retention_days: DEFAULT_LOG_RETENTION_DAYS,
             secrets_file_path: String::new(),
         }
@@ -814,6 +826,7 @@ mod tests {
         let (root, context) = ctx("roundtrip");
         let conn = open_write(&context).unwrap();
         let settings = AppSettings {
+            language: AppLanguage::SimplifiedChinese,
             log_retention_days: 14,
             secrets_file_path: "~/private/secrets.env".into(),
         };

@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { useEffect, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
 import { runEngine } from "../lib/engine";
@@ -16,7 +17,7 @@ interface PreviewData {
   other: { status: string; file: string }[];
 }
 
-const CHANGE: Record<string, string> = { added: "新增", deleted: "删除", modified: "修改" };
+const CHANGE: Record<string, string> = { get added() { return t("新增"); }, get deleted() { return t("删除"); }, get modified() { return t("修改"); } };
 
 /** 整个技能是新加的还是被删掉的：看它的 SKILL.md。 */
 function skillChange(files: FileChange[]): "added" | "deleted" | null {
@@ -84,7 +85,7 @@ export function SkillVersionsDialog({
           setData(envelope.data);
           if (envelope.data.tags.length === 0) setTab("branches");
         } else {
-          setError(envelope.errors[0]?.message ?? "读不到版本清单");
+          setError(envelope.errors[0]?.message ?? t("读不到版本清单"));
         }
       })
       .catch((reason) => alive && setError(reason instanceof Error ? reason.message : String(reason)));
@@ -104,7 +105,7 @@ export function SkillVersionsDialog({
           prev && prev.ref === ref
             ? envelope.ok
               ? { ...prev, data: envelope.data }
-              : { ...prev, error: envelope.errors[0]?.message ?? "预览失败" }
+              : { ...prev, error: envelope.errors[0]?.message ?? t("预览失败") }
             : prev,
         ),
       )
@@ -119,18 +120,18 @@ export function SkillVersionsDialog({
   };
   useEffect(() => {
     // 来源行的「更新」：打开就预览换到最新
-    if (openLatest) previewSwitch(null, "最新");
+    if (openLatest) previewSwitch(null, t("最新"));
   }, []);
   const rows = data ? (tab === "tags" ? data.tags : data.branches) : [];
   const total = data ? (tab === "tags" ? data.tags_total : data.branches_total) : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in" onClick={(e) => e.target === e.currentTarget && close()}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`${name} 的版本`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border bg-card shadow-xl animate-zoom-in-95">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("{0} 的版本", name)} tabIndex={-1} onKeyDown={onDialogKeyDown} className="flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border bg-card shadow-xl animate-zoom-in-95">
         <div className="flex items-center justify-between border-b px-5 py-3">
-          <h3 className="text-base font-semibold text-foreground">{name} 的版本</h3>
+          <h3 className="text-base font-semibold text-foreground">{name}{(" " + t("的版本"))}</h3>
           {!busy && (
-            <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">
+            <button type="button" onClick={onClose} aria-label={t("关闭")} className="rounded p-1 text-muted-foreground hover:bg-accent">
               <X className="h-4 w-4" aria-hidden />
             </button>
           )}
@@ -140,14 +141,13 @@ export function SkillVersionsDialog({
           {error ? (
             <p data-testid="versions-error" className="text-xs text-destructive">{error}</p>
           ) : !data ? (
-            <p className="text-xs text-muted-foreground">正在读取远端的版本…</p>
+            <p className="text-xs text-muted-foreground">{t("正在读取远端的版本…")}</p>
           ) : (
             <>
-              <p data-testid="versions-summary" className="text-xs text-muted-foreground">
-                跟踪：{describeTrack(data.track)}
-                {data.auto_resolved && `（${data.auto_resolved === "tag" ? "按版本" : "按主分支"}）`}
-                {" · "}当前 <span className="font-mono text-foreground">{versionLabel(current) ?? "未下载"}</span>
-                {" · "}最新 <span className="font-mono text-foreground">{latest ? versionLabel(latest) : "—"}</span>
+              <p data-testid="versions-summary" className="text-xs text-muted-foreground">{t("跟踪：")}{describeTrack(data.track)}
+                {data.auto_resolved && `（${data.auto_resolved === "tag" ? t("按版本") : t("按主分支")}）`}
+                {" · "}{(t("当前") + " ")}<span className="font-mono text-foreground">{versionLabel(current) ?? t("未下载")}</span>
+                {" · "}{(t("最新") + " ")}<span className="font-mono text-foreground">{latest ? versionLabel(latest) : "—"}</span>
               </p>
               {"error" in data.latest && data.latest.error && (
                 <p data-testid="versions-latest-error" className="text-xs text-warning">{data.latest.error}</p>
@@ -157,13 +157,13 @@ export function SkillVersionsDialog({
                   type="button"
                   data-testid="versions-update-latest"
                   disabled={busy}
-                  onClick={() => previewSwitch(null, versionLabel(latest) ?? "最新")}
+                  onClick={() => previewSwitch(null, versionLabel(latest) ?? t("最新"))}
                   className="inline-flex items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
                 >
-                  <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} aria-hidden /> 更新到 {versionLabel(latest)}
+                  <RefreshCw className={cn("h-3.5 w-3.5", busy && "animate-spin")} aria-hidden />{(" " + t("更新到") + " ")}{versionLabel(latest)}
                 </button>
               )}
-              <p className="text-[11px] text-muted-foreground">切换后，各助手在用的技能一起换到那个版本，停用的不动。要一直停在某个版本，把跟踪改成「固定」。</p>
+              <p className="text-[11px] text-muted-foreground">{t("切换后，各助手在用的技能一起换到那个版本，停用的不动。要一直停在某个版本，把跟踪改成「固定」。")}</p>
             </>
           )}
         </div>
@@ -173,55 +173,49 @@ export function SkillVersionsDialog({
             {pending.error ? (
               <p data-testid="versions-preview-error" className="text-destructive">{pending.error}</p>
             ) : !pending.data ? (
-              <p className="text-muted-foreground">正在取 {pending.label} 并比较…</p>
+              <p className="text-muted-foreground">{(t("正在取") + " ")}{pending.label}{(" " + t("并比较…"))}</p>
             ) : (
               <>
                 <p className="text-foreground">
-                  {versionLabel(pending.data.from) ?? "未下载"} → <span className="font-mono">{versionLabel(pending.data.to)}</span>
+                  {versionLabel(pending.data.from) ?? t("未下载")} → <span className="font-mono">{versionLabel(pending.data.to)}</span>
                 </p>
                 {!pending.data.downloaded ? (
-                  <p className="text-muted-foreground">还没下载过，这次是首次下载。</p>
+                  <p className="text-muted-foreground">{t("还没下载过，这次是首次下载。")}</p>
                 ) : pending.data.same ? (
-                  <p data-testid="versions-preview-same" className="text-muted-foreground">已经是这个版本，内容没有变化。</p>
+                  <p data-testid="versions-preview-same" className="text-muted-foreground">{t("已经是这个版本，内容没有变化。")}</p>
                 ) : (
                   <>
                     {pending.data.skills.length === 0 && pending.data.rules.length === 0 && (
-                      <p className="text-muted-foreground">用到的技能与规则都没有变化。</p>
+                      <p className="text-muted-foreground">{t("用到的技能与规则都没有变化。")}</p>
                     )}
                     {pending.data.skills.map((skill) => (
                       <div key={skill.name} data-testid={`preview-skill-${skill.name}`} className="rounded border p-2">
                         <p className="font-medium text-foreground">
                           {skill.name}
                           {skillChange(skill.files) === "added" && (
-                            <span data-testid={`preview-skill-new-${skill.name}`} className="ml-2 rounded bg-info/10 px-1.5 py-0.5 text-[11px] font-normal text-info">
-                              新技能
-                            </span>
+                            <span data-testid={`preview-skill-new-${skill.name}`} className="ml-2 rounded bg-info/10 px-1.5 py-0.5 text-[11px] font-normal text-info">{t("新技能")}</span>
                           )}
                           {skillChange(skill.files) === "deleted" && (
-                            <span data-testid={`preview-skill-gone-${skill.name}`} className="ml-2 rounded bg-warning/15 px-1.5 py-0.5 text-[11px] font-normal text-warning">
-                              这一版删掉了它
-                            </span>
+                            <span data-testid={`preview-skill-gone-${skill.name}`} className="ml-2 rounded bg-warning/15 px-1.5 py-0.5 text-[11px] font-normal text-warning">{t("这一版删掉了它")}</span>
                           )}
                           <span className="ml-2 font-normal text-muted-foreground">
                             {skill.accounts.length
-                              ? `跟着换：${skill.accounts.map(nameOf).join("、")}`
+                              ? t("跟着换：{0}", skill.accounts.map(nameOf).join("、"))
                               : skillChange(skill.files) === "added"
-                                ? "换过去后出现在技能页，由你决定给哪些助手"
-                                : "没有助手在用"}
+                                ? t("换过去后出现在技能页，由你决定给哪些助手")
+                                : t("没有助手在用")}
                           </span>
                         </p>
                         <ul className="mt-1 space-y-0.5 font-mono">
                           {skill.files.slice(0, 15).map((change) => (
                             <ChangedFile key={change.file} change={change} label={CHANGE[change.status] ?? change.status} />
                           ))}
-                          {skill.files.length > 15 && <li className="text-muted-foreground">另有 {skill.files.length - 15} 处</li>}
+                          {skill.files.length > 15 && <li className="text-muted-foreground">{(t("另有") + " ")}{skill.files.length - 15}{(" " + t("处"))}</li>}
                         </ul>
                       </div>
                     ))}
                     {pending.data.rules.length > 0 && (
-                      <p data-testid="preview-rules" className="text-muted-foreground">
-                        规则变化 {pending.data.rules.length} 处（规则页会提示「来源有新版」，确认后才覆盖）
-                      </p>
+                      <p data-testid="preview-rules" className="text-muted-foreground">{(t("规则变化") + " ")}{pending.data.rules.length}{(" " + t("处（规则页会提示「来源有新版」，确认后才覆盖）"))}</p>
                     )}
                   </>
                 )}
@@ -229,13 +223,9 @@ export function SkillVersionsDialog({
             )}
             <div className="sticky -bottom-3 z-10 -mx-5 -mb-3 flex items-center justify-end gap-2 border-t bg-card px-5 py-2">
               {busy ? (
-                <span data-testid="versions-switching-note" className="mr-auto text-muted-foreground">
-                  正在下载并把在用的技能换过去，完成前不能取消
-                </span>
+                <span data-testid="versions-switching-note" className="mr-auto text-muted-foreground">{t("正在下载并把在用的技能换过去，完成前不能取消")}</span>
               ) : (
-                <button type="button" onClick={() => setPending(null)} className="rounded-md border px-3 py-1 text-xs text-muted-foreground hover:bg-accent">
-                  返回
-                </button>
+                <button type="button" onClick={() => setPending(null)} className="rounded-md border px-3 py-1 text-xs text-muted-foreground hover:bg-accent">{t("返回")}</button>
               )}
               <button
                 type="button"
@@ -244,7 +234,7 @@ export function SkillVersionsDialog({
                 onClick={() => void confirmSwitch()}
                 className="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
               >
-                {busy ? "正在切换…" : `确认换到 ${pending.label}`}
+                {busy ? t("正在切换…") : t("确认换到 {0}", pending.label)}
               </button>
             </div>
           </div>
@@ -261,22 +251,22 @@ export function SkillVersionsDialog({
                   onClick={() => setTab(key)}
                   className={cn("rounded px-2.5 py-1", tab === key ? "bg-primary/15 font-medium text-primary" : "text-muted-foreground hover:text-foreground")}
                 >
-                  {key === "tags" ? `版本 ${data.tags_total}` : `分支 ${data.branches_total}`}
+                  {key === "tags" ? t("版本 {0}", data.tags_total) : t("分支 {0}", data.branches_total)}
                 </button>
               ))}
             </div>
             <ul data-testid="versions-list" className="min-h-0 flex-1 divide-y overflow-y-auto px-5 py-2">
-              {rows.length === 0 && <li className="py-2 text-xs text-muted-foreground">{tab === "tags" ? "这个仓库没有标签" : "没有分支"}</li>}
+              {rows.length === 0 && <li className="py-2 text-xs text-muted-foreground">{tab === "tags" ? t("这个仓库没有标签") : t("没有分支")}</li>}
               {rows.map((item) => {
                 const isCurrent = current?.commit === item.commit && (tab === "branches" || current?.kind !== "branch");
                 return (
                   <li key={item.name} data-testid={`version-${item.name}`} className="flex items-center gap-2 py-1.5">
                     <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground" title={item.commit}>{item.name}</span>
-                    {(item as { prerelease?: boolean }).prerelease === true && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">预发布</span>}
-                    {tab === "branches" && item.name === data.default_branch && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">主分支</span>}
-                    {latest?.commit === item.commit && <span className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">最新</span>}
+                    {(item as { prerelease?: boolean }).prerelease === true && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{t("预发布")}</span>}
+                    {tab === "branches" && item.name === data.default_branch && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">{t("主分支")}</span>}
+                    {latest?.commit === item.commit && <span className="rounded bg-info/10 px-1.5 py-0.5 text-[11px] text-info">{t("最新")}</span>}
                     {isCurrent ? (
-                      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">当前</span>
+                      <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[11px] text-primary">{t("当前")}</span>
                     ) : (
                       <button
                         type="button"
@@ -284,14 +274,12 @@ export function SkillVersionsDialog({
                         disabled={busy}
                         onClick={() => previewSwitch(item.name, item.name)}
                         className="rounded border px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-40"
-                      >
-                        切换
-                      </button>
+                      >{t("切换")}</button>
                     )}
                   </li>
                 );
               })}
-              {total > rows.length && <li className="py-2 text-[11px] text-muted-foreground">只列出前 {rows.length} 个（共 {total} 个）</li>}
+              {total > rows.length && <li className="py-2 text-[11px] text-muted-foreground">{(t("只列出前") + " ")}{rows.length}{(" " + t("个（共") + " ")}{total}{(" " + t("个）"))}</li>}
             </ul>
           </>
         )}

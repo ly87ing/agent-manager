@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { Freshness } from "./contract";
 
 /**
@@ -117,33 +118,33 @@ export interface ProgramPlan {
 }
 
 export const MODE_LABEL: Record<ProgramMode, string> = {
-  managed: "本工具安装",
-  delegated: "代管",
-  runner: "按需拉取",
-  observed: "只观察",
-  missing: "未安装",
+  get managed() { return t("本工具安装"); },
+  get delegated() { return t("代管"); },
+  get runner() { return t("按需拉取"); },
+  get observed() { return t("只观察"); },
+  get missing() { return t("未安装"); },
 };
 
 export const MODE_HINT: Record<ProgramMode, string> = {
-  managed: "装在本工具目录，按版本各一份，可换版本、退回旧版本",
-  delegated: "装在原处（npm 全局 / uv tool），本工具调用原来的包管理器升级、回退",
-  runner: "MCP 启动时由 npx / uvx 按条目里写的版本拉取；管理的是条目里的版本号",
-  observed: "由 Homebrew、系统或别的应用管理，本工具只显示、给命令",
-  missing: "哪里都没有",
+  get managed() { return t("装在本工具目录，按版本各一份，可换版本、退回旧版本"); },
+  get delegated() { return t("装在原处（npm 全局 / uv tool），本工具调用原来的包管理器升级、回退"); },
+  get runner() { return t("MCP 启动时由 npx / uvx 按条目里写的版本拉取；管理的是条目里的版本号"); },
+  get observed() { return t("由 Homebrew、系统或别的应用管理，本工具只显示、给命令"); },
+  get missing() { return t("哪里都没有"); },
 };
 
 const OWNER_LABEL: Record<string, string> = {
-  managed: "本工具",
-  "npm-global": "npm 全局",
+  get managed() { return t("本工具"); },
+  get "npm-global"() { return t("npm 全局"); },
   "uv-tool": "uv tool",
   homebrew: "Homebrew",
-  app: "应用自带",
-  system: "系统",
-  unknown: "来源不明",
+  get app() { return t("应用自带"); },
+  get system() { return t("系统"); },
+  get unknown() { return t("来源不明"); },
 };
 
 export function ownerLabel(install: ProgramInstall): string {
-  if (install.owner === "app" && install.app) return `${install.app} 自带`;
+  if (install.owner === "app" && install.app) return t("{0} 自带", install.app);
   return OWNER_LABEL[install.owner] ?? install.owner;
 }
 

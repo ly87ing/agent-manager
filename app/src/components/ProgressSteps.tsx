@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { useEffect, useState } from "react";
 import { Check, Circle, Loader2, X } from "lucide-react";
 import type { EngineProgress } from "../lib/useEngineProgress";
@@ -16,7 +17,7 @@ export function ProgressSteps({ progress, fallback, testId }: { progress: Engine
     <div data-testid={testId} className="space-y-1.5 text-xs">
       <p className="flex items-center justify-between text-muted-foreground">
         <span>{fallback}</span>
-        <span data-testid={testId ? `${testId}-elapsed` : undefined} className="tabular-nums">已用 {elapsed} 秒</span>
+        <span data-testid={testId ? `${testId}-elapsed` : undefined} className="tabular-nums">{(t("已用") + " ")}{elapsed}{(" " + t("秒"))}</span>
       </p>
       {progress && (
         <ol className="space-y-1">

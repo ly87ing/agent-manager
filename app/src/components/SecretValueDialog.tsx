@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { useState } from "react";
 import { X } from "lucide-react";
 import { useDialogFocus } from "../lib/dialogFocus";
@@ -32,20 +33,18 @@ export function SecretValueDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in">
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`填写 ${variable}`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-lg border bg-card p-5 shadow-lg">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("填写 {0}", variable)} tabIndex={-1} onKeyDown={onDialogKeyDown} className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-lg border bg-card p-5 shadow-lg">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="text-base font-semibold text-foreground">填写取值</h3>
+            <h3 className="text-base font-semibold text-foreground">{t("填写取值")}</h3>
             <p className="mt-0.5 break-all font-mono text-xs text-muted-foreground">{variable}</p>
           </div>
-          <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">
+          <button type="button" onClick={onClose} aria-label={t("关闭")} className="rounded p-1 text-muted-foreground hover:bg-accent">
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
 
-        <label className="mt-4 block text-xs font-medium text-muted-foreground" htmlFor="secret-value-input">
-          取值
-        </label>
+        <label className="mt-4 block text-xs font-medium text-muted-foreground" htmlFor="secret-value-input">{t("取值")}</label>
         <input
           id="secret-value-input"
           type="password"
@@ -53,14 +52,11 @@ export function SecretValueDialog({
           autoComplete="off"
           data-testid="secret-value-input"
           onChange={(event) => setValue(event.target.value)}
-          placeholder={stored ? "粘贴新取值以覆盖" : "粘贴取值"}
+          placeholder={stored ? t("粘贴新取值以覆盖") : t("粘贴取值")}
           className="mt-1 w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
         />
 
-        <p className="mt-3 rounded-md border bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-          取值只写入“设置 → 密钥”选择的外部文件，不进入本机数据库、操作记录或配置备份。
-          同步到部分助手时，目标配置本身可能需要明文；保存前请确认你信任该文件位置。
-        </p>
+        <p className="mt-3 rounded-md border bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">{t("取值只写入“设置 → 密钥”选择的外部文件，不进入本机数据库、操作记录或配置备份。\n          同步到部分助手时，目标配置本身可能需要明文；保存前请确认你信任该文件位置。")}</p>
 
         <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex justify-end gap-2">
           {stored && onRequestClear && (
@@ -70,22 +66,16 @@ export function SecretValueDialog({
               disabled={busy}
               onClick={onRequestClear}
               className="mr-auto rounded border border-destructive/30 px-3 py-1.5 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
-            >
-              删除取值
-            </button>
+            >{t("删除取值")}</button>
           )}
-          <button type="button" onClick={onClose} className="rounded border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent">
-            取消
-          </button>
+          <button type="button" onClick={onClose} className="rounded border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent">{t("取消")}</button>
           <button
             type="button"
             data-testid="secret-value-save"
             disabled={busy || value.length === 0}
             onClick={() => onSubmit(value)}
             className="rounded bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
-          >
-            保存
-          </button>
+          >{t("保存")}</button>
         </div>
       </div>
     </div>

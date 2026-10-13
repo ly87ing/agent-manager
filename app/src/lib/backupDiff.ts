@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 /**
  * 备份导入前的差异对比（纯函数）。
  *
@@ -26,7 +27,7 @@ type Json = Record<string, unknown>;
 
 export const BACKUP_MODULES = ["skills", "mcp", "rules"] as const;
 export type BackupModule = typeof BACKUP_MODULES[number];
-export const BACKUP_MODULE_LABELS: Record<BackupModule, string> = { skills: "技能来源", mcp: "MCP 已保存项", rules: "规则模板" };
+export const BACKUP_MODULE_LABELS: Record<BackupModule, string> = { get skills() { return t("技能来源"); }, get mcp() { return t("MCP 已保存项"); }, get rules() { return t("规则模板"); } };
 
 export function selectBackupModules(current: Json, incoming: Json, modules: BackupModule[]): Json {
   const policy = { ...asObject(current.policy) };
@@ -86,14 +87,14 @@ function templatesByName(value: unknown): Json {
 
 const SOURCE_LABELS: Record<string, string> = {
   // 旧备份里的规则来源：导入时转成「旧规则来源」模板，不再作为来源保存
-  "rules.shared": "旧规则来源（共享，导入后转为模板）",
-  "rules.claude": "旧规则来源（Claude 专用，导入后转为模板）",
-  "rules.codex": "旧规则来源（Codex 专用，导入后转为模板）",
+  get "rules.shared"() { return t("旧规则来源（共享，导入后转为模板）"); },
+  get "rules.claude"() { return t("旧规则来源（Claude 专用，导入后转为模板）"); },
+  get "rules.codex"() { return t("旧规则来源（Codex 专用，导入后转为模板）"); },
   // Hooks 已不再管理：旧备份里的这两段导入时跳过
-  "hooks.claude": "旧版 Claude Hooks（已不再管理，导入时跳过）",
-  "hooks.codex": "旧版 Codex Hooks（已不再管理，导入时跳过）",
+  get "hooks.claude"() { return t("旧版 Claude Hooks（已不再管理，导入时跳过）"); },
+  get "hooks.codex"() { return t("旧版 Codex Hooks（已不再管理，导入时跳过）"); },
   // 旧版本保存、还没写进终端配置的快捷命令：导入后在快捷命令页作为已保存未生效建议出现
-  "aliases.shell": "旧版终端快捷命令（已不再管理，导入时跳过）",
+  get "aliases.shell"() { return t("旧版终端快捷命令（已不再管理，导入时跳过）"); },
 };
 
 export function sourceLabel(key: string): string {
@@ -106,15 +107,15 @@ export function diffBackup(current: Json, incoming: Json): BackupDiff {
 
   const sections = [
     // 导入只新增或覆盖同名项，本机已有的 MCP 已保存项不会消失
-    { ...diffMaps("MCP 已保存项", mcpSavedItems(current), mcpSavedItems(incoming)), removed: [] },
+    { ...diffMaps(t("MCP 已保存项"), mcpSavedItems(current), mcpSavedItems(incoming)), removed: [] },
     diffMaps(
-      "技能来源",
+      t("技能来源"),
       asObject(asObject(currentPolicy.skills).repositories),
       asObject(asObject(incomingPolicy.skills).repositories),
     ),
     // 备份里带了模板才会整体替换；没带就不动现有模板，不报消失
     ...("rule_templates" in incoming
-      ? [diffMaps("规则模板", templatesByName(current.rule_templates), templatesByName(incoming.rule_templates))]
+      ? [diffMaps(t("规则模板"), templatesByName(current.rule_templates), templatesByName(incoming.rule_templates))]
       : []),
   ].filter((section) => section.added.length + section.changed.length + section.removed.length > 0);
 

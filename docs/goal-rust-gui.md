@@ -1282,3 +1282,40 @@ and both [regular CI jobs](https://github.com/ly87ing/agent-manager/actions/runs
 passed for that revision. Interactive Windows/arm64 macOS desktop and
 automatic-update acceptance remain open. No real account files were changed,
 and no Release or installer was published.
+
+### 2026-10-12: English default and Simplified Chinese interface
+
+The desktop interface now defaults to English. Settings → Language switches
+between English and Simplified Chinese after an explicit save and retains the
+choice across restarts. Language uses the existing application-preference table;
+reading missing or legacy preferences remains read-only and defaults to English.
+Saving preserves the secrets-file path owned by the MCP secrets page.
+
+The catalogue covers application-owned navigation, pages, forms, search labels,
+instructions and existing operation messages. Resource names, user content,
+paths and original engine diagnostics remain unchanged. No notification module
+was added. Language changes add no account operations or assistant-file writes.
+
+Acceptance passed 466 engine tests, 27 Tauri tests and 621 frontend tests, plus
+the production frontend build and native macOS debug compilation. Regressions
+cover English defaults with a Chinese browser language, explicit save, failed
+save/retry, canceled stale queries, preserved user text, both-language MCP
+unsupported-target filtering and unchanged keep-existing wire values.
+
+Browser checks captured all ten page surfaces at 1000 and 760 px in both
+languages, with empty and populated skill/source states, plus twenty source,
+MCP, rule-template, restore-preview and search-dialog checks. Final captures wait
+for loaded content and page animations; no document overflow was found.
+
+Native macOS acceptance used a separate application identifier, isolated HOME
+and data directory, and the committed window geometry. It saved Chinese through
+the actual UI, read `"zh-CN"` from SQLite, restarted into Chinese, saved English,
+read `"en"`, and restarted into English. Three simulated identity/configuration
+files remained byte-identical. Initial copied-binary attempts failed Tauri's
+resource-path lookup; the accepted run used the actual Cargo debug executable.
+
+Interactive Windows/arm64 macOS operation, signing/notarization and automatic
+updates remain outside this acceptance. No real account files were changed and
+no Release, tag or installer was published. Downgrading to a pre-language binary
+requires removing only the new app preference row as described in
+[Interface language](subsystems/interface-language.md).

@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { toast } from "sonner";
 
 /**
@@ -15,7 +16,7 @@ export function toastWithUndo(
     description: options.description,
     duration: 10_000,
     action: {
-      label: "撤销",
+      label: t("撤销"),
       onClick: () => void options.onUndo(),
     },
   });

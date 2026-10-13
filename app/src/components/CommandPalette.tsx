@@ -1,3 +1,4 @@
+import { t, useLanguage } from "../lib/i18n";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import type { StatusData } from "../lib/contract";
@@ -17,17 +18,17 @@ export interface CommandItem {
 }
 
 const PAGES: { key: string; label: string; keywords: string }[] = [
-  { key: "skills", label: "技能", keywords: "skills 技能" },
+  { key: "skills", get label() { return t("技能"); }, keywords: "skills 技能" },
   { key: "mcp", label: "MCP", keywords: "mcp 服务器" },
-  { key: "rules", label: "规则", keywords: "rules 规则" },
-  { key: "agents", label: "助手", keywords: "agent agents 助手 只读 目录 扩展目标" },
-  { key: "settings", label: "设置", keywords: "settings 偏好" },
+  { key: "rules", get label() { return t("规则"); }, keywords: "rules 规则" },
+  { key: "agents", get label() { return t("助手"); }, keywords: "agent agents 助手 只读 目录 扩展目标" },
+  { key: "settings", get label() { return t("设置"); }, keywords: "settings 偏好" },
   // 设置里的二级页面也要搜得到
-  { key: "runs", label: "操作记录", keywords: "runs 任务 日志 记录" },
-  { key: "settings:secrets", label: "MCP 密钥", keywords: "secrets 密钥 变量 token api key 凭据" },
-  { key: "settings:tips", label: "更多技巧", keywords: "tips 技巧 分享 多账号 独立环境 别名 alias shell" },
-  { key: "programs", label: "依赖程序", keywords: "programs 程序 cli 命令行 依赖 npm npx uvx 安装 升级 版本" },
-  { key: "sources", label: "来源", keywords: "sources 来源 集合 仓库 规则来源 添加 更新 版本 停用 移除 未纳管 纳入 接管 扫描 agent-skills" },
+  { key: "runs", get label() { return t("操作记录"); }, keywords: "runs 任务 日志 记录" },
+  { key: "settings:secrets", get label() { return t("MCP 密钥"); }, keywords: "secrets 密钥 变量 token api key 凭据" },
+  { key: "settings:tips", get label() { return t("更多技巧"); }, keywords: "tips 技巧 分享 多账号 独立环境 别名 alias shell" },
+  { key: "programs", get label() { return t("依赖程序"); }, keywords: "programs 程序 cli 命令行 依赖 npm npx uvx 安装 升级 版本" },
+  { key: "sources", get label() { return t("来源"); }, keywords: "sources 来源 集合 仓库 规则来源 添加 更新 版本 停用 移除 未纳管 纳入 接管 扫描 agent-skills" },
 ];
 
 /**
@@ -53,6 +54,7 @@ export function CommandPalette({
   /** 选中某个账号的技能时，跳到技能页并只看它。 */
   onOpenAgentSkills: (agentId: string) => void;
 }) {
+  const language = useLanguage();
   const [keyword, setKeyword] = useState("");
   const [targetItemId, setTargetItemId] = useState<string | null>(null);
   const [active, setActive] = useState(0);
@@ -75,38 +77,38 @@ export function CommandPalette({
     const out: CommandItem[] = PAGES.map((page) => ({
       id: `page:${page.key}`,
       label: page.label,
-      hint: "页面",
+      hint: t("页面"),
       keywords: page.keywords,
-      group: "前往",
+      group: t("前往"),
       run: () => onNavigate(page.key),
     }));
     for (const element of skills.data?.ok ? skills.data.data.elements : []) {
       const id = element.id.replace(/^skill:/, "");
       if (id.includes("/")) continue;
-      out.push({ id: `skill:${id}`, label: id, hint: "技能来源", keywords: `${id} skills`, group: "资源", run: () => onNavigate("skills") });
+      out.push({ id: `skill:${id}`, label: id, hint: t("技能来源"), keywords: `${id} skills`, group: t("资源"), run: () => onNavigate("skills") });
     }
     for (const element of mcp.data?.ok ? mcp.data.data.elements : []) {
       const id = element.id.replace(/^mcp:/, "");
-      out.push({ id: `mcp:${id}`, label: id, hint: "MCP 服务", keywords: `${id} mcp`, group: "资源", run: () => onNavigate("mcp") });
+      out.push({ id: `mcp:${id}`, label: id, hint: t("MCP 服务"), keywords: `${id} mcp`, group: t("资源"), run: () => onNavigate("mcp") });
     }
     out.push({
       id: "action:import-link",
-      label: "从分享链接导入…",
-      hint: "MCP 服务或技能来源",
+      label: t("从分享链接导入…"),
+      hint: t("MCP 服务或技能来源"),
       keywords: "import share link 分享 导入 链接",
-      group: "动作",
+      group: t("动作"),
       run: () => onNavigate("import-link"),
     });
     out.push({
       id: "action:refresh-upstream",
-      label: "检查更新",
-      hint: "对比官方最新版本",
+      label: t("检查更新"),
+      hint: t("对比官方最新版本"),
       keywords: "update upstream 版本",
-      group: "动作",
+      group: t("动作"),
       run: () => refreshUpstream.mutate(undefined),
     });
     return out;
-  }, [skills.data, mcp.data, refreshUpstream, onNavigate]);
+  }, [skills.data, mcp.data, refreshUpstream, onNavigate, language]);
 
   const filtered = useMemo(() => {
     const scoped = items;
@@ -140,7 +142,7 @@ export function CommandPalette({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={"命令面板"}
+        aria-label={t("命令面板")}
         data-testid="command-palette"
         className="w-full max-w-xl overflow-hidden rounded-xl border bg-card shadow-xl animate-zoom-in-95"
         onKeyDown={(event) => {
@@ -171,15 +173,15 @@ export function CommandPalette({
               setKeyword(event.target.value);
             }}
             data-testid="command-palette-input"
-            aria-label={"搜索页面与资源"}
-            placeholder={"搜索页面、技能、MCP…"}
+            aria-label={t("搜索页面与资源")}
+            placeholder={t("搜索页面、技能、MCP…")}
             className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
         </div>
         <div className="max-h-[50vh] overflow-y-auto p-2">
           {filtered.length === 0 ? (
             <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-              {"没有匹配的页面或资源。"}
+              {t("没有匹配的页面或资源。")}
             </p>
           ) : (
             Object.entries(grouped).map(([group, groupItems]) => (
@@ -209,7 +211,7 @@ export function CommandPalette({
             ))
           )}
         </div>
-        <div className="border-t px-4 py-2 text-[11px] text-muted-foreground">↑↓ 选择 · Enter 执行 · Esc 关闭</div>
+        <div className="border-t px-4 py-2 text-[11px] text-muted-foreground">{t("↑↓ 选择 · Enter 执行 · Esc 关闭")}</div>
       </div>
     </div>
   );

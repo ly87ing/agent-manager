@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { useState } from "react";
 import { ConfirmModal } from "./ConfirmModal";
 
@@ -31,10 +32,10 @@ export function ForkSkillDialog({
   const targetOk = /^[a-z0-9][a-z0-9-]*$/.test(target) && target !== collection;
   return (
     <ConfirmModal
-      title={`把 ${skill} 改成我的版本`}
-      description={`复制一份到你的目录，之后在那里改；${collection} 以后更新不会改你的版本，出新版时会提示你对比。`}
+      title={t("把 {0} 改成我的版本", skill)}
+      description={t("复制一份到你的目录，之后在那里改；{0} 以后更新不会改你的版本，出新版时会提示你对比。", collection)}
       risk="write-local"
-      confirmLabel="复制并换过去"
+      confirmLabel={t("复制并换过去")}
       confirmDisabled={!destOk || !targetOk}
       executing={executing}
       onConfirm={() => onConfirm({ dest: dest.trim(), target, switchAccounts: picked })}
@@ -42,7 +43,7 @@ export function ForkSkillDialog({
     >
       <div className="mt-3 space-y-3 text-sm">
         <label className="block">
-          <span className="text-xs text-muted-foreground">集合目录（可自定义，已有集合沿用原位置）</span>
+          <span className="text-xs text-muted-foreground">{t("集合目录（可自定义，已有集合沿用原位置）")}</span>
           <input
             data-testid="fork-dest"
             value={dest}
@@ -52,7 +53,7 @@ export function ForkSkillDialog({
         </label>
         <p data-testid="fork-target-path" className="break-all rounded-md bg-muted/30 p-2 font-mono text-xs">{dest.trim().replace(/[\\/]+$/, "")}/{skill}/</p>
         <label className="block">
-          <span className="text-xs text-muted-foreground">登记成哪个集合（已有同名集合须指向同一个目录）</span>
+          <span className="text-xs text-muted-foreground">{t("登记成哪个集合（已有同名集合须指向同一个目录）")}</span>
           <input
             data-testid="fork-collection"
             value={target}
@@ -62,7 +63,7 @@ export function ForkSkillDialog({
         </label>
         {accounts.length > 0 && (
           <div>
-            <span className="text-xs text-muted-foreground">这些助手现在用着它，换成你的版本：</span>
+            <span className="text-xs text-muted-foreground">{t("这些助手现在用着它，换成你的版本：")}</span>
             <div className="mt-1 flex flex-wrap gap-3">
               {accounts.map((account) => (
                 <label key={account.id} className="flex items-center gap-1.5 text-sm">
@@ -78,8 +79,8 @@ export function ForkSkillDialog({
             </div>
           </div>
         )}
-        {!destOk && <p className="text-xs text-destructive">目录要写绝对路径或以 ~/ 开头</p>}
-        {!targetOk && <p className="text-xs text-destructive">集合名只能用小写字母、数字和连字符，且不能是 {collection}</p>}
+        {!destOk && <p className="text-xs text-destructive">{t("目录要写绝对路径或以 ~/ 开头")}</p>}
+        {!targetOk && <p className="text-xs text-destructive">{(t("集合名只能用小写字母、数字和连字符，且不能是") + " ")}{collection}</p>}
       </div>
     </ConfirmModal>
   );

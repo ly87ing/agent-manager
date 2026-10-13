@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { buildAccounts } from "./accounts";
 import type { EngineElement, McpTarget, StatusData } from "./contract";
 import { mcpFillRows, type McpFillRow } from "./mcpFill";
@@ -26,12 +27,12 @@ import type { BatchApplyRow } from "./useBatchApply";
 export type InboxState = "broken" | "drifted" | "missing" | "update" | "unmanaged" | "cleanup";
 
 export const INBOX_STATES: { state: InboxState; label: string; hint: string }[] = [
-  { state: "broken", label: "损坏", hint: "链接断了、格式无效、找不到命令或读不了" },
-  { state: "drifted", label: "已偏离", hint: "被外部改过，和来源或预期不一致" },
-  { state: "missing", label: "缺失", hint: "同类账号在用，这些账号还没有" },
-  { state: "update", label: "有新版本", hint: "来源有新内容" },
-  { state: "unmanaged", label: "未纳管", hint: "在账号里，但不来自任何来源" },
-  { state: "cleanup", label: "可清理", hint: "本工具装的程序已经没人用了" },
+  { state: "broken", get label() { return t("损坏"); }, get hint() { return t("链接断了、格式无效、找不到命令或读不了"); } },
+  { state: "drifted", get label() { return t("已偏离"); }, get hint() { return t("被外部改过，和来源或预期不一致"); } },
+  { state: "missing", get label() { return t("缺失"); }, get hint() { return t("同类账号在用，这些账号还没有"); } },
+  { state: "update", get label() { return t("有新版本"); }, get hint() { return t("来源有新内容"); } },
+  { state: "unmanaged", get label() { return t("未纳管"); }, get hint() { return t("在账号里，但不来自任何来源"); } },
+  { state: "cleanup", get label() { return t("可清理"); }, get hint() { return t("本工具装的程序已经没人用了"); } },
 ];
 
 /** 处理一条待处理项的唯一动作：能直接执行的直接执行，需要看差异或选择的跳到负责的页面。 */
@@ -70,13 +71,13 @@ export interface InboxInput {
 }
 
 const PAGE_LABEL: Record<InboxPage, string> = {
-  accounts: "账号",
-  skills: "技能",
+  get accounts() { return t("账号"); },
+  get skills() { return t("技能"); },
   mcp: "MCP",
-  rules: "规则",
-  commands: "命令",
-  sources: "来源",
-  programs: "程序",
+  get rules() { return t("规则"); },
+  get commands() { return t("命令"); },
+  get sources() { return t("来源"); },
+  get programs() { return t("程序"); },
 };
 
 export function pageLabel(page: InboxPage): string {
@@ -100,7 +101,7 @@ function sourceItems(collections: EngineElement[]): InboxItem[] {
     if ((collection.policy as { enabled?: boolean }).enabled === false) return [];
     const open = (label: string) => ({ kind: "open" as const, label, target: `sources:${name}` });
     const problem = observed.discovery_error?.message ?? observed.version?.track_error ?? observed.blocked_reason ?? null;
-    if (problem) return [{ id: `source:${name}:broken`, subject: collection.id, page: "sources", state: "broken", title: `${name}`, detail: problem, fix: open("去处理") }];
+    if (problem) return [{ id: `source:${name}:broken`, subject: collection.id, page: "sources", state: "broken", title: `${name}`, detail: problem, fix: open(t("去处理")) }];
     if (!observed.repo_cached) {
       return [{
         id: `source:${name}:fetch`,
@@ -108,8 +109,8 @@ function sourceItems(collections: EngineElement[]): InboxItem[] {
         page: "sources",
         state: spec.source_path ? "broken" : "update",
         title: `${name}`,
-        detail: spec.source_path ? `本机目录不存在：${spec.source_path}` : "还没有取回内容",
-        fix: open(spec.source_path ? "去处理" : "取回"),
+        detail: spec.source_path ? t("本机目录不存在：{0}", spec.source_path) : t("还没有取回内容"),
+        fix: open(spec.source_path ? t("去处理") : t("取回")),
       }];
     }
     if (collection.freshness.state === "behind") {
@@ -119,8 +120,8 @@ function sourceItems(collections: EngineElement[]): InboxItem[] {
         page: "sources",
         state: "update",
         title: `${name}`,
-        detail: collection.freshness.upstream ? `可更新到 ${shortRef(collection.freshness.upstream)}` : "有新内容",
-        fix: open("预览并更新"),
+        detail: collection.freshness.upstream ? t("可更新到 {0}", shortRef(collection.freshness.upstream)) : t("有新内容"),
+        fix: open(t("预览并更新")),
       }];
     }
     return [];
@@ -142,29 +143,29 @@ export function skillItems(elements: EngineElement[], nameOf: (agent: string) =>
     const out: InboxItem[] = [];
     const dropped = where((_, cell) => Boolean(cell.source_missing));
     if (dropped.length) {
-      out.push({ id: `skill:${skill.id}:dropped`, subject: skill.id, page: "skills", state: "broken", title: `${name}`, detail: `来源里已删除：${names(dropped, nameOf)}`, fix: open("去移除") });
+      out.push({ id: `skill:${skill.id}:dropped`, subject: skill.id, page: "skills", state: "broken", title: `${name}`, detail: t("来源里已删除：{0}", names(dropped, nameOf)), fix: open(t("去移除")) });
     }
     const repair = cells
       .filter(([, cell]) => !cell.source_missing && (cell.state === "missing-link" || cell.state === "dead-link") && (cell.actions ?? []).includes("update"))
-      .map(([agent]): BatchApplyRow => ({ elementId: skill.id, agent, action: "update", label: `修复 ${name} @ ${agent}`, takeover: false }));
+      .map(([agent]): BatchApplyRow => ({ elementId: skill.id, agent, action: "update", label: t("修复 {0} @ {1}", name, agent), takeover: false }));
     if (repair.length) {
-      out.push({ id: `skill:${skill.id}:broken`, subject: skill.id, page: "skills", state: "broken", title: `${name}`, detail: `链接损坏：${names(repair.map((row) => row.agent), nameOf)}`, fix: { kind: "skills", label: "修复", rows: repair } });
+      out.push({ id: `skill:${skill.id}:broken`, subject: skill.id, page: "skills", state: "broken", title: `${name}`, detail: t("链接损坏：{0}", names(repair.map((row) => row.agent), nameOf)), fix: { kind: "skills", label: t("修复"), rows: repair } });
     }
     const drifted = where((state, cell) => state === "drifted" && !cell.source_missing);
     if (drifted.length) {
-      out.push({ id: `skill:${skill.id}:drifted`, subject: skill.id, page: "skills", state: "drifted", title: `${name}`, detail: `入口被外部内容占用：${names(drifted, nameOf)}`, fix: open("去查看") });
+      out.push({ id: `skill:${skill.id}:drifted`, subject: skill.id, page: "skills", state: "drifted", title: `${name}`, detail: t("入口被外部内容占用：{0}", names(drifted, nameOf)), fix: open(t("去查看")) });
     }
     const extra = where((state) => state === "extra-link");
     if (extra.length) {
-      out.push({ id: `skill:${skill.id}:extra`, subject: skill.id, page: "skills", state: "unmanaged", title: `${name}`, detail: `有外部链接：${names(extra, nameOf)}`, fix: open("去纳入") });
+      out.push({ id: `skill:${skill.id}:extra`, subject: skill.id, page: "skills", state: "unmanaged", title: `${name}`, detail: t("有外部链接：{0}", names(extra, nameOf)), fix: open(t("去纳入")) });
     }
     const missing = fill.filter((row) => row.elementId === skill.id);
     if (missing.length) {
-      out.push({ id: `skill:${skill.id}:missing`, subject: skill.id, page: "skills", state: "missing", title: `${name}`, detail: `还没有：${names(missing.map((row) => row.agent), nameOf)}`, fix: { kind: "skills", label: "补齐", rows: missing } });
+      out.push({ id: `skill:${skill.id}:missing`, subject: skill.id, page: "skills", state: "missing", title: `${name}`, detail: t("还没有：{0}", names(missing.map((row) => row.agent), nameOf)), fix: { kind: "skills", label: t("补齐"), rows: missing } });
     }
     const behind = versions.filter((row) => row.elementId === skill.id);
     if (behind.length) {
-      out.push({ id: `skill:${skill.id}:version`, subject: skill.id, page: "skills", state: "update", title: `${name}`, detail: `换到来源里的新版本：${names(behind.map((row) => row.agent), nameOf)}`, fix: { kind: "skills", label: "换到新版本", rows: behind } });
+      out.push({ id: `skill:${skill.id}:version`, subject: skill.id, page: "skills", state: "update", title: `${name}`, detail: t("换到来源里的新版本：{0}", names(behind.map((row) => row.agent), nameOf)), fix: { kind: "skills", label: t("换到新版本"), rows: behind } });
     }
     if (observed.discovery_inbox === true) {
       const rows = addToAllRows(skill);
@@ -174,9 +175,9 @@ export function skillItems(elements: EngineElement[], nameOf: (agent: string) =>
         page: "skills",
         state: "update",
         title: `${name}`,
-        detail: `来源 ${spec.collection} 里有、还没用的技能`,
-        fix: rows.length ? { kind: "skills", label: "添加到全部账号", rows } : open("去查看"),
-        group: { key: `new:${spec.collection}`, title: `${spec.collection} 里还没用的技能`, open: `skills:${spec.collection}` },
+        detail: t("来源 {0} 里有、还没用的技能", spec.collection),
+        fix: rows.length ? { kind: "skills", label: t("添加到全部账号"), rows } : open(t("去查看")),
+        group: { key: `new:${spec.collection}`, title: t("{0} 里还没用的技能", spec.collection), open: `skills:${spec.collection}` },
       });
     }
     return out;
@@ -185,7 +186,7 @@ export function skillItems(elements: EngineElement[], nameOf: (agent: string) =>
 
 function unmanagedItems(view: StatusData["unmanaged"] | null | undefined): InboxItem[] {
   if (!view) return [];
-  const open = { kind: "open" as const, label: "去纳入", target: "sources:unmanaged" };
+  const open = { kind: "open" as const, label: t("去纳入"), target: "sources:unmanaged" };
   return [
     ...view.skills.map((skill): InboxItem => ({
       id: `unmanaged:${skill.name}`,
@@ -193,9 +194,9 @@ function unmanagedItems(view: StatusData["unmanaged"] | null | undefined): Inbox
       page: "sources",
       state: "unmanaged",
       title: `${skill.name}`,
-      detail: skill.source?.repository ? `装自 ${skill.source.repository}，不来自任何来源` : "不来自任何来源",
+      detail: skill.source?.repository ? t("装自 {0}，不来自任何来源", skill.source.repository) : t("不来自任何来源"),
       fix: open,
-      group: { key: "unmanaged", title: "不来自任何来源的技能", open: "sources:unmanaged" },
+      group: { key: "unmanaged", title: t("不来自任何来源的技能"), open: "sources:unmanaged" },
     })),
     ...view.duplicates.map((dup): InboxItem => ({
       id: `duplicate:${dup.agent}:${dup.name}`,
@@ -203,8 +204,8 @@ function unmanagedItems(view: StatusData["unmanaged"] | null | undefined): Inbox
       page: "sources",
       state: "drifted",
       title: `${dup.name}`,
-      detail: "Codex 会加载两份（账号目录与共用目录各一份）",
-      fix: { ...open, label: "去清理" },
+      detail: t("Codex 会加载两份（账号目录与共用目录各一份）"),
+      fix: { ...open, label: t("去清理") },
     })),
   ];
 }
@@ -219,12 +220,12 @@ export function mcpItems(elements: EngineElement[], targets: McpTarget[], nameOf
     const invalid = cells.filter(([, cell]) => cell.state === "invalid").map(([agent]) => agent);
     const noCommand = cells.filter(([, cell]) => cell.state === "enabled" && cell.command_available === false).map(([agent]) => agent);
     const vars = missingVariables(element);
-    if (invalid.length) out.push({ id: `mcp:${name}:invalid`, subject: element.id, page: "mcp", state: "broken", title: `${name}`, detail: `条目无法识别：${names(invalid, nameOf)}`, fix: open("去查看") });
-    if (noCommand.length) out.push({ id: `mcp:${name}:command`, subject: element.id, page: "mcp", state: "broken", title: `${name}`, detail: `找不到要执行的命令：${names(noCommand, nameOf)}`, fix: open("去查看") });
-    if (vars.length) out.push({ id: `mcp:${name}:vars`, subject: element.id, page: "mcp", state: "broken", title: `${name}`, detail: `变量没有取值：${vars.join("、")}`, fix: open("去填写") });
+    if (invalid.length) out.push({ id: `mcp:${name}:invalid`, subject: element.id, page: "mcp", state: "broken", title: `${name}`, detail: t("条目无法识别：{0}", names(invalid, nameOf)), fix: open(t("去查看")) });
+    if (noCommand.length) out.push({ id: `mcp:${name}:command`, subject: element.id, page: "mcp", state: "broken", title: `${name}`, detail: t("找不到要执行的命令：{0}", names(noCommand, nameOf)), fix: open(t("去查看")) });
+    if (vars.length) out.push({ id: `mcp:${name}:vars`, subject: element.id, page: "mcp", state: "broken", title: `${name}`, detail: t("变量没有取值：{0}", vars.join("、")), fix: open(t("去填写")) });
     const missing = fill.filter((row) => row.elementId === element.id);
     if (missing.length) {
-      out.push({ id: `mcp:${name}:missing`, subject: element.id, page: "mcp", state: "missing", title: `${name}`, detail: `还没有：${names(missing.map((row) => row.to), nameOf)}`, fix: { kind: "mcp-fill", label: "补齐", rows: missing } });
+      out.push({ id: `mcp:${name}:missing`, subject: element.id, page: "mcp", state: "missing", title: `${name}`, detail: t("还没有：{0}", names(missing.map((row) => row.to), nameOf)), fix: { kind: "mcp-fill", label: t("补齐"), rows: missing } });
     }
     return out;
   });
@@ -238,11 +239,11 @@ function ruleItems(elements: EngineElement[]): InboxItem[] {
     const open = (label: string) => ({ kind: "open" as const, label, target: "rules" });
     const out: InboxItem[] = [];
     const row = fill.find((item) => item.elementId === element.id);
-    if (row) out.push({ id: `rules:${element.id}:missing`, subject: element.id, page: "rules", state: "missing", title: `${spec.name}`, detail: "还没有规则文件，可从同类主账号复制", fix: { kind: "rules-fill", label: "补齐", rows: [row] } });
+    if (row) out.push({ id: `rules:${element.id}:missing`, subject: element.id, page: "rules", state: "missing", title: `${spec.name}`, detail: "还没有规则文件，可从同类主账号复制", fix: { kind: "rules-fill", label: t("补齐"), rows: [row] } });
     if (follow?.update_available) {
-      out.push({ id: `rules:${element.id}:update`, subject: element.id, page: "rules", state: "update", title: `${spec.name}`, detail: `跟随的「${follow.rule}」有新版本`, fix: open("看差异后更新") });
+      out.push({ id: `rules:${element.id}:update`, subject: element.id, page: "rules", state: "update", title: `${spec.name}`, detail: t("跟随的「{0}」有新版本", follow.rule), fix: open(t("看差异后更新")) });
     } else if (follow && !follow.file_unchanged && follow.current_revision && follow.current_revision !== follow.applied_revision) {
-      out.push({ id: `rules:${element.id}:drifted`, subject: element.id, page: "rules", state: "drifted", title: `${spec.name}`, detail: `改过，跟随的「${follow.rule}」也有新版本`, fix: open("看差异") });
+      out.push({ id: `rules:${element.id}:drifted`, subject: element.id, page: "rules", state: "drifted", title: `${spec.name}`, detail: t("改过，跟随的「{0}」也有新版本", follow.rule), fix: open(t("看差异")) });
     }
     return out;
   });
@@ -282,27 +283,27 @@ function programItems(programs: ProgramElement[]): InboxItem[] {
     for (const problem of program.problems) {
       switch (problem.code) {
         case "missing":
-          out.push({ ...base, id: `program:${program.program}:missing`, state: "missing", detail: `缺 ${(problem.bins ?? []).join("、")}`, fix: open("去安装") });
+          out.push({ ...base, id: `program:${program.program}:missing`, state: "missing", detail: t("缺 {0}", (problem.bins ?? []).join("、")), fix: open(t("去安装")) });
           break;
         case "missing-no-install":
-          out.push({ ...base, id: `program:${program.program}:missing`, state: "missing", detail: `缺 ${(problem.bins ?? []).join("、")}，不知道怎么装`, fix: open("补充安装方式") });
+          out.push({ ...base, id: `program:${program.program}:missing`, state: "missing", detail: t("缺 {0}，不知道怎么装", (problem.bins ?? []).join("、")), fix: open(t("补充安装方式")) });
           break;
         case "runner-missing":
-          out.push({ ...base, id: `program:${program.program}:runner`, state: "broken", detail: `找不到 ${problem.bin}，MCP 服务起不来`, fix: open("去查看") });
+          out.push({ ...base, id: `program:${program.program}:runner`, state: "broken", detail: t("找不到 {0}，MCP 服务起不来", problem.bin), fix: open(t("去查看")) });
           break;
         case "multiple":
-          out.push({ ...base, id: `program:${program.program}:multiple:${problem.bin}`, state: "drifted", detail: `${problem.bin} 在 PATH 上有 ${problem.paths?.length ?? 2} 份`, fix: open("去查看") });
+          out.push({ ...base, id: `program:${program.program}:multiple:${problem.bin}`, state: "drifted", detail: t("{0} 在 PATH 上有 {1} 份", problem.bin, problem.paths?.length ?? 2), fix: open(t("去查看")) });
           break;
         case "unused":
-          out.push({ ...base, id: `program:${program.program}:unused`, state: "cleanup", detail: "没有技能或 MCP 再需要它", fix: open("去清理") });
+          out.push({ ...base, id: `program:${program.program}:unused`, state: "cleanup", detail: t("没有技能或 MCP 再需要它"), fix: open(t("去清理")) });
           break;
       }
     }
     const unpinned = program.problems.filter((problem) => problem.code === "unpinned");
     if (unpinned.length) {
-      out.push({ ...base, id: `program:${program.program}:unpinned`, state: "update", detail: `MCP ${[...new Set(unpinned.map((p) => p.server))].join("、")} 没固定版本，一发布新版本就会被换掉`, fix: open("去固定") });
+      out.push({ ...base, id: `program:${program.program}:unpinned`, state: "update", detail: t("MCP {0} 没固定版本，一发布新版本就会被换掉", [...new Set(unpinned.map((p) => p.server))].join("、")), fix: open(t("去固定")) });
     } else if (program.freshness?.state === "behind") {
-      out.push({ ...base, id: `program:${program.program}:behind`, state: "update", detail: `${program.freshness.current ?? ""} → ${program.freshness.upstream ?? ""}`, fix: open("去升级") });
+      out.push({ ...base, id: `program:${program.program}:behind`, state: "update", detail: `${program.freshness.current ?? ""} → ${program.freshness.upstream ?? ""}`, fix: open(t("去升级")) });
     }
     return out;
   });

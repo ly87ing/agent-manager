@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useExecutions } from "./execution";
@@ -45,7 +46,7 @@ export function useTakeover() {
   const [progress, setProgress] = useState<TakeoverProgress | null>(null);
 
   /** verb 决定执行记录与汇总提示怎么称呼这批操作：总览是「同步」，MCP/技能页是「接管」。 */
-  const run = async (tasks: TakeoverTask[], verb = "接管"): Promise<TakeoverOutcome | null> => {
+  const run = async (tasks: TakeoverTask[], verb = t("接管")): Promise<TakeoverOutcome | null> => {
     if (busyRef.current || tasks.length === 0) return null;
     busyRef.current = true;
     setExecuting(true);
@@ -72,9 +73,9 @@ export function useTakeover() {
               : { command: step.command, args: step.args };
           const envelope = await execute({ ...request, label: `${verb} ${task.label}`, silent: true });
           if (!envelope?.ok) {
-            const message = envelope?.errors[0]?.message ?? "引擎调用失败，详见任务记录";
+            const message = envelope?.errors[0]?.message ?? t("引擎调用失败，详见任务记录");
             failures.push({ label: task.label, message });
-            console.error(`[${verb}] ${task.label} 失败：${message}`);
+            console.error(t("[{0}] {1} 失败：{2}", verb, task.label, message));
             ok = false;
             break;
           }
@@ -86,12 +87,12 @@ export function useTakeover() {
       setExecuting(false);
       setProgress(null);
     }
-    const summary = `${verb}完成：成功 ${succeeded}，失败 ${failures.length}`;
+    const summary = t("{0}完成：成功 {1}，失败 {2}", verb, succeeded, failures.length);
     if (failures.length > 0) {
       const visibleLabels = failures.slice(0, 2).map((item) => item.label).join("、");
       const remaining = failures.length - 2;
       toast.error(summary, {
-        description: `${visibleLabels}${remaining > 0 ? ` 等 ${failures.length} 项` : ""}未完成。请到对应项目处理，完整原因见操作记录。`,
+        description: t("{0}{1}未完成。请到对应项目处理，完整原因见操作记录。", visibleLabels, remaining > 0 ? (" " + t("等 {0} 项", failures.length)) : ""),
       });
     } else {
       toast.success(summary);

@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { useEffect, useState } from "react";
 import type { McpAgentCell } from "../lib/observed";
 import { FileDiff } from "./FileDiff";
@@ -48,10 +49,10 @@ export function McpRemoveDialog({
 
   return (
     <ConfirmModal
-      title={`删除 ${name}`}
-      description="从勾选的助手里删掉这一条，其他条目与配置保持不变；停用时保存在本工具里的内容一并删除。确认后逐个助手执行。"
+      title={t("删除 {0}", name)}
+      description={t("从勾选的助手里删掉这一条，其他条目与配置保持不变；停用时保存在本工具里的内容一并删除。确认后逐个助手执行。")}
       risk="write-local"
-      confirmLabel={selected.length ? `从 ${selected.length} 个助手删除` : "确认删除"}
+      confirmLabel={selected.length ? t("从 {0} 个助手删除", selected.length) : t("确认删除")}
       confirmDisabled={!ready}
       executing={busy}
       onConfirm={() => onConfirm(selected)}
@@ -71,15 +72,15 @@ export function McpRemoveDialog({
                   onChange={() => setSelected((prev) => (checked ? prev.filter((item) => item !== agent) : [...prev, agent]))}
                 />
                 {nameOf(agent)}
-                <span className="font-normal text-muted-foreground">{savedOnly(cell) ? "（已停用，只删本工具保存的内容）" : ""}</span>
+                <span className="font-normal text-muted-foreground">{savedOnly(cell) ? t("（已停用，只删本工具保存的内容）") : ""}</span>
               </label>
               {checked && (
                 <div className="mt-1.5 space-y-1 pl-5">
-                  {preview === undefined && <p className="text-muted-foreground">正在读取实际文件并计算…</p>}
+                  {preview === undefined && <p className="text-muted-foreground">{t("正在读取实际文件并计算…")}</p>}
                   {typeof preview === "string" && <p role="alert" className="text-destructive">{preview}</p>}
                   {preview !== undefined && typeof preview !== "string" && (
                     <>
-                      {preview.files.length === 0 && <p className="text-muted-foreground">配置文件不变。</p>}
+                      {preview.files.length === 0 && <p className="text-muted-foreground">{t("配置文件不变。")}</p>}
                       {preview.files.map((file) => (
                         <FileDiff
                           key={file.path}
@@ -98,7 +99,7 @@ export function McpRemoveDialog({
             </div>
           );
         })}
-        <p className="text-muted-foreground">只读预览；文件原文可能含敏感值，仅在本机查看。</p>
+        <p className="text-muted-foreground">{t("只读预览；文件原文可能含敏感值，仅在本机查看。")}</p>
       </section>
     </ConfirmModal>
   );

@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 /**
  * API Key 存在哪、这个变量现在有没有值：给接入表单和密钥页用一句话说清。
  *
@@ -39,23 +40,23 @@ export function keyStatus(
 ): { tone: "ok" | "warn" | "info"; text: string } {
   const name = variable.trim();
   if (!source) {
-    return { tone: "info", text: "填了只写进你的密钥文件（仅本人可读），不进本应用的数据库。" };
+    return { tone: "info", text: t("填了只写进你的密钥文件（仅本人可读），不进本应用的数据库。") };
   }
   if (source.configured && !source.ready) {
     return {
       tone: "warn",
-      text: `密钥文件现在用不了（${source.error ?? "读不到"}）：先到「设置 → 密钥」处理，否则 API Key 存不进去。`,
+      text: t("密钥文件现在用不了（{0}）：先到「设置 → 密钥」处理，否则 API Key 存不进去。", source.error ?? t("读不到")),
     };
   }
   if (!source.configured) {
     return {
       tone: "info",
-      text: `还没有密钥文件：保存时会新建 ${DEFAULT_SECRETS_PATH}（仅本人可读），API Key 只写进这个文件。也可以先到「设置 → 密钥」选已有的文件。`,
+      text: t("还没有密钥文件：保存时会新建 {0}（仅本人可读），API Key 只写进这个文件。也可以先到「设置 → 密钥」选已有的文件。", DEFAULT_SECRETS_PATH),
     };
   }
-  if (!name) return { tone: "info", text: `填了只写进 ${source.path}（仅本人可读）。` };
+  if (!name) return { tone: "info", text: t("填了只写进 {0}（仅本人可读）。", source.path) };
   if (source.names.includes(name)) {
-    return { tone: "ok", text: `${source.path} 里已有 ${name} 的值：留空保持不变，填了就替换。` };
+    return { tone: "ok", text: t("{0} 里已有 {1} 的值：留空保持不变，填了就替换。", source.path, name) };
   }
-  return { tone: "warn", text: `${source.path} 里还没有 ${name}：填上才能用；只写进这个文件，不进本应用的数据库。` };
+  return { tone: "warn", text: t("{0} 里还没有 {1}：填上才能用；只写进这个文件，不进本应用的数据库。", source.path, name) };
 }

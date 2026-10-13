@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -47,7 +48,7 @@ export function useRuleSources() {
     try {
       const envelope = await runEngine("policy:set", ["--layer", "local", "--key", key, "--value", JSON.stringify(value)]);
       if (!envelope.ok) {
-        toast.error(`没有保存：${envelope.errors[0]?.message ?? "未知错误"}`);
+        toast.error(t("没有保存：{0}", envelope.errors[0]?.message ?? t("未知错误")));
         return false;
       }
       toast.success(done);
@@ -63,11 +64,11 @@ export function useRuleSources() {
     /** 名字不能与已有来源或技能集合重名。 */
     taken: [...sources.map((source) => source.name), ...collections],
     busy,
-    add: (name: string, path: string) => write(`rules.sources.${name}`, { path, _delete: false, _replace: true }, `已添加规则来源 ${name}`),
-    remove: (source: UserSource) => write(`rules.sources.${source.name}`, { _delete: true }, `已移除规则来源 ${source.name}`),
+    add: (name: string, path: string) => write(`rules.sources.${name}`, { path, _delete: false, _replace: true }, t("已添加规则来源 {0}", name)),
+    remove: (source: UserSource) => write(`rules.sources.${source.name}`, { _delete: true }, t("已移除规则来源 {0}", source.name)),
     /** 停用 / 启用：只改开关，路径与跟随记录都不动。 */
     setEnabled: (source: UserSource, enabled: boolean) =>
-      write(`rules.sources.${source.name}.enabled`, enabled, `已${enabled ? "启用" : "停用"}规则来源 ${source.name}`),
+      write(`rules.sources.${source.name}.enabled`, enabled, t("已{0}规则来源 {1}", enabled ? t("启用") : t("停用"), source.name)),
   };
 }
 
@@ -85,10 +86,10 @@ export function RemoveSourceDialog({
 }) {
   return (
     <ConfirmModal
-      title={`移除规则来源 ${source.name}`}
-      description={`只移除这条登记，${source.path} 里的文件原样保留；已经写进各助手的规则文件也不动（不再提示来源更新）。`}
+      title={t("移除规则来源 {0}", source.name)}
+      description={t("只移除这条登记，{0} 里的文件原样保留；已经写进各助手的规则文件也不动（不再提示来源更新）。", source.path)}
       risk="write-local"
-      confirmLabel="移除"
+      confirmLabel={t("移除")}
       executing={busy}
       onConfirm={onConfirm}
       onClose={onClose}
@@ -112,44 +113,42 @@ export function AddSourceDialog({
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
   const trimmed = path.trim();
   const error = !NAME_RE.test(name)
-    ? "名称只能用小写字母、数字和连字符"
+    ? t("名称只能用小写字母、数字和连字符")
     : taken.includes(name)
-      ? `${name} 已被占用（与已有来源同名）`
+      ? t("{0} 已被占用（与已有来源同名）", name)
       : !/^(~\/|\/)/.test(trimmed)
-        ? "路径填绝对路径或以 ~/ 开头"
+        ? t("路径填绝对路径或以 ~/ 开头")
         : null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="添加规则来源" onKeyDown={onDialogKeyDown} className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border bg-card p-5 shadow-xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("添加规则来源")} onKeyDown={onDialogKeyDown} className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border bg-card p-5 shadow-xl">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold">添加规则来源</h3>
-          <button type="button" aria-label="关闭" onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-accent">
+          <h3 className="text-base font-semibold">{t("添加规则来源")}</h3>
+          <button type="button" aria-label={t("关闭")} onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-accent">
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
         <div className="mt-4 space-y-3 text-sm">
           <label className="block">
-            <span className="text-xs font-medium text-muted-foreground">名称</span>
+            <span className="text-xs font-medium text-muted-foreground">{t("名称")}</span>
             <input data-testid="rule-source-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="my-rules" className="mt-1 w-full rounded border border-input bg-background px-2 py-1.5 font-mono text-xs" />
           </label>
           <label className="block">
-            <span className="text-xs font-medium text-muted-foreground">位置：一个 .md 文件，或一个目录（目录里的每个 .md 是一条规则）</span>
-            <input data-testid="rule-source-path" value={path} onChange={(event) => setPath(event.target.value)} placeholder="~/notes/CLAUDE.md 或 ~/notes/rules" className="mt-1 w-full rounded border border-input bg-background px-2 py-1.5 font-mono text-xs" />
+            <span className="text-xs font-medium text-muted-foreground">{t("位置：一个 .md 文件，或一个目录（目录里的每个 .md 是一条规则）")}</span>
+            <input data-testid="rule-source-path" value={path} onChange={(event) => setPath(event.target.value)} placeholder={t("~/notes/CLAUDE.md 或 ~/notes/rules")} className="mt-1 w-full rounded border border-input bg-background px-2 py-1.5 font-mono text-xs" />
           </label>
-          <p className="text-xs text-muted-foreground">只登记位置、原地读取，文件改了这里即时看到；不会复制内容，也不会改任何助手的规则文件。</p>
+          <p className="text-xs text-muted-foreground">{t("只登记位置、原地读取，文件改了这里即时看到；不会复制内容，也不会改任何助手的规则文件。")}</p>
         </div>
         <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex items-center justify-end gap-2">
           {error && (name || path) && <span className="mr-auto text-xs text-destructive">{error}</span>}
-          <button type="button" onClick={onClose} className="rounded border px-3 py-1.5 text-sm hover:bg-accent">取消</button>
+          <button type="button" onClick={onClose} className="rounded border px-3 py-1.5 text-sm hover:bg-accent">{t("取消")}</button>
           <button
             type="button"
             data-testid="rule-source-save"
             disabled={Boolean(error) || busy}
             onClick={() => onSubmit(name, trimmed)}
             className="rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
-          >
-            添加
-          </button>
+          >{t("添加")}</button>
         </div>
       </div>
     </div>

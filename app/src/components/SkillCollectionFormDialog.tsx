@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { useState } from "react";
 import { isRemoteGitRepository } from "../lib/gitRepository";
 import { ChevronRight, X } from "lucide-react";
@@ -71,20 +72,20 @@ export function SkillCollectionFormDialog({
 
   const submit = () => {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
-      setError("名称只能用小写字母/数字/连字符（如 my-skills）");
+      setError(t("名称只能用小写字母/数字/连字符（如 my-skills）"));
       return;
     }
     if (sourceKind === "git" && !isRemoteGitRepository(url.trim()) && !/^file:\/\/\/[^\x00-\x1f\x7f]+$/.test(url.trim())) {
-      setError("请输入 HTTPS、SSH、git:// 或 file:// 仓库地址");
+      setError(t("请输入 HTTPS、SSH、git:// 或 file:// 仓库地址"));
       return;
     }
     if (sourceKind === "local" && !/^(~\/|\/)/.test(sourcePath.trim())) {
-      setError("本地目录要填绝对路径或以 ~/ 开头");
+      setError(t("本地目录要填绝对路径或以 ~/ 开头"));
       return;
     }
     const rulesRel = rulesPath.trim().replace(/^\.\//, "");
     if (rulesRel && (rulesRel.startsWith("/") || rulesRel.startsWith("~") || rulesRel.split("/").includes(".."))) {
-      setError("规则位置填集合里的相对路径，例如 rules 或 docs/CLAUDE.md");
+      setError(t("规则位置填集合里的相对路径，例如 rules 或 docs/CLAUDE.md"));
       return;
     }
     const trackResult = sourceKind === "git" ? trackFromForm(track) : { track: null };
@@ -100,7 +101,7 @@ export function SkillCollectionFormDialog({
     } else if (listed) {
       skillPaths = toSkillPaths({ available: skills, selected, auto: autoPossible && auto, keptMissing, initialPaths });
       if (skillPaths !== null && skillPaths.length === 0) {
-        setError("至少勾一个技能；一个都不用的话，可以在集合卡片上点「停用」");
+        setError(t("至少勾一个技能；一个都不用的话，可以在集合卡片上点「停用」"));
         return;
       }
     } else {
@@ -128,10 +129,10 @@ export function SkillCollectionFormDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={initial ? "编辑来源" : "添加来源"} tabIndex={-1} onKeyDown={onDialogKeyDown} className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-xl border bg-card shadow-xl animate-zoom-in-95">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={initial ? t("编辑来源") : t("添加来源")} tabIndex={-1} onKeyDown={onDialogKeyDown} className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-xl border bg-card shadow-xl animate-zoom-in-95">
         <div className="flex items-center justify-between border-b px-5 py-3">
-          <h3 className="text-base font-semibold text-foreground">{initial ? `编辑来源 ${initial.name}` : "添加来源"}</h3>
-          <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">
+          <h3 className="text-base font-semibold text-foreground">{initial ? t("编辑来源 {0}", initial.name) : t("添加来源")}</h3>
+          <button type="button" onClick={onClose} aria-label={t("关闭")} className="rounded p-1 text-muted-foreground hover:bg-accent">
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
@@ -139,18 +140,18 @@ export function SkillCollectionFormDialog({
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4 text-sm">
           {!initial && (
             <div>
-              <label className={sectionTitle} htmlFor="collection-name">名称（小写字母、数字、连字符）</label>
-              <input id="collection-name" value={name} onChange={(e) => setName(e.target.value)} data-testid="collection-name-input" aria-label="集合名称" className={inputClass} placeholder="my-skills" />
+              <label className={sectionTitle} htmlFor="collection-name">{t("名称（小写字母、数字、连字符）")}</label>
+              <input id="collection-name" value={name} onChange={(e) => setName(e.target.value)} data-testid="collection-name-input" aria-label={t("集合名称")} className={inputClass} placeholder="my-skills" />
             </div>
           )}
 
           <div>
             <div className="mb-1.5 flex items-center gap-3">
-              <span className="text-xs font-medium text-muted-foreground">来源</span>
+              <span className="text-xs font-medium text-muted-foreground">{t("来源")}</span>
               <div className="inline-flex rounded-md border p-0.5 text-xs">
                 {([
-                  { key: "git", label: "git 仓库" },
-                  { key: "local", label: "本机目录" },
+                  { key: "git", label: t("git 仓库") },
+                  { key: "local", label: t("本机目录") },
                 ] as const).map((option) => (
                   <label
                     key={option.key}
@@ -174,13 +175,13 @@ export function SkillCollectionFormDialog({
             </div>
             {sourceKind === "git" ? (
               <>
-                <input value={url} onChange={(e) => setUrl(e.target.value)} data-testid="collection-url-input" aria-label="仓库地址" className={inputClass} placeholder="https://github.com/example/skills.git" />
-                <p className="mt-1 text-xs text-muted-foreground">推荐 HTTPS；也支持 SSH、git://、file://</p>
+                <input value={url} onChange={(e) => setUrl(e.target.value)} data-testid="collection-url-input" aria-label={t("仓库地址")} className={inputClass} placeholder="https://github.com/example/skills.git" />
+                <p className="mt-1 text-xs text-muted-foreground">{t("推荐 HTTPS；也支持 SSH、git://、file://")}</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <label htmlFor="collection-track-mode" className="text-xs text-muted-foreground">跟踪</label>
+                  <label htmlFor="collection-track-mode" className="text-xs text-muted-foreground">{t("跟踪")}</label>
                   <Select
                     id="collection-track-mode"
-                    label="跟踪方式"
+                    label={t("跟踪方式")}
                     testId="collection-track-mode"
                     value={track.mode}
                     onChange={(next) => setTrack({ mode: next as TrackMode, value: "", prerelease: false })}
@@ -190,43 +191,41 @@ export function SkillCollectionFormDialog({
                   {(track.mode === "tag" || track.mode === "branch" || track.mode === "branch-pattern" || track.mode === "pinned") && (
                     <input
                       data-testid="collection-track-value"
-                      aria-label="跟踪的版本、分支或规则"
+                      aria-label={t("跟踪的版本、分支或规则")}
                       value={track.value}
                       onChange={(e) => setTrack({ ...track, value: e.target.value })}
                       className="w-40 rounded-md border border-input bg-background px-2 py-1 font-mono text-xs"
-                      placeholder={{ tag: "v*（可空）", branch: "stable", "branch-pattern": "release/*", pinned: "v3.0.1" }[track.mode]}
+                      placeholder={{ tag: t("v*（可空）"), branch: "stable", "branch-pattern": "release/*", pinned: "v3.0.1" }[track.mode]}
                     />
                   )}
                   {track.mode === "tag" && (
                     <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <input type="checkbox" data-testid="collection-track-prerelease" checked={track.prerelease} onChange={(e) => setTrack({ ...track, prerelease: e.target.checked })} />
-                      含预发布（-rc、-beta）
-                    </label>
+                      <input type="checkbox" data-testid="collection-track-prerelease" checked={track.prerelease} onChange={(e) => setTrack({ ...track, prerelease: e.target.checked })} />{t("含预发布（-rc、-beta）")}</label>
                   )}
                 </div>
               </>
             ) : (
               <>
-                <input value={sourcePath} onChange={(e) => setSourcePath(e.target.value)} data-testid="collection-source-path-input" aria-label="本机位置" className={inputClass} placeholder={`~/skills/${name || "my-skills"}`} />
-                <p className="mt-1 text-[11px] text-muted-foreground">装着多个技能的目录，或直接是一个技能文件夹。助手里的链接直接指向它，内容在原处维护。</p>
+                <input value={sourcePath} onChange={(e) => setSourcePath(e.target.value)} data-testid="collection-source-path-input" aria-label={t("本机位置")} className={inputClass} placeholder={`~/skills/${name || "my-skills"}`} />
+                <p className="mt-1 text-[11px] text-muted-foreground">{t("装着多个技能的目录，或直接是一个技能文件夹。助手里的链接直接指向它，内容在原处维护。")}</p>
               </>
             )}
           </div>
 
           <div data-testid="collection-skills">
             {single ? (
-              <p className="text-xs text-muted-foreground">这个来源本身就是一个技能：{skills[0].name}。</p>
+              <p className="text-xs text-muted-foreground">{t("这个来源本身就是一个技能：")}{skills[0].name}。</p>
             ) : listed ? (
               <>
                 <div className="mb-1.5 flex items-center gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">用哪些技能</span>
+                  <span className="text-xs font-medium text-muted-foreground">{t("用哪些技能")}</span>
                   {sourceKind === "git" && (
-                    <span className="text-[11px] text-muted-foreground" title="规则目录与 aliases/ 也会一起取回">只下载勾选的目录</span>
+                    <span className="text-[11px] text-muted-foreground" title={t("规则目录与 aliases/ 也会一起取回")}>{t("只下载勾选的目录")}</span>
                   )}
-                  <span data-testid="collection-paths-count" className="text-xs text-muted-foreground">已选 {selected.length} / {skills.length}</span>
+                  <span data-testid="collection-paths-count" className="text-xs text-muted-foreground">{(t("已选") + " ")}{selected.length} / {skills.length}</span>
                   <div className="ml-auto flex gap-1">
-                    <button type="button" data-testid="collection-paths-select-all" onClick={() => setSelected(skills.map((skill) => skill.name))} className="rounded px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10">全选</button>
-                    <button type="button" data-testid="collection-paths-clear" onClick={() => setSelected([])} className="rounded px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent">全不选</button>
+                    <button type="button" data-testid="collection-paths-select-all" onClick={() => setSelected(skills.map((skill) => skill.name))} className="rounded px-2 py-0.5 text-[11px] text-primary hover:bg-primary/10">{t("全选")}</button>
+                    <button type="button" data-testid="collection-paths-clear" onClick={() => setSelected([])} className="rounded px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent">{t("全不选")}</button>
                   </div>
                 </div>
                 <div className="grid max-h-56 grid-cols-2 gap-x-3 overflow-y-auto rounded-md border p-2">
@@ -239,13 +238,11 @@ export function SkillCollectionFormDialog({
                 </div>
                 {autoPossible && (
                   <label className="mt-2 flex items-center gap-2 text-xs text-foreground">
-                    <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} data-testid="collection-auto-include" />
-                    来源以后新增的技能也自动列进来（列进来后仍要在技能页点「添加」才会用上）
-                  </label>
+                    <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} data-testid="collection-auto-include" />{t("来源以后新增的技能也自动列进来（列进来后仍要在技能页点「添加」才会用上）")}</label>
                 )}
                 {keptMissing.length > 0 && (
                   <div data-testid="collection-paths-missing" className="mt-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs text-warning">
-                    <p>配置里还有这些，但来源里已经找不到（改过名或删了）。取消勾选就从配置里去掉：</p>
+                    <p>{t("配置里还有这些，但来源里已经找不到（改过名或删了）。取消勾选就从配置里去掉：")}</p>
                     {keptMissing.map((item) => (
                       <label key={item} className="mt-1 flex items-center gap-2">
                         <input type="checkbox" checked onChange={() => setKeptMissing((prev) => prev.filter((entry) => entry !== item))} data-testid={`collection-path-missing-${item}`} />
@@ -257,13 +254,13 @@ export function SkillCollectionFormDialog({
               </>
             ) : (
               <>
-                <label className={sectionTitle} htmlFor="collection-paths-input">用哪些技能</label>
+                <label className={sectionTitle} htmlFor="collection-paths-input">{t("用哪些技能")}</label>
                 <p data-testid="collection-paths-empty" className="mb-1.5 text-[11px] leading-relaxed text-muted-foreground">
                   {sourceKind === "git" && repoCached === false
-                    ? "仓库还没取到本地，列不出里面的技能。空着就用全部；保存后在集合上点「更新」取回，再回来就能逐个勾选。"
+                    ? t("仓库还没取到本地，列不出里面的技能。空着就用全部；保存后在集合上点「更新」取回，再回来就能逐个勾选。")
                     : initial
-                      ? "这个来源里没找到技能（技能文件夹里要有 SKILL.md）。"
-                      : "保存后才能列出来源里的技能。空着就用全部；也可以先填技能名或装技能的子目录，每行一个。"}
+                      ? t("这个来源里没找到技能（技能文件夹里要有 SKILL.md）。")
+                      : t("保存后才能列出来源里的技能。空着就用全部；也可以先填技能名或装技能的子目录，每行一个。")}
                 </p>
                 <textarea
                   id="collection-paths-input"
@@ -271,7 +268,7 @@ export function SkillCollectionFormDialog({
                   onChange={(e) => setManualText(e.target.value)}
                   rows={2}
                   data-testid="collection-paths-input"
-                  placeholder={"空着 = 全部\n或每行一个，例如 skills"}
+                  placeholder={t("空着 = 全部\n或每行一个，例如 skills")}
                   className={inputClass}
                 />
               </>
@@ -280,17 +277,15 @@ export function SkillCollectionFormDialog({
 
           <details className="group rounded-md border" open={Boolean(seed?.definition.rules_path) || selectedAgents.length > 0}>
             <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
-              <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" aria-hidden />
-              更多设置
-              <span className="text-muted-foreground/70">· 规则位置、只给某些助手用</span>
+              <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" aria-hidden />{t("更多设置")}<span className="text-muted-foreground/70">{t("· 规则位置、只给某些助手用")}</span>
             </summary>
             <div className="space-y-3 border-t px-3 py-3">
               <div>
-                <label className={sectionTitle} htmlFor="collection-rules-path">规则位置：集合里的子目录或某个 .md 文件，空着用 rules/</label>
+                <label className={sectionTitle} htmlFor="collection-rules-path">{t("规则位置：集合里的子目录或某个 .md 文件，空着用 rules/")}</label>
                 <input id="collection-rules-path" value={rulesPath} onChange={(e) => setRulesPath(e.target.value)} data-testid="collection-rules-path-input" className={inputClass} placeholder="rules" />
               </div>
               <div>
-                <span className={sectionTitle}>只给这些助手用（都不勾 = 不限）</span>
+                <span className={sectionTitle}>{t("只给这些助手用（都不勾 = 不限）")}</span>
                 <div className="flex flex-wrap gap-4">
                   {agentIds.map((agent) => (
                     <label key={agent} className="flex items-center gap-1.5 text-xs text-foreground">
@@ -311,13 +306,9 @@ export function SkillCollectionFormDialog({
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t px-5 py-3">
-          <span className="mr-auto text-xs text-muted-foreground">保存不会把技能加到任何助手</span>
-          <button type="button" onClick={onClose} className="rounded-md border px-4 py-1.5 text-sm text-muted-foreground hover:bg-accent">
-            取消
-          </button>
-          <button type="button" onClick={submit} data-testid="collection-form-submit" className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-            保存
-          </button>
+          <span className="mr-auto text-xs text-muted-foreground">{t("保存不会把技能加到任何助手")}</span>
+          <button type="button" onClick={onClose} className="rounded-md border px-4 py-1.5 text-sm text-muted-foreground hover:bg-accent">{t("取消")}</button>
+          <button type="button" onClick={submit} data-testid="collection-form-submit" className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">{t("保存")}</button>
         </div>
       </div>
     </div>

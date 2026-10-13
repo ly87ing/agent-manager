@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { EngineElement } from "./contract";
 import type { SkillAgentCell, SkillObserved, SkillSpec } from "./observed";
 import type { BatchApplyRow } from "./useBatchApply";
@@ -39,7 +40,7 @@ export function fillRows(elements: EngineElement[], agents?: string[]): BatchApp
     if (!Object.values(cells).some(isActive)) return [];
     return Object.entries(cells)
       .filter(([agent, cell]) => (!agents || agents.includes(agent)) && canAdd(cell))
-      .map(([agent]) => row(skill, agent, "补齐"));
+      .map(([agent]) => row(skill, agent, t("补齐")));
   });
 }
 
@@ -47,7 +48,7 @@ export function fillRows(elements: EngineElement[], agents?: string[]): BatchApp
 export function addToAllRows(skill: EngineElement): BatchApplyRow[] {
   return Object.entries(cellsOf(skill))
     .filter(([, cell]) => canAdd(cell))
-    .map(([agent]) => row(skill, agent, "添加"));
+    .map(([agent]) => row(skill, agent, t("添加")));
 }
 
 /** 在用的技能数：新账号建好后会链接的就是这些。 */
@@ -64,6 +65,6 @@ export function versionUpdateRows(elements: EngineElement[]): BatchApplyRow[] {
     Object.entries(cellsOf(skill))
       .filter(([, cell]) =>
         cell.state === "linked" && (cell.actions ?? []).includes("update") && Boolean(cell.available_version) && cell.version !== cell.available_version)
-      .map(([agent]) => ({ ...row(skill, agent, "更新"), action: "update" })),
+      .map(([agent]) => ({ ...row(skill, agent, t("更新")), action: "update" })),
   );
 }

@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { AccountCells, AccountHeader, RowActions } from "./AccountGrid";
 import { matchesKeyword } from "./SearchInput";
 import type { SkillUnmanaged, SkillUnmanagedView } from "../lib/contract";
@@ -12,17 +13,17 @@ export function shortRepository(url: string): string {
 
 /** 来源一行：仓库 · 版本 · 安装方式；认不出来时如实说。 */
 export function sourceText(source: SkillUnmanaged["source"]): string {
-  if (!source) return "来源不明";
+  if (!source) return t("来源不明");
   const parts: string[] = [];
   if (source.repository) parts.push(shortRepository(source.repository));
   if (source.version) parts.push(`v${source.version.replace(/^v/, "")}`);
-  if (source.installer === "npx-skills") parts.push("npx skills 安装");
-  return parts.join(" · ") || "来源不明";
+  if (source.installer === "npx-skills") parts.push(t("npx skills 安装"));
+  return parts.join(" · ") || t("来源不明");
 }
 
 const BLOCKED: Record<string, string> = {
-  "claude-synced": "Claude 自己同步的",
-  "no-skill-md": "没有 SKILL.md",
+  get "claude-synced"() { return t("Claude 自己同步的"); },
+  get "no-skill-md"() { return t("没有 SKILL.md"); },
 };
 
 /**
@@ -59,8 +60,7 @@ export function SkillOtherSources({
       <AccountHeader
         groups={groups}
         left={
-          <span className="font-medium text-foreground" title="用别的方式装进助手目录的技能：纳入管理后只留一份源，可撤回">
-            未纳管 · {skills.length}
+          <span className="font-medium text-foreground" title={t("用别的方式装进助手目录的技能：纳入管理后只留一份源，可撤回")}>{(t("未纳管 ·") + " ")}{skills.length}
           </span>
         }
       />
@@ -80,13 +80,11 @@ export function SkillOtherSources({
                     key={location.path}
                     data-testid={`other-shared-${skill.name}`}
                     className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
-                    title={`${sharedPath(location.shared!)}：全部 Codex 助手都会用到，不能按助手关`}
-                  >
-                    Codex 共用
-                  </span>
+                    title={t("{0}：全部 Codex 助手都会用到，不能按助手关", sharedPath(location.shared!))}
+                  >{t("Codex 共用")}</span>
                 ))}
                 {skill.blocked_reason && (
-                  <span data-testid={`other-blocked-${skill.name}`} className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" title="只显示，不能纳入管理">
+                  <span data-testid={`other-blocked-${skill.name}`} className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground" title={t("只显示，不能纳入管理")}>
                     {BLOCKED[skill.blocked_reason] ?? skill.blocked_reason}
                   </span>
                 )}
@@ -112,9 +110,7 @@ export function SkillOtherSources({
                       data-testid={`adopt-${skill.name}`}
                       onClick={() => onAdopt(skill.name)}
                       className="rounded-md border px-2 py-0.5 text-xs hover:bg-accent"
-                    >
-                      纳入管理…
-                    </button>
+                    >{t("纳入管理…")}</button>
                   ) : null
                 }
               />
@@ -125,14 +121,14 @@ export function SkillOtherSources({
           <li key={`${dup.name}-${dup.agent}`} data-testid={`duplicate-${dup.name}-${dup.agent}`} className="group flex items-center gap-3 py-1.5 pl-4 pr-4 hover:bg-accent/40">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2" title={dup.paths.join("\n")}>
               <span className="min-w-0 truncate text-sm">{dup.name}</span>
-              <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning">Codex 会加载两份</span>
+              <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning">{t("Codex 会加载两份")}</span>
               <span className="truncate font-mono text-xs text-muted-foreground">{dup.paths[dup.paths.length - 1]}</span>
             </div>
             <AccountCells
               groups={groups}
               cell={(column) =>
                 column.id === dup.agent ? (
-                  <span className="inline-block h-2 w-2 rounded-full bg-warning" title={`${column.fullName}：${dup.paths.join(" 与 ")}`} />
+                  <span className="inline-block h-2 w-2 rounded-full bg-warning" title={`${column.fullName}：${dup.paths.join((" " + t("与") + " "))}`} />
                 ) : null
               }
             />
@@ -143,9 +139,7 @@ export function SkillOtherSources({
                   data-testid={`dedupe-${dup.name}-${dup.agent}`}
                   onClick={() => onAdopt(dup.name)}
                   className="rounded-md border px-2 py-0.5 text-xs hover:bg-accent"
-                >
-                  清理多余…
-                </button>
+                >{t("清理多余…")}</button>
               }
             />
           </li>

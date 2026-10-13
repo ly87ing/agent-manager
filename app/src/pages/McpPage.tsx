@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Info, Plus, SearchX, Server } from "lucide-react";
@@ -99,12 +100,12 @@ export default function McpPage({
     onImportConsumed?.();
   }, [importPayload, query.data]);
   if (query.isPending) return <PageLoading />;
-  if (query.isError) return <PageError title="MCP 状态读取失败" error={query.error} />;
+  if (query.isError) return <PageError title={t("MCP 状态读取失败")} error={query.error} />;
   if (!query.data.ok) {
     return (
       <div className="space-y-3">
         <h1 className="text-lg font-semibold tracking-tight">MCP</h1>
-        <ErrorPanel title="MCP 状态读取失败" errors={query.data.errors} />
+        <ErrorPanel title={t("MCP 状态读取失败")} errors={query.data.errors} />
       </div>
     );
   }
@@ -135,7 +136,7 @@ export default function McpPage({
     void runEngine<StatusData>("mcp:status", []).then((envelope) => {
       const cell = envelope.ok ? cellsOf(envelope.data.elements.find((item) => item.id === element.id) ?? element)[agent] : undefined;
       if (!cell) {
-        toast.error(`${label}：这个助手上已经找不到这一条`);
+        toast.error(t("{0}：这个助手上已经找不到这一条", label));
         return;
       }
       void apply(label, ["--only", element.id, "--agent", agent, "--action", action, "--base", cell.base]);
@@ -143,14 +144,14 @@ export default function McpPage({
 
   /** 助手开关：启用 / 停用这一个助手上的条目，可撤销。 */
   const handleAction = (element: EngineElement, agent: string, action: string, cell: McpAgentCell) => {
-    const verb = action === "enable" ? "启用" : "停用";
+    const verb = action === "enable" ? t("启用") : t("停用");
     const label = `${verb} ${nameOf(element)} @ ${nameOfAgent(agent)}`;
     void directApply
       .apply({
         command: "mcp:apply",
         label,
         args: ["--only", element.id, "--agent", agent, "--action", action, "--base", cell.base],
-        undo: undoWith(element, agent, `撤销：${label}`, action === "enable" ? "disable" : "enable"),
+        undo: undoWith(element, agent, t("撤销：{0}", label), action === "enable" ? "disable" : "enable"),
       })
       .then(showNotices);
   };
@@ -175,11 +176,11 @@ export default function McpPage({
     const spec = entry.url ? { url: entry.url, headers: asVars(entry.headers) } : { command: entry.command, args: entry.args ?? [], env: asVars(entry.env) };
     try {
       await navigator.clipboard.writeText(encodeShareLink({ kind: "mcp", name: nameOf(element), spec }));
-      toast.success(`已复制 ${nameOf(element)} 的分享链接`, {
-        description: replaced.length ? `这些取值没放进链接，改成了同名变量：${replaced.join("、")}；对方要自己配。` : undefined,
+      toast.success(t("已复制 {0} 的分享链接", nameOf(element)), {
+        description: replaced.length ? t("这些取值没放进链接，改成了同名变量：{0}；对方要自己配。", replaced.join("、")) : undefined,
       });
     } catch (reason) {
-      toast.error(`没能复制：${reason instanceof Error ? reason.message : String(reason)}`);
+      toast.error(t("没能复制：{0}", reason instanceof Error ? reason.message : String(reason)));
     }
   };
 
@@ -205,7 +206,7 @@ export default function McpPage({
       const envelope = await runEngine<{ files: { path: string; exists: boolean; content: string; original?: string | null }[] }>("mcp:preview", args);
       return envelope.ok
         ? { files: envelope.data.files, warnings: envelope.warnings.map((warning) => warning.message) }
-        : envelope.errors[0]?.message ?? "预览失败";
+        : envelope.errors[0]?.message ?? t("预览失败");
     } catch (reason) {
       return engineErrorMessage(reason);
     }
@@ -217,7 +218,7 @@ export default function McpPage({
     for (const agent of agents) {
       const cell = cellsOf(element)[agent];
       if (!cell) continue;
-      await apply(`从 ${nameOfAgent(agent)} 删除 ${nameOf(element)}`, ["--only", element.id, "--agent", agent, "--action", "remove", "--base", cell.base]);
+      await apply(t("从 {0} 删除 {1}", nameOfAgent(agent), nameOf(element)), ["--only", element.id, "--agent", agent, "--action", "remove", "--base", cell.base]);
     }
   };
 
@@ -246,7 +247,7 @@ export default function McpPage({
         const envelope = await runEngine<{ files: McpFilePreview["files"] }>("mcp:preview", args);
         return envelope.ok
           ? { agent, files: envelope.data.files }
-          : { agent, files: [], error: envelope.errors[0]?.message ?? "预览失败" };
+          : { agent, files: [], error: envelope.errors[0]?.message ?? t("预览失败") };
       } catch (reason) {
         return { agent, files: [], error: engineErrorMessage(reason) };
       }
@@ -265,7 +266,7 @@ export default function McpPage({
     if (mode.kind === "edit") {
       // 各助手逐个写入，各自核对是否被外部改过：一个失败不拦其他
       for (const target of mode.targets.filter((target) => payload.agents.includes(target.agent))) {
-        await apply(`编辑 ${payload.name} @ ${nameOfAgent(target.agent)}`, [
+        await apply(t("编辑 {0} @ {1}", payload.name, nameOfAgent(target.agent)), [
           "--only",
           `mcp:${payload.name}`,
           "--agent",
@@ -282,7 +283,7 @@ export default function McpPage({
     }
     // 各助手逐个写入，互不影响：一个失败不拦其他
     for (const agent of payload.agents) {
-      await apply(`新增 ${payload.name} @ ${nameOfAgent(agent)}`, [
+      await apply(t("新增 {0} @ {1}", payload.name, nameOfAgent(agent)), [
         "--only",
         `mcp:${payload.name}`,
         "--agent",
@@ -328,14 +329,14 @@ export default function McpPage({
     let failed = 0;
     try {
       for (const row of pendingFill) {
-        const envelope = await execute({ command: "mcp:apply", label: `补齐 ${row.name} @ ${nameOfAgent(row.to)}`, args: mcpFillArgs(row), silent: true });
+        const envelope = await execute({ command: "mcp:apply", label: t("补齐 {0} @ {1}", row.name, nameOfAgent(row.to)), args: mcpFillArgs(row), silent: true });
         if (envelope?.ok) ok += 1;
         else failed += 1;
       }
     } finally {
       setFilling(false);
     }
-    (failed ? toast.error : toast.success)(`补齐完成：成功 ${ok}，失败 ${failed}${failed ? "，详见任务记录" : ""}`);
+    (failed ? toast.error : toast.success)(t("补齐完成：成功 {0}，失败 {1}{2}", ok, failed, failed ? t("，详见任务记录") : ""));
   };
 
   const brokenTargets = targets.filter((target) => target.error !== null);
@@ -344,28 +345,28 @@ export default function McpPage({
   return (
     <div className="space-y-3">
       <h1 className="text-lg font-semibold tracking-tight">MCP</h1>
-      <p className="text-xs text-muted-foreground">开关表示配置是否启用；连接结果来自手动检查，不代表助手已经加载。</p>
-      {query.data.errors.length > 0 && <ErrorPanel title="MCP 状态读取失败" errors={query.data.errors} />}
+      <p className="text-xs text-muted-foreground">{t("开关表示配置是否启用；连接结果来自手动检查，不代表助手已经加载。")}</p>
+      {query.data.errors.length > 0 && <ErrorPanel title={t("MCP 状态读取失败")} errors={query.data.errors} />}
       {brokenTargets.map((target) => (
         <div
           key={target.agent}
           data-testid={`mcp-target-error-${target.agent}`}
           className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning"
         >
-          <span className="font-medium">{nameOfAgent(target.agent)}</span> 的 MCP 配置读不了：{target.error}
+          <span className="font-medium">{nameOfAgent(target.agent)}</span>{(" " + t("的 MCP 配置读不了："))}{target.error}
           <span className="block break-all font-mono text-[11px] opacity-80">{target.path}</span>
         </div>
       ))}
 
       <div className="flex flex-wrap items-center gap-2">
-        <SearchInput value={search} onChange={setSearch} placeholder="搜索服务…" testId="mcp-search" />
+        <SearchInput value={search} onChange={setSearch} placeholder={t("搜索服务…")} testId="mcp-search" />
         <Select
-          label="助手筛选"
+          label={t("助手筛选")}
           testId="filter-agent-select"
           value={agentFilter}
           onChange={setAgentFilter}
           className="rounded-md border bg-card px-2 py-1.5 text-sm"
-          options={[{ value: "all", label: "全部助手" }, ...agentColumns.map((agent) => ({ value: agent, label: nameOfAgent(agent) }))]}
+          options={[{ value: "all", label: t("全部助手") }, ...agentColumns.map((agent) => ({ value: agent, label: nameOfAgent(agent) }))]}
         />
         <AttentionOnlyToggle checked={attentionOnly} count={attentionSubjects.size} onChange={setAttentionOnly} />
         <div className="ml-auto flex items-center gap-2">
@@ -374,11 +375,10 @@ export default function McpPage({
               type="button"
               data-testid="mcp-fill-all"
               disabled={filling || busy}
-              title="把在用的服务从同类助手复制到所有还没有它的助手；助手上停用的不动"
+              title={t("把在用的服务从同类助手复制到所有还没有它的助手；助手上停用的不动")}
               onClick={() => void runFill()}
               className="inline-flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-3 py-1.5 text-sm text-primary hover:bg-primary/15 disabled:opacity-40"
-            >
-              全部补齐 {fillAllCount}
+            >{(t("全部补齐") + " ")}{fillAllCount}
             </button>
           )}
           <button
@@ -399,40 +399,36 @@ export default function McpPage({
       {elements.length === 0 ? (
         <EmptyState
           icon={Server}
-          title="各助手的配置里还没有 MCP 服务"
-          description={<p>点击右上角「{OVERLAY_COPY.addServer}」写入第一个服务；在助手里直接加的条目也会出现在这里。</p>}
+          title={t("各助手的配置里还没有 MCP 服务")}
+          description={<p>{t("点击右上角「")}{OVERLAY_COPY.addServer}{t("」写入第一个服务；在助手里直接加的条目也会出现在这里。")}</p>}
         />
       ) : (search_ || agentFilter !== "all" || attentionOnly) && shown.length === 0 ? (
         <EmptyState
           icon={SearchX}
           testId="mcp-search-empty"
-          title="无匹配结果"
-          description="没有名称、启动命令、地址或助手包含该关键词的服务。"
+          title={t("无匹配结果")}
+          description={t("没有名称、启动命令、地址或助手包含该关键词的服务。")}
           actions={
             <button
               type="button"
               onClick={() => setSearch("")}
               className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
-            >
-              清除搜索关键词
-            </button>
+            >{t("清除搜索关键词")}</button>
           }
         />
       ) : (
-        <div role="region" aria-label="MCP 助手列表" tabIndex={0} className="table-scroll rounded-lg border bg-card" style={{ "--table-min-width": `${Math.max(704, 400 + groups.reduce((count, group) => count + group.columns.length * 64 + 16, 0))}px` } as CSSProperties}>
+        <div role="region" aria-label={t("MCP 助手列表")} tabIndex={0} className="table-scroll rounded-lg border bg-card" style={{ "--table-min-width": `${Math.max(704, 400 + groups.reduce((count, group) => count + group.columns.length * 64 + 16, 0))}px` } as CSSProperties}>
           <AccountHeader
             className="sticky top-0 z-10"
             groups={groups}
             left={
               <span className="flex items-center gap-2">
-                <span className="font-medium text-foreground" data-testid="mcp-counts">
-                  MCP 服务 · {shown.length}
-                  {disabledCount > 0 && <span className="font-normal text-muted-foreground">（{disabledCount} 个已停用）</span>}
+                <span className="font-medium text-foreground" data-testid="mcp-counts">{(t("MCP 服务 ·") + " ")}{shown.length}
+                  {disabledCount > 0 && <span className="font-normal text-muted-foreground">（{disabledCount}{(" " + t("个已停用）"))}</span>}
                 </span>
                 {unsupported.length > 0 && (
-                  <span data-testid="mcp-unsupported" title="这些助手的 MCP 配置格式本工具还不支持，没有列出；它们自己的 MCP 不受影响。">
-                    <Info className="inline h-3.5 w-3.5 align-[-2px]" aria-hidden /> {unsupported.map((target) => readableName(target.agent)).join("、")} 暂不支持
-                  </span>
+                  <span data-testid="mcp-unsupported" title={t("这些助手的 MCP 配置格式本工具还不支持，没有列出；它们自己的 MCP 不受影响。")}>
+                    <Info className="inline h-3.5 w-3.5 align-[-2px]" aria-hidden /> {unsupported.map((target) => readableName(target.agent)).join("、")}{(" " + t("暂不支持"))}</span>
                 )}
               </span>
             }
@@ -446,11 +442,10 @@ export default function McpPage({
                       type="button"
                       data-testid={`mcp-fill-${column.id}`}
                       disabled={filling || busy}
-                      title={`把在用的 ${missing} 个服务复制到 ${column.fullName}；助手上停用的不动`}
+                      title={t("把在用的 {0} 个服务复制到 {1}；助手上停用的不动", missing, column.fullName)}
                       onClick={() => void runFill(column.id)}
                       className="text-primary hover:underline disabled:opacity-40"
-                    >
-                      补齐 {missing}
+                    >{(t("补齐") + " ")}{missing}
                     </button>
                   )}
                 </>
@@ -471,14 +466,14 @@ export default function McpPage({
                 onAddHere={(target, from, to) => {
                   const cell = cellsOf(target)[from];
                   if (!cell) return;
-                  const label = `把 ${nameOf(target)} 复制到 ${nameOfAgent(to)}`;
+                  const label = t("把 {0} 复制到 {1}", nameOf(target), nameOfAgent(to));
                   void directApply
                     .apply({
                       command: "mcp:apply",
                       label,
                       args: copyArgs(target, from, cell.base, to, null),
                       // 撤销复制 = 从这个助手删掉刚复制过来的那一条
-                      undo: undoWith(target, to, `撤销：${label}`, "remove"),
+                      undo: undoWith(target, to, t("撤销：{0}", label), "remove"),
                     })
                     .then(showNotices);
                 }}
@@ -518,7 +513,7 @@ export default function McpPage({
       />}
 
       {cleaning && <McpMarkerCleanupDialog id={cleaning.element.id} agent={cleaning.agent} base={cleaning.cell.base} nameOf={nameOfAgent} busy={busy} onClose={() => setCleaning(null)} onConfirm={(args) => {
-        void apply(`清理旧标记 ${nameOf(cleaning.element)} @ ${nameOfAgent(cleaning.agent)}`, args).then((envelope) => { if (envelope?.ok) setCleaning(null); });
+        void apply(t("清理旧标记 {0} @ {1}", nameOf(cleaning.element), nameOfAgent(cleaning.agent)), args).then((envelope) => { if (envelope?.ok) setCleaning(null); });
       }} />}
 
       {form && (
@@ -552,15 +547,15 @@ export default function McpPage({
 
       {pendingForget && (
         <ConfirmModal
-          title={`删除存着的配置 ${nameOf(pendingForget)}`}
-          description="只删除本工具里保存、还没写进任何助手的这份定义，各助手的配置文件不受影响。"
+          title={t("删除存着的配置 {0}", nameOf(pendingForget))}
+          description={t("只删除本工具里保存、还没写进任何助手的这份定义，各助手的配置文件不受影响。")}
           risk="write-local"
-          confirmLabel="确认删除"
+          confirmLabel={t("确认删除")}
           executing={busy}
           onConfirm={() => {
             const element = pendingForget;
             setPendingForget(null);
-            void apply(`删除存着的配置 ${nameOf(element)}`, ["--only", element.id, "--action", "forget"]);
+            void apply(t("删除存着的配置 {0}", nameOf(element)), ["--only", element.id, "--action", "forget"]);
           }}
           onClose={() => setPendingForget(null)}
         />
@@ -576,7 +571,7 @@ export default function McpPage({
             void directApply
               .apply({
                 command: "secrets:set",
-                label: `写入外部密钥 ${editingSecret}`,
+                label: t("写入外部密钥 {0}", editingSecret),
                 args: ["--var", editingSecret, "--value", value],
               })
               .then((envelope) => {

@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { useState } from "react";
 import type { EngineElement } from "../lib/contract";
@@ -24,7 +25,7 @@ export interface McpCheckResult {
   exit_code: number | null;
 }
 
-export const CHECK_STAGE = { variables: "变量取值", start: "启动命令", initialize: "初始化", tools: "读取工具", done: "完成" };
+export const CHECK_STAGE = { get variables() { return t("变量取值"); }, get start() { return t("启动命令"); }, get initialize() { return t("初始化"); }, get tools() { return t("读取工具"); }, get done() { return t("完成"); } };
 
 /** 能测的助手：文件里实际有、结构认得出的条目。 */
 export function checkableAgents(element: EngineElement): string[] {
@@ -78,7 +79,7 @@ export function McpCheckDialog({
         setResult(envelope.data);
         onResult(agent, envelope.data);
       }
-      else setError(envelope.errors[0]?.message ?? "测试失败");
+      else setError(envelope.errors[0]?.message ?? t("测试失败"));
     } catch (reason) {
       setError(engineErrorMessage(reason));
     } finally {
@@ -88,10 +89,10 @@ export function McpCheckDialog({
 
   return (
     <ConfirmModal
-      title={`测试连接 · ${name}`}
-      description="按所选助手的实际配置检查初始化和工具读取。命令型会运行命令，npx 一类可能下载依赖；地址型会发请求。不改任何配置，结果仅在当前页面保留；通过也不代表助手已经加载。"
+      title={t("测试连接 · {0}", name)}
+      description={t("按所选助手的实际配置检查初始化和工具读取。命令型会运行命令，npx 一类可能下载依赖；地址型会发请求。不改任何配置，结果仅在当前页面保留；通过也不代表助手已经加载。")}
       risk="exec-local"
-      confirmLabel={running ? "测试中…" : result || error ? "再测一次" : "测试"}
+      confirmLabel={running ? t("测试中…") : result || error ? t("再测一次") : t("测试")}
       confirmDisabled={!agent}
       executing={running}
       onConfirm={() => void run()}
@@ -99,8 +100,8 @@ export function McpCheckDialog({
     >
       {agents.length > 1 && (
         <div className="mt-3">
-          <p className="mb-1.5 text-xs text-muted-foreground">用哪个助手里的配置</p>
-          <div role="radiogroup" aria-label="助手" className="flex flex-wrap gap-1.5">
+          <p className="mb-1.5 text-xs text-muted-foreground">{t("用哪个助手里的配置")}</p>
+          <div role="radiogroup" aria-label={t("助手")} className="flex flex-wrap gap-1.5">
             {agents.map((item) => (
               <button
                 key={item}
@@ -123,49 +124,48 @@ export function McpCheckDialog({
       )}
       {cell && (
         <div className="mt-3 space-y-2 text-xs text-muted-foreground">
-          <p>助手：{nameOf(agent)}</p>
-          <p className="break-all font-mono">配置：{cell.target}</p>
+          <p>{t("助手：")}{nameOf(agent)}</p>
+          <p className="break-all font-mono">{t("配置：")}{cell.target}</p>
           <p className="break-all font-mono">{cell.entry?.url ?? [cell.entry?.command, ...(cell.entry?.args ?? [])].join(" ")}</p>
           {cell.transport === "stdio" && (
             <label className="block space-y-1">
-              <span>工作目录{configuredCwd ? "（来自配置）" : "（留空使用本工具的 HOME）"}</span>
-              <input data-testid="mcp-check-cwd" value={configuredCwd ?? cwd} disabled={running || Boolean(configuredCwd)} onChange={(event) => { setCwd(event.target.value); setResult(null); setError(null); }} placeholder="项目目录的绝对路径" className="w-full rounded border bg-background px-2 py-1.5 font-mono text-xs" />
+              <span>{t("工作目录")}{configuredCwd ? t("（来自配置）") : t("（留空使用本工具的 HOME）")}</span>
+              <input data-testid="mcp-check-cwd" value={configuredCwd ?? cwd} disabled={running || Boolean(configuredCwd)} onChange={(event) => { setCwd(event.target.value); setResult(null); setError(null); }} placeholder={t("项目目录的绝对路径")} className="w-full rounded border bg-background px-2 py-1.5 font-mono text-xs" />
             </label>
           )}
-          <p>取值使用本工具的密钥文件及运行环境，可能与助手进程不同。</p>
+          <p>{t("取值使用本工具的密钥文件及运行环境，可能与助手进程不同。")}</p>
         </div>
       )}
-      {agents.length === 0 && <p className="mt-3 text-xs text-warning">没有助手里有能识别的这条配置，测不了。</p>}
+      {agents.length === 0 && <p className="mt-3 text-xs text-warning">{t("没有助手里有能识别的这条配置，测不了。")}</p>}
       {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
       {result && (
         <div data-testid="mcp-check-result" className={cn("mt-3 rounded-md border p-3 text-sm", result.ok ? "border-success/30 bg-success/5" : "border-destructive/30 bg-destructive/5")}>
           <div className="flex items-start gap-2">
             {result.ok ? <CheckCircle2 className="h-4 w-4 shrink-0 text-success" aria-hidden /> : <XCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden />}
             <span className="min-w-0 break-words font-medium">{result.message}</span>
-            <span className="ml-auto shrink-0 text-xs text-muted-foreground">{(result.elapsed_ms / 1000).toFixed(1)} 秒</span>
+            <span className="ml-auto shrink-0 text-xs text-muted-foreground">{(result.elapsed_ms / 1000).toFixed(1)}{(" " + t("秒"))}</span>
           </div>
-          <p className="mt-1.5 text-xs text-muted-foreground">阶段：{CHECK_STAGE[result.stage]}{result.exit_code != null ? ` · 退出码：${result.exit_code}` : ""}</p>
-          <p className="mt-1 text-xs text-muted-foreground">超时：初始化 {result.startup_timeout_sec} 秒 · 工具 {result.tool_timeout_sec} 秒</p>
-          {result.cwd && <p className="mt-1 break-all font-mono text-xs text-muted-foreground">工作目录：{result.cwd}{result.cwd_source === "home" ? "（HOME）" : ""}</p>}
+          <p className="mt-1.5 text-xs text-muted-foreground">{t("阶段：")}{CHECK_STAGE[result.stage]}{result.exit_code != null ? (" " + t("· 退出码：{0}", result.exit_code)) : ""}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{(t("超时：初始化") + " ")}{result.startup_timeout_sec}{(" " + t("秒 · 工具") + " ")}{result.tool_timeout_sec}{(" " + t("秒"))}</p>
+          {result.cwd && <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{t("工作目录：")}{result.cwd}{result.cwd_source === "home" ? "（HOME）" : ""}</p>}
           {result.server_info?.name && (
-            <p className="mt-1.5 text-xs text-muted-foreground">
-              服务：{result.server_info.title ?? result.server_info.name}
+            <p className="mt-1.5 text-xs text-muted-foreground">{t("服务：")}{result.server_info.title ?? result.server_info.name}
               {result.server_info.version ? ` ${result.server_info.version}` : ""}
             </p>
           )}
           {result.tools && result.tools.length > 0 && (
             <p className="mt-1.5 break-words font-mono text-xs text-muted-foreground">
               {result.tools.join("、")}
-              {result.tool_count !== null && result.tool_count > result.tools.length ? ` 等 ${result.tool_count} 个` : ""}
+              {result.tool_count !== null && result.tool_count > result.tools.length ? (" " + t("等 {0} 个", result.tool_count)) : ""}
             </p>
           )}
           {result.detail && (
             <details className="mt-2" open={!result.ok}>
-              <summary className="cursor-pointer text-xs text-muted-foreground">错误输出（已脱敏）</summary>
+              <summary className="cursor-pointer text-xs text-muted-foreground">{t("错误输出（已脱敏）")}</summary>
               <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 font-mono text-[11px] text-muted-foreground">{result.detail}</pre>
             </details>
           )}
-          {!result.ok && <button type="button" onClick={() => onEdit(agent)} className="mt-2 text-xs text-primary hover:underline">编辑服务配置</button>}
+          {!result.ok && <button type="button" onClick={() => onEdit(agent)} className="mt-2 text-xs text-primary hover:underline">{t("编辑服务配置")}</button>}
         </div>
       )}
     </ConfirmModal>

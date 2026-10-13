@@ -7,6 +7,7 @@ import { makeApplyResult, makeEnvelope } from "./fixtures";
 import { BASE_CLAUDE_FS, BASE_CLAUDE_SNAPSHOT, BASE_CODEX_FS, BASE_CODEX_REMOTE, mcpStatusData, mcpTargets } from "./mcp-fixtures";
 import { renderWithEngine, screen, userEvent, within, chooseOption } from "./render-with-engine";
 import { decodeShareLink } from "../lib/shareLink";
+import { setLanguage, t } from "../lib/i18n";
 
 /** 等服务列表出现（开关直接在行上，不用再展开）。 */
 async function expandAll() {
@@ -48,6 +49,24 @@ function specOf(args: string[]): Record<string, unknown> {
 }
 
 describe("McpPage：实际条目为主", () => {
+  it("keeps existing MCP values in English previews and writes only the selected target", async () => {
+    setLanguage("en");
+    const { calls } = renderWithEngine(<McpPage />, routes());
+    await expandAll();
+    await userEvent.click(screen.getByTestId("edit-mcp:fs"));
+    let dialog = await screen.findByRole("dialog", { name: /Edit fs/ });
+    await chooseOption(within(dialog).getByTestId("server-edit-base"), "codex");
+    dialog = await screen.findByRole("dialog", { name: /Edit fs/ });
+    expect(within(dialog).getByTestId("server-env-input")).toHaveValue("TOKEN=(keep existing)");
+    await within(dialog).findByTestId("mcp-preview-content-codex");
+    await userEvent.click(within(dialog).getByTestId("server-form-submit"));
+    await waitFor(() => expect(applyCalls(calls)).toHaveLength(1));
+    expect(applyCalls(calls)[0].args.slice(0, 8)).toEqual(["--only", "mcp:fs", "--agent", "codex", "--action", "edit", "--base", BASE_CODEX_FS]);
+    expect(specOf(applyCalls(calls)[0].args).env).toEqual({ TOKEN: "<literal>" });
+    expect(calls.filter(call => call.command === "mcp:preview").map(call => specOf(call.args).env))
+      .toContainEqual({ TOKEN: "<literal>" });
+  });
+
   it("按服务列出各助手里的实际条目：内容各不相同、只显示脱敏值，不再有服务库/导入/同步入口", async () => {
     const { calls } = renderWithEngine(<McpPage />, routes());
     await expandAll();
@@ -182,11 +201,12 @@ describe("McpPage：实际条目为主", () => {
     await waitFor(() => expect(screen.queryByTestId("check-result-mcp:fs-claude-code")).toBeNull());
   });
 
-  it("配置格式还不支持的助手不占列，只在表头说明里提一句", async () => {
+  it.each(["en", "zh-CN"] as const)("配置格式还不支持的助手不占列，只在表头说明里提一句 (%s)", async (language) => {
+    setLanguage(language);
     const status = mcpStatusData();
     status.targets = mcpTargets({ codex: { error: "不支持的 MCP 配置格式: kimi-json" } });
     renderWithEngine(<McpPage />, routes(status));
-    expect(await screen.findByTestId("mcp-unsupported")).toHaveTextContent("暂不支持");
+    expect(await screen.findByTestId("mcp-unsupported")).toHaveTextContent(t("暂不支持"));
     expect(screen.queryByTestId("mcp-target-error-codex")).toBeNull();
     expect(screen.queryByTestId("action-disable-mcp:fs-codex")).toBeNull();
     expect(screen.getByTestId("action-disable-mcp:fs-claude-code")).toBeInTheDocument();

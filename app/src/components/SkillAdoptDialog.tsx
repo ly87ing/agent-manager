@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { runEngine } from "../lib/engine";
@@ -46,9 +47,9 @@ export interface AdoptPreview {
 }
 
 const FILE_STATUS: Record<string, string> = {
-  modified: "改过",
-  "only-local": "只在本地",
-  "only-source": "只在来源",
+  get modified() { return t("改过"); },
+  get "only-local"() { return t("只在本地"); },
+  get "only-source"() { return t("只在来源"); },
 };
 
 /**
@@ -109,7 +110,7 @@ export function SkillAdoptDialog({
           if (requestedDest === null) setSelected(accounts);
           else setSelected((previous) => previous.filter((agent) => accounts.includes(agent)));
         } else {
-          setError(envelope.errors[0]?.message ?? "预览失败");
+          setError(envelope.errors[0]?.message ?? t("预览失败"));
         }
       })
       .catch((reason) => alive && setError(reason instanceof Error ? reason.message : String(reason)))
@@ -140,16 +141,16 @@ export function SkillAdoptDialog({
     let label: string;
     if (dedupe) {
       args = ["--name", name, "--digest", preview.digest ?? ""];
-      label = `清理 ${name} 的多余副本`;
+      label = t("清理 {0} 的多余副本", name);
     } else if (choice === "local") {
       args = ["--name", name, "--digest", preview.local?.digest ?? "", "--keep-local"];
       args.push("--dest", previewRoot!);
-      label = `纳入 ${name}（保留本地内容）`;
+      label = t("纳入 {0}（保留本地内容）", name);
     } else {
       args = ["--name", name, "--digest", check!.digest, "--path", check!.path];
       if (check!.ref) args.push("--ref", check!.ref);
       if (!check!.same) args.push("--accept-source");
-      label = `纳入 ${name}`;
+      label = t("纳入 {0}", name);
     }
     if (!dedupe) args.push("--agents", chosen.join(","));
     const runId = newRunId();
@@ -163,11 +164,11 @@ export function SkillAdoptDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 animate-fade-in" onClick={(e) => e.target === e.currentTarget && close()}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={`纳入管理 ${name}`} tabIndex={-1} onKeyDown={onDialogKeyDown} className="flex max-h-[88vh] w-full max-w-xl flex-col rounded-xl border bg-card shadow-xl animate-zoom-in-95">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("纳入管理 {0}", name)} tabIndex={-1} onKeyDown={onDialogKeyDown} className="flex max-h-[88vh] w-full max-w-xl flex-col rounded-xl border bg-card shadow-xl animate-zoom-in-95">
         <div className="flex items-center justify-between border-b px-5 py-3">
-          <h3 className="text-base font-semibold text-foreground">{dedupe ? `清理 ${name} 的多余副本` : `纳入管理 ${name}`}</h3>
+          <h3 className="text-base font-semibold text-foreground">{dedupe ? t("清理 {0} 的多余副本", name) : t("纳入管理 {0}", name)}</h3>
           {!running && (
-            <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent">
+            <button type="button" onClick={onClose} aria-label={t("关闭")} className="rounded p-1 text-muted-foreground hover:bg-accent">
               <X className="h-4 w-4" aria-hidden />
             </button>
           )}
@@ -175,37 +176,33 @@ export function SkillAdoptDialog({
 
         <div data-testid="adopt-body" className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4 text-sm">
           {running ? (
-            <ProgressSteps testId="adopt-progress" progress={progress} fallback={dedupe ? "正在清理…" : "正在纳入…"} />
+            <ProgressSteps testId="adopt-progress" progress={progress} fallback={dedupe ? t("正在清理…") : t("正在纳入…")} />
           ) : error ? (
             <p data-testid="adopt-error" className="text-xs text-destructive">{error}</p>
           ) : !preview ? (
             <ProgressSteps
               testId="adopt-loading"
               progress={progress}
-              fallback="正在识别来源并与来源比对。预览不会改动任何东西，可以随时取消。"
+              fallback={t("正在识别来源并与来源比对。预览不会改动任何东西，可以随时取消。")}
             />
           ) : dedupe ? (
             <p data-testid="adopt-dedupe" className="text-xs text-foreground">
-              {name} 已由来源 <span className="font-medium">{preview.collection?.name}</span> 管理；Codex 共用目录里还有一份，Codex 会加载两次。清理后只留来源这一份。
-            </p>
+              {name}{(" " + t("已由来源") + " ")}<span className="font-medium">{preview.collection?.name}</span>{(" " + t("管理；Codex 共用目录里还有一份，Codex 会加载两次。清理后只留来源这一份。"))}</p>
           ) : (
             <>
               <section className="space-y-1 text-xs">
-                <p data-testid="adopt-source">
-                  来源：
-                  {preview.source?.repository ? (
+                <p data-testid="adopt-source">{t("来源：")}{preview.source?.repository ? (
                     <span className="font-mono text-foreground">{shortRepository(preview.source.repository)}</span>
                   ) : (
-                    <span className="text-muted-foreground">认不出来</span>
+                    <span className="text-muted-foreground">{t("认不出来")}</span>
                   )}
                   {check && <span className="text-muted-foreground"> · {check.path}</span>}
                 </p>
                 {check && (
-                  <p data-testid="adopt-version" className="text-muted-foreground">
-                    纳入到来源 <span className="text-foreground">{preview.collection?.name}</span>
-                    {preview.collection?.exists ? "（已有）" : "（新建）"}，版本 <span className="font-mono text-foreground">{check.adopt_at.label}</span>
-                    {check.adopt_at.commit !== check.latest.commit && `，之后可更新到 ${check.latest.label}`}
-                    {preview.collection?.linked_as && preview.collection.linked_as !== name && `；在来源里叫 ${preview.collection.linked_as}，助手里按这个名字链接`}
+                  <p data-testid="adopt-version" className="text-muted-foreground">{(t("纳入到来源") + " ")}<span className="text-foreground">{preview.collection?.name}</span>
+                    {preview.collection?.exists ? t("（已有）") : t("（新建）")}{(t("，版本") + " ")}<span className="font-mono text-foreground">{check.adopt_at.label}</span>
+                    {check.adopt_at.commit !== check.latest.commit && t("，之后可更新到 {0}", check.latest.label)}
+                    {preview.collection?.linked_as && preview.collection.linked_as !== name && t("；在来源里叫 {0}，助手里按这个名字链接", preview.collection.linked_as)}
                   </p>
                 )}
                 {checkError && <p data-testid="adopt-source-error" className="text-warning">{checkError}</p>}
@@ -214,10 +211,10 @@ export function SkillAdoptDialog({
               {check && (
                 <section data-testid="adopt-compare" className="space-y-1 text-xs">
                   {check.same ? (
-                    <p className="text-foreground">现有内容与来源的 {check.adopt_at.label} 完全一致。</p>
+                    <p className="text-foreground">{(t("现有内容与来源的") + " ")}{check.adopt_at.label}{(" " + t("完全一致。"))}</p>
                   ) : (
                     <>
-                      <p className="text-warning">现有内容与来源的 {check.adopt_at.label} 不一致：</p>
+                      <p className="text-warning">{(t("现有内容与来源的") + " ")}{check.adopt_at.label}{(" " + t("不一致："))}</p>
                       {preview.locations.map((location, index) => {
                         const files = check.locations[index]?.files ?? [];
                         return files.length === 0 ? null : (
@@ -227,7 +224,7 @@ export function SkillAdoptDialog({
                               {files.slice(0, 20).map((change) => (
                                 <ChangedFile key={change.file} change={change} label={FILE_STATUS[change.status] ?? change.status} />
                               ))}
-                              {files.length > 20 && <li className="text-muted-foreground">另有 {files.length - 20} 处</li>}
+                              {files.length > 20 && <li className="text-muted-foreground">{(t("另有") + " ")}{files.length - 20}{(" " + t("处"))}</li>}
                             </ul>
                           </div>
                         );
@@ -239,16 +236,14 @@ export function SkillAdoptDialog({
 
               {(!check || !check.same) && (
                 <fieldset className="space-y-1.5 text-xs">
-                  <legend className="mb-1 text-muted-foreground">怎么纳入</legend>
+                  <legend className="mb-1 text-muted-foreground">{t("怎么纳入")}</legend>
                   <label className={cn("flex items-start gap-2", !check && "opacity-50")}>
                     <input type="radio" name="adopt-choice" data-testid="adopt-choice-source" disabled={!check} checked={choice === "source"} onChange={() => setChoice("source")} />
-                    <span>用来源的版本（你现在的内容留在备份里，可撤回）</span>
+                    <span>{t("用来源的版本（你现在的内容留在备份里，可撤回）")}</span>
                   </label>
                   <label className="flex items-start gap-2">
                     <input type="radio" name="adopt-choice" data-testid="adopt-choice-local" checked={choice === "local"} onChange={() => setChoice("local")} />
-                    <span>
-                      保留我的内容：放进 <span className="font-mono">{preview.local?.dest}</span> 作为本机来源（没有版本跟踪）
-                      {preview.local?.dest_exists && <span className="text-destructive">——这个位置已经有内容，不能用</span>}
+                    <span>{(t("保留我的内容：放进") + " ")}<span className="font-mono">{preview.local?.dest}</span>{(" " + t("作为本机来源（没有版本跟踪）"))}{preview.local?.dest_exists && <span className="text-destructive">{t("——这个位置已经有内容，不能用")}</span>}
                     </span>
                   </label>
                 </fieldset>
@@ -256,14 +251,14 @@ export function SkillAdoptDialog({
               {choice === "local" && (
                 <section className="space-y-2 text-xs">
                   <label className="block">
-                    <span className="text-muted-foreground">个人集合目录（可自定义）</span>
+                    <span className="text-muted-foreground">{t("个人集合目录（可自定义）")}</span>
                     <input data-testid="adopt-dest" value={dest} onChange={(event) => setDest(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 font-mono text-xs" />
                   </label>
                   {preview.local_error && <p className="text-destructive">{preview.local_error}</p>}
                   {destDirty && (
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-muted-foreground">目录已修改，请更新预览。</span>
-                      <button type="button" data-testid="adopt-refresh-preview" disabled={!destOk} onClick={() => setRequestedDest(dest.trim())} className="rounded-md border px-2 py-1 disabled:opacity-40">更新预览</button>
+                      <span className="text-muted-foreground">{t("目录已修改，请更新预览。")}</span>
+                      <button type="button" data-testid="adopt-refresh-preview" disabled={!destOk} onClick={() => setRequestedDest(dest.trim())} className="rounded-md border px-2 py-1 disabled:opacity-40">{t("更新预览")}</button>
                     </div>
                   )}
                 </section>
@@ -273,7 +268,7 @@ export function SkillAdoptDialog({
 
           {preview && !running && !dedupe && accounts.length > 0 && (
             <fieldset data-testid="adopt-accounts" className="space-y-1 text-xs">
-              <legend className="mb-1 text-muted-foreground">链接到哪些助手（默认全部）</legend>
+              <legend className="mb-1 text-muted-foreground">{t("链接到哪些助手（默认全部）")}</legend>
               <div className="flex flex-wrap gap-x-4 gap-y-1">
                 {accounts.map((agent) => (
                   <label key={agent} className="flex items-center gap-1.5 text-foreground">
@@ -285,32 +280,30 @@ export function SkillAdoptDialog({
                     />
                     {nameOf(agent)}
                     {preview.current_accounts?.includes(agent) && (
-                      <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">原来就有</span>
+                      <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{t("原来就有")}</span>
                     )}
                   </label>
                 ))}
               </div>
-              {chosen.length === 0 && <p className="text-destructive">至少选一个助手</p>}
+              {chosen.length === 0 && <p className="text-destructive">{t("至少选一个助手")}</p>}
             </fieldset>
           )}
 
           {preview && !running && (
             <section data-testid="adopt-plan" className="space-y-1 break-words rounded-md border bg-muted/30 p-3 text-xs [overflow-wrap:anywhere]">
-              <p className="font-medium text-foreground">点确认后会：</p>
+              <p className="font-medium text-foreground">{t("点确认后会：")}</p>
               <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
                 {preview.removes.map((path) => (
-                  <li key={path}>
-                    备份并移走 <span className="font-mono">{path}</span>
+                  <li key={path}>{(t("备份并移走") + " ")}<span className="font-mono">{path}</span>
                   </li>
                 ))}
                 {!dedupe && choice === "local" && preview.local && (
-                  <li>
-                    复制到 <span className="font-mono">{preview.local.dest}</span>，登记为本机来源 {preview.local.collection}
+                  <li>{(t("复制到") + " ")}<span className="font-mono">{preview.local.dest}</span>{(t("，登记为本机来源") + " ")}{preview.local.collection}
                   </li>
                 )}
-                {!dedupe && choice === "source" && check && <li>登记来源并下载 {check.path}（只下载这一个目录）</li>}
-                {chosen.length > 0 && <li>链接到 {chosen.map(nameOf).join("、")}</li>}
-                <li>不改 npx skills 等别的工具的记录；可以在完成提示或操作记录里撤回</li>
+                {!dedupe && choice === "source" && check && <li>{(t("登记来源并下载") + " ")}{check.path}{t("（只下载这一个目录）")}</li>}
+                {chosen.length > 0 && <li>{(t("链接到") + " ")}{chosen.map(nameOf).join("、")}</li>}
+                <li>{t("不改 npx skills 等别的工具的记录；可以在完成提示或操作记录里撤回")}</li>
               </ul>
             </section>
           )}
@@ -319,21 +312,17 @@ export function SkillAdoptDialog({
         <div className="flex items-center justify-end gap-2 border-t px-5 py-3">
           {running ? (
             <>
-              <span data-testid="adopt-running-note" className="mr-auto text-xs text-muted-foreground">执行中不能取消；出错会自动恢复原样</span>
+              <span data-testid="adopt-running-note" className="mr-auto text-xs text-muted-foreground">{t("执行中不能取消；出错会自动恢复原样")}</span>
               <button
                 type="button"
                 data-testid="adopt-background"
                 onClick={onClose}
                 className="rounded-md border px-4 py-1.5 text-sm text-muted-foreground hover:bg-accent"
-              >
-                在后台继续
-              </button>
+              >{t("在后台继续")}</button>
             </>
           ) : (
             <>
-              <button type="button" data-testid="adopt-cancel" onClick={onClose} className="rounded-md border px-4 py-1.5 text-sm text-muted-foreground hover:bg-accent">
-                取消
-              </button>
+              <button type="button" data-testid="adopt-cancel" onClick={onClose} className="rounded-md border px-4 py-1.5 text-sm text-muted-foreground hover:bg-accent">{t("取消")}</button>
               <button
                 type="button"
                 data-testid="adopt-confirm"
@@ -341,7 +330,7 @@ export function SkillAdoptDialog({
                 onClick={() => void confirm()}
                 className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
               >
-                {dedupe ? "清理" : "纳入"}
+                {dedupe ? t("清理") : t("纳入")}
               </button>
             </>
           )}

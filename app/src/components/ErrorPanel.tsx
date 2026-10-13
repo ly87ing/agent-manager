@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { AlertOctagon, AlertTriangle } from "lucide-react";
 import type { Diagnostic } from "../lib/contract";
 import { adviseError } from "../lib/errorAdvice";
@@ -5,7 +6,7 @@ import { cn } from "../lib/utils";
 
 /** 渲染 envelope 的 errors / warnings（code + element + message）。 */
 export function ErrorPanel({
-  title = "引擎返回诊断",
+  title = t("引擎返回诊断"),
   errors,
   variant = "error",
   className,
@@ -42,14 +43,14 @@ export function ErrorPanel({
               return advice ? (
                 <>
                   <p>{advice.what}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">怎么办：{advice.todo}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{t("怎么办：")}{advice.todo}</p>
                 </>
               ) : (
                 <p>{diag.message}</p>
               );
             })()}
             <details className="mt-1 text-xs text-muted-foreground">
-              <summary className="w-fit cursor-pointer select-none">详细信息</summary>
+              <summary className="w-fit cursor-pointer select-none">{t("详细信息")}</summary>
               {adviseError(diag.message) && <p className="mt-1 break-all pl-2">{diag.message}</p>}
               <div className="mt-1 flex flex-wrap gap-2 pl-2">
                 <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{diag.code}</code>

@@ -13,7 +13,7 @@ import { setSettingsClient, settingsSchema } from "../lib/settings";
 import { setAutostartClient } from "../lib/autostart";
 
 const settings: SettingsData = {
-  preferences: { logRetentionDays: 30 },
+  preferences: { language: "zh-CN", logRetentionDays: 30 },
   appVersion: "1.2.3",
   contractVersion: "agent-manager/engine/v1",
   resourceDir: "/resources",
@@ -165,11 +165,11 @@ describe("SettingsPage", () => {
   it("DEV mock 保存后再次读取仍保留偏好", async () => {
     window.history.pushState({}, "", "?mock=1");
     renderWithEngine(<SettingsPage />, {});
-    const retention = await screen.findByLabelText("日志保留天数");
+    const retention = await screen.findByLabelText("Log retention days");
     await userEvent.clear(retention);
     await userEvent.type(retention, "45");
-    await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
-    expect(await screen.findByText("设置已保存")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    expect(await screen.findByText("Settings saved")).toBeInTheDocument();
     expect(retention).toHaveValue(45);
     window.history.pushState({}, "", "/");
   });
@@ -583,7 +583,7 @@ describe("SettingsPage", () => {
 
   it("settingsSchema 严格校验：拒绝多余字段与已退役的偏好", () => {
     const baseValid = {
-      preferences: { logRetentionDays: 30 },
+      preferences: { language: "zh-CN", logRetentionDays: 30 },
       appVersion: "1.0.0",
       contractVersion: "agent-manager/engine/v1",
       resourceDir: "/res",

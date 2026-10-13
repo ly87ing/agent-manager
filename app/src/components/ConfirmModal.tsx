@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { useState, type ReactNode } from "react";
 import { Loader2, X } from "lucide-react";
 import type { Diagnostic, RiskLevel } from "../lib/contract";
@@ -16,7 +17,7 @@ export function ConfirmModal({
   risk,
   riskLabel,
   requireText,
-  confirmLabel = "确认执行",
+  confirmLabel = t("确认执行"),
   confirmDisabled = false,
   executing,
   resultErrors,
@@ -71,7 +72,7 @@ export function ConfirmModal({
             <h3 className="break-words text-base font-semibold text-foreground">{title}</h3>
             <RiskBadge risk={risk} label={riskLabel} />
           </div>
-          <button type="button" onClick={onClose} disabled={executing} aria-label="关闭" className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-40">
+          <button type="button" onClick={onClose} disabled={executing} aria-label={t("关闭")} className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-40">
             <X className="h-4 w-4" aria-hidden />
           </button>
         </div>
@@ -86,13 +87,13 @@ export function ConfirmModal({
               value={text}
               onChange={(event) => setText(event.target.value)}
               disabled={executing}
-              placeholder={`请输入 ${requireText} 以确认`}
+              placeholder={t("请输入 {0} 以确认", requireText)}
               data-testid="confirm-modal-input"
               className="mt-3 w-full rounded border border-input px-2 py-1.5 font-mono text-xs"
             />
           )}
 
-          {resultErrors && resultErrors.length > 0 && <div className="mt-3"><ErrorPanel title="执行失败" errors={resultErrors} /></div>}
+          {resultErrors && resultErrors.length > 0 && <div className="mt-3"><ErrorPanel title={t("执行失败")} errors={resultErrors} /></div>}
         </div>
 
         <div className="mt-4 flex shrink-0 flex-wrap justify-end gap-2">
@@ -107,9 +108,7 @@ export function ConfirmModal({
             onClick={onClose}
             disabled={executing}
             className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-accent disabled:opacity-40"
-          >
-            取消
-          </button>
+          >{t("取消")}</button>
           <button
             type="button"
             data-testid="confirm-modal-confirm"

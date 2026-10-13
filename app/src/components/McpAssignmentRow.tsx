@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import type { McpAgentCell } from "../lib/observed";
 
 /** 条目一句话摘要：stdio 为命令行，远程为地址。 */
@@ -24,9 +25,9 @@ export function mcpBrief(cell: McpAgentCell): string {
   const entry = cell.entry ?? {};
   if (cell.transport === "remote") {
     try {
-      return `远程 · ${new URL(entry.url ?? "").host}`;
+      return t("远程 · {0}", new URL(entry.url ?? "").host);
     } catch {
-      return `远程 · ${entry.url ?? ""}`;
+      return t("远程 · {0}", entry.url ?? "");
     }
   }
   const command = entry.command ?? "";
@@ -41,8 +42,8 @@ export function mcpBrief(cell: McpAgentCell): string {
         continue;
       }
       if (arg.startsWith("-") || arg === "run") continue;
-      return `本地命令 · ${arg}${/^git\+|\.git$|github\.com/.test(from) ? "（git）" : ""}`;
+      return t("本地命令 · {0}{1}", arg, /^git\+|\.git$|github\.com/.test(from) ? "（git）" : "");
     }
   }
-  return `本地命令 · ${baseName(command)}`;
+  return t("本地命令 · {0}", baseName(command));
 }

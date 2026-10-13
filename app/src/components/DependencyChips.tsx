@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import type { ProgramElement } from "../lib/programs";
 import { cn } from "../lib/utils";
 
@@ -29,13 +30,13 @@ export function DependencyChips({ chips, onOpen }: { chips: DependencyChip[]; on
           type="button"
           data-testid={`dependency-${chip.program}`}
           onClick={() => onOpen?.(chip.program)}
-          title={chip.missing ? "需要的程序没装，点这里去程序页处理" : "需要的程序，点这里看版本与管理方式"}
+          title={chip.missing ? t("需要的程序没装，点这里去程序页处理") : t("需要的程序，点这里看版本与管理方式")}
           className={cn(
             "whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] hover:underline",
             chip.missing ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
           )}
         >
-          {chip.missing ? "缺" : "需要"} {chip.name}
+          {chip.missing ? t("缺") : t("需要")} {chip.name}
         </button>
       ))}
     </>

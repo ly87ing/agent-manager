@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import type { ReactNode } from "react";
 import { INBOX_STATES, type InboxState } from "../lib/inbox";
 import { cn } from "../lib/utils";
@@ -35,8 +36,7 @@ export function AttentionOnlyToggle({ checked, count, onChange }: { checked: boo
         "rounded-md border px-3 py-1.5 text-sm",
         checked ? "border-warning/40 bg-warning/15 text-warning" : "text-muted-foreground hover:bg-accent hover:text-foreground",
       )}
-    >
-      只看待处理 {count}
+    >{(t("只看待处理") + " ")}{count}
     </button>
   );
 }

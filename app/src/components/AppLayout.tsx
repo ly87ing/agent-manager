@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { ChevronDown, Moon, Search, Sun, X, type LucideIcon } from "lucide-react";
 import { useTheme } from "../lib/theme";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
@@ -54,7 +55,7 @@ export function AppLayout({
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const [visibleCount, setVisibleCount] = useState(nav.length);
   const [moreOpen, setMoreOpen] = useState(false);
-  const widthKey = nav.map((item) => `${item.key}:${item.badge ?? 0}`).join("|");
+  const widthKey = nav.map((item) => `${item.key}:${item.label}:${item.badge ?? 0}`).join("|");
 
   // 按实际宽度算能平铺几个：量的是隐藏的一排副本，所以收起后再变宽也能放回来
   useLayoutEffect(() => {
@@ -129,7 +130,7 @@ export function AppLayout({
           {Boolean(item.badge) && (
             <span
               data-testid={`nav-badge-${item.key}`}
-              title={`${item.badge} 项需要处理`}
+              title={t("{0} 项需要处理", item.badge)}
               aria-hidden
               className="min-w-[1.125rem] rounded-full bg-warning/20 px-1 text-center text-[11px] font-medium leading-[1.125rem] text-warning"
             >
@@ -139,7 +140,7 @@ export function AppLayout({
           {showUpdateBadge && (
             <span
               data-testid="update-badge"
-              title={`发现新版本 ${updateVersion}，点击查看`}
+              title={t("发现新版本 {0}，点击查看", updateVersion)}
               className="h-2 w-2 shrink-0 rounded-full bg-success"
             />
           )}
@@ -148,8 +149,8 @@ export function AppLayout({
           <button
             type="button"
             data-testid="update-badge-dismiss"
-            aria-label={`不再提示版本 ${updateVersion} 的更新`}
-            title={`不再提示版本 ${updateVersion} 的更新`}
+            aria-label={t("不再提示版本 {0} 的更新", updateVersion)}
+            title={t("不再提示版本 {0} 的更新", updateVersion)}
             onClick={onDismissUpdate}
             className="absolute -right-1 -top-1 rounded-full bg-card p-0.5 text-muted-foreground hover:text-foreground"
           >
@@ -181,7 +182,7 @@ export function AppLayout({
                     foldedActive ? "bg-primary/10 font-medium text-primary" : "text-muted-foreground hover:bg-accent hover:text-foreground",
                   )}
                 >
-                  {foldedActive ? foldedActive.label : "更多"}
+                  {foldedActive ? foldedActive.label : t("更多")}
                   {foldedBadge > 0 && (
                     <span className="min-w-[1.125rem] rounded-full bg-warning/20 px-1 text-center text-[11px] font-medium leading-[1.125rem] text-warning">
                       {foldedBadge}
@@ -193,7 +194,7 @@ export function AppLayout({
                   <div
                     ref={moreMenuRef}
                     role="menu"
-                    aria-label="更多页面"
+                    aria-label={t("更多页面")}
                     onKeyDown={(event) => {
                       if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
                       event.preventDefault();
@@ -250,21 +251,21 @@ export function AppLayout({
               <button
                 type="button"
                 data-testid="open-search"
-                aria-label={`搜索（${MOD}K）`}
+                aria-label={t("搜索（{0}K）", MOD)}
                 onClick={onSearch}
-                title={`搜索助手、技能、MCP、规则和操作（${MOD}K）`}
+                title={t("搜索助手、技能、MCP、规则和操作（{0}K）", MOD)}
                 className="mr-1 flex shrink-0 items-center gap-2 rounded-md border bg-background px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
               >
                 <Search className="h-3.5 w-3.5" aria-hidden />
-                <span className="hidden xl:inline">搜索</span>
+                <span className="hidden xl:inline">{t("搜索")}</span>
                 <kbd className="hidden rounded border bg-muted px-1 font-sans text-[10px] xl:inline">{MOD}K</kbd>
               </button>
             )}
             <button
               type="button"
               data-testid="theme-toggle"
-              aria-label={nextTheme === "light" ? "切换到浅色" : "切换到深色"}
-              title={nextTheme === "light" ? "切换到浅色" : "切换到深色"}
+              aria-label={nextTheme === "light" ? t("切换到浅色") : t("切换到深色")}
+              title={nextTheme === "light" ? t("切换到浅色") : t("切换到深色")}
               onClick={() => setTheme(nextTheme)}
               className="rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-foreground"
             >

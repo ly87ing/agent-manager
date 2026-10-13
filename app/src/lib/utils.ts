@@ -1,3 +1,4 @@
+import { getLanguage, t } from "./i18n";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
@@ -10,11 +11,11 @@ export const FRESHNESS_STALE_THRESHOLD_SEC = 24 * 60 * 60;
 
 /** 把 cache_age_sec 人类化为「N 秒/分钟/小时/天前」。 */
 export function humanizeCacheAge(ageSec: number): string {
-  if (ageSec < 0) return "刚刚";
-  if (ageSec < 60) return `${ageSec} 秒前`;
-  if (ageSec < 3600) return `${Math.floor(ageSec / 60)} 分钟前`;
-  if (ageSec < 86400) return `${Math.floor(ageSec / 3600)} 小时前`;
-  return `${Math.floor(ageSec / 86400)} 天前`;
+  if (ageSec < 0) return t("刚刚");
+  if (ageSec < 60) return t("{0} 秒前", ageSec);
+  if (ageSec < 3600) return t("{0} 分钟前", Math.floor(ageSec / 60));
+  if (ageSec < 86400) return t("{0} 小时前", Math.floor(ageSec / 3600));
+  return t("{0} 天前", Math.floor(ageSec / 86400));
 }
 
 export function isCacheStale(ageSec: number | null): boolean {
@@ -22,10 +23,10 @@ export function isCacheStale(ageSec: number | null): boolean {
 }
 
 export function formatCheckedAt(iso: string | null): string {
-  if (!iso) return "从未检查";
+  if (!iso) return t("从未检查");
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString("zh-CN", { hour12: false });
+  return date.toLocaleString(getLanguage(), { hour12: false });
 }
 
 /** 引擎回读的 JSON 对象键顺序可能与表单不同，按值比较完整字段。 */

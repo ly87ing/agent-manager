@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -36,7 +37,7 @@ export function useDefinitionOps({
       return false;
     }
     if (!envelope.ok) {
-      toast.error(`${TOGGLE_COPY.saveRejected}:${envelope.errors[0]?.message ?? "未知错误"}`);
+      toast.error(`${TOGGLE_COPY.saveRejected}:${envelope.errors[0]?.message ?? t("未知错误")}`);
       return false;
     }
     return true;
@@ -47,33 +48,33 @@ export function useDefinitionOps({
    * 取消表单不会走到这里，绝不迁移。 */
   const migrateAndLoadFullDefinition = async (name: string): Promise<Record<string, unknown> | null> => {
     const fail = (message: string) => {
-      toast.error(`保存定义 ${name} 失败:${message}`);
+      toast.error(t("保存定义 {0} 失败:{1}", name, message));
       return null;
     };
     let migrated;
     try {
       migrated = await runEngine("db:migrate", []);
     } catch (err) {
-      return fail(`初始化本地数据库失败:${engineErrorMessage(err)}`);
+      return fail(t("初始化本地数据库失败:{0}", engineErrorMessage(err)));
     }
     if (!migrated.ok) {
-      return fail(`初始化本地数据库被拒绝:${migrated.errors[0]?.message ?? "未知错误"}`);
+      return fail(t("初始化本地数据库被拒绝:{0}", migrated.errors[0]?.message ?? t("未知错误")));
     }
     let policy;
     try {
       policy = await runEngine<PolicyData>("policy:get", []);
     } catch (err) {
-      return fail(`读取完整定义失败:${engineErrorMessage(err)}`);
+      return fail(t("读取完整定义失败:{0}", engineErrorMessage(err)));
     }
     if (!policy.ok) {
-      return fail(`读取完整定义被拒绝:${policy.errors[0]?.message ?? "未知错误"}`);
+      return fail(t("读取完整定义被拒绝:{0}", policy.errors[0]?.message ?? t("未知错误")));
     }
     const sqlite = policy.data.layers?.sqlite as Record<string, unknown> | null | undefined;
     const sectionData = sqlite?.[section] as Record<string, unknown> | undefined;
     const defs = sectionData?.[definitionContainerKey(section)] as Record<string, unknown> | undefined;
     const full = defs?.[name];
     if (typeof full !== "object" || full === null) {
-      return fail("初始化后仍取不到完整定义，已停止保存（定义未改动）");
+      return fail(t("初始化后仍取不到完整定义，已停止保存（定义未改动）"));
     }
     return full as Record<string, unknown>;
   };
@@ -113,8 +114,8 @@ export function useDefinitionOps({
     void queryClient.invalidateQueries({ queryKey: engineKeys.all });
     toast.success(
       domain === "agents"
-        ? `已保存定义 ${input.name}（不会自动安装）`
-        : `已保存定义 ${input.name} 到本地资源库（不会自动安装或同步）`,
+        ? t("已保存定义 {0}（不会自动安装）", input.name)
+        : t("已保存定义 {0} 到本地资源库（不会自动安装或同步）", input.name),
     );
     return true;
   };
@@ -141,7 +142,7 @@ export function useDefinitionOps({
       // 直接 scoped apply 清理目标配置与链接
       void directApply.apply({
         command: "skills:apply",
-        label: `移除 ${name}`,
+        label: t("移除 {0}", name),
         args: ["--only", `skill:${name}`, "--action", "remove"],
       });
       return;
@@ -156,11 +157,11 @@ export function useDefinitionOps({
     setRemoval(null);
     void queryClient.invalidateQueries({ queryKey: engineKeys.all });
     if (snapshot) {
-      toastWithUndo(`已移除 ${name}`, {
+      toastWithUndo(t("已移除 {0}", name), {
         description:
           domain === "agents"
-            ? "撤销会把定义原样加回来。"
-            : "撤销只加回定义；已经清理掉的目标配置要再点一次应用才会写回。",
+            ? t("撤销会把定义原样加回来。")
+            : t("撤销只加回定义；已经清理掉的目标配置要再点一次应用才会写回。"),
         onUndo: async () => {
           const restored = await writePolicy("policy:set", [
             "--layer",
@@ -172,23 +173,23 @@ export function useDefinitionOps({
           ]);
           if (restored) {
             void queryClient.invalidateQueries({ queryKey: engineKeys.all });
-            toast.success(`已恢复 ${name}`);
+            toast.success(t("已恢复 {0}", name));
           }
         },
       });
     } else {
-      toast.success(`已移除 ${name}`);
+      toast.success(t("已移除 {0}", name));
     }
   };
 
   const removalSpec = removal ? buildDefinitionRemoval(removal.layers, section, removal.name) : null;
   const removalModal = removal && removalSpec ? (
     <ConfirmModal
-      title={`移除 ${removal.name}`}
-      description={domain === "agents" ? "停止管理该定义，不自动卸载系统包。后续同步仍会清理本工具拥有的孤立缓存目录。" : OVERLAY_COPY.removeDefinitionNote}
+      title={t("移除 {0}", removal.name)}
+      description={domain === "agents" ? t("停止管理该定义，不自动卸载系统包。后续同步仍会清理本工具拥有的孤立缓存目录。") : OVERLAY_COPY.removeDefinitionNote}
       risk="install-remove"
       requireText={removal.name}
-      confirmLabel="确认移除"
+      confirmLabel={t("确认移除")}
       executing={removalExecuting}
       resultErrors={null}
       onConfirm={() => void confirmRemove()}

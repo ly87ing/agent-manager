@@ -37,6 +37,7 @@ export interface Envelope<T = unknown> {
 }
 
 export interface SettingsPreferences {
+  language: "en" | "zh-CN";
   logRetentionDays: number;
 }
 

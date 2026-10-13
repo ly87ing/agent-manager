@@ -11,7 +11,7 @@ const dummySettings: SettingsData = {
   resourceDir: "/tmp/resources",
   dataDir: "/tmp/data",
   updaterConfigured: false,
-  preferences: { logRetentionDays: 30 },
+  preferences: { language: "zh-CN", logRetentionDays: 30 },
 };
 
 function routes() {

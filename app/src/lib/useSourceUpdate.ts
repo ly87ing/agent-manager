@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -42,7 +43,7 @@ export function useSourceUpdate() {
       for (const collection of targets) {
         const envelope = await execute({
           command: "skills:apply",
-          label: `更新来源 ${collection.id.replace(/^skill:/, "")}`,
+          label: t("更新来源 {0}", collection.id.replace(/^skill:/, "")),
           args: ["--only", collection.id, "--action", "update"],
           silent: true,
         });
@@ -56,27 +57,27 @@ export function useSourceUpdate() {
       }
       // 取回之后按最新状态算哪些技能有新版本，只换这些来源的
       const fresh = await runEngine<StatusData>("skills:status", []);
-      const sourceSummary = `来源更新：成功 ${fetched}，失败 ${failed}`;
+      const sourceSummary = t("来源更新：成功 {0}，失败 {1}", fetched, failed);
       if (!fresh.ok) {
-        toast.error(`${sourceSummary}；无法读取更新后的技能状态，尚未确认部署结果：${fresh.errors[0]?.message ?? "读取失败"}`);
+        toast.error(t("{0}；无法读取更新后的技能状态，尚未确认部署结果：{1}", sourceSummary, fresh.errors[0]?.message ?? t("读取失败")));
         return;
       }
       const rows = versionUpdateRows(fresh.data.elements ?? []).filter((row) =>
         ids.has(row.elementId.slice(0, row.elementId.lastIndexOf("/"))),
       );
       if (rows.length === 0) {
-        (failed ? toast.error : toast.success)(`${sourceSummary}；已成功更新的来源没有待部署的技能版本`);
+        (failed ? toast.error : toast.success)(t("{0}；已成功更新的来源没有待部署的技能版本", sourceSummary));
         return;
       }
-      const result = await batchApply.applyBatch({ actionLabel: "更新", rows });
+      const result = await batchApply.applyBatch({ actionLabel: t("更新"), rows });
       if (!result) {
-        toast.error(`${sourceSummary}；技能部署尚未执行，请等待当前任务结束后重试`);
+        toast.error(t("{0}；技能部署尚未执行，请等待当前任务结束后重试", sourceSummary));
         return;
       }
       const counts = batchCounts(result);
-      (failed || counts.failed ? toast.error : toast.success)(`${sourceSummary}；技能部署：成功 ${counts.succeeded}，失败 ${counts.failed}${failed || counts.failed ? "（详见任务记录）" : ""}`);
+      (failed || counts.failed ? toast.error : toast.success)(t("{0}；技能部署：成功 {1}，失败 {2}{3}", sourceSummary, counts.succeeded, counts.failed, failed || counts.failed ? t("（详见任务记录）") : ""));
     } catch (error) {
-      toast.error(`来源更新：成功 ${fetched}，失败 ${failed}；更新未完成：${engineErrorMessage(error)}`);
+      toast.error(t("来源更新：成功 {0}，失败 {1}；更新未完成：{2}", fetched, failed, engineErrorMessage(error)));
     } finally {
       try { await queryClient.invalidateQueries({ queryKey: engineKeys.all }); }
       finally { busyRef.current = false; setUpdating(false); }

@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateEngineQueries } from "./queries";
 import { useRef, useState } from "react";
@@ -44,11 +45,11 @@ export function useBatchApply() {
         const row = item.row;
         try {
           if (retry) {
-            if (batch.command !== "skills:apply" || row.takeover) throw new Error("请在资源页重新预览并确认此项，不能自动重试外部链接接管");
+            if (batch.command !== "skills:apply" || row.takeover) throw new Error(t("请在资源页重新预览并确认此项，不能自动重试外部链接接管"));
             const fresh = await runEngine<StatusData>("skills:status");
-            if (!fresh.ok) throw new Error(fresh.errors[0]?.message ?? "读取当前技能状态失败");
+            if (!fresh.ok) throw new Error(fresh.errors[0]?.message ?? t("读取当前技能状态失败"));
             const cell = (fresh.data.elements.find((element) => element.id === row.elementId)?.observed as SkillObserved | undefined)?.agents?.[row.agent];
-            if (!cell?.actions?.includes(row.action)) throw new Error("目标状态已变化或不再允许此动作，请在技能页检查；未重复写入");
+            if (!cell?.actions?.includes(row.action)) throw new Error(t("目标状态已变化或不再允许此动作，请在技能页检查；未重复写入"));
           }
           const args = ["--only", row.elementId, "--action", row.action, "--agent", row.agent];
           if (row.takeover) args.push("--allow-takeover");
@@ -60,7 +61,7 @@ export function useBatchApply() {
             refresh: false,
           });
           item.status = envelope?.ok ? "ok" : "failed";
-          item.message = envelope?.ok ? undefined : envelope?.errors[0]?.message ?? "引擎调用失败，详见操作记录";
+          item.message = envelope?.ok ? undefined : envelope?.errors[0]?.message ?? t("引擎调用失败，详见操作记录");
         } catch (error) {
           item.status = "failed";
           item.message = engineErrorMessage(error);
@@ -75,9 +76,9 @@ export function useBatchApply() {
       finally { busyRef.current = false; setExecuting(false); }
     }
     const { succeeded, failed } = batchCounts(batch);
-    const summary = `批量${request.actionLabel}完成：成功 ${succeeded}，失败 ${failed}`;
+    const summary = t("批量{0}完成：成功 {1}，失败 {2}", request.actionLabel, succeeded, failed);
     if (failed > 0) {
-      toast.error(`${summary}，失败详情见任务记录`);
+      toast.error(t("{0}，失败详情见任务记录", summary));
     } else {
       toast.success(summary);
     }

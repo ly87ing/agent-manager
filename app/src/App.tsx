@@ -6,6 +6,7 @@ import { ImportLinkDialog } from "./components/ImportLinkDialog";
 import { subscribeImportLinks, type SharePayload } from "./lib/shareLink";
 import { useSettings } from "./lib/settings";
 import { PageError, PageLoading } from "./components/PageState";
+import { t, useLanguage  } from "./lib/i18n";
 
 const McpPage = lazy(() => import("./pages/McpPage"));
 const RulesPage = lazy(() => import("./pages/RulesPage"));
@@ -18,15 +19,15 @@ const AgentsPage = lazy(() => import("./pages/AgentsPage"));
 
 // Keep resource queries in their pages; navigation does not collect global status.
 const NAV: NavItem[] = [
-  { key: "skills", label: "技能", icon: Sparkles },
+  { key: "skills", get label() { return t("技能"); }, icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
-  { key: "rules", label: "规则", icon: ScrollText },
-  { key: "sources", label: "来源", icon: Library },
-  { key: "programs", label: "依赖程序", icon: Package },
-  { key: "agents", label: "助手", icon: Bot },
+  { key: "rules", get label() { return t("规则"); }, icon: ScrollText },
+  { key: "sources", get label() { return t("来源"); }, icon: Library },
+  { key: "programs", get label() { return t("依赖程序"); }, icon: Package },
+  { key: "agents", get label() { return t("助手"); }, icon: Bot },
 ];
 const SECONDARY_NAV: NavItem[] = [
-  { key: "settings", label: "设置", icon: Settings, iconOnly: true },
+  { key: "settings", get label() { return t("设置"); }, icon: Settings, iconOnly: true },
 ];
 
 /** 事件目标是否处于文本编辑语境（输入框/文本域/下拉/可编辑区）：命中时全局快捷键不抢按键。 */
@@ -43,6 +44,7 @@ function isTextEditableTarget(target: EventTarget | null): boolean {
 }
 
 export default function App() {
+  useLanguage();
   // 预加载本机偏好，确保首次打开任意预览时已有默认演练值。
   const settings = useSettings();
   const [activePage, setActivePage] = useState<string>("skills");
@@ -92,8 +94,8 @@ export default function App() {
   // 系统里点开 agentmanager://import 链接：打开导入对话框并填好链接，由用户检查确认
   useEffect(() => subscribeImportLinks((url) => setImportText(url)), []);
 
-  if (settings.isPending) return <PageLoading text="正在读取应用设置…" />;
-  if (settings.isError) return <PageError title="应用设置加载失败" error={settings.error} />;
+  if (settings.isPending) return <PageLoading text={t("正在读取应用设置…")} />;
+  if (settings.isError) return <PageError title={t("应用设置加载失败")} error={settings.error} />;
 
   const handleNavigate = (page: string) => {
     if (page === "import-link") {
@@ -153,7 +155,7 @@ export default function App() {
         </p>
       )}
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
-      <Suspense fallback={<PageLoading text="正在打开页面…" />}>
+      <Suspense fallback={<PageLoading text={t("正在打开页面…")} />}>
         <div key={`${activePage}:${activePage === "sources" ? sourceFocus ?? "" : activePage === "mcp" ? mcpSearch ?? "" : activePage === "programs" ? programFocus ?? "" : ""}`} className="animate-page-in">
           {activePage === "programs" && <ProgramsPage focus={programFocus} onOpen={handleNavigate} />}
           {activePage === "agents" && <AgentsPage />}

@@ -23,17 +23,19 @@ import { cn } from "../lib/utils";
 import { ConfigBackupSection } from "../components/ConfigBackupSection";
 import SecretsPage from "./SecretsPage";
 import TipsPage from "./TipsPage";
+import { Select } from "../components/Select";
+import { t, useLanguage } from "../lib/i18n";
 
 const THEME_OPTIONS: { value: Theme; label: string; icon: typeof Sun }[] = [
-  { value: "light", label: "浅色", icon: Sun },
-  { value: "dark", label: "深色", icon: Moon },
-  { value: "system", label: "跟随系统", icon: Monitor },
+  { value: "light", get label() { return t("浅色"); }, icon: Sun },
+  { value: "dark", get label() { return t("深色"); }, icon: Moon },
+  { value: "system", get label() { return t("跟随系统"); }, icon: Monitor },
 ];
 
 function ThemeControl() {
   const { theme, setTheme } = useTheme();
   return (
-    <div className="inline-flex rounded-lg border bg-muted p-0.5" role="group" aria-label="外观主题">
+    <div className="inline-flex rounded-lg border bg-muted p-0.5" role="group" aria-label={t("外观主题")}>
       {THEME_OPTIONS.map((option) => {
         const Icon = option.icon;
         const active = theme === option.value;
@@ -73,17 +75,15 @@ function AutostartControl() {
   const error = state.error ?? change.error;
   return (
     <>
-      <div className="flex items-center gap-2 text-xs" role="group" aria-label="旧版登录项">
-        {!state.isPending && !state.isError && <span className="text-muted-foreground">{state.data ? "已启用旧登录项" : "未启用开机启动"}</span>}
+      <div className="flex items-center gap-2 text-xs" role="group" aria-label={t("旧版登录项")}>
+        {!state.isPending && !state.isError && <span className="text-muted-foreground">{state.data ? t("已启用旧登录项") : t("未启用开机启动")}</span>}
         <button type="button" disabled={state.isPending || state.isError || change.isPending}
-          onClick={() => change.mutate(false)} className="rounded-md border px-3 py-1 hover:bg-accent disabled:opacity-50">
-          移除旧登录项
-        </button>
+          onClick={() => change.mutate(false)} className="rounded-md border px-3 py-1 hover:bg-accent disabled:opacity-50">{t("移除旧登录项")}</button>
       </div>
-      {state.isPending && <p role="status" className="text-xs text-muted-foreground">正在读取登录项…</p>}
+      {state.isPending && <p role="status" className="text-xs text-muted-foreground">{t("正在读取登录项…")}</p>}
       {error && <div className="flex w-full flex-wrap items-center gap-2 text-xs text-destructive">
-        <p role="alert">开机启动设置失败：{engineErrorMessage(error)}</p>
-        <button type="button" onClick={() => { change.reset(); void state.refetch(); }} className="rounded border px-2 py-1">重新读取</button>
+        <p role="alert">{t("开机启动设置失败：")}{engineErrorMessage(error)}</p>
+        <button type="button" onClick={() => { change.reset(); void state.refetch(); }} className="rounded border px-2 py-1">{t("重新读取")}</button>
       </div>}
     </>
   );
@@ -113,26 +113,26 @@ interface AvailableUpdate {
 const ADVANCED_ENTRIES = [
   {
     key: "tips",
-    title: "更多技巧",
-    description: "多账号与终端别名的使用经验，只读分享。",
+    get title() { return t("更多技巧"); },
+    get description() { return t("多账号与终端别名的使用经验，只读分享。"); },
     icon: BookOpen,
   },
   {
     key: "runs",
-    title: "操作记录",
-    description: "每次写入的记录：做了什么、成功与否、失败原因。",
+    get title() { return t("操作记录"); },
+    get description() { return t("每次写入的记录：做了什么、成功与否、失败原因。"); },
     icon: History,
   },
   {
     key: "secrets",
-    title: "MCP 密钥",
-    description: "管理 MCP 专用变量与外部密钥文件；账号凭据只读。",
+    get title() { return t("MCP 密钥"); },
+    get description() { return t("管理 MCP 专用变量与外部密钥文件；账号凭据只读。"); },
     icon: KeyRound,
   },
 ];
 
 function initialPreferences(data?: SettingsData): SettingsPreferences {
-  return { logRetentionDays: data?.preferences?.logRetentionDays ?? 30 };
+  return { language: data?.preferences?.language ?? "en", logRetentionDays: data?.preferences?.logRetentionDays ?? 30 };
 }
 
 export default function SettingsPage({
@@ -142,6 +142,7 @@ export default function SettingsPage({
   initialAdvanced?: string | null;
   onNavigate?: (page: string) => void;
 } = {}) {
+  useLanguage();
   const settings = useSettings();
   const save = useSaveSettings();
   const [preferences, setPreferences] = useState<SettingsPreferences>(() => initialPreferences());
@@ -176,7 +177,7 @@ export default function SettingsPage({
   }, [settings.data]);
 
   if (settings.isPending) return <PageLoading />;
-  if (settings.isError) return <PageError title="设置加载失败" error={settings.error} />;
+  if (settings.isError) return <PageError title={t("设置加载失败")} error={settings.error} />;
   const data = settings.data;
   const changed = JSON.stringify(preferences) !== JSON.stringify(data.preferences);
 
@@ -191,9 +192,9 @@ export default function SettingsPage({
     setSaveStatus(null);
     save.mutate(preferences, {
       onSuccess: () => {
-        setSaveStatus("设置已保存（已从引擎读回）"); toast.success("设置已保存");
+        setSaveStatus(t("设置已保存（已从引擎读回）")); toast.success(t("设置已保存"));
       },
-      onError: (error) => { setSaveStatus(`设置保存失败：${engineErrorMessage(error)}`); toast.error(`设置保存失败：${engineErrorMessage(error)}`); },
+      onError: (error) => { setSaveStatus(t("设置保存失败：{0}", engineErrorMessage(error))); toast.error(t("设置保存失败：{0}", engineErrorMessage(error))); },
     });
   };
 
@@ -236,12 +237,12 @@ export default function SettingsPage({
           close: safeClose,
         });
       } else {
-        setUpdateStatus("当前已是最新版本");
-        toast.success("当前已是最新版本");
+        setUpdateStatus(t("当前已是最新版本"));
+        toast.success(t("当前已是最新版本"));
       }
     } catch (error) {
       if (isMountedRef.current) {
-        setUpdateError(`检查更新失败：${engineErrorMessage(error)}`);
+        setUpdateError(t("检查更新失败：{0}", engineErrorMessage(error)));
       }
     } finally {
       if (isMountedRef.current) {
@@ -259,14 +260,14 @@ export default function SettingsPage({
     isInstallingRef.current = true;
     try {
       await currentUpdate.downloadAndInstall();
-      toast.success("更新已安装，请重启应用生效");
+      toast.success(t("更新已安装，请重启应用生效"));
       void currentUpdate.close().catch(() => {});
       if (isMountedRef.current) {
-        setUpdateStatus("更新已安装，请重启应用生效");
+        setUpdateStatus(t("更新已安装，请重启应用生效"));
         setUpdate(null);
       }
     } catch (error) {
-      const msg = `更新安装失败：${engineErrorMessage(error)}`;
+      const msg = t("更新安装失败：{0}", engineErrorMessage(error));
       toast.error(msg);
       if (!isMountedRef.current) {
         void currentUpdate.close().catch(() => {});
@@ -292,10 +293,8 @@ export default function SettingsPage({
             onClick={() => setActiveAdvanced(null)}
             className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
           >
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-            返回设置
-          </button>
-          <span className="text-xs text-muted-foreground">/ 工具 / {currentEntry?.title}</span>
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden />{t("返回设置")}</button>
+          <span className="text-xs text-muted-foreground">{(t("/ 工具 /") + " ")}{currentEntry?.title}</span>
         </div>
         {activeAdvanced === "secrets" && <SecretsPage />}
         {activeAdvanced === "tips" && <TipsPage />}
@@ -308,19 +307,24 @@ export default function SettingsPage({
 
   return (
     <div className="space-y-3">
-      <h1 className="text-lg font-semibold tracking-tight">设置</h1>
+      <h1 className="text-lg font-semibold tracking-tight">{t("设置")}</h1>
 
-      <SettingsGroup title="通用">
-        <SettingsRow label="外观" note="立即生效，保存在本机">
+      <SettingsGroup title={t("通用")}>
+        <SettingsRow label={t("语言")} note={t("保存后生效")}>
+          <Select label={t("语言")} value={preferences.language} disabled={save.isPending}
+            options={[{ value: "en", label: "English" }, { value: "zh-CN", label: "简体中文" }]}
+            onChange={(language) => setPreferences({ ...preferences, language: language as SettingsPreferences["language"] })} />
+        </SettingsRow>
+        <SettingsRow label={t("外观")} note={t("立即生效，保存在本机")}>
           <ThemeControl />
         </SettingsRow>
-        <SettingsRow label="旧版开机启动" note="当前版本不设置开机启动；可移除以前创建且未被改动的登录项">
+        <SettingsRow label={t("旧版开机启动")} note={t("当前版本不设置开机启动；可移除以前创建且未被改动的登录项")}>
           <AutostartControl />
         </SettingsRow>
-        <SettingsRow label="操作记录保留" note="0 为不自动清理，最多 3650 天">
+        <SettingsRow label={t("操作记录保留")} note={t("0 为不自动清理，最多 3650 天")}>
           <div className="flex items-center gap-2">
             <input
-              aria-label="日志保留天数"
+              aria-label={t("日志保留天数")}
               type="number"
               min={0}
               max={3650}
@@ -331,44 +335,31 @@ export default function SettingsPage({
               aria-describedby={!isRetentionValid ? "log-retention-error" : undefined}
               className={cn("w-20 rounded-md border border-input bg-background px-2 py-1 text-right text-sm tabular-nums", !isRetentionValid && "border-destructive")}
             />
-            <span className="text-sm text-muted-foreground">天</span>
-            {changed && (
-              <button
-                type="button"
-                onClick={savePreferences}
-                disabled={save.isPending || !isFormValid}
-                className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-              >
-                <Save className="h-3.5 w-3.5" aria-hidden />
-                保存设置
-              </button>
-            )}
+            <span className="text-sm text-muted-foreground">{t("天")}</span>
           </div>
           {!isRetentionValid && (
-            <p id="log-retention-error" role="alert" className="w-full text-right text-xs text-destructive">
-              请输入 0 到 3650 之间的整数。
-            </p>
-          )}
-          {saveStatus && (
-            <p role={saveStatus.startsWith("设置保存失败") ? "alert" : "status"} className={cn("w-full text-right text-xs", saveStatus.startsWith("设置保存失败") ? "text-destructive" : "text-success")}>
-              {saveStatus}
-            </p>
+            <p id="log-retention-error" role="alert" className="w-full text-right text-xs text-destructive">{t("请输入 0 到 3650 之间的整数。")}</p>
           )}
         </SettingsRow>
+        {(changed || saveStatus) && <div className="flex flex-wrap items-center justify-end gap-3 px-4 py-3">
+          {saveStatus && <p role={save.isError ? "alert" : "status"} className={cn("min-w-0 flex-1 text-xs", save.isError ? "text-destructive" : "text-success")}>{saveStatus}</p>}
+          {changed && <button type="button" onClick={savePreferences} disabled={save.isPending || !isFormValid}
+            className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+            <Save className="h-3.5 w-3.5" aria-hidden />{t("保存设置")}
+          </button>}
+        </div>}
         {data.updaterConfigured && (
-          <SettingsRow label="应用更新" note="手动检查，确认后下载并安装">
+          <SettingsRow label={t("应用更新")} note={t("手动检查，确认后下载并安装")}>
             <button
               type="button"
               onClick={() => void checkForUpdate()}
               disabled={updateState !== "idle" || Boolean(data.runtimeWarning)}
               className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm hover:bg-accent disabled:opacity-50"
             >
-              <RefreshCw className={cn("h-3.5 w-3.5", updateState === "checking" && "animate-spin")} aria-hidden />
-              检查更新
-            </button>
-            {data.runtimeWarning && <p role="status" className="w-full text-xs text-muted-foreground">安装到“应用程序”后可检查更新。</p>}
+              <RefreshCw className={cn("h-3.5 w-3.5", updateState === "checking" && "animate-spin")} aria-hidden />{t("检查更新")}</button>
+            {data.runtimeWarning && <p role="status" className="w-full text-xs text-muted-foreground">{t("安装到“应用程序”后可检查更新。")}</p>}
             {!data.runtimeWarning && updateState === "idle" && !update && !updateError && (
-              <p role="status" className="w-full text-right text-xs text-muted-foreground">{updateStatus ?? "尚未检查更新。"}</p>
+              <p role="status" className="w-full text-right text-xs text-muted-foreground">{updateStatus ?? t("尚未检查更新。")}</p>
             )}
             {updateError && (
               <div className="flex w-full items-center justify-between gap-2 rounded-md bg-destructive/10 p-2.5 text-sm text-destructive">
@@ -378,26 +369,22 @@ export default function SettingsPage({
                   onClick={() => void (update ? installUpdate() : checkForUpdate())}
                   disabled={updateState !== "idle"}
                   className="rounded border border-destructive/30 bg-card px-2.5 py-1 text-xs font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
-                >
-                  重试
-                </button>
+                >{t("重试")}</button>
               </div>
             )}
             {update && (
               <div className="w-full rounded-md border border-primary/20 bg-primary/10 p-3 text-sm">
-                <p className="font-medium text-primary">发现新版本 {update.version}</p>
-                {update.date && <p className="mt-1 text-xs text-primary">发布时间：{update.date}</p>}
+                <p className="font-medium text-primary">{(t("发现新版本") + " ")}{update.version}</p>
+                {update.date && <p className="mt-1 text-xs text-primary">{t("发布时间：")}{update.date}</p>}
                 {update.body && <p className="mt-2 whitespace-pre-wrap text-xs text-primary">{update.body}</p>}
-                <button type="button" onClick={() => setConfirmUpdate(true)} disabled={updateState !== "idle"} className="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50">
-                  下载并安装
-                </button>
+                <button type="button" onClick={() => setConfirmUpdate(true)} disabled={updateState !== "idle"} className="mt-3 inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50">{t("下载并安装")}</button>
               </div>
             )}
           </SettingsRow>
         )}
       </SettingsGroup>
 
-      <SettingsGroup title="工具">
+      <SettingsGroup title={t("工具")}>
         {ADVANCED_ENTRIES.map((entry) => {
           const Icon = entry.icon;
           return (
@@ -421,14 +408,14 @@ export default function SettingsPage({
 
       <ConfigBackupSection />
 
-      <SettingsGroup title="关于">
-        {[["应用版本", data.appVersion], ["数据目录", data.dataDir], ["资源目录", data.resourceDir]].map(([label, value]) => (
+      <SettingsGroup title={t("关于")}>
+        {[[t("应用版本"), data.appVersion], [t("数据目录"), data.dataDir], [t("资源目录"), data.resourceDir]].map(([label, value]) => (
           <SettingsRow key={label} label={label}>
             <span className="min-w-0 max-w-[60%] break-all text-right font-mono text-xs text-muted-foreground">{value}</span>
           </SettingsRow>
         ))}
       </SettingsGroup>
-      {confirmUpdate && update && <ConfirmModal title="安装应用更新" description={`将下载并安装版本 ${update.version}，完成后请重启应用。`} risk="network" confirmLabel="确认下载并安装" executing={updateState === "installing"} onConfirm={() => void installUpdate()} onClose={() => setConfirmUpdate(false)} />}
+      {confirmUpdate && update && <ConfirmModal title={t("安装应用更新")} description={t("将下载并安装版本 {0}，完成后请重启应用。", update.version)} risk="network" confirmLabel={t("确认下载并安装")} executing={updateState === "installing"} onConfirm={() => void installUpdate()} onClose={() => setConfirmUpdate(false)} />}
     </div>
   );
 }

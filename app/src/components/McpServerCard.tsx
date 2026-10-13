@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import type { EngineElement } from "../lib/contract";
 import type { McpAgentCell, McpObserved, McpSpec } from "../lib/observed";
 import { Pencil, PlugZap, Share2, Trash2 } from "lucide-react";
@@ -19,26 +20,26 @@ function savedSummary(spec: McpSpec): string {
 function mcpChip(cell: McpAgentCell | undefined, canAddHere: boolean): { tone: CellTone; checked: boolean; hint: string; primary: string | null } {
   if (!cell) {
     return canAddHere
-      ? { tone: "off", checked: false, hint: "这个助手还没有，点击从其他助手复制过来", primary: "add-here" }
-      : { tone: "blocked", checked: false, hint: "这个助手还没有这个服务", primary: null };
+      ? { tone: "off", checked: false, hint: t("这个助手还没有，点击从其他助手复制过来"), primary: "add-here" }
+      : { tone: "blocked", checked: false, hint: t("这个助手还没有这个服务"), primary: null };
   }
   const has = (action: string) => cell.actions.includes(action);
   if (cell.state === "invalid") {
-    return { tone: "warn", checked: false, hint: cell.blocked_reason ?? "条目结构无法识别，只能删除或在配置文件里修正", primary: null };
+    return { tone: "warn", checked: false, hint: cell.blocked_reason ?? t("条目结构无法识别，只能删除或在配置文件里修正"), primary: null };
   }
   if (cell.state === "enabled") {
     const missing = cell.command_available === false;
     return {
       tone: missing ? "warn" : "on",
       checked: true,
-      hint: missing ? "已启用，但本机找不到它要执行的命令；点击停用" : "已启用，点击停用",
+      hint: missing ? t("已启用，但本机找不到它要执行的命令；点击停用") : t("已启用，点击停用"),
       primary: has("disable") ? "disable" : null,
     };
   }
   return {
     tone: "off",
     checked: false,
-    hint: cell.source === "saved" ? "已停用（内容保存在本工具里），点击启用" : "已停用，点击启用",
+    hint: cell.source === "saved" ? t("已停用（内容保存在本工具里），点击启用") : t("已停用，点击启用"),
     primary: has("enable") ? "enable" : null,
   };
 }
@@ -122,9 +123,9 @@ export function McpServerCard({
             {first && <span className="truncate" title={mcpEntrySummary(first)}>{mcpBrief(first)}</span>}
             <DependencyChips chips={dependencies} onOpen={onOpenProgram} />
             {/* 统一状态（lib/inbox.ts）：与待处理页同一套标签 */}
-            {summaries.size > 1 && <StateBadge state="drifted" title="保存编辑时会统一成一份">各助手内容不同</StateBadge>}
-            {commandMissing && <StateBadge state="broken">有助手找不到它要执行的命令</StateBadge>}
-            {invalid && <StateBadge state="broken" title="只能删除或在配置文件里修正">有助手的条目无法识别</StateBadge>}
+            {summaries.size > 1 && <StateBadge state="drifted" title={t("保存编辑时会统一成一份")}>{t("各助手内容不同")}</StateBadge>}
+            {commandMissing && <StateBadge state="broken">{t("有助手找不到它要执行的命令")}</StateBadge>}
+            {invalid && <StateBadge state="broken" title={t("只能删除或在配置文件里修正")}>{t("有助手的条目无法识别")}</StateBadge>}
             {missing.length > 0 && onConfigureSecrets && (
               <button
                 type="button"
@@ -132,8 +133,7 @@ export function McpServerCard({
                 onClick={() => onConfigureSecrets(missing[0])}
                 className={cn("rounded px-1.5 py-0.5 text-[11px] underline-offset-2 hover:underline", STATE_TONE.broken)}
               >
-                {missing.length} 个变量没有取值 · 填写
-              </button>
+                {t("{0} 个变量没有取值 · 填写", missing.length)}</button>
             )}
           </div>
         </div>
@@ -145,7 +145,7 @@ export function McpServerCard({
             const source = canWrite && !cell ? copySource(cells, formatOf, column.id) : null;
             const chip = canWrite
               ? mcpChip(cell, Boolean(source))
-              : { tone: "blocked" as const, checked: cell?.state === "enabled", hint: cell?.blocked_reason ?? "这个助手的配置文件现在读写不了", primary: null };
+              : { tone: "blocked" as const, checked: cell?.state === "enabled", hint: cell?.blocked_reason ?? t("这个助手的配置文件现在读写不了"), primary: null };
             const detail = cell ? `\n${mcpEntrySummary(cell)}` : "";
             return (
               <AccountSwitch
@@ -170,8 +170,8 @@ export function McpServerCard({
             <button
               type="button"
               data-testid={`check-${element.id}`}
-              aria-label={`测试 ${name} 的连接`}
-              title="测试连接（运行一次它的命令或请求它的地址，不改配置）"
+              aria-label={t("测试 {0} 的连接", name)}
+              title={t("测试连接（运行一次它的命令或请求它的地址，不改配置）")}
               onClick={() => onCheck(element)}
               disabled={busy}
               className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -183,8 +183,8 @@ export function McpServerCard({
             <button
               type="button"
               data-testid={`edit-${element.id}`}
-              aria-label={`编辑 ${name}`}
-              title="编辑（写到所有有它的助手）"
+              aria-label={t("编辑 {0}", name)}
+              title={t("编辑（写到所有有它的助手）")}
               onClick={() => onEdit(element)}
               disabled={busy}
               className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
@@ -196,8 +196,8 @@ export function McpServerCard({
             <button
               type="button"
               data-testid={`share-${element.id}`}
-              aria-label={`复制 ${name} 的分享链接`}
-              title="复制分享链接（不含明文取值）"
+              aria-label={t("复制 {0} 的分享链接", name)}
+              title={t("复制分享链接（不含明文取值）")}
               onClick={() => onShare(element)}
               className="rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             >
@@ -208,8 +208,8 @@ export function McpServerCard({
             <button
               type="button"
               data-testid={`remove-${element.id}`}
-              aria-label={`删除 ${name}`}
-              title="删除（可选从哪些助手删）"
+              aria-label={t("删除 {0}", name)}
+              title={t("删除（可选从哪些助手删）")}
               onClick={() => onRemove(element)}
               disabled={busy}
               className="rounded p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
@@ -224,9 +224,9 @@ export function McpServerCard({
         <div className="mx-4 mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
           {Object.entries(cells).map(([agent, cell]) => (
             <div key={agent} className="flex flex-wrap items-center gap-2">
-              {cell.legacy_marker && <span className="text-warning">{nameOf(agent)}：含旧标记，可能触发配置警告</span>}
-              {cell.actions.includes("clean-markers") && onCleanMarkers && <button type="button" data-testid={`clean-markers-${element.id}-${agent}`} disabled={busy} onClick={() => onCleanMarkers(element, agent, cell)} className="text-primary hover:underline disabled:opacity-50">预览清理</button>}
-              {checks[agent]?.base === cell.base && <button type="button" data-testid={`check-result-${element.id}-${agent}`} disabled={busy} onClick={() => onCheck?.(element, agent)} className={cn("rounded px-1.5 py-0.5 hover:underline", checks[agent].ok ? "bg-success/10 text-success" : STATE_TONE.broken)}>{nameOf(agent)} · 上次检查{checks[agent].ok ? "通过" : `失败：${CHECK_STAGE[checks[agent].stage]}`} · 查看 / 重试</button>}
+              {cell.legacy_marker && <span className="text-warning">{nameOf(agent)}{t("：含旧标记，可能触发配置警告")}</span>}
+              {cell.actions.includes("clean-markers") && onCleanMarkers && <button type="button" data-testid={`clean-markers-${element.id}-${agent}`} disabled={busy} onClick={() => onCleanMarkers(element, agent, cell)} className="text-primary hover:underline disabled:opacity-50">{t("预览清理")}</button>}
+              {checks[agent]?.base === cell.base && <button type="button" data-testid={`check-result-${element.id}-${agent}`} disabled={busy} onClick={() => onCheck?.(element, agent)} className={cn("rounded px-1.5 py-0.5 hover:underline", checks[agent].ok ? "bg-success/10 text-success" : STATE_TONE.broken)}>{nameOf(agent)}{(" " + t("· 上次检查"))}{checks[agent].ok ? t("通过") : t("失败：{0}", CHECK_STAGE[checks[agent].stage])}{(" " + t("· 查看 / 重试"))}</button>}
             </div>
           ))}
         </div>
@@ -239,9 +239,9 @@ export function McpServerCard({
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0 text-xs">
-              <span className="font-medium text-foreground">存着但还没用上的配置（没写进任何助手）</span>
+              <span className="font-medium text-foreground">{t("存着但还没用上的配置（没写进任何助手）")}</span>
               <code className="ml-2 font-mono text-muted-foreground">{savedSummary(spec)}</code>
-              {!spec.saved.valid && <span className="ml-2 text-warning">内容不完整，只能删除</span>}
+              {!spec.saved.valid && <span className="ml-2 text-warning">{t("内容不完整，只能删除")}</span>}
             </div>
             <div className="flex items-center gap-1.5">
               {spec.saved.valid && (
@@ -251,9 +251,7 @@ export function McpServerCard({
                   onClick={() => onAddFromSaved(element)}
                   disabled={busy}
                   className="rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs text-primary hover:bg-primary/15 disabled:opacity-50"
-                >
-                  添加到助手
-                </button>
+                >{t("添加到助手")}</button>
               )}
               <button
                 type="button"
@@ -261,9 +259,7 @@ export function McpServerCard({
                 onClick={() => onForget(element)}
                 disabled={busy}
                 className="rounded border border-destructive/30 bg-card px-2 py-0.5 text-xs text-destructive hover:bg-destructive/10 disabled:opacity-50"
-              >
-                删除保存项
-              </button>
+              >{t("删除保存项")}</button>
             </div>
           </div>
         </div>

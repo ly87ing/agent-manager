@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 /**
  * 「粘贴配置」：把 README 里常见的 MCP 配置片段读成表单内容。认这几种写法：
  * `{"mcpServers": {"名字": {...}}}`、`{"名字": {...}}`、`"名字": {...}`（没带外层大括号），
@@ -43,9 +44,9 @@ export function parsePastedServer(text: string): PastedServer | string {
   try {
     root = parseLoose(text);
   } catch {
-    return "读不出来：请粘贴 JSON 格式的配置，例如 {\"mcpServers\": {\"名字\": {\"command\": \"npx\", ...}}}";
+    return t("读不出来：请粘贴 JSON 格式的配置，例如 {\"mcpServers\": {\"名字\": {\"command\": \"npx\", ...}}}");
   }
-  if (!isObject(root)) return "读不出来：配置应该是一个 JSON 对象";
+  if (!isObject(root)) return t("读不出来：配置应该是一个 JSON 对象");
   const container = isObject(root.mcpServers) ? root.mcpServers : isObject(root.mcp) ? root.mcp : isObject(root.servers) ? root.servers : root;
   let name: string | null = null;
   let server: Json;
@@ -54,9 +55,9 @@ export function parsePastedServer(text: string): PastedServer | string {
     server = container;
   } else {
     const entries = Object.entries(container).filter(([, value]) => isServer(value));
-    if (entries.length === 0) return "没找到服务：配置里要有 command（本地命令）或 url（远程地址）";
+    if (entries.length === 0) return t("没找到服务：配置里要有 command（本地命令）或 url（远程地址）");
     [name, server] = entries[0] as [string, Json];
-    if (entries.length > 1) notes.push(`粘贴的内容里有 ${entries.length} 个服务，只填了第一个 ${name}；其余请分别添加。`);
+    if (entries.length > 1) notes.push(t("粘贴的内容里有 {0} 个服务，只填了第一个 {1}；其余请分别添加。", entries.length, name));
   }
   const url = typeof server.url === "string" ? server.url : typeof server.serverUrl === "string" ? server.serverUrl : "";
   if (url) {
@@ -67,7 +68,7 @@ export function parsePastedServer(text: string): PastedServer | string {
       } else {
         const variable = key.replace(/[^A-Za-z0-9_]/g, "_").toUpperCase();
         headers[key] = `\${${variable}}`;
-        notes.push(`请求头 ${key} 的取值没有填进来，改成了变量 \${${variable}}；取值放进密钥文件。`);
+        notes.push(t("请求头 {0} 的取值没有填进来，改成了变量 ${{1}}；取值放进密钥文件。", key, variable));
       }
     }
     return { name, transport: "remote", command: "", args: [], env: {}, url, headers, notes };
@@ -78,7 +79,7 @@ export function parsePastedServer(text: string): PastedServer | string {
     // 名字像密钥的明文取值不填进表单，改成同名变量
     if (SECRET_NAME_RE.test(key) && !VAR_RE.test(value)) {
       env[key] = `\${${key}}`;
-      notes.push(`${key} 的取值没有填进来，改成了变量 \${${key}}；取值放进密钥文件。`);
+      notes.push(t("{0} 的取值没有填进来，改成了变量 ${{1}}；取值放进密钥文件。", key, key));
     } else {
       env[key] = value;
     }

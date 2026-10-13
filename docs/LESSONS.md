@@ -306,3 +306,19 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Compare missing copy destinations through resolved existing ancestors. A lexical `/var/...` destination and its existing `/private/var/...` source looked unrelated on macOS; the overlap regression caught the first guard accepting a directory inside the original source.
 - Use that same resolution in preview fingerprints: a failed adoption can leave an empty parent directory. Its creation must not change the destination identity or invalidate an otherwise unchanged preview.
 - Apply personal-directory confirmation guards only to personal-copy adoption. The existing duplicate-cleanup test caught the new dirty-path guard blocking an operation that has no copy destination.
+
+### 2026-10-12: language changes need layout and stale-query checks
+
+- Wrapping JSX text in a translation call can remove meaningful boundary spaces.
+  The initial English implementation passed type checking but broke existing
+  count, breadcrumb and update-version assertions. Preserve JSX whitespace and
+  inspect both languages, including screenshots after page animations finish.
+- Keep global language updates out of cancelable query functions. A canceled
+  older response can finish after a successful save; only the active query
+  snapshot and successful save readback may apply a language. Exercise that
+  response order explicitly.
+- Preserve interpolated user content without a second translation pass, and
+  verify localized MCP display hints still produce the same engine sentinel.
+- Keep engine error matching in its original language. Translating an MCP error
+  prefix changed unsupported-target recognition in English despite a passing
+  Chinese suite; verify the same target filtering in both languages.

@@ -34,6 +34,6 @@ read-only disclosures should not look like a second primary card.
 
 ## Copy
 
-13. Interface text is Simplified Chinese and avoids engineering jargon; the banned words are listed in the guard test.
+13. Interface text defaults to English and supports Simplified Chinese through Settings → Language. Translate application-owned labels, instructions and messages; preserve user content, resource names, paths and original engine diagnostics. Both languages avoid engineering jargon; the banned words are listed in the guard test.
 
 Rules 9–12 were adopted on 2026-10-09 from a comparison with Magpie's GUI standards; rules 1–8 collect layout problems reported repeatedly during September 2026.

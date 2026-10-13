@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -84,11 +85,11 @@ export function ProgramPinDialog({
     void Promise.all(
       targets.map(async (target) => {
         const id = `${target.server}@${target.agent}`;
-        if (!target.args) return [id, "认不出条目里写版本的位置，没法自动改；可以在 MCP 页手动编辑"] as const;
+        if (!target.args) return [id, t("认不出条目里写版本的位置，没法自动改；可以在 MCP 页手动编辑")] as const;
         try {
           const envelope = await runEngine<{ files: { path: string; original?: string | null; content: string }[] }>("mcp:preview", argsOf(target));
           const file = envelope.ok ? envelope.data.files[0] : null;
-          return [id, file ? { path: file.path, original: file.original ?? null, content: file.content } : envelope.errors[0]?.message ?? "预览失败"] as const;
+          return [id, file ? { path: file.path, original: file.original ?? null, content: file.content } : envelope.errors[0]?.message ?? t("预览失败")] as const;
         } catch (reason) {
           return [id, engineErrorMessage(reason)] as const;
         }
@@ -105,8 +106,8 @@ export function ProgramPinDialog({
     try {
       for (const target of targets.filter((item) => item.args)) {
         const label = unpin
-          ? `${target.server} @ ${nameOf(target.agent)} 取消固定、跟最新版本`
-          : `把 ${target.server} @ ${nameOf(target.agent)} 固定到 ${shortVersion(version.trim())}`;
+          ? t("{0} @ {1} 取消固定、跟最新版本", target.server, nameOf(target.agent))
+          : t("把 {0} @ {1} 固定到 {2}", target.server, nameOf(target.agent), shortVersion(version.trim()));
         const envelope = await execute({ command: "mcp:apply", label, args: argsOf(target), silent: true });
         if (!envelope?.ok) failed += 1;
       }
@@ -115,12 +116,12 @@ export function ProgramPinDialog({
         for (const server of new Set(targets.map((item) => item.server))) {
           const following = program.runners.some((runner) => runner.server === server && runner.follow_latest);
           if (unpin || following) {
-            await execute({ command: "programs:declare", label: `${server} ${unpin ? "跟最新版本" : "改为固定版本"}`, args: ["--server", server, "--follow-latest", unpin ? "true" : "false"], silent: true });
+            await execute({ command: "programs:declare", label: `${server} ${unpin ? t("跟最新版本") : t("改为固定版本")}`, args: ["--server", server, "--follow-latest", unpin ? "true" : "false"], silent: true });
           }
         }
       }
       (failed ? toast.error : toast.success)(
-        failed ? `${failed} 处没改成，详见操作记录` : unpin ? "已取消固定：以后启动时用最新版本，检查新版本照常提示" : `已固定到 ${shortVersion(version.trim())}`,
+        failed ? t("{0} 处没改成，详见操作记录", failed) : unpin ? t("已取消固定：以后启动时用最新版本，检查新版本照常提示") : t("已固定到 {0}", shortVersion(version.trim())),
       );
       if (!failed) onClose();
       // 条目里的版本变了：重新检查这些 MCP 服务，显示的版本跟实际一致
@@ -138,14 +139,14 @@ export function ProgramPinDialog({
   const ready = valid && targets.length > 0 && targets.every((target) => typeof previews[`${target.server}@${target.agent}`] === "object");
   return (
     <ConfirmModal
-      title={unpin ? `${program.name}：取消固定，跟最新版本` : `${program.name}：固定 MCP 用的版本`}
+      title={unpin ? t("{0}：取消固定，跟最新版本", program.name) : t("{0}：固定 MCP 用的版本", program.name)}
       description={
         unpin
-          ? "只改启动参数里的版本号，条目的其他内容不动。之后每次启动都用最新版本（发布方一更新就会换）；检查新版本照常提示，随时可以再固定。"
-          : "只改启动参数里的版本号，条目的其他内容不动。固定之后即使发布了新版本也不会被自动换掉；检查新版本照常提示，要升级时在这里改，也可以取消固定改回跟最新。"
+          ? t("只改启动参数里的版本号，条目的其他内容不动。之后每次启动都用最新版本（发布方一更新就会换）；检查新版本照常提示，随时可以再固定。")
+          : t("只改启动参数里的版本号，条目的其他内容不动。固定之后即使发布了新版本也不会被自动换掉；检查新版本照常提示，要升级时在这里改，也可以取消固定改回跟最新。")
       }
       risk="write-local"
-      confirmLabel="写入"
+      confirmLabel={t("写入")}
       confirmDisabled={!ready}
       executing={executing}
       onConfirm={() => void confirm()}
@@ -154,7 +155,7 @@ export function ProgramPinDialog({
       <div data-testid="program-pin-dialog" className="mt-3 space-y-3 text-sm">
         {needsBranch && (
           <label className="block space-y-1">
-            <span className="text-xs text-muted-foreground">{unpin ? "跟随的分支" : "版本（精确版本号，或 git 源的 40 位提交号）"}</span>
+            <span className="text-xs text-muted-foreground">{unpin ? t("跟随的分支") : t("版本（精确版本号，或 git 源的 40 位提交号）")}</span>
             <input
               data-testid="program-pin-version"
               value={version}
@@ -162,11 +163,11 @@ export function ProgramPinDialog({
               className="w-full rounded-md border bg-card px-2 py-1.5 font-mono text-xs"
             />
             {version.trim() && !valid && (
-              <span className="text-xs text-warning">{unpin ? "分支名只能含字母、数字与 ._/-" : "要写精确版本（如 1.10.1）或完整提交号，不能是 latest 或分支名"}</span>
+              <span className="text-xs text-warning">{unpin ? t("分支名只能含字母、数字与 ._/-") : t("要写精确版本（如 1.10.1）或完整提交号，不能是 latest 或分支名")}</span>
             )}
           </label>
         )}
-        {targets.length === 0 && <p className="text-xs text-muted-foreground">没有可以改的条目（可能已停用或只保存在本工具里）。</p>}
+        {targets.length === 0 && <p className="text-xs text-muted-foreground">{t("没有可以改的条目（可能已停用或只保存在本工具里）。")}</p>}
         {targets.map((target) => {
           const preview = previews[`${target.server}@${target.agent}`];
           return (
@@ -177,7 +178,7 @@ export function ProgramPinDialog({
               ) : preview ? (
                 <FileDiff path={preview.path} original={preview.original} content={preview.content} maxHeight="max-h-40" />
               ) : valid ? (
-                <p className="text-xs text-muted-foreground">正在预览…</p>
+                <p className="text-xs text-muted-foreground">{t("正在预览…")}</p>
               ) : null}
             </div>
           );

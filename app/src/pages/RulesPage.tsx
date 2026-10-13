@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -24,15 +25,15 @@ import { cn } from "../lib/utils";
 import { Select } from "../components/Select";
 
 const PAGE_NOTE =
-  "编辑直接写入规则文件。模板保存在本机，推荐规则来自技能来源；覆盖未知内容前会自动备份。";
+  () => t("编辑直接写入规则文件。模板保存在本机，推荐规则来自技能来源；覆盖未知内容前会自动备份。");
 
 /** 写入前被外部改过时引擎给出的固定说法。 */
 const EXTERNAL_EDIT = "已在外部修改";
 
 const ORIGIN_LABEL: Record<string, string> = {
-  user: "自建",
-  backup: "备份",
-  legacy: "旧来源",
+  get user() { return t("自建"); },
+  get backup() { return t("备份"); },
+  get legacy() { return t("旧来源"); },
 };
 
 function specOf(element: EngineElement): RulesSpec {
@@ -59,7 +60,7 @@ function lineCount(text: string): number {
 /** 执行失败时给弹窗内展示的说明；外部修改额外说明页面已刷新。 */
 function failureText(message: string): string {
   if (message.includes(EXTERNAL_EDIT)) {
-    return `${message}。页面已刷新为文件的最新内容，请关闭后重新打开再操作。`;
+    return t("{0}。页面已刷新为文件的最新内容，请关闭后重新打开再操作。", message);
   }
   return message;
 }
@@ -80,7 +81,7 @@ type DialogState =
   | { kind: "delete-template"; template: RuleTemplate };
 
 function sourceRuleLabel(rule: RuleSourceRule): string {
-  return `规则「${rule.name}」（来自 ${rule.collection}）`;
+  return t("规则「{0}」（来自 {1}）", rule.name, rule.collection);
 }
 
 export default function RulesPage({
@@ -95,12 +96,12 @@ export default function RulesPage({
   const accountName = useAccountNames();
 
   if (query.isPending) return <PageLoading />;
-  if (query.isError) return <PageError title="规则状态读取失败" error={query.error} />;
+  if (query.isError) return <PageError title={t("规则状态读取失败")} error={query.error} />;
   if (!query.data.ok) {
     return (
       <div className="space-y-4">
-        <h1 className="text-lg font-semibold tracking-tight">规则</h1>
-        <ErrorPanel title="规则状态读取失败" errors={query.data.errors} />
+        <h1 className="text-lg font-semibold tracking-tight">{t("规则")}</h1>
+        <ErrorPanel title={t("规则状态读取失败")} errors={query.data.errors} />
       </div>
     );
   }
@@ -118,7 +119,7 @@ export default function RulesPage({
 
   const templateSource = (template: RuleTemplate): ContentSource => ({
     key: `template:${template.id}`,
-    label: `模板「${template.name}」`,
+    label: t("模板「{0}」", template.name),
     body: template.body,
     args: ["--template", template.id],
   });
@@ -136,18 +137,18 @@ export default function RulesPage({
     void directApply
       .apply({
         command: "rules:apply",
-        label: `${nameOf(element)} 跟随${sourceRuleLabel(rule)}`,
+        label: t("{0} 跟随{1}", nameOf(element), sourceRuleLabel(rule)),
         args: ["--only", element.id, "--base", base, "--source-rule", rule.id],
       })
       .then((envelope) => {
-        if (envelope?.ok) toast.info(`已跟随${sourceRuleLabel(rule)}：来源出新版本时，这里会提示更新`);
+        if (envelope?.ok) toast.info(t("已跟随{0}：来源出新版本时，这里会提示更新", sourceRuleLabel(rule)));
       });
   };
 
   const pendingFill = rulesFillRows(elements);
   /** 补齐一个助手：还没有规则文件时从同类主助手复制；引擎写前再核对文件仍不存在。 */
   const fillOne = (row: RulesFillRow) =>
-    void directApply.apply({ command: "rules:apply", label: `补齐 ${row.name}`, args: rulesFillArgs(row) });
+    void directApply.apply({ command: "rules:apply", label: t("补齐 {0}", row.name), args: rulesFillArgs(row) });
 
   /** 助手名：主助手用助手名，实例用助手名。 */
   const labelOf = (element: EngineElement) => {
@@ -160,12 +161,12 @@ export default function RulesPage({
 
   return (
     <div className="space-y-3">
-      <h1 className="text-lg font-semibold tracking-tight">规则</h1>
-      {query.data.errors.length > 0 && <ErrorPanel title="规则状态读取失败" errors={query.data.errors} />}
+      <h1 className="text-lg font-semibold tracking-tight">{t("规则")}</h1>
+      {query.data.errors.length > 0 && <ErrorPanel title={t("规则状态读取失败")} errors={query.data.errors} />}
 
-      <section tabIndex={0} className="table-scroll rounded-lg border bg-card" aria-label="规则文件">
-        <TableHeader title={`规则文件 · ${elements.length}`} middle="使用的规则" />
-        {elements.length === 0 && <p className="px-4 py-3 text-xs text-muted-foreground">没有可显示的规则文件。</p>}
+      <section tabIndex={0} className="table-scroll rounded-lg border bg-card" aria-label={t("规则文件")}>
+        <TableHeader title={t("规则文件 · {0}", elements.length)} middle={t("使用的规则")} />
+        {elements.length === 0 && <p className="px-4 py-3 text-xs text-muted-foreground">{t("没有可显示的规则文件。")}</p>}
         <ul className="divide-y">
           {elements.map((element) => {
             const others = writable.filter((item) => item.id !== element.id);
@@ -185,14 +186,14 @@ export default function RulesPage({
                     ? () =>
                         setDialog({
                           kind: "apply",
-                          title: `更换 ${nameOf(element)} 的规则`,
+                          title: t("更换 {0} 的规则", nameOf(element)),
                           targets: [element],
                           sources: [...sourceRules.map(ruleSource), ...templates.map(templateSource)],
                         })
                     : undefined
                 }
                 onApplyRule={(rule) =>
-                  setDialog({ kind: "apply", title: `用${sourceRuleLabel(rule)}更新 ${nameOf(element)}`, targets: [element], sources: [ruleSource(rule)] })
+                  setDialog({ kind: "apply", title: t("用{0}更新 {1}", sourceRuleLabel(rule), nameOf(element)), targets: [element], sources: [ruleSource(rule)] })
                 }
                 onFollow={(rule) => follow(element, rule)}
                 onCopy={
@@ -200,7 +201,7 @@ export default function RulesPage({
                     ? () =>
                         setDialog({
                           kind: "apply",
-                          title: `复制 ${nameOf(element)} 的内容`,
+                          title: t("复制 {0} 的内容", nameOf(element)),
                           targets: others,
                           sources: [{ key: `from:${element.id}`, label: nameOf(element), body: content, args: ["--from", element.id] }],
                         })
@@ -211,7 +212,7 @@ export default function RulesPage({
           })}
         </ul>
       </section>
-      <p className="px-1 text-xs text-muted-foreground">{PAGE_NOTE}</p>
+      <p className="px-1 text-xs text-muted-foreground">{PAGE_NOTE()}</p>
 
       <RuleLibrary
         sourceRules={sourceRules}
@@ -223,12 +224,12 @@ export default function RulesPage({
         }}
         onApplyRule={
           writable.length > 0
-            ? (rule) => setDialog({ kind: "apply", title: `应用${sourceRuleLabel(rule)}`, targets: writable, sources: [ruleSource(rule)] })
+            ? (rule) => setDialog({ kind: "apply", title: t("应用{0}", sourceRuleLabel(rule)), targets: writable, sources: [ruleSource(rule)] })
             : undefined
         }
         onApplyTemplate={
           writable.length > 0
-            ? (template) => setDialog({ kind: "apply", title: `应用模板「${template.name}」`, targets: writable, sources: [templateSource(template)] })
+            ? (template) => setDialog({ kind: "apply", title: t("应用模板「{0}」", template.name), targets: writable, sources: [templateSource(template)] })
             : undefined
         }
         onNewTemplate={() => setDialog({ kind: "template", template: null })}
@@ -251,26 +252,26 @@ export default function RulesPage({
 function ruleStatus(element: EngineElement, sourceRules: RuleSourceRule[]) {
   const observed = observedOf(element);
   const follow = observed.source_follow;
-  if (element.state === "disabled") return { tone: "muted" as const, note: "已停用" };
-  if (!isWritable(element)) return { tone: "muted" as const, note: "不可用", detail: observed.blocked_reason ?? undefined };
-  if (observed.content === null || observed.base === "missing") return { tone: "muted" as const, note: "还没有规则文件" };
+  if (element.state === "disabled") return { tone: "muted" as const, note: t("已停用") };
+  if (!isWritable(element)) return { tone: "muted" as const, note: t("不可用"), detail: observed.blocked_reason ?? undefined };
+  if (observed.content === null || observed.base === "missing") return { tone: "muted" as const, note: t("还没有规则文件") };
   if (follow) {
     const rule = sourceRules.find((item) => item.id === follow.rule);
     const name = rule?.name ?? follow.rule.split("/").pop();
     const source = rule?.collection ?? follow.rule.split("/")[0];
     const changedSinceFollow = !follow.file_unchanged && Boolean(follow.current_revision) && follow.current_revision !== follow.applied_revision;
     // 统一状态（lib/inbox.ts）：与待处理页同一套标签
-    if (follow.update_available) return { name, source, tone: "warn" as const, state: "update" as const, note: "有新版本", testId: "rules-update-available" };
-    if (changedSinceFollow) return { name, source, tone: "warn" as const, state: "drifted" as const, note: "被改过，来源有新版", testId: "rules-changed-since-follow" };
-    if (follow.current_revision === null) return { name, source, tone: "muted" as const, note: "来源已不在" };
-    if (!follow.file_unchanged) return { name, source, tone: "muted" as const, note: "改过" };
-    return { name, source, tone: "ok" as const, note: "最新" };
+    if (follow.update_available) return { name, source, tone: "warn" as const, state: "update" as const, note: t("有新版本"), testId: "rules-update-available" };
+    if (changedSinceFollow) return { name, source, tone: "warn" as const, state: "drifted" as const, note: t("被改过，来源有新版"), testId: "rules-changed-since-follow" };
+    if (follow.current_revision === null) return { name, source, tone: "muted" as const, note: t("来源已不在") };
+    if (!follow.file_unchanged) return { name, source, tone: "muted" as const, note: t("改过") };
+    return { name, source, tone: "ok" as const, note: t("最新") };
   }
   if (observed.matched_source_rule) {
-    return { name: observed.matched_source_rule.name, source: observed.matched_source_rule.collection, tone: "ok" as const, note: "一致" };
+    return { name: observed.matched_source_rule.name, source: observed.matched_source_rule.collection, tone: "ok" as const, note: t("一致") };
   }
-  if (observed.matched_template) return { name: observed.matched_template.name, source: "本机模板", tone: "ok" as const, note: "一致" };
-  return { tone: "muted" as const, note: "自定义内容" };
+  if (observed.matched_template) return { name: observed.matched_template.name, source: t("本机模板"), tone: "ok" as const, note: t("一致") };
+  return { tone: "muted" as const, note: t("自定义内容") };
 }
 
 const DOT = { ok: "bg-success", warn: "bg-warning", muted: "bg-muted-foreground/50" } as const;
@@ -314,16 +315,16 @@ function TargetRow({
   const action = !writable
     ? null
     : fill
-      ? { testId: `rules-fill-${element.id}`, label: "补齐", title: "还没有规则文件：从同一助手的主号复制过来", run: () => onFill(fill) }
+      ? { testId: `rules-fill-${element.id}`, label: t("补齐"), title: t("还没有规则文件：从同一助手的主号复制过来"), run: () => onFill(fill) }
       : followedRule && status.testId
         ? {
             testId: `rules-update-from-source-${element.id}`,
-            label: follow?.update_available ? "更新" : "查看新版本",
-            title: "先看差异，确认后写入；覆盖前先备份现有内容",
+            label: follow?.update_available ? t("更新") : t("查看新版本"),
+            title: t("先看差异，确认后写入；覆盖前先备份现有内容"),
             run: () => onApplyRule(followedRule),
           }
         : matchedRule && !follow
-          ? { testId: `rules-follow-${element.id}`, label: "跟随更新", title: "文件不动，只记下它来自这条规则；来源出新版本时这里会提示", run: () => onFollow(matchedRule) }
+          ? { testId: `rules-follow-${element.id}`, label: t("跟随更新"), title: t("文件不动，只记下它来自这条规则；来源出新版本时这里会提示"), run: () => onFollow(matchedRule) }
           : null;
   return (
     <li data-testid={`rules-target-${element.id}`}>
@@ -335,7 +336,7 @@ function TargetRow({
           </div>
           <div className="truncate font-mono text-xs text-muted-foreground" title={spec.target ?? observed.target}>
             {spec.target ?? observed.target}
-            {typeof content === "string" && <span className="font-sans"> · {lineCount(content)} 行</span>}
+            {typeof content === "string" && <span className="font-sans"> · {lineCount(content)}{(" " + t("行"))}</span>}
           </div>
         </div>
         <div className={cn(COL_MIDDLE, "min-w-0 text-sm")}>
@@ -362,20 +363,20 @@ function TargetRow({
           {writable && (
             <>
               {onSwitch && (
-                <RowIcon label={`更换 ${nameOf(element)} 的规则`} onClick={onSwitch}>
+                <RowIcon label={t("更换 {0} 的规则", nameOf(element))} onClick={onSwitch}>
                   <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
                 </RowIcon>
               )}
               {typeof content === "string" && (
-                <RowIcon label={open ? `收起 ${nameOf(element)} 全文` : `查看 ${nameOf(element)} 全文`} onClick={() => setOpen(!open)}>
+                <RowIcon label={open ? t("收起 {0} 全文", nameOf(element)) : t("查看 {0} 全文", nameOf(element))} onClick={() => setOpen(!open)}>
                   <Eye className="h-3.5 w-3.5" aria-hidden />
                 </RowIcon>
               )}
-              <RowIcon label={`编辑 ${nameOf(element)}`} onClick={onEdit}>
+              <RowIcon label={t("编辑 {0}", nameOf(element))} onClick={onEdit}>
                 <Pencil className="h-3.5 w-3.5" aria-hidden />
               </RowIcon>
               {onCopy && (
-                <RowIcon label={`复制 ${nameOf(element)} 到…`} onClick={onCopy}>
+                <RowIcon label={t("复制 {0} 到…", nameOf(element))} onClick={onCopy}>
                   <Copy className="h-3.5 w-3.5" aria-hidden />
                 </RowIcon>
               )}
@@ -422,7 +423,7 @@ function RuleLibrary({
   const userSourceOf = (collection: string) => userSources.sources.find((source) => source.name === collection);
   const emptySources = userSources.sources.filter((source) => !sourceRules.some((rule) => rule.collection === source.name));
   const count = sourceRules.length + templates.length;
-  const used = (n: number) => (n > 0 ? `${n} 个助手在用` : "未使用");
+  const used = (n: number) => (n > 0 ? t("{0} 个助手在用", n) : t("未使用"));
   const body = (id: string, text: string, testId: string) =>
     openId === id && (
       <pre data-testid={testId} className="mx-4 mb-2 max-h-80 overflow-auto whitespace-pre-wrap rounded border bg-muted/40 p-2 font-mono text-xs">
@@ -431,14 +432,12 @@ function RuleLibrary({
     );
 
   return (
-    <section tabIndex={0} className="table-scroll rounded-lg border bg-card" aria-label="规则库">
-      <TableHeader title={`规则库 · ${count}`} middle="来源">
+    <section tabIndex={0} className="table-scroll rounded-lg border bg-card" aria-label={t("规则库")}>
+      <TableHeader title={t("规则库 · {0}", count)} middle={t("来源")}>
         <button type="button" data-testid="rule-source-add" onClick={() => onOpenSource?.(null)} className="inline-flex items-center gap-1 text-primary hover:underline">
-          <Library className="h-3.5 w-3.5" aria-hidden /> 管理来源
-        </button>
+          <Library className="h-3.5 w-3.5" aria-hidden />{(" " + t("管理来源"))}</button>
         <button type="button" onClick={onNewTemplate} className="inline-flex items-center gap-1 text-primary hover:underline">
-          <Plus className="h-3.5 w-3.5" aria-hidden /> 新建模板
-        </button>
+          <Plus className="h-3.5 w-3.5" aria-hidden />{(" " + t("新建模板"))}</button>
       </TableHeader>
       <ul className="divide-y">
         {sourceRules.map((rule) => {
@@ -448,31 +447,29 @@ function RuleLibrary({
               <div className={ROW}>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{rule.name}</div>
-                  <div className="text-xs text-muted-foreground">{used(usage.rule(rule))} · {lineCount(rule.body)} 行</div>
+                  <div className="text-xs text-muted-foreground">{used(usage.rule(rule))} · {lineCount(rule.body)}{(" " + t("行"))}</div>
                 </div>
                 <button
                   type="button"
                   data-testid={`rules-open-source-${rule.id}`}
                   onClick={() => onOpenSource?.(rule.collection)}
                   className={cn(COL_MIDDLE, "truncate text-left text-sm text-muted-foreground hover:text-primary hover:underline")}
-                  title={`到来源页管理 ${rule.collection}${mine ? `（${mine.path}）` : ""}`}
+                  title={t("到来源页管理 {0}{1}", rule.collection, mine ? `（${mine.path}）` : "")}
                 >
-                  {mine ? `规则文件 · ${mine.path}` : `${rule.collection} · ${rule.local ? "本机目录" : "git 仓库"}`}
+                  {mine ? t("规则文件 · {0}", mine.path) : `${rule.collection} · ${rule.local ? t("本机目录") : t("git 仓库")}`}
                 </button>
                 <div className={COL_ACTION}>
                   {onApplyRule && (
                     <button
                       type="button"
-                      aria-label={`应用${sourceRuleLabel(rule)}到…`}
+                      aria-label={t("应用{0}到…", sourceRuleLabel(rule))}
                       onClick={() => onApplyRule(rule)}
                       className={PILL}
-                    >
-                      应用到…
-                    </button>
+                    >{t("应用到…")}</button>
                   )}
                 </div>
                 <div className={COL_ICONS}>
-                  <RowIcon label={openId === rule.id ? `收起 ${rule.name}` : `查看 ${rule.name}`} onClick={() => setOpenId(openId === rule.id ? null : rule.id)}>
+                  <RowIcon label={openId === rule.id ? t("收起 {0}", rule.name) : t("查看 {0}", rule.name)} onClick={() => setOpenId(openId === rule.id ? null : rule.id)}>
                     <Eye className="h-3.5 w-3.5" aria-hidden />
                   </RowIcon>
                 </div>
@@ -485,12 +482,12 @@ function RuleLibrary({
           <li key={`source:${source.name}`} data-testid={`rule-source-${source.name}`} className={ROW}>
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium">{source.name}</div>
-              <div className="text-xs text-warning">没读到规则</div>
+              <div className="text-xs text-warning">{t("没读到规则")}</div>
             </div>
-            <div className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")} title={source.path}>规则文件 · {source.path}</div>
+            <div className={cn(COL_MIDDLE, "truncate text-sm text-muted-foreground")} title={source.path}>{(t("规则文件 ·") + " ")}{source.path}</div>
             <div className={COL_ACTION} />
             <div className={COL_ICONS}>
-              <RowIcon label={`到来源页管理 ${source.name}`} onClick={() => onOpenSource?.(source.name)}>
+              <RowIcon label={t("到来源页管理 {0}", source.name)} onClick={() => onOpenSource?.(source.name)}>
                 <Library className="h-3.5 w-3.5" aria-hidden />
               </RowIcon>
             </div>
@@ -501,28 +498,26 @@ function RuleLibrary({
             <div className={ROW}>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium">{template.name}</div>
-                <div className="text-xs text-muted-foreground">{used(usage.template(template))} · {lineCount(template.body)} 行</div>
+                <div className="text-xs text-muted-foreground">{used(usage.template(template))} · {lineCount(template.body)}{(" " + t("行"))}</div>
               </div>
-              <div className={cn(COL_MIDDLE, "text-sm text-muted-foreground")}>本机模板 · {ORIGIN_LABEL[template.origin] ?? template.origin}</div>
+              <div className={cn(COL_MIDDLE, "text-sm text-muted-foreground")}>{(t("本机模板 ·") + " ")}{ORIGIN_LABEL[template.origin] ?? template.origin}</div>
               <div className={COL_ACTION}>
                 {onApplyTemplate && (
                   <button
                     type="button"
                     onClick={() => onApplyTemplate(template)}
                     className={PILL}
-                  >
-                    应用到…
-                  </button>
+                  >{t("应用到…")}</button>
                 )}
               </div>
               <div className={COL_ICONS}>
-                <RowIcon label={openId === template.id ? `收起 ${template.name}` : `查看 ${template.name}`} onClick={() => setOpenId(openId === template.id ? null : template.id)}>
+                <RowIcon label={openId === template.id ? t("收起 {0}", template.name) : t("查看 {0}", template.name)} onClick={() => setOpenId(openId === template.id ? null : template.id)}>
                   <Eye className="h-3.5 w-3.5" aria-hidden />
                 </RowIcon>
-                <RowIcon label={`编辑模板 ${template.name}`} onClick={() => onEditTemplate(template)}>
+                <RowIcon label={t("编辑模板 {0}", template.name)} onClick={() => onEditTemplate(template)}>
                   <Pencil className="h-3.5 w-3.5" aria-hidden />
                 </RowIcon>
-                <RowIcon danger label={`删除模板 ${template.name}`} onClick={() => onDeleteTemplate(template)}>
+                <RowIcon danger label={t("删除模板 {0}", template.name)} onClick={() => onDeleteTemplate(template)}>
                   <Trash2 className="h-3.5 w-3.5" aria-hidden />
                 </RowIcon>
               </div>
@@ -532,13 +527,7 @@ function RuleLibrary({
         ))}
         {sourceRules.length === 0 && (
           <li data-testid="rules-no-source" className="space-y-2 px-4 py-3 text-xs text-muted-foreground">
-            <p>
-              还没有来源提供规则：到
-              <button type="button" data-testid="rules-open-sources" onClick={() => onOpenSource?.(null)} className="mx-1 text-primary underline-offset-2 hover:underline">
-                来源页
-              </button>
-              添加规则文件，或带规则的仓库（如 agent-skills）。
-            </p>
+            <p>{t("还没有来源提供规则：到")}<button type="button" data-testid="rules-open-sources" onClick={() => onOpenSource?.(null)} className="mx-1 text-primary underline-offset-2 hover:underline">{t("来源页")}</button>{t("添加规则文件，或带规则的仓库（如 agent-skills）。")}</p>
             {suggested.map((item) => (
               <div key={item.name} className="flex items-center justify-between gap-3">
                 <span className="min-w-0">
@@ -550,7 +539,7 @@ function RuleLibrary({
                   onClick={() => onOpenSource?.(item.collection ?? null)}
                   className={PILL}
                 >
-                  {item.collection ? `到来源页取回 ${item.collection}` : `到来源页添加 ${item.name}`}
+                  {item.collection ? t("到来源页取回 {0}", item.collection) : t("到来源页添加 {0}", item.name)}
                 </button>
               </div>
             ))}
@@ -608,23 +597,21 @@ function EditDialog({ element, onClose }: { element: EngineElement; onClose: () 
     setError(null);
     const envelope = await directApply.apply({
       command: "rules:apply",
-      label: `保存 ${name}`,
+      label: t("保存 {0}", name),
       args: ["--only", element.id, "--base", observed.base, "--value", text],
     });
     if (envelope?.ok) {
       onClose();
       return;
     }
-    setError(failureText(envelope?.errors[0]?.message ?? "保存失败，详见任务记录"));
+    setError(failureText(envelope?.errors[0]?.message ?? t("保存失败，详见任务记录")));
   };
 
   return (
-    <DialogFrame label={`编辑 ${name}`} busy={directApply.executing} onClose={onClose} initialFocusSelector='textarea[aria-label="规则全文"]'>
-      <p className="my-2 text-xs text-muted-foreground">
-        保存即写入 <span className="font-mono">{observed.target}</span>；打开编辑后若文件被别处改过，保存会被拒绝，不会覆盖。
-      </p>
+    <DialogFrame label={t("编辑 {0}", name)} busy={directApply.executing} onClose={onClose} initialFocusSelector={t("textarea[aria-label=\"规则全文\"]")}>
+      <p className="my-2 text-xs text-muted-foreground">{(t("保存即写入") + " ")}<span className="font-mono">{observed.target}</span>{t("；打开编辑后若文件被别处改过，保存会被拒绝，不会覆盖。")}</p>
       <textarea
-        aria-label="规则全文"
+        aria-label={t("规则全文")}
         value={text}
         onChange={(event) => setText(event.target.value)}
         rows={18}
@@ -640,17 +627,13 @@ function EditDialog({ element, onClose }: { element: EngineElement; onClose: () 
         </p>
       )}
       <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex justify-end gap-2">
-        <button type="button" disabled={directApply.executing} onClick={onClose} className="rounded border px-4 py-2 text-sm">
-          取消
-        </button>
+        <button type="button" disabled={directApply.executing} onClick={onClose} className="rounded border px-4 py-2 text-sm">{t("取消")}</button>
         <button
           type="button"
           disabled={directApply.executing}
           onClick={() => void save()}
           className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-60"
-        >
-          保存到文件
-        </button>
+        >{t("保存到文件")}</button>
       </div>
     </DialogFrame>
   );
@@ -659,26 +642,20 @@ function EditDialog({ element, onClose }: { element: EngineElement; onClose: () 
 function DiffView({ current, after }: { current: string | null; after: string }) {
   if (current === null && after === "") {
     return (
-      <p data-testid="rules-diff-empty-new" className="rounded border bg-muted px-3 py-2 text-xs text-muted-foreground">
-        目标还没有文件，将新建一个空的规则文件。
-      </p>
+      <p data-testid="rules-diff-empty-new" className="rounded border bg-muted px-3 py-2 text-xs text-muted-foreground">{t("目标还没有文件，将新建一个空的规则文件。")}</p>
     );
   }
   const before = current ?? "";
   if (before === after) {
     return (
-      <p data-testid="rules-diff-same" className="rounded border bg-muted px-3 py-2 text-xs text-muted-foreground">
-        与现有内容相同，不会写入。
-      </p>
+      <p data-testid="rules-diff-same" className="rounded border bg-muted px-3 py-2 text-xs text-muted-foreground">{t("与现有内容相同，不会写入。")}</p>
     );
   }
   const lines = diffLines(before, after);
   if (!hasChanges(lines)) {
     // 逐行比较看不出来的差别（只差文件末尾换行）：仍会写入，照实说
     return (
-      <p data-testid="rules-diff-eol" className="rounded border bg-muted px-3 py-2 text-xs text-muted-foreground">
-        各行内容相同，只有文件末尾换行不同。
-      </p>
+      <p data-testid="rules-diff-eol" className="rounded border bg-muted px-3 py-2 text-xs text-muted-foreground">{t("各行内容相同，只有文件末尾换行不同。")}</p>
     );
   }
   // 只显示变化的行与前后几行，没变的折叠（与 MCP、快捷命令等预览同一写法）
@@ -713,26 +690,26 @@ function ApplyContentDialog({
     setError(null);
     const envelope = await directApply.apply({
       command: "rules:apply",
-      label: `把${source.label}写入 ${nameOf(target)}`,
+      label: t("把{0}写入 {1}", source.label, nameOf(target)),
       args: ["--only", target.id, "--base", observed.base, ...source.args],
     });
     if (envelope?.ok) {
       const backedUp = (envelope.data as { steps?: { name?: string }[] }).steps?.some((step) => step.name?.startsWith("rules:backup"));
-      if (backedUp) toast.info("原内容已另存为备份模板");
+      if (backedUp) toast.info(t("原内容已另存为备份模板"));
       onClose();
       return;
     }
-    setError(failureText(envelope?.errors[0]?.message ?? "写入失败，详见任务记录"));
+    setError(failureText(envelope?.errors[0]?.message ?? t("写入失败，详见任务记录")));
   };
 
   return (
     <DialogFrame label={title} busy={directApply.executing} onClose={onClose}>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">内容来源</span>
+          <span className="text-muted-foreground">{t("内容来源")}</span>
           {sources.length > 1 ? (
             <Select
-              label="内容来源"
+              label={t("内容来源")}
               value={source.key}
               onChange={setSourceKey}
               disabled={directApply.executing}
@@ -744,10 +721,10 @@ function ApplyContentDialog({
           )}
         </label>
         <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">写入目标</span>
+          <span className="text-muted-foreground">{t("写入目标")}</span>
           {targets.length > 1 ? (
             <Select
-              label="写入目标"
+              label={t("写入目标")}
               value={target.id}
               onChange={setTargetId}
               disabled={directApply.executing}
@@ -759,9 +736,7 @@ function ApplyContentDialog({
           )}
         </label>
       </div>
-      <p className="mt-3 text-xs text-muted-foreground">
-        目标现有内容 → 将写入的内容（<span className="font-mono">{specOf(target).target ?? observed.target}</span>）。现有内容对不上任何已保存模板、来源里的规则或上次从来源写入的那一版时，会先另存为备份模板再写入。
-      </p>
+      <p className="mt-3 text-xs text-muted-foreground">{t("目标现有内容 → 将写入的内容（")}<span className="font-mono">{specOf(target).target ?? observed.target}</span>{t("）。现有内容对不上任何已保存模板、来源里的规则或上次从来源写入的那一版时，会先另存为备份模板再写入。")}</p>
       <div className="mt-2">
         <DiffView current={observed.content} after={source.body} />
       </div>
@@ -771,17 +746,13 @@ function ApplyContentDialog({
         </p>
       )}
       <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex justify-end gap-2">
-        <button type="button" disabled={directApply.executing} onClick={onClose} className="rounded border px-4 py-2 text-sm">
-          取消
-        </button>
+        <button type="button" disabled={directApply.executing} onClick={onClose} className="rounded border px-4 py-2 text-sm">{t("取消")}</button>
         <button
           type="button"
           disabled={directApply.executing || !changed}
           onClick={() => void confirm()}
           className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-60"
-        >
-          写入
-        </button>
+        >{t("写入")}</button>
       </div>
     </DialogFrame>
   );
@@ -803,11 +774,11 @@ function TemplateDialog({ template, onClose }: { template: RuleTemplate | null; 
         : ["--name", name, "--value", body];
       const envelope = await runEngine("rules:save-template", args, { runId: newRunId() });
       if (!envelope.ok) {
-        setError(envelope.errors[0]?.message ?? "保存失败");
+        setError(envelope.errors[0]?.message ?? t("保存失败"));
         return;
       }
       void queryClient.invalidateQueries({ queryKey: engineKeys.all });
-      toast.success("模板已保存");
+      toast.success(t("模板已保存"));
       onClose();
     } catch (err) {
       setError(engineErrorMessage(err));
@@ -817,18 +788,18 @@ function TemplateDialog({ template, onClose }: { template: RuleTemplate | null; 
   };
 
   return (
-    <DialogFrame label={template ? `编辑模板 ${template.name}` : "新建模板"} busy={saving} onClose={onClose} initialFocusSelector='input[aria-label="模板名称"]'>
-      <p className="my-2 text-xs text-muted-foreground">模板只保存在本机库里，不改任何规则文件。</p>
+    <DialogFrame label={template ? t("编辑模板 {0}", template.name) : t("新建模板")} busy={saving} onClose={onClose} initialFocusSelector={t("input[aria-label=\"模板名称\"]")}>
+      <p className="my-2 text-xs text-muted-foreground">{t("模板只保存在本机库里，不改任何规则文件。")}</p>
       <input
-        aria-label="模板名称"
+        aria-label={t("模板名称")}
         value={name}
         onChange={(event) => setName(event.target.value)}
         disabled={saving}
         className="mb-2 w-full rounded border px-2 py-1.5 text-sm"
-        placeholder="名称"
+        placeholder={t("名称")}
       />
       <textarea
-        aria-label="模板正文"
+        aria-label={t("模板正文")}
         value={body}
         onChange={(event) => setBody(event.target.value)}
         rows={16}
@@ -844,17 +815,13 @@ function TemplateDialog({ template, onClose }: { template: RuleTemplate | null; 
         </p>
       )}
       <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex justify-end gap-2">
-        <button type="button" disabled={saving} onClick={onClose} className="rounded border px-4 py-2 text-sm">
-          取消
-        </button>
+        <button type="button" disabled={saving} onClick={onClose} className="rounded border px-4 py-2 text-sm">{t("取消")}</button>
         <button
           type="button"
           disabled={saving || name.trim() === ""}
           onClick={() => void save()}
           className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-60"
-        >
-          保存模板
-        </button>
+        >{t("保存模板")}</button>
       </div>
     </DialogFrame>
   );
@@ -874,7 +841,7 @@ function DeleteTemplateDialog({ template, onClose }: { template: RuleTemplate; o
         return;
       }
       void queryClient.invalidateQueries({ queryKey: engineKeys.all });
-      toast.success("模板已删除");
+      toast.success(t("模板已删除"));
       onClose();
     } catch (err) {
       setErrors([{ code: "ERROR", element: null, message: engineErrorMessage(err) }]);
@@ -885,10 +852,10 @@ function DeleteTemplateDialog({ template, onClose }: { template: RuleTemplate; o
 
   return (
     <ConfirmModal
-      title={`删除模板 ${template.name}`}
-      description="只删除本机库里的这份模板，不改任何规则文件。"
+      title={t("删除模板 {0}", template.name)}
+      description={t("只删除本机库里的这份模板，不改任何规则文件。")}
       risk="write-local"
-      confirmLabel="删除"
+      confirmLabel={t("删除")}
       executing={executing}
       resultErrors={errors}
       onConfirm={() => void confirm()}

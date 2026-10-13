@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -106,8 +107,8 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
         patch({ status: "failed", finishedAt: Date.now(), bridgeError: textSummary(message) });
         if (!request.silent) {
           const summary = errorSummary(message);
-          if (summary.description) toast.error(`${request.label} 调用失败：${summary.text}`, { description: summary.description });
-          else toast.error(`${request.label} 调用失败：${summary.text}`);
+          if (summary.description) toast.error(t("{0} 调用失败：{1}", request.label, summary.text), { description: summary.description });
+          else toast.error(t("{0} 调用失败：{1}", request.label, summary.text));
         }
         if (request.refresh !== false) void invalidateEngineQueries(queryClient, request.command);
         return null;
@@ -121,14 +122,14 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
           // 写入完成不等于助手已经用上：直接把生效条件说清楚
           const hint = effectHint(request.command, request.args ?? []);
           const undo = request.undo;
-          toast.success(`${request.label}完成`, {
+          toast.success(t("{0}完成", request.label), {
             ...(hint ? { description: hint } : {}),
-            ...(undo ? { action: { label: "撤销", onClick: () => undo() } } : {}),
+            ...(undo ? { action: { label: t("撤销"), onClick: () => undo() } } : {}),
           });
         } else {
-          const summary = errorSummary(firstError?.message ?? "详见任务记录");
-          if (summary.description) toast.error(`${request.label} 失败：${summary.text}`, { description: summary.description });
-          else toast.error(`${request.label} 失败：${summary.text}`);
+          const summary = errorSummary(firstError?.message ?? t("详见任务记录"));
+          if (summary.description) toast.error(t("{0} 失败：{1}", request.label, summary.text), { description: summary.description });
+          else toast.error(t("{0} 失败：{1}", request.label, summary.text));
         }
       }
       if (request.refresh !== false) void invalidateEngineQueries(queryClient, request.command);
@@ -144,7 +145,7 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
 export function useExecutions(): ExecutionContextValue {
   const ctx = useContext(ExecutionContext);
   if (!ctx) {
-    throw new Error("useExecutions 必须在 ExecutionProvider 内使用");
+    throw new Error(t("useExecutions 必须在 ExecutionProvider 内使用"));
   }
   return ctx;
 }

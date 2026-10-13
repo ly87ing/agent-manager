@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { z } from "zod";
 import { CONTRACT_ID, type Envelope } from "./contract";
@@ -76,7 +77,7 @@ const tauriEngineClient: EngineClient = {
         .join("; ");
       throw new EngineBridgeError({
         kind: "contract_violation",
-        message: `引擎输出不符合 Contract v1 envelope：${issues}`,
+        message: t("引擎输出不符合 Contract v1 envelope：{0}", issues),
       });
     }
     return parsed.data as Envelope;
@@ -100,7 +101,7 @@ export function runEngine<T>(command: string, args?: string[], options?: EngineR
 
 export function engineErrorMessage(err: unknown): string {
   if (err instanceof EngineBridgeError) {
-    return err.stderr ? `${err.message}（${err.kind}${err.exitCode !== null ? `, 退出码 ${err.exitCode}` : ""}）` : err.message;
+    return err.stderr ? `${err.message}（${err.kind}${err.exitCode !== null ? t(", 退出码 {0}", err.exitCode) : ""}）` : err.message;
   }
   return err instanceof Error ? err.message : String(err);
 }

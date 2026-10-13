@@ -4,7 +4,11 @@ process.env.TZ = "UTC";
 
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterEach, beforeEach } from "vitest";
+import { setLanguage } from "../lib/i18n";
+
+// Existing interaction tests retain their Chinese coverage; language tests also exercise English.
+beforeEach(() => setLanguage("zh-CN"));
 import { setTimeout as settleTimers } from "node:timers/promises";
 import { resetIgnoredForTest } from "../lib/inboxIgnore";
 
@@ -25,7 +29,7 @@ const defaultAutostartClient = { get: async () => false, set: async (enabled: bo
 setAutostartClient(defaultAutostartClient);
 
 const defaultSettingsClient: SettingsClient = {
-  get: async () => ({ preferences: { logRetentionDays: 30 }, appVersion: "test", contractVersion: "agent-manager/engine/v1", resourceDir: "/resources", dataDir: "/data", updaterConfigured: false, }),
+  get: async () => ({ preferences: { language: "zh-CN", logRetentionDays: 30 }, appVersion: "test", contractVersion: "agent-manager/engine/v1", resourceDir: "/resources", dataDir: "/data", updaterConfigured: false, }),
   save: async (preferences) => ({ preferences, appVersion: "test", contractVersion: "agent-manager/engine/v1", resourceDir: "/resources", dataDir: "/data", updaterConfigured: false, }),
 };
 setSettingsClient(defaultSettingsClient);

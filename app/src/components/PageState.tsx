@@ -1,9 +1,10 @@
+import { t } from "../lib/i18n";
 import { toDiagnostic } from "../lib/engine";
 import { ErrorPanel } from "./ErrorPanel";
 import { Skeleton } from "./Skeleton";
 
 /** 页面级加载占位：标题条 + 卡片轮廓骨架，与真实卡片配方（rounded-lg border bg-card p-5）对齐。 */
-export function PageLoading({ text = "正在读取数据…" }: { text?: string }) {
+export function PageLoading({ text = t("正在读取数据…") }: { text?: string }) {
   return (
     <div role="status" className="space-y-4">
       <span className="sr-only">{text}</span>

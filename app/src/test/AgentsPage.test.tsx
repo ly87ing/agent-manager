@@ -12,7 +12,7 @@ const targets = [
 ];
 
 function renderApp() {
-  const settings = { appVersion: "0.1.0", contractVersion: "v1", resourceDir: "/tmp/resources", dataDir: "/tmp/data", updaterConfigured: false, preferences: { logRetentionDays: 30 } };
+  const settings = { appVersion: "0.1.0", contractVersion: "v1", resourceDir: "/tmp/resources", dataDir: "/tmp/data", updaterConfigured: false, preferences: { language: "zh-CN" as const, logRetentionDays: 30 } };
   setSettingsClient({ get: async () => settings, save: async () => { throw new Error("Read-only page must not save"); } });
   return renderWithEngine(<App />, {
     "resources:targets": makeEnvelope({ targets }),

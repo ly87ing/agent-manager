@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { QueryClient, useIsMutating, useMutation, useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { engineErrorMessage, runEngine } from "./engine";
@@ -63,21 +64,21 @@ export function useRefreshUpstream() {
           const entry = envelope.data.elements.find((item) => item.id === only);
           toast.success(
             entry
-              ? `已重新检查 ${only}${entry.upstream ? `：官方最新 ${entry.upstream}` : ""}`
-              : `已重新检查 ${only}`,
+              ? t("已重新检查 {0}{1}", only, entry.upstream ? t("：官方最新 {0}", entry.upstream) : "")
+              : t("已重新检查 {0}", only),
           );
         } else {
           toast.success(
-            `检查更新完成：已是最新 ${summary.current} · 可更新 ${summary.behind} · 比官方新 ${summary.ahead} · 未检查 ${summary.unknown}`,
+            t("检查更新完成：已是最新 {0} · 可更新 {1} · 比官方新 {2} · 未检查 {3}", summary.current, summary.behind, summary.ahead, summary.unknown),
           );
         }
       } else {
-        toast.error(envelope.errors[0]?.message ?? "检查更新失败");
+        toast.error(envelope.errors[0]?.message ?? t("检查更新失败"));
       }
       void queryClient.invalidateQueries({ queryKey: engineKeys.all });
     },
     onError: (err) => {
-      toast.error(`检查更新调用失败：${engineErrorMessage(err)}`);
+      toast.error(t("检查更新调用失败：{0}", engineErrorMessage(err)));
     },
   });
 }

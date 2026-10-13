@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import { useMemo, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { diffLines, diffStats, foldDiff, type DiffSegment } from "../lib/textDiff";
@@ -34,7 +35,7 @@ export function FileDiff({
     <div data-testid={testId} className="space-y-1 text-xs">
       <p className="flex flex-wrap items-center gap-x-2 text-muted-foreground">
         {path && <span className="break-all font-mono">{path}</span>}
-        <span>{isNew ? "新建" : unchanged ? "内容不变" : "更新"}</span>
+        <span>{isNew ? t("新建") : unchanged ? t("内容不变") : t("更新")}</span>
         {!unchanged && (
           <span data-testid={testId ? `${testId}-stats` : undefined} className="font-mono">
             <span className="text-success">+{stats.added}</span> <span className="text-destructive">−{stats.removed}</span>
@@ -51,9 +52,7 @@ export function FileDiff({
                 data-testid={testId ? `${testId}-fold` : undefined}
                 onClick={() => setExpanded((prev) => new Set(prev).add(index))}
                 className="block w-full bg-muted/60 px-2 py-0.5 text-left text-muted-foreground hover:bg-accent"
-              >
-                ⋯ 未改动 {segment.lines.length} 行（点击展开）
-              </button>
+              >{(t("⋯ 未改动") + " ")}{segment.lines.length}{(" " + t("行（点击展开）"))}</button>
             ) : (
               segment.lines.map((line, lineIndex) => (
                 <div
@@ -82,7 +81,7 @@ export function FileDiff({
         className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground"
       >
         <ChevronRight className={cn("h-3 w-3 transition-transform", showFull && "rotate-90")} aria-hidden />
-        {showFull ? "收起完整文件" : "查看完整文件"}
+        {showFull ? t("收起完整文件") : t("查看完整文件")}
       </button>
       {showFull && (
         <pre
@@ -117,7 +116,7 @@ export function ChangedFile({ change, label, testId }: { change: FileChange; lab
         aria-expanded={viewable ? open : undefined}
         onClick={() => setOpen((value) => !value)}
         className={cn("inline-flex items-center gap-1 text-left", viewable ? "hover:text-foreground" : "cursor-default")}
-        title={viewable ? "点开看改了什么" : "太大、二进制或文件太多，未显示内容"}
+        title={viewable ? t("点开看改了什么") : t("太大、二进制或文件太多，未显示内容")}
       >
         {viewable ? (
           <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", open && "rotate-90")} aria-hidden />
@@ -125,7 +124,7 @@ export function ChangedFile({ change, label, testId }: { change: FileChange; lab
           <span className="w-3" />
         )}
         <span className="text-muted-foreground">{label}</span> {change.file}
-        {!viewable && <span className="font-sans text-[10px] text-muted-foreground">（未显示内容）</span>}
+        {!viewable && <span className="font-sans text-[10px] text-muted-foreground">{t("（未显示内容）")}</span>}
       </button>
       {open && viewable && (
         <div className="mt-1 font-sans">
