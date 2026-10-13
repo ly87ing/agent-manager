@@ -59,7 +59,7 @@ describe("read-only assistant listing", () => {
 
   it("can be found as agent in search without account queries or writes", async () => {
     const { calls } = renderApp();
-    await screen.findByRole("heading", { name: "技能" });
+    await screen.findByRole("heading", { name: "启动配置" });
     calls.length = 0;
     await userEvent.keyboard("{Meta>}k{/Meta}");
     await userEvent.type(screen.getByTestId("command-palette-input"), "agent");

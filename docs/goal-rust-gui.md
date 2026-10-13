@@ -1359,3 +1359,28 @@ macOS rendering and local launch execution were accepted on this host. Windows
 PowerShell rendering is covered by source tests, and Linux command rendering is
 executed through available local shells. Native Windows/Linux desktop operation
 and real applications' displayed time remain unaccepted.
+
+### 2026-10-13 Follow-up: Launch as the default top-level page
+
+- Launch configurations are a frequent-use workflow rather than an advanced
+  setting. Launch is now the first top-level navigation item and the page shown
+  when Agent Manager opens.
+- Saved graphical applications keep direct Launch actions at the top of the
+  page; terminal tools keep copy-only commands and definitions. The Settings
+  entry and command palette route to the same top-level page.
+- Acceptance covers default-page routing, the retained Settings shortcut,
+  command-palette routing, and navigation/layout at the committed 1000 × 650
+  window and the required 760 px width.
+
+### 2026-10-13 Follow-up: Saved launchers first and explicit login startup
+
+- The default Launch page shows saved applications and terminal commands without
+  mounting the editor. New configuration and Open configuration reveal it on
+  demand, while saved graphical applications retain their direct Launch actions.
+- Settings again exposes explicit Enable and Disable actions for opening Agent
+  Manager at OS login. Reading Settings remains zero-write. The backend writes and
+  reads back the owned macOS LaunchAgent, Linux Desktop Entry, or Windows current-user
+  Run value only after a click, preserving external-change and symlink protection.
+- macOS refuses enabling from translocated or read-only locations. Agent Manager
+  does not enable startup automatically as part of installation, launch, or this
+  change.

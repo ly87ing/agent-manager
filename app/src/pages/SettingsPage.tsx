@@ -71,16 +71,19 @@ function SettingsGroup({ title, children }: { title: string; children: ReactNode
   );
 }
 
-function AutostartControl() {
+function AutostartControl({ canEnable }: { canEnable: boolean }) {
   const state = useAutostart();
   const change = useSetAutostart();
   const error = state.error ?? change.error;
   return (
     <>
-      <div className="flex items-center gap-2 text-xs" role="group" aria-label={t("旧版登录项")}>
-        {!state.isPending && !state.isError && <span className="text-muted-foreground">{state.data ? t("已启用旧登录项") : t("未启用开机启动")}</span>}
-        <button type="button" disabled={state.isPending || state.isError || change.isPending}
-          onClick={() => change.mutate(false)} className="rounded-md border px-3 py-1 hover:bg-accent disabled:opacity-50">{t("移除旧登录项")}</button>
+      <div className="inline-flex rounded-lg border bg-muted p-0.5" role="group" aria-label={t("开机启动")}>
+        {[true, false].map((enabled) => <button key={String(enabled)} type="button" aria-pressed={state.data === enabled}
+          disabled={state.isPending || state.isError || change.isPending || (enabled && !canEnable)}
+          onClick={() => change.mutate(enabled)} className={cn(
+            "rounded-md px-3 py-1 text-xs transition-colors disabled:opacity-50",
+            state.data === enabled ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+          )}>{enabled ? t("启用") : t("停用")}</button>)}
       </div>
       {state.isPending && <p role="status" className="text-xs text-muted-foreground">{t("正在读取登录项…")}</p>}
       {error && <div className="flex w-full flex-wrap items-center gap-2 text-xs text-destructive">
@@ -312,7 +315,7 @@ export default function SettingsPage({
   }
 
   const openTool = (key: string) =>
-    key === "runs" && onNavigate ? onNavigate(key) : setActiveAdvanced(key);
+    (key === "runs" || key === "launch") && onNavigate ? onNavigate(key) : setActiveAdvanced(key);
 
   return (
     <div className="space-y-3">
@@ -327,8 +330,8 @@ export default function SettingsPage({
         <SettingsRow label={t("外观")} note={t("立即生效，保存在本机")}>
           <ThemeControl />
         </SettingsRow>
-        <SettingsRow label={t("旧版开机启动")} note={t("当前版本不设置开机启动；可移除以前创建且未被改动的登录项")}>
-          <AutostartControl />
+        <SettingsRow label={t("开机启动")} note={t("登录系统后自动打开 Agent Manager")}>
+          <AutostartControl canEnable={!data.runtimeWarning} />
         </SettingsRow>
         <SettingsRow label={t("操作记录保留")} note={t("0 为不自动清理，最多 3650 天")}>
           <div className="flex items-center gap-2">

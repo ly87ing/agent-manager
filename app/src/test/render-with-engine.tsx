@@ -9,6 +9,7 @@ import { createQueryClient } from "../lib/queries";
 import { ThemeProvider } from "../lib/theme";
 import type { Envelope } from "../lib/contract";
 import { createFakeEngineClient } from "./engine-test-client";
+import { makeEnvelope } from "./fixtures";
 
 export interface RecordedCall {
   command: string;
@@ -34,6 +35,8 @@ export function renderWithEngine(
     }
   }
   const base = createFakeEngineClient({
+    "launch:catalog": makeEnvelope({ platform: "macos", shell: "zsh", apps: [] }, { command: "launch:catalog" }),
+    "launch:list": makeEnvelope({ items: [] }, { command: "launch:list" }),
     "resources:targets": { contract: "agent-manager/engine/v1", run_id: "targets-fixture", command: "resources.targets", ok: true,
       mode: { offline: true }, lock: { held: false, pid: null }, errors: [], warnings: [], data: { targets: resourceTargets } },
     ...routes,

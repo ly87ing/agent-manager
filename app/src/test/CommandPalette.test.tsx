@@ -84,7 +84,7 @@ function routes(): Record<string, TestRoute> {
 async function renderApp() {
   setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
   const view = renderWithEngine(<App />, routes());
-  await screen.findByRole("heading", { name: "技能" }, { timeout: 10_000 });
+  await screen.findByRole("heading", { name: "启动配置" }, { timeout: 10_000 });
   return view;
 }
 
@@ -95,7 +95,7 @@ function writes(calls: { command: string }[]) {
 
 describe("命令面板", () => {
   beforeAll(async () => {
-    await Promise.all([import("../pages/SkillsPage"), import("../pages/SettingsPage")]);
+    await Promise.all([import("../pages/LaunchPage"), import("../pages/SkillsPage"), import("../pages/SettingsPage")]);
   });
   beforeEach(() => trayEvents.byName.clear());
 
@@ -116,6 +116,8 @@ describe("命令面板", () => {
     const palette = await screen.findByTestId("command-palette");
     expect(within(palette).queryByTestId("command-item-account:agents:claude-code")).toBeNull();
     expect(within(palette).queryByTestId("command-item-page:accounts")).toBeNull();
+    expect(within(palette).getByTestId("command-item-page:launch")).toBeInTheDocument();
+    expect(within(palette).queryByTestId("command-item-page:settings:launch")).toBeNull();
     expect(await within(palette).findByTestId("command-item-skill:agent-skills")).toBeInTheDocument();
     await userEvent.type(screen.getByTestId("command-palette-input"), "MCP");
     await userEvent.click(within(palette).getByTestId("command-item-page:mcp"));

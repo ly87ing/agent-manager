@@ -13,12 +13,12 @@ Manage MCP servers, rules, skills, and their extension dependencies for existing
 - **Sources:** manage optional skill and rule repositories, versions, local sources, and resource share links. No external repository is required for local extension management.
 - **Programs:** manage command-line dependencies used by skills and MCP. Assistant installation and updates remain outside this tool.
 - **More tips:** read-only guidance about independent environments and shell aliases in Settings. Copying a generic example does not execute it or edit files.
-- **Launch configurations:** Settings → Launch configurations saves an application or terminal command, generic environment variables, literal arguments, optional time zones and shortcut names in Agent Manager. Saved graphical applications can be launched directly; terminal commands provide complete commands and alias/function definitions for manual use. Agent Manager does not write shell configuration. See [launch configurations](docs/subsystems/launch-configurations.md).
-- **Settings:** English by default, with Simplified Chinese available under Language; themes, operation history, MCP-specific secret files, extension configuration backups, and manual application updates. Account credentials and unrelated secret variables are read-only.
+- **Launch configurations:** Launch is the first top-level page and the default page when Agent Manager opens. It saves an application or terminal command, generic environment variables, literal arguments, optional time zones and shortcut names in Agent Manager. Saved graphical applications can be launched directly; terminal commands provide complete commands and alias/function definitions for manual use. Agent Manager does not write shell configuration. See [launch configurations](docs/subsystems/launch-configurations.md).
+- **Settings:** English by default, with Simplified Chinese available under Language; themes, explicit start-at-login control, operation history, MCP-specific secret files, extension configuration backups, and manual application updates. Account credentials and unrelated secret variables are read-only.
 
 ## Experience
 
-Navigation contains Skills, MCP, Rules, Sources, Programs, Assistants, and Settings. `⌘K` and `⌘⇧K` search extension resources and pages; `⌘F` searches the current page; `⌘,` opens Settings. General launch configurations are available under Settings and search. Account pages remain removed.
+Navigation opens on Launch and also contains Skills, MCP, Rules, Sources, Programs, Assistants, and Settings. `⌘K` and `⌘⇧K` search extension resources and pages; `⌘F` searches the current page; `⌘,` opens Settings. The Settings launch entry remains a shortcut to the top-level Launch page. Account pages remain removed.
 
 The app runs in the foreground and exits when its window closes. Search queries run only while search is open. Usage, quota, recent-session collection, tray residency, and automatic application update checks remain retired. See [resource bounds](docs/subsystems/resource-bounds.md).
 

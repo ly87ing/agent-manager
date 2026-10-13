@@ -1,4 +1,4 @@
-//! Read legacy OS login entries and remove them only after an explicit request.
+//! The OS login entry is authoritative; merely opening the app never creates one.
 
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "linux")]
@@ -10,6 +10,9 @@ pub(crate) fn get(app: &tauri::AppHandle) -> Result<bool, String> {
 }
 
 pub(crate) fn set(app: &tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    if enabled && crate::startup::location_warning().is_some() {
+        return Err("请先将应用安装到“应用程序”文件夹后再开启开机启动".into());
+    }
     let executable = executable(app)?;
     set_status(&app.config().identifier, &executable, enabled)
         .map_err(|error| error.to_string())?;
@@ -87,15 +90,30 @@ fn file_status(path: &Path, expected: &[u8]) -> std::io::Result<bool> {
 
 #[cfg(not(windows))]
 fn set_file_status(path: &Path, expected: &[u8], enabled: bool) -> std::io::Result<()> {
-    if enabled {
-        return Err(std::io::Error::other("开机启动已移除，仅支持移除旧登录项"));
-    }
-    if !file_status(path, expected)? {
+    use std::io::Write;
+    let current = file_status(path, expected)?;
+    if current == enabled {
         return Ok(());
     }
-    // Re-read immediately before deletion; never remove an externally replaced entry.
-    if file_status(path, expected)? {
-        std::fs::remove_file(path)?;
+    if enabled {
+        std::fs::create_dir_all(path.parent().unwrap())?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(path)?;
+        if let Err(error) = file.write_all(expected).and_then(|_| file.sync_all()) {
+            let _ = std::fs::remove_file(path);
+            return Err(error);
+        }
+    } else {
+        // Re-read immediately before deletion; never remove an externally replaced entry.
+        if file_status(path, expected)? {
+            std::fs::remove_file(path)?;
+        }
     }
     Ok(())
 }
@@ -183,16 +201,30 @@ fn status(identifier: &str, executable: &Path) -> std::io::Result<bool> {
 
 #[cfg(windows)]
 fn set_status(identifier: &str, executable: &Path, enabled: bool) -> std::io::Result<()> {
-    if enabled {
-        return Err(std::io::Error::other("开机启动已移除，仅支持移除旧登录项"));
-    }
     use winreg::{
-        enums::{HKEY_CURRENT_USER, KEY_SET_VALUE},
-        RegKey,
+        enums::{HKEY_CURRENT_USER, KEY_SET_VALUE, REG_BINARY},
+        RegKey, RegValue,
     };
     let current = registered(identifier, executable)?;
     let user = RegKey::predef(HKEY_CURRENT_USER);
-    if current {
+    if enabled {
+        if current && status(identifier, executable)? {
+            return Ok(());
+        }
+        let (key, _) = user.create_subkey(RUN)?;
+        key.set_value(identifier, &format!("\"{}\"", executable.display()))?;
+        match user.open_subkey_with_flags(APPROVED, KEY_SET_VALUE) {
+            Ok(key) => key.set_raw_value(
+                identifier,
+                &RegValue {
+                    vtype: REG_BINARY,
+                    bytes: vec![2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                },
+            )?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    } else if current {
         user.open_subkey_with_flags(RUN, KEY_SET_VALUE)?
             .delete_value(identifier)?;
     }
@@ -209,7 +241,7 @@ mod windows_tests {
 
     #[test]
     #[ignore = "Requires an isolated Windows user hive; run explicitly in Wine"]
-    fn retired_enable_and_owned_registry_removal() {
+    fn quoted_registry_entry_roundtrip_and_task_manager_override() {
         assert_eq!(
             std::env::var("AM_ISOLATED_WINDOWS_HIVE").as_deref(),
             Ok("1")
@@ -220,10 +252,7 @@ mod windows_tests {
         let (run, _) = user.create_subkey(RUN).unwrap();
         let (approved, _) = user.create_subkey(APPROVED).unwrap();
         assert!(!status(&identifier, executable).unwrap());
-        assert!(set_status(&identifier, executable, true).is_err());
-        assert!(run.get_value::<String, _>(&identifier).is_err());
-        run.set_value(&identifier, &format!("\"{}\"", executable.display()))
-            .unwrap();
+        set_status(&identifier, executable, true).unwrap();
         let value: String = run.get_value(&identifier).unwrap();
         assert_eq!(value, r#""C:\Program Files\Agent Manager\app.exe""#);
         assert!(status(&identifier, executable).unwrap());
@@ -237,8 +266,8 @@ mod windows_tests {
             )
             .unwrap();
         assert!(!status(&identifier, executable).unwrap());
-        assert!(set_status(&identifier, executable, true).is_err());
-        assert!(!status(&identifier, executable).unwrap());
+        set_status(&identifier, executable, true).unwrap();
+        assert!(status(&identifier, executable).unwrap());
         run.set_value(&identifier, &"external change").unwrap();
         assert!(set_status(&identifier, executable, false).is_err());
         assert_eq!(
@@ -265,7 +294,7 @@ mod tests {
     }
 
     #[test]
-    fn enabling_is_retired_and_owned_entry_removal_protects_external_changes() {
+    fn login_entry_read_write_read_and_external_change_protection() {
         let root = std::env::temp_dir().join(format!(
             "am-login-{}-{}",
             std::process::id(),
@@ -282,16 +311,10 @@ mod tests {
         .unwrap();
         assert!(!file_status(&path, &bytes).unwrap());
         assert!(!root.exists(), "Queries must not create directories");
-        assert!(set_file_status(&path, &bytes, true).is_err());
-        assert!(
-            !root.exists(),
-            "Rejected enabling must not create directories"
-        );
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, &bytes).unwrap();
+        set_file_status(&path, &bytes, true).unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
         assert!(file_status(&path, &bytes).unwrap());
-        assert!(set_file_status(&path, &bytes, true).is_err());
+        set_file_status(&path, &bytes, true).unwrap();
         #[cfg(target_os = "macos")]
         {
             let parsed = plist::Value::from_file(&path).unwrap();

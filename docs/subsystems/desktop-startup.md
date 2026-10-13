@@ -10,12 +10,11 @@ The current executable's location determines whether macOS needs an installation
 
 [`settings_data`](../../app/src-tauri/src/settings.rs) includes an optional `runtimeWarning`. [`App`](../../app/src/App.tsx) displays it above the current page. The [Settings page](../../app/src/pages/SettingsPage.tsx) suppresses manual update checks and installation while the warning is present. There is no automatic update check. Closing the main window uses Tauri's normal close/exit flow; no tray or second webview is created.
 
-Settings reads `autostart_get` on opening. Enabling is retired in the UI and
-backend. The explicit Remove old login entry action calls `autostart_set(false)`;
-the backend reads back the result and the frontend refreshes after failures too.
-The removal action remains available for an OS-disabled Windows entry, since a
-false enabled state does not prove the Run value is absent. Existing entry formats
-are recognized only for ownership-checked removal.
+Settings reads `autostart_get` on opening and presents explicit Enable and Disable
+actions. A click calls `autostart_set`; the backend reads the OS entry back before
+reporting success, and the frontend refreshes after failures too. Merely opening
+Agent Manager or Settings never registers a login entry. Enabling is unavailable
+from a macOS translocated or read-only launch location; disabling remains available.
 
 The committed first-launch window is 1000 × 650. Later geometry remains owned by
 the window-state plugin. Native UI previews use a fresh identifier and isolated
@@ -40,8 +39,9 @@ target metadata; generic tips do not generate or execute account commands.
 - Detection only reads the executable path and mount flags; it does not move the app or write configuration.
 - The message asks the user to quit, drag the app into Applications and reopen it.
 - Other platforms omit the macOS-specific warning.
-- Enabling autostart is rejected before creating directories or registry values, regardless of launch location.
+- Enabling autostart from a macOS translocated or read-only launch location is rejected before creating an entry.
 - Reading login state creates no directory or file. File entries must be regular files with exactly the expected contents; registry values must point to this executable. External changes and symlinks are refused, including before deletion. Errors remain visible with a reread action.
+- Enabling creates only the parent login-entry directory and an owned entry. Repeated enables are idempotent. Disabling deletes only the exact owned entry.
 - macOS/Linux registration uses the current executable (the original AppImage on Linux), and no software or assistant resource is installed. Moving the app can leave an old entry that must be reviewed manually.
 - Linux refuses executable paths with `%`, `=`, control characters or invalid UTF-8. GIO validates the executable before expanding `%%`, and the specification forbids `=` in executable names; do not report registration success for an unusable path. See the [Desktop Entry specification](https://specifications.freedesktop.org/desktop-entry/latest/exec-variables.html) and [GIO loader](https://github.com/GNOME/glib/blob/main/gio/gdesktopappinfo.c).
 - OS policy may still prevent a login launch. A registered entry does not prove a physical reboot/login succeeded.

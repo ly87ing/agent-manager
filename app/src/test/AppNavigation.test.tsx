@@ -38,7 +38,7 @@ describe("App 顶层导航", () => {
   // Load lazy modules before timing UI interactions; these imports issue no queries.
   beforeAll(async () => {
     await Promise.all([
-      import("../pages/SkillsPage"), import("../pages/SettingsPage"),
+      import("../pages/LaunchPage"), import("../pages/SkillsPage"), import("../pages/SettingsPage"),
       import("../pages/RulesPage"), import("../pages/SourcesPage"),
       import("../pages/McpPage"), import("../pages/SkillsPage"),
     ]);
@@ -57,6 +57,7 @@ describe("App 顶层导航", () => {
 
     // Settings uses an icon; check its accessible name.
     expect(navButtons.map((b) => b.getAttribute("aria-label") ?? b.textContent?.trim())).toEqual([
+      "启动",
       "技能",
       "MCP",
       "规则",
@@ -75,7 +76,12 @@ describe("App 顶层导航", () => {
     await userEvent.click(within(nav).getByTestId("theme-toggle"));
     expect(document.documentElement).not.toHaveClass("dark");
 
+    const launchNav = within(nav).getByRole("button", { name: "启动" });
+    expect(launchNav).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "启动配置" })).toBeInTheDocument();
+
     const accountsNav = within(nav).getByRole("button", { name: "技能" });
+    await userEvent.click(accountsNav);
     expect(accountsNav).toHaveAttribute("aria-current", "page");
     expect(await screen.findByRole("heading", { name: "技能" })).toBeInTheDocument();
 
@@ -86,6 +92,10 @@ describe("App 顶层导航", () => {
 
     expect(screen.queryByTestId("advanced-entry-takeover")).toBeNull();
     expect(screen.queryByTestId("advanced-entry-import-link")).toBeNull();
+
+    await userEvent.click(screen.getByTestId("advanced-entry-launch"));
+    expect(launchNav).toHaveAttribute("aria-current", "page");
+    expect(await screen.findByRole("heading", { name: "启动配置" })).toBeInTheDocument();
 
     expect(within(nav).queryByRole("button", { name: "待处理" })).toBeNull();
     expect(within(nav).queryByRole("button", { name: "用量" })).toBeNull();
@@ -111,6 +121,7 @@ describe("App 顶层导航", () => {
       }, { command: "skills.status" }),
     });
     const nav = await screen.findByRole("navigation");
+    await userEvent.click(within(nav).getByRole("button", { name: "技能" }));
     await screen.findByRole("heading", { name: "技能" });
     expect(within(nav).queryByTestId("nav-badge-skills")).toBeNull();
     expect(within(nav).getByRole("button", { name: "技能" })).toBeInTheDocument();

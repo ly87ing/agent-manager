@@ -27,6 +27,7 @@ export default function LaunchPage() {
   const [built, setBuilt] = useState<{ spec: string; entries: LaunchEntry[] } | null>(null);
   const [saved, setSaved] = useState<SavedLaunch[] | null>(null);
   const [selected, setSelected] = useState<SavedLaunch | null>(null);
+  const [editing, setEditing] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -92,6 +93,19 @@ export default function LaunchPage() {
     const normalized = { ...item.recipe, env: item.recipe.env ?? [] };
     change(normalized); setSelected({ ...item, recipe: normalized });
     setBuilt({ spec: JSON.stringify(normalized), entries: item.entries });
+    setEditing(true);
+  }
+  function startNew() {
+    change(emptyRecipe(catalog?.platform, catalog?.shell));
+    setSelected(null);
+    setEditing(true);
+  }
+  function closeEditor() {
+    setEditing(false);
+    setSelected(null);
+    setBuilt(null);
+    setError(null);
+    setMessage(null);
   }
   async function save() {
     const spec = JSON.stringify(recipe);
@@ -119,7 +133,11 @@ export default function LaunchPage() {
     try {
       await launchRequest("delete", ["--id", confirmation.id, "--base", confirmation.revision]);
       setSaved((items) => (items ?? []).filter((old) => old.id !== confirmation.id));
-      if (selected?.id === confirmation.id) setSelected(null);
+      if (selected?.id === confirmation.id) {
+        setSelected(null);
+        setEditing(false);
+        setBuilt(null);
+      }
       setMessage(t("已删除保存的配置。"));
       setConfirmation(null);
     } catch (err) { setError(engineErrorMessage(err)); }
@@ -127,14 +145,18 @@ export default function LaunchPage() {
   }
 
   return <div className="space-y-4" data-testid="launch-page">
-    <div>
-      <h1 className="text-lg font-semibold">{t("启动配置")}</h1>
-      <p className="mt-1 text-xs text-muted-foreground">{t("保存图形应用或终端命令、环境变量、参数和别名。图形应用可直接启动，终端命令可复制后运行。")}</p>
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 className="text-lg font-semibold">{t("启动配置")}</h1>
+        <p className="mt-1 text-xs text-muted-foreground">{t("保存图形应用或终端命令、环境变量、参数和别名。图形应用可直接启动，终端命令可复制后运行。")}</p>
+      </div>
+      {!editing && <button type="button" className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`}
+        disabled={busy} onClick={startNew}>{t("新增配置")}</button>}
     </div>
     <section className="space-y-2" aria-label={t("已保存配置")}>
       <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-medium">{t("已保存配置")}</h2>
         <button type="button" className={button} disabled={busy} onClick={() => setRevision((value) => value + 1)}>{t("重新读取")}</button></div>
-      {saved?.length === 0 && <p className="text-xs text-muted-foreground">{t("尚未保存配置。填写后点击“保存配置”，无需运行或修改终端配置。")}</p>}
+      {saved?.length === 0 && <p className="text-xs text-muted-foreground">{t("尚未保存配置。点击“新增配置”创建常用应用或命令。")}</p>}
       {saved?.map((item) => <div key={item.id} className="min-w-0 space-y-3 rounded-md border p-3">
         <div className="flex min-w-0 items-start gap-2">
           <div className="min-w-0 flex-1 space-y-1">
@@ -159,12 +181,13 @@ export default function LaunchPage() {
         </div>
       </div>)}
     </section>
-    <section className="space-y-3 rounded-lg border bg-card p-4" aria-label={t("构建启动命令")}>
+    {editing && <section className="space-y-3 rounded-lg border bg-card p-4" aria-label={t("构建启动命令")}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-medium">{selected ? t("编辑配置") : t("新建配置")}</h2>
-        {selected && <button type="button" className={button} disabled={busy} onClick={() => {
-          change(emptyRecipe(catalog?.platform, catalog?.shell)); setSelected(null);
-        }}>{t("新建配置")}</button>}
+        <div className="flex flex-wrap gap-2">
+          {selected && <button type="button" className={button} disabled={busy} onClick={startNew}>{t("新增配置")}</button>}
+          <button type="button" className={button} disabled={busy} onClick={closeEditor}>{t("关闭编辑")}</button>
+        </div>
       </div>
       <fieldset disabled={busy} className="min-w-0 space-y-3 disabled:opacity-70">
         <div className="grid gap-3 sm:grid-cols-3">
@@ -236,9 +259,9 @@ export default function LaunchPage() {
           </div>
         </div>
       </fieldset>
-    </section>
-    {recipe.platform === "windows" && <p className="text-xs text-muted-foreground">{t("Windows 的 TZ 取值由应用决定，部分应用需要 POSIX 格式，部分会忽略它。不会修改系统时区、PATH 或脚本执行设置。")}</p>}
-    {built && <section className="space-y-3" aria-label={t("生成结果")}>
+    </section>}
+    {editing && recipe.platform === "windows" && <p className="text-xs text-muted-foreground">{t("Windows 的 TZ 取值由应用决定，部分应用需要 POSIX 格式，部分会忽略它。不会修改系统时区、PATH 或脚本执行设置。")}</p>}
+    {editing && built && <section className="space-y-3" aria-label={t("生成结果")}>
       {built.entries.map((entry) => <div key={entry.name} className="min-w-0 space-y-2 rounded-lg border bg-card p-3">
         <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-mono text-sm">{entry.name}</span>
           <span className="text-xs text-muted-foreground">{entry.timezone || t("系统默认时区")}</span></div>

@@ -59,16 +59,33 @@ async function chooseExample() {
   await chooseOption(await screen.findByRole("combobox", { name: "本机应用" }), "/Applications/Example.app");
 }
 
+async function startNew() {
+  await userEvent.click(await screen.findByRole("button", { name: "新增配置" }));
+  await screen.findByRole("heading", { name: "新建配置" });
+}
+
 async function generate() {
+  await startNew();
   await chooseExample();
   await userEvent.click(screen.getByRole("button", { name: "生成命令" }));
   await screen.findAllByRole("button", { name: "复制运行命令" });
 }
 
 describe("launch configuration controls", () => {
+  it("shows saved launchers first and opens the editor only on request", async () => {
+    setup();
+    expect(await screen.findByText("尚未保存配置。点击“新增配置”创建常用应用或命令。")).toBeVisible();
+    expect(screen.queryByRole("textbox", { name: "程序路径或命令" })).toBeNull();
+    await startNew();
+    expect(screen.getByRole("textbox", { name: "程序路径或命令" })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "关闭编辑" }));
+    expect(screen.queryByRole("textbox", { name: "程序路径或命令" })).toBeNull();
+  });
+
   it("allows native file selection and cancellation without saving, deleting or launching", async () => {
     vi.mocked(isTauri).mockReturnValue(true);
     const { calls } = setup();
+    await startNew();
     await screen.findByRole("combobox", { name: "本机应用" });
     vi.mocked(open).mockResolvedValueOnce(null).mockResolvedValueOnce("/Applications/Custom App.app");
     await userEvent.click(screen.getByRole("button", { name: "选择文件" }));
@@ -93,6 +110,7 @@ describe("launch configuration controls", () => {
 
   it("saves a configuration without generating, launching or writing shell files", async () => {
     const { calls } = setup();
+    await startNew();
     await chooseExample();
     await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
     expect(await screen.findByRole("status")).toHaveTextContent("配置已保存到 Agent Manager。");
@@ -151,11 +169,12 @@ describe("launch configuration controls", () => {
     expect(calls.find((call) => call.command === "launch:run")?.args).toEqual([
       "--spec", JSON.stringify(recipe), "--name", "example-sg", "--confirm",
     ]);
-    expect(screen.getByRole("heading", { name: "新建配置" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "新建配置" })).toBeNull();
   });
 
   it("saves generic environment variables and component-specific arguments", async () => {
     const { calls } = setup();
+    await startNew();
     await chooseExample();
     await userEvent.click(screen.getByText("环境变量（0）"));
     await userEvent.click(screen.getByRole("button", { name: "添加环境变量" }));
@@ -183,6 +202,7 @@ describe("launch configuration controls", () => {
 
   it("saves and copies another platform while keeping launch unavailable", async () => {
     const { calls } = setup();
+    await startNew();
     await screen.findByRole("combobox", { name: "本机应用" });
     await chooseOption(screen.getByRole("combobox", { name: "程序类型" }), "command");
     await userEvent.type(screen.getByRole("textbox", { name: "程序路径或命令" }), "example.exe");

@@ -21,7 +21,7 @@ const routes = {
 };
 
 describe("application language", () => {
-  beforeAll(async () => { await import("../pages/SkillsPage"); });
+  beforeAll(async () => { await Promise.all([import("../pages/LaunchPage"), import("../pages/SkillsPage")]); });
 
   it("defaults older preferences to English and rejects unsupported languages", () => {
     expect(defaults.preferences.language).toBe("en");
@@ -33,13 +33,13 @@ describe("application language", () => {
     vi.spyOn(navigator, "language", "get").mockReturnValue("zh-CN");
     setSettingsClient({ get: async () => defaults, save });
     const { calls } = renderWithEngine(<App />, routes);
-    expect(await screen.findByRole("heading", { name: "Skills" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Launch configurations" })).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("en");
     const nav = screen.getByRole("navigation");
     expect(within(nav).getByRole("button", { name: "Settings" })).toBeInTheDocument();
     expect(save).not.toHaveBeenCalled();
     expect(calls.map(({ command }) => command).filter((command) =>
-      !["skills:status", "programs:status", "policy:get", "resources:targets"].includes(command))).toEqual([]);
+      !["launch:catalog", "launch:list", "skills:status", "programs:status", "policy:get", "resources:targets"].includes(command))).toEqual([]);
   });
 
   it("applies only saved language, switches navigation, and retains it on reopen", async () => {

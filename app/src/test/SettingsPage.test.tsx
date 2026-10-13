@@ -49,66 +49,66 @@ describe("SettingsPage", () => {
     copy.mockRestore();
   });
 
-  it("reads the old OS login state without writing, then removes it explicitly", async () => {
-    let enabled = true;
+  it("reads the OS login state without writing, then enables it explicitly", async () => {
+    let enabled = false;
     const set = vi.fn(async (next: boolean) => (enabled = next));
     setAutostartClient({ get: async () => enabled, set });
     setSettingsClient({ get: async () => settings, save: async () => settings });
     renderWithEngine(<SettingsPage />, {});
-    const group = await screen.findByRole("group", { name: "旧版登录项" });
-    const remove = within(group).getByRole("button", { name: "移除旧登录项" });
-    await vi.waitFor(() => expect(remove).toBeEnabled());
-    expect(group).toHaveTextContent("已启用旧登录项");
+    const group = await screen.findByRole("group", { name: "开机启动" });
+    const enable = within(group).getByRole("button", { name: "启用" });
+    await vi.waitFor(() => expect(enable).toBeEnabled());
+    expect(within(group).getByRole("button", { name: "停用" })).toHaveAttribute("aria-pressed", "true");
     expect(set).not.toHaveBeenCalled();
-    await userEvent.click(remove);
-    await vi.waitFor(() => expect(group).toHaveTextContent("未启用开机启动"));
-    expect(set).toHaveBeenCalledExactlyOnceWith(false);
-    expect(within(group).queryByRole("button", { name: "开" })).toBeNull();
+    await userEvent.click(enable);
+    await vi.waitFor(() => expect(enable).toHaveAttribute("aria-pressed", "true"));
+    expect(set).toHaveBeenCalledExactlyOnceWith(true);
   });
 
   it("keeps the actual state visible when an OS write fails", async () => {
     setAutostartClient({ get: async () => true, set: async () => { throw new Error("OS denied write"); } });
     setSettingsClient({ get: async () => settings, save: async () => settings });
     renderWithEngine(<SettingsPage />, {});
-    const group = await screen.findByRole("group", { name: "旧版登录项" });
-    const remove = within(group).getByRole("button", { name: "移除旧登录项" });
-    await vi.waitFor(() => expect(remove).toBeEnabled());
-    await userEvent.click(remove);
+    const group = await screen.findByRole("group", { name: "开机启动" });
+    const disable = within(group).getByRole("button", { name: "停用" });
+    await vi.waitFor(() => expect(disable).toBeEnabled());
+    await userEvent.click(disable);
     expect(await screen.findByRole("alert")).toHaveTextContent("OS denied write");
-    expect(group).toHaveTextContent("已启用旧登录项");
+    expect(within(group).getByRole("button", { name: "启用" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("allows removing a legacy entry from a read-only launch location", async () => {
+  it("allows disabling but not enabling from an unsafe launch location", async () => {
     let enabled = true;
     const set = vi.fn(async (next: boolean) => (enabled = next));
     setAutostartClient({ get: async () => enabled, set });
     setSettingsClient({ get: async () => ({ ...settings, runtimeWarning: "Install the app first" }), save: async () => settings });
     renderWithEngine(<SettingsPage />, {});
-    const group = await screen.findByRole("group", { name: "旧版登录项" });
-    const remove = within(group).getByRole("button", { name: "移除旧登录项" });
-    await vi.waitFor(() => expect(remove).toBeEnabled());
+    const group = await screen.findByRole("group", { name: "开机启动" });
+    const enable = within(group).getByRole("button", { name: "启用" });
+    const disable = within(group).getByRole("button", { name: "停用" });
+    expect(enable).toBeDisabled();
+    await vi.waitFor(() => expect(disable).toBeEnabled());
     expect(set).not.toHaveBeenCalled();
-    await userEvent.click(remove);
-    await vi.waitFor(() => expect(group).toHaveTextContent("未启用开机启动"));
+    await userEvent.click(disable);
+    await vi.waitFor(() => expect(disable).toHaveAttribute("aria-pressed", "true"));
     expect(set).toHaveBeenCalledWith(false);
-    expect(within(group).queryByRole("button", { name: "开" })).toBeNull();
   });
 
-  it("can remove an old entry even when OS startup approval is disabled", async () => {
+  it("can disable an entry even when the OS reports startup disabled", async () => {
     const set = vi.fn(async () => false);
     setAutostartClient({ get: async () => false, set });
     setSettingsClient({ get: async () => settings, save: async () => settings });
     renderWithEngine(<SettingsPage />, {});
-    const remove = await screen.findByRole("button", { name: "移除旧登录项" });
-    await vi.waitFor(() => expect(remove).toBeEnabled());
+    const disable = await screen.findByRole("button", { name: "停用" });
+    await vi.waitFor(() => expect(disable).toBeEnabled());
     expect(set).not.toHaveBeenCalled();
-    await userEvent.click(remove);
+    await userEvent.click(disable);
     await vi.waitFor(() => expect(set).toHaveBeenCalledExactlyOnceWith(false));
   });
 
   it("warns about a read-only launch location and prevents manual update checks", async () => {
     // Match the navigation suite: load lazy modules before timing UI interactions.
-    await Promise.all([import("../pages/SkillsPage"), import("../pages/SettingsPage")]);
+    await Promise.all([import("../pages/LaunchPage"), import("../pages/SkillsPage"), import("../pages/SettingsPage")]);
     const runtimeWarning = "请先退出应用，将 Agent Manager 拖到应用程序后再打开。";
     setSettingsClient({ get: async () => ({ ...settings, updaterConfigured: true, runtimeWarning }), save: async () => settings });
     renderWithEngine(<App />, {
@@ -118,7 +118,7 @@ describe("SettingsPage", () => {
       "skills:status": makeEnvelope({ domain: "skills", elements: [] }),
     });
     expect(await screen.findByRole("alert")).toHaveTextContent(runtimeWarning);
-    await screen.findByRole("heading", { name: /^技能$/ });
+    await screen.findByRole("heading", { name: "启动配置" });
     await userEvent.click(await screen.findByRole("button", { name: "设置" }));
     expect(await screen.findByRole("button", { name: "检查更新" })).toBeDisabled();
     expect(check).not.toHaveBeenCalled();

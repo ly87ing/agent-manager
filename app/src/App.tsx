@@ -1,4 +1,4 @@
-import { Bot, Library, Package, ScrollText, Server, Settings, Sparkles } from "lucide-react";
+import { Bot, Library, Package, Rocket, ScrollText, Server, Settings, Sparkles } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
@@ -11,6 +11,7 @@ import { t, useLanguage  } from "./lib/i18n";
 const McpPage = lazy(() => import("./pages/McpPage"));
 const RulesPage = lazy(() => import("./pages/RulesPage"));
 const RunsPage = lazy(() => import("./pages/RunsPage"));
+const LaunchPage = lazy(() => import("./pages/LaunchPage"));
 const SkillsPage = lazy(() => import("./pages/SkillsPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SourcesPage = lazy(() => import("./pages/SourcesPage"));
@@ -19,6 +20,7 @@ const AgentsPage = lazy(() => import("./pages/AgentsPage"));
 
 // Keep resource queries in their pages; navigation does not collect global status.
 const NAV: NavItem[] = [
+  { key: "launch", get label() { return t("启动"); }, icon: Rocket },
   { key: "skills", get label() { return t("技能"); }, icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
   { key: "rules", get label() { return t("规则"); }, icon: ScrollText },
@@ -47,7 +49,7 @@ export default function App() {
   useLanguage();
   // 预加载本机偏好，确保首次打开任意预览时已有默认演练值。
   const settings = useSettings();
-  const [activePage, setActivePage] = useState<string>("skills");
+  const [activePage, setActivePage] = useState<string>("launch");
   const [selectedSkillAgent, setSelectedSkillAgent] = useState<string | null>(null);
   /** 「skills:<名称>」跳转带进来的技能搜索词：直接定位到那一行。 */
   const [skillSearch, setSkillSearch] = useState<string | null>(null);
@@ -106,6 +108,10 @@ export default function App() {
       setActivePage("skills");
       return;
     }
+    if (page === "settings:launch") {
+      setActivePage("launch");
+      return;
+    }
     if (page.startsWith("skills:")) {
       setSelectedSkillAgent(null);
       setSkillSearch(page.slice("skills:".length));
@@ -157,6 +163,7 @@ export default function App() {
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
       <Suspense fallback={<PageLoading text={t("正在打开页面…")} />}>
         <div key={`${activePage}:${activePage === "sources" ? sourceFocus ?? "" : activePage === "mcp" ? mcpSearch ?? "" : activePage === "programs" ? programFocus ?? "" : ""}`} className="animate-page-in">
+          {activePage === "launch" && <LaunchPage />}
           {activePage === "programs" && <ProgramsPage focus={programFocus} onOpen={handleNavigate} />}
           {activePage === "agents" && <AgentsPage />}
           {activePage === "skills" && (

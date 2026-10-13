@@ -5,12 +5,13 @@ This directory contains the Tauri 2 app. The React UI calls `engine-rs` through 
 Current scope: [the extension boundary](../docs/EXTENSIONS-ONLY.md). Skills, MCP,
 Rules, Sources, dependency programs and read-only assistant targets remain. The
 independent [Launch configurations](../docs/subsystems/launch-configurations.md)
-tool is available under Settings for saving recipes with generic environment
+tool is the first top-level navigation item and the default opening page for
+saving recipes with generic environment
 variables and literal arguments, copying complete commands or definitions, and
 direct explicit graphical application launches. It does not write shell
-configuration. The app exits on
-window close, loads resource queries on demand, and has no quota/session collector,
-tray webview, notifications, automatic update check, or OS-login enabling.
+configuration. The app exits on window close, can register itself to open at OS
+login after an explicit Settings action, loads resource queries on demand, and has
+no quota/session collector, tray webview, notifications, or automatic update check.
 
 The following records describe earlier implementation milestones. For the current product model, active configuration is authoritative as specified in [the multi-account design](../docs/MULTI-ACCOUNT-DESIGN.md) and [GUI redesign](../docs/GUI-REDESIGN.md).
 

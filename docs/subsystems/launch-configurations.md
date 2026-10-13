@@ -14,6 +14,12 @@ inactive application data. Only the recipe is stored; complete commands are
 rendered from it when read. Saving does not require the target to be installed,
 inspect or change shell files, or start a process.
 
+Launch is the first top-level navigation item and the default desktop opening
+page. It initially shows only saved entries, so common graphical applications can
+be started immediately and terminal commands can be copied without opening an
+editor or Settings. New configuration and Open configuration explicitly reveal
+the editor. The retained Settings entry routes to this same top-level page.
+
 ## Runtime path
 
 `launch:build --spec <JSON>` returns each complete launch command and definition.

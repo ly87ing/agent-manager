@@ -28,14 +28,14 @@ function routes() {
 
 describe("全局快捷键", () => {
   beforeAll(async () => {
-    await Promise.all([import("../pages/SkillsPage"), import("../pages/SettingsPage"), import("../pages/McpPage")]);
+    await Promise.all([import("../pages/LaunchPage"), import("../pages/SkillsPage"), import("../pages/SettingsPage"), import("../pages/McpPage")]);
   });
   it("Cmd/Ctrl+, 跳到设置页", async () => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     renderWithEngine(<App />, routes());
 
     const nav = await screen.findByRole("navigation");
-    expect(await screen.findByRole("heading", { name: "技能" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "启动配置" })).toBeInTheDocument();
 
     await userEvent.keyboard("{Meta>},{/Meta}");
     expect(within(nav).getByRole("button", { name: "设置" })).toHaveAttribute("aria-current", "page");
