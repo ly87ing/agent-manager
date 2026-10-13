@@ -1276,6 +1276,9 @@ with 12 test threads, and all 466 engine tests under default parallel execution.
 Tauri passed 27 tests, frontend passed 610 tests, and the production frontend
 build passed. Evidence was collected from actual native fixture processes and
 their readiness, parent-exit and delayed-write markers. Native Windows checks
-of this correction are pending CI; interactive Windows/arm64 macOS desktop and
+passed at `f67ed1a`, including all 10 Windows capture cases read back from the
+job log. All seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38336759194)
+and both [regular CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38336759120)
+passed for that revision. Interactive Windows/arm64 macOS desktop and
 automatic-update acceptance remain open. No real account files were changed,
 and no Release or installer was published.
