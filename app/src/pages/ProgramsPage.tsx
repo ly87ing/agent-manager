@@ -144,6 +144,15 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
         }
         break;
     }
+    const missingRunner = program.problems.some((problem) => problem.code === "runner-missing");
+    const unknownInstall = program.problems.some((problem) => problem.code === "missing-no-install");
+    const dependent = program.dependents[0];
+    if (missingRunner && onOpen) {
+      const server = program.runners[0]?.server ?? program.dependents.find((item) => item.kind === "mcp")?.name;
+      if (server) primary = { label: t("检查 MCP 配置"), testId: `program-check-runner-${program.program}`, run: () => onOpen(`mcp:${server}`) };
+    } else if (unknownInstall && dependent && onOpen) {
+      primary = { label: t("检查依赖来源"), testId: `program-check-source-${program.program}`, run: () => onOpen(`${dependent.kind === "skill" ? "skills" : "mcp"}:${dependent.name}`) };
+    }
     for (const [key, label] of [["install", t("安装命令")], ["upgrade", t("升级命令")], ["uninstall", t("卸载命令")]] as const) {
       const command = program.commands[key];
       if (command && program.mode !== "runner") menu.push({ label: t("复制{0}", label), testId: `program-copy-${key}-${program.program}`, onSelect: () => void copy(command, label) });
@@ -237,6 +246,12 @@ export default function ProgramsPage({ focus, onOpen }: { focus?: string | null;
                         <StateBadge key={badge.text} state={badge.state}>{badge.text}</StateBadge>
                       ))}
                     </div>
+                    {program.problems.filter((problem) => problem.code === "multiple" && problem.paths?.length).map((problem) => (
+                      <details key={problem.bin} className="text-xs text-muted-foreground">
+                        <summary className="w-fit cursor-pointer hover:text-foreground">{t("查看 {0} 的位置", problem.bin)}</summary>
+                        <ul className="mt-1 space-y-1 font-mono">{problem.paths!.map((path) => <li key={path} className="break-all">{path}</li>)}</ul>
+                      </details>
+                    ))}
                   </div>
                   <div className="flex items-center justify-end gap-1">
                     {primary && (

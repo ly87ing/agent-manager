@@ -112,6 +112,27 @@ function routes(): Record<string, Envelope | ((args: string[]) => Promise<Envelo
 }
 
 describe("程序页：谁需要、装在哪、什么版本；动作先看计划，也能自己执行", () => {
+  it("未知安装方式和缺启动器直达依赖配置；多份命令可查看完整位置，不猜测安装", async () => {
+    const contents = data();
+    contents.elements = [
+      program({ program: "bin:helper", kind: "bin", name: "helper", mode: "missing", problems: [{ code: "missing-no-install", bins: ["helper"] }], dependents: [{ kind: "skill", name: "helper-skill", agents: ["codex"], source: "declared", bins: ["helper"], any: false }] }),
+      program({ program: "git:example.com/mcp/missing", kind: "git", name: "missing", mode: "runner", runners: [{ server: "missing-server", agent: "codex", runner: "uvx", version: "main", pinned: false }], problems: [{ code: "runner-missing", bin: "uvx" }], dependents: [{ kind: "mcp", name: "missing-server", agents: ["codex"], source: "mcp", bins: [], any: false }] }),
+      program({ program: "bin:duplicate", kind: "bin", name: "duplicate", mode: "observed", problems: [{ code: "multiple", bin: "duplicate", paths: ["/isolated/a/duplicate", "/isolated/b/duplicate"] }] }),
+    ];
+    const onOpen = vi.fn();
+    const { calls } = renderWithEngine(<ProgramsPage onOpen={onOpen} />, { ...routes(), "programs:status": makeEnvelope(contents) });
+    await userEvent.click(await screen.findByTestId("program-check-source-bin:helper"));
+    expect(onOpen).toHaveBeenLastCalledWith("skills:helper-skill");
+    await userEvent.click(screen.getByTestId("program-check-runner-git:example.com/mcp/missing"));
+    expect(onOpen).toHaveBeenLastCalledWith("mcp:missing-server");
+    expect(screen.queryByTestId("program-pin-git:example.com/mcp/missing")).toBeNull();
+    const duplicate = screen.getByTestId("program-row-bin:duplicate");
+    await userEvent.click(within(duplicate).getByText("查看 duplicate 的位置"));
+    expect(duplicate).toHaveTextContent("/isolated/a/duplicate");
+    expect(duplicate).toHaveTextContent("/isolated/b/duplicate");
+    expect(calls.some((call) => call.command === "programs:preview" || call.command === "programs:apply" || call.command === "mcp:apply")).toBe(false);
+  });
+
   it.each(["delegated", "managed"] as const)("%s 仅在确认有新版本时提供升级入口", async (mode) => {
     const states = [
       { state: "current", checked_at: "2026-10-08T00:00:00Z", label: "已是最新" },
