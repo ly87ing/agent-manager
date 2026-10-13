@@ -386,6 +386,7 @@ export default function SkillsPage({
             const name = collName(collection);
             const spec = collection.spec as SkillCollectionSpec;
             const observed = collection.observed as SkillCollectionObserved;
+            const missingDefinition = observed.discovery_error?.category === "missing-definition";
             const enabled = (collection.policy as { enabled?: boolean }).enabled !== false;
             const inboxCount = observed.discovery_inbox?.length ?? 0;
             const rows = skillsOf(collection);
@@ -415,10 +416,10 @@ export default function SkillsPage({
                     </span>
                   )}
                   <span className={cn("!shrink min-w-0 w-full break-words [overflow-wrap:anywhere] font-mono text-xs text-muted-foreground", !open && "hidden")} title={spec.source_path ?? spec.url ?? undefined}>
-                    {spec.source_path ?? spec.url ?? "（未填来源）"}
+                    {spec.source_path ?? spec.url ?? (missingDefinition ? "来源定义缺失" : "（未填来源）")}
                   </span>
                   {!enabled && <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">已停用</span>}
-                  {!observed.repo_cached && (
+                  {!observed.repo_cached && !missingDefinition && (
                     <button type="button" data-testid={`collection-uncached-${name}`} onClick={() => onOpenSource?.(name)} title="到来源页处理" className="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning hover:underline">
                       {spec.source_path ? "本机目录不存在" : "尚未下载"}
                     </button>
@@ -460,7 +461,7 @@ export default function SkillsPage({
                   <div className={TRAILING} />
                 </header>
                 {observed.discovery_error && (
-                  <p data-testid={`discovery-error-${name}`} className="bg-warning/10 px-4 py-1.5 text-xs text-warning">
+                  <p data-testid={`discovery-error-${name}`} className="break-all bg-warning/10 px-4 py-1.5 text-xs text-warning">
                     {observed.discovery_error.message ?? "技能发现失败"}
                   </p>
                 )}
@@ -487,7 +488,7 @@ export default function SkillsPage({
                           onSelect: () => handleSkillAction(skill, agent, item.action, cell),
                         })),
                       ),
-                      ...(summary.inbox
+                      ...(summary.inbox || missingDefinition
                         ? []
                         : [{ label: "改成我的版本…", testId: `fork-${skill.id}`, onSelect: () => setForking(skill) }]),
                     ];

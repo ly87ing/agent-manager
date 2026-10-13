@@ -37,7 +37,7 @@ function chipOf(cell: SkillAgentCell): { tone: CellTone; hint: string; primary: 
   if (cell.state === "extra-link") {
     return {
       tone: "warn",
-      hint: "技能目录里有一条本工具以外的链接，点击纳入管理",
+      hint: cell.blocked_reason ?? "技能目录里有一条本工具以外的链接，点击纳入管理",
       primary: has("add") ? { action: "add", label: "纳入管理" } : null,
       secondary: has("remove") ? [{ action: "remove", label: "取消这条外部链接" }] : [],
     };

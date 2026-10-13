@@ -27,6 +27,25 @@ async function clickAction(testId: string) {
   throw new Error(`找不到动作 ${testId}`);
 }
 
+it("历史孤立来源显示缺失原因，不提示重新下载或执行更新", async () => {
+  const routes = skillsRoutes();
+  const data = routes["skills:status"].data as { elements: ReturnType<typeof makeElement>[] };
+  const collection = data.elements.find(e => e.id === "skill:agent-skills")!;
+  collection.spec = {};
+  collection.policy = { enabled: false };
+  Object.assign(collection.observed, { repo_cached: false, discovery_error: { category: "missing-definition", message: "来源定义已丢失，仅可移除已有分配" }, actions: ["remove"] });
+  const alpha = data.elements.find(e => e.id === "skill:agent-skills/alpha")!;
+  alpha.observed = { agents: { "claude-code": { state: "extra-link", assigned: true, enabled: true, managed: false, actions: ["remove"], blocked_reason: "来源定义已丢失，仅可移除已有分配" } } };
+  renderWithEngine(<SkillsPage />, routes);
+  expect(await screen.findByTestId("discovery-error-agent-skills")).toHaveTextContent("来源定义已丢失");
+  expect(screen.getByTestId("collection-card-agent-skills")).toHaveTextContent("来源定义缺失");
+  expect(screen.queryByTestId("collection-uncached-agent-skills")).toBeNull();
+  await expandAll();
+  await userEvent.click(within(screen.getByTestId("skill-row-skill:agent-skills/alpha")).getByRole("button", { name: "alpha 的更多操作" }));
+  expect(screen.queryByTestId("fork-skill:agent-skills/alpha")).toBeNull();
+  expect(screen.getByTestId("action-remove-skill:agent-skills/alpha-claude-code")).toBeVisible();
+});
+
 function skillsRoutes() {
   return {
     "skills:status": makeEnvelope(

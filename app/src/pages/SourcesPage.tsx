@@ -6,6 +6,7 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { ActionMenu } from "../components/AccountGrid";
 import { COL_NARROW, DataTable, PILL, ROW } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
+import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import { RemoveCollectionDialog } from "../components/RemoveCollectionDialog";
 import { AddSourceDialog, RemoveSourceDialog, useRuleSources, type UserSource } from "../components/RuleSources";
@@ -109,6 +110,13 @@ export default function SourcesPage({
 
   if (skills.isPending) return <PageLoading />;
   if (skills.isError) return <PageError title="来源读取失败" error={skills.error} />;
+  if (!skills.data.ok) return <ErrorPanel title="来源读取失败" errors={skills.data.errors} className="break-all" />;
+  if (policy.isPending) return <PageLoading />;
+  if (policy.isError) return <PageError title="来源定义读取失败" error={policy.error} />;
+  if (!policy.data.ok) return <ErrorPanel title="来源定义读取失败" errors={policy.data.errors} className="break-all" />;
+  if (rules.isPending) return <PageLoading />;
+  if (rules.isError) return <PageError title="规则内容读取失败" error={rules.error} />;
+  if (!rules.data.ok) return <ErrorPanel title="规则内容读取失败" errors={rules.data.errors} className="break-all" />;
 
   const skillElements = elements.filter((element) => !isCollection(element));
   const recommendations = skills.data.ok ? skills.data.data.recommendations ?? [] : [];
@@ -384,7 +392,7 @@ export default function SourcesPage({
                       )}
                     </div>
                     <div className="break-all font-mono text-xs text-muted-foreground">
-                      {spec.source_path ? `本机目录 · ${spec.source_path}` : `git · ${spec.url ?? ""}`}
+                      {spec.source_path ? `本机目录 · ${spec.source_path}` : spec.url ? `git · ${spec.url}` : "来源定义缺失"}
                     </div>
                     {(observed.discovery_error || observed.version?.track_error || observed.blocked_reason) && (
                       <div data-testid={`source-problem-${name}`} className="break-words text-xs text-warning">
@@ -414,7 +422,7 @@ export default function SourcesPage({
                               { label: "复制分享链接", testId: `source-share-${name}`, onSelect: () => void share(name, spec) },
                             ]
                           : []),
-                        { label: "编辑来源", testId: `source-edit-${name}`, onSelect: () => setEditing(collection) },
+                        ...(spec.source_path || spec.url ? [{ label: "编辑来源", testId: `source-edit-${name}`, onSelect: () => setEditing(collection) }] : []),
                         ...(actions.includes(enabled ? "disable" : "enable")
                           ? [
                               {

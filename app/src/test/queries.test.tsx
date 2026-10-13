@@ -2,10 +2,21 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { setEngineClient } from "../lib/engine";
-import { createQueryClient, useEngineQuery } from "../lib/queries";
+import { createQueryClient, engineKeys, invalidateEngineQueries, useEngineQuery } from "../lib/queries";
 import { makeEnvelope } from "./fixtures";
 
 describe("useEngineQuery 请求缓存键", () => {
+  it("MCP 写入使程序依赖列表过期，同时保留不相关的规则缓存", async () => {
+    const client = createQueryClient({ retry: false });
+    const programs = engineKeys.request("programs:status");
+    const rules = engineKeys.request("rules:status");
+    client.setQueryData(programs, makeEnvelope({ elements: [] }));
+    client.setQueryData(rules, makeEnvelope({ elements: [] }));
+    await invalidateEngineQueries(client, "mcp:apply");
+    expect(client.getQueryState(programs)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(rules)?.isInvalidated).toBe(false);
+    client.clear();
+  });
   it("同一 QueryClient 下同命令不同 args 各自真实调用并保留各自结果", async () => {
     const calls: { command: string; args: string[] }[] = [];
     setEngineClient({

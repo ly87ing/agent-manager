@@ -35,6 +35,23 @@ function routes(): Record<string, Envelope | ((args: string[]) => Promise<Envelo
 }
 
 describe("来源页", () => {
+  it.each(["skills:status", "rules:status", "policy:get"])("%s 返回失败时展示原因，不伪装成空来源且不提供写操作", async (command) => {
+    const r = routes();
+    r[command] = makeEnvelope({}, { ok: false, errors: [{ code: "SOURCE_READ_FAILED", element: null, message: "来源数据暂不可读" }] });
+    const { calls } = renderWithEngine(<SourcesPage />, r);
+    expect(await screen.findByRole("alert")).toHaveTextContent("来源数据暂不可读");
+    expect(screen.queryByTestId("sources-empty")).toBeNull();
+    expect(screen.queryByTestId("source-add-collection")).toBeNull();
+    expect(calls.some(call => ["skills:apply", "policy:set"].includes(call.command))).toBe(false);
+  });
+
+  it.each(["skills:status", "rules:status", "policy:get"])("%s 调用异常时显示错误且不提供写操作", async (command) => {
+    const r: Record<string, Envelope | ((args: string[]) => Promise<Envelope>)> = routes();
+    r[command] = async () => { throw new Error("来源查询通道失败"); };
+    renderWithEngine(<SourcesPage />, r);
+    expect(await screen.findByRole("alert")).toHaveTextContent("来源查询通道失败");
+    expect(screen.queryByTestId("source-add-collection")).toBeNull();
+  });
   it("技能集合与规则来源在一张表里，写明提供什么和状态；每行一个主操作，其余在「⋯」里", async () => {
     renderWithEngine(<SourcesPage />, routes());
     const git = await screen.findByTestId("source-row-agent-skills");

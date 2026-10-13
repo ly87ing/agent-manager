@@ -16,6 +16,7 @@ async function menuItem(testId: string) {
 
 function skillsRoutes() {
   return {
+    "rules:status": makeEnvelope({ domain: "rules", elements: [], source_rules: [] }, { command: "rules.status" }),
     "skills:status": makeEnvelope(
       {
         domain: "skills",
@@ -316,6 +317,45 @@ describe("来源页：添加、编辑、更新、移除", () => {
     expect(applies[0]).toEqual(["--only", "skill:agent-skills", "--action", "update"]);
     expect(applies[1]).toEqual(["--only", "skill:agent-skills/alpha", "--action", "update", "--agent", "claude-code"]);
     expect(calls.some((call) => call.command === "policy:set")).toBe(false);
+  });
+
+  it.each(["envelope", "bridge"])("全部更新：更新后状态读取失败（%s）明确报错，不报告技能已更新", async (failure) => {
+    const r = skillsRoutes();
+    const { calls } = renderWithEngine(<SourcesPage />, {
+      ...r,
+      "skills:status": async (args) => {
+        if (args.includes("--collections-only")) return r["skills:status"];
+        if (failure === "bridge") throw new Error("无法读取新状态");
+        return makeEnvelope({}, { ok: false, errors: [{ code: "STATUS_FAILED", element: null, message: "无法读取新状态" }] });
+      },
+      "system:refresh-upstream": makeEnvelope({}),
+    });
+    await userEvent.click(await screen.findByTestId("sources-update-all"));
+    expect(await screen.findByText(/无法读取新状态/)).toBeVisible();
+    expect(screen.queryByText(/各账号的技能都已是最新|处技能换到新版本/)).toBeNull();
+    expect(calls.filter(call => call.command === "skills:apply")).toHaveLength(1);
+    await waitFor(() => expect(screen.getByTestId("sources-update-all")).toBeEnabled());
+  });
+
+  it("全部更新：部署完成之前不报告成功，部分失败显示实际结果并保留失败记录", async () => {
+    const r = skillsRoutes();
+    const status = r["skills:status"] as Envelope<{ elements: ReturnType<typeof makeElement>[] }>;
+    const alpha = status.data.elements.find(element => element.id === "skill:agent-skills/alpha")!;
+    Object.assign((alpha.observed as { agents: Record<string, Record<string, unknown>> }).agents["claude-code"], { version: "v1", available_version: "v2", actions: ["update", "disable", "remove"] });
+    let release!: (value: Envelope) => void;
+    const pending = new Promise<Envelope>(resolve => { release = resolve; });
+    const { calls } = renderWithEngine(<SourcesPage />, {
+      ...r,
+      "system:refresh-upstream": makeEnvelope({}),
+      "skills:apply": async args => args.includes("--agent") ? pending : makeEnvelope(makeApplyResult({ domain: "skills" })),
+    });
+    await userEvent.click(await screen.findByTestId("sources-update-all"));
+    await waitFor(() => expect(calls.filter(call => call.command === "skills:apply")).toHaveLength(2));
+    expect(screen.queryByText(/技能部署：|处技能换到新版本|各账号的技能都已是最新/)).toBeNull();
+    expect(screen.getByTestId("sources-update-all")).toBeDisabled();
+    release(makeEnvelope({}, { ok: false, errors: [{ code: "DEPLOY_FAILED", element: null, message: "部署被拒绝" }] }));
+    expect(await screen.findByText("来源更新：成功 1，失败 0；技能部署：成功 0，失败 1（详见任务记录）")).toBeVisible();
+    expect(screen.getByText(/部署被拒绝/)).toBeVisible();
   });
 
   it("移除集合：点击先打开 ConfirmModal，取消时零 apply/零 policy:set", async () => {

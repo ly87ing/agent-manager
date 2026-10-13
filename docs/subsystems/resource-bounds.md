@@ -51,6 +51,13 @@ requires the action to remain available. External takeover is not replayed.
 Completed groups do not persist across application restarts; individual audit
 records do. A partial source application must not report full success.
 
+Source updates read fresh skill status before deployment and report completed
+row counts only after the batch returns. Failed source fetches are excluded from
+deployment; failed status reads and refused batches report an incomplete result.
+Sources shows query and envelope failures instead of an empty inventory, and
+disables editing until its source, rule and definition queries succeed.
+MCP writes invalidate program dependency status as well as MCP inventory.
+
 Account and controlled-launch operations are retired. Extension selectors and
 Assistants use `resources:targets`: immutable metadata only, without loading
 secrets or invoking assistant executables. Sources uses
