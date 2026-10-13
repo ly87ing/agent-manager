@@ -10,7 +10,10 @@ use rusqlite::TransactionBehavior;
 use serde_json::{json, Map, Value};
 use std::path::Path;
 
-use super::paths::{collection_source_root, expand_home, personal_source_path, resolve_loose};
+use super::paths::{
+    collection_source_root, expand_home, personal_source_path, resolve_loose,
+    validate_path_identifier,
+};
 use super::persistence::load_bindings_readonly;
 use super::snapshot::{
     copy_dir_recursive, discover_repo_skills, hash_skill_dir, verify_skill_version,
@@ -42,7 +45,14 @@ fn make_writable(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn fork(ctx: &Context, req: &Request) -> Result<Value> {
+fn destination(
+    ctx: &Context,
+    req: &Request,
+    meta: &DomainMetadata,
+) -> Result<(String, String, String, String)> {
+    if req.flag("--dry-run") {
+        bail!("skills:fork 不支持 --dry-run，未复制任何内容");
+    }
     let only = req
         .value("--only")
         .ok_or_else(|| anyhow!("skills:fork 需要 --only skill:<集合>/<技能>"))?;
@@ -50,33 +60,55 @@ pub(crate) fn fork(ctx: &Context, req: &Request) -> Result<Value> {
         .strip_prefix("skill:")
         .and_then(|rest| rest.split_once('/'))
         .ok_or_else(|| anyhow!("--only 要写成 skill:<集合>/<技能>"))?;
-    if skill.is_empty() || skill.contains('/') || skill.contains("..") || skill.starts_with('.') {
+    validate_path_identifier(coll_name, "集合名称")?;
+    validate_path_identifier(skill, "技能名")?;
+    if skill.contains("..") || skill.starts_with('.') {
         bail!("技能名不合法: {skill}");
     }
     let target = req.value("--collection").unwrap_or(DEFAULT_COLLECTION);
     if target == coll_name {
         bail!("要放进另一个集合，不能是 {coll_name} 自己");
     }
-    let meta = load_metadata(ctx)?;
-    let dest_raw = personal_source_path(ctx, &meta, target, req.value("--dest"))?;
+    let dest_raw = personal_source_path(ctx, meta, target, req.value("--dest"))?;
     let dest_root = resolve_loose(&expand_home(&dest_raw, &ctx.home_dir));
     let dest = dest_root.join(skill);
     if dest.exists() || std::fs::symlink_metadata(&dest).is_ok() {
         bail!("{} 已经存在，不覆盖；换个目录或先把它移走", dest.display());
     }
 
-    let origin = meta
+    if !meta
         .collections
         .get(coll_name)
-        .filter(|coll| !coll.deleted)
-        .ok_or_else(|| anyhow!("没有集合 {coll_name}"))?;
+        .is_some_and(|coll| !coll.deleted)
+    {
+        bail!("没有集合 {coll_name}");
+    }
+    Ok((coll_name.into(), skill.into(), target.into(), dest_raw))
+}
+
+pub(super) fn preflight(ctx: &Context, req: &Request) -> Result<()> {
+    destination(ctx, req, &load_metadata(ctx)?)?;
+    Ok(())
+}
+
+pub(crate) fn fork(ctx: &Context, req: &Request) -> Result<Value> {
+    let meta = load_metadata(ctx)?;
+    let (coll_name, skill, target, dest_raw) = destination(ctx, req, &meta)?;
+    let origin = &meta.collections[&coll_name];
+    let dest_root = resolve_loose(&expand_home(&dest_raw, &ctx.home_dir));
+    let dest = dest_root.join(&skill);
+    let real_root = crate::native_profiles::paths::resolved(&dest_root)?;
 
     // Git assignments use snapshots; local assignments follow the actual source.
     let bindings = load_bindings_readonly(ctx)?;
     let in_use = bindings
         .iter()
         .find(|((c, s, _), b)| {
-            origin.source_path.is_none() && c == coll_name && s == skill && b.assigned && b.enabled
+            origin.source_path.is_none()
+                && c == &coll_name
+                && s == &skill
+                && b.assigned
+                && b.enabled
         })
         .map(|(_, b)| b.version.clone());
     let (source, version) = match in_use {
@@ -85,7 +117,7 @@ pub(crate) fn fork(ctx: &Context, req: &Request) -> Result<Value> {
             let root = collection_source_root(ctx, origin);
             let (found, _) = discover_repo_skills(&root, &origin.raw)?;
             let path = found
-                .get(skill)
+                .get(&skill)
                 .cloned()
                 .ok_or_else(|| anyhow!("集合 {coll_name} 里没有技能 {skill}"))?;
             let version = hash_skill_dir(&path)?;
@@ -95,12 +127,21 @@ pub(crate) fn fork(ctx: &Context, req: &Request) -> Result<Value> {
 
     std::fs::create_dir_all(&dest_root)
         .with_context(|| format!("无法创建目录 {}", dest_root.display()))?;
-    copy_dir_recursive(&source, &dest)?;
+    std::fs::create_dir(&dest)
+        .with_context(|| format!("无法创建技能目录 {}（不覆盖已有目录）", dest.display()))?;
     let registered = (|| -> Result<()> {
+        copy_dir_recursive(&source, &dest)?;
         make_writable(&dest)?;
         let mut conn = store::open_write(ctx)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let mut policy = store::policy_from_connection(&tx)?;
+        // Definition writers use their own transactions; recheck the copied
+        // destination against the current policy while registration is locked.
+        let current_meta = DomainMetadata {
+            collections: super::status::load_collections(ctx, &policy)?,
+            agents: meta.agents.clone(),
+        };
+        personal_source_path(ctx, &current_meta, &target, Some(&dest_raw))?;
         let repos = policy
             .as_object_mut()
             .ok_or_else(|| anyhow!("策略必须是对象"))?
@@ -145,7 +186,19 @@ pub(crate) fn fork(ctx: &Context, req: &Request) -> Result<Value> {
     })();
     if let Err(err) = registered {
         // 登记没成功：刚复制出来的目录也撤掉，不留半截
-        let _ = std::fs::remove_dir_all(&dest);
+        let cleanup = (|| -> Result<()> {
+            crate::native_profiles::paths::validate_shell_target(ctx, &dest, true)?;
+            if crate::native_profiles::paths::resolved(&dest_root)? != real_root
+                || super::paths::is_link_entry(&dest)
+            {
+                bail!("复制目录已被外部修改，保留 {}", dest.display());
+            }
+            std::fs::remove_dir_all(&dest)?;
+            Ok(())
+        })();
+        if let Err(cleanup) = cleanup {
+            return Err(err.context(format!("复制失败后的清理未完成: {cleanup}")));
+        }
         return Err(err);
     }
     Ok(json!({

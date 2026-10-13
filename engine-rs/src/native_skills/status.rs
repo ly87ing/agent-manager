@@ -381,16 +381,17 @@ fn aggregate_skill_agents(
                         && name == skill_name
                         && target == agent_id
                         && other.assigned
-                        && other.enabled
                     {
                         if let Some(origin) = meta.collections.get(owner) {
                             let expected =
                                 expected_link_path(ctx, origin, skill_name, Some(&other.version));
-                            if actual == resolve_loose(&expected) {
+                            if origin.deleted
+                                || (other.enabled && actual == resolve_loose(&expected))
+                            {
                                 ev.state = "other-source";
                                 ev.actions.clear();
                                 ev.blocked_reason = Some(format!(
-                                    "该助手正在使用来源 {owner} 的同名技能，请在该来源行操作"
+                                    "该助手已分配来源 {owner} 的同名技能，请在该来源行操作"
                                 ));
                                 break;
                             }
@@ -404,6 +405,16 @@ fn aggregate_skill_agents(
         if source_missing && assigned {
             ev.actions = vec!["remove"];
             ev.blocked_reason = Some("来源里已没有这个技能，可以移除".to_string());
+        }
+        if coll.deleted {
+            ev.actions = if assigned { vec!["remove"] } else { vec![] };
+            ev.blocked_reason = Some("来源定义已丢失，仅可移除已有分配；外部链接需逐项确认".into());
+            if bindings.iter().any(|((other, name, target), b)| {
+                other != coll_name && name == skill_name && target == agent_id && b.assigned
+            }) {
+                ev.actions.clear();
+                ev.blocked_reason = Some("该助手有其他来源的同名技能分配，请先核对其入口".into());
+            }
         }
         let expected = expected_link_path(ctx, coll, skill_name, version.as_deref());
         verify_agent_link_state(
@@ -575,6 +586,9 @@ fn build_collection_element(
         coll_actions.push("enable".to_string());
     }
     coll_actions.push("remove".to_string());
+    if coll.deleted {
+        coll_actions = vec!["remove".to_string()];
+    }
 
     let coll_state = if !coll.enabled {
         "disabled"
@@ -607,6 +621,9 @@ fn build_collection_element(
             .get("category")
             .and_then(Value::as_str)
             .unwrap_or("discovery-failed");
+        if coll.deleted {
+            return "来源定义已丢失，请先核对并移除已有技能分配".to_string();
+        }
         format!(
             "技能发现失败（{}），集合暂按空发现处理；修复 skill_paths 后自动恢复",
             category
@@ -659,14 +676,24 @@ fn build_collection_element(
 }
 
 pub(super) fn build_status_view(ctx: &Context, collections_only: bool) -> Result<Value> {
-    let meta = load_metadata(ctx)?;
+    let mut meta = load_metadata(ctx)?;
     let bindings = load_bindings_readonly(ctx)?;
+    for ((collection, _, _), binding) in &bindings {
+        if binding.assigned && !meta.collections.contains_key(collection) {
+            meta.collections
+                .insert(collection.clone(), super::orphaned_collection(collection));
+        }
+    }
     let probes = crate::native_upstream::load_probe_cache(ctx)?;
     let bases = managed_bases(ctx, &meta.collections);
     let mut elements = Vec::new();
 
     for (coll_name, coll) in &meta.collections {
-        if coll.deleted {
+        if coll.deleted
+            && !bindings
+                .iter()
+                .any(|((c, _, _), b)| c == coll_name && b.assigned)
+        {
             continue;
         }
         // 本地来源集合的“资源库”就是登记的外部源目录本身（直链模式，无缓存与所有权标记）。
@@ -674,7 +701,16 @@ pub(super) fn build_status_view(ctx: &Context, collections_only: bool) -> Result
         let repo_cached = repo_dir.is_dir();
         let owner_marked = !is_local_source(coll) && repo_dir.join(".agent-manager-owned").exists();
 
-        let (discovered_map, _dups, discovery_error) = if repo_cached {
+        let (discovered_map, _dups, discovery_error) = if coll.deleted {
+            (
+                BTreeMap::new(),
+                BTreeSet::new(),
+                Some(json!({
+                    "category": "missing-definition", "skill_paths_item": null,
+                    "message": "来源定义已丢失，仅可移除已有分配；外部链接需逐项确认"
+                })),
+            )
+        } else if repo_cached {
             match discover_repo_skills(&repo_dir, &coll.raw) {
                 Ok((map, dups)) => (map, dups, None),
                 Err(err) => (

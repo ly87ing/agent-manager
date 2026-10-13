@@ -326,6 +326,7 @@ pub fn discover_repo_skills(
 ) -> Result<(BTreeMap<String, PathBuf>, BTreeSet<String>)> {
     let mut found = BTreeMap::new();
     let mut duplicates = BTreeSet::new();
+    let mut conflicts = BTreeSet::new();
     if !repo_dir.is_dir() {
         return Ok((found, duplicates));
     }
@@ -336,8 +337,17 @@ pub fn discover_repo_skills(
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
-            if found.contains_key(&name) {
+            if let Some(previous) = found.get(&name) {
+                if previous == search_path {
+                    continue;
+                }
                 duplicates.insert(name.clone());
+                conflicts.insert(format!(
+                    "{}: {} / {}",
+                    name,
+                    previous.display(),
+                    search_path.display()
+                ));
             } else {
                 found.insert(name, search_path.clone());
             }
@@ -367,13 +377,33 @@ pub fn discover_repo_skills(
             }
             let is_skill = path.join("SKILL.md").is_file() || def.get("skill_paths").is_some();
             if is_skill {
-                if found.contains_key(&name) {
+                if let Some(previous) = found.get(&name) {
+                    if previous == &path {
+                        continue;
+                    }
                     duplicates.insert(name.clone());
+                    conflicts.insert(format!(
+                        "{}: {} / {}",
+                        name,
+                        previous.display(),
+                        path.display()
+                    ));
                 } else {
                     found.insert(name, path);
                 }
             }
         }
+    }
+    if !duplicates.is_empty() {
+        return Err(SkillPathsError::new(
+            "duplicate-name",
+            Some(duplicates.into_iter().collect::<Vec<_>>().join(", ")),
+            format!(
+                "同一来源包含重名技能，请调整目录或 skill_paths 后再部署：{}",
+                conflicts.into_iter().collect::<Vec<_>>().join("; ")
+            ),
+        )
+        .into());
     }
     Ok((found, duplicates))
 }

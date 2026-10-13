@@ -52,21 +52,11 @@ pub fn apply(ctx: &Context, req: &Request) -> Result<Value> {
 
     let result = (|| -> Result<Value> {
         let meta = load_metadata(ctx)?;
-        let fallback_coll = CollectionDef {
-            name: target.collection.clone(),
-            url: None,
-            source_path: None,
-            skill_paths: None,
-            agents: None,
-            disabled: None,
-            enabled: false,
-            deleted: true,
-            raw: serde_json::Map::new(),
-        };
+        let fallback_coll = super::orphaned_collection(&target.collection);
         let coll = match meta.collections.get(&target.collection) {
             Some(c) => c,
             None => {
-                if target.skill.is_none() && action == "remove" {
+                if action == "remove" {
                     let bindings = load_bindings_readonly(ctx)?;
                     if bindings
                         .iter()
@@ -207,6 +197,13 @@ fn apply_single_skill(
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let bindings = load_bindings_from_conn(&tx)?;
+    if coll.deleted
+        && bindings.iter().any(|((other, name, target), b)| {
+            other != &coll.name && name == skill && target == agent && b.assigned
+        })
+    {
+        bail!("该助手有其他来源的同名技能分配，拒绝清理孤立分配的入口");
+    }
     let existing_binding = bindings.get(&(coll.name.clone(), skill.to_string(), agent.to_string()));
     let Some(source_dir) = source_dir else {
         // 来源里已经没有这个技能：连分配记录一起删掉，不留下永远找不到来源的一行
@@ -1033,6 +1030,17 @@ fn apply_coll_remove(
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let bindings = load_bindings_from_conn(&tx)?;
+    if coll.deleted
+        && bindings.iter().any(|((c, s, a), b)| {
+            c == &coll.name
+                && b.assigned
+                && bindings.iter().any(|((other, name, target), binding)| {
+                    other != c && name == s && target == a && binding.assigned
+                })
+        })
+    {
+        bail!("该助手有其他来源的同名技能分配，拒绝清理孤立分配的入口");
+    }
 
     let mut rollback_guard = RollbackGuard::new();
     for ((c, s, a), b) in &bindings {

@@ -32,6 +32,22 @@ assistant skill roots, directory aliases, ambiguous paths, and overlap with othe
 local collections. Comparisons resolve existing ancestors even when the final
 directory does not exist. Copies never overwrite an existing skill directory.
 
+`skills:fork` shares the exclusive apply lock with assignment writes and backup
+restore. It creates the skill directory exclusively and revalidates its destination
+against the current policy inside the registration transaction. Failed copying
+or registration removes the new copy only while its cleanup path remains safe.
+
+Duplicate skill names within the selected search paths block discovery and
+deployment with a `duplicate-name` diagnostic containing the conflicting paths.
+Existing assignments remain removable. Historical assignments without a source
+definition stay visible with removal-only actions; unknown local links require
+individual takeover confirmation. Real directories and another source's
+same-name assignments remain protected.
+
+Source definition edits and deletions share this lock and cannot remove or change
+the location of an assigned collection. Tracking and selection metadata can still
+be edited without changing the registered source location.
+
 Collection folders organize the source library. Assistant entries remain
 `<assistant-skills>/<skill>` links: nested deployment is not enabled without
 actual discovery acceptance for the affected assistant. Collection directories

@@ -28,6 +28,147 @@ fn request(command: &str, args: &[&str]) -> Request {
 }
 
 #[test]
+fn restoring_skills_refuses_changes_to_assigned_sources_including_disabled_skills() {
+    let (root, ctx) = temp_ctx("restore-active-sources");
+    let agents_before = store::effective_policy(&ctx).unwrap()["agents"].clone();
+    let library = root.join("library");
+    std::fs::create_dir_all(library.join("alpha")).unwrap();
+    std::fs::write(library.join("alpha/SKILL.md"), "# Alpha\n").unwrap();
+    let definition = serde_json::json!({"source_path": library}).to_string();
+    assert!(
+        execute(
+            &ctx,
+            &request(
+                "policy:set",
+                &[
+                    "--layer",
+                    "local",
+                    "--key",
+                    "skills.repositories.library",
+                    "--value",
+                    &definition
+                ]
+            )
+        )
+        .ok
+    );
+    let action = |value: &str| {
+        execute(
+            &ctx,
+            &request(
+                "skills:apply",
+                &[
+                    "--only",
+                    "skill:library/alpha",
+                    "--agent",
+                    "claude-code",
+                    "--action",
+                    value,
+                ],
+            ),
+        )
+    };
+    assert!(action("add").ok);
+    let before = execute(&ctx, &request("config:export", &[])).data;
+    for disabled in [false, true] {
+        if disabled {
+            assert!(action("disable").ok);
+        }
+        let changed_source = serde_json::json!({"source_path": root.join("elsewhere")}).to_string();
+        assert!(
+            !execute(
+                &ctx,
+                &request(
+                    "policy:set",
+                    &[
+                        "--layer",
+                        "local",
+                        "--key",
+                        "skills.repositories.library",
+                        "--value",
+                        &changed_source
+                    ]
+                )
+            )
+            .ok
+        );
+        assert!(
+            !execute(
+                &ctx,
+                &request(
+                    "policy:delete",
+                    &["--layer", "local", "--key", "skills.repositories.library"]
+                )
+            )
+            .ok
+        );
+        for replacement in [
+            serde_json::json!({}),
+            serde_json::json!({"library": {"source_path": root.join("other")}}),
+        ] {
+            let mut incoming = before.clone();
+            incoming["policy"]["skills"]["repositories"] = replacement;
+            let restored = execute(
+                &ctx,
+                &request(
+                    "config:import",
+                    &[
+                        "--modules",
+                        "skills",
+                        "--base",
+                        before["base"].as_str().unwrap(),
+                        "--value",
+                        &incoming.to_string(),
+                    ],
+                ),
+            );
+            assert!(!restored.ok);
+            assert!(format!("{:?}", restored.errors).contains("仍有技能分配"));
+            assert_eq!(
+                execute(&ctx, &request("config:export", &[])).data["base"],
+                before["base"]
+            );
+            assert_eq!(
+                ctx.home_dir.join(".claude/skills/alpha").exists(),
+                !disabled
+            );
+            assert_eq!(
+                std::fs::read_to_string(library.join("alpha/SKILL.md")).unwrap(),
+                "# Alpha\n"
+            );
+            // Restoring a different module never modifies source definitions.
+            assert!(
+                execute(
+                    &ctx,
+                    &request(
+                        "config:import",
+                        &["--modules", "rules", "--value", &incoming.to_string()]
+                    )
+                )
+                .ok
+            );
+        }
+    }
+    assert!(action("remove").ok);
+    let mut incoming = before.clone();
+    incoming["policy"]["skills"]["repositories"] = serde_json::json!({});
+    let restored = execute(
+        &ctx,
+        &request(
+            "config:import",
+            &["--modules", "skills", "--value", &incoming.to_string()],
+        ),
+    );
+    assert!(restored.ok, "{:?}", restored.errors);
+    assert_eq!(
+        store::effective_policy(&ctx).unwrap()["agents"],
+        agents_before
+    );
+    assert!(library.join("alpha/SKILL.md").is_file());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn selective_restore_preserves_other_modules_and_rejects_stale_previews() {
     let (root, ctx) = temp_ctx("selective-restore");
     let account_metadata = store::effective_policy(&ctx).unwrap()["agents"].clone();

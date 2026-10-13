@@ -282,6 +282,7 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
     crate::native_mcp::saved::validate_saved_rows(ctx, &payload.policy, &payload.mcp_saved)?;
     let _account_locks =
         crate::native_account_context::lock_policy_account_changes(ctx, &before, &payload.policy)?;
+    let _apply_lock = crate::native::acquire_apply_lock(ctx, "Config")?;
 
     let mut conn = store::open_write(ctx)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -310,6 +311,7 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
     crate::native::validate_account_policy_change(ctx, &current, &payload.policy)?;
     crate::native_mcp::saved::validate_saved_rows(ctx, &payload.policy, &payload.mcp_saved)?;
     let scans = crate::native_mcp::inventory::scan_targets_checked(ctx, &current);
+    crate::native_skills::validate_collection_restore(&tx, &current, &payload.policy)?;
     let restore_mcp = modules
         .as_ref()
         .is_none_or(|modules| modules.contains(&"mcp"));

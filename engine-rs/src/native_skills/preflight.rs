@@ -19,6 +19,9 @@ pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     if req.command.replace('.', ":") == "skills:adopt" {
         return super::adopt::preflight(ctx, req);
     }
+    if req.command.replace('.', ":") == "skills:fork" {
+        return super::fork::preflight(ctx, req);
+    }
     if req.flag("--dry-run") {
         bail!("skills:apply 已退役 --dry-run，拒绝该参数（执行前请以 skills:status 确认状态）");
     }
@@ -42,21 +45,11 @@ pub fn preflight_apply(ctx: &Context, req: &Request) -> Result<()> {
     }
     let meta = load_metadata(ctx)?;
 
-    let fallback_coll = CollectionDef {
-        name: target.collection.clone(),
-        url: None,
-        source_path: None,
-        skill_paths: None,
-        agents: None,
-        disabled: None,
-        enabled: false,
-        deleted: true,
-        raw: serde_json::Map::new(),
-    };
+    let fallback_coll = super::orphaned_collection(&target.collection);
     let coll = match meta.collections.get(&target.collection) {
         Some(c) => c,
         None => {
-            if target.skill.is_none() && action == "remove" {
+            if action == "remove" {
                 let bindings = load_bindings_readonly(ctx)?;
                 if bindings
                     .iter()
@@ -196,6 +189,13 @@ fn preflight_skill_action(
 
     let bindings = load_bindings_readonly(ctx)?;
     let existing_binding = bindings.get(&(coll.name.clone(), skill.to_string(), agent.to_string()));
+    if coll.deleted
+        && bindings.iter().any(|((other, name, target), b)| {
+            other != &coll.name && name == skill && target == agent && b.assigned
+        })
+    {
+        bail!("该助手有其他来源的同名技能分配，拒绝清理孤立分配的入口");
+    }
     preflight_verify_skill_binding(ctx, coll, action, skill, agent, existing_binding)?;
     replacement(ctx, req, coll, skill, agent, &bindings, meta)?;
     Ok(())
@@ -378,6 +378,13 @@ fn preflight_coll_action(
         "disable" | "remove" => {
             for ((c, s, a), b) in &bindings {
                 if c == &coll.name && b.assigned {
+                    if coll.deleted
+                        && bindings.iter().any(|((other, name, target), binding)| {
+                            other != c && name == s && target == a && binding.assigned
+                        })
+                    {
+                        bail!("该助手有其他来源的同名技能分配，拒绝清理孤立分配的入口");
+                    }
                     if let Some(agent_info) = meta.agents.get(a) {
                         let link_path = agent_info.skills_dir.join(s);
                         if link_path.exists() || is_link_entry(&link_path) {

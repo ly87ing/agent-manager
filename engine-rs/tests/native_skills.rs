@@ -1199,6 +1199,224 @@ fn set_collection(context: &Context, name: &str, value: &str) {
     assert!(res.ok, "{:?}", res.errors);
 }
 
+#[test]
+fn fork_obeys_the_apply_lock_and_rechecks_the_registered_destination() {
+    let (root, ctx) = temp_ctx("fork-registration-race");
+    let source = root.join("upstream/alpha");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("SKILL.md"), "# Alpha\n").unwrap();
+    set_collection(
+        &ctx,
+        "upstream",
+        &serde_json::json!({"source_path": root.join("upstream")}).to_string(),
+    );
+    let dest = root.join("personal").to_string_lossy().to_string();
+    let fork = request(
+        "skills:fork",
+        &["--only", "skill:upstream/alpha", "--dest", &dest],
+    );
+    let lock = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(ctx.data_dir.join("agent-manager.apply.lock"))
+        .unwrap();
+    lock.lock_exclusive().unwrap();
+    let blocked = execute(&ctx, &fork);
+    assert!(!blocked.ok);
+    assert!(format!("{:?}", blocked.errors).contains("拒绝并发"));
+    assert!(!root.join("personal").exists());
+    lock.unlock().unwrap();
+
+    let mut conn = store::open_write(&ctx).unwrap();
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .unwrap();
+    let worker_ctx = Context {
+        data_dir: ctx.data_dir.clone(),
+        home_dir: ctx.home_dir.clone(),
+    };
+    let worker = std::thread::spawn(move || execute(&worker_ctx, &fork));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !root.join("personal/alpha/SKILL.md").exists() {
+        assert!(
+            !worker.is_finished(),
+            "fork must reach copying before the definition changes"
+        );
+        assert!(
+            std::time::Instant::now() < deadline,
+            "fork did not copy its source"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let mut policy = store::policy_from_connection(&tx).unwrap();
+    policy["skills"]["repositories"]["my-skills"] =
+        serde_json::json!({"source_path": root.join("elsewhere")});
+    store::write_policy(&tx, &policy).unwrap();
+    tx.commit().unwrap();
+    let rejected = worker.join().unwrap();
+    assert!(!rejected.ok, "{:?}", rejected.errors);
+    assert!(format!("{:?}", rejected.errors).contains("已经指向别处"));
+    assert!(
+        !root.join("personal/alpha").exists(),
+        "failed registration must clean its own copy"
+    );
+    assert_eq!(store::effective_policy(&ctx).unwrap(), policy);
+    assert_eq!(
+        std::fs::read_to_string(source.join("SKILL.md")).unwrap(),
+        "# Alpha\n"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn duplicate_skill_names_are_visible_and_refuse_deployment_or_copying() {
+    let (root, ctx) = temp_ctx("duplicate-source-names");
+    let library = root.join("library");
+    for group in ["group-a", "group-b"] {
+        std::fs::create_dir_all(library.join(group).join("alpha")).unwrap();
+        std::fs::write(
+            library.join(group).join("alpha/SKILL.md"),
+            format!("# {group}\n"),
+        )
+        .unwrap();
+    }
+    set_collection(
+        &ctx,
+        "library",
+        &serde_json::json!({"source_path": library, "skill_paths": ["group-a", "group-b"]})
+            .to_string(),
+    );
+    let status = execute(&ctx, &request("skills:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    let collection = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "skill:library")
+        .unwrap();
+    let error = &collection["observed"]["discovery_error"];
+    assert_eq!(error["category"], "duplicate-name");
+    for group in ["group-a", "group-b"] {
+        assert!(error["message"].as_str().unwrap().contains(group));
+    }
+    let added = skill_action(&ctx, "skill:library/alpha", "add", "claude-code");
+    assert!(!added.ok);
+    assert!(format!("{:?}", added.errors).contains("重名技能"));
+    let copied = execute(
+        &ctx,
+        &request("skills:fork", &["--only", "skill:library/alpha"]),
+    );
+    assert!(!copied.ok);
+    assert!(format!("{:?}", copied.errors).contains("重名技能"));
+    assert!(!ctx.home_dir.join(".claude/skills/alpha").exists());
+    assert!(!ctx.home_dir.join("skills/my-skills").exists());
+    // Removing one search root makes the remaining source unambiguous again.
+    set_collection(
+        &ctx,
+        "library",
+        &serde_json::json!({"source_path": library, "skill_paths": ["group-b", "group-b/alpha", "group-b"]}).to_string(),
+    );
+    assert!(skill_action(&ctx, "skill:library/alpha", "add", "claude-code").ok);
+    assert_eq!(
+        std::fs::read_to_string(ctx.home_dir.join(".claude/skills/alpha/SKILL.md")).unwrap(),
+        "# group-b\n"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn orphaned_assignments_stay_visible_and_require_confirmation_for_external_links() {
+    let (root, ctx) = temp_ctx("orphaned-skills");
+    let library = root.join("library");
+    std::fs::create_dir_all(library.join("alpha")).unwrap();
+    std::fs::write(library.join("alpha/SKILL.md"), "# Alpha\n").unwrap();
+    set_collection(
+        &ctx,
+        "library",
+        &serde_json::json!({"source_path": library}).to_string(),
+    );
+    assert!(skill_action(&ctx, "skill:library/alpha", "add", "claude-code").ok);
+    assert!(
+        execute(
+            &ctx,
+            &request(
+                "skills:fork",
+                &["--only", "skill:library/alpha", "--collection", "personal"]
+            )
+        )
+        .ok
+    );
+    let mut policy = store::effective_policy(&ctx).unwrap();
+    policy["skills"]["repositories"]
+        .as_object_mut()
+        .unwrap()
+        .remove("library");
+    // Simulate a database written by a version that allowed unsafe restores.
+    store::write_policy(&store::open_write(&ctx).unwrap(), &policy).unwrap();
+    let status = execute(&ctx, &request("skills:status", &[]));
+    assert!(status.ok, "{:?}", status.errors);
+    let row = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "skill:library/alpha")
+        .unwrap();
+    let other = status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "skill:personal/alpha")
+        .unwrap();
+    assert_eq!(
+        other["observed"]["agents"]["claude-code"]["state"],
+        "other-source"
+    );
+    assert_eq!(
+        other["observed"]["agents"]["claude-code"]["actions"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        row["observed"]["agents"]["claude-code"]["actions"],
+        serde_json::json!(["remove"])
+    );
+    assert!(!skill_action(&ctx, "skill:library/alpha", "remove", "claude-code").ok);
+    assert!(ctx.home_dir.join(".claude/skills/alpha").exists());
+    let removed = execute(
+        &ctx,
+        &request(
+            "skills:apply",
+            &[
+                "--only",
+                "skill:library/alpha",
+                "--action",
+                "remove",
+                "--agent",
+                "claude-code",
+                "--allow-takeover",
+            ],
+        ),
+    );
+    assert!(removed.ok, "{:?}", removed.errors);
+    assert!(!ctx.home_dir.join(".claude/skills/alpha").exists());
+    assert_eq!(
+        std::fs::read_to_string(library.join("alpha/SKILL.md")).unwrap(),
+        "# Alpha\n"
+    );
+    assert!(
+        execute(&ctx, &request("skills:status", &[])).data["elements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["id"] != "skill:library" && e["id"] != "skill:library/alpha")
+    );
+    assert_eq!(
+        store::effective_policy(&ctx).unwrap()["agents"],
+        policy["agents"]
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
 fn collection_discovery(context: &Context, name: &str) -> (Vec<String>, serde_json::Value) {
     let status = execute(context, &request("skills:status", &[]));
     assert!(status.ok, "{:?}", status.errors);

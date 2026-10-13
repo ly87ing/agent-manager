@@ -8,6 +8,14 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Reject unsafe backup metadata before acquiring a stateful write lock.**
+- The first assigned-source restore guard acquired the apply lock immediately
+  after parsing. The existing foreign-skill-target regression caught data-directory
+  creation for a rejected account import. Account, module and payload validation
+  now precede lock acquisition; current bindings are still checked inside the
+  write transaction. Retain both no-write rejection and active-source restore cases.
+- Seen 1× (2026-10-12).
+
 **Check the actual command entry after success on each platform.**
 - Dependency unlink returned success while leaving the Windows `.cmd` entry in
   place: its plan used the extension-free inventory name instead of the same

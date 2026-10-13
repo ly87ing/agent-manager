@@ -30,6 +30,12 @@ failure leaves all definitions intact. Existing actual assistant files and other
 modules remain unchanged. No automatic backup files are created; users can
 explicitly export the current definitions before restoring.
 
+Restore takes the same exclusive apply lock as skill writes. In its database
+transaction it refuses removing or replacing a source that still has assigned
+skills, including disabled assignments. Remove those assignments and preview
+again before restoring the changed source. Unselected skill definitions remain
+untouched. This prevents definitions from disappearing underneath active links.
+
 ## Verification
 
 ```sh

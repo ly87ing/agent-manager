@@ -87,6 +87,61 @@ pub(crate) use discover::skills_in_use;
 // 供集成测试使用的最小公开发行接口
 pub use snapshot::hash_skill_dir;
 
+pub(crate) fn validate_collection_restore(
+    conn: &rusqlite::Connection,
+    before: &Value,
+    after: &Value,
+) -> Result<()> {
+    let before = before.pointer("/skills/repositories");
+    let after = after.pointer("/skills/repositories");
+    for ((collection, _, _), binding) in persistence::load_bindings_from_conn(conn)? {
+        if binding.assigned
+            && before.and_then(|v| v.get(&collection)) != after.and_then(|v| v.get(&collection))
+        {
+            bail!("来源 {collection} 仍有技能分配，不能通过恢复移除或替换；请先移除该来源的分配，再重新预览备份");
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_collection_locations(
+    conn: &rusqlite::Connection,
+    before: &Value,
+    after: &Value,
+) -> Result<()> {
+    for ((collection, _, _), binding) in persistence::load_bindings_from_conn(conn)? {
+        let old = before
+            .pointer("/skills/repositories")
+            .and_then(|v| v.get(&collection));
+        let new = after
+            .pointer("/skills/repositories")
+            .and_then(|v| v.get(&collection));
+        if binding.assigned
+            && (old.is_some() != new.is_some()
+                || ["source_path", "url", "_delete"]
+                    .iter()
+                    .any(|key| old.and_then(|v| v.get(key)) != new.and_then(|v| v.get(key))))
+        {
+            bail!("来源 {collection} 仍有技能分配，不能移除或更换来源目录；请先移除该来源的分配");
+        }
+    }
+    Ok(())
+}
+
+fn orphaned_collection(name: &str) -> CollectionDef {
+    CollectionDef {
+        name: name.into(),
+        url: None,
+        source_path: None,
+        skill_paths: None,
+        agents: None,
+        disabled: None,
+        enabled: false,
+        deleted: true,
+        raw: Map::new(),
+    }
+}
+
 /// 旧库固化、从未生效的内置集合名：读路径按推荐处理（不作为集合、不参与上游检查）。
 /// 零写；集合元数据与 native_upstream 的探测范围共用这一判定。
 pub(crate) fn hidden_builtin_collections(

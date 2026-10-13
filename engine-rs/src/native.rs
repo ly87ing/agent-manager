@@ -105,7 +105,7 @@ fn lock_from_env() -> Lock {
     }
 }
 
-struct ApplyLock {
+pub(crate) struct ApplyLock {
     _file: std::fs::File,
 }
 
@@ -116,7 +116,7 @@ struct ApplyLock {
 /// 真正在执行的写动作远比这长，照样拒绝。
 const APPLY_LOCK_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
 
-fn acquire_apply_lock(ctx: &Context, domain: &str) -> Result<ApplyLock> {
+pub(crate) fn acquire_apply_lock(ctx: &Context, domain: &str) -> Result<ApplyLock> {
     std::fs::create_dir_all(&ctx.data_dir)?;
     let path = ctx.data_dir.join("agent-manager.apply.lock");
     let file = OpenOptions::new()
@@ -228,7 +228,7 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     // 纳入管理会移动账号目录里的内容并建链接：与 skills:apply 同样取排他锁
     let is_skill_apply = matches!(
         request.command.replace('.', ":").as_str(),
-        "skills:apply" | "skills:adopt"
+        "skills:apply" | "skills:adopt" | "skills:fork"
     );
     let is_mcp_apply = request.command.replace('.', ":") == "mcp:apply";
     let is_rule_apply = request.command.replace('.', ":") == "rules:apply";
@@ -1348,6 +1348,13 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
         }
     }
 
+    // Before the first database exists there can be no assigned source to race.
+    let _skill_lock =
+        if segments.first().copied() == Some("skills") && store::db_path(ctx).is_file() {
+            Some(acquire_apply_lock(ctx, "Skills definition").map_err(DispatchError::from)?)
+        } else {
+            None
+        };
     let before_policy = store::effective_policy(ctx).map_err(DispatchError::from)?;
     let mut candidate_policy = before_policy.clone();
     if let Some(expected) = &expected_definition {
@@ -1390,6 +1397,8 @@ fn policy_set(ctx: &Context, request: &Request) -> DispatchResult {
     validate_mcp_policy_candidate(key, &value, &policy)?;
     validate_account_policy_change(ctx, &before, &policy)
         .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}")))?;
+    crate::native_skills::validate_collection_locations(&tx, &before, &policy)
+        .map_err(DispatchError::from)?;
     reserve_changed_account_references(ctx, &tx, &before, &policy)
         .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}")))?;
     store::write_policy(&tx, &policy).map_err(DispatchError::from)?;
@@ -1433,6 +1442,12 @@ fn policy_delete(ctx: &Context, request: &Request) -> DispatchResult {
         .value("--key")
         .ok_or_else(|| DispatchError::new("USAGE_ERROR", "policy:delete 需要 --key <dot.path>"))?;
     let segments = validate_key(key)?;
+    let _skill_lock =
+        if segments.first().copied() == Some("skills") && store::db_path(ctx).is_file() {
+            Some(acquire_apply_lock(ctx, "Skills definition").map_err(DispatchError::from)?)
+        } else {
+            None
+        };
     let before = store::effective_policy(ctx).map_err(DispatchError::from)?;
     let mut after = before.clone();
     delete_dot_path(&mut after, &segments)?;
@@ -1462,6 +1477,8 @@ fn policy_delete(ctx: &Context, request: &Request) -> DispatchResult {
         ));
     }
     delete_dot_path(&mut policy, &segments)?;
+    crate::native_skills::validate_collection_locations(&tx, &before, &policy)
+        .map_err(DispatchError::from)?;
     reserve_changed_account_references(ctx, &tx, &before, &policy)
         .map_err(|err| DispatchError::new("ACCOUNT_ISOLATION_ERROR", format!("{err:#}")))?;
     store::write_policy(&tx, &policy).map_err(DispatchError::from)?;
