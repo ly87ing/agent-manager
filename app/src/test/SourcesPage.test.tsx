@@ -117,6 +117,61 @@ describe("来源页", () => {
     expect(calls.some((call) => call.command === "rules:apply" || call.command === "skills:apply")).toBe(false);
   });
 
+  it("未发现规则的来源可就地修改路径，保存后回读登记", async () => {
+    let path = "~/missing/rules";
+    const r = routes();
+    r["policy:get"] = async () => makeEnvelope(makePolicyData({ effective: { rules: { sources: { notes: { path, enabled: true } } } } }));
+    r["policy:set"] = async (args) => {
+      path = JSON.parse(args[args.indexOf("--value") + 1]) as string;
+      return makeEnvelope({});
+    };
+    const { calls } = renderWithEngine(<SourcesPage />, r);
+    const row = await screen.findByTestId("source-row-notes");
+    expect(row).toHaveTextContent("未发现规则");
+    await userEvent.click(within(row).getByTestId("source-edit-notes"));
+    const dialog = await screen.findByRole("dialog", { name: "修改规则来源路径" });
+    expect(within(dialog).getByTestId("rule-source-name")).toBeDisabled();
+    expect(within(dialog).getByTestId("rule-source-path")).toHaveValue("~/missing/rules");
+    await userEvent.clear(within(dialog).getByTestId("rule-source-path"));
+    await userEvent.type(within(dialog).getByTestId("rule-source-path"), "~/fixed/rules");
+    await userEvent.click(within(dialog).getByTestId("rule-source-save"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "修改规则来源路径" })).toBeNull());
+    expect(row).toHaveTextContent("~/fixed/rules");
+    expect(calls.find((call) => call.command === "policy:set")?.args).toEqual([
+      "--layer", "local", "--key", "rules.sources.notes.path", "--value", JSON.stringify("~/fixed/rules"),
+    ]);
+    expect(calls.some((call) => call.command === "rules:apply" || call.command === "skills:apply")).toBe(false);
+  });
+
+  it("路径写入后回读不符时保留编辑表单", async () => {
+    const r = routes();
+    r["policy:get"] = makeEnvelope(makePolicyData({ effective: { rules: { sources: { notes: { path: "~/old/rules", enabled: true } } } } }));
+    const { calls } = renderWithEngine(<SourcesPage />, r);
+    await userEvent.click(await screen.findByTestId("source-edit-notes"));
+    const dialog = await screen.findByRole("dialog", { name: "修改规则来源路径" });
+    await userEvent.clear(within(dialog).getByTestId("rule-source-path"));
+    await userEvent.type(within(dialog).getByTestId("rule-source-path"), "~/new/rules");
+    await userEvent.click(within(dialog).getByTestId("rule-source-save"));
+    await waitFor(() => expect(calls.some((call) => call.command === "policy:set")).toBe(true));
+    expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("未能确认保存结果");
+    expect(screen.getByTestId("source-row-notes")).toHaveTextContent("~/old/rules");
+  });
+
+  it("路径写入通道失败时保留编辑表单", async () => {
+    const r = routes();
+    r["policy:get"] = makeEnvelope(makePolicyData({ effective: { rules: { sources: { notes: { path: "~/old/rules", enabled: true } } } } }));
+    r["policy:set"] = async () => { throw new Error("写入通道断开"); };
+    renderWithEngine(<SourcesPage />, r);
+    await userEvent.click(await screen.findByTestId("source-edit-notes"));
+    const dialog = await screen.findByRole("dialog", { name: "修改规则来源路径" });
+    await userEvent.clear(within(dialog).getByTestId("rule-source-path"));
+    await userEvent.type(within(dialog).getByTestId("rule-source-path"), "~/new/rules");
+    await userEvent.click(within(dialog).getByTestId("rule-source-save"));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("未能确认保存结果");
+    expect(screen.getByTestId("source-row-notes")).toHaveTextContent("~/old/rules");
+  });
+
   it("移除规则来源先确认，只删登记，不改任何规则文件", async () => {
     const { calls } = renderWithEngine(<SourcesPage />, routes());
     await userEvent.click(await menuItem("source-remove-notes"));

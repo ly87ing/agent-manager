@@ -10,7 +10,7 @@ import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
 import { PageError, PageLoading } from "../components/PageState";
 import { RemoveCollectionDialog } from "../components/RemoveCollectionDialog";
-import { AddSourceDialog, RemoveSourceDialog, useRuleSources, type UserSource } from "../components/RuleSources";
+import { RuleSourceFormDialog, RemoveSourceDialog, useRuleSources, type UserSource } from "../components/RuleSources";
 import { SkillAdoptDialog } from "../components/SkillAdoptDialog";
 import { SkillCollectionFormDialog } from "../components/SkillCollectionFormDialog";
 import { SkillOtherSources } from "../components/SkillOtherSources";
@@ -75,6 +75,7 @@ export default function SourcesPage({
   const definitionOps = useDefinitionOps();
   const [adding, setAdding] = useState<"collection" | "rule" | null>(null);
   const [editing, setEditing] = useState<EngineElement | null>(null);
+  const [editingRuleSource, setEditingRuleSource] = useState<UserSource | null>(null);
   // 检查新版本进行中（任何页面或命令面板发起）：先不更新、不换版本，免得检查按更新前的版本记下「可更新」
   const checking = useCheckingUpdates();
   const CHECKING_TITLE = t("正在检查新版本，完成后再更新");
@@ -448,9 +449,13 @@ export default function SourcesPage({
                     {!source.enabled ? t("已停用") : count ? t("正常") : t("未发现规则")}
                   </span>
                   <div className={ACTIONS}>
+                    {source.enabled && count === 0 && (
+                      <button type="button" data-testid={`source-edit-${source.name}`} disabled={userSources.busy} onClick={() => setEditingRuleSource(source)} className={PILL}>{t("修改路径")}</button>
+                    )}
                     <ActionMenu
                       label={t("{0} 的更多操作", source.name)}
                       items={[
+                        ...(source.enabled && count === 0 ? [] : [{ label: t("修改路径"), testId: `source-edit-${source.name}`, disabled: userSources.busy, onSelect: () => setEditingRuleSource(source) }]),
                         {
                           label: source.enabled ? t("停用来源") : t("启用来源"),
                           testId: `source-toggle-${source.name}`,
@@ -519,13 +524,18 @@ export default function SourcesPage({
           }}
         />
       )}
-      {adding === "rule" && (
-        <AddSourceDialog
+      {(adding === "rule" || editingRuleSource) && (
+        <RuleSourceFormDialog
+          initial={editingRuleSource ?? undefined}
           taken={userSources.taken}
           busy={userSources.busy}
-          onClose={() => setAdding(null)}
+          onClose={() => { setAdding(null); setEditingRuleSource(null); }}
           onSubmit={async (name, path) => {
-            if (await userSources.add(name, path)) setAdding(null);
+            const saved = editingRuleSource
+              ? await userSources.updatePath(editingRuleSource, path)
+              : await userSources.add(name, path);
+            if (saved) { setAdding(null); setEditingRuleSource(null); }
+            return saved;
           }}
         />
       )}

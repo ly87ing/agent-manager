@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PolicyData } from "../lib/contract";
 import { useDialogFocus } from "../lib/dialogFocus";
-import { runEngine } from "../lib/engine";
+import { engineErrorMessage, runEngine } from "../lib/engine";
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import { ConfirmModal } from "./ConfirmModal";
 
@@ -43,7 +43,7 @@ export function useRuleSources() {
   const [busy, setBusy] = useState(false);
   const { sources, collections } = sourcesOf(policy.data?.ok ? policy.data.data : undefined);
 
-  const write = async (key: string, value: unknown, done: string): Promise<boolean> => {
+  const write = async (key: string, value: unknown, done: string, verify?: (data: PolicyData) => boolean): Promise<boolean> => {
     setBusy(true);
     try {
       const envelope = await runEngine("policy:set", ["--layer", "local", "--key", key, "--value", JSON.stringify(value)]);
@@ -51,9 +51,19 @@ export function useRuleSources() {
         toast.error(t("没有保存：{0}", envelope.errors[0]?.message ?? t("未知错误")));
         return false;
       }
-      toast.success(done);
+      if (verify) {
+        const fresh = await runEngine<PolicyData>("policy:get").catch(() => null);
+        if (!fresh?.ok || !verify(fresh.data)) {
+          toast.error(t("已写入，但无法确认规则来源的新路径；请重新读取后检查"));
+          return false;
+        }
+      }
       await queryClient.invalidateQueries({ queryKey: engineKeys.all });
+      toast.success(done);
       return true;
+    } catch (error) {
+      toast.error(t("没有保存：{0}", engineErrorMessage(error)));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -65,6 +75,10 @@ export function useRuleSources() {
     taken: [...sources.map((source) => source.name), ...collections],
     busy,
     add: (name: string, path: string) => write(`rules.sources.${name}`, { path, _delete: false, _replace: true }, t("已添加规则来源 {0}", name)),
+    updatePath: (source: UserSource, path: string) => write(
+      `rules.sources.${source.name}.path`, path, t("已更新规则来源 {0}", source.name),
+      (data) => sourcesOf(data).sources.some((item) => item.name === source.name && item.path === path),
+    ),
     remove: (source: UserSource) => write(`rules.sources.${source.name}`, { _delete: true }, t("已移除规则来源 {0}", source.name)),
     /** 停用 / 启用：只改开关，路径与跟随记录都不动。 */
     setEnabled: (source: UserSource, enabled: boolean) =>
@@ -97,33 +111,38 @@ export function RemoveSourceDialog({
   );
 }
 
-export function AddSourceDialog({
+export function RuleSourceFormDialog({
   taken,
   busy,
+  initial,
   onClose,
   onSubmit,
 }: {
   taken: string[];
   busy: boolean;
+  initial?: UserSource;
   onClose: () => void;
-  onSubmit: (name: string, path: string) => void;
+  onSubmit: (name: string, path: string) => Promise<boolean>;
 }) {
-  const [name, setName] = useState("");
-  const [path, setPath] = useState("");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [path, setPath] = useState(initial?.path ?? "");
+  const [saveError, setSaveError] = useState(false);
+  const editing = Boolean(initial);
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({ onEscape: onClose });
   const trimmed = path.trim();
   const error = !NAME_RE.test(name)
     ? t("名称只能用小写字母、数字和连字符")
-    : taken.includes(name)
+    : taken.includes(name) && name !== initial?.name
       ? t("{0} 已被占用（与已有来源同名）", name)
       : !/^(~\/|\/)/.test(trimmed)
         ? t("路径填绝对路径或以 ~/ 开头")
         : null;
+  const unchanged = editing && trimmed === initial?.path;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("添加规则来源")} onKeyDown={onDialogKeyDown} className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border bg-card p-5 shadow-xl">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={editing ? t("修改规则来源路径") : t("添加规则来源")} onKeyDown={onDialogKeyDown} className="max-h-[calc(100vh-2rem)] w-full max-w-md overflow-y-auto rounded-xl border bg-card p-5 shadow-xl">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold">{t("添加规则来源")}</h3>
+          <h3 className="text-base font-semibold">{editing ? t("修改规则来源路径") : t("添加规则来源")}</h3>
           <button type="button" aria-label={t("关闭")} onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-accent">
             <X className="h-4 w-4" aria-hidden />
           </button>
@@ -131,13 +150,14 @@ export function AddSourceDialog({
         <div className="mt-4 space-y-3 text-sm">
           <label className="block">
             <span className="text-xs font-medium text-muted-foreground">{t("名称")}</span>
-            <input data-testid="rule-source-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="my-rules" className="mt-1 w-full rounded border border-input bg-background px-2 py-1.5 font-mono text-xs" />
+            <input data-testid="rule-source-name" value={name} onChange={(event) => setName(event.target.value)} disabled={editing} placeholder="my-rules" className="mt-1 w-full rounded border border-input bg-background px-2 py-1.5 font-mono text-xs disabled:opacity-60" />
           </label>
           <label className="block">
             <span className="text-xs font-medium text-muted-foreground">{t("位置：一个 .md 文件，或一个目录（目录里的每个 .md 是一条规则）")}</span>
-            <input data-testid="rule-source-path" value={path} onChange={(event) => setPath(event.target.value)} placeholder={t("~/notes/CLAUDE.md 或 ~/notes/rules")} className="mt-1 w-full rounded border border-input bg-background px-2 py-1.5 font-mono text-xs" />
+            <input data-testid="rule-source-path" value={path} onChange={(event) => { setPath(event.target.value); setSaveError(false); }} placeholder={t("~/notes/CLAUDE.md 或 ~/notes/rules")} className="mt-1 w-full rounded border border-input bg-background px-2 py-1.5 font-mono text-xs" />
           </label>
           <p className="text-xs text-muted-foreground">{t("只登记位置、原地读取，文件改了这里即时看到；不会复制内容，也不会改任何助手的规则文件。")}</p>
+          {saveError && <p role="alert" className="text-xs text-destructive">{t("未能确认保存结果；请核对来源状态后重试")}</p>}
         </div>
         <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-4 flex items-center justify-end gap-2">
           {error && (name || path) && <span className="mr-auto text-xs text-destructive">{error}</span>}
@@ -145,10 +165,10 @@ export function AddSourceDialog({
           <button
             type="button"
             data-testid="rule-source-save"
-            disabled={Boolean(error) || busy}
-            onClick={() => onSubmit(name, trimmed)}
+            disabled={Boolean(error) || busy || unchanged}
+            onClick={() => void onSubmit(name, trimmed).then((saved) => { if (!saved) setSaveError(true); })}
             className="rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
-          >{t("添加")}</button>
+          >{editing ? t("保存") : t("添加")}</button>
         </div>
       </div>
     </div>
