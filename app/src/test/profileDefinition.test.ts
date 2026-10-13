@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   instancesUsingConnection,
   PROFILE_ID_RE,
-  authTerminalCommand,
   buildProfileDefinition,
   connectionToProfileInput,
   defaultConfigDir,
@@ -72,20 +71,6 @@ describe("助手实例定义", () => {
         "codex",
       ),
     ).toBe('CODEX_HOME="$HOME/.codex-work" codex');
-  });
-
-  it("认证命令只生成文本，实例命令严格指向自己的配置目录", () => {
-    expect(authTerminalCommand("claude", "claude", "login")).toBe("claude auth login");
-    expect(authTerminalCommand("codex", "codex", "logout")).toBe("codex logout");
-    expect(authTerminalCommand("claude", "claude", "login", "~/.claude-work")).toBe(
-      'CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude auth login',
-    );
-    expect(authTerminalCommand("codex", "codex", "logout", "~/.codex-work")).toBe(
-      'CODEX_HOME="$HOME/.codex-work" codex logout',
-    );
-    expect(authTerminalCommand("claude", "claude", "login", "/tmp/a'$(touch nope)")).toBe(
-      `CLAUDE_CONFIG_DIR='/tmp/a'"'"'$(touch nope)' claude auth login`,
-    );
   });
 
   it("回填既有定义", () => {

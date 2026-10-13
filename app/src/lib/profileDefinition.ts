@@ -13,17 +13,6 @@
 import type { ConnectionEntry } from "./agentDefinitionForm";
 
 export type ProfileKind = "claude" | "codex";
-export type AuthShell = "posix" | "powershell";
-
-/** The selector remains explicit because Windows Terminal can host different shells. */
-export function defaultAuthShell(platform = typeof navigator === "undefined" ? "" : navigator.platform): AuthShell {
-  return /Win/i.test(platform) ? "powershell" : "posix";
-}
-
-export function authShellLabel(shell: AuthShell): string {
-  return shell === "powershell" ? "PowerShell" : "Bash / Zsh / Git Bash";
-}
-
 export interface ProfileDraftPreview {
   path: string;
   content: string;
@@ -193,40 +182,6 @@ export function profileLaunchValue(input: ProfileFormInput, baseBin: string): st
   const extra = input.extraArgs.trim();
   if (extra) parts.push(extra);
   return parts.join(" ");
-}
-
-/**
- * 生成由用户在终端亲自执行的官方认证命令。本应用只复制文本，绝不代为启动登录或退出。
- * 实例必须带独立配置目录，避免认证写到主账号；主助手省略 configDir。
- */
-export function authTerminalCommand(
-  kind: ProfileKind,
-  bin: string,
-  action: "login" | "logout",
-  configDir?: string,
-  shell: AuthShell = "posix",
-): string {
-  if (shell === "powershell") {
-    const quote = (value: string) => `'${value.replace(/'/g, "''")}'`;
-    const command = `& ${quote(bin)} ${kind === "claude" ? "auth " : ""}${action}`;
-    if (!configDir) return command;
-    const env = `$env:${configEnvOf(kind)}`;
-    const path = configDir === "~" || configDir === "$HOME" ? "$HOME"
-      : /^(~|\$HOME)[/\\]/.test(configDir)
-        ? `(Join-Path $HOME ${quote(configDir.replace(/^(~|\$HOME)[/\\]/, ""))})`
-        : quote(configDir);
-    // A script-block scope protects the caller's variables; finally restores the
-    // process environment even when command lookup or login fails.
-    return `& { $previous = ${env}; try { ${env} = ${path}; ${command} } finally { ${env} = $previous } }`;
-  }
-  const quotedBin = /^[A-Za-z0-9_./-]+$/.test(bin) ? bin : `'${bin.replace(/'/g, `'"'"'`)}'`;
-  const command = kind === "claude" ? `${quotedBin} auth ${action}` : `${quotedBin} ${action}`;
-  if (!configDir) return command;
-  const rendered = shellConfigDir(configDir);
-  const quoted = rendered.startsWith("$HOME")
-    ? `"$HOME${rendered.slice(5).replace(/(["\\`$])/g, "\\$1")}"`
-    : `'${rendered.replace(/'/g, `'"'"'`)}'`;
-  return `${configEnvOf(kind)}=${quoted} ${command}`;
 }
 
 /**

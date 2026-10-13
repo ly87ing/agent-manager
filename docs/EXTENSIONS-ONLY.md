@@ -39,7 +39,8 @@ An old custom target without a verifiable credential identity remains read-only 
 
 Assistant and provider environment namespaces are reserved using the existing identity-variable guard, including OAuth, AWS, Azure, and Google variables. MCP entries must reference dedicated variable names outside those namespaces.
 
-Unused frontend alias editors and hooks, account runtime drafts, connection presets, and account seed/shared-setting builders are removed. Active extension target recognition and grouping remain.
+Unused frontend alias editors and hooks, account runtime drafts, connection presets, authentication command generators and shell selectors, and
+account seed/shared-setting builders are removed. Active extension target recognition and grouping remain.
 
 Account-named internal helpers that remain in the engine protect extension paths, locks, and credential ownership. Their presence does not expose account operations. Unreachable backend account implementations remain isolated behind the retired-command gate; their cleanup is separate from extension behavior changes.
 

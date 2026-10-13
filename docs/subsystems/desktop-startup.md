@@ -27,11 +27,13 @@ The native exit event stops the engine's active temporary command groups before
 Tauri terminates the process. Independent account terminal sessions continue;
 see [External commands](external-commands.md) for ownership and race handling.
 
-### Share links and authentication commands
+### Share links
 
 [`import_links.rs`](../../app/src-tauri/src/import_links.rs) keeps the deep-link plugin's initial URL batch and assigns each opening a delivery ID. The runtime listener is installed before seeding from `get_current`; a newer opening wins over that setup snapshot. [`subscribeImportLinks`](../../app/src/lib/shareLink.ts) registers its frontend listener before reading `import_links_current`, deduplicating the two delivery paths by monotonically increasing ID and ignoring stale snapshots after a newer runtime opening. Another click on the same URL gets a new ID. Disposing a subscription prevents callbacks from a delayed initial read and removes even a listener whose registration completes after disposal. Links only prefill the existing import dialog; they never apply configuration by themselves.
 
-The Accounts page explicitly chooses the shell for copied authentication commands and new-account previews. Windows defaults to PowerShell, other platforms to Bash/Zsh; Windows Terminal is not treated as a shell. Users in cmd are told to enter PowerShell first. [`authTerminalCommand`](../../app/src/lib/profileDefinition.ts) quotes paths for the selected shell. PowerShell saves and restores the account-directory environment variable in a `finally` block, including failed command lookup/login; POSIX uses a command-local environment assignment. Copying does not execute authentication.
+Account authentication command generation and its shell selector have been removed.
+The [read-only Assistants page](account-context.md) only lists immutable extension
+target metadata; generic tips do not generate or execute account commands.
 
 ## Constraints and failure behavior
 
@@ -53,10 +55,13 @@ cargo test --manifest-path app/src-tauri/Cargo.toml autostart::tests
 cargo check --manifest-path app/src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --all-targets
 cd app
 pnpm test:unit run src/test/SettingsPage.test.tsx src/test/UpdateBadge.test.tsx --maxWorkers=2
-pnpm test:unit run src/test/importLinkSubscription.test.ts src/test/authTerminalCommand.test.ts src/test/AccountsPage.test.tsx src/test/AppNavigation.test.tsx --maxWorkers=2
+pnpm test:unit run src/test/importLinkSubscription.test.ts src/test/AgentsPage.test.tsx src/test/AppNavigation.test.tsx --maxWorkers=2
 ```
 
-Share-link tests cover cold and warm openings, either snapshot/event race ordering, repeated URLs, and unmount during both asynchronous steps. Authentication tests execute disposable assistant fixtures under POSIX on Unix and Windows PowerShell on Windows in the existing frontend CI matrix; UI tests verify the selected shell reaches preview and copy actions. These tests do not replace native OS link activation or an actual official login.
+Share-link tests cover cold and warm openings, either snapshot/event race ordering,
+repeated URLs, and unmount during both asynchronous steps. Assistants tests preserve
+metadata-only navigation and failure handling. These checks do not replace native
+OS link activation.
 
 Tests distinguish real read-only system and writable development mounts, translocated paths, and writable external-volume paths. Frontend tests cover the banner and both update-check paths. Browser layout acceptance uses mock settings at 1000 and 760 px; a controlled native executable path exercises the Tauri warning response without creating an installer.
 
