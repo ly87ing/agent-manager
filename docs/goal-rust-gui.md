@@ -1320,31 +1320,32 @@ no Release, tag or installer was published. Downgrading to a pre-language binary
 requires removing only the new app preference row as described in
 [Interface language](subsystems/interface-language.md).
 
-### 2026-10-12: General launch configurations
+### 2026-10-12–13: General launch configurations
 
 Settings now offers a general launch builder independent of assistant accounts.
 Users select or enter an application, executable, arguments, time zones and
-shortcut names. Generation returns complete commands and definitions without
-writing. Applying shortcuts shows the exact file changes, then requires a
-separate confirmation and a matching file baseline. A graphical application can
-be launched once after its own confirmation. CLI commands are copied to a
-terminal for interaction. Zsh writes only `.zshrc`; Bash writes `.bashrc`;
-Windows writes one PowerShell script per shortcut. System time-zone settings are
-never changed, and each application's handling of `TZ` remains unverified until
-the application itself is checked.
+shortcut names. Recipes save in Agent Manager without generating a command,
+running a process, or changing shell configuration. Opening a saved recipe makes
+it editable. Users can copy one complete launch command, one complete POSIX alias
+or PowerShell function, or all definitions and decide where to paste them.
+`launch:status`, `launch:preview`, and `launch:apply` were removed after user
+feedback established that direct shell-file management was the wrong boundary.
+A local graphical application can still be launched once after its own separate
+confirmation. System time-zone settings are never changed, and each application's
+handling of `TZ` remains unverified until the application itself is checked.
 
-Local acceptance used 479 full engine tests, 28 Tauri tests and 631 frontend
-tests, with no failures, plus the production frontend build. An isolated compiled
-application read back `Asia/Singapore` and literal arguments, remained running
-after the CLI exited, and rejected a repeated launch. The native macOS debug
-window used a separate identifier and isolated HOME/data: the application file
-picker returned an installed bundle, the 1000 × 650 window displayed generated
-commands, cancel left `.zshrc` absent, and confirmed apply wrote exactly the two
-previewed aliases. `.zprofile` stayed byte-identical. Mock browser captures at
-1000 and 760 px showed no document overflow and kept the confirm buttons visible.
+Local acceptance used 479 full engine tests, 28 Tauri tests and 632 frontend
+tests, with no failures, plus the production frontend build. An isolated CLI save
+survived a new process and read back both variants; `.zshrc`, `.zprofile`,
+`.bashrc`, and a PowerShell profile remained byte-identical, the target did not
+run, and the retired apply operation was rejected. The launch runtime regression
+also started an isolated compiled application with `Asia/Singapore` and literal
+arguments, kept it alive after the CLI exited, and rejected a repeated launch.
+The browser mock at 1000 px and 760 px showed the saved item, both copy actions,
+and the save action with no document overflow, legacy apply entry, or console
+error.
 
-Remote Linux and Windows engine tests initially exposed fixture assumptions:
-the Linux fixture relied on the former zsh default, and piped CLI output delayed
-the Windows independent-child check. The fixtures now select zsh explicitly and
-read CLI JSON from a private file. Native Windows/Linux desktop operation and
-time-zone display in real applications have not been accepted on this host.
+macOS rendering and local launch execution were accepted on this host. Windows
+PowerShell rendering is covered by source tests, and Linux command rendering is
+executed through available local shells. Native Windows/Linux desktop operation
+and real applications' displayed time remain unaccepted.

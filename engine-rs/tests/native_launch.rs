@@ -36,6 +36,30 @@ fn builds_arbitrary_pairs_without_creating_home_or_state() {
 }
 
 #[test]
+fn retired_shell_write_operations_are_rejected_without_creating_files() {
+    for command in ["launch:status", "launch:preview", "launch:apply"] {
+        let ctx = context();
+        let result = execute(
+            &ctx,
+            &Request {
+                command: command.into(),
+                args: vec![],
+                run_id: "retired-shell-write".into(),
+            },
+        );
+        assert!(!result.ok, "{command} remained available");
+        assert!(
+            !ctx.home_dir.exists(),
+            "{command} created the home directory"
+        );
+        assert!(
+            !ctx.data_dir.exists(),
+            "{command} created the data directory"
+        );
+    }
+}
+
+#[test]
 fn rejects_duplicate_names_unknown_fields_and_mismatched_shells() {
     for mut input in [
         spec("windows", "zsh"),

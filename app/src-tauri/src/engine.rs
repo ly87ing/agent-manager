@@ -38,11 +38,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ));
     };
     let allowed = match (domain, verb) {
-        (
-            "launch",
-            "build" | "status" | "preview" | "apply" | "catalog" | "run" | "list" | "save"
-            | "delete",
-        ) => true,
+        ("launch", "build" | "catalog" | "run" | "list" | "save" | "delete") => true,
         ("resources", "targets") => true,
         ("system", "audit" | "discover" | "refresh-upstream") => true,
         ("secrets", "status" | "set" | "source") => true,
@@ -70,7 +66,6 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
 /// 参数取值类型（按类型校验；不经 shell，argv 直传引擎）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArgValueKind {
-    LaunchShell,
     LaunchName,
     /// 纯开关（如 --allow-uninstall），不带值。
     Flag,
@@ -142,16 +137,6 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--spec", ArgValueKind::JsonValue));
             specs.push(("--name", ArgValueKind::LaunchName));
             specs.push(("--confirm", ArgValueKind::Flag));
-        }
-        ("launch", "status") => specs.push(("--shell", ArgValueKind::LaunchShell)),
-        ("launch", "preview" | "apply") => {
-            specs.push(("--spec", ArgValueKind::JsonValue));
-            specs.push(("--shell", ArgValueKind::LaunchShell));
-            specs.push(("--base", ArgValueKind::RuleBase));
-            specs.push(("--remove", ArgValueKind::LaunchName));
-            if verb == "apply" {
-                specs.push(("--confirm", ArgValueKind::Flag));
-            }
         }
         ("accounts", "command") => {
             specs.push(("--only", ArgValueKind::ElementId));
@@ -427,10 +412,6 @@ pub fn validate_run_id(value: &str) -> Result<(), EngineError> {
 
 fn validate_arg_value(kind: ArgValueKind, value: &str) -> Result<(), EngineError> {
     match kind {
-        ArgValueKind::LaunchShell => {
-            if ["zsh", "bash", "powershell"].contains(&value) {Ok(())}
-            else {Err(EngineError::new("invalid_args", "Unsupported launch shell"))}
-        }
         ArgValueKind::LaunchName => {
             if value.len() <= 80 && value.chars().next().is_some_and(|c|c.is_ascii_alphabetic() || c=='_')
                 && value.chars().all(|c|c.is_ascii_alphanumeric() || matches!(c,'_'|'-')) {Ok(())}
@@ -848,6 +829,9 @@ mod tests {
         .is_ok());
         assert!(validate_args("launch:build", &["--spec".into(), "{}".into()]).is_ok());
         assert!(validate_args("launch:build", &["--secret-value".into(), "value".into()]).is_err());
+        for command in ["launch:status", "launch:preview", "launch:apply"] {
+            assert!(validate_command(command).is_err());
+        }
         assert!(validate_command("aliases:apply").is_err());
         assert!(validate_command("accounts:launch").is_err());
     }

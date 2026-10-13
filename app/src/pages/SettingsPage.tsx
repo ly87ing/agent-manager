@@ -116,7 +116,7 @@ const ADVANCED_ENTRIES = [
   {
     key: "launch",
     get title() { return t("启动配置"); },
-    get description() { return t("选择程序与时区，复制命令或确认后应用到本机。"); },
+    get description() { return t("保存程序与时区配置，复制完整启动命令和别名定义。"); },
     icon: Terminal,
   },
   {

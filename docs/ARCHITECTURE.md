@@ -17,10 +17,11 @@ Multi-account and alias examples in More Tips are static text with clipboard
 copy only.
 
 Settings → Launch configurations uses the independent `launch` domain to build
-general commands, preview and confirm local shortcut writes, and explicitly launch
+general commands, save inactive recipes in Agent Manager, and explicitly launch
 graphical applications. It never resolves account identity or credentials. The
-desktop uses the shared Rust renderer; actual shell files and PowerShell scripts
-are authoritative. See [launch configurations](subsystems/launch-configurations.md).
+desktop uses the shared Rust renderer and offers complete alias or PowerShell
+function definitions for manual copying; it does not write shell configuration.
+See [launch configurations](subsystems/launch-configurations.md).
 
 Dependency Programs manages programs explicitly required by skills or MCP.
 Assistant packages and command names are excluded, and filesystem mutation

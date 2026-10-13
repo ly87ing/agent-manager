@@ -81,8 +81,8 @@ pub(super) fn build(spec: &Recipe, variant: &Variant) -> Built {
         )
     };
     let definition = if spec.platform == "windows" {
-        // Script scope and ProcessStartInfo keep TZ out of the caller's environment.
-        format!("# Agent Manager launch shortcut\n{command}\n")
+        // A named function can be pasted into $PROFILE or the current session.
+        format!("function {} {{ {} }}", variant.name, command)
     } else {
         format!("alias {}={}", variant.name, posix(&command))
     };
@@ -103,5 +103,25 @@ mod tests {
         assert_eq!(posix("O'Brien $HOME"), "'O'\\''Brien $HOME'");
         assert_eq!(windows_arg("a\\\"b\\"), "\"a\\\\\\\"b\\\\\"");
         assert_eq!(powershell("O'Brien"), "'O''Brien'");
+        let definition = build(
+            &Recipe {
+                platform: "windows".into(),
+                shell: "powershell".into(),
+                kind: "app".into(),
+                target: r"C:\Apps\Example.exe".into(),
+                args: vec![],
+                variants: vec![Variant {
+                    name: "example-sg".into(),
+                    timezone: "Asia/Singapore".into(),
+                }],
+            },
+            &Variant {
+                name: "example-sg".into(),
+                timezone: "Asia/Singapore".into(),
+            },
+        )
+        .definition;
+        assert!(definition.starts_with("function example-sg { "));
+        assert!(definition.ends_with(" }"));
     }
 }

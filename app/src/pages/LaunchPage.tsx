@@ -3,25 +3,31 @@ import { isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import { ConfirmModal } from "../components/ConfirmModal";
-import { FileDiff } from "../components/FileDiff";
+import { ActionMenu } from "../components/AccountGrid";
 import { Select } from "../components/Select";
 import { listTimeZones } from "../lib/aliasCommand";
 import { engineErrorMessage } from "../lib/engine";
 import { t, useLanguage } from "../lib/i18n";
-import { launchRequest, type LaunchCatalog, type LaunchEntry, type LaunchPreview, type LaunchRecipe, type LaunchStatus } from "../lib/launch";
+import { launchRequest, type LaunchCatalog, type LaunchEntry, type LaunchRecipe, type SavedLaunch } from "../lib/launch";
 
 const button = "rounded-md border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50";
 const input = "w-full min-w-0 rounded-md border border-input bg-background px-2 py-1.5 text-sm";
 const zones = listTimeZones().map((value) => ({ value, label: value }));
-type Confirmation = { kind: "apply"; args: string[]; preview: LaunchPreview } | { kind: "run"; args: string[]; entry: LaunchEntry };
+type Confirmation = { kind: "delete"; item: SavedLaunch } | { kind: "run"; args: string[]; entry: LaunchEntry };
+const targetBase = (value: string) => value.split(/[\\/]/).pop()?.replace(/\.(app|exe)$/i, "").toLowerCase()
+  .replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "app";
+const emptyRecipe = (platform: LaunchRecipe["platform"] = "macos", shell: LaunchRecipe["shell"] = "zsh"): LaunchRecipe => ({
+  platform, shell, kind: "app", target: "", args: [],
+  variants: [{ name: "app-sg", timezone: "Asia/Singapore" }, { name: "app-la", timezone: "America/Los_Angeles" }],
+});
 
 export default function LaunchPage() {
   useLanguage();
   const [catalog, setCatalog] = useState<LaunchCatalog | null>(null);
-  const [recipe, setRecipe] = useState<LaunchRecipe>({ platform: "macos", shell: "zsh", kind: "app", target: "", args: [],
-    variants: [{ name: "app-sg", timezone: "Asia/Singapore" }, { name: "app-la", timezone: "America/Los_Angeles" }] });
+  const [recipe, setRecipe] = useState<LaunchRecipe>(() => emptyRecipe());
   const [built, setBuilt] = useState<{ spec: string; entries: LaunchEntry[] } | null>(null);
-  const [status, setStatus] = useState<LaunchStatus | null>(null);
+  const [saved, setSaved] = useState<SavedLaunch[] | null>(null);
+  const [selected, setSelected] = useState<SavedLaunch | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -30,6 +36,7 @@ export default function LaunchPage() {
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const generation = useRef(0);
   const local = catalog?.platform === recipe.platform;
+  const dirty = !selected || JSON.stringify(recipe) !== JSON.stringify(selected.recipe);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,23 +50,22 @@ export default function LaunchPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setStatus(null);
-    if (!local) return;
-    setReadError(null);
-    void launchRequest<LaunchStatus>("status", ["--shell", recipe.shell]).then((data) => {
-      if (!cancelled) setStatus(data);
+    setSaved(null);
+    void launchRequest<{ items: SavedLaunch[] }>("list").then((data) => {
+      if (!cancelled) { setSaved(data.items); setReadError(null); }
     }).catch((err) => { if (!cancelled) setReadError(engineErrorMessage(err)); });
     return () => { cancelled = true; };
-  }, [local, recipe.shell, revision]);
+  }, [revision]);
 
   function change(next: LaunchRecipe) {
     generation.current++;
     setRecipe(next); setBuilt(null); setConfirmation(null); setError(null); setMessage(null);
   }
   function target(value: string) {
-    const base = value.split(/[\\/]/).pop()?.replace(/\.(app|exe)$/i, "").toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "app";
+    const previous = targetBase(recipe.target);
+    const base = targetBase(value);
     change({ ...recipe, target: value, variants: recipe.variants.map((variant) => ({ ...variant,
-      name: variant.name === "app-sg" ? `${base}-sg` : variant.name === "app-la" ? `${base}-la` : variant.name })) });
+      name: variant.name === `${previous}-sg` ? `${base}-sg` : variant.name === `${previous}-la` ? `${base}-la` : variant.name })) });
   }
   async function browse() {
     try {
@@ -83,14 +89,19 @@ export default function LaunchPage() {
     try { await navigator.clipboard.writeText(value); toast.success(t("已复制到剪贴板")); }
     catch (err) { setError(engineErrorMessage(err)); }
   }
-  async function preview(remove?: string) {
-    if (!status || (!remove && !built)) return;
-    const args = ["--shell", recipe.shell, "--base", status.base,
-      ...(remove ? ["--remove", remove] : ["--spec", built!.spec])];
+  function openSaved(item: SavedLaunch) {
+    change(item.recipe); setSelected(item);
+    setBuilt({ spec: JSON.stringify(item.recipe), entries: item.entries });
+  }
+  async function save() {
+    const spec = JSON.stringify(recipe);
     setBusy(true); setError(null); setMessage(null);
     try {
-      const data = await launchRequest<LaunchPreview>("preview", args);
-      setConfirmation({ kind: "apply", args, preview: data });
+      const data = await launchRequest<{ item: SavedLaunch }>("save", ["--spec", spec,
+        ...(selected ? ["--id", selected.id, "--base", selected.revision] : [])]);
+      setSelected(data.item); setBuilt({ spec, entries: data.item.entries });
+      setSaved((items) => [...(items ?? []).filter((item) => item.id !== data.item.id), data.item]);
+      setMessage(t("配置已保存到 Agent Manager。"));
     } catch (err) { setError(engineErrorMessage(err)); }
     finally { setBusy(false); }
   }
@@ -98,9 +109,12 @@ export default function LaunchPage() {
     if (!confirmation) return;
     setBusy(true); setError(null);
     try {
-      if (confirmation.kind === "apply") {
-        const data = await launchRequest<{ status: LaunchStatus }>("apply", [...confirmation.args, "--confirm"]);
-        setStatus(data.status); setMessage(t("快捷命令已应用。新开终端后生效；应用显示的时间仍需验证。"));
+      if (confirmation.kind === "delete") {
+        const { item } = confirmation;
+        await launchRequest("delete", ["--id", item.id, "--base", item.revision]);
+        setSaved((items) => (items ?? []).filter((old) => old.id !== item.id));
+        if (selected?.id === item.id) setSelected(null);
+        setMessage(t("已删除保存的配置。"));
       } else {
         await launchRequest("run", [...confirmation.args, "--confirm"]);
         setMessage(t("已发送启动请求。请在应用中确认时间。"));
@@ -113,9 +127,30 @@ export default function LaunchPage() {
   return <div className="space-y-4" data-testid="launch-page">
     <div>
       <h1 className="text-lg font-semibold">{t("启动配置")}</h1>
-      <p className="mt-1 text-xs text-muted-foreground">{t("选择程序、时区和别名。复制不会修改本机；应用前会展示文件改动并请你确认。")}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{t("保存程序、时区和别名，随时复制运行命令或完整别名定义。请自行添加到终端配置文件。")}</p>
     </div>
+    <section className="space-y-2" aria-label={t("已保存配置")}>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-medium">{t("已保存配置")}</h2>
+        <button type="button" className={button} disabled={busy} onClick={() => setRevision((value) => value + 1)}>{t("重新读取")}</button></div>
+      {saved?.length === 0 && <p className="text-xs text-muted-foreground">{t("尚未保存配置。填写后点击“保存配置”，无需运行或修改终端配置。")}</p>}
+      {saved?.map((item) => <div key={item.id} className="flex min-w-0 items-center gap-2 rounded-md border p-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <p className="break-all font-mono text-xs">{item.recipe.variants.map((variant) => variant.name).join(", ")}</p>
+          <p className="break-all text-xs text-muted-foreground">{item.recipe.target}</p>
+          <p className="text-xs text-muted-foreground">{item.recipe.platform} · {item.recipe.shell}</p>
+        </div>
+        <button type="button" className={`${button} shrink-0`} disabled={busy} onClick={() => openSaved(item)}>{t("打开配置")}</button>
+        <ActionMenu label={t("配置操作")} items={[{ label: t("删除配置"), testId: `delete-launch-${item.id}`, danger: true, disabled: busy,
+          onSelect: () => { setError(null); setConfirmation({ kind: "delete", item }); } }]} />
+      </div>)}
+    </section>
     <section className="space-y-3 rounded-lg border bg-card p-4" aria-label={t("构建启动命令")}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-medium">{selected ? t("编辑配置") : t("新建配置")}</h2>
+        {selected && <button type="button" className={button} disabled={busy} onClick={() => {
+          change(emptyRecipe(catalog?.platform, catalog?.shell)); setSelected(null);
+        }}>{t("新建配置")}</button>}
+      </div>
       <fieldset disabled={busy} className="min-w-0 space-y-3 disabled:opacity-70">
         <div className="grid gap-3 sm:grid-cols-3">
           <div><p className="mb-1 text-xs">{t("目标系统")}</p><Select label={t("目标系统")} value={recipe.platform}
@@ -163,7 +198,11 @@ export default function LaunchPage() {
           </div>)}
           <div className="flex flex-wrap justify-between gap-2">
             <button type="button" className={button} disabled={recipe.variants.length >= 32} onClick={() => change({ ...recipe, variants: [...recipe.variants, { name: "", timezone: "UTC" }] })}>{t("添加时区别名")}</button>
-            <button type="button" className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={!recipe.target.trim()} onClick={() => void generate()}>{t("生成命令")}</button>
+            <div className="flex flex-wrap items-center gap-2">
+              {recipe.target.trim() && <span className="text-xs text-muted-foreground">{dirty ? t("未保存") : t("已保存")}</span>}
+              <button type="button" className={button} disabled={!recipe.target.trim()} onClick={() => void generate()}>{t("生成命令")}</button>
+              <button type="button" className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={!saved || !recipe.target.trim() || !dirty} onClick={() => void save()}>{selected ? t("保存修改") : t("保存配置")}</button>
+            </div>
           </div>
         </div>
       </fieldset>
@@ -175,8 +214,8 @@ export default function LaunchPage() {
           <span className="text-xs text-muted-foreground">{entry.timezone}</span></div>
         <pre className="whitespace-pre-wrap break-all rounded bg-muted p-2 text-xs" data-testid={`launch-command-${entry.name}`}>{entry.command}</pre>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={button} onClick={() => void copy(entry.command)}>{t("复制完整命令")}</button>
-          <button type="button" className={button} onClick={() => void copy(entry.definition)}>{t("复制快捷命令定义")}</button>
+          <button type="button" className={button} onClick={() => void copy(entry.command)}>{t("复制运行命令")}</button>
+          <button type="button" className={button} onClick={() => void copy(entry.definition)}>{recipe.platform === "windows" ? t("复制完整函数定义") : t("复制完整别名定义")}</button>
           {local && recipe.kind === "app" && <button type="button" disabled={busy} className={button} onClick={() => {
             setError(null); setConfirmation({ kind: "run", args: ["--spec", built.spec, "--name", entry.name], entry });
           }}>{t("启动一次")}</button>}
@@ -184,43 +223,23 @@ export default function LaunchPage() {
       </div>)}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" className={button} onClick={() => void copy(built.entries.map((entry) => entry.definition).join("\n"))}>{t("复制全部定义")}</button>
-        <button type="button" className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={!local || !status || busy} onClick={() => void preview()}>{t("应用到本机")}</button>
       </div>
+      <p className="text-xs text-muted-foreground">{recipe.shell === "powershell" ? t("将完整函数定义粘贴到 PowerShell 的 $PROFILE，或当前会话中。")
+        : recipe.shell === "zsh" ? t("将完整别名定义粘贴到 .zshrc，或当前终端会话中。") : t("将完整别名定义粘贴到 .bashrc，或当前终端会话中。")}</p>
       <p className="text-xs text-muted-foreground">{recipe.kind === "command" ? t("命令行程序请在终端运行复制的命令，保留正常交互。") : t("若应用已经运行，请先正常退出，再使用新命令启动。")}</p>
-      {!local && <p className="text-xs text-muted-foreground">{t("其他系统的命令可以复制；仅本机系统可以应用或启动。")}</p>}
+      {!local && <p className="text-xs text-muted-foreground">{t("其他系统的配置也可以保存和复制；仅本机系统可以启动。")}</p>}
     </section>}
     {message && <p role="status" className="text-xs text-success">{message}</p>}
     {error && !confirmation && <p role="alert" className="whitespace-pre-wrap break-words text-xs text-destructive">{error}</p>}
-    {local && <section className="space-y-2 border-t pt-3" aria-label={t("本机快捷命令")}>
-      <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-medium">{t("本机快捷命令")}</h2>
-        <button type="button" className={button} disabled={busy} onClick={() => { setConfirmation(null); setRevision((value) => value + 1); }}>{t("重新读取")}</button></div>
-      {status && <><p className="break-all font-mono text-xs text-muted-foreground">{status.path}</p>
-        {status.entries.length === 0 && <p className="text-xs text-muted-foreground">{t("尚未应用快捷命令。")}</p>}
-        {status.entries.map((entry) => <div key={entry.name} className="min-w-0 space-y-1 border-b py-2">
-          <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-mono text-xs">{entry.name}</span><div className="flex gap-2">
-            <button type="button" className={button} onClick={() => void copy(entry.command ?? entry.definition)}>{t("复制")}</button>
-            <button type="button" className={button} disabled={busy} onClick={() => void preview(entry.name)}>{t("移除")}</button>
-          </div></div>
-          <pre className="whitespace-pre-wrap break-all text-xs text-muted-foreground">{entry.command ?? entry.definition}</pre>
-          {recipe.shell === "powershell" && <div className="flex flex-wrap items-center gap-2">
-            <code className="min-w-0 flex-1 break-all text-xs">{entry.path}</code>
-            <button type="button" className={button} onClick={() => void copy(`& '${entry.path.replaceAll("'", "''")}'`)}>{t("复制脚本调用")}</button>
-          </div>}
-        </div>)}
-        <p className="text-xs text-muted-foreground">{recipe.shell === "powershell" ? t("在 PowerShell 中使用显示的脚本完整路径。") : t("新开交互终端即可使用。zsh 仅维护 .zshrc，不写 .zprofile。")}</p>
-      </>}
-    </section>}
     {readError && <p role="alert" className="break-words text-xs text-destructive">{readError}</p>}
-    {confirmation && <ConfirmModal title={confirmation.kind === "apply" ? t("确认应用快捷命令") : t("确认启动应用")}
-      description={confirmation.kind === "apply" ? t("以下文件将按预览改动。若文件在预览后发生变化，会停止写入。") : t("将使用下面的命令启动应用一次，不保存快捷命令。应用显示的时间需单独确认。")}
-      risk={confirmation.kind === "apply" ? "write-local" : "exec-local"} executing={busy}
-      confirmLabel={confirmation.kind === "apply" ? t("确认应用") : t("确认启动")}
+    {confirmation && <ConfirmModal title={confirmation.kind === "delete" ? t("删除配置") : t("确认启动应用")}
+      description={confirmation.kind === "delete" ? t("仅删除 Agent Manager 中保存的配置。你自行添加的别名不受影响。") : t("将使用下面的命令启动应用一次，不保存配置。应用显示的时间需单独确认。")}
+      risk={confirmation.kind === "delete" ? "write-local" : "exec-local"} executing={busy}
+      confirmLabel={confirmation.kind === "delete" ? t("删除配置") : t("确认启动")}
       onConfirm={() => void confirm()} onClose={() => { setConfirmation(null); setError(null); }}>
       <div className="mt-3 space-y-3">
-        {confirmation.kind === "apply" ? confirmation.preview.files.map((file) => <div key={file.path}>
-          <p className="mb-1 break-all font-mono text-xs">{file.path}</p>
-          <FileDiff original={file.original} content={file.content} />
-        </div>) : <pre className="whitespace-pre-wrap break-all rounded bg-muted p-2 text-xs">{confirmation.entry.command}</pre>}
+        <pre className="whitespace-pre-wrap break-all rounded bg-muted p-2 text-xs">{confirmation.kind === "delete"
+          ? confirmation.item.recipe.variants.map((variant) => variant.name).join(", ") : confirmation.entry.command}</pre>
         {error && <p role="alert" className="whitespace-pre-wrap break-words text-xs text-destructive">{error}</p>}
       </div>
     </ConfirmModal>}

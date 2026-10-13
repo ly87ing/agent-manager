@@ -2,7 +2,6 @@
 mod render;
 mod runtime;
 mod saved;
-mod shortcuts;
 
 use crate::{diagnostic, Context, Envelope, Lock, Mode, Request};
 use anyhow::{bail, Result};
@@ -104,7 +103,7 @@ fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         return saved::handle(ctx, req);
     }
     if command != "launch:build" {
-        return shortcuts::handle(ctx, req);
+        bail!("Unsupported launch operation");
     }
     if req.args.len() != 2 || req.args[0] != "--spec" {
         bail!("build accepts exactly one --spec argument");

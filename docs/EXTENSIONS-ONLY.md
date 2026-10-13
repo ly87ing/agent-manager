@@ -4,9 +4,10 @@ The 2026-10-11 user requirement supersedes earlier account designs: Agent Manage
 
 The 2026-10-12 user request adds an independent general launch tool: configurable
 applications or executables, arguments, time zones, and shortcut names. Generating
-or copying commands is read-only. Local shortcut writes require a preview and
-confirmation; application launch is a separate explicit action. This exception
-does not enable the retired account or `aliases` APIs. See
+or copying commands is read-only. Recipes can be saved in Agent Manager without
+running the application or changing shell configuration. Application launch is a
+separate explicit action. This exception does not enable the retired account or
+`aliases` APIs. See
 [Launch configurations](subsystems/launch-configurations.md).
 
 ## Product boundary
@@ -26,9 +27,10 @@ Copy buttons write only to the clipboard; there is no account discovery, command
 generation or execution, file access, or persistence. This does not restore any
 account or alias management operation.
 
-The separate **Launch configurations** tool uses the `launch` domain. Only an
-explicitly confirmed apply request writes general shell shortcuts. It does not
-restore the historical `aliases` domain or synchronize `.zprofile`.
+The separate **Launch configurations** tool uses the `launch` domain. It stores
+inactive recipes and renders complete commands and alias/function definitions for
+manual copying. It does not write `.zshrc`, `.bashrc`, PowerShell profiles, or
+`.zprofile`, and it does not restore the historical `aliases` domain.
 
 ## Runtime and write constraints
 
