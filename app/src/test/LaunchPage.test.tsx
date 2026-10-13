@@ -67,7 +67,7 @@ async function startNew() {
 async function generate() {
   await startNew();
   await chooseExample();
-  await userEvent.click(screen.getByRole("button", { name: "生成命令" }));
+  await userEvent.click(screen.getByRole("button", { name: "预览命令" }));
   await screen.findAllByRole("button", { name: "复制运行命令" });
 }
 
@@ -78,6 +78,12 @@ describe("launch configuration controls", () => {
     expect(screen.queryByRole("textbox", { name: "程序路径或命令" })).toBeNull();
     await startNew();
     expect(screen.getByRole("textbox", { name: "程序路径或命令" })).toBeVisible();
+    const actions = screen.getByTestId("launch-editor-actions");
+    expect(actions).toHaveClass("sticky", "top-0");
+    expect(actions).toHaveTextContent("预览命令不会保存；保存到 Agent Manager 仅保存常用配置，不写入 Shell 配置或修改系统环境。");
+    expect(actions).toContainElement(screen.getByRole("button", { name: "取消" }));
+    expect(actions).toContainElement(screen.getByRole("button", { name: "预览命令" }));
+    expect(actions).toContainElement(screen.getByRole("button", { name: "保存到 Agent Manager" }));
     await userEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.queryByRole("textbox", { name: "程序路径或命令" })).toBeNull();
   });
@@ -112,7 +118,7 @@ describe("launch configuration controls", () => {
     const { calls } = setup();
     await startNew();
     await chooseExample();
-    await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
     expect(await screen.findByRole("status")).toHaveTextContent("配置已保存到 Agent Manager。");
     const saved = calls.find((call) => call.command === "launch:save")!;
     expect(JSON.parse(saved.args[1])).toMatchObject({ target: recipe.target, variants: recipe.variants });
@@ -128,7 +134,7 @@ describe("launch configuration controls", () => {
     expect(screen.getByRole("textbox", { name: "程序路径或命令" })).toHaveValue(recipe.target);
     await userEvent.clear(screen.getByRole("textbox", { name: "别名 1" }));
     await userEvent.type(screen.getByRole("textbox", { name: "别名 1" }), "example-sin");
-    await userEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
     expect((await screen.findAllByText("example-sin"))[0]).toBeVisible();
     const saves = calls.filter((call) => call.command === "launch:save");
     const saved = saves[saves.length - 1]!;
@@ -183,7 +189,7 @@ describe("launch configuration controls", () => {
     await userEvent.click(screen.getByText("启动参数（0）"));
     await userEvent.click(screen.getByRole("button", { name: "添加参数" }));
     await userEvent.type(screen.getByRole("textbox", { name: "启动参数 1" }), "--lang=en-US");
-    await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
     await screen.findByRole("status");
     const saved = calls.find((call) => call.command === "launch:save")!;
     expect(JSON.parse(saved.args[1])).toMatchObject({
@@ -195,7 +201,7 @@ describe("launch configuration controls", () => {
     const { calls } = setup({ items: [savedItem], saveError: "Modified externally" });
     await userEvent.click(await screen.findByRole("button", { name: "打开配置" }));
     await userEvent.type(screen.getByRole("textbox", { name: "程序路径或命令" }), " changed");
-    await userEvent.click(screen.getByRole("button", { name: "保存修改" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Modified externally");
     expect(calls.filter((call) => call.command === "launch:save")).toHaveLength(1);
   });
@@ -207,14 +213,14 @@ describe("launch configuration controls", () => {
     await chooseOption(screen.getByRole("combobox", { name: "程序类型" }), "command");
     await userEvent.type(screen.getByRole("textbox", { name: "程序路径或命令" }), "example.exe");
     await chooseOption(screen.getByRole("combobox", { name: "目标系统" }), "windows");
-    await userEvent.click(screen.getByRole("button", { name: "生成命令" }));
+    await userEvent.click(screen.getByRole("button", { name: "预览命令" }));
     const copy = await screen.findAllByRole("button", { name: "复制完整函数定义" });
     const write = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
     await userEvent.click(copy[0]);
     expect(write).toHaveBeenCalledWith(expect.stringMatching(/^function example-sg \{/));
     expect(screen.queryByRole("button", { name: "启动一次" })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "保存配置" }));
+    await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
     await screen.findByRole("status");
     expect(calls.some((call) => call.command === "launch:save")).toBe(true);
     expect(screen.getByText("命令行程序请在终端运行复制的命令，保留正常交互。")).toBeVisible();

@@ -182,11 +182,17 @@ export default function LaunchPage() {
       </div>)}
     </section>
     {editing && <section className="space-y-3 rounded-lg border bg-card p-4" aria-label={t("构建启动命令")}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-medium">{selected ? t("编辑配置") : t("新建配置")}</h2>
-        <div className="flex flex-wrap gap-2">
+      <div data-testid="launch-editor-actions" className="sticky top-0 z-10 -mx-4 -mt-4 flex flex-wrap items-start justify-between gap-2 rounded-t-lg border-b bg-card px-4 py-3">
+        <div>
+          <h2 className="text-sm font-medium">{selected ? t("编辑配置") : t("新建配置")}</h2>
+          <p className="mt-1 text-xs text-muted-foreground">{t("预览命令不会保存；保存到 Agent Manager 仅保存常用配置，不写入 Shell 配置或修改系统环境。")}</p>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {recipe.target.trim() && <span className="text-xs text-muted-foreground">{dirty ? t("未保存") : t("已保存")}</span>}
           {selected && <button type="button" className={button} disabled={busy} onClick={startNew}>{t("新增配置")}</button>}
           <button type="button" className={button} disabled={busy} onClick={cancelEditing}>{t("取消")}</button>
+          <button type="button" className={button} disabled={!recipe.target.trim()} onClick={() => void generate()}>{t("预览命令")}</button>
+          <button type="button" className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={!saved || !recipe.target.trim() || !dirty} onClick={() => void save()}>{t("保存到 Agent Manager")}</button>
         </div>
       </div>
       <fieldset disabled={busy} className="min-w-0 space-y-3 disabled:opacity-70">
@@ -249,14 +255,7 @@ export default function LaunchPage() {
             </div>
             <button className={button} type="button" disabled={recipe.variants.length === 1} onClick={() => change({ ...recipe, variants: recipe.variants.filter((_, i) => i !== index) })}>{t("移除")}</button>
           </div>)}
-          <div className="flex flex-wrap justify-between gap-2">
-            <button type="button" className={button} disabled={recipe.variants.length >= 32} onClick={() => change({ ...recipe, variants: [...recipe.variants, { name: "", timezone: "" }] })}>{t("添加别名")}</button>
-            <div className="flex flex-wrap items-center gap-2">
-              {recipe.target.trim() && <span className="text-xs text-muted-foreground">{dirty ? t("未保存") : t("已保存")}</span>}
-              <button type="button" className={button} disabled={!recipe.target.trim()} onClick={() => void generate()}>{t("生成命令")}</button>
-              <button type="button" className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={!saved || !recipe.target.trim() || !dirty} onClick={() => void save()}>{selected ? t("保存修改") : t("保存配置")}</button>
-            </div>
-          </div>
+          <button type="button" className={button} disabled={recipe.variants.length >= 32} onClick={() => change({ ...recipe, variants: [...recipe.variants, { name: "", timezone: "" }] })}>{t("添加别名")}</button>
         </div>
       </fieldset>
     </section>}
