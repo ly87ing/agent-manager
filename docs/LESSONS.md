@@ -16,6 +16,13 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Bind candidate runtime versions to the signed manifest version.**
+- Manifest tests preserved `rc` suffixes while the release configuration left the
+  application at its base version. Tauri's default updater compares SemVer values,
+  so a same-base candidate looked older than the running application.
+- Verify the configuration consumed by the native build and its actual version
+  readback; manifest fixtures alone cannot establish the update path.
+
 **Keep the complete sanitized protocol result in a failed MCP assertion.**
 - The first 2026-10-14 full run returned `data.ok:false` in the selected-reference
   check, but the bare Boolean assertion hid its stage and diagnostic. Replaying

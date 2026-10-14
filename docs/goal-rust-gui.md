@@ -40,6 +40,12 @@ boundary and add no background scheduling or automatic system remediation.
   [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/38548297906)
   passed for `fd54f17`, including native Windows engine tests and four installer
   builds. The repository is public; the old private-download statement is retired.
+- Release preflight reproduced a candidate/runtime version mismatch in the old
+  workflow: `v0.1.0-rc.3` left Tauri at `0.1.0`. The ephemeral configuration now
+  retains the full tag, with 23 script tests including manifest/config equality,
+  idempotent reruns and refusal without writes. A native debug build using that
+  version displayed `0.1.0-rc.3` in Settings. This is not a signed release or
+  download/install/restart receipt.
 
 Remaining verification is explicit in [platform status](GUI-PLATFORM-STATUS.md):
 actual excessive-offset clock correction on an isolated system, physical

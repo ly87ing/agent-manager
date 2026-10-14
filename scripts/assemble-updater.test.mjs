@@ -29,10 +29,18 @@ function fixture(t) {
 
 test('Tauri 2 原生制品生成全部平台并保留预发布版本和 URL 编码', t => {
   const f = fixture(t);
+  mkdirSync(join(f.cwd, 'src-tauri'));
+  const configPath = join(f.cwd, 'src-tauri', 'tauri.conf.json');
+  writeFileSync(configPath, JSON.stringify({ version: '0.1.1' }));
+  const configured = spawnSync(process.execPath, [fileURLToPath(new URL('./configure-release.mjs', import.meta.url))], {
+    cwd: f.cwd, encoding: 'utf8', env: { ...process.env, RELEASE_TAG: 'v0.1.1-rc.1', TAURI_UPDATER_PUBKEY: 'TEST_PUBLIC_KEY', WINDOWS_SIGNING_ENABLED: 'false', APPLE_SIGNING_ENABLED: 'false' },
+  });
+  assert.equal(configured.status, 0, configured.stderr);
   const r = f.run();
   assert.equal(r.status, 0, r.stderr);
   const manifest = JSON.parse(readFileSync(join(f.cwd, 'latest.json'), 'utf8'));
   assert.equal(manifest.version, '0.1.1-rc.1');
+  assert.equal(manifest.version, JSON.parse(readFileSync(configPath, 'utf8')).version);
   assert.equal(Object.keys(manifest.platforms).length, 10);
   assert.match(manifest.platforms['darwin-aarch64'].url, /Agent%20Manager_aarch64.app.tar.gz$/);
   assert.match(manifest.platforms['linux-x86_64'].url, /\.AppImage$/);

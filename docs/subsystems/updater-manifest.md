@@ -8,6 +8,14 @@ from the actual release asset filenames and their updater signatures. The
 after every installer build has succeeded. This script does not sign assets or
 prove that an installed application can update successfully.
 
+Before building, [`configure-release.mjs`](../../scripts/configure-release.mjs)
+sets the ephemeral Tauri configuration to the full tag version, including any
+prerelease suffix. Source package versions remain at the base version. The
+runtime updater compares Tauri's configured version with the manifest version;
+leaving a candidate at the base version would make same-base prereleases appear
+older and suppress their updates. The workflow restores the source configuration
+after building.
+
 ## Runtime path
 
 - Read downloaded assets from `updater-assets` and require exactly one bundle
@@ -30,6 +38,7 @@ they are not cryptographic verification or actual update acceptance.
 
 ```sh
 node --test scripts/assemble-updater.test.mjs
+node --test scripts/configure-release.test.mjs
 ```
 
 The tests check format-specific URLs and distinct bundle signatures, reject

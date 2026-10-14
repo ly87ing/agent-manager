@@ -376,38 +376,7 @@ jobs:
           WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
           WINDOWS_SIGNING_ENABLED: ${{ vars.WINDOWS_SIGNING_ENABLED }}
           APPLE_SIGNING_ENABLED: ${{ vars.APPLE_SIGNING_ENABLED }}
-        run: |
-          node <<'EOF'
-          const fs = require('fs');
-          const p = 'src-tauri/tauri.conf.json';
-          const c = JSON.parse(fs.readFileSync(p, 'utf8'));
-          const pubkey = process.env.TAURI_UPDATER_PUBKEY || '';
-          if (!pubkey || pubkey.startsWith('YOUR_')) {
-            console.error('TAURI_UPDATER_PUBKEY is empty or a YOUR_* placeholder');
-            process.exit(1);
-          }
-          c.bundle = c.bundle || {};
-          c.bundle.createUpdaterArtifacts = true;
-          c.plugins = c.plugins || {};
-          c.plugins.updater = c.plugins.updater || {};
-          c.plugins.updater.pubkey = pubkey;
-          if (process.platform === 'darwin' && process.env.APPLE_SIGNING_ENABLED !== 'true') {
-            c.bundle.macOS = { ...c.bundle.macOS, signingIdentity: '-' };
-          }
-          if (process.platform === 'win32' && process.env.WINDOWS_SIGNING_ENABLED === 'true') {
-            const thumbprint = process.env.WINDOWS_CERTIFICATE_THUMBPRINT || '';
-            const timestampUrl = process.env.WINDOWS_TIMESTAMP_URL || '';
-            if (!thumbprint || !timestampUrl) {
-              console.error('WINDOWS_CERTIFICATE_THUMBPRINT or WINDOWS_TIMESTAMP_URL is empty');
-              process.exit(1);
-            }
-            c.bundle.windows = c.bundle.windows || {};
-            c.bundle.windows.certificateThumbprint = thumbprint;
-            c.bundle.windows.digestAlgorithm = 'sha256';
-            c.bundle.windows.timestampUrl = timestampUrl;
-          }
-          fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
-          EOF
+        run: node ../scripts/configure-release.mjs
 
       # Release 由前置 create-release job 统一创建；本步骤以 releaseId 模式只向
       # 既有草稿 Release 上传产物与 updater 签名，不再创建/修改 Release 本身。
