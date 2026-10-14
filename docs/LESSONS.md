@@ -16,6 +16,13 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Keep the complete sanitized protocol result in a failed MCP assertion.**
+- The first 2026-10-14 full run returned `data.ok:false` in the selected-reference
+  check, but the bare Boolean assertion hid its stage and diagnostic. Replaying
+  the retained isolated fixture and rerunning all 424 engine tests passed.
+- Add the envelope to the failure message; do not attribute a non-reproduced
+  failure to host contention or claim that retries fixed its unknown cause.
+
 **Audit notification ownership across complete user operations.**
 - A shared renderer cannot prevent one workflow from announcing both step success
   and a final result. Inspect execution helpers and their callers together; one

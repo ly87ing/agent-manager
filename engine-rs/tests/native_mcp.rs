@@ -3282,7 +3282,7 @@ printf '%s\n' "own=$OWN" "arg=$1" "foreign=${{YOUR_MCP_A-unset}}" "token=${{ANTH
         .unwrap();
     let outcome: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(output.status.success(), "{}", outcome);
-    assert_eq!(outcome["data"]["ok"], true);
+    assert_eq!(outcome["data"]["ok"], true, "{outcome}");
     let recorded = read(&server.parent().unwrap().join("environment"));
     assert!(recorded.contains("own=YOUR_FAKE_B_ONLY_VALUE"));
     for line in [
