@@ -1,4 +1,4 @@
-import { Bot, Library, Package, Rocket, ScrollText, Server, Settings, Sparkles } from "lucide-react";
+import { Bot, Globe, Library, Package, Rocket, ScrollText, Server, Settings, Sparkles } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
@@ -12,6 +12,7 @@ const McpPage = lazy(() => import("./pages/McpPage"));
 const RulesPage = lazy(() => import("./pages/RulesPage"));
 const RunsPage = lazy(() => import("./pages/RunsPage"));
 const LaunchPage = lazy(() => import("./pages/LaunchPage"));
+const EnvironmentPage = lazy(() => import("./pages/EnvironmentPage"));
 const SkillsPage = lazy(() => import("./pages/SkillsPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SourcesPage = lazy(() => import("./pages/SourcesPage"));
@@ -21,6 +22,7 @@ const AgentsPage = lazy(() => import("./pages/AgentsPage"));
 // Keep resource queries in their pages; navigation does not collect global status.
 const NAV: NavItem[] = [
   { key: "launch", get label() { return t("启动"); }, icon: Rocket },
+  { key: "environment", get label() { return t("环境"); }, icon: Globe },
   { key: "skills", get label() { return t("技能"); }, icon: Sparkles },
   { key: "mcp", label: "MCP", icon: Server },
   { key: "rules", get label() { return t("规则"); }, icon: ScrollText },
@@ -160,6 +162,7 @@ export default function App() {
       <Suspense fallback={<PageLoading text={t("正在打开页面…")} />}>
         <div key={`${activePage}:${activePage === "sources" ? sourceFocus ?? "" : activePage === "mcp" ? mcpSearch ?? "" : activePage === "programs" ? programFocus ?? "" : ""}`} className="animate-page-in">
           {activePage === "launch" && <LaunchPage />}
+          {activePage === "environment" && <EnvironmentPage />}
           {activePage === "programs" && <ProgramsPage focus={programFocus} onOpen={handleNavigate} />}
           {activePage === "agents" && <AgentsPage />}
           {activePage === "skills" && (

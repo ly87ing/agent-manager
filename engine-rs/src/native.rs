@@ -146,6 +146,13 @@ pub(crate) fn acquire_apply_lock(ctx: &Context, domain: &str) -> Result<ApplyLoc
 /// The single native entry point. Pure with respect to process state: no exit
 /// codes here (CLI maps errors to exit codes); status never writes the DB.
 pub fn execute(ctx: &Context, request: &Request) -> Envelope {
+    if request
+        .command
+        .replace('.', ":")
+        .starts_with("environment:")
+    {
+        return crate::native_environment::execute(ctx, request);
+    }
     if request.command.replace('.', ":").starts_with("launch:") {
         return crate::native_launch::execute(ctx, request);
     }

@@ -37,6 +37,7 @@ export function renderWithEngine(
   const base = createFakeEngineClient({
     "launch:catalog": makeEnvelope({ platform: "macos", shell: "zsh", apps: [] }, { command: "launch:catalog" }),
     "launch:list": makeEnvelope({ items: [] }, { command: "launch:list" }),
+    "environment:profiles": makeEnvelope({ items: [] }, { command: "environment:profiles" }),
     "resources:targets": { contract: "agent-manager/engine/v1", run_id: "targets-fixture", command: "resources.targets", ok: true,
       mode: { offline: true }, lock: { held: false, pid: null }, errors: [], warnings: [], data: { targets: resourceTargets } },
     ...routes,

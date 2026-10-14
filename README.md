@@ -15,10 +15,11 @@ Manage MCP servers, rules, skills, and their extension dependencies for existing
 - **More tips:** read-only guidance about independent environments and shell aliases in Settings. Copying a generic example does not execute it or edit files.
 - **Launch configurations:** Launch is the first top-level page and the default page when Agent Manager opens. It saves an application or terminal command, generic environment variables, literal arguments, optional time zones and shortcut names in Agent Manager. Saved graphical applications can be launched directly; terminal commands provide complete commands and alias/function definitions for manual use. Agent Manager does not write shell configuration. See [launch configurations](docs/subsystems/launch-configurations.md).
 - **Settings:** English by default, with Simplified Chinese available under Language; themes, explicit start-at-login control, operation history, MCP-specific secret files, extension configuration backups, and manual application updates. Account credentials and unrelated secret variables are read-only.
+- **Environment checks:** save named expected-value collections and select one to compare macOS time, time zone, language order, region, process locale and NTP settings. Checks preserve unknown evidence. Collections can opt into system-authorized clock correction when a fresh measurement clearly exceeds their tolerance, followed by independent verification. Other regional settings remain unchanged. See [environment checks](docs/subsystems/environment-checks.md).
 
 ## Experience
 
-Navigation opens on Launch and also contains Skills, MCP, Rules, Sources, Programs, Assistants, and Settings. `⌘K` and `⌘⇧K` search extension resources and pages; `⌘F` searches the current page; `⌘,` opens Settings. The Settings launch entry remains a shortcut to the top-level Launch page. Account pages remain removed.
+Navigation opens on Launch and also contains Environment, Skills, MCP, Rules, Sources, Programs, Assistants, and Settings. `⌘K` and `⌘⇧K` search extension resources and pages; `⌘F` searches the current page; `⌘,` opens Settings. The Settings launch entry remains a shortcut to the top-level Launch page. Account pages remain removed.
 
 The app runs in the foreground and exits when its window closes. Search queries run only while search is open. Usage, quota, recent-session collection, tray residency, and automatic application update checks remain retired. See [resource bounds](docs/subsystems/resource-bounds.md).
 

@@ -1,0 +1,71 @@
+import { z } from "zod";
+import { runEngine } from "./engine";
+
+export interface EnvironmentTarget {
+  timezone?: string;
+  languages?: string[];
+  region?: string;
+  locale?: string;
+  strict_locale?: boolean;
+  ntp_server?: string;
+  automatic_time?: boolean;
+  time_synchronized?: boolean;
+  automatic_timezone?: boolean;
+  max_clock_offset_ms?: number;
+}
+
+const checkSchema = z.object({
+  id: z.string(), group: z.enum(["system", "time", "language", "process", "ntp"]),
+  expected: z.string().nullable(), observed: z.string().nullable(),
+  state: z.enum(["match", "mismatch", "unknown", "observed"]), source: z.string(), note: z.string(),
+}).strict();
+const targetSchema = z.object({ timezone: z.string().nullable(), languages: z.array(z.string()), region: z.string().nullable(), locale: z.string().nullable(), strict_locale: z.boolean(),
+  ntp_server: z.string().nullable(), automatic_time: z.boolean().nullable(), time_synchronized: z.boolean().nullable(), automatic_timezone: z.boolean().nullable(), max_clock_offset_ms: z.number().nullable() }).strict();
+const reportSchema = z.object({
+  platform: z.literal("macos"), checked_at: z.string(),
+  target: targetSchema,
+  checks: z.array(checkSchema),
+  summary: z.object({ status: z.enum(["match", "mismatch", "incomplete"]), matched: z.number().int().nonnegative(), mismatched: z.number().int().nonnegative(), unknown: z.number().int().nonnegative(), compared: z.number().int().nonnegative() }).strict(),
+  process_scope: z.literal("caller"), probe_server: z.string().nullable(),
+  probe_error: z.string().nullable(),
+  time_repair: z.object({ status: z.enum(["not_needed", "unavailable", "verified", "unverified", "cancelled", "failed"]), before_offset_ms: z.number().nullable(), before_uncertainty_ms: z.number().nullable() }).strict().nullable(),
+  time_sync: z.object({ synchronized: z.boolean(), state_code: z.number().int().min(0).max(5), max_error_ms: z.number().finite().nonnegative(), estimated_error_ms: z.number().finite().nonnegative() }).strict().nullable(),
+  time_sample: z.object({ server: z.string(), peer_address: z.string(), special_use_address: z.boolean(), stratum: z.number(), offset_ms: z.number(), round_trip_ms: z.number(), uncertainty_ms: z.number() }).strict().nullable(),
+}).strict();
+
+export type EnvironmentReport = z.infer<typeof reportSchema>;
+export type EnvironmentCheck = z.infer<typeof checkSchema>;
+const profileSchema = z.object({ id: z.string(), revision: z.string(), name: z.string(), target: targetSchema, auto_sync: z.boolean() }).strict();
+export type EnvironmentProfile = z.infer<typeof profileSchema>;
+export interface EnvironmentProfileInput { name: string; target: EnvironmentTarget; auto_sync: boolean }
+
+async function request(operation: string, args: string[] = []) {
+  const result = await runEngine(`environment:${operation}`, args,
+    ["save-profile", "delete-profile", "sync-time"].includes(operation) ? { runId: crypto.randomUUID() } : undefined);
+  if (!result.ok) throw new Error(result.errors.map((error) => error.message).join("\n"));
+  return result.data;
+}
+
+export function profileTarget(profile: EnvironmentProfile): EnvironmentTarget {
+  return Object.fromEntries(Object.entries(profile.target).filter(([, value]) => value !== null)) as EnvironmentTarget;
+}
+
+export async function listEnvironmentProfiles(): Promise<EnvironmentProfile[]> {
+  return z.object({ items: z.array(profileSchema) }).strict().parse(await request("profiles")).items;
+}
+
+export async function saveEnvironmentProfile(input: EnvironmentProfileInput, previous?: EnvironmentProfile): Promise<EnvironmentProfile> {
+  return z.object({ item: profileSchema }).strict().parse(await request("save-profile", ["--spec", JSON.stringify(input), ...(previous ? ["--id", previous.id, "--base", previous.revision] : [])])).item;
+}
+
+export async function deleteEnvironmentProfile(profile: EnvironmentProfile): Promise<void> {
+  z.object({ id: z.string() }).strict().parse(await request("delete-profile", ["--id", profile.id, "--base", profile.revision]));
+}
+
+export async function repairEnvironmentTime(target: EnvironmentTarget): Promise<EnvironmentReport> {
+  return reportSchema.parse(await request("sync-time", ["--spec", JSON.stringify(target), "--confirm"]));
+}
+
+export async function checkEnvironment(target: EnvironmentTarget = {}, probeTime = false): Promise<EnvironmentReport> {
+  return reportSchema.parse(await request("check", ["--spec", JSON.stringify(target), ...(probeTime ? ["--probe-time"] : [])]));
+}

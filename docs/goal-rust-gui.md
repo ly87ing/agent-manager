@@ -1438,3 +1438,84 @@ Verification generated and read back locally:
 These checks establish source, isolated CLI and browser-mock behavior. Installed
 desktop, native Windows/Linux interaction, real assistant sessions and updater
 acceptance were not exercised. No installer, tag or Release was produced.
+
+## 2026-10-13: read-only environment checks
+
+The new Environment page and `environment:check` share the Rust collector and
+comparison model. Optional targets cover IANA time zone, ordered languages,
+region, process locale, automatic-time settings, kernel synchronization state and
+NTP configuration. Effective
+locale precedence and optional strict comparison of explicit variables are shown
+separately. Observations without targets and missing evidence remain visible.
+Reference-time queries are explicit, send one NTP request and never set the clock.
+
+Verification: the full engine suite, all 24 Tauri tests, 583 frontend tests in 54
+files, production build, formatting and diff whitespace checks passed. Local
+documentation links were checked. Browser mocks exercised target editing,
+invalidation, comparison states and explicit time queries at 1000 and 760 px;
+English and Chinese render checks found no page-level horizontal overflow.
+
+The real CLI read back macOS settings and a valid NTP reply without creating
+HOME/data files. Uncertainty crossing the configured tolerance remained unknown.
+An isolated native desktop with a separate identifier and the committed
+1000 × 650 window exercised real collection, prefill and strict raw-locale
+mismatch while effective locale categories matched. System time-zone, NTP and
+shell-file readback was unchanged by the checks.
+
+The synchronization follow-up reads Darwin `ntp_gettime` without privileges or
+network access. Kernel synchronization and error estimates remain separate from
+the external reference measurement. Tests cover `TIME_ERROR` returned as EIO,
+read failures, and a running time service with unsynchronized or unknown state.
+The isolated native desktop compared the real kernel state successfully. A live
+CLI sample reported synchronized kernel state and approximately +604 ms offset
+with 292 ms uncertainty, within a 2000 ms tolerance. This is a point-in-time
+measurement; the selected background peer and last network synchronization time
+remain unconfirmed.
+
+At this milestone, targets remained in page memory. Automatic-time permissions,
+the actual background peer and other applications remained explicit evidence gaps. Other
+operating systems are unsupported. No installed app, installer, tag or Release
+was changed or published.
+
+## 2026-10-13: saved environment collections and authorized time correction
+
+Environment now opens with a collection selector and actual observations.
+Add/Edit keeps criteria in a separate dialog with an explicit criteria-only
+badge. Named collections persist in the existing database, support revision-based
+updates/deletion, and can be selected again without re-entering every field.
+Reads do not initialize storage. No country or collection is a product default.
+
+Collections can opt into correction during an explicit check. The shared
+`environment:sync-time --confirm` endpoint remeasures first and requests macOS
+authorization only for a clearly excessive offset. Fixed SNTP arguments correct
+the clock; an independent subsequent measurement is required for verified
+success. Matching/uncertain samples, cancellation, failure and unverified
+results have separate outcomes. Other system settings remain unchanged.
+
+Verification: the complete engine suite, all 25 Tauri tests, 592 frontend tests
+in 54 files, production build, formatting and whitespace checks passed. Collection
+tests exercise persistence, stale revisions, duplicate names, deletion and
+read-only/invalid requests. Correction fixtures exercise the no-write gate and
+post-correction success, uncertainty, failure and cancellation. AppleScript
+compiled without execution; the actual system SNTP tool also returned a valid
+read-only reference-time sample using the intended peer and query options.
+Browser mocks exercised collection CRUD/reopen and
+automatic correction in both languages at 1000 and 760 px; final dialog checks
+verified the criteria-only badge and uncovered fixed footer after transient
+notifications cleared.
+
+Real isolated CLI processes saved/read a collection and measured NTP time. The
+real correction endpoint returned `not_needed` for an in-tolerance sample without
+authorization or a clock write. System time-zone, NTP and shell-file hashes were
+unchanged. In the separate native desktop at the committed 1000 × 650 geometry,
+a collection was created through the UI, read back through the CLI, and used for
+an actual check with automatic correction enabled; accurate time correctly
+skipped correction. The original process-locale discrepancy remained visible.
+A later optional native navigation recheck was blocked by Orca's Accessibility
+read permission; no system permissions were changed. The earlier native save,
+check and independent CLI readback remain the verified evidence.
+
+Actual administrator-authorized clock writing remains unaccepted pending user
+interaction with the macOS authorization dialog. Simulated success does not
+establish that live privileged path. No installed app, installer, tag or Release
+was changed or published.

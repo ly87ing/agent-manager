@@ -8,6 +8,26 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Verify saved criteria and authorization controls through actual UI state.**
+- The generic local-write badge says that configuration files change. A saved
+  expected-value collection changes only Agent Manager's database. Supply an
+  explicit criteria-only badge for save/delete dialogs so users can distinguish
+  comparison setup from system changes.
+- A footer inside the viewport can still be covered by a transient toast from
+  Settings. Wait for that toast to clear before visual acceptance, then inspect
+  the actual dialog and fixed footer in both supported window widths.
+- Accessibility value-setting can update a WebKit input without updating React
+  state. A later render then resets the field. Type into the confirmed focused
+  input and verify the value after another render and in persisted readback.
+- Seen 1× (2026-10-13; collection dialog and native persistence acceptance).
+
+**Check explicit locale conflicts separately from effective locale precedence.**
+- A matching `LC_ALL` can hide different `LANG` or category values. Environment
+  checks now show optional strict raw-locale comparison alongside effective
+  categories; the regression proves matching effective values and conflicting
+  explicit values can coexist, while unset variables remain valid.
+- Seen 1× (2026-10-13; environment-check acceptance review).
+
 **Run the development mock through each affected page after changing its data shape.**
 - Removing retired account fields from the mock also removed `agents` arrays nested
   inside skill discovery groups. The TypeScript build and 561 frontend unit tests

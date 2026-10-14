@@ -38,6 +38,9 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ));
     };
     let allowed = match (domain, verb) {
+        ("environment", "check" | "profiles" | "save-profile" | "delete-profile" | "sync-time") => {
+            true
+        }
         ("launch", "build" | "catalog" | "run" | "list" | "save" | "delete") => true,
         ("resources", "targets") => true,
         ("system", "audit" | "discover" | "refresh-upstream") => true,
@@ -117,6 +120,21 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
     let (domain, verb) = command.split_once(':').unwrap_or(("", ""));
     let mut specs: Vec<(&'static str, ArgValueKind)> = Vec::new();
     match (domain, verb) {
+        ("environment", "check") => {
+            specs.push(("--spec", ArgValueKind::JsonValue));
+            specs.push(("--probe-time", ArgValueKind::Flag));
+        }
+        ("environment", "sync-time") => {
+            specs.push(("--spec", ArgValueKind::JsonValue));
+            specs.push(("--confirm", ArgValueKind::Flag));
+        }
+        ("environment", "save-profile" | "delete-profile") => {
+            if verb == "save-profile" {
+                specs.push(("--spec", ArgValueKind::JsonValue));
+            }
+            specs.push(("--id", ArgValueKind::TemplateId));
+            specs.push(("--base", ArgValueKind::Digest));
+        }
         ("launch", "build") => specs.push(("--spec", ArgValueKind::JsonValue)),
         ("launch", "save" | "delete") => {
             if verb == "save" {
@@ -658,6 +676,40 @@ pub async fn engine_invoke(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn environment_check_exposes_only_read_and_explicit_time_query() {
+        assert!(validate_command("environment:check").is_ok());
+        assert!(validate_args(
+            "environment:check",
+            &["--spec".into(), "{}".into(), "--probe-time".into()]
+        )
+        .is_ok());
+        assert!(validate_command("environment:apply").is_err());
+        assert!(validate_args("environment:check", &["--confirm".into()]).is_err());
+        assert!(validate_args("environment:check", &["--spec".into(), "not-json".into()]).is_err());
+    }
+
+    #[test]
+    fn environment_collections_and_clock_correction_have_separate_arguments() {
+        for command in [
+            "environment:profiles",
+            "environment:save-profile",
+            "environment:delete-profile",
+            "environment:sync-time",
+        ] {
+            assert!(validate_command(command).is_ok());
+        }
+        assert!(validate_args("environment:profiles", &["--spec".into(), "{}".into()]).is_err());
+        assert!(validate_args("environment:save-profile", &["--spec".into(), "{}".into()]).is_ok());
+        assert!(validate_args(
+            "environment:sync-time",
+            &["--spec".into(), "{}".into(), "--confirm".into()]
+        )
+        .is_ok());
+        assert!(validate_args("environment:sync-time", &["--probe-time".into()]).is_err());
+        assert!(validate_args("environment:save-profile", &["--confirm".into()]).is_err());
+    }
 
     #[test]
     fn launch_generation_is_exposed_without_retired_account_commands() {

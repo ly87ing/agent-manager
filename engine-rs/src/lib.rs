@@ -19,6 +19,7 @@ pub(crate) mod native_agent_adapters;
 pub mod native_agents;
 pub(crate) mod native_config;
 pub(crate) mod native_discover;
+pub(crate) mod native_environment;
 pub(crate) mod native_launch;
 pub mod native_mcp;
 pub(crate) mod native_profiles;

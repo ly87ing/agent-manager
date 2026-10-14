@@ -57,6 +57,7 @@ describe("App 顶层导航", () => {
     // Settings uses an icon; check its accessible name.
     expect(navButtons.map((b) => b.getAttribute("aria-label") ?? b.textContent?.trim())).toEqual([
       "启动",
+      "环境",
       "技能",
       "MCP",
       "规则",

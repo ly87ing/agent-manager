@@ -18,6 +18,7 @@ export interface CommandItem {
 }
 
 const PAGES: { key: string; label: string; keywords: string }[] = [
+  { key: "environment", get label() { return t("环境检查"); }, keywords: "environment timezone locale language region ntp time 环境 时区 语言 地区 校时" },
   { key: "launch", get label() { return t("启动"); }, keywords: "launch app cli command environment env args timezone alias shell 应用 命令 环境变量 参数 时区 别名 启动 la sg" },
   { key: "skills", get label() { return t("技能"); }, keywords: "skills 技能" },
   { key: "mcp", label: "MCP", keywords: "mcp 服务器" },

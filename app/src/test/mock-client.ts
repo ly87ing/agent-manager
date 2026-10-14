@@ -1,6 +1,7 @@
 import type { Envelope, RunEntry } from "../lib/contract";
 import { EngineBridgeError, type EngineClient } from "../lib/engine";
 import { createLaunchMock } from "./launch-mock";
+import { createEnvironmentMock } from "./environment-mock";
 import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeRunEntry } from "./fixtures";
 
 /**
@@ -812,12 +813,14 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
   }
 
   const launch = createLaunchMock();
+  const environment = createEnvironmentMock();
   return {
     async run(command, args = [], runOptions = {}) {
       // 模拟进程耗时，让加载/进行中的 UI 状态可见
       await new Promise((resolve) => setTimeout(resolve, 120));
       const runId = runOptions.runId ?? "20260906T020000Z-mockrun";
       if (command.startsWith("launch:")) return launch(command, args);
+      if (command.startsWith("environment:")) return environment(command, args);
 
       const domain = command.replaceAll(".", ":").split(":")[0];
       const key = argOf(args, "--key") ?? "";

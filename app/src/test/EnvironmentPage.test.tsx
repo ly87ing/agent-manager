@@ -1,0 +1,181 @@
+import { describe, expect, it } from "vitest";
+import { waitFor } from "@testing-library/react";
+import EnvironmentPage from "../pages/EnvironmentPage";
+import { setLanguage } from "../lib/i18n";
+import type { EnvironmentProfile, EnvironmentTarget } from "../lib/environment";
+import { environmentFixture } from "./environment-fixture";
+import { createEnvironmentMock } from "./environment-mock";
+import { makeEnvelope } from "./fixtures";
+import { chooseOption, renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+
+function collection(target: EnvironmentTarget = {}, auto_sync = false): EnvironmentProfile {
+  return { id: "sample", revision: "a".repeat(64), name: "Example collection", target: environmentFixture(target).target, auto_sync };
+}
+function setup(item?: EnvironmentProfile, synchronized: boolean | null = true) {
+  return renderWithEngine(<EnvironmentPage />, {
+    "environment:profiles": makeEnvelope({ items: item ? [item] : [] }),
+    "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]), args.includes("--probe-time"), synchronized)),
+  });
+}
+
+describe("Environment checks", () => {
+  it("opens local inventory and collections without network or writes, then compares one selected collection", async () => {
+    const { calls } = setup(collection({ timezone: "Asia/Tokyo" }));
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    expect(calls.map((call) => call.command).sort()).toEqual(["environment:check", "environment:profiles"]);
+    expect(calls.find((call) => call.command === "environment:check")!.args).not.toContain("--probe-time");
+    expect(screen.queryByRole("textbox", { name: "目标地区" })).not.toBeInTheDocument();
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    expect(screen.queryByText("已读取环境，尚未设置比较目标。")).not.toBeInTheDocument();
+    expect(calls).toHaveLength(2);
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    await screen.findByText("发现与目标不符的项目。");
+    expect(document.querySelector('[data-check-id="time.timezone"]')).toHaveTextContent("不符");
+  });
+
+  it.each([[true, "符合"], [false, "不符"], [null, "无法确认"]] as const)("compares kernel synchronization (%s) independently", async (synchronized, state) => {
+    const { calls } = setup(collection({ time_synchronized: true }), synchronized);
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    await screen.findByText("内核时间同步状态");
+    expect(document.querySelector('[data-check-id="ntp.synchronized"]')).toHaveTextContent(state);
+    expect(calls.every((call) => !call.args.includes("--probe-time"))).toBe(true);
+    await userEvent.click(screen.getByRole("checkbox", { name: "显示取值来源与说明" }));
+    expect(screen.getByText("内核报告的同步状态，不提供最近同步时间或后台采用的服务器。实际偏差请比较参考时间。")).toBeInTheDocument();
+  });
+
+  it("creates with explicit prefill, edits, reopens and deletes a reusable collection", async () => {
+    const mock = createEnvironmentMock();
+    const routes = Object.fromEntries(["check", "profiles", "save-profile", "delete-profile"].map((verb) => [`environment:${verb}`, async (args: string[]) => mock(`environment:${verb}`, args)]));
+    let view = renderWithEngine(<EnvironmentPage />, routes);
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await userEvent.click(screen.getByRole("button", { name: "新增期望集合" }));
+    expect(screen.getByRole("textbox", { name: "目标地区" })).toHaveValue("");
+    await userEvent.type(screen.getByRole("textbox", { name: "集合名称" }), "My environment");
+    await userEvent.click(screen.getByRole("button", { name: "用当前值填写目标" }));
+    expect(screen.getByRole("textbox", { name: "目标地区" })).toHaveValue("GB");
+    expect(screen.getByRole("combobox", { name: "目标时间同步状态" })).toHaveAttribute("data-value", "true");
+    await userEvent.click(screen.getByRole("button", { name: "保存期望集合" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(view.calls.filter((call) => call.command === "environment:check")).toHaveLength(1);
+    const savedId = screen.getByRole("combobox", { name: "选择期望集合" }).getAttribute("data-value")!;
+    await userEvent.click(screen.getByRole("button", { name: "编辑期望集合" }));
+    await userEvent.clear(screen.getByRole("textbox", { name: "集合名称" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "集合名称" }), "Renamed environment");
+    await userEvent.click(screen.getByRole("button", { name: "保存期望集合" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(view.calls.filter((call) => call.command === "environment:save-profile")[1].args).toContain("--base");
+    view.unmount(); view = renderWithEngine(<EnvironmentPage />, routes);
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), savedId);
+    expect(screen.getByRole("combobox", { name: "选择期望集合" })).toHaveTextContent("Renamed environment");
+    await userEvent.click(screen.getByRole("button", { name: "删除期望集合" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "删除期望集合" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByRole("combobox", { name: "选择期望集合" })).toHaveAttribute("data-value", "");
+  });
+
+  it("discloses the server, measures on demand and offers correction only for a clear clock mismatch", async () => {
+    const { calls } = setup(collection({ ntp_server: "time.example.org", max_clock_offset_ms: 10 }));
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    expect(screen.getByText("检查会向 time.example.org 的 UDP 123 端口查询参考时间。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "立即校时（系统授权）" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    await screen.findByText(/查询地址：198.18.0.1/);
+    expect(calls[calls.length - 1].args).toContain("--probe-time");
+    expect(screen.getByRole("button", { name: "立即校时（系统授权）" })).toBeDisabled();
+    expect(calls.some((call) => call.command === "environment:sync-time")).toBe(false);
+  });
+
+  it.each(["verified", "cancelled", "unverified", "unavailable"] as const)("runs opted-in correction and renders the %s outcome", async (status) => {
+    const item = collection({ ntp_server: "time.example.org", max_clock_offset_ms: 10 }, true);
+    const report = environmentFixture({ ntp_server: "time.example.org", max_clock_offset_ms: 10 }, true);
+    report.time_repair = { status, before_offset_ms: 3000, before_uncertainty_ms: 20 };
+    if (status === "verified") {
+      const clock = report.checks.find((row) => row.id === "ntp.clock_offset")!;
+      clock.state = "match"; clock.observed = "+0.0 ms ± 1.0 ms";
+      report.time_sample!.offset_ms = 0; report.time_sample!.uncertainty_ms = 1;
+      report.summary.matched++; report.summary.mismatched--;
+    }
+    const { calls } = renderWithEngine(<EnvironmentPage />, {
+      "environment:profiles": makeEnvelope({ items: [item] }), "environment:check": makeEnvelope(environmentFixture()), "environment:sync-time": makeEnvelope(report),
+    });
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    expect(screen.getByText(/此集合已启用自动校时/)).toBeInTheDocument();
+    expect(calls.some((call) => call.command === "environment:sync-time")).toBe(false);
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    const messages = { verified: "系统时间已校正，复测偏差符合目标。", cancelled: "已取消管理员授权，未完成校时。", unverified: "校时命令已完成，但复测尚未确认符合目标。", unavailable: "无法可靠判断时间偏差，未执行校时。" };
+    await screen.findByText(messages[status]);
+    expect(calls[calls.length - 1].command).toBe("environment:sync-time"); expect(calls[calls.length - 1].args).toContain("--confirm");
+    if (status !== "verified") expect(screen.queryByText(messages.verified)).not.toBeInTheDocument();
+  });
+
+  it("prevents saving an incomplete automatic-correction policy", async () => {
+    const { calls } = setup(); await screen.findByText("已读取环境，尚未设置比较目标。");
+    await userEvent.click(screen.getByRole("button", { name: "新增期望集合" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "集合名称" }), "Example");
+    await userEvent.click(screen.getByRole("checkbox", { name: "检查发现时间偏差超限时自动校时" }));
+    expect(screen.getByRole("button", { name: "保存期望集合" })).toBeDisabled();
+    expect(calls.some((call) => call.command === "environment:save-profile")).toBe(false);
+  });
+
+  it("preserves edits when saving fails and recovers an unreadable collection list", async () => {
+    let reads = 0;
+    renderWithEngine(<EnvironmentPage />, {
+      "environment:check": makeEnvelope(environmentFixture()),
+      "environment:profiles": async () => makeEnvelope(++reads === 1 ? { items: [{}] } : { items: [] }),
+      "environment:save-profile": makeEnvelope({}, { ok: false, errors: [{ code: "CONFLICT", element: null, message: "Collection changed; reload before editing." }] }),
+    });
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    expect(screen.getByRole("button", { name: "新增期望集合" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "重新读取集合" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "新增期望集合" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "新增期望集合" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "集合名称" }), "Preserve this");
+    await userEvent.type(screen.getByRole("textbox", { name: "目标地区" }), "US");
+    await userEvent.click(screen.getByRole("button", { name: "保存期望集合" }));
+    await screen.findByText("Collection changed; reload before editing.");
+    expect(screen.getByRole("textbox", { name: "集合名称" })).toHaveValue("Preserve this");
+    expect(screen.getByRole("textbox", { name: "目标地区" })).toHaveValue("US");
+    expect(screen.getByRole("button", { name: "保存期望集合" })).toBeEnabled();
+  });
+
+  it("reports malformed results and allows retry without showing success", async () => {
+    let attempt = 0;
+    renderWithEngine(<EnvironmentPage />, { "environment:check": async () => makeEnvelope(++attempt === 1 ? { checks: [] } : environmentFixture()) });
+    await userEvent.click(await screen.findByRole("button", { name: "重试检查" }));
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+  });
+
+  it("corrects a measured mismatch only after the explicit manual action", async () => {
+    const target = { ntp_server: "time.example.org", max_clock_offset_ms: 10 };
+    const corrected = environmentFixture(target, true);
+    corrected.time_repair = { status: "cancelled", before_offset_ms: 20, before_uncertainty_ms: 5 };
+    const { calls } = renderWithEngine(<EnvironmentPage />, {
+      "environment:profiles": makeEnvelope({ items: [collection(target)] }),
+      "environment:check": async (args) => makeEnvelope(environmentFixture(args.includes("--probe-time") ? target : {}, args.includes("--probe-time"))),
+      "environment:sync-time": makeEnvelope(corrected),
+    });
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    const correction = await screen.findByRole("button", { name: "立即校时（系统授权）" });
+    expect(calls.some((call) => call.command === "environment:sync-time")).toBe(false);
+    await waitFor(() => expect(correction).toBeEnabled(), { timeout: 5000 });
+    await userEvent.click(correction);
+    await screen.findByText("已取消管理员授权，未完成校时。");
+    expect(calls[calls.length - 1].command).toBe("environment:sync-time");
+  }, 10000);
+
+  it("renders collections and the editor in English", async () => {
+    setLanguage("en"); setup(); await screen.findByText("Environment read. No comparison targets selected.");
+    expect(screen.getByRole("combobox", { name: "Choose expected-value collection" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Add expected-value collection" }));
+    expect(screen.getByRole("button", { name: "Save expected-value collection" })).toBeInTheDocument();
+    expect(screen.getByText("Save criteria only")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Correct time automatically when a check finds excessive clock offset" })).toBeInTheDocument();
+  });
+});

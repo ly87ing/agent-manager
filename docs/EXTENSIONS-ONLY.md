@@ -13,6 +13,19 @@ separate explicit action. This exception does not enable the retired account or
 
 ## Product boundary
 
+The 2026-10-13 user request adds an independent environment checker for
+macOS time, language, region, locale and NTP settings. The desktop and CLI share
+`environment:check`; reference-time queries require an explicit action. It reads
+no account identity or credentials and changes no system or shell settings.
+The follow-up adds named expected-value collections stored in Agent Manager and
+authorized one-shot time correction. Only `environment:sync-time --confirm`,
+including a collection's explicitly enabled automatic correction during a user
+check, may adjust the system clock. It requires a fresh excessive offset and
+macOS administrator authorization, then independently checks the result. It
+does not alter the time zone, regional preferences, NTP configuration or shell
+files, and installs no privileged service. See
+[Environment checks](subsystems/environment-checks.md).
+
 Account creation, registration edits, removal, switching, login/logout, account-bound launch commands, credentials, provider/model/runtime settings, and assistant installation/upgrades are retired. Existing account directories, authentication files, sessions, configuration, shell files, and historical launch scripts are preserved. Official assistant tools remain responsible for them.
 
 Historical registrations are immutable location metadata for existing extension targets. Reading a target label does not inspect authentication, account settings, or assistant executables. New account registration is unavailable. The default assistant resource locations remain available.
