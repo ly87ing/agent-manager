@@ -19,6 +19,71 @@ function setup(item?: EnvironmentProfile, synchronized: boolean | null = true) {
 }
 
 describe("Environment checks", () => {
+  it("announces matching targets immediately while disclosing untargeted unknowns, then clears stale feedback", async () => {
+    const view = setup(collection({ region: "GB" }));
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    expect(document.querySelector('[data-sonner-toast]')).toBeNull();
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toHaveTextContent("检查完成：所选目标全部符合。"));
+    const toast = document.querySelector('[data-sonner-toast]')!;
+    expect(toast).toHaveTextContent("符合 1 项，不符 0 项，无法确认 0 项。");
+    expect(toast).toHaveTextContent("未设目标且无法确认：后台实际授时来源、自动设置时间、参考时间偏差");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "");
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast]:not([data-removed="true"])')).toBeNull());
+    view.unmount();
+  });
+
+  it("names mismatches and unknown targets in the completion toast and persistent summary", async () => {
+    setup(collection({ timezone: "Asia/Tokyo", region: "US", automatic_time: true }));
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toHaveTextContent("检查完成：3 项不符，1 项无法确认。"));
+    for (const result of [document.querySelector('[data-sonner-toast]')!, screen.getByRole("region", { name: "检查结果" })]) {
+      expect(result).toHaveTextContent("不符项目：系统时区、地区、进程实际时区");
+      expect(result).toHaveTextContent("目标中无法确认：自动设置时间");
+    }
+    expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toBeNull();
+  });
+
+  it.each([[{}, "info", "检查完成：尚未设置比较目标。"], [{ automatic_time: true }, "warning", "检查完成：0 项不符，1 项无法确认。"]] as const)("does not claim all-clear for inventory or unknown targets (%s)", async (target, level, title) => {
+    setup(collection(target));
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    await waitFor(() => expect(document.querySelector(`[data-sonner-toast][data-type="${level}"]`)).toHaveTextContent(title));
+    expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toBeNull();
+  });
+
+  it("announces a failed explicit check and replaces the error with a successful retry", async () => {
+    let calls = 0;
+    renderWithEngine(<EnvironmentPage />, { "environment:check": async () => makeEnvelope(++calls === 2 ? { checks: [] } : environmentFixture()) });
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await userEvent.click(screen.getByRole("button", { name: "检查本机环境" }));
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent("环境检查失败"));
+    expect(document.querySelector('[data-sonner-toast]')).toHaveTextContent(screen.getByRole("alert").textContent!.replace("重试检查", "").replace(/\s+/g, " "));
+    await userEvent.click(screen.getByRole("button", { name: "重试检查" }));
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="info"]')).toHaveTextContent("尚未设置比较目标"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("does not announce successful correction when the new sample matches after a failed correction", async () => {
+    const target = { ntp_server: "pool.ntp.org", max_clock_offset_ms: 2000 };
+    const report = environmentFixture(target, true);
+    report.time_repair = { status: "failed", before_offset_ms: 3000, before_uncertainty_ms: 20 };
+    renderWithEngine(<EnvironmentPage />, {
+      "environment:profiles": makeEnvelope({ items: [collection(target, true)] }),
+      "environment:check": makeEnvelope(environmentFixture()), "environment:sync-time": makeEnvelope(report),
+    });
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toHaveTextContent("检查完成，校时未确认成功。"));
+    expect(document.querySelector('[data-sonner-toast]')).toHaveTextContent("校时未成功，请检查管理员授权和网络连接。");
+    expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toBeNull();
+  });
+
   it("opens local inventory and collections without network or writes, then compares one selected collection", async () => {
     const { calls } = setup(collection({ timezone: "Asia/Tokyo" }));
     await screen.findByText("已读取环境，尚未设置比较目标。");
@@ -246,7 +311,8 @@ describe("Environment checks", () => {
     expect(calls.some((call) => call.command === "environment:check-time-settings")).toBe(false);
     await userEvent.click(within(dialog).getByRole("button", { name: "继续只读检查" }));
     const messages = { read: "已读取自动设置时间开关并更新检查结果，未修改系统设置。", cancelled: "已取消授权，保留原检查结果。", failed: "未能读取自动设置时间开关，保留原检查结果。可在系统设置中确认。" };
-    await screen.findByText(messages[status]);
+    await within(screen.getByTestId("environment-page")).findByText(messages[status]);
+    await waitFor(() => expect(document.querySelector(`[data-sonner-toast][data-type="${status === "read" ? "success" : status === "cancelled" ? "info" : "error"}"]`)).not.toBeNull());
     expect(calls[calls.length - 1]).toMatchObject({ command: "environment:check-time-settings", args: ["--spec", expect.any(String), "--confirm"] });
     expect(JSON.parse(calls[calls.length - 1].args[1])).toMatchObject(target);
     expect(calls.some((call) => call.command === "environment:sync-time")).toBe(false);

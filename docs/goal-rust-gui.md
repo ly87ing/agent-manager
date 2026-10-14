@@ -1584,3 +1584,29 @@ Actual administrator-authorized clock writing remains unaccepted pending user
 interaction with the macOS authorization dialog. Simulated success does not
 establish that live privileged path. No installed app, installer, tag or Release
 was changed or published.
+
+## 2026-10-13: immediate environment check conclusions
+
+Explicit checks now show a completion toast with matching/differing/unknown target
+counts and finding names. Untargeted unknown observations are disclosed separately.
+The page retains complete finding lists after the toast closes; long toast lists
+are bounded. Inventory-only checks, failed requests and unconfirmed correction
+cannot announce success. Selection changes, new checks and navigation clear old
+feedback. Authorized read-only inspection also reports completion or cancellation.
+
+Verification: 187 focused frontend tests passed, including 26 Environment tests;
+the complete frontend workspace passed 611 tests in 54 files, and the production
+type/build gate passed. Browser mocks exercised matching, mixed, unknown,
+inventory-only, long-list, failed correction and failed-request/retry outcomes in
+English and Chinese at 1000 × 650 and 760 × 650. Toasts fit the triggering viewport
+without scrolling; complete finding lists remain in the page summary.
+
+Read-only system checks confirmed the existing time zone, language and region,
+unchanged shell/NTP file hashes and unchanged saved environment collections.
+The isolated native desktop at 1000 × 650 checked the existing selected
+collection: 15 targets matched, zero differed and zero targeted checks were
+unknown. The completion toast disclosed the two untargeted unknowns. The current
+clock sample was within tolerance and correctly skipped correction.
+Rust and native clock-writing acceptance were not repeated because this slice
+changes frontend feedback only. System configuration and the installed app were
+preserved. No installer, tag or Release was produced.

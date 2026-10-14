@@ -16,6 +16,16 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   failure. Test clipboard recovery so an earlier error does not outlive a new action.
 - Seen 1× (2026-10-13; launch-error placement reported in the desktop preview).
 
+**Verify environment completion feedback from the triggering viewport.**
+- Persistent report counts alone do not prove that a user immediately sees the
+  conclusion. Check a completion toast without scrolling, and name differences
+  and unknown target checks in both the toast and persistent summary.
+- Matching selected criteria does not establish complete evidence. Disclose
+  untargeted unknowns separately, and never call inventory-only results or an
+  unconfirmed clock correction successful. Bound long notification lists while
+  retaining full details on the page.
+- Seen 1× (2026-10-13; environment completion feedback correction).
+
 **Keep remediation tied to the evidence and process it can actually change.**
 - A raw locale conflict can coexist with matching effective categories. Explain
   that distinction inline, and hand expected values to an unsaved launch draft;

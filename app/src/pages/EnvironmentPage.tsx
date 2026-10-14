@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Select } from "../components/Select";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EnvironmentProfileEditor } from "../components/EnvironmentProfileEditor";
@@ -57,6 +58,41 @@ function showValue(value: string | null) {
   if (value === "{}") return t("未设置自定义值");
   return value;
 }
+function repairDescription(report: EnvironmentReport) {
+  return report.time_repair ? ({
+    not_needed: t("时间偏差符合目标，无需校时。"), unavailable: t("无法可靠判断时间偏差，未执行校时。"),
+    verified: t("系统时间已校正，复测偏差符合目标。"), unverified: t("校时命令已完成，但复测尚未确认符合目标。"),
+    cancelled: t("已取消管理员授权，未完成校时。"), failed: t("校时未成功，请检查管理员授权和网络连接。"),
+  })[report.time_repair.status] : null;
+}
+function findingDetails(report: EnvironmentReport, limit = Infinity) {
+  return ([
+    { text: "不符项目：{0}", rows: report.checks.filter((row) => row.expected !== null && row.state === "mismatch") },
+    { text: "目标中无法确认：{0}", rows: report.checks.filter((row) => row.expected !== null && row.state === "unknown") },
+    { text: "未设目标且无法确认：{0}", rows: report.checks.filter((row) => row.expected === null && row.state === "unknown") },
+  ] as const).filter(({ rows }) => rows.length).map(({ text, rows }) => {
+    const names = rows.slice(0, limit).map((row) => label(row.id));
+    if (rows.length > limit) names.push(t("另 {0} 项", String(rows.length - limit)));
+    return t(text, names.join(t("、")));
+  });
+}
+function notifyReport(report: EnvironmentReport) {
+  const { matched, mismatched, unknown, compared } = report.summary;
+  const repairUnconfirmed = report.time_repair && !["not_needed", "verified"].includes(report.time_repair.status);
+  const title = mismatched || unknown ? t("检查完成：{0} 项不符，{1} 项无法确认。", String(mismatched), String(unknown))
+    : repairUnconfirmed ? t("检查完成，校时未确认成功。")
+    : compared ? t("检查完成：所选目标全部符合。") : t("检查完成：尚未设置比较目标。");
+  const level = mismatched || unknown || repairUnconfirmed ? "warning" : compared ? "success" : "info";
+  toast[level](title, { id: "environment-result", duration: 10000, closeButton: true,
+    description: [t("符合 {0} 项，不符 {1} 项，无法确认 {2} 项。", String(matched), String(mismatched), String(unknown)),
+      ...findingDetails(report, 3), repairDescription(report), t("完整明细见检查结果。")].filter(Boolean).join("\n"),
+    classNames: { description: "whitespace-pre-line" },
+  });
+}
+function notifyCheckError(message: string) {
+  toast.error(t("环境检查失败"), { id: "environment-result", description: message, duration: 10000, closeButton: true,
+    classNames: { description: "max-h-48 overflow-y-auto whitespace-pre-wrap break-words" } });
+}
 
 export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaunch?: (recipe: LaunchRecipe) => void }) {
   useLanguage();
@@ -83,12 +119,12 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
       if (collections.status === "fulfilled") setProfiles(collections.value); else setProfilesError(engineErrorMessage(collections.reason));
       setBusy(false);
     });
-    return () => { generation.current++; clearTimeout(cooldownTimer.current); };
+    return () => { generation.current++; clearTimeout(cooldownTimer.current); toast.dismiss("environment-result"); };
   }, []);
 
   const selected = profiles.find((profile) => profile.id === selectedId);
   const server = selected?.target.ntp_server;
-  function select(id: string) { generation.current++; setSelectedId(id); setData(null); setError(null); setActionMessage(null); }
+  function select(id: string) { generation.current++; setSelectedId(id); setData(null); setError(null); setActionMessage(null); toast.dismiss("environment-result"); }
   function startCooldown() {
     setCooldown(true); clearTimeout(cooldownTimer.current);
     cooldownTimer.current = setTimeout(() => setCooldown(false), 4000);
@@ -96,17 +132,22 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   async function run(forceRepair = false) {
     const id = ++generation.current;
     setBusy(true); setError(null); setData(null); setActionMessage(null);
+    toast.dismiss("environment-result");
     const target = selected ? profileTarget(selected) : {};
     const repair = forceRepair || Boolean(selected?.auto_sync);
     try {
       const result = await (repair ? repairEnvironmentTime(target) : checkEnvironment(target, Boolean(server)));
       if (id === generation.current) {
         setData(result);
+        notifyReport(result);
         if (server) {
           startCooldown();
         }
       }
-    } catch (err) { if (id === generation.current) setError(engineErrorMessage(err)); }
+    } catch (err) { if (id === generation.current) {
+      const message = engineErrorMessage(err); setError(message);
+      notifyCheckError(message);
+    } }
     finally { if (id === generation.current) setBusy(false); }
   }
   async function openSettings(pane: "date-time" | "language-region") {
@@ -118,14 +159,20 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   async function authorizeTimeSettings() {
     const id = ++generation.current;
     setBusy(true); setError(null); setActionMessage(null);
+    toast.dismiss("environment-result");
     try {
       const result = await checkTimeSettings(selected ? profileTarget(selected) : {}, Boolean(server));
       if (id !== generation.current) return;
       if (result.status === "read") {
         setData(result.report); if (server) startCooldown();
+        notifyReport(result.report);
         setActionMessage(t("已读取自动设置时间开关并更新检查结果，未修改系统设置。"));
-      } else setActionMessage(result.status === "cancelled" ? t("已取消授权，保留原检查结果。") : t("未能读取自动设置时间开关，保留原检查结果。可在系统设置中确认。"));
-    } catch (err) { if (id === generation.current) setError(engineErrorMessage(err)); }
+      } else {
+        const message = result.status === "cancelled" ? t("已取消授权，保留原检查结果。") : t("未能读取自动设置时间开关，保留原检查结果。可在系统设置中确认。");
+        setActionMessage(message);
+        toast[result.status === "cancelled" ? "info" : "error"](message, { id: "environment-result", duration: 10000, closeButton: true });
+      }
+    } catch (err) { if (id === generation.current) { const message = engineErrorMessage(err); setError(message); notifyCheckError(message); } }
     finally { if (id === generation.current) { setBusy(false); setAuthorizing(false); } }
   }
   async function save(input: EnvironmentProfileInput) {
@@ -146,11 +193,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
     catch (err) { setProfilesError(engineErrorMessage(err)); }
     finally { setRemoving(false); }
   }
-  const repairMessage = data?.time_repair ? ({
-    not_needed: t("时间偏差符合目标，无需校时。"), unavailable: t("无法可靠判断时间偏差，未执行校时。"),
-    verified: t("系统时间已校正，复测偏差符合目标。"), unverified: t("校时命令已完成，但复测尚未确认符合目标。"),
-    cancelled: t("已取消管理员授权，未完成校时。"), failed: t("校时未成功，请检查管理员授权和网络连接。"),
-  })[data.time_repair.status] : null;
+  const repairMessage = data ? repairDescription(data) : null;
   return <div className="space-y-4" data-testid="environment-page">
     <div>
       <h1 className="text-lg font-semibold">{t("环境检查")}</h1>
@@ -194,6 +237,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
       <section className="space-y-2 rounded-md border p-3" aria-label={t("检查结果")}>
         <p role="status" className="text-sm font-medium">{data.summary.compared === 0 ? t("已读取环境，尚未设置比较目标。") : data.summary.status === "match" ? t("已检查的目标全部符合。") : data.summary.status === "mismatch" ? t("发现与目标不符的项目。") : t("仍有目标项目无法确认。")}</p>
         <p className="text-xs text-muted-foreground">{t("符合 {0} 项，不符 {1} 项，无法确认 {2} 项。", String(data.summary.matched), String(data.summary.mismatched), String(data.summary.unknown))}</p>
+        {findingDetails(data).map((detail) => <p key={detail} className="break-words text-xs">{detail}</p>)}
         <p className="text-xs text-muted-foreground">{t("另有 {0} 项未设目标，其中 {1} 项无法确认。", String(data.checks.filter((row) => row.expected === null).length), String(data.checks.filter((row) => row.expected === null && row.state === "unknown").length))}</p>
         <p className="break-all text-xs text-muted-foreground">{t("检查时间：{0}", data.checked_at)}</p>
         <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={evidence} onChange={(event) => setEvidence(event.target.checked)} />{t("显示取值来源与说明")}</label>

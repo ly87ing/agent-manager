@@ -54,6 +54,15 @@ selected collection compares its values and queries its explicit time server,
 when configured. The destination and automatic-correction behavior are disclosed
 before checking. No collection is selected by default.
 
+An explicit check immediately shows a dismissible completion toast with target
+counts and the names of differences or unknown checks. Long lists show three
+names per category and a remaining count; the persistent result summary keeps
+the complete lists. Matching targets are stated as matching selected criteria,
+with untargeted unknown observations disclosed separately. Inventory-only checks
+never claim an all-clear. Failed requests and unconfirmed time correction do not
+show success. Starting a new check, selecting a collection or leaving the page
+clears the previous notification. Opening the page does not announce completion.
+
 Add/Edit opens the criteria editor; Use current values as targets explicitly
 prefills its fields without asserting those values are correct. Save persists
 the name, target and optional `auto_sync` flag in `environment_profiles` inside
@@ -189,5 +198,8 @@ no HOME/data creation on reads or invalid requests, and no implicit network quer
 Frontend tests cover collection CRUD/reopen, target invalidation, explicit prefill,
 opt-in correction, destination disclosure, unknown evidence, malformed results,
 retry and English rendering.
+Completion-feedback regressions cover mixed differences/unknowns, matching
+targets with untargeted unknowns, inventory-only results, failed request/retry,
+stale notification dismissal and unconfirmed correction despite a matching sample.
 Browser mock acceptance at 1000 and 760 px proves the UI; real CLI and isolated
 native desktop readback separately establish system and bridge behavior.
