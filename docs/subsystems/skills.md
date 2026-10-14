@@ -18,7 +18,7 @@ locations. The interface shows the complete destination before confirmation.
 Git repository caches remain grouped by collection under the application data
 directory. Existing sources and assistant entries are never moved automatically.
 
-For unmanaged skills, `skills:adopt-preview --name NAME [--dest PATH]` previews
+For unmanaged skills, `skills:adopt-preview --name NAME [--dest PATH] [--local-only]` previews
 the personal `my-skills` collection. The local digest includes its resolved
 directory and existing definition. `skills:adopt --keep-local` must use that
 same preview and directory; a changed directory or definition requires a new
@@ -26,6 +26,12 @@ preview before any content is copied or moved. Editing the destination in the
 interface disables confirmation until the preview is refreshed and retains the
 selected assistants. Source adoption
 and duplicate cleanup do not depend on a usable personal-copy destination.
+
+The desktop initially uses `--local-only`: it reads local provenance and prepares
+the personal-copy plan without querying Git. **Compare remote source** explicitly
+requests remote refs and content comparison. A remote failure returns the local
+option; changing the personal destination refreshes only the local preview.
+CLI callers omit `--local-only` when they want the existing remote comparison.
 
 Personal-copy destinations reject account and application-data directories,
 assistant skill roots, directory aliases, ambiguous paths, and overlap with other

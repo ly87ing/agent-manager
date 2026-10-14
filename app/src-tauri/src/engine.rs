@@ -245,6 +245,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--ref", ArgValueKind::GitRef));
         }
         ("skills", "adopt-preview") => {
+            specs.push(("--local-only", ArgValueKind::Flag));
             specs.push(("--name", ArgValueKind::ElementId));
             specs.push(("--collection", ArgValueKind::ElementId));
             specs.push(("--dest", ArgValueKind::FilePath));
@@ -1651,6 +1652,7 @@ mod tests {
             &[
                 "--name".into(),
                 "archify".into(),
+                "--local-only".into(),
                 "--dest".into(),
                 "~/skills/my-skills".into()
             ]

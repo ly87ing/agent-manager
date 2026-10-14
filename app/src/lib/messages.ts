@@ -1,5 +1,7 @@
 /** Application copy only; user content and engine diagnostics are never translation keys. */
 export const messages = {
+  "正在读取本机内容，预览不会改动任何东西。": "Reading local content. Preview does not change anything.",
+  "比对远程来源": "Compare remote source",
   "校时结果未能写入操作记录，本页保留复测结果。": "The correction result could not be saved to activity. The new measurement remains on this page.",
   "详细信息：{0}": "Details: {0}",
   "正在处理…": "Working…",

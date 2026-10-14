@@ -6,6 +6,14 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-14: local adoption previews cover every entry and refresh
+
+The focused dialog tests passed before the full suite reached Sources' existing
+destination-refresh case. A local-only preview must stay local after a destination
+edit too. Keep the exact request, chosen-assistant and destination-digest assertions
+in that caller, and verify a successful explicit source comparison switches the
+confirmation back to the verified source plan.
+
 ## Tests that prove something
 
 **Audit notification ownership across complete user operations.**

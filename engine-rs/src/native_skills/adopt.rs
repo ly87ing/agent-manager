@@ -620,7 +620,11 @@ fn local_destination(ctx: &Context, req: &Request) -> Result<(String, Value)> {
 }
 
 pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
-    strict_args(req, &["--name", "--collection", "--dest"], &[])?;
+    strict_args(
+        req,
+        &["--name", "--collection", "--dest"],
+        &["--local-only"],
+    )?;
     let name = req
         .value("--name")
         .ok_or_else(|| anyhow!("需要 --name <技能>"))?;
@@ -672,6 +676,9 @@ pub(crate) fn preview(ctx: &Context, req: &Request) -> Result<Value> {
                 });
         }
         Err(error) => out["local_error"] = json!(error.to_string()),
+    }
+    if req.flag("--local-only") {
+        return Ok(out);
     }
     let Some(repository) = plan.source["repository"].as_str().map(str::to_string) else {
         out["source_check"] = json!({"error": "认不出来源仓库，只能作为本机来源纳入"});

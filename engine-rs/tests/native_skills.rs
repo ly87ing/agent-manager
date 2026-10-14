@@ -3648,6 +3648,44 @@ fn personal_skill_adoption_checks_the_previewed_custom_directory_and_can_undo() 
 }
 
 #[test]
+fn local_adoption_preview_skips_a_known_remote_and_preserves_source_bytes() {
+    let (root, ctx) = temp_ctx("local-adoption-no-remote");
+    let source = ctx.home_dir.join("source");
+    std::fs::create_dir_all(source.join(".git")).unwrap();
+    std::fs::create_dir_all(source.join("skills/mine")).unwrap();
+    std::fs::create_dir_all(ctx.home_dir.join(".claude/skills")).unwrap();
+    std::fs::write(
+        source.join(".git/config"),
+        "[remote \"origin\"]\n url = https://example.invalid/YOUR_REPOSITORY.git\n",
+    )
+    .unwrap();
+    std::fs::write(source.join("skills/mine/SKILL.md"), "# Local content\n").unwrap();
+    link_dir(
+        source.join("skills/mine"),
+        ctx.home_dir.join(".claude/skills/mine"),
+    )
+    .unwrap();
+    let preview = execute(
+        &ctx,
+        &request("skills:adopt-preview", &["--name", "mine", "--local-only"]),
+    );
+    assert!(preview.ok, "{:?}", preview.errors);
+    assert_eq!(
+        preview.data["source"]["repository"],
+        "https://example.invalid/YOUR_REPOSITORY.git"
+    );
+    assert!(preview.data["local"]["digest"].is_string());
+    assert!(preview.data.get("source_check").is_none());
+    assert!(!ctx.data_dir.exists());
+    assert!(!ctx.home_dir.join("skills").exists());
+    assert_eq!(
+        std::fs::read_to_string(source.join("skills/mine/SKILL.md")).unwrap(),
+        "# Local content\n"
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn forking_an_assigned_local_skill_copies_current_source_without_a_snapshot() {
     let (root, context) = temp_ctx("skills-fork-local");
     let source = root.join("local/alpha");

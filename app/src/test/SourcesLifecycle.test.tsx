@@ -967,7 +967,7 @@ describe("来源页：纳入管理", () => {
     await userEvent.click(within(dialog).getByTestId("adopt-refresh-preview"));
     await waitFor(() => expect(within(dialog).getByTestId("adopt-plan")).toHaveTextContent(`${customRoot}/archify`));
     expect(within(dialog).getByTestId("adopt-account-codex")).not.toBeChecked();
-    expect(calls.filter((call) => call.command === "skills:adopt-preview")[1].args).toEqual(["--name", "archify", "--dest", customRoot]);
+    expect(calls.filter((call) => call.command === "skills:adopt-preview")[1].args).toEqual(["--name", "archify", "--local-only", "--dest", customRoot]);
     await userEvent.click(within(dialog).getByTestId("adopt-confirm"));
     await waitFor(() => expect(calls.some((call) => call.command === "skills:adopt")).toBe(true));
     expect(calls.find((call) => call.command === "skills:adopt")!.args).toEqual(["--name", "archify", "--digest", customDigest, "--keep-local", "--dest", customRoot, "--agents", "claude-code"]);

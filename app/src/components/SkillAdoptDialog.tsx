@@ -81,6 +81,7 @@ export function SkillAdoptDialog({
   const [selected, setSelected] = useState<string[]>([]);
   const [dest, setDest] = useState("");
   const [requestedDest, setRequestedDest] = useState<string | null>(null);
+  const [sourceRequest, setSourceRequest] = useState(0);
   const running = runningId !== null;
   const progress = useEngineProgress(runningId ?? previewId);
   const close = () => {
@@ -95,6 +96,7 @@ export function SkillAdoptDialog({
     setError(null);
     setPreviewId(runId);
     const args = ["--name", name];
+    if (!sourceRequest) args.push("--local-only");
     if (requestedDest !== null) args.push("--dest", requestedDest);
     runEngine<AdoptPreview>("skills:adopt-preview", args, { runId })
       .then((envelope) => {
@@ -105,7 +107,7 @@ export function SkillAdoptDialog({
           const check = envelope.data.source_check;
           const sourceOk = Boolean(check && !("error" in check && check.error));
           // 认不出来源或取不到来源：只能保留本地内容
-          if (!sourceOk) setChoice("local");
+          setChoice(sourceOk ? "source" : "local");
           const accounts = sourceOk ? (check as { accounts: string[] }).accounts : envelope.data.local?.accounts ?? [];
           if (requestedDest === null) setSelected(accounts);
           else setSelected((previous) => previous.filter((agent) => accounts.includes(agent)));
@@ -118,7 +120,7 @@ export function SkillAdoptDialog({
     return () => {
       alive = false;
     };
-  }, [name, requestedDest]);
+  }, [name, requestedDest, sourceRequest]);
 
   const check = preview?.source_check && !("error" in preview.source_check && preview.source_check.error)
     ? (preview.source_check as Extract<AdoptPreview["source_check"], { same: boolean }>)
@@ -183,7 +185,7 @@ export function SkillAdoptDialog({
             <ProgressSteps
               testId="adopt-loading"
               progress={progress}
-              fallback={t("正在识别来源并与来源比对。预览不会改动任何东西，可以随时取消。")}
+              fallback={sourceRequest ? t("正在识别来源并与来源比对。预览不会改动任何东西，可以随时取消。") : t("正在读取本机内容，预览不会改动任何东西。")}
             />
           ) : dedupe ? (
             <p data-testid="adopt-dedupe" className="text-xs text-foreground">
@@ -206,6 +208,7 @@ export function SkillAdoptDialog({
                   </p>
                 )}
                 {checkError && <p data-testid="adopt-source-error" className="text-warning">{checkError}</p>}
+                {preview.source?.repository && <button type="button" onClick={() => setSourceRequest((value) => value + 1)} className="rounded-md border px-2 py-1 hover:bg-accent">{t("比对远程来源")}</button>}
               </section>
 
               {check && (
@@ -258,7 +261,7 @@ export function SkillAdoptDialog({
                   {destDirty && (
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-muted-foreground">{t("目录已修改，请更新预览。")}</span>
-                      <button type="button" data-testid="adopt-refresh-preview" disabled={!destOk} onClick={() => setRequestedDest(dest.trim())} className="rounded-md border px-2 py-1 disabled:opacity-40">{t("更新预览")}</button>
+                      <button type="button" data-testid="adopt-refresh-preview" disabled={!destOk} onClick={() => { setSourceRequest(0); setRequestedDest(dest.trim()); }} className="rounded-md border px-2 py-1 disabled:opacity-40">{t("更新预览")}</button>
                     </div>
                   )}
                 </section>
