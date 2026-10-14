@@ -67,6 +67,13 @@ never process arguments, rendered commands, or definitions.
 
 ## Constraints and failure behavior
 
+User-triggered action failures immediately show a dismissible viewport toast for
+ten seconds, with a translated action title and the original diagnostic. Details
+also remain beside the affected saved/preview entry, in the editor's sticky
+action area, or inside the delete confirmation. Read failures appear beside the
+saved-list controls. A new action, draft change or page exit clears stale action
+feedback. No error path scrolls the page or retries a launch automatically.
+
 - Unknown fields, duplicate alias or environment-variable names, non-portable
   environment-variable names, incompatible platform/shell combinations, and
   control characters are rejected before work begins.

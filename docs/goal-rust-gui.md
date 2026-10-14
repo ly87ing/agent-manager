@@ -2,6 +2,32 @@
 
 > Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
 
+## 2026-10-13: Immediate Launch Failure Feedback
+
+Verification base: `b0fc1e1`, plus the launch-feedback changes. Action failures
+now show a dismissible ten-second toast immediately. Persistent diagnostics sit
+beside the affected saved/preview entry, sticky editor actions, or delete dialog.
+New actions, draft edits and page exit clear stale action feedback. Launch
+execution and backend contracts are unchanged.
+
+- Both new saved/preview notification regressions failed against the old source.
+  Focused checks passed 175 tests; full frontend passed 54 files/603 tests.
+  Production frontend build, whitespace and documentation links passed.
+- Browser mock: English and Simplified Chinese at 1000 × 650 and 760 × 650
+  passed saved/preview failure, viewport toast bounds, unchanged scroll position,
+  dismissible notification, persistent local detail and successful-retry cleanup.
+  Settled screenshots were visually inspected. The first harness run imported
+  a second Vite module instance; using the observed loaded engine URL exercised
+  the active client without changing product code.
+- Native preview: an unsaved command used a confirmed missing application path
+  and the Los Angeles variant. The real backend rejected it before process
+  execution; the toast title and diagnostic appeared with local entry details.
+  The draft was cancelled. No real application was launched or quit.
+- Saved launch recipes, the original US/Los Angeles collection, shell/NTP file
+  hashes and the system time-zone link were unchanged. No system settings or
+  permissions were modified. Rust suites were not rerun for this frontend-only
+  change; their backend code is unchanged.
+
 ## 2026-10-13: Environment Remediation at the Finding
 
 Verification base: `919402e`, plus the remediation changes. Mismatch and unknown

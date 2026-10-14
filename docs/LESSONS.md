@@ -8,6 +8,14 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Exercise launch failures from the triggering viewport.**
+- A page-end alert can exist in tests while remaining off screen after a launch
+  click. Require an immediate viewport toast and persistent details beside the
+  affected entry or sticky editor controls. Verify saved and preview actions at
+  both window widths without scrolling after the click, and preserve drafts on
+  failure. Test clipboard recovery so an earlier error does not outlive a new action.
+- Seen 1× (2026-10-13; launch-error placement reported in the desktop preview).
+
 **Keep remediation tied to the evidence and process it can actually change.**
 - A raw locale conflict can coexist with matching effective categories. Explain
   that distinction inline, and hand expected values to an unsaved launch draft;

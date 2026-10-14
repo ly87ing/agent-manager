@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { waitFor } from "@testing-library/react";
 import LaunchPage from "../pages/LaunchPage";
 import type { LaunchEntry, LaunchRecipe, SavedLaunch } from "../lib/launch";
 import { makeEnvelope } from "./fixtures";
@@ -27,7 +28,7 @@ function entries(spec: LaunchRecipe): LaunchEntry[] {
   });
 }
 
-function setup(options: { items?: SavedLaunch[]; saveError?: string } = {}) {
+function setup(options: { items?: SavedLaunch[]; saveError?: string; runError?: string } = {}) {
   let items = [...(options.items ?? [])];
   let revision = 1;
   const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
@@ -51,7 +52,7 @@ function setup(options: { items?: SavedLaunch[]; saveError?: string } = {}) {
       items = items.filter((item) => item.id !== id);
       return makeEnvelope({ id });
     },
-    "launch:run": makeEnvelope({ state: "requested", timezone_verified: false }),
+    "launch:run": options.runError ? makeEnvelope({}, { ok: false, errors: [{ code: "LAUNCH_ERROR", element: null, message: options.runError }] }) : makeEnvelope({ state: "requested", timezone_verified: false }),
   });
 }
 
@@ -72,6 +73,21 @@ async function generate() {
 }
 
 describe("launch configuration controls", () => {
+  it.each(["saved", "preview"])("announces %s launch failures immediately and retains details beside the triggering entry", async (location) => {
+    const reason = "The application is already running. Quit it normally before launching with a different time zone";
+    const { calls } = setup({ items: location === "saved" ? [savedItem] : [], runError: reason });
+    if (location === "preview") await generate();
+    const launch = location === "saved" ? await screen.findByTestId("run-saved-saved-1-example-sg") : screen.getAllByRole("button", { name: "启动一次" })[0];
+    await userEvent.click(launch);
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent(reason));
+    expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent("启动失败");
+    const detail = screen.getByRole("alert");
+    expect(detail).toHaveTextContent(reason);
+    expect(launch.closest('[data-launch-entry]')).toContainElement(detail);
+    expect(calls.filter((call) => call.command === "launch:run")).toHaveLength(1);
+    expect(calls.some((call) => ["launch:save", "launch:delete"].includes(call.command))).toBe(false);
+  });
+
   it("shows saved launchers first and opens the editor only on request", async () => {
     setup();
     expect(await screen.findByText("尚未保存配置。点击“新增配置”创建常用应用或命令。")).toBeVisible();
@@ -202,8 +218,25 @@ describe("launch configuration controls", () => {
     await userEvent.click(await screen.findByRole("button", { name: "打开配置" }));
     await userEvent.type(screen.getByRole("textbox", { name: "程序路径或命令" }), " changed");
     await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Modified externally");
+    const detail = await screen.findByRole("alert");
+    expect(detail).toHaveTextContent("Modified externally");
+    expect(screen.getByTestId("launch-editor-actions")).toContainElement(detail);
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent("保存配置失败"));
     expect(calls.filter((call) => call.command === "launch:save")).toHaveLength(1);
+  });
+
+  it("announces clipboard failure at the entry and clears it on a successful retry", async () => {
+    setup({ items: [savedItem] });
+    const write = vi.fn().mockRejectedValueOnce(new Error("Clipboard unavailable")).mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
+    const copy = (await screen.findAllByRole("button", { name: "复制运行命令" }))[0];
+    await userEvent.click(copy);
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent("Clipboard unavailable"));
+    expect(copy.closest('[data-launch-entry]')).toContainElement(screen.getByRole("alert"));
+    await userEvent.click(copy);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).not.toBeInTheDocument());
+    expect(write).toHaveBeenCalledTimes(2);
   });
 
   it("saves and copies another platform while keeping launch unavailable", async () => {
