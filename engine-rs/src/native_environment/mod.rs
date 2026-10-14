@@ -1,4 +1,5 @@
 //! Read-only regional environment checks shared by the desktop and CLI.
+mod actions;
 #[cfg(target_os = "macos")]
 mod macos;
 mod profiles;
@@ -443,8 +444,10 @@ fn sync_value(value: bool) -> String {
 }
 
 fn arguments(req: &Request) -> Result<(Target, bool)> {
-    let repair = req.command.replace('.', ":") == "environment:sync-time";
-    if !repair && req.command.replace('.', ":") != "environment:check" {
+    let command = req.command.replace('.', ":");
+    let repair = command == "environment:sync-time";
+    let authorized_read = command == "environment:check-time-settings";
+    if !repair && !authorized_read && command != "environment:check" {
         bail!("Unsupported environment operation.");
     }
     let mut target = None;
@@ -466,7 +469,7 @@ fn arguments(req: &Request) -> Result<(Target, bool)> {
                 );
             }
             "--probe-time" if !repair && !probe => probe = true,
-            "--confirm" if repair && !confirm => confirm = true,
+            "--confirm" if (repair || authorized_read) && !confirm => confirm = true,
             _ => bail!("Unsupported or duplicate environment flag."),
         }
     }
@@ -474,6 +477,9 @@ fn arguments(req: &Request) -> Result<(Target, bool)> {
     target.validate()?;
     if repair && !confirm {
         bail!("Time correction requires --confirm.");
+    }
+    if authorized_read && !confirm {
+        bail!("Authorized time-settings inspection requires --confirm.");
     }
     Ok((target, probe))
 }
@@ -490,15 +496,26 @@ fn clock_state(offset_ms: f64, uncertainty_ms: f64, limit_ms: u32) -> &'static s
 }
 
 fn report(target: &Target, probe: bool) -> Result<Value> {
+    report_with_automatic_time(target, probe, None)
+}
+
+fn report_with_automatic_time(
+    target: &Target,
+    probe: bool,
+    automatic_time: Option<bool>,
+) -> Result<Value> {
     #[cfg(target_os = "macos")]
     let mut observed = macos::collect();
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (target, probe);
+        let _ = (target, probe, automatic_time);
         bail!("Environment checks currently support macOS only.");
     }
     #[cfg(target_os = "macos")]
     {
+        if let Some(value) = automatic_time {
+            observed.automatic_time = Some(value);
+        }
         let time_sync = time_sync::collect();
         if let Some(value) = &time_sync {
             observed.time_synchronized = Some(value.synchronized);
@@ -567,6 +584,9 @@ fn report(target: &Target, probe: bool) -> Result<Value> {
 
 pub(crate) fn execute(ctx: &Context, req: &Request) -> Envelope {
     let command = req.command.replace('.', ":");
+    if command == "environment:open-settings" {
+        return envelope(req, true, actions::open_settings(req));
+    }
     if matches!(
         command.as_str(),
         "environment:profiles" | "environment:save-profile" | "environment:delete-profile"
@@ -579,6 +599,8 @@ pub(crate) fn execute(ctx: &Context, req: &Request) -> Envelope {
     let result = parsed.and_then(|(target, probe)| {
         if repair {
             time_repair::handle(&target)
+        } else if command == "environment:check-time-settings" {
+            actions::check_time_settings(&target, probe)
         } else {
             report(&target, probe)
         }

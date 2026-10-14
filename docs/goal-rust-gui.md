@@ -2,6 +2,45 @@
 
 > Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
 
+## 2026-10-13: Environment Remediation at the Finding
+
+Verification base: `919402e`, plus the remediation changes. Mismatch and unknown
+rows now show their explanation, scope and handling action without opening source
+details. Process differences prefill an unsaved general launch draft; system
+differences open a fixed Date & Time or Language & Region pane. An explicit
+administrator-authorized inspection reads only the automatic-time switch. It is
+separate from clock correction, and cancellation/failure keeps the previous report.
+
+Verification generated and read back locally:
+
+- Full Rust engine: 419 passed; desktop bridge: 26 passed; frontend: 54 files,
+  600 passed. Production frontend build, native debug build, formatting and
+  whitespace checks passed. The final launch-layout change also passed its
+  focused 17 frontend cases and another production build.
+- Browser mock in English and Simplified Chinese at 1000 × 650 and 760 × 650:
+  inline guidance, settings actions, the authorized-read dialog, updated results,
+  launch prefill and copied commands passed. Dialog footer controls were visible
+  and uncovered. Captures were visually inspected. The launch type control was
+  widened after the narrow English capture exposed clipped text.
+- Actual desktop bridge in an isolated HOME/data: a non-US comparison displayed
+  the expected scope/actions, opened both correct macOS settings panes, and
+  created an unsaved launch draft with the collection's time zone and eight
+  locale variables. Cancelling the read-only confirmation returned to results.
+- The fixed authorization script compiled without execution. Actual successful
+  administrator-authorized reading and an actual clock adjustment were not run;
+  parser, cancellation/failure and report-boundary cases are covered separately.
+- The isolated test preview was stopped. The user's original preview data and
+  US/Los Angeles collection were restored unchanged. Live readback confirmed
+  America/Los_Angeles, en-US, region US, all explicitly set preview locale values
+  en_US.UTF-8, time.nist.gov, and automatic time-zone selection off. The actual
+  Date & Time pane showed automatic time enabled. Final selected comparison:
+  15 matched, zero mismatched; two untargeted observations remain unknown.
+  Shell/NTP file hashes and the system time-zone link matched their pre-test values.
+
+No system regional settings, shell files, account files or authorization policy
+were changed. No installer, tag or release was published. The user requested
+implementation and pushes to remote main; source commits are separate from packaging.
+
 ## 2026-10-12: Clear Source Actions and Complete Labels
 
 Verification base: `07a3671f2cac420dc608d014ab437e1716984538`, plus the source-copy changes. Sources now uses explicit action labels: **添加并启用**, **仅添加来源（不下载）**, and **不再推荐**. Existing-source menus use **切换版本**, **编辑来源**, **停用来源**, and **移除来源**. Buttons retain their complete text; source URLs, paths, descriptions, and problem details wrap. Recommendation copy no longer refers to the retired terminal-shortcuts page. Operation handlers and account protections are unchanged.

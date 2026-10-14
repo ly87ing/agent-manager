@@ -173,9 +173,84 @@ describe("Environment checks", () => {
   it("renders collections and the editor in English", async () => {
     setLanguage("en"); setup(); await screen.findByText("Environment read. No comparison targets selected.");
     expect(screen.getByRole("combobox", { name: "Choose expected-value collection" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check with administrator authorization" })).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Add expected-value collection" }));
     expect(screen.getByRole("button", { name: "Save expected-value collection" })).toBeInTheDocument();
     expect(screen.getByText("Save criteria only")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Correct time automatically when a check finds excessive clock offset" })).toBeInTheDocument();
+  });
+
+  it("shows remediation without enabling source details and opens only the requested settings pane", async () => {
+    const target = { timezone: "Asia/Tokyo", region: "JP" };
+    const { calls } = renderWithEngine(<EnvironmentPage />, {
+      "environment:profiles": makeEnvelope({ items: [collection(target)] }),
+      "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]))),
+      "environment:open-settings": async (args) => makeEnvelope({ pane: args[1] }),
+    });
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    expect(screen.getByText("本次无法可靠读取后台当前采用的授时节点。配置文件和单次查询不能代替此项证据。")).toBeInTheDocument();
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    await screen.findByText("发现与目标不符的项目。");
+    expect(screen.getByRole("checkbox", { name: "显示取值来源与说明" })).not.toBeChecked();
+    const time = document.querySelector('[data-check-id="time.timezone"]') as HTMLElement;
+    expect(time).toHaveTextContent("影响范围：本机系统");
+    await userEvent.click(within(time).getByRole("button", { name: "打开日期与时间设置" }));
+    await screen.findByText("已请求打开系统设置。完成调整后，请重新检查。");
+    expect(calls[calls.length - 1]).toMatchObject({ command: "environment:open-settings", args: ["--pane", "date-time"] });
+    const region = document.querySelector('[data-check-id="language.region"]') as HTMLElement;
+    await userEvent.click(within(region).getByRole("button", { name: "打开语言与地区设置" }));
+    expect(calls[calls.length - 1]).toMatchObject({ command: "environment:open-settings", args: ["--pane", "language-region"] });
+    expect(calls.some((call) => call.command === "environment:sync-time")).toBe(false);
+  });
+
+  it("explains shadowed raw-locale differences without claiming an effective locale failure", async () => {
+    const target = { locale: "en_GB.UTF-8", strict_locale: true };
+    const report = environmentFixture(target);
+    const raw = report.checks.find((row) => row.id === "process.raw_locale")!;
+    raw.state = "mismatch"; raw.observed = '{"LANG":"C.UTF-8"}';
+    report.summary.matched--; report.summary.mismatched++; report.summary.status = "mismatch";
+    let draft: unknown;
+    renderWithEngine(<EnvironmentPage onConfigureLaunch={(recipe) => { draft = recipe; }} />, {
+      "environment:profiles": makeEnvelope({ items: [collection(target)] }),
+      "environment:check": async (args) => makeEnvelope(JSON.parse(args[args.indexOf("--spec") + 1]).locale ? report : environmentFixture()),
+    });
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    await screen.findByText("实际生效的 locale 符合目标，但已设置的原始变量存在差异。");
+    await userEvent.click(within(document.querySelector('[data-check-id="process.raw_locale"]') as HTMLElement).getByRole("button", { name: "创建启动配置" }));
+    expect(draft).toMatchObject({ target: "", env: expect.arrayContaining([{ name: "LANG", value: "en_GB.UTF-8" }, { name: "LC_ALL", value: "en_GB.UTF-8" }]) });
+  });
+
+  it.each(["read", "cancelled", "failed"] as const)("keeps privileged inspection separate from clock correction (%s)", async (status) => {
+    const target = { automatic_time: true };
+    const updated = environmentFixture(target);
+    const row = updated.checks.find((item) => item.id === "ntp.automatic_time")!;
+    row.state = "match"; row.observed = "true"; row.note = "automatic_time";
+    updated.summary.unknown--; updated.summary.matched++; updated.summary.status = "match";
+    const { calls } = renderWithEngine(<EnvironmentPage />, {
+      "environment:profiles": makeEnvelope({ items: [collection(target)] }),
+      "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]))),
+      "environment:check-time-settings": makeEnvelope({ status, report: status === "read" ? updated : null }),
+    });
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    await screen.findByText("仍有目标项目无法确认。");
+    const previous = document.querySelector('[data-check-id="ntp.automatic_time"]')!.textContent;
+    await userEvent.click(screen.getByRole("button", { name: "授权后重新检查" }));
+    const dialog = screen.getByRole("dialog", { name: "授权后重新检查" });
+    expect(dialog).toHaveTextContent("/usr/sbin/systemsetup -getusingnetworktime");
+    expect(dialog).toHaveTextContent("只读时间设置");
+    expect(calls.some((call) => call.command === "environment:check-time-settings")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "继续只读检查" }));
+    const messages = { read: "已读取自动设置时间开关并更新检查结果，未修改系统设置。", cancelled: "已取消授权，保留原检查结果。", failed: "未能读取自动设置时间开关，保留原检查结果。可在系统设置中确认。" };
+    await screen.findByText(messages[status]);
+    expect(calls[calls.length - 1]).toMatchObject({ command: "environment:check-time-settings", args: ["--spec", expect.any(String), "--confirm"] });
+    expect(JSON.parse(calls[calls.length - 1].args[1])).toMatchObject(target);
+    expect(calls.some((call) => call.command === "environment:sync-time")).toBe(false);
+    const after = document.querySelector('[data-check-id="ntp.automatic_time"]') as HTMLElement;
+    if (status === "read") expect(after).toHaveTextContent("符合"); else expect(after.textContent).toEqual(previous);
   });
 });

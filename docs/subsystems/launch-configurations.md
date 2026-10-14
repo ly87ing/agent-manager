@@ -20,6 +20,12 @@ be started immediately and terminal commands can be copied without opening an
 editor or Settings. New configuration and Open configuration explicitly reveal
 the editor. The retained Settings entry routes to this same top-level page.
 
+Environment remediation can open a new unsaved draft with the selected
+collection's time zone and locale variables. The application target stays empty
+until the user chooses it. Leaving the editor consumes this one-time handoff;
+returning to Launch does not recreate it. No build, save or run occurs during
+navigation, and existing saved recipes are preserved.
+
 ## Runtime path
 
 `launch:build --spec <JSON>` returns each complete launch command and definition.

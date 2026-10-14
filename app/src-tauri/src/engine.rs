@@ -38,9 +38,16 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         ));
     };
     let allowed = match (domain, verb) {
-        ("environment", "check" | "profiles" | "save-profile" | "delete-profile" | "sync-time") => {
-            true
-        }
+        (
+            "environment",
+            "check"
+            | "profiles"
+            | "save-profile"
+            | "delete-profile"
+            | "sync-time"
+            | "check-time-settings"
+            | "open-settings",
+        ) => true,
         ("launch", "build" | "catalog" | "run" | "list" | "save" | "delete") => true,
         ("resources", "targets") => true,
         ("system", "audit" | "discover" | "refresh-upstream") => true,
@@ -128,6 +135,12 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--spec", ArgValueKind::JsonValue));
             specs.push(("--confirm", ArgValueKind::Flag));
         }
+        ("environment", "check-time-settings") => {
+            specs.push(("--spec", ArgValueKind::JsonValue));
+            specs.push(("--probe-time", ArgValueKind::Flag));
+            specs.push(("--confirm", ArgValueKind::Flag));
+        }
+        ("environment", "open-settings") => specs.push(("--pane", ArgValueKind::TemplateId)),
         ("environment", "save-profile" | "delete-profile") => {
             if verb == "save-profile" {
                 specs.push(("--spec", ArgValueKind::JsonValue));
@@ -709,6 +722,36 @@ mod tests {
         .is_ok());
         assert!(validate_args("environment:sync-time", &["--probe-time".into()]).is_err());
         assert!(validate_args("environment:save-profile", &["--confirm".into()]).is_err());
+    }
+
+    #[test]
+    fn environment_read_authorization_and_settings_opening_have_narrow_arguments() {
+        assert!(validate_command("environment:check-time-settings").is_ok());
+        assert!(validate_args(
+            "environment:check-time-settings",
+            &[
+                "--spec".into(),
+                "{}".into(),
+                "--confirm".into(),
+                "--probe-time".into()
+            ]
+        )
+        .is_ok());
+        assert!(validate_command("environment:open-settings").is_ok());
+        assert!(validate_args(
+            "environment:open-settings",
+            &["--pane".into(), "date-time".into()]
+        )
+        .is_ok());
+        assert!(validate_args(
+            "environment:open-settings",
+            &["--pane".into(), "https://example.org".into()]
+        )
+        .is_err());
+        assert!(
+            validate_args("environment:open-settings", &["--spec".into(), "{}".into()]).is_err()
+        );
+        assert!(validate_args("environment:check", &["--confirm".into()]).is_err());
     }
 
     #[test]

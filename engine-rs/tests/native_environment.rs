@@ -49,3 +49,39 @@ fn environment_check_does_not_create_home_or_data() {
     assert!(!ctx.home_dir.exists());
     assert!(!ctx.data_dir.exists());
 }
+
+#[test]
+fn remediation_rejects_unconfirmed_reads_and_arbitrary_settings_before_any_effect() {
+    let root = std::env::temp_dir().join(format!("environment-actions-{}", std::process::id()));
+    let ctx = Context {
+        home_dir: root.join("missing-home"),
+        data_dir: root.join("missing-data"),
+    };
+    for (command, args) in [
+        ("environment:check-time-settings", vec![]),
+        (
+            "environment:check-time-settings",
+            vec!["--confirm", "--spec", "{\"timezone\":\"../../etc\"}"],
+        ),
+        (
+            "environment:open-settings",
+            vec!["--pane", "https://example.org"],
+        ),
+        (
+            "environment:open-settings",
+            vec!["--pane", "date-time", "--spec", "{}"],
+        ),
+    ] {
+        let result = execute(
+            &ctx,
+            &Request {
+                command: command.into(),
+                args: args.into_iter().map(str::to_string).collect(),
+                run_id: "invalid-action".into(),
+            },
+        );
+        assert!(!result.ok, "{:?}", result.data);
+    }
+    assert!(!ctx.home_dir.exists());
+    assert!(!ctx.data_dir.exists());
+}

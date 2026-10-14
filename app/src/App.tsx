@@ -1,5 +1,6 @@
 import { Bot, Globe, Library, Package, Rocket, ScrollText, Server, Settings, Sparkles } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
+import type { LaunchRecipe } from "./lib/launch";
 import { AppLayout, type NavItem } from "./components/AppLayout";
 import { CommandPalette } from "./components/CommandPalette";
 import { ImportLinkDialog } from "./components/ImportLinkDialog";
@@ -52,6 +53,7 @@ export default function App() {
   // 预加载本机偏好，确保首次打开任意预览时已有默认演练值。
   const settings = useSettings();
   const [activePage, setActivePage] = useState<string>("launch");
+  const [launchDraft, setLaunchDraft] = useState<LaunchRecipe | null>(null);
   const [selectedSkillAgent, setSelectedSkillAgent] = useState<string | null>(null);
   /** 「skills:<名称>」跳转带进来的技能搜索词：直接定位到那一行。 */
   const [skillSearch, setSkillSearch] = useState<string | null>(null);
@@ -161,8 +163,8 @@ export default function App() {
       {/* key 驱动重挂载，让页面切换时重放一次轻量进场动画 */}
       <Suspense fallback={<PageLoading text={t("正在打开页面…")} />}>
         <div key={`${activePage}:${activePage === "sources" ? sourceFocus ?? "" : activePage === "mcp" ? mcpSearch ?? "" : activePage === "programs" ? programFocus ?? "" : ""}`} className="animate-page-in">
-          {activePage === "launch" && <LaunchPage />}
-          {activePage === "environment" && <EnvironmentPage />}
+          {activePage === "launch" && <LaunchPage initialRecipe={launchDraft} onInitialConsumed={() => setLaunchDraft(null)} />}
+          {activePage === "environment" && <EnvironmentPage onConfigureLaunch={(recipe) => { setLaunchDraft(recipe); setActivePage("launch"); }} />}
           {activePage === "programs" && <ProgramsPage focus={programFocus} onOpen={handleNavigate} />}
           {activePage === "agents" && <AgentsPage />}
           {activePage === "skills" && (

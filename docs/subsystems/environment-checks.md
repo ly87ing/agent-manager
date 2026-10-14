@@ -74,6 +74,30 @@ The CLI describes its calling terminal's inherited environment; the desktop
 describes Agent Manager's process. Neither executes shell startup files or
 establishes another application's effective settings.
 
+Mismatch and unknown rows show their explanation and scope without opening source
+details. Process differences offer **Create launch configuration**, which opens
+the existing launch editor with the collection's optional time zone and locale.
+Locale prefill covers `LANG`, `LC_ALL` and the six supported categories. The draft
+has no application target and is neither saved nor run automatically. Users choose
+the application, review the command and explicitly save or launch it. Existing
+processes and shell files remain unchanged; other applications require their own
+checks. A shadowed raw-locale conflict is distinguished from an effective mismatch.
+
+System time/region differences offer **Open settings**. The shared
+`environment:open-settings --pane date-time|language-region` endpoint accepts only
+these two destinations and opens the macOS settings pane. Users make the change
+there and recheck; opening the pane does not establish a successful adjustment.
+
+An unreadable automatic-time switch offers **Check with administrator
+authorization**. A read-only confirmation shows the fixed
+`/usr/sbin/systemsetup -getusingnetworktime` command and any reference-time query
+destination before `environment:check-time-settings --confirm [--spec JSON]
+[--probe-time]`. It reads that switch with macOS authorization, then collects a
+fresh report. This path never invokes clock correction, even for a collection
+with `auto_sync` enabled. Cancellation or failure retains the previous report;
+neither is a successful read. No credentials are handled or stored by the app.
+Background peer identity stays unknown and has no repair action.
+
 The CLI explicitly adds `--probe-time`. The page's Check selected collection
 action discloses the saved time server and UDP port 123. CLI queries use the target server, or the
 configured server when no target is supplied. Name lookup and UDP response each
@@ -131,7 +155,8 @@ A successful command means collection completed; automation must inspect
 Ordinary macOS users may not read automatic-time state through `systemsetup`.
 Missing permissions, missing or ambiguous NTP configuration, command failure,
 DNS failure, timeout and invalid replies remain unknown. Plain checks never
-request privileges; authorized clock correction has its own system prompt.
+request privileges; read-only time-settings inspection and clock correction each
+require their own explicit action and macOS authorization.
 Configured server, running service, kernel state and
 reference-time sample are distinct observations. Special-use DNS addresses cannot establish the actual
 server's location. Other applications, browser languages, per-app overrides,

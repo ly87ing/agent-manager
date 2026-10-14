@@ -7,6 +7,7 @@ export function createEnvironmentMock() {
   const items: EnvironmentProfile[] = [];
   const arg = (args: string[], key: string) => args[args.indexOf(key) + 1];
   return (command: string, args: string[]) => {
+    if (command === "environment:open-settings") return makeEnvelope({ pane: arg(args, "--pane") });
     if (command === "environment:profiles") return makeEnvelope({ items });
     if (command === "environment:save-profile") {
       const input = JSON.parse(arg(args, "--spec")) as EnvironmentProfileInput;
@@ -23,6 +24,17 @@ export function createEnvironmentMock() {
     const target = args.includes("--spec") ? JSON.parse(arg(args, "--spec")) : {};
     const probe = args.includes("--probe-time") || command === "environment:sync-time";
     const report = environmentFixture(target, probe);
+    if (command === "environment:check-time-settings") {
+      const row = report.checks.find((item) => item.id === "ntp.automatic_time")!;
+      if (row.expected !== null) {
+        report.summary.unknown--;
+        if (row.expected === "true") report.summary.matched++; else report.summary.mismatched++;
+      }
+      row.observed = "true"; row.note = "automatic_time";
+      row.state = row.expected === null ? "observed" : row.expected === "true" ? "match" : "mismatch";
+      report.summary.status = report.summary.mismatched ? "mismatch" : report.summary.unknown || !report.summary.compared ? "incomplete" : "match";
+      return makeEnvelope({ status: "read", report });
+    }
     if (command === "environment:sync-time") {
       const clock = report.checks.find((row) => row.id === "ntp.clock_offset")!;
       const status: NonNullable<EnvironmentReport["time_repair"]>["status"] = clock.state === "match" ? "not_needed" : clock.state === "unknown" ? "unavailable" : "verified";

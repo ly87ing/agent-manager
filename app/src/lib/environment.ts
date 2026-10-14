@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { runEngine } from "./engine";
+import type { LaunchRecipe } from "./launch";
 
 export interface EnvironmentTarget {
   timezone?: string;
@@ -68,4 +69,22 @@ export async function repairEnvironmentTime(target: EnvironmentTarget): Promise<
 
 export async function checkEnvironment(target: EnvironmentTarget = {}, probeTime = false): Promise<EnvironmentReport> {
   return reportSchema.parse(await request("check", ["--spec", JSON.stringify(target), ...(probeTime ? ["--probe-time"] : [])]));
+}
+
+export function environmentLaunchRecipe(target: EnvironmentTarget): LaunchRecipe {
+  return { platform: "macos", shell: "zsh", kind: "app", target: "", args: [],
+    env: target.locale ? ["LANG", "LC_ALL", "LC_CTYPE", "LC_COLLATE", "LC_MESSAGES", "LC_MONETARY", "LC_NUMERIC", "LC_TIME"].map((name) => ({ name, value: target.locale! })) : [],
+    variants: [{ name: "environment", timezone: target.timezone ?? "" }] };
+}
+
+export async function openEnvironmentSettings(pane: "date-time" | "language-region"): Promise<void> {
+  z.object({ pane: z.enum(["date-time", "language-region"]) }).strict().parse(await request("open-settings", ["--pane", pane]));
+}
+
+export async function checkTimeSettings(target: EnvironmentTarget, probeTime: boolean) {
+  return z.discriminatedUnion("status", [
+    z.object({ status: z.literal("read"), report: reportSchema }).strict(),
+    z.object({ status: z.literal("cancelled"), report: z.null() }).strict(),
+    z.object({ status: z.literal("failed"), report: z.null() }).strict(),
+  ]).parse(await request("check-time-settings", ["--spec", JSON.stringify(target), "--confirm", ...(probeTime ? ["--probe-time"] : [])]));
 }

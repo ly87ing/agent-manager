@@ -20,23 +20,25 @@ const emptyRecipe = (platform: LaunchRecipe["platform"] = "macos", shell: Launch
   variants: [{ name: "app-sg", timezone: "Asia/Singapore" }, { name: "app-la", timezone: "America/Los_Angeles" }],
 });
 
-export default function LaunchPage() {
+export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initialRecipe?: LaunchRecipe | null; onInitialConsumed?: () => void }) {
   useLanguage();
   const [catalog, setCatalog] = useState<LaunchCatalog | null>(null);
-  const [recipe, setRecipe] = useState<LaunchRecipe>(() => emptyRecipe());
+  const [recipe, setRecipe] = useState<LaunchRecipe>(() => initialRecipe ?? emptyRecipe());
   const [built, setBuilt] = useState<{ spec: string; entries: LaunchEntry[] } | null>(null);
   const [saved, setSaved] = useState<SavedLaunch[] | null>(null);
   const [selected, setSelected] = useState<SavedLaunch | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(Boolean(initialRecipe));
   const [readError, setReadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
   const [confirmation, setConfirmation] = useState<SavedLaunch | null>(null);
-  const generation = useRef(0);
+  const generation = useRef(initialRecipe ? 1 : 0);
   const local = catalog?.platform === recipe.platform;
   const dirty = !selected || JSON.stringify(recipe) !== JSON.stringify(selected.recipe);
+
+  useEffect(() => { if (initialRecipe) onInitialConsumed?.(); }, [initialRecipe, onInitialConsumed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -196,14 +198,14 @@ export default function LaunchPage() {
         </div>
       </div>
       <fieldset disabled={busy} className="min-w-0 space-y-3 disabled:opacity-70">
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-[1fr_1fr_2fr]">
           <div><p className="mb-1 text-xs">{t("目标系统")}</p><Select label={t("目标系统")} value={recipe.platform}
             options={[{ value: "macos", label: "macOS" }, { value: "linux", label: "Linux" }, { value: "windows", label: "Windows" }]}
             onChange={(value) => change({ ...recipe, platform: value as LaunchRecipe["platform"], shell: value === "windows" ? "powershell" : value === "linux" ? "bash" : "zsh" })} /></div>
           <div><p className="mb-1 text-xs">Shell</p><Select label="Shell" value={recipe.shell}
             options={(recipe.platform === "windows" ? ["powershell"] : ["zsh", "bash"]).map((value) => ({ value, label: value === "powershell" ? "PowerShell" : value }))}
             onChange={(value) => change({ ...recipe, shell: value as LaunchRecipe["shell"] })} /></div>
-          <div><p className="mb-1 text-xs">{t("程序类型")}</p><Select label={t("程序类型")} value={recipe.kind}
+          <div className="min-w-0 sm:col-span-2 md:col-span-1"><p className="mb-1 text-xs">{t("程序类型")}</p><Select label={t("程序类型")} value={recipe.kind}
             options={[{ value: "app", label: t("图形应用（可直接启动）") }, { value: "command", label: t("命令行程序（在终端运行）") }]}
             onChange={(value) => change({ ...recipe, kind: value as LaunchRecipe["kind"] })} /></div>
         </div>

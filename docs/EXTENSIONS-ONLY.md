@@ -26,6 +26,12 @@ does not alter the time zone, regional preferences, NTP configuration or shell
 files, and installs no privileged service. See
 [Environment checks](subsystems/environment-checks.md).
 
+Environment remediation may open one of two fixed macOS settings panes, hand an
+unsaved process-environment draft to the existing launch editor, or explicitly
+read the automatic-time switch with administrator authorization. That authorized
+query is read-only and cannot correct time or change settings. These actions
+never normalize the checking process to hide a mismatch or restore account APIs.
+
 Account creation, registration edits, removal, switching, login/logout, account-bound launch commands, credentials, provider/model/runtime settings, and assistant installation/upgrades are retired. Existing account directories, authentication files, sessions, configuration, shell files, and historical launch scripts are preserved. Official assistant tools remain responsible for them.
 
 Historical registrations are immutable location metadata for existing extension targets. Reading a target label does not inspect authentication, account settings, or assistant executables. New account registration is unavailable. The default assistant resource locations remain available.

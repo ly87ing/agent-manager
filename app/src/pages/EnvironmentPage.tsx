@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { Select } from "../components/Select";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EnvironmentProfileEditor } from "../components/EnvironmentProfileEditor";
-import { checkEnvironment, deleteEnvironmentProfile, listEnvironmentProfiles, profileTarget, repairEnvironmentTime, saveEnvironmentProfile, type EnvironmentCheck, type EnvironmentProfile, type EnvironmentProfileInput, type EnvironmentReport } from "../lib/environment";
+import { EnvironmentRemediation } from "../components/EnvironmentRemediation";
+import { checkEnvironment, checkTimeSettings, deleteEnvironmentProfile, environmentLaunchRecipe, listEnvironmentProfiles, openEnvironmentSettings, profileTarget, repairEnvironmentTime, saveEnvironmentProfile, type EnvironmentCheck, type EnvironmentProfile, type EnvironmentProfileInput, type EnvironmentReport } from "../lib/environment";
+import type { LaunchRecipe } from "../lib/launch";
 import { engineErrorMessage } from "../lib/engine";
 import { t, useLanguage } from "../lib/i18n";
 
@@ -56,7 +58,7 @@ function showValue(value: string | null) {
   return value;
 }
 
-export default function EnvironmentPage() {
+export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaunch?: (recipe: LaunchRecipe) => void }) {
   useLanguage();
   const [profiles, setProfiles] = useState<EnvironmentProfile[]>([]);
   const [selectedId, setSelectedId] = useState("");
@@ -69,6 +71,8 @@ export default function EnvironmentPage() {
   const [busy, setBusy] = useState(true);
   const [evidence, setEvidence] = useState(false);
   const [cooldown, setCooldown] = useState(false);
+  const [authorizing, setAuthorizing] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const generation = useRef(0);
   const cooldownTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
@@ -84,11 +88,14 @@ export default function EnvironmentPage() {
 
   const selected = profiles.find((profile) => profile.id === selectedId);
   const server = selected?.target.ntp_server;
-  const canRepair = Boolean(selected?.target.max_clock_offset_ms && server && data?.checks.some((row) => row.id === "ntp.clock_offset" && row.state === "mismatch"));
-  function select(id: string) { generation.current++; setSelectedId(id); setData(null); setError(null); }
+  function select(id: string) { generation.current++; setSelectedId(id); setData(null); setError(null); setActionMessage(null); }
+  function startCooldown() {
+    setCooldown(true); clearTimeout(cooldownTimer.current);
+    cooldownTimer.current = setTimeout(() => setCooldown(false), 4000);
+  }
   async function run(forceRepair = false) {
     const id = ++generation.current;
-    setBusy(true); setError(null); setData(null);
+    setBusy(true); setError(null); setData(null); setActionMessage(null);
     const target = selected ? profileTarget(selected) : {};
     const repair = forceRepair || Boolean(selected?.auto_sync);
     try {
@@ -96,12 +103,30 @@ export default function EnvironmentPage() {
       if (id === generation.current) {
         setData(result);
         if (server) {
-          setCooldown(true); clearTimeout(cooldownTimer.current);
-          cooldownTimer.current = setTimeout(() => setCooldown(false), 4000);
+          startCooldown();
         }
       }
     } catch (err) { if (id === generation.current) setError(engineErrorMessage(err)); }
     finally { if (id === generation.current) setBusy(false); }
+  }
+  async function openSettings(pane: "date-time" | "language-region") {
+    setBusy(true); setError(null); setActionMessage(null);
+    try { await openEnvironmentSettings(pane); setActionMessage(t("已请求打开系统设置。完成调整后，请重新检查。")); }
+    catch (err) { setError(engineErrorMessage(err)); }
+    finally { setBusy(false); }
+  }
+  async function authorizeTimeSettings() {
+    const id = ++generation.current;
+    setBusy(true); setError(null); setActionMessage(null);
+    try {
+      const result = await checkTimeSettings(selected ? profileTarget(selected) : {}, Boolean(server));
+      if (id !== generation.current) return;
+      if (result.status === "read") {
+        setData(result.report); if (server) startCooldown();
+        setActionMessage(t("已读取自动设置时间开关并更新检查结果，未修改系统设置。"));
+      } else setActionMessage(result.status === "cancelled" ? t("已取消授权，保留原检查结果。") : t("未能读取自动设置时间开关，保留原检查结果。可在系统设置中确认。"));
+    } catch (err) { if (id === generation.current) setError(engineErrorMessage(err)); }
+    finally { if (id === generation.current) { setBusy(false); setAuthorizing(false); } }
   }
   async function save(input: EnvironmentProfileInput) {
     const saved = await saveEnvironmentProfile(input, editor?.initial ?? undefined);
@@ -145,21 +170,26 @@ export default function EnvironmentPage() {
       <div className="flex flex-wrap gap-2">
         <button className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={busy || cooldown || removing}
           onClick={() => void run()}>{busy ? t("正在检查…") : selected ? t("检查所选集合") : t("检查本机环境")}</button>
-        {canRepair && <button className={button} disabled={busy || cooldown} onClick={() => void run(true)}>{t("立即校时（系统授权）")}</button>}
       </div>
       {server && <p className="break-all text-xs text-muted-foreground">{t("检查会向 {0} 的 UDP 123 端口查询参考时间。", server)}</p>}
       {selected?.auto_sync && <p className="text-xs text-muted-foreground">{t("此集合已启用自动校时：偏差明确超限时会校正系统时间，macOS 可能请求管理员授权，完成后自动复测。")}</p>}
-      {canRepair && !selected?.auto_sync && <p className="text-xs text-muted-foreground">{t("立即校时会调整系统时间，macOS 可能请求管理员授权，完成后自动复测。")}</p>}
       {cooldown && <p role="status" className="text-xs text-muted-foreground">{t("两次时间查询至少间隔 4 秒。")}</p>}
       {profilesError && <div role="alert" className="space-y-2"><p className="break-words text-xs text-destructive">{profilesError}</p><button className={button} disabled={busy} onClick={() => void reloadProfiles()}>{t("重新读取集合")}</button></div>}
     </section>
     {editor && <EnvironmentProfileEditor initial={editor.initial} observation={data} onSave={save} onClose={() => setEditor(null)} />}
+    {authorizing && <ConfirmModal title={t("授权后重新检查")} description={t("macOS 将请求管理员授权，仅运行以下只读查询，完成后更新检查结果。")}
+      risk="read" riskLabel={t("只读时间设置")} executing={busy} confirmLabel={t("继续只读检查")} onConfirm={() => void authorizeTimeSettings()} onClose={() => setAuthorizing(false)}>
+      <p className="mt-3 whitespace-pre-wrap break-all font-mono text-xs">/usr/sbin/systemsetup -getusingnetworktime</p>
+      <p className="mt-3 text-xs text-muted-foreground">{t("不会调整系统时间、时间服务器或任何区域设置。")}</p>
+      {server && <p className="mt-2 break-all text-xs text-muted-foreground">{t("检查会向 {0} 的 UDP 123 端口查询参考时间。", server)}</p>}
+    </ConfirmModal>}
     {deleting && selected && <ConfirmModal title={t("删除期望集合")} description={t("仅删除集合 {0}，不修改系统环境。", selected.name)} risk="write-local" riskLabel={t("仅删除比较基准")} executing={removing}
       confirmLabel={t("删除期望集合")} onConfirm={() => void remove()} onClose={() => setDeleting(false)}>
       {profilesError && <p role="alert" className="mt-2 break-words text-xs text-destructive">{profilesError}</p>}
     </ConfirmModal>}
     {error && <div role="alert" className="space-y-2 rounded-md border border-destructive/30 p-3 text-sm"><p className="break-words text-destructive">{error}</p><button className={button} disabled={busy} onClick={() => void run()}>{t("重试检查")}</button></div>}
     {repairMessage && <p role="status" className="rounded-md border p-3 text-sm">{repairMessage}</p>}
+    {actionMessage && <p role="status" className="rounded-md border p-3 text-sm">{actionMessage}</p>}
     {data && <>
       <section className="space-y-2 rounded-md border p-3" aria-label={t("检查结果")}>
         <p role="status" className="text-sm font-medium">{data.summary.compared === 0 ? t("已读取环境，尚未设置比较目标。") : data.summary.status === "match" ? t("已检查的目标全部符合。") : data.summary.status === "mismatch" ? t("发现与目标不符的项目。") : t("仍有目标项目无法确认。")}</p>
@@ -173,7 +203,10 @@ export default function EnvironmentPage() {
         <div className="divide-y rounded-md border">{data.checks.filter((row) => row.group === group).map((row) => <div key={row.id} className="grid min-w-0 gap-2 p-3 sm:grid-cols-[10rem_minmax(0,1fr)_minmax(0,1fr)]" data-check-id={row.id}>
           <div className="min-w-0"><p className="break-words text-xs font-medium">{label(row.id)}</p><span className={`mt-1 inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-xs ${row.state === "match" ? "bg-success/10 text-success" : row.state === "mismatch" ? "bg-destructive/10 text-destructive" : row.state === "unknown" ? "bg-warning/10 text-warning" : "bg-muted text-muted-foreground"}`}>{stateLabel(row.state)}</span></div>
           <div className="min-w-0"><p className="text-xs text-muted-foreground">{t("实际值")}</p><p className="whitespace-pre-wrap break-all font-mono text-xs">{showValue(row.observed)}</p>{evidence && <p className="mt-1 break-all text-xs text-muted-foreground">{row.source}</p>}</div>
-          <div className="min-w-0"><p className="text-xs text-muted-foreground">{t("期望值")}</p><p className="whitespace-pre-wrap break-all font-mono text-xs">{row.expected === null ? t("未设置目标") : showValue(row.expected)}</p>{evidence && <p className="mt-1 text-xs text-muted-foreground">{note(row.note)}</p>}</div>
+          <div className="min-w-0"><p className="text-xs text-muted-foreground">{t("期望值")}</p><p className="whitespace-pre-wrap break-all font-mono text-xs">{row.expected === null ? t("未设置目标") : showValue(row.expected)}</p>{evidence && row.state !== "mismatch" && row.state !== "unknown" && <p className="mt-1 text-xs text-muted-foreground">{note(row.note)}</p>}</div>
+          <EnvironmentRemediation row={row} report={data} reason={note(row.note)} busy={busy} cooldown={cooldown}
+            onRepair={() => void run(true)} onAuthorize={() => setAuthorizing(true)} onSettings={(pane) => void openSettings(pane)} onRecheck={() => void run()}
+            onConfigureLaunch={onConfigureLaunch && selected ? () => onConfigureLaunch(environmentLaunchRecipe(profileTarget(selected))) : undefined} />
         </div>)}</div>
       </section>)}
       {data.time_sample && <p className="break-all text-xs text-muted-foreground">{t("查询地址：{0}；往返耗时：{1} ms；服务器层级：{2}。", data.time_sample.peer_address, data.time_sample.round_trip_ms.toFixed(1), String(data.time_sample.stratum))}{data.time_sample.special_use_address && ` ${t("该地址属于本地或特殊用途范围，无法据此确认实际服务器位置。")}`}</p>}

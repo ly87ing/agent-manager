@@ -8,6 +8,16 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Keep remediation tied to the evidence and process it can actually change.**
+- A raw locale conflict can coexist with matching effective categories. Explain
+  that distinction inline, and hand expected values to an unsaved launch draft;
+  changing the checker process would only hide the original evidence.
+- Unknown automatic-time state needs an explicit read-only authorization path,
+  separate from clock correction. Cancellation must keep the previous report.
+- Frontend unit tests transpile test code without checking its TypeScript API
+  options. Run the production type/build gate after adding navigation coverage.
+- Seen 1× (2026-10-13; environment remediation and build acceptance).
+
 **Verify saved criteria and authorization controls through actual UI state.**
 - The generic local-write badge says that configuration files change. A saved
   expected-value collection changes only Agent Manager's database. Supply an

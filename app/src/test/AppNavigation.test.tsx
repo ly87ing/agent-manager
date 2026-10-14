@@ -2,7 +2,8 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import App from "../App";
 import { MOD } from "../lib/platform";
 import { makeAuditData, makeElement, makeEnvelope, makeMode } from "./fixtures";
-import { renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { chooseOption, renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+import { environmentFixture } from "./environment-fixture";
 import { setSettingsClient } from "../lib/settings";
 import * as shareLinks from "../lib/shareLink";
 import { encodeShareLink, SHARE_PREFIX } from "../lib/shareLink";
@@ -41,6 +42,31 @@ describe("App 顶层导航", () => {
       import("../pages/RulesPage"), import("../pages/SourcesPage"),
       import("../pages/McpPage"), import("../pages/SkillsPage"),
     ]);
+  });
+
+  it("prefills a launch draft from the selected environment without saving or running it", async () => {
+    setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
+    const target = { timezone: "Europe/Paris", locale: "fr_FR.UTF-8", strict_locale: true };
+    const { calls } = renderWithEngine(<App />, {
+      ...routes(),
+      "environment:profiles": makeEnvelope({ items: [{ id: "french", name: "French", revision: "a".repeat(64), target: environmentFixture(target).target, auto_sync: false }] }),
+      "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]))),
+    });
+    await screen.findByRole("heading", { name: "启动配置" });
+    await userEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: "环境" }));
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "french");
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    await screen.findByText("发现与目标不符的项目。");
+    await userEvent.click(within(document.querySelector('[data-check-id="process.raw_locale"]') as HTMLElement).getByRole("button", { name: "创建启动配置" }));
+    await screen.findByRole("heading", { name: "新建配置" });
+    expect(screen.getByRole("combobox", { name: "目标系统" })).toHaveAttribute("data-value", "macos");
+    expect(screen.getByRole("combobox", { name: "选择时区 1" })).toHaveAttribute("data-value", "Europe/Paris");
+    await userEvent.click(screen.getByText("环境变量（8）"));
+    expect(screen.getByRole("textbox", { name: "环境变量名称 1" })).toHaveValue("LANG");
+    expect(screen.getByRole("textbox", { name: "环境变量取值 1" })).toHaveValue("fr_FR.UTF-8");
+    expect(screen.getByRole("button", { name: "预览命令" })).toBeDisabled();
+    expect(calls.some((call) => ["launch:save", "launch:run", "launch:build"].includes(call.command))).toBe(false);
   });
 
   it("keeps extension resource navigation without the global inbox", async () => {
