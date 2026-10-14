@@ -29,7 +29,7 @@ const reportSchema = z.object({
   summary: z.object({ status: z.enum(["match", "mismatch", "incomplete"]), matched: z.number().int().nonnegative(), mismatched: z.number().int().nonnegative(), unknown: z.number().int().nonnegative(), compared: z.number().int().nonnegative() }).strict(),
   process_scope: z.literal("caller"), probe_server: z.string().nullable(),
   probe_error: z.string().nullable(),
-  time_repair: z.object({ status: z.enum(["not_needed", "unavailable", "verified", "unverified", "cancelled", "failed"]), before_offset_ms: z.number().nullable(), before_uncertainty_ms: z.number().nullable() }).strict().nullable(),
+  time_repair: z.object({ status: z.enum(["not_needed", "unavailable", "verified", "unverified", "cancelled", "failed"]), before_offset_ms: z.number().nullable(), before_uncertainty_ms: z.number().nullable(), audit_recorded: z.boolean().optional() }).strict().nullable(),
   time_sync: z.object({ synchronized: z.boolean(), state_code: z.number().int().min(0).max(5), max_error_ms: z.number().finite().nonnegative(), estimated_error_ms: z.number().finite().nonnegative() }).strict().nullable(),
   time_sample: z.object({ server: z.string(), peer_address: z.string(), special_use_address: z.boolean(), stratum: z.number(), offset_ms: z.number(), round_trip_ms: z.number(), uncertainty_ms: z.number() }).strict().nullable(),
 }).strict();

@@ -1,4 +1,5 @@
 use super::Target;
+use crate::{Context, Request};
 use anyhow::Result;
 #[cfg(any(target_os = "macos", test))]
 use serde_json::json;
@@ -41,6 +42,7 @@ fn finish(mut report: Value, before: &Value, status: &str) -> Value {
 fn run(
     mut measure: impl FnMut() -> Result<Value>,
     adjust: impl FnOnce(IpAddr) -> Adjustment,
+    mut audit: impl FnMut(&Value) -> Result<()>,
 ) -> Result<Value> {
     let before = measure()?;
     match clock_state(&before) {
@@ -52,6 +54,11 @@ fn run(
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("No measured time-server address."))?
         .parse()?;
+    audit(&finish(before.clone(), &before, "requested")).map_err(|_| {
+        anyhow::anyhow!(
+            "Could not record the time correction request; no authorization was requested."
+        )
+    })?;
     let outcome = adjust(peer);
     let after = measure()?;
     let status = match outcome {
@@ -60,7 +67,30 @@ fn run(
         Adjustment::Applied if clock_state(&after) == Some("match") => "verified",
         Adjustment::Applied => "unverified",
     };
-    Ok(finish(after, &before, status))
+    let mut result = finish(after, &before, status);
+    result["time_repair"]["audit_recorded"] = json!(audit(&result).is_ok());
+    Ok(result)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn record(ctx: &Context, req: &Request, report: &Value) -> Result<()> {
+    let repair = &report["time_repair"];
+    let number = |value: &Value| value.as_f64().filter(|value| value.is_finite());
+    let detail = json!({
+        "status":repair["status"],
+        "before_offset_ms":number(&repair["before_offset_ms"]),
+        "before_uncertainty_ms":number(&repair["before_uncertainty_ms"]),
+        "offset_ms":number(&report["time_sample"]["offset_ms"]),
+        "uncertainty_ms":number(&report["time_sample"]["uncertainty_ms"]),
+    });
+    let conn = crate::store::open_write(ctx)?;
+    crate::store::record_operation(
+        &conn,
+        Some(&req.run_id),
+        "environment:sync-time",
+        Some("system-clock"),
+        Some(&detail),
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -99,7 +129,7 @@ fn adjust(peer: IpAddr) -> Adjustment {
     }
 }
 
-pub(super) fn handle(target: &Target) -> Result<Value> {
+pub(super) fn handle(ctx: &Context, req: &Request, target: &Target) -> Result<Value> {
     target.validate_time_repair()?;
     #[cfg(target_os = "macos")]
     {
@@ -112,10 +142,14 @@ pub(super) fn handle(target: &Target) -> Result<Value> {
                 super::report(target, true)
             },
             adjust,
+            |report| record(ctx, req, report),
         )
     }
     #[cfg(not(target_os = "macos"))]
-    anyhow::bail!("Time correction currently supports macOS only.");
+    {
+        let _ = (ctx, req);
+        anyhow::bail!("Time correction currently supports macOS only.");
+    }
 }
 
 #[cfg(test)]
@@ -130,7 +164,12 @@ mod tests {
     #[test]
     fn uncertain_or_matching_clocks_never_request_authorization() {
         for (state, status) in [("match", "not_needed"), ("unknown", "unavailable")] {
-            let result = run(|| Ok(sample(state)), |_| panic!("must not adjust")).unwrap();
+            let result = run(
+                || Ok(sample(state)),
+                |_| panic!("must not adjust"),
+                |_| panic!("must not audit"),
+            )
+            .unwrap();
             assert_eq!(result["time_repair"]["status"], status);
         }
     }
@@ -158,10 +197,98 @@ mod tests {
                     assert_eq!(peer.to_string(), "192.0.2.1");
                     outcome
                 },
+                |_| Ok(()),
             )
             .unwrap();
             assert_eq!(calls.get(), 2);
             assert_eq!(result["time_repair"]["status"], status);
         }
+    }
+
+    #[test]
+    fn correction_records_request_and_outcome_without_server_or_environment_data() {
+        let root =
+            std::env::temp_dir().join(format!("time-repair-audit-{}", crate::store::uuid_v4()));
+        let ctx = Context {
+            home_dir: root.join("home"),
+            data_dir: root.join("data"),
+        };
+        let req = Request {
+            command: "environment:sync-time".into(),
+            args: vec![],
+            run_id: "repair-audit".into(),
+        };
+        let calls = Cell::new(0);
+        let result = run(
+            || {
+                calls.set(calls.get() + 1);
+                Ok(sample(if calls.get() == 1 {
+                    "mismatch"
+                } else {
+                    "match"
+                }))
+            },
+            |_| Adjustment::Applied,
+            |report| record(&ctx, &req, report),
+        )
+        .unwrap();
+        assert_eq!(result["time_repair"]["audit_recorded"], true);
+        let conn = crate::store::open_readonly(&ctx).unwrap().unwrap();
+        let mut query = conn
+            .prepare("SELECT run_id, target, detail_json FROM operation_logs WHERE operation_type='environment:sync-time' ORDER BY rowid")
+            .unwrap();
+        let rows = query
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 2);
+        for (index, (run_id, target, detail)) in rows.iter().enumerate() {
+            assert_eq!(run_id, "repair-audit");
+            assert_eq!(target, "system-clock");
+            let detail: Value = serde_json::from_str(detail).unwrap();
+            assert_eq!(
+                detail["status"],
+                if index == 0 { "requested" } else { "verified" }
+            );
+            assert_eq!(detail.as_object().unwrap().len(), 5);
+            assert_eq!(detail["before_offset_ms"], 3000.0);
+        }
+        assert!(!ctx.home_dir.exists());
+        drop(query);
+        drop(conn);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn audit_failure_prevents_authorization_or_preserves_the_completed_measurement() {
+        assert!(run(
+            || Ok(sample("mismatch")),
+            |_| panic!("must not authorize"),
+            |_| anyhow::bail!("audit failed")
+        )
+        .is_err());
+        let count = Cell::new(0);
+        let result = run(
+            || Ok(sample("mismatch")),
+            |_| Adjustment::Cancelled,
+            |_| {
+                count.set(count.get() + 1);
+                if count.get() == 2 {
+                    anyhow::bail!("audit failed")
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(result["time_repair"]["status"], "cancelled");
+        assert_eq!(result["time_repair"]["audit_recorded"], false);
+        assert_eq!(result["time_sample"]["offset_ms"], 3000.0);
     }
 }

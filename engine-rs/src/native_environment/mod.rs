@@ -598,7 +598,7 @@ pub(crate) fn execute(ctx: &Context, req: &Request) -> Envelope {
     let offline = !repair && parsed.as_ref().map(|(_, probe)| !probe).unwrap_or(true);
     let result = parsed.and_then(|(target, probe)| {
         if repair {
-            time_repair::handle(&target)
+            time_repair::handle(ctx, req, &target)
         } else if command == "environment:check-time-settings" {
             actions::check_time_settings(&target, probe)
         } else {

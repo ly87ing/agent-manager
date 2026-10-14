@@ -142,7 +142,7 @@ a parsed IP quoted as data. Passwords are handled by macOS, never by Agent Manag
 No privileged helper/service is installed and no authorization policy is changed.
 See Apple's [administrator authorization guidance](https://developer.apple.com/library/archive/technotes/tn2065/_index.html).
 
-SNTP uses `-S -s -n 1 -t 5`; it may step the clock or request a gradual adjustment.
+SNTP uses `-S -s -n 1 -g 4000 -t 5`; it may step the clock or request a gradual adjustment.
 The authorization subprocess has a 150-second deadline. A second independent
 measurement follows correction, cancellation or failure. Query intervals are at
 least four seconds within this flow, including around the privileged request.
@@ -150,6 +150,16 @@ Only an applied command with a matching new measurement returns `verified`.
 Other outcomes are `unverified`, `cancelled` or `failed`; an exit code alone
 cannot establish success. Results include the pre-correction offset and
 uncertainty in `time_repair`.
+
+A clear mismatch records a `requested` operation before administrator
+authorization. If that audit cannot be saved, correction stops before requesting
+privileges. Completion records the outcome and numeric before/after measurement
+evidence under the same run identifier. Server addresses, process variables and
+authorization output are excluded. If the completion audit fails, the report
+retains the actual correction outcome and sets `time_repair.audit_recorded:false`;
+the page shows a warning alongside the new measurement. Matching or uncertain
+measurements return without an audit or database creation. Ordinary checks and
+authorized read-only inspection remain zero-write.
 
 The clock is the only system setting this endpoint may change. Time zone,
 languages, region, locale, NTP configuration and automatic-time preferences

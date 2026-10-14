@@ -65,6 +65,9 @@ function repairDescription(report: EnvironmentReport) {
     cancelled: t("已取消管理员授权，未完成校时。"), failed: t("校时未成功，请检查管理员授权和网络连接。"),
   })[report.time_repair.status] : null;
 }
+function auditWarning(report: EnvironmentReport) {
+  return report.time_repair?.audit_recorded === false ? t("校时结果未能写入操作记录，本页保留复测结果。") : null;
+}
 function findingDetails(report: EnvironmentReport, limit = Infinity) {
   return ([
     { text: "不符项目：{0}", rows: report.checks.filter((row) => row.expected !== null && row.state === "mismatch") },
@@ -82,10 +85,10 @@ function notifyReport(report: EnvironmentReport, actionNote?: string) {
   const title = mismatched || unknown ? t("检查完成：{0} 项不符，{1} 项无法确认。", String(mismatched), String(unknown))
     : repairUnconfirmed ? t("检查完成，校时未确认成功。")
     : compared ? t("检查完成：所选目标全部符合。") : t("检查完成：尚未设置比较目标。");
-  const level = mismatched || unknown || repairUnconfirmed ? "warning" : compared ? "success" : "info";
+  const level = mismatched || unknown || repairUnconfirmed || auditWarning(report) ? "warning" : compared ? "success" : "info";
   toast[level](title, { id: "environment-result", duration: 10000, closeButton: true,
     description: [t("符合 {0} 项，不符 {1} 项，无法确认 {2} 项。", String(matched), String(mismatched), String(unknown)),
-      ...findingDetails(report, 3), repairDescription(report), actionNote, t("完整明细见检查结果。")].filter(Boolean).join("\n"),
+      ...findingDetails(report, 3), repairDescription(report), auditWarning(report), actionNote, t("完整明细见检查结果。")].filter(Boolean).join("\n"),
     classNames: { description: "whitespace-pre-line" },
   });
 }
@@ -229,6 +232,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
     </ConfirmModal>}
     {error && <div role="alert" className="space-y-2 rounded-md border border-destructive/30 p-3 text-sm"><p className="break-words text-destructive">{error}</p><button className={button} disabled={busy} onClick={() => void run()}>{t("重试检查")}</button></div>}
     {repairMessage && <p role="status" className="rounded-md border p-3 text-sm">{repairMessage}</p>}
+    {data && auditWarning(data) && <p role="alert" className="break-words text-xs text-warning">{auditWarning(data)}</p>}
     {data && <>
       <section className="space-y-2 rounded-md border p-3" aria-label={t("检查结果")}>
         <p role="status" className="text-sm font-medium">{data.summary.compared === 0 ? t("已读取环境，尚未设置比较目标。") : data.summary.status === "match" ? t("已检查的目标全部符合。") : data.summary.status === "mismatch" ? t("发现与目标不符的项目。") : t("仍有目标项目无法确认。")}</p>

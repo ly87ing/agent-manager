@@ -178,6 +178,27 @@ describe("Environment checks", () => {
     if (status !== "verified") expect(screen.queryByText(messages.verified)).not.toBeInTheDocument();
   });
 
+  it("retains correction evidence and warns when its completion audit fails", async () => {
+    const target = { ntp_server: "pool.ntp.org", max_clock_offset_ms: 10 };
+    const report = environmentFixture(target, true);
+    report.time_repair = { status: "verified", before_offset_ms: 3000, before_uncertainty_ms: 20, audit_recorded: false };
+    const clock = report.checks.find((row) => row.id === "ntp.clock_offset")!;
+    clock.state = "match"; clock.observed = "+0.0 ms ± 1.0 ms";
+    report.time_sample!.offset_ms = 0; report.time_sample!.uncertainty_ms = 1;
+    report.summary.matched++; report.summary.mismatched--; report.summary.status = "match";
+    renderWithEngine(<EnvironmentPage />, {
+      "environment:profiles": makeEnvelope({ items: [collection(target, true)] }),
+      "environment:check": makeEnvelope(environmentFixture()), "environment:sync-time": makeEnvelope(report),
+    });
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "sample");
+    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("校时结果未能写入操作记录，本页保留复测结果。");
+    expect(screen.getByText("系统时间已校正，复测偏差符合目标。")).toBeVisible();
+    expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toHaveTextContent("校时结果未能写入操作记录");
+    expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toBeNull();
+  });
+
   it("prevents saving an incomplete automatic-correction policy", async () => {
     const { calls } = setup(); await screen.findByText("已读取环境，尚未设置比较目标。");
     await userEvent.click(screen.getByRole("button", { name: "新增期望集合" }));
