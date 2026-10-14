@@ -1,7 +1,7 @@
 //! General launch recipes are independent of assistant accounts and MCP secrets.
 mod render;
 mod runtime;
-mod saved;
+pub(crate) mod saved;
 
 use crate::{diagnostic, Context, Envelope, Lock, Mode, Request};
 use anyhow::{bail, Result};

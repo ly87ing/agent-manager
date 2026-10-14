@@ -3,6 +3,7 @@ use crate::native_mcp::model::sha256_hex;
 use crate::{store, Context, Request};
 use anyhow::{bail, Result};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 
@@ -46,6 +47,75 @@ fn has_table(conn: &Connection) -> Result<bool> {
         [],
         |row| row.get::<_, i64>(0),
     )? > 0)
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BackupItem {
+    id: String,
+    recipe: Recipe,
+}
+
+pub(crate) fn backup(ctx: &Context) -> Result<Vec<Value>> {
+    let Some(conn) = store::open_readonly(ctx)? else {
+        return Ok(vec![]);
+    };
+    if !has_table(&conn)? {
+        return Ok(vec![]);
+    }
+    let mut query = conn.prepare("SELECT id, recipe_json FROM launch_recipes ORDER BY id")?;
+    let rows = query.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut items = Vec::new();
+    for row in rows {
+        let (id, raw) = row?;
+        let saved = Saved::parse(id, raw)?;
+        let value = serde_json::to_value(BackupItem {
+            id: saved.id,
+            recipe: saved.recipe,
+        })?;
+        crate::native::reject_secrets_value(&value)?;
+        items.push(value);
+    }
+    Ok(items)
+}
+
+pub(crate) fn validate_backup(value: &Value) -> Result<Vec<(String, String)>> {
+    let items = value
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("launch_recipes must be an array."))?;
+    let mut ids = BTreeSet::new();
+    let mut rows = Vec::new();
+    for value in items {
+        let item: BackupItem = serde_json::from_value(value.clone())
+            .map_err(|_| anyhow::anyhow!("Invalid launch backup item."))?;
+        text(&item.id, 64)?;
+        if !item
+            .id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+            || !ids.insert(item.id.clone())
+        {
+            bail!("Invalid or duplicate launch backup id.");
+        }
+        item.recipe.validate()?;
+        crate::native::reject_secrets_value(value)?;
+        rows.push((item.id, serde_json::to_string(&item.recipe)?));
+    }
+    Ok(rows)
+}
+
+pub(crate) fn restore_backup(conn: &Connection, rows: &[(String, String)]) -> Result<()> {
+    conn.execute_batch(TABLE_DDL)?;
+    conn.execute("DELETE FROM launch_recipes", [])?;
+    for (id, raw) in rows {
+        conn.execute(
+            "INSERT INTO launch_recipes (id, recipe_json) VALUES (?1, ?2)",
+            rusqlite::params![id, raw],
+        )?;
+    }
+    Ok(())
 }
 
 fn list(ctx: &Context) -> Result<Value> {

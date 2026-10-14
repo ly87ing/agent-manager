@@ -2,7 +2,7 @@
 mod actions;
 #[cfg(target_os = "macos")]
 mod macos;
-mod profiles;
+pub(crate) mod profiles;
 mod time_probe;
 mod time_repair;
 #[cfg(target_os = "macos")]

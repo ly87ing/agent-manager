@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffBackup, sourceLabel } from "../lib/backupDiff";
+import { diffBackup, selectBackupModules, sourceLabel } from "../lib/backupDiff";
 
 const current = {
   policy: {
@@ -43,6 +43,17 @@ const incoming = {
 };
 
 describe("备份导入差异", () => {
+  it("compares saved tools by identity and shows their names, including removals", () => {
+    const before = { launch_recipes: [{ id: "launch", recipe: { target: "YOUR_APP", variants: [{ name: "shortcut" }], args: [] } }], environment_profiles: [{ id: "profile", profile: { name: "Example environment" } }] };
+    const incoming = { launch_recipes: [{ id: "launch", recipe: { ...before.launch_recipes[0].recipe, args: ["changed"] } }], environment_profiles: [] };
+    const diff = diffBackup(before, incoming);
+    expect(diff.sections).toEqual([
+      { label: "启动配置", added: [], changed: ["shortcut · YOUR_APP"], removed: [] },
+      { label: "环境集合", added: [], changed: [], removed: ["Example environment"] },
+    ]);
+    expect(diffBackup(before, selectBackupModules(before, incoming, ["launch"])).sections).toHaveLength(1);
+    expect(diffBackup(before, selectBackupModules(before, {}, ["launch", "environment"])).identical).toBe(true);
+  });
   it("按类别分出新增、改动与消失的条目", () => {
     const diff = diffBackup(current, incoming);
     const byLabel = Object.fromEntries(diff.sections.map((s) => [s.label, s]));

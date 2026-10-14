@@ -14,6 +14,8 @@ const BACKUP = {
   rule_templates: [{ name: "团队规则", body: "我的规则\n", origin: "user" }],
   // MCP 定义随「已保存项」导出（原先计在策略的服务库定义里）
   mcp_saved: [{ server: "demo", agent: "", entry: { command: "npx", env: { T: "${T}" } }, resolve: { env: [], headers: [] }, origin: "migrated" }],
+  launch_recipes: [{ id: "launch-1", recipe: { platform: "macos", shell: "zsh", kind: "app", target: "/Applications/YOUR_APPLICATION.app", args: [], env: [], variants: [{ name: "example", timezone: "" }] } }],
+  environment_profiles: [{ id: "environment-1", profile: { name: "Example environment", target: { region: "GB" }, auto_sync: false } }],
 };
 
 function routes() {
@@ -36,6 +38,8 @@ describe("配置备份", () => {
     }) } });
     await userEvent.click(screen.getByTestId("restore-module-mcp"));
     await userEvent.click(screen.getByTestId("restore-module-rules"));
+    await userEvent.click(screen.getByTestId("restore-module-launch"));
+    await userEvent.click(screen.getByTestId("restore-module-environment"));
     await userEvent.click(screen.getByTestId("config-import-button"));
     const preview = await screen.findByTestId("config-import-diff");
     expect(preview).toHaveTextContent("新增：imported");
@@ -51,6 +55,7 @@ describe("配置备份", () => {
     const output = await screen.findByTestId("config-export-output");
     expect(output).toHaveTextContent("0 条定义 · 1 个 MCP 已保存项");
     expect(output).toHaveTextContent("1 个规则模板");
+    expect(output).toHaveTextContent("1 个启动配置 · 1 个环境集合");
     expect(output).toHaveTextContent("不含密钥");
     expect(screen.getByText(/不含密钥取值，也不含外部密钥文件路径/)).toBeInTheDocument();
     expect(calls.find((call) => call.command === "config:export")?.args).toEqual([]);
@@ -68,6 +73,22 @@ describe("配置备份", () => {
     await waitFor(() => expect(written.length).toBe(1));
     expect(JSON.parse(written[0])).toEqual(BACKUP);
     expect(written[0]).not.toContain('"secrets"');
+  });
+
+  it("previews only selected launch data and discloses that restoration does not execute it", async () => {
+    const { calls } = renderWithEngine(<ConfigBackupSection />, routes());
+    await userEvent.click(screen.getByTestId("config-import-toggle"));
+    for (const module of ["skills", "mcp", "rules", "environment"]) await userEvent.click(screen.getByTestId(`restore-module-${module}`));
+    const incoming = { ...BACKUP, launch_recipes: [{ ...BACKUP.launch_recipes[0], recipe: { ...BACKUP.launch_recipes[0].recipe, target: "/Applications/YOUR_OTHER_APPLICATION.app" } }], environment_profiles: [] };
+    fireEvent.change(screen.getByTestId("config-import-input"), { target: { value: JSON.stringify(incoming) } });
+    await userEvent.click(screen.getByTestId("config-import-button"));
+    const preview = await screen.findByTestId("config-import-diff");
+    expect(preview).toHaveTextContent("YOUR_OTHER_APPLICATION.app");
+    expect(preview).toHaveTextContent("恢复不会启动应用或调整系统设置");
+    expect(screen.queryByTestId("config-diff-环境集合")).toBeNull();
+    await userEvent.click(screen.getByTestId("config-import-confirm"));
+    await waitFor(() => expect(calls.find((call) => call.command === "config:import")?.args.slice(2)).toEqual(["--modules", "launch", "--base", BACKUP.base]));
+    expect(calls.some((call) => ["launch:run", "environment:sync-time"].includes(call.command))).toBe(false);
   });
 
   it("导入前先给差异预览，确认后才整份提交", async () => {
@@ -100,7 +121,7 @@ describe("配置备份", () => {
     await waitFor(() => expect(calls.some((call) => call.command === "config:import")).toBe(true));
     const write = calls.find((call) => call.command === "config:import")!;
     expect(write.args[0]).toBe("--value");
-    expect(write.args.slice(2)).toEqual(["--modules", "skills,mcp,rules", "--base", BACKUP.base]);
+    expect(write.args.slice(2)).toEqual(["--modules", "skills,mcp,rules,launch,environment", "--base", BACKUP.base]);
     expect(JSON.parse(write.args[1]).format).toBe("agent-manager/config-backup/v1");
     expect(await screen.findByTestId("config-import-success")).toHaveTextContent("逐项预览和应用");
     expect(screen.queryByTestId("config-go-sync")).toBeNull();

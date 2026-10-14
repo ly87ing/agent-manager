@@ -9,7 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useDialogFocus } from "../lib/dialogFocus";
 
 /**
- * 扩展定义备份：把本机的定义与来源导出成一份 JSON，换机器或重装时导回来。
+ * Portable saved extension definitions and independent tool configuration.
  *
  * 密钥取值与密钥文件路径不进入备份。不含分配记录与写入指纹——那些是本机落地状态，
  * 导回来之后仍由用户到对应页面逐项预览和应用，才会写到助手配置里。
@@ -47,6 +47,8 @@ export function ConfigBackupSection() {
         sources?: Record<string, unknown>;
         rule_templates?: unknown[];
         mcp_saved?: unknown[];
+        launch_recipes?: unknown[];
+        environment_profiles?: unknown[];
       };
       const policy = (data.policy ?? {}) as Record<string, any>;
       const count = (obj: unknown) => Object.keys((obj ?? {}) as Record<string, unknown>).length;
@@ -54,7 +56,7 @@ export function ConfigBackupSection() {
       const mcpSaved = data.mcp_saved?.length ?? 0;
       setExported(JSON.stringify(envelope.data, null, 2));
       setExportSummary(
-        t("{0} 条定义{1} · {2} 份来源 · {3} 个规则模板 · 不含密钥", definitions, mcpSaved > 0 ? (" " + t("· {0} 个 MCP 已保存项", mcpSaved)) : "", count(data.sources), data.rule_templates?.length ?? 0),
+        t("{0} 条定义{1} · {2} 份来源 · {3} 个规则模板 · 不含密钥", definitions, mcpSaved > 0 ? (" " + t("· {0} 个 MCP 已保存项", mcpSaved)) : "", count(data.sources), data.rule_templates?.length ?? 0) + t(" · {0} 个启动配置 · {1} 个环境集合", data.launch_recipes?.length ?? 0, data.environment_profiles?.length ?? 0),
       );
       toast.success(t("已生成备份内容"));
     } catch (err) {
@@ -127,8 +129,8 @@ export function ConfigBackupSection() {
       setImportText("");
       setImported(true);
       void queryClient.invalidateQueries({ queryKey: engineKeys.all });
-      toast.success(t("已恢复定义与来源"), {
-        description: t("助手配置未改动；请到对应页面逐项预览和应用，密钥需另行配置。"),
+      toast.success(t("已恢复所选配置"), {
+        description: t("配置已恢复，未启动应用或修改系统设置。扩展仍需到对应页面逐项预览和应用，密钥需另行配置。"),
       });
     } catch (err) {
       notifyError(t("导入失败"), err);
@@ -138,13 +140,13 @@ export function ConfigBackupSection() {
   };
 
   return (
-    <section data-testid="config-backup-section" className="overflow-clip rounded-lg border bg-card" aria-label={t("扩展定义备份")}>
-      <h2 className="border-b bg-muted px-4 py-2 text-xs font-medium text-foreground">{t("扩展定义备份")}</h2>
+    <section data-testid="config-backup-section" className="overflow-clip rounded-lg border bg-card" aria-label={t("扩展与工具备份")}>
+      <h2 className="border-b bg-muted px-4 py-2 text-xs font-medium text-foreground">{t("扩展与工具备份")}</h2>
       <div className="divide-y">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
           <div className="min-w-0 flex-1">
-            <div className="text-sm">{t("导出扩展定义")}</div>
-            <div className="text-xs text-muted-foreground">{t("技能来源、规则模板与 MCP 已保存项；不含密钥取值与密钥文件路径")}</div>
+            <div className="text-sm">{t("导出配置备份")}</div>
+            <div className="text-xs text-muted-foreground">{t("技能来源、规则模板、MCP 已保存项、启动配置与环境集合；不含密钥取值与密钥文件路径")}</div>
           </div>
           <button
             type="button"
@@ -169,8 +171,8 @@ export function ConfigBackupSection() {
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
           <div className="min-w-0 flex-1">
-            <div className="text-sm">{t("恢复扩展定义")}</div>
-            <div className="text-xs text-muted-foreground">{t("只恢复定义与来源，不改助手配置；导回后到各页逐项预览和应用")}</div>
+            <div className="text-sm">{t("恢复配置备份")}</div>
+            <div className="text-xs text-muted-foreground">{t("恢复保存的扩展定义、启动配置和环境集合，不启动应用或应用系统设置。")}</div>
           </div>
           <button
             type="button"
@@ -215,7 +217,7 @@ export function ConfigBackupSection() {
             </div>
           )}
           {imported && (
-            <p data-testid="config-import-success" className="w-full text-xs text-success">{t("定义与来源已恢复，助手配置未改动。请到技能、MCP、规则等对应页面逐项预览和应用；密钥需另行配置。")}</p>
+            <p data-testid="config-import-success" className="w-full text-xs text-success">{t("配置已恢复，未启动应用或修改系统设置。扩展仍需到对应页面逐项预览和应用，密钥需另行配置。")}</p>
           )}
         </div>
       </div>
@@ -235,10 +237,11 @@ export function ConfigBackupSection() {
             onKeyDown={onDialogKeyDown}
             className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-card p-5 shadow-xl animate-zoom-in-95"
           >
-            <h3 className="text-base font-semibold text-foreground">{t("确认扩展定义恢复范围")}</h3>
-            <p className="mt-1 text-xs text-muted-foreground">{t("仅恢复所选模块：")}{modules.map((module) => BACKUP_MODULE_LABELS[module]).join("、")}{t("。\n              技能来源与规则模板按模块替换，MCP 已保存项合并；此操作不能撤销。助手配置文件本身不受影响。")}</p>
+            <h3 className="text-base font-semibold text-foreground">{t("确认配置恢复范围")}</h3>
+            <p className="mt-1 text-xs text-warning">{t("此操作不能自动撤销，请先导出需要保留的配置。")}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("仅恢复所选模块：")}{modules.map((module) => BACKUP_MODULE_LABELS[module]).join("、")}{t("。技能来源、规则模板、启动配置和环境集合按模块替换，MCP 已保存项合并；缺少的旧版字段保留本机数据。恢复不会启动应用或调整系统设置。")}</p>
 
-            <div className="mt-3 space-y-2 text-sm">
+            <div className="mt-3 min-w-0 space-y-2 break-words text-sm [overflow-wrap:anywhere]">
               {diff.identical ? (
                 <p data-testid="config-diff-identical" className="rounded-md border bg-muted px-3 py-2 text-xs text-muted-foreground">{t("与当前配置完全一致，导入不会改变任何东西。")}</p>
               ) : (

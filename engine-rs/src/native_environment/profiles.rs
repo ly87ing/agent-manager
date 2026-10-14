@@ -58,6 +58,80 @@ fn has_table(conn: &Connection) -> Result<bool> {
     )? > 0)
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BackupItem {
+    id: String,
+    profile: Profile,
+}
+
+pub(crate) fn backup(ctx: &Context) -> Result<Vec<Value>> {
+    let Some(conn) = store::open_readonly(ctx)? else {
+        return Ok(vec![]);
+    };
+    if !has_table(&conn)? {
+        return Ok(vec![]);
+    }
+    let mut query =
+        conn.prepare("SELECT id, profile_json FROM environment_profiles ORDER BY id")?;
+    let rows = query.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut items = Vec::new();
+    for row in rows {
+        let (id, raw) = row?;
+        let profile: Profile = serde_json::from_str(&raw)
+            .map_err(|_| anyhow::anyhow!("Invalid saved expected-value collection."))?;
+        profile.validate()?;
+        let value = serde_json::to_value(BackupItem { id, profile })?;
+        crate::native::reject_secrets_value(&value)?;
+        items.push(value);
+    }
+    Ok(items)
+}
+
+pub(crate) fn validate_backup(value: &Value) -> Result<Vec<(String, String)>> {
+    let items = value
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("environment_profiles must be an array."))?;
+    let mut ids = BTreeSet::new();
+    let mut names = BTreeSet::new();
+    let mut rows = Vec::new();
+    for value in items {
+        let item: BackupItem = serde_json::from_value(value.clone())
+            .map_err(|_| anyhow::anyhow!("Invalid environment backup item."))?;
+        if item.id.is_empty()
+            || item.id.len() > 64
+            || !item
+                .id
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            || !ids.insert(item.id.clone())
+        {
+            bail!("Invalid or duplicate environment backup id.");
+        }
+        item.profile.validate()?;
+        if !names.insert(item.profile.name.to_lowercase()) {
+            bail!("Duplicate expected-value collection name.");
+        }
+        crate::native::reject_secrets_value(value)?;
+        rows.push((item.id, serde_json::to_string(&item.profile)?));
+    }
+    Ok(rows)
+}
+
+pub(crate) fn restore_backup(conn: &Connection, rows: &[(String, String)]) -> Result<()> {
+    conn.execute_batch(TABLE_DDL)?;
+    conn.execute("DELETE FROM environment_profiles", [])?;
+    for (id, raw) in rows {
+        conn.execute(
+            "INSERT INTO environment_profiles (id, profile_json) VALUES (?1, ?2)",
+            rusqlite::params![id, raw],
+        )?;
+    }
+    Ok(())
+}
+
 fn item(id: &str, raw: &str) -> Result<Value> {
     let profile: Profile = serde_json::from_str(raw)
         .map_err(|_| anyhow::anyhow!("Invalid saved expected-value collection."))?;

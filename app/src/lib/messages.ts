@@ -1,5 +1,17 @@
 /** Application copy only; user content and engine diagnostics are never translation keys. */
 export const messages = {
+  "恢复保存的扩展定义、启动配置和环境集合，不启动应用或应用系统设置。": "Restore saved extension definitions, launch configurations and environment collections without launching applications or applying system settings.",
+  "此操作不能自动撤销，请先导出需要保留的配置。": "This restore cannot be undone automatically. Export any configuration you need to keep first.",
+  "环境集合": "Environment collections",
+  "扩展与工具备份": "Extension and tool backups",
+  "导出配置备份": "Export saved configuration",
+  "恢复配置备份": "Restore saved configuration",
+  "技能来源、规则模板、MCP 已保存项、启动配置与环境集合；不含密钥取值与密钥文件路径": "Skill sources, rule templates, saved MCP entries, launch configurations and environment collections; excludes secret values and secrets file paths",
+  " · {0} 个启动配置 · {1} 个环境集合": " · {0} launch configurations · {1} environment collections",
+  "已恢复所选配置": "Selected configuration restored",
+  "配置已恢复，未启动应用或修改系统设置。扩展仍需到对应页面逐项预览和应用，密钥需另行配置。": "Configuration restored without launching applications or changing system settings. Preview and apply extensions on their pages; configure secrets separately.",
+  "确认配置恢复范围": "Confirm configuration restore scope",
+  "。技能来源、规则模板、启动配置和环境集合按模块替换，MCP 已保存项合并；缺少的旧版字段保留本机数据。恢复不会启动应用或调整系统设置。": ". Skill sources, rule templates, launch configurations and environment collections replace their selected module; saved MCP entries merge. Fields absent from older backups preserve local data. Restore does not launch applications or change system settings.",
   "正在读取本机内容，预览不会改动任何东西。": "Reading local content. Preview does not change anything.",
   "比对远程来源": "Compare remote source",
   "校时结果未能写入操作记录，本页保留复测结果。": "The correction result could not be saved to activity. The new measurement remains on this page.",

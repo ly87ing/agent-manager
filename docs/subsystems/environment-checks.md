@@ -78,6 +78,11 @@ is involved. The collection endpoints are `environment:profiles`,
 `environment:save-profile --spec JSON [--id ID --base SHA256]` and
 `environment:delete-profile --id ID --base SHA256`.
 
+[Configuration backups](extension-backups.md) include these collections as an
+optional selectable module. Restore validates targets and unique collection
+names without inspecting or applying system settings. Restoring `auto_sync:true`
+does not query or correct time; correction still requires a later explicit check.
+
 ```sh
 cargo run --manifest-path engine-rs/Cargo.toml -- environment:check --json
 cargo run --manifest-path engine-rs/Cargo.toml -- environment:check --spec '{"timezone":"Europe/London","languages":["en-GB"],"region":"GB","locale":"en_GB.UTF-8","strict_locale":true,"ntp_server":"pool.ntp.org","automatic_time":true,"time_synchronized":true,"max_clock_offset_ms":2000}' --json

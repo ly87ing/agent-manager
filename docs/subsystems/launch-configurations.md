@@ -14,6 +14,10 @@ inactive application data. Only the recipe is stored; complete commands are
 rendered from it when read. Saving does not require the target to be installed,
 inspect or change shell files, or start a process.
 
+[Configuration backups](extension-backups.md) include saved recipes as an optional,
+selectable module. Restore validates recipes and preserves their identifiers;
+it saves inactive data without launching applications or writing shell files.
+
 Launch is the first top-level navigation item and the default desktop opening
 page. It initially shows only saved entries, so common graphical applications can
 be started immediately and terminal commands can be copied without opening an

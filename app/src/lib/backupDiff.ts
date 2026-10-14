@@ -25,9 +25,9 @@ export interface BackupDiff {
 
 type Json = Record<string, unknown>;
 
-export const BACKUP_MODULES = ["skills", "mcp", "rules"] as const;
+export const BACKUP_MODULES = ["skills", "mcp", "rules", "launch", "environment"] as const;
 export type BackupModule = typeof BACKUP_MODULES[number];
-export const BACKUP_MODULE_LABELS: Record<BackupModule, string> = { get skills() { return t("技能来源"); }, get mcp() { return t("MCP 已保存项"); }, get rules() { return t("规则模板"); } };
+export const BACKUP_MODULE_LABELS: Record<BackupModule, string> = { get skills() { return t("技能来源"); }, get mcp() { return t("MCP 已保存项"); }, get rules() { return t("规则模板"); }, get launch() { return t("启动配置"); }, get environment() { return t("环境集合"); } };
 
 export function selectBackupModules(current: Json, incoming: Json, modules: BackupModule[]): Json {
   const policy = { ...asObject(current.policy) };
@@ -37,6 +37,8 @@ export function selectBackupModules(current: Json, incoming: Json, modules: Back
   return { ...incoming, policy,
     mcp_saved: modules.includes("mcp") ? incoming.mcp_saved : current.mcp_saved,
     rule_templates: modules.includes("rules") ? incoming.rule_templates ?? current.rule_templates : current.rule_templates,
+    launch_recipes: modules.includes("launch") ? incoming.launch_recipes ?? current.launch_recipes : current.launch_recipes,
+    environment_profiles: modules.includes("environment") ? incoming.environment_profiles ?? current.environment_profiles : current.environment_profiles,
     sources: modules.includes("rules") ? incoming.sources : {},
   };
 }
@@ -85,6 +87,16 @@ function templatesByName(value: unknown): Json {
   return out;
 }
 
+function diffSaved(label: string, current: unknown, incoming: unknown, name: (row: Json) => string): DiffSection {
+  const byId = (items: unknown): Record<string, Json> => Object.fromEntries((Array.isArray(items) ? items : []).map((item) => {
+    const row = asObject(item); return [String(row.id), row];
+  }));
+  const before = byId(current), after = byId(incoming);
+  const diff = diffMaps(label, before, after);
+  const display = (id: string) => name(after[id] ?? before[id]) || id;
+  return { label, added: diff.added.map(display), changed: diff.changed.map(display), removed: diff.removed.map(display) };
+}
+
 const SOURCE_LABELS: Record<string, string> = {
   // 旧备份里的规则来源：导入时转成「旧规则来源」模板，不再作为来源保存
   get "rules.shared"() { return t("旧规则来源（共享，导入后转为模板）"); },
@@ -117,6 +129,11 @@ export function diffBackup(current: Json, incoming: Json): BackupDiff {
     ...("rule_templates" in incoming
       ? [diffMaps(t("规则模板"), templatesByName(current.rule_templates), templatesByName(incoming.rule_templates))]
       : []),
+    ...(incoming.launch_recipes != null ? [diffSaved(t("启动配置"), current.launch_recipes, incoming.launch_recipes, (row) => {
+      const recipe = asObject(row.recipe);
+      return `${(Array.isArray(recipe.variants) ? recipe.variants : []).map((variant) => String(asObject(variant).name)).join(", ")} · ${String(recipe.target ?? "")}`;
+    })] : []),
+    ...(incoming.environment_profiles != null ? [diffSaved(t("环境集合"), current.environment_profiles, incoming.environment_profiles, (row) => String(asObject(row.profile).name ?? ""))] : []),
   ].filter((section) => section.added.length + section.changed.length + section.removed.length > 0);
 
   const currentSources = asObject(current.sources);

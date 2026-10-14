@@ -73,6 +73,8 @@ pub(crate) fn export(ctx: &Context, req: &Request) -> Result<Value> {
             .map(|t| json!({ "name": t.name, "body": t.body, "origin": t.origin }))
             .collect::<Vec<_>>(),
         "mcp_saved": saved,
+        "launch_recipes": crate::native_launch::saved::backup(ctx)?,
+        "environment_profiles": crate::native_environment::profiles::backup(ctx)?,
     });
     let mut state = backup.clone();
     state.as_object_mut().unwrap().remove("exported_at");
@@ -83,6 +85,8 @@ pub(crate) fn export(ctx: &Context, req: &Request) -> Result<Value> {
 /// 校验后的备份内容：policy、规则模板（None = 备份没带这一段）、
 /// 旧规则来源（旧备份的 rules.* 键）、MCP 已保存项。
 struct Payload {
+    launch_recipes: Option<Vec<(String, String)>>,
+    environment_profiles: Option<Vec<(String, String)>>,
     policy: Value,
     rule_templates: Option<Vec<(String, String, String)>>,
     legacy_rules: BTreeMap<String, String>,
@@ -215,6 +219,16 @@ fn validate_payload(payload: &Value) -> Result<Payload> {
     };
 
     Ok(Payload {
+        launch_recipes: obj
+            .get("launch_recipes")
+            .filter(|value| !value.is_null())
+            .map(crate::native_launch::saved::validate_backup)
+            .transpose()?,
+        environment_profiles: obj
+            .get("environment_profiles")
+            .filter(|value| !value.is_null())
+            .map(crate::native_environment::profiles::validate_backup)
+            .transpose()?,
         policy,
         rule_templates,
         legacy_rules,
@@ -256,9 +270,9 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
         if modules.is_empty()
             || modules
                 .iter()
-                .any(|module| !["skills", "mcp", "rules"].contains(module))
+                .any(|module| !["skills", "mcp", "rules", "launch", "environment"].contains(module))
         {
-            bail!("恢复模块只能选择 skills、mcp、rules，且至少选择一项");
+            bail!("恢复模块只能选择 skills、mcp、rules、launch、environment，且至少选择一项");
         }
         let incoming = payload.policy.clone();
         payload.policy = before.clone();
@@ -277,6 +291,12 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
         }
         if !modules.contains(&"mcp") {
             payload.mcp_saved.clear();
+        }
+        if !modules.contains(&"launch") {
+            payload.launch_recipes = None;
+        }
+        if !modules.contains(&"environment") {
+            payload.environment_profiles = None;
         }
     }
     crate::native_mcp::saved::validate_saved_rows(ctx, &payload.policy, &payload.mcp_saved)?;
@@ -371,6 +391,12 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
             restored_templates += 1;
         }
     }
+    if let Some(rows) = &payload.launch_recipes {
+        crate::native_launch::saved::restore_backup(&tx, rows)?;
+    }
+    if let Some(rows) = &payload.environment_profiles {
+        crate::native_environment::profiles::restore_backup(&tx, rows)?;
+    }
     store::record_operation(
         &tx,
         Some(&req.run_id),
@@ -381,6 +407,8 @@ pub(crate) fn import(ctx: &Context, req: &Request) -> Result<Value> {
             "sources": [],
             "rule_templates": restored_templates,
             "mcp_saved": payload.mcp_saved.len(),
+            "launch_recipes": payload.launch_recipes.as_ref().map(Vec::len),
+            "environment_profiles": payload.environment_profiles.as_ref().map(Vec::len),
             "modules": modules,
         })),
     )?;

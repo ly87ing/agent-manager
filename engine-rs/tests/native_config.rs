@@ -27,6 +27,220 @@ fn request(command: &str, args: &[&str]) -> Request {
     }
 }
 
+fn save_tool_fixtures(ctx: &Context) -> serde_json::Value {
+    let recipe = serde_json::json!({"platform":"linux","shell":"bash","kind":"command","target":"not-installed","args":["$(touch executed)"],"env":[],"variants":[{"name":"example-launch","timezone":"Europe/London"}]});
+    let profile = serde_json::json!({"name":"Example environment","target":{"region":"GB","ntp_server":"time.example.org","max_clock_offset_ms":2000},"auto_sync":true});
+    for (command, spec) in [
+        ("launch:save", recipe),
+        ("environment:save-profile", profile),
+    ] {
+        let saved = execute(ctx, &request(command, &["--spec", &spec.to_string()]));
+        assert!(saved.ok, "{:?}", saved.errors);
+    }
+    execute(ctx, &request("config:export", &[])).data
+}
+
+#[test]
+fn tool_backups_roundtrip_selected_modules_and_preserve_older_omitted_fields() {
+    let (root, ctx) = temp_ctx("tool-backup-roundtrip");
+    let backup = save_tool_fixtures(&ctx);
+    let bytes = std::fs::read(store::db_path(&ctx)).unwrap();
+    let again = execute(&ctx, &request("config:export", &[]));
+    assert!(again.ok);
+    assert_eq!(again.data["base"], backup["base"]);
+    assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), bytes);
+    assert_eq!(backup["launch_recipes"][0].as_object().unwrap().len(), 2);
+    assert_eq!(
+        backup["environment_profiles"][0]["profile"]["auto_sync"],
+        true
+    );
+    let (other_root, other) = temp_ctx("tool-backup-destination");
+    std::fs::write(other.home_dir.join(".zshrc"), "# Keep shell bytes\n").unwrap();
+    let base = execute(&other, &request("config:export", &[])).data["base"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let imported = execute(
+        &other,
+        &request(
+            "config:import",
+            &[
+                "--value",
+                &backup.to_string(),
+                "--modules",
+                "launch",
+                "--base",
+                &base,
+            ],
+        ),
+    );
+    assert!(imported.ok, "{:?}", imported.errors);
+    assert_eq!(
+        execute(&other, &request("launch:list", &[])).data["items"][0]["recipe"],
+        backup["launch_recipes"][0]["recipe"]
+    );
+    assert_eq!(
+        execute(&other, &request("environment:profiles", &[])).data["items"],
+        serde_json::json!([])
+    );
+    let imported = execute(
+        &other,
+        &request(
+            "config:import",
+            &["--value", &backup.to_string(), "--modules", "environment"],
+        ),
+    );
+    assert!(imported.ok, "{:?}", imported.errors);
+    let current = execute(&other, &request("config:export", &[])).data;
+    assert_eq!(current["launch_recipes"], backup["launch_recipes"]);
+    assert_eq!(
+        current["environment_profiles"],
+        backup["environment_profiles"]
+    );
+    let mut old = backup.clone();
+    old.as_object_mut().unwrap().remove("launch_recipes");
+    old.as_object_mut().unwrap().remove("environment_profiles");
+    assert!(
+        execute(
+            &other,
+            &request(
+                "config:import",
+                &[
+                    "--value",
+                    &old.to_string(),
+                    "--modules",
+                    "launch,environment"
+                ]
+            )
+        )
+        .ok
+    );
+    let after = execute(&other, &request("config:export", &[])).data;
+    assert_eq!(after["launch_recipes"], current["launch_recipes"]);
+    assert_eq!(
+        after["environment_profiles"],
+        current["environment_profiles"]
+    );
+    assert_eq!(
+        std::fs::read_to_string(other.home_dir.join(".zshrc")).unwrap(),
+        "# Keep shell bytes\n"
+    );
+    assert_eq!(std::fs::read_dir(&other.home_dir).unwrap().count(), 1);
+    assert!(!other_root.join("executed").exists());
+    std::fs::remove_dir_all(root).unwrap();
+    std::fs::remove_dir_all(other_root).unwrap();
+}
+
+#[test]
+fn tool_restore_refuses_stale_or_invalid_backups_and_rolls_back_audit_failure() {
+    let (root, ctx) = temp_ctx("tool-backup-failures");
+    let original = save_tool_fixtures(&ctx);
+    let item = execute(&ctx, &request("launch:list", &[])).data["items"][0].clone();
+    let mut changed = item["recipe"].clone();
+    changed["args"] = serde_json::json!(["changed"]);
+    assert!(
+        execute(
+            &ctx,
+            &request(
+                "launch:save",
+                &[
+                    "--id",
+                    item["id"].as_str().unwrap(),
+                    "--base",
+                    item["revision"].as_str().unwrap(),
+                    "--spec",
+                    &changed.to_string()
+                ]
+            )
+        )
+        .ok
+    );
+    let stale = execute(
+        &ctx,
+        &request(
+            "config:import",
+            &[
+                "--value",
+                &original.to_string(),
+                "--modules",
+                "launch,environment",
+                "--base",
+                original["base"].as_str().unwrap(),
+            ],
+        ),
+    );
+    assert!(!stale.ok);
+    assert!(format!("{:?}", stale.errors).contains("预览后已变化"));
+    let before = execute(&ctx, &request("config:export", &[])).data;
+    let mut secret = original.clone();
+    secret["launch_recipes"][0]["recipe"]["args"] =
+        serde_json::json!([format!("sk-{}", "x".repeat(30))]);
+    let mut duplicate = original.clone();
+    duplicate["environment_profiles"]
+        .as_array_mut()
+        .unwrap()
+        .push(original["environment_profiles"][0].clone());
+    let mut duplicate_name = duplicate.clone();
+    duplicate_name["environment_profiles"][1]["id"] = serde_json::json!("another-id");
+    let mut duplicate_launch = original.clone();
+    duplicate_launch["launch_recipes"]
+        .as_array_mut()
+        .unwrap()
+        .push(original["launch_recipes"][0].clone());
+    let mut invalid = original.clone();
+    invalid["environment_profiles"][0]["profile"]["target"] = serde_json::json!({});
+    for (invalid, expected) in [
+        (secret, "疑似凭据"),
+        (duplicate, "duplicate environment backup id"),
+        (duplicate_name, "Duplicate expected-value collection name"),
+        (duplicate_launch, "duplicate launch backup id"),
+        (invalid, "Choose at least one expected value"),
+    ] {
+        let bytes = std::fs::read(store::db_path(&ctx)).unwrap();
+        let refused = execute(
+            &ctx,
+            &request(
+                "config:import",
+                &["--value", &invalid.to_string(), "--modules", "rules"],
+            ),
+        );
+        assert!(!refused.ok);
+        assert!(
+            format!("{:?}", refused.errors).contains(expected),
+            "{:?}",
+            refused.errors
+        );
+        assert_eq!(std::fs::read(store::db_path(&ctx)).unwrap(), bytes);
+    }
+    let conn = store::open_write(&ctx).unwrap();
+    conn.execute_batch("CREATE TRIGGER reject_tool_restore BEFORE INSERT ON operation_logs WHEN NEW.operation_type='config:import' BEGIN SELECT RAISE(ABORT, 'fixture audit failure'); END;").unwrap();
+    drop(conn);
+    let mut empty = original.clone();
+    empty["launch_recipes"] = serde_json::json!([]);
+    empty["environment_profiles"] = serde_json::json!([]);
+    let failed = execute(
+        &ctx,
+        &request(
+            "config:import",
+            &[
+                "--value",
+                &empty.to_string(),
+                "--modules",
+                "launch,environment",
+            ],
+        ),
+    );
+    assert!(!failed.ok);
+    let after = execute(&ctx, &request("config:export", &[])).data;
+    assert_eq!(after["launch_recipes"], before["launch_recipes"]);
+    assert_eq!(
+        after["environment_profiles"],
+        before["environment_profiles"]
+    );
+    assert_eq!(std::fs::read_dir(&ctx.home_dir).unwrap().count(), 0);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn restoring_skills_refuses_changes_to_assigned_sources_including_disabled_skills() {
     let (root, ctx) = temp_ctx("restore-active-sources");
