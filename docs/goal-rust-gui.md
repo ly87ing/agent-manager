@@ -46,6 +46,10 @@ boundary and add no background scheduling or automatic system remediation.
   idempotent reruns and refusal without writes. A native debug build using that
   version displayed `0.1.0-rc.3` in Settings. This is not a signed release or
   download/install/restart receipt.
+- Ubuntu CI for `f4e8a11` exposed an empty launch-probe receipt between creation
+  and writing. A controlled process handoff reproduced that intermediate state.
+  The test probe now publishes complete ready/done files by sibling rename,
+  retaining all existing launch and lifetime assertions.
 
 Remaining verification is explicit in [platform status](GUI-PLATFORM-STATUS.md):
 actual excessive-offset clock correction on an isolated system, physical

@@ -16,6 +16,14 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Publish complete file receipts before their existence signals readiness.**
+- Ubuntu CI for `f4e8a11` read an empty launch-probe receipt after `exists()` became
+  true. [`std::fs::write`](https://doc.rust-lang.org/std/fs/fn.write.html) creates
+  the file before writing; a controlled two-process reproduction read the same
+  empty intermediate state.
+- Write probe receipts to a sibling staging file and rename after completion.
+  Keep argument, environment, running-process and lifetime assertions unchanged.
+
 **Bind candidate runtime versions to the signed manifest version.**
 - Manifest tests preserved `rc` suffixes while the release configuration left the
   application at its base version. Tauri's default updater compares SemVer values,

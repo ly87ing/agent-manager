@@ -10,13 +10,14 @@ and [scope](EXTENSIONS-ONLY.md).
 
 ## Current acceptance boundary (2026-10-14)
 
-The functional corrections are `4b7e596`, `620850c` and `fd54f17`.
+The functional corrections are `4b7e596`, `620850c`, `fd54f17` and release-version
+binding `81f42f7`.
 The [current verification receipt](goal-rust-gui.md#2026-10-14-audit-corrections-and-current-verification)
 separates local execution, desktop interaction and remaining acceptance.
 
 | Area | Current evidence | Remaining boundary |
 | --- | --- | --- |
-| Extension and saved-tool source | Engine 424, Tauri 26, frontend 629 tests; type checking/build and isolated CLI readback passed | These are not consumer acceptance of an installed package |
+| Extension and saved-tool source | Engine 424, Tauri 26, frontend 629 and release-script 23 tests; type checking/build and isolated CLI readback passed | These are not consumer acceptance of an installed package |
 | macOS x86_64 desktop | Isolated native backup preview, restore, Launch/Environment readback and authorized time-settings read passed at 1000 × 650 | Current installed-package business workflows still need their own receipt |
 | Environment correction | Request/completion audit and failure gates tested; live `not_needed` returned with unchanged database bytes | Actual excessive-offset adjustment needs an isolated system where changing its clock is safe |
 | Skill adoption | Local-only CLI preview made no Git call or state write; explicit comparison and failure fallback passed | Real SSH repository access depends on the configured source and network |

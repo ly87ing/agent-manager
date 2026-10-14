@@ -94,13 +94,19 @@ fn real_cli_launches_an_independent_application_with_literal_args_and_scoped_tim
     let f = Fixture::new();
     std::fs::create_dir_all(&f.root).unwrap();
     let source = f.root.join("probe.rs");
-    std::fs::write(&source, r#"fn main() {
+    std::fs::write(&source, r#"fn publish(path: &str, content: &str) {
+        let target = std::path::Path::new(path);
+        let staging = target.with_extension("writing");
+        std::fs::write(&staging, content).unwrap();
+        std::fs::rename(staging, target).unwrap();
+    }
+    fn main() {
         let args: Vec<String> = std::env::args().skip(1).collect();
-        std::fs::write(&args[0], format!("{}\n{}\n{}\n{:?}", std::env::var("TZ").unwrap_or_default(), std::env::var("LANG").unwrap_or_default(), std::env::var("CUSTOM_ENV").unwrap_or_default(), &args[1..])).unwrap();
+        publish(&args[0], &format!("{}\n{}\n{}\n{:?}", std::env::var("TZ").unwrap_or_default(), std::env::var("LANG").unwrap_or_default(), std::env::var("CUSTOM_ENV").unwrap_or_default(), &args[1..]));
         let release = std::path::Path::new(&args[1]).with_extension("release");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         while !release.exists() && std::time::Instant::now() < deadline { std::thread::sleep(std::time::Duration::from_millis(20)); }
-        std::fs::write(&args[1], "survived").unwrap();
+        publish(&args[1], "survived");
     }"#).unwrap();
     let executable = if cfg!(target_os = "macos") {
         f.root.join("Probe.app/Contents/MacOS/probe")
@@ -155,7 +161,7 @@ fn real_cli_launches_an_independent_application_with_literal_args_and_scoped_tim
     let content = std::fs::read_to_string(&ready).unwrap();
     assert!(
         content.starts_with("Asia/Singapore\nen_US.UTF-8\nliteral $HOME\n"),
-        "{content}"
+        "{content:?}"
     );
     assert!(
         content.contains("O'Brien")
