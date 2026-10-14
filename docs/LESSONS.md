@@ -8,6 +8,15 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Open launch editors independently of the saved-list length.**
+- Keeping controls sticky inside a page-end editor still leaves the form below
+  the viewport when editing the first saved item. Use a modal with an internally
+  scrolling body and fixed action footer; verify the triggering viewport,
+  unchanged list position, cancellation and focus restoration at both widths.
+  Trigger a save failure while checking the footer: a bottom notification can
+  still cover fixed buttons, so editor notifications belong at the top.
+- Seen 1× (2026-10-13; compact launch-list and modal-editor correction).
+
 **Exercise launch failures from the triggering viewport.**
 - A page-end alert can exist in tests while remaining off screen after a launch
   click. Require an immediate viewport toast and persistent details beside the

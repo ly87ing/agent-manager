@@ -17,8 +17,13 @@ inspect or change shell files, or start a process.
 Launch is the first top-level navigation item and the default desktop opening
 page. It initially shows only saved entries, so common graphical applications can
 be started immediately and terminal commands can be copied without opening an
-editor or Settings. New configuration and Open configuration explicitly reveal
-the editor. The retained Settings entry routes to this same top-level page.
+editor or Settings. Each saved variant occupies one table row with its full
+target path, shortcut name, time zone and primary launch/copy action. Other
+actions live in the row menu. New configuration, clicking a target path, or the
+row's Edit configuration action opens a modal editor. Its form and generated
+commands scroll independently of the fixed action footer. Cancel or Escape
+discards the draft and returns focus to the original trigger without moving the
+list. The retained Settings entry routes to this same top-level page.
 
 Environment remediation can open a new unsaved draft with the selected
 collection's time zone and locale variables. The application target stays empty
@@ -68,9 +73,10 @@ never process arguments, rendered commands, or definitions.
 ## Constraints and failure behavior
 
 User-triggered action failures immediately show a dismissible viewport toast for
-ten seconds, with a translated action title and the original diagnostic. Details
-also remain beside the affected saved/preview entry, in the editor's sticky
-action area, or inside the delete confirmation. Read failures appear beside the
+ten seconds, with a translated action title and the original diagnostic. Editor
+notifications appear at the top so they cannot cover its action footer. Details
+also remain beside the affected saved/preview entry, in the editor's fixed
+action footer, or inside the delete confirmation. Read failures appear beside the
 saved-list controls. A new action, draft change or page exit clears stale action
 feedback. No error path scrolls the page or retries a launch automatically.
 

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { waitFor } from "@testing-library/react";
+import { waitFor, within } from "@testing-library/react";
 import LaunchPage from "../pages/LaunchPage";
 import type { LaunchEntry, LaunchRecipe, SavedLaunch } from "../lib/launch";
 import { makeEnvelope } from "./fixtures";
@@ -72,6 +72,11 @@ async function generate() {
   await screen.findAllByRole("button", { name: "复制运行命令" });
 }
 
+async function savedAction(name: string) {
+  await userEvent.click(await screen.findByRole("button", { name: "配置操作 example-sg" }));
+  await userEvent.click(await screen.findByRole("menuitem", { name }));
+}
+
 describe("launch configuration controls", () => {
   it.each(["saved", "preview"])("announces %s launch failures immediately and retains details beside the triggering entry", async (location) => {
     const reason = "The application is already running. Quit it normally before launching with a different time zone";
@@ -81,6 +86,8 @@ describe("launch configuration controls", () => {
     await userEvent.click(launch);
     await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent(reason));
     expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent("启动失败");
+    expect(document.querySelector('[data-sonner-toast][data-type="error"]')?.closest('[data-sonner-toaster]'))
+      .toHaveAttribute("data-y-position", location === "preview" ? "top" : "bottom");
     const detail = screen.getByRole("alert");
     expect(detail).toHaveTextContent(reason);
     expect(launch.closest('[data-launch-entry]')).toContainElement(detail);
@@ -94,14 +101,48 @@ describe("launch configuration controls", () => {
     expect(screen.queryByRole("textbox", { name: "程序路径或命令" })).toBeNull();
     await startNew();
     expect(screen.getByRole("textbox", { name: "程序路径或命令" })).toBeVisible();
+    const dialog = screen.getByRole("dialog", { name: "新建配置" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveTextContent("预览命令不会保存；保存到 Agent Manager 仅保存常用配置，不写入 Shell 配置或修改系统环境。");
     const actions = screen.getByTestId("launch-editor-actions");
-    expect(actions).toHaveClass("sticky", "top-0");
-    expect(actions).toHaveTextContent("预览命令不会保存；保存到 Agent Manager 仅保存常用配置，不写入 Shell 配置或修改系统环境。");
+    expect(dialog).toContainElement(actions);
+    expect(screen.getByTestId("launch-editor-body")).not.toContainElement(actions);
     expect(actions).toContainElement(screen.getByRole("button", { name: "取消" }));
     expect(actions).toContainElement(screen.getByRole("button", { name: "预览命令" }));
     expect(actions).toContainElement(screen.getByRole("button", { name: "保存到 Agent Manager" }));
     await userEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.queryByRole("textbox", { name: "程序路径或命令" })).toBeNull();
+    expect(screen.getByRole("button", { name: "新增配置" })).toHaveFocus();
+  });
+
+  it("opens a saved row in a modal and cancels draft changes without mutating the recipe", async () => {
+    const { calls } = setup({ items: [savedItem] });
+    const trigger = await screen.findByRole("button", { name: "编辑配置 example-sg" });
+    await userEvent.click(trigger);
+    expect(screen.getByRole("dialog", { name: "编辑配置" })).toContainElement(screen.getByRole("textbox", { name: "程序路径或命令" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "程序路径或命令" }), " changed");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(trigger).toHaveFocus();
+    await userEvent.click(trigger);
+    expect(screen.getByRole("textbox", { name: "程序路径或命令" })).toHaveValue(recipe.target);
+    expect(screen.getByRole("textbox", { name: "别名 1" })).toHaveValue("example-sg");
+    expect(calls.some((call) => ["launch:build", "launch:save", "launch:delete", "launch:run"].includes(call.command))).toBe(false);
+  });
+
+  it("keeps each saved variant in its own row with one primary action and the full definition in its menu", async () => {
+    setup({ items: [savedItem] });
+    const launch = await screen.findByTestId("run-saved-saved-1-example-la");
+    const row = launch.closest("tr")!;
+    expect(within(row).getByText(recipe.target)).toBeVisible();
+    expect(within(row).getByText("example-la")).toBeVisible();
+    expect(within(row).getByText("America/Los_Angeles")).toBeVisible();
+    expect(within(row).queryByRole("button", { name: "复制完整别名定义" })).toBeNull();
+    const write = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
+    await userEvent.click(within(row).getByRole("button", { name: "配置操作 example-la" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "复制完整别名定义" }));
+    expect(write).toHaveBeenCalledWith(savedItem.entries[1].definition);
   });
 
   it("allows native file selection and cancellation without saving, deleting or launching", async () => {
@@ -146,7 +187,7 @@ describe("launch configuration controls", () => {
 
   it("opens and updates a saved configuration with its revision", async () => {
     const { calls } = setup({ items: [savedItem] });
-    await userEvent.click(await screen.findByRole("button", { name: "打开配置" }));
+    await userEvent.click(await screen.findByRole("button", { name: "编辑配置 example-sg" }));
     expect(screen.getByRole("textbox", { name: "程序路径或命令" })).toHaveValue(recipe.target);
     await userEvent.clear(screen.getByRole("textbox", { name: "别名 1" }));
     await userEvent.type(screen.getByRole("textbox", { name: "别名 1" }), "example-sin");
@@ -160,8 +201,7 @@ describe("launch configuration controls", () => {
   it("deletes only after a separate confirmation", async () => {
     const { calls } = setup({ items: [savedItem] });
     await screen.findAllByText("example-sg");
-    await userEvent.click(screen.getByRole("button", { name: "配置操作" }));
-    await userEvent.click(await screen.findByTestId(`delete-launch-${savedItem.id}`));
+    await savedAction("删除配置");
     expect(await screen.findByRole("dialog")).toHaveTextContent("你自行添加的别名不受影响");
     expect(calls.some((call) => call.command === "launch:delete")).toBe(false);
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
@@ -173,9 +213,10 @@ describe("launch configuration controls", () => {
   it("treats the launch button as confirmation and does not save", async () => {
     const { calls } = setup();
     await generate();
+    const editor = screen.getByRole("dialog");
     await userEvent.click(screen.getAllByRole("button", { name: "启动一次" })[0]);
     expect(await screen.findByRole("status")).toHaveTextContent("已发送启动请求。请在应用中确认时间和环境。");
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getAllByRole("dialog")).toEqual([editor]);
     expect(calls.find((call) => call.command === "launch:run")?.args).toContain("--confirm");
     expect(calls.some((call) => call.command === "launch:save")).toBe(false);
   });
@@ -184,7 +225,7 @@ describe("launch configuration controls", () => {
     const { calls } = setup({ items: [savedItem] });
     const write = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
-    await userEvent.click((await screen.findAllByRole("button", { name: "复制运行命令" }))[0]);
+    await savedAction("复制运行命令");
     expect(write).toHaveBeenLastCalledWith(savedItem.entries[0].command);
     await userEvent.click(screen.getByTestId("run-saved-saved-1-example-sg"));
     expect(await screen.findByRole("status")).toHaveTextContent("已发送启动请求");
@@ -215,13 +256,14 @@ describe("launch configuration controls", () => {
 
   it("keeps a stale save error visible without retrying", async () => {
     const { calls } = setup({ items: [savedItem], saveError: "Modified externally" });
-    await userEvent.click(await screen.findByRole("button", { name: "打开配置" }));
+    await userEvent.click(await screen.findByRole("button", { name: "编辑配置 example-sg" }));
     await userEvent.type(screen.getByRole("textbox", { name: "程序路径或命令" }), " changed");
     await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
     const detail = await screen.findByRole("alert");
     expect(detail).toHaveTextContent("Modified externally");
     expect(screen.getByTestId("launch-editor-actions")).toContainElement(detail);
     await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent("保存配置失败"));
+    expect(document.querySelector('[data-sonner-toast][data-type="error"]')?.closest('[data-sonner-toaster]')).toHaveAttribute("data-y-position", "top");
     expect(calls.filter((call) => call.command === "launch:save")).toHaveLength(1);
   });
 
@@ -229,11 +271,11 @@ describe("launch configuration controls", () => {
     setup({ items: [savedItem] });
     const write = vi.fn().mockRejectedValueOnce(new Error("Clipboard unavailable")).mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
-    const copy = (await screen.findAllByRole("button", { name: "复制运行命令" }))[0];
-    await userEvent.click(copy);
+    const row = (await screen.findByTestId("run-saved-saved-1-example-sg")).closest("[data-launch-entry]");
+    await savedAction("复制运行命令");
     await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent("Clipboard unavailable"));
-    expect(copy.closest('[data-launch-entry]')).toContainElement(screen.getByRole("alert"));
-    await userEvent.click(copy);
+    expect(row).toContainElement(screen.getByRole("alert"));
+    await savedAction("复制运行命令");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).not.toBeInTheDocument());
     expect(write).toHaveBeenCalledTimes(2);

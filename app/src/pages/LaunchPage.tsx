@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
@@ -7,6 +8,7 @@ import { ActionMenu } from "../components/AccountGrid";
 import { Select } from "../components/Select";
 import { listTimeZones } from "../lib/launch";
 import { engineErrorMessage } from "../lib/engine";
+import { useDialogFocus } from "../lib/dialogFocus";
 import { t, useLanguage } from "../lib/i18n";
 import { launchRequest, type LaunchCatalog, type LaunchEntry, type LaunchRecipe, type SavedLaunch } from "../lib/launch";
 
@@ -37,6 +39,10 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   const generation = useRef(initialRecipe ? 1 : 0);
   const local = catalog?.platform === recipe.platform;
   const dirty = !selected || JSON.stringify(recipe) !== JSON.stringify(selected.recipe);
+  const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({
+    active: editing,
+    onEscape: () => { if (!busy) cancelEditing(); },
+  });
 
   useEffect(() => { if (initialRecipe) onInitialConsumed?.(); }, [initialRecipe, onInitialConsumed]);
   useEffect(() => () => { toast.dismiss("launch-error"); }, []);
@@ -66,7 +72,8 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   function fail(reason: unknown, title: string, location = "editor") {
     const message = engineErrorMessage(reason);
     setError({ message, location });
-    toast.error(title, { id: "launch-error", description: message, duration: 10000, closeButton: true });
+    toast.error(title, { id: "launch-error", description: message, duration: 10000, closeButton: true,
+      position: editing ? "top-right" : "bottom-right" });
   }
   function change(next: LaunchRecipe) {
     generation.current++;
@@ -99,7 +106,7 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   }
   async function copy(value: string, location: string) {
     clearFeedback();
-    try { await navigator.clipboard.writeText(value); toast.success(t("已复制到剪贴板")); }
+    try { await navigator.clipboard.writeText(value); toast.success(t("已复制到剪贴板"), { position: editing ? "top-right" : "bottom-right" }); }
     catch (err) { fail(err, t("复制命令失败"), location); }
   }
   function openSaved(item: SavedLaunch) {
@@ -158,58 +165,67 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
 
   return <div className="space-y-4" data-testid="launch-page">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div>
+      <div className="min-w-0 flex-1">
         <h1 className="text-lg font-semibold">{t("启动配置")}</h1>
         <p className="mt-1 text-xs text-muted-foreground">{t("保存图形应用或终端命令、环境变量、参数和别名。图形应用可直接启动，终端命令可复制后运行。")}</p>
       </div>
-      {!editing && <button type="button" className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`}
-        disabled={busy} onClick={startNew}>{t("新增配置")}</button>}
+      <button type="button" className={`${button} shrink-0 bg-primary text-primary-foreground hover:bg-primary/90`}
+        disabled={busy} onClick={startNew}>{t("新增配置")}</button>
     </div>
     <section className="space-y-2" aria-label={t("已保存配置")}>
       <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-medium">{t("已保存配置")}</h2>
         <button type="button" className={button} disabled={busy} onClick={() => setRevision((value) => value + 1)}>{t("重新读取")}</button></div>
       {readError && <p role="alert" className="break-words text-xs text-destructive">{readError}</p>}
       {saved?.length === 0 && <p className="text-xs text-muted-foreground">{t("尚未保存配置。点击“新增配置”创建常用应用或命令。")}</p>}
-      {saved?.map((item) => <div key={item.id} className="min-w-0 space-y-3 rounded-md border p-3">
-        <div className="flex min-w-0 items-start gap-2">
-          <div className="min-w-0 flex-1 space-y-1">
-            <p className="break-all text-xs font-medium">{item.recipe.target}</p>
-            <p className="text-xs text-muted-foreground">{item.recipe.kind === "app" ? t("图形应用") : t("命令行程序")} · {item.recipe.platform} · {item.recipe.shell}</p>
-          </div>
-          <button type="button" className={`${button} shrink-0`} disabled={busy} onClick={() => openSaved(item)}>{t("打开配置")}</button>
-          <ActionMenu label={t("配置操作")} items={[{ label: t("删除配置"), testId: `delete-launch-${item.id}`, danger: true, disabled: busy,
-            onSelect: () => { clearFeedback(); setConfirmation(item); } }]} />
-        </div>
-        <div className="space-y-2">
-          {item.entries.map((entry) => <div key={entry.name} data-launch-entry={`saved-${item.id}-${entry.name}`} className="flex min-w-0 flex-wrap items-center gap-2 rounded bg-muted/40 p-2">
-            <div className="min-w-0 flex-1">
-              <p className="break-all font-mono text-xs">{entry.name}</p>
-              <p className="break-all text-xs text-muted-foreground">{entry.timezone || t("系统默认时区")}</p>
-            </div>
-            <button type="button" className={button} disabled={busy} onClick={() => void copy(entry.command, `saved-${item.id}-${entry.name}`)}>{t("复制运行命令")}</button>
-            <button type="button" className={button} disabled={busy} onClick={() => void copy(entry.definition, `saved-${item.id}-${entry.name}`)}>{item.recipe.platform === "windows" ? t("复制完整函数定义") : t("复制完整别名定义")}</button>
-            {catalog?.platform === item.recipe.platform && item.recipe.kind === "app" && <button type="button" className={button} disabled={busy}
-              data-testid={`run-saved-${item.id}-${entry.name}`} onClick={() => void run(item.recipe, entry, `saved-${item.id}-${entry.name}`)}>{t("启动一次")}</button>}
-            {error?.location === `saved-${item.id}-${entry.name}` && <p role="alert" className="w-full whitespace-pre-wrap break-words text-xs text-destructive">{error.message}</p>}
-          </div>)}
-        </div>
-      </div>)}
+      {Boolean(saved?.length) && <div className="rounded-md border">
+        <table className="w-full table-fixed text-left text-xs">
+          <colgroup><col /><col className="w-28" /><col className="w-40" /><col className="w-44" /></colgroup>
+          <thead className="border-b bg-muted/40 text-muted-foreground"><tr>
+            <th className="px-3 py-2 font-medium">{t("程序")}</th>
+            <th className="px-3 py-2 font-medium">{t("别名")}</th>
+            <th className="px-3 py-2 font-medium">{t("时区")}</th>
+            <th className="px-3 py-2 font-medium">{t("操作")}</th>
+          </tr></thead>
+          {saved?.flatMap((item) => item.entries.map((entry) => {
+            const location = `saved-${item.id}-${entry.name}`;
+            const runnable = catalog?.platform === item.recipe.platform && item.recipe.kind === "app";
+            return <tbody key={location} data-launch-entry={location} className="border-b last:border-b-0">
+              <tr>
+                <td className="px-3 py-2">
+                  <button type="button" className="w-full break-all text-left font-medium hover:underline disabled:opacity-50"
+                    aria-label={t("编辑配置 {0}", entry.name)} disabled={busy} onClick={() => openSaved(item)}>{item.recipe.target}</button>
+                  {catalog && catalog.platform !== item.recipe.platform && <span className="ml-2 text-muted-foreground">{item.recipe.platform}</span>}
+                </td>
+                <td className="break-all px-3 py-2 font-mono">{entry.name}</td>
+                <td className="break-words px-3 py-2 text-muted-foreground">{entry.timezone || t("系统默认时区")}</td>
+                <td className="px-3 py-2"><div className="flex items-center gap-2">
+                  <button type="button" className={`${button} min-w-0 flex-1`} disabled={busy}
+                    data-testid={runnable ? `run-saved-${item.id}-${entry.name}` : undefined}
+                    onClick={() => void (runnable ? run(item.recipe, entry, location) : copy(entry.command, location))}>{runnable ? t("启动一次") : t("复制运行命令")}</button>
+                  <ActionMenu label={t("配置操作 {0}", entry.name)} items={[
+                    { label: t("编辑配置"), testId: `edit-launch-${item.id}-${entry.name}`, disabled: busy, onSelect: () => openSaved(item) },
+                    { label: t("复制运行命令"), testId: `copy-launch-${item.id}-${entry.name}`, disabled: busy, onSelect: () => void copy(entry.command, location) },
+                    { label: item.recipe.platform === "windows" ? t("复制完整函数定义") : t("复制完整别名定义"), testId: `copy-definition-${item.id}-${entry.name}`, disabled: busy,
+                      onSelect: () => void copy(entry.definition, location) },
+                    { label: t("删除配置"), testId: `delete-launch-${item.id}-${entry.name}`, danger: true, disabled: busy,
+                      onSelect: () => { clearFeedback(); setConfirmation(item); } },
+                  ]} />
+                </div></td>
+              </tr>
+              {error?.location === location && <tr><td colSpan={4} className="px-3 pb-2"><p role="alert" className="whitespace-pre-wrap break-words text-destructive">{error.message}</p></td></tr>}
+            </tbody>;
+          }))}
+        </table>
+      </div>}
     </section>
-    {editing && <section className="space-y-3 rounded-lg border bg-card p-4" aria-label={t("构建启动命令")}>
-      <div data-testid="launch-editor-actions" className="sticky top-0 z-10 -mx-4 -mt-4 flex flex-wrap items-start justify-between gap-2 rounded-t-lg border-b bg-card px-4 py-3">
-        <div>
-          <h2 className="text-sm font-medium">{selected ? t("编辑配置") : t("新建配置")}</h2>
-          <p className="mt-1 text-xs text-muted-foreground">{t("预览命令不会保存；保存到 Agent Manager 仅保存常用配置，不写入 Shell 配置或修改系统环境。")}</p>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {recipe.target.trim() && <span className="text-xs text-muted-foreground">{dirty ? t("未保存") : t("已保存")}</span>}
-          {selected && <button type="button" className={button} disabled={busy} onClick={startNew}>{t("新增配置")}</button>}
-          <button type="button" className={button} disabled={busy} onClick={cancelEditing}>{t("取消")}</button>
-          <button type="button" className={button} disabled={!recipe.target.trim()} onClick={() => void generate()}>{t("预览命令")}</button>
-          <button type="button" className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={!saved || !recipe.target.trim() || !dirty} onClick={() => void save()}>{t("保存到 Agent Manager")}</button>
-        </div>
-        {error?.location === "editor" && <p role="alert" className="max-h-24 w-full overflow-y-auto whitespace-pre-wrap break-words text-xs text-destructive">{error.message}</p>}
+    {editing && createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={selected ? t("编辑配置") : t("新建配置")}
+        tabIndex={-1} onKeyDown={onDialogKeyDown} className="flex max-h-[calc(100vh-2rem)] w-full max-w-3xl flex-col rounded-xl border bg-card shadow-xl">
+      <div className="shrink-0 border-b px-4 py-3">
+        <h2 className="text-sm font-medium">{selected ? t("编辑配置") : t("新建配置")}</h2>
+        <p className="mt-1 text-xs text-muted-foreground">{t("预览命令不会保存；保存到 Agent Manager 仅保存常用配置，不写入 Shell 配置或修改系统环境。")}</p>
       </div>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4" data-testid="launch-editor-body">
       <fieldset disabled={busy} className="min-w-0 space-y-3 disabled:opacity-70">
         <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-[1fr_1fr_2fr]">
           <div><p className="mb-1 text-xs">{t("目标系统")}</p><Select label={t("目标系统")} value={recipe.platform}
@@ -273,9 +289,8 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
           <button type="button" className={button} disabled={recipe.variants.length >= 32} onClick={() => change({ ...recipe, variants: [...recipe.variants, { name: "", timezone: "" }] })}>{t("添加别名")}</button>
         </div>
       </fieldset>
-    </section>}
-    {editing && recipe.platform === "windows" && <p className="text-xs text-muted-foreground">{t("Windows 的 TZ 取值由应用决定，部分应用需要 POSIX 格式，部分会忽略它。不会修改系统时区、PATH 或脚本执行设置。")}</p>}
-    {editing && built && <section className="space-y-3" aria-label={t("生成结果")}>
+    {recipe.platform === "windows" && <p className="text-xs text-muted-foreground">{t("Windows 的 TZ 取值由应用决定，部分应用需要 POSIX 格式，部分会忽略它。不会修改系统时区、PATH 或脚本执行设置。")}</p>}
+    {built && <section className="space-y-3" aria-label={t("生成结果")}>
       {built.entries.map((entry) => <div key={entry.name} data-launch-entry={`preview-${entry.name}`} className="min-w-0 space-y-2 rounded-lg border bg-card p-3">
         <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-mono text-sm">{entry.name}</span>
           <span className="text-xs text-muted-foreground">{entry.timezone || t("系统默认时区")}</span></div>
@@ -297,7 +312,20 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
       <p className="text-xs text-muted-foreground">{recipe.kind === "command" ? t("命令行程序请在终端运行复制的命令，保留正常交互。") : t("若应用已经运行，请先正常退出，再使用新命令启动。")}</p>
       {!local && <p className="text-xs text-muted-foreground">{t("其他系统的配置也可以保存和复制；仅本机系统可以启动。")}</p>}
     </section>}
-    {message && <p role="status" className="text-xs text-success">{message}</p>}
+      </div>
+      <div data-testid="launch-editor-actions" className="shrink-0 space-y-2 border-t px-4 py-3">
+        {error?.location === "editor" && <p role="alert" className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words text-xs text-destructive">{error.message}</p>}
+        {message && <p role="status" className="text-xs text-success">{message}</p>}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {recipe.target.trim() && <span className="mr-auto text-xs text-muted-foreground">{dirty ? t("未保存") : t("已保存")}</span>}
+          <button type="button" className={button} disabled={busy} onClick={cancelEditing}>{t("取消")}</button>
+          <button type="button" className={button} disabled={busy || !recipe.target.trim()} onClick={() => void generate()}>{t("预览命令")}</button>
+          <button type="button" className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={busy || !saved || !recipe.target.trim() || !dirty} onClick={() => void save()}>{t("保存到 Agent Manager")}</button>
+        </div>
+      </div>
+      </div>
+    </div>, document.body)}
+    {!editing && message && <p role="status" className="text-xs text-success">{message}</p>}
     {confirmation && <ConfirmModal title={t("删除配置")}
       description={t("仅删除 Agent Manager 中保存的配置。你自行添加的别名不受影响。")}
       risk="write-local" executing={busy}
