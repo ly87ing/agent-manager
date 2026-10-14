@@ -29,7 +29,7 @@ export function EmptyState({
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted">
         <Icon className="h-4 w-4 text-muted-foreground" aria-hidden />
       </div>
-      <div className="min-w-0 flex-1 basis-48">
+      <div className="min-w-0 flex-1 basis-48 break-words">
         <p className="text-sm font-medium text-foreground">{title}</p>
         {description ? <div className="mt-1 text-sm text-muted-foreground">{description}</div> : null}
       </div>

@@ -266,6 +266,7 @@ export function McpServerFormDialog({
   };
 
   const submit = () => {
+    setError(null);
     const payload = buildPayload();
     if (typeof payload === "string") {
       setError(payload);
@@ -505,10 +506,10 @@ export function McpServerFormDialog({
               </div>
             ))}
           </section>
-          {error && <p role="alert" className="text-xs text-destructive lg:col-span-2">{error}</p>}
         </div>
 
-        <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-5 flex items-center justify-end gap-2 sm:-bottom-6 sm:-mx-6 sm:-mb-6 sm:px-6">
+        <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 border-t bg-card px-5 py-3 mt-5 flex flex-wrap items-center justify-end gap-2 sm:-bottom-6 sm:-mx-6 sm:-mb-6 sm:px-6">
+          {error && <p role="alert" className="max-h-24 w-full overflow-y-auto break-words text-xs text-destructive">{error}</p>}
           <span className="mr-auto text-xs text-muted-foreground">
             {isNew ? t("直接写入所选助手的配置文件") : t("只改这一条，每个助手写入前都会核对是否已被外部修改")}
           </span>

@@ -5,15 +5,22 @@ import { BatchResultPanel } from "../components/BatchResultPanel";
 import { makeEnvelope } from "./fixtures";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 
-function Batch() {
+function Batch({ silent = false }: { silent?: boolean }) {
   const batch = useBatchApply();
   return <>
-    <button onClick={() => void batch.applyBatch({ actionLabel: "添加", rows: ["alpha", "beta"].map((name) => ({ elementId: `skill:source/${name}`, agent: "codex", action: "add", label: `${name} @ codex`, takeover: false })) })}>开始批量</button>
+    <button onClick={() => void batch.applyBatch({ actionLabel: "添加", silent, rows: ["alpha", "beta"].map((name) => ({ elementId: `skill:source/${name}`, agent: "codex", action: "add", label: `${name} @ codex`, takeover: false })) })}>开始批量</button>
     {batch.result && <BatchResultPanel batch={batch.result} busy={batch.executing} onRetry={() => void batch.retryFailed(batch.result!)} />}
   </>;
 }
 
 describe("批量结果与失败重试", () => {
+  it("retains per-row results when the caller owns the final notification", async () => {
+    const { calls } = renderWithEngine(<Batch silent />, { "skills:apply": makeEnvelope({}) });
+    await userEvent.click(screen.getByRole("button", { name: "开始批量" }));
+    await screen.findByText("成功 2 · 失败 0");
+    expect(document.querySelector('[data-sonner-toast]')).toBeNull();
+    expect(calls.filter((call) => call.command === "skills:apply")).toHaveLength(2);
+  });
   for (const allowed of [true, false]) it(`保留成功项，仅重新读取并检查失败目标（当前动作允许=${allowed}）`, async () => {
     let betaAttempts = 0;
     const { calls } = renderWithEngine(<Batch />, {
@@ -25,6 +32,7 @@ describe("批量结果与失败重试", () => {
     });
     await userEvent.click(screen.getByRole("button", { name: "开始批量" }));
     await screen.findByText("成功 1 · 失败 1");
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toHaveTextContent("成功 1，失败 1"));
     expect(screen.getByText(/beta @ codex：Fixture failure/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "重新检查并重试失败项" }));
     if (allowed) await screen.findByText("成功 2 · 失败 0");

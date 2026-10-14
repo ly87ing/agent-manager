@@ -3,6 +3,7 @@ import { ConfirmModal } from "./ConfirmModal";
 import { Select } from "./Select";
 import { type EnvironmentProfile, type EnvironmentProfileInput, type EnvironmentReport, type EnvironmentTarget } from "../lib/environment";
 import { engineErrorMessage } from "../lib/engine";
+import { notifyError } from "../lib/notifications";
 import { t } from "../lib/i18n";
 import { listTimeZones } from "../lib/launch";
 
@@ -51,10 +52,10 @@ export function EnvironmentProfileEditor({ initial, observation, onSave, onClose
     };
     setSaving(true); setError(null);
     try { await onSave({ name: name.trim(), target: expected, auto_sync: autoSync }); }
-    catch (err) { setError(engineErrorMessage(err)); setSaving(false); }
+    catch (err) { setError(engineErrorMessage(err)); notifyError(t("保存期望集合失败"), err); setSaving(false); }
   }
   return <ConfirmModal title={initial ? t("编辑期望集合") : t("新增期望集合")} description={t("保存的是比较基准，不会应用到系统。留空的项目只展示实际值。")}
-    risk="write-local" riskLabel={t("仅保存比较基准")} executing={saving} confirmLabel={t("保存期望集合")} confirmDisabled={!name.trim() || !validTolerance || (autoSync && (!server.trim() || !tolerance))}
+    risk="write-local" riskLabel={t("仅保存比较基准")} error={error} executing={saving} confirmLabel={t("保存期望集合")} confirmDisabled={!name.trim() || !validTolerance || (autoSync && (!server.trim() || !tolerance))}
     onConfirm={() => void save()} onClose={onClose}>
     <fieldset disabled={saving} className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
       <label className="min-w-0 text-xs sm:col-span-2">{t("集合名称")}<input className={`${input} mt-1`} value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
@@ -74,6 +75,5 @@ export function EnvironmentProfileEditor({ initial, observation, onSave, onClose
       <p className="text-xs text-muted-foreground sm:col-span-2">{t("自动校时需要填写时间服务器和偏差容限。仅在主动检查此集合时执行，macOS 可能请求管理员授权，随后自动复测。")}</p>
     </fieldset>
     {!validTolerance && <p role="alert" className="mt-2 text-xs text-destructive">{t("时间偏差请输入 1 到 60000 之间的整数。")}</p>}
-    {error && <p role="alert" className="mt-2 break-words text-xs text-destructive">{error}</p>}
   </ConfirmModal>;
 }

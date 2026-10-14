@@ -6,7 +6,7 @@ import { cn } from "../lib/utils";
 
 /** 渲染 envelope 的 errors / warnings（code + element + message）。 */
 export function ErrorPanel({
-  title = t("引擎返回诊断"),
+  title,
   errors,
   variant = "error",
   className,
@@ -24,7 +24,7 @@ export function ErrorPanel({
     <div
       role="alert"
       className={cn(
-        "rounded-lg border p-4",
+        "min-w-0 break-words rounded-lg border p-4",
         variant === "error" ? "border-destructive/30 bg-destructive/10" : "border-warning/30 bg-warning/10",
         className,
       )}
@@ -32,12 +32,12 @@ export function ErrorPanel({
       <div className="mb-2 flex items-center gap-2">
         <Icon className={cn("h-4 w-4", variant === "error" ? "text-destructive" : "text-warning")} aria-hidden />
         <h3 className={cn("text-sm font-semibold", variant === "error" ? "text-destructive" : "text-warning")}>
-          {title}（{errors.length}）
+          {title ?? (variant === "warning" ? t("注意事项") : t("执行失败"))}（{errors.length}）
         </h3>
       </div>
       <ul className="space-y-2">
         {errors.map((diag, index) => (
-          <li key={`${diag.code}-${index}`} className="text-sm text-foreground">
+          <li key={`${diag.code}-${index}`} className="min-w-0 break-words text-sm text-foreground">
             {(() => {
               const advice = adviseError(diag.message);
               return advice ? (

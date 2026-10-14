@@ -76,6 +76,10 @@ async function savedAction(name: string) {
   await userEvent.click(await screen.findByRole("button", { name: "配置操作 example-sg" }));
   await userEvent.click(await screen.findByRole("menuitem", { name }));
 }
+async function successToast() {
+  await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="success"]')).not.toBeNull());
+  return document.querySelector('[data-sonner-toast][data-type="success"]') as HTMLElement;
+}
 
 describe("launch configuration controls", () => {
   it.each(["saved", "preview"])("announces %s launch failures without adding a persistent error row", async (location) => {
@@ -183,7 +187,7 @@ describe("launch configuration controls", () => {
     await startNew();
     await chooseExample();
     await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("配置已保存到 Agent Manager。");
+    expect(await successToast()).toHaveTextContent("配置已保存到 Agent Manager。");
     const saved = calls.find((call) => call.command === "launch:save")!;
     expect(JSON.parse(saved.args[1])).toMatchObject({ target: recipe.target, variants: recipe.variants });
     expect(saved.args).not.toContain("--confirm");
@@ -212,7 +216,7 @@ describe("launch configuration controls", () => {
     expect(await screen.findByRole("dialog")).toHaveTextContent("你自行添加的别名不受影响");
     expect(calls.some((call) => call.command === "launch:delete")).toBe(false);
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
-    expect(await screen.findByRole("status")).toHaveTextContent("已删除保存的配置。");
+    expect(await successToast()).toHaveTextContent("已删除保存的配置。");
     expect(calls.find((call) => call.command === "launch:delete")?.args).toEqual(["--id", savedItem.id, "--base", savedItem.revision]);
     expect(calls.some((call) => ["launch:status", "launch:preview", "launch:apply"].includes(call.command))).toBe(false);
   });
@@ -222,7 +226,7 @@ describe("launch configuration controls", () => {
     await generate();
     const editor = screen.getByRole("dialog");
     await userEvent.click(screen.getAllByRole("button", { name: "启动" })[0]);
-    expect(await screen.findByRole("status")).toHaveTextContent("已发送启动请求。请在应用中确认时间和环境。");
+    expect(await successToast()).toHaveTextContent("已发送启动请求。请在应用中确认时间和环境。");
     expect(screen.getAllByRole("dialog")).toEqual([editor]);
     expect(calls.find((call) => call.command === "launch:run")?.args).toContain("--confirm");
     expect(calls.some((call) => call.command === "launch:save")).toBe(false);
@@ -235,7 +239,7 @@ describe("launch configuration controls", () => {
     await savedAction("复制命令");
     expect(write).toHaveBeenLastCalledWith(savedItem.entries[0].command);
     await userEvent.click(screen.getByTestId("run-saved-saved-1-example-sg"));
-    expect(await screen.findByRole("status")).toHaveTextContent("已发送启动请求");
+    expect(await successToast()).toHaveTextContent("已发送启动请求");
     expect(calls.find((call) => call.command === "launch:run")?.args).toEqual([
       "--spec", JSON.stringify(recipe), "--name", "example-sg", "--confirm",
     ]);
@@ -254,7 +258,7 @@ describe("launch configuration controls", () => {
     await userEvent.click(screen.getByRole("button", { name: "添加参数" }));
     await userEvent.type(screen.getByRole("textbox", { name: "启动参数 1" }), "--lang=en-US");
     await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
-    await screen.findByRole("status");
+    await successToast();
     const saved = calls.find((call) => call.command === "launch:save")!;
     expect(JSON.parse(saved.args[1])).toMatchObject({
       env: [{ name: "LANG", value: "en_US.UTF-8" }], args: ["--lang=en-US"],
@@ -304,7 +308,7 @@ describe("launch configuration controls", () => {
     expect(write).toHaveBeenCalledWith(expect.stringMatching(/^function example-sg \{/));
     expect(screen.queryByRole("button", { name: "启动" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
-    await screen.findByRole("status");
+    await successToast();
     expect(calls.some((call) => call.command === "launch:save")).toBe(true);
     expect(screen.getByText("命令行程序请在终端运行复制的命令，保留正常交互。")).toBeVisible();
   });

@@ -1,7 +1,7 @@
 import { t } from "../lib/i18n";
 import { useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { notifyError, toast } from "../lib/notifications";
 import { ArrowUpDown, Copy, Eye, Library, Pencil, Plus, Trash2 } from "lucide-react";
 import { AgentIcon } from "../components/AgentIcon";
 import { StateBadge } from "../components/StateBadge";
@@ -139,9 +139,7 @@ export default function RulesPage({
         command: "rules:apply",
         label: t("{0} 跟随{1}", nameOf(element), sourceRuleLabel(rule)),
         args: ["--only", element.id, "--base", base, "--source-rule", rule.id],
-      })
-      .then((envelope) => {
-        if (envelope?.ok) toast.info(t("已跟随{0}：来源出新版本时，这里会提示更新", sourceRuleLabel(rule)));
+        successDescription: t("已跟随{0}：来源出新版本时，这里会提示更新", sourceRuleLabel(rule)),
       });
   };
 
@@ -699,10 +697,9 @@ function ApplyContentDialog({
       command: "rules:apply",
       label: t("把{0}写入 {1}", source.label, nameOf(target)),
       args: ["--only", target.id, "--base", observed.base, ...source.args],
+      successDescription: (result) => (result.data as { steps?: { name?: string }[] }).steps?.some((step) => step.name?.startsWith("rules:backup")) ? t("原内容已另存为备份模板") : undefined,
     });
     if (envelope?.ok) {
-      const backedUp = (envelope.data as { steps?: { name?: string }[] }).steps?.some((step) => step.name?.startsWith("rules:backup"));
-      if (backedUp) toast.info(t("原内容已另存为备份模板"));
       onClose();
       return;
     }
@@ -781,7 +778,7 @@ function TemplateDialog({ template, onClose }: { template: RuleTemplate | null; 
         : ["--name", name, "--value", body];
       const envelope = await runEngine("rules:save-template", args, { runId: newRunId() });
       if (!envelope.ok) {
-        setError(envelope.errors[0]?.message ?? t("保存失败"));
+        const message = envelope.errors[0]?.message ?? t("保存失败"); setError(message); notifyError(t("保存失败"), message);
         return;
       }
       void queryClient.invalidateQueries({ queryKey: engineKeys.all });
@@ -789,6 +786,7 @@ function TemplateDialog({ template, onClose }: { template: RuleTemplate | null; 
       onClose();
     } catch (err) {
       setError(engineErrorMessage(err));
+      notifyError(t("保存失败"), err);
     } finally {
       setSaving(false);
     }

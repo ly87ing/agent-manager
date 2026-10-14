@@ -6,6 +6,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
 import { setLanguage } from "../lib/i18n";
+import { toast } from "sonner";
 
 // Existing interaction tests retain their Chinese coverage; language tests also exercise English.
 beforeEach(() => setLanguage("zh-CN"));
@@ -69,6 +70,7 @@ if (typeof window !== "undefined") {
 
 afterEach(async () => {
   cleanup();
+  toast.dismiss();
   // sonner 的通知订阅会排入零延时回调；卸载后等它执行，再允许 jsdom 销毁。
   await settleTimers(0);
   setEngineClient(null);

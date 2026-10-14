@@ -1,11 +1,12 @@
 import { t } from "../lib/i18n";
 import { CheckCircle2, XCircle } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { EngineElement } from "../lib/contract";
 import { engineErrorMessage, runEngine } from "../lib/engine";
 import type { McpAgentCell, McpObserved } from "../lib/observed";
 import { cn } from "../lib/utils";
 import { ConfirmModal } from "./ConfirmModal";
+import { notifyError, toast } from "../lib/notifications";
 
 /** `mcp:check` 的结果。 */
 export interface McpCheckResult {
@@ -63,6 +64,7 @@ export function McpCheckDialog({
   const [result, setResult] = useState<McpCheckResult | null>(initialResult ?? null);
   const [cwd, setCwd] = useState(initialResult?.cwd_source === "selected" ? initialResult.cwd ?? "" : "");
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => () => { toast.dismiss("mcp-check"); }, [agent]);
   const name = element.id.replace(/^mcp:/, "");
   const cell = (element.observed as McpObserved).agents?.[agent];
   const configuredCwd = typeof cell?.extra?.cwd === "string" ? cell.extra.cwd : undefined;
@@ -72,16 +74,19 @@ export function McpCheckDialog({
     setRunning(true);
     setResult(null);
     setError(null);
+    toast.dismiss("mcp-check");
     onResult(agent, null);
     try {
       const envelope = await runEngine<McpCheckResult>("mcp:check", ["--only", element.id, "--agent", agent, "--base", cell.base, ...(cwd.trim() && !configuredCwd ? ["--cwd", cwd.trim()] : [])]);
       if (envelope.ok) {
         setResult(envelope.data);
         onResult(agent, envelope.data);
+        toast[envelope.data.ok ? "success" : "error"](envelope.data.ok ? t("连接测试通过") : t("连接测试失败"), { id: "mcp-check", description: `${name}: ${envelope.data.message}` });
       }
-      else setError(envelope.errors[0]?.message ?? t("测试失败"));
+      else { const message = envelope.errors[0]?.message ?? t("测试失败"); setError(message); notifyError(t("连接测试失败"), message, { id: "mcp-check" }); }
     } catch (reason) {
       setError(engineErrorMessage(reason));
+      notifyError(t("连接测试失败"), reason, { id: "mcp-check" });
     } finally {
       setRunning(false);
     }
@@ -95,6 +100,7 @@ export function McpCheckDialog({
       confirmLabel={running ? t("测试中…") : result || error ? t("再测一次") : t("测试")}
       confirmDisabled={!agent}
       executing={running}
+      error={error}
       onConfirm={() => void run()}
       onClose={onClose}
     >
@@ -137,7 +143,6 @@ export function McpCheckDialog({
         </div>
       )}
       {agents.length === 0 && <p className="mt-3 text-xs text-warning">{t("没有助手里有能识别的这条配置，测不了。")}</p>}
-      {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
       {result && (
         <div data-testid="mcp-check-result" className={cn("mt-3 rounded-md border p-3 text-sm", result.ok ? "border-success/30 bg-success/5" : "border-destructive/30 bg-destructive/5")}>
           <div className="flex items-start gap-2">

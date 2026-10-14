@@ -8,7 +8,7 @@ import { Skeleton } from "./Skeleton";
 export function PageLoading({ text = t("正在读取数据…") }: { text?: string }) {
   return (
     <div role="status" className="space-y-4">
-      <span className="sr-only">{text}</span>
+      <span className="text-xs text-muted-foreground">{text}</span>
       <Skeleton className="h-7 w-48" />
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         {[0, 1, 2].map((index) => (

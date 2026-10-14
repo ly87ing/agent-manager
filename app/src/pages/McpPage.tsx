@@ -2,7 +2,7 @@ import { t } from "../lib/i18n";
 import type { CSSProperties } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Info, Plus, SearchX, Server } from "lucide-react";
-import { toast } from "sonner";
+import { notifyError, toast } from "../lib/notifications";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
@@ -23,6 +23,7 @@ import { engineErrorMessage, runEngine } from "../lib/engine";
 import { useEngineQuery } from "../lib/queries";
 import { useDirectApply } from "../lib/useDirectApply";
 import { useExecutions } from "../lib/execution";
+import { effectHint } from "../lib/effectHints";
 import { mcpFillArgs, mcpFillRows } from "../lib/mcpFill";
 import { mcpItems } from "../lib/inbox";
 import { AttentionOnlyToggle } from "../components/StateBadge";
@@ -38,11 +39,6 @@ function cellsOf(element: EngineElement): Record<string, McpAgentCell> {
 
 function nameOf(element: EngineElement): string {
   return element.id.replace(/^mcp:/, "");
-}
-
-/** 引擎附带的提示（转存了哪些变量、复制时哪些字段没带过去）：只含名字，不含取值。 */
-function showNotices(envelope: Envelope | null) {
-  for (const warning of envelope?.warnings ?? []) toast.info(warning.message);
 }
 
 /**
@@ -122,11 +118,8 @@ export default function McpPage({
   const targetOf = (agent: string) => targets.find((target) => target.agent === agent);
   const busy = directApply.executing;
 
-  const apply = (label: string, args: string[]) =>
-    directApply.apply({ command: "mcp:apply", label, args }).then((envelope) => {
-      showNotices(envelope);
-      return envelope;
-    });
+  const apply = (label: string, args: string[], silent = false) =>
+    directApply.apply({ command: "mcp:apply", label, args, silent });
 
   /**
    * 撤销：写入后条目的基准变了，先重读状态拿这个助手条目的新基准再做反向操作；
@@ -152,8 +145,7 @@ export default function McpPage({
         label,
         args: ["--only", element.id, "--agent", agent, "--action", action, "--base", cell.base],
         undo: undoWith(element, agent, t("撤销：{0}", label), action === "enable" ? "disable" : "enable"),
-      })
-      .then(showNotices);
+      });
   };
 
   /**
@@ -180,7 +172,7 @@ export default function McpPage({
         description: replaced.length ? t("这些取值没放进链接，改成了同名变量：{0}；对方要自己配。", replaced.join("、")) : undefined,
       });
     } catch (reason) {
-      toast.error(t("没能复制：{0}", reason instanceof Error ? reason.message : String(reason)));
+      notifyError(t("复制失败"), reason);
     }
   };
 
@@ -263,10 +255,11 @@ export default function McpPage({
     const mode = form;
     setForm(null);
     if (!mode) return;
+    const results: (Envelope | null)[] = [];
     if (mode.kind === "edit") {
       // 各助手逐个写入，各自核对是否被外部改过：一个失败不拦其他
       for (const target of mode.targets.filter((target) => payload.agents.includes(target.agent))) {
-        await apply(t("编辑 {0} @ {1}", payload.name, nameOfAgent(target.agent)), [
+        results.push(await apply(t("编辑 {0} @ {1}", payload.name, nameOfAgent(target.agent)), [
           "--only",
           `mcp:${payload.name}`,
           "--agent",
@@ -277,24 +270,30 @@ export default function McpPage({
           target.cell.base,
           "--spec",
           JSON.stringify(specFor(payload, target.agent)),
-        ]);
+        ], true));
       }
-      return;
+    } else {
+      // 各助手逐个写入，互不影响：一个失败不拦其他
+      for (const agent of payload.agents) {
+        results.push(await apply(t("新增 {0} @ {1}", payload.name, nameOfAgent(agent)), [
+          "--only",
+          `mcp:${payload.name}`,
+          "--agent",
+          agent,
+          "--action",
+          "add",
+          "--spec",
+          JSON.stringify(specFor(payload, agent)),
+        ], true));
+      }
+      savedExtraArgs.current = {};
     }
-    // 各助手逐个写入，互不影响：一个失败不拦其他
-    for (const agent of payload.agents) {
-      await apply(t("新增 {0} @ {1}", payload.name, nameOfAgent(agent)), [
-        "--only",
-        `mcp:${payload.name}`,
-        "--agent",
-        agent,
-        "--action",
-        "add",
-        "--spec",
-        JSON.stringify(specFor(payload, agent)),
-      ]);
-    }
-    savedExtraArgs.current = {};
+    const succeeded = results.filter((result) => result?.ok).length;
+    const failed = results.length - succeeded;
+    const details = results.flatMap((result) => result ? [...result.errors, ...result.warnings].map((item) => item.message) : [t("详见任务记录")]);
+    toast[failed === results.length ? "error" : failed || details.length ? "warning" : "success"](t("MCP 配置：成功 {0}，失败 {1}", succeeded, failed), {
+      description: [payload.name, succeeded ? effectHint("mcp:apply") : null, ...details].filter(Boolean).join("\n"),
+    });
   };
 
   const openAddFromSaved = (element: EngineElement) => {
@@ -336,7 +335,7 @@ export default function McpPage({
     } finally {
       setFilling(false);
     }
-    (failed ? toast.error : toast.success)(t("补齐完成：成功 {0}，失败 {1}{2}", ok, failed, failed ? t("，详见任务记录") : ""));
+    toast[failed ? ok ? "warning" : "error" : "success"](t("补齐完成：成功 {0}，失败 {1}{2}", ok, failed, failed ? t("，详见任务记录") : ""));
   };
 
   const brokenTargets = targets.filter((target) => target.error !== null);
@@ -478,8 +477,7 @@ export default function McpPage({
                       args: copyArgs(target, from, cell.base, to, null),
                       // 撤销复制 = 从这个助手删掉刚复制过来的那一条
                       undo: undoWith(target, to, t("撤销：{0}", label), "remove"),
-                    })
-                    .then(showNotices);
+                    });
                 }}
                 onAction={handleAction}
                 onEdit={(target) => openEdit(target)}

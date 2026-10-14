@@ -83,6 +83,9 @@ Form failures remain in the editor's fixed action footer, and delete failures
 remain inside the confirmation. Read failures appear beside the
 saved-list controls. A new action, draft change or page exit clears stale action
 feedback. No error path scrolls the page or retries a launch automatically.
+Save/delete/request success is transient too. All action feedback uses the shared
+[interface feedback](interface-feedback.md) policy; form errors retain their
+local correction context.
 
 - Unknown fields, duplicate alias or environment-variable names, non-portable
   environment-variable names, incompatible platform/shell combinations, and

@@ -2,7 +2,7 @@ import { t } from "./i18n";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateEngineQueries } from "./queries";
 import { useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "./notifications";
 import { useExecutions } from "./execution";
 import { runEngine, engineErrorMessage } from "./engine";
 import { newRunId } from "./runId";
@@ -33,7 +33,7 @@ export function useBatchApply() {
   const busyRef = useRef(false);
   const [executing, setExecuting] = useState(false);
 
-  const applyBatch = async (request: { command?: string; actionLabel: string; rows: BatchApplyRow[] }, retry?: BatchResult): Promise<BatchResult | null> => {
+  const applyBatch = async (request: { command?: string; actionLabel: string; rows: BatchApplyRow[]; silent?: boolean }, retry?: BatchResult): Promise<BatchResult | null> => {
     if (busyRef.current || request.rows.length === 0 || batches.some((batch) => batch.running)) return null;
     busyRef.current = true;
     setExecuting(true);
@@ -77,10 +77,9 @@ export function useBatchApply() {
     }
     const { succeeded, failed } = batchCounts(batch);
     const summary = t("批量{0}完成：成功 {1}，失败 {2}", request.actionLabel, succeeded, failed);
-    if (failed > 0) {
-      toast.error(t("{0}，失败详情见任务记录", summary));
-    } else {
-      toast.success(summary);
+    if (!request.silent) {
+      if (failed > 0) toast[succeeded ? "warning" : "error"](summary, { description: t("失败详情见任务记录") });
+      else toast.success(summary);
     }
     return batch;
   };

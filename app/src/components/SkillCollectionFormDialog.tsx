@@ -302,10 +302,10 @@ export function SkillCollectionFormDialog({
               </div>
             </div>
           </details>
-          {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t px-5 py-3">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t px-5 py-3">
+          {error && <p role="alert" className="max-h-24 w-full overflow-y-auto break-words text-xs text-destructive">{error}</p>}
           <span className="mr-auto text-xs text-muted-foreground">{t("保存不会把技能加到任何助手")}</span>
           <button type="button" onClick={onClose} className="rounded-md border px-4 py-1.5 text-sm text-muted-foreground hover:bg-accent">{t("取消")}</button>
           <button type="button" onClick={submit} data-testid="collection-form-submit" className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">{t("保存")}</button>

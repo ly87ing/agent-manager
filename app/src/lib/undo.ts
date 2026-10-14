@@ -1,5 +1,5 @@
 import { t } from "./i18n";
-import { toast } from "sonner";
+import { toast } from "./notifications";
 
 /**
  * 带「撤销」的成功提示。

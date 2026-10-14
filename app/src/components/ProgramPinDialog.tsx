@@ -1,6 +1,6 @@
 import { t } from "../lib/i18n";
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "../lib/notifications";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "./ConfirmModal";
 import { FileDiff } from "./FileDiff";
@@ -103,24 +103,26 @@ export function ProgramPinDialog({
   const confirm = async () => {
     setExecuting(true);
     let failed = 0;
+    let succeeded = 0;
     try {
       for (const target of targets.filter((item) => item.args)) {
         const label = unpin
           ? t("{0} @ {1} 取消固定、跟最新版本", target.server, nameOf(target.agent))
           : t("把 {0} @ {1} 固定到 {2}", target.server, nameOf(target.agent), shortVersion(version.trim()));
         const envelope = await execute({ command: "mcp:apply", label, args: argsOf(target), silent: true });
-        if (!envelope?.ok) failed += 1;
+        if (!envelope?.ok) failed += 1; else succeeded += 1;
       }
       // 记下这是用户的选择：跟最新的不再报「没固定版本」；重新固定就清掉
       if (!failed) {
         for (const server of new Set(targets.map((item) => item.server))) {
           const following = program.runners.some((runner) => runner.server === server && runner.follow_latest);
           if (unpin || following) {
-            await execute({ command: "programs:declare", label: `${server} ${unpin ? t("跟最新版本") : t("改为固定版本")}`, args: ["--server", server, "--follow-latest", unpin ? "true" : "false"], silent: true });
+            const declared = await execute({ command: "programs:declare", label: `${server} ${unpin ? t("跟最新版本") : t("改为固定版本")}`, args: ["--server", server, "--follow-latest", unpin ? "true" : "false"], silent: true });
+            if (!declared?.ok) failed += 1;
           }
         }
       }
-      (failed ? toast.error : toast.success)(
+      toast[failed ? succeeded ? "warning" : "error" : "success"](
         failed ? t("{0} 处没改成，详见操作记录", failed) : unpin ? t("已取消固定：以后启动时用最新版本，检查新版本照常提示") : t("已固定到 {0}", shortVersion(version.trim())),
       );
       if (!failed) onClose();

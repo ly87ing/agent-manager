@@ -113,6 +113,7 @@ describe("McpPage：实际条目为主", () => {
     await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
     const result = await within(dialog).findByTestId("mcp-check-result");
     expect(result).toHaveTextContent("连接成功，提供 2 个工具");
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toHaveTextContent("连接测试通过"));
     expect(result).toHaveTextContent("fs-mcp 1.0.0");
     expect(result).toHaveTextContent("read_file、write_file");
     expect(result).toHaveTextContent("阶段：完成");
@@ -204,6 +205,7 @@ describe("McpPage：实际条目为主", () => {
     await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
     const result = await within(dialog).findByTestId("mcp-check-result");
     expect(result).toHaveTextContent("阶段：初始化 · 退出码：1");
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent("连接测试失败"));
     expect(result).toHaveTextContent("auth failed for token ***");
     expect(within(result).getByRole("button", { name: "编辑服务配置" })).toBeInTheDocument();
     expect(calls.find((call) => call.command === "mcp:check")?.args).toEqual(["--only", "mcp:fs", "--agent", "claude-code", "--base", BASE_CLAUDE_FS, "--cwd", "/isolated/project"]);
@@ -276,6 +278,8 @@ describe("McpPage：实际条目为主", () => {
     expect(claude.args.slice(0, 8)).toEqual(["--only", "mcp:fs", "--agent", "claude-code", "--action", "edit", "--base", BASE_CLAUDE_FS]);
     expect(specOf(claude.args)).toEqual({ command: "npx", args: ["-y", "fs-mcp@3"], env: { TOKEN: "<literal>", MODE: "fast" } });
     expect(codex.args.slice(0, 8)).toEqual(["--only", "mcp:fs", "--agent", "codex", "--action", "edit", "--base", BASE_CODEX_FS]);
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toHaveTextContent("MCP 配置：成功 2，失败 0"));
+    expect(document.querySelectorAll('[data-sonner-toast]')).toHaveLength(1);
     expect(specOf(codex.args)).toEqual({
       command: "npx",
       args: ["-y", "fs-mcp@3"],
@@ -408,7 +412,7 @@ describe("McpPage：实际条目为主", () => {
 
   it("写入被拒（已在外部修改）：提示失败并重新读取状态；引擎的提示以通知显示", async () => {
     const errorSpy = vi.spyOn(toast, "error");
-    const infoSpy = vi.spyOn(toast, "info");
+    const infoSpy = vi.spyOn(toast, "warning");
     let attempt = 0;
     const { calls } = renderWithEngine(
       <McpPage />,
@@ -428,11 +432,12 @@ describe("McpPage：实际条目为主", () => {
       }),
     );
     await userEvent.click(await screen.findByTestId("action-disable-mcp:fs-claude-code"));
-    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("被别处改过"), { description: expect.stringContaining("怎么办") }));
+    await waitFor(() => expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("失败"), expect.objectContaining({ description: expect.stringContaining("被别处改过"), closeButton: true })));
     await waitFor(() => expect(calls.filter((call) => call.command === "mcp:status").length).toBeGreaterThan(1));
 
     await userEvent.click(screen.getByTestId("action-disable-mcp:fs-claude-code"));
-    await waitFor(() => expect(infoSpy).toHaveBeenCalledWith("条目含旧版标记，已清除标记"));
+    await waitFor(() => expect(infoSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ description: expect.stringContaining("条目含旧版标记，已清除标记"), duration: 10000, closeButton: true })));
+    expect(infoSpy).toHaveBeenCalledTimes(1);
     errorSpy.mockRestore();
     infoSpy.mockRestore();
   });

@@ -1,10 +1,9 @@
 import { t } from "./i18n";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { notifyError, toast } from "./notifications";
 import type { PolicyData } from "./contract";
 import { engineErrorMessage, runEngine } from "./engine";
 import { engineKeys } from "./queries";
-import { TOGGLE_COPY } from "./ui-copy";
 
 /** Save a skill source definition without installing or applying its resources. */
 export function useDefinitionOps() {
@@ -15,11 +14,11 @@ export function useDefinitionOps() {
     try {
       envelope = await runEngine<PolicyData>("policy:set", args);
     } catch (err) {
-      toast.error(`${TOGGLE_COPY.saveFailed}:${engineErrorMessage(err)}`);
+      notifyError(t("保存来源失败"), err);
       return false;
     }
     if (!envelope.ok) {
-      toast.error(`${TOGGLE_COPY.saveRejected}:${envelope.errors[0]?.message ?? t("未知错误")}`);
+      notifyError(t("保存来源失败"), envelope.errors[0]?.message ?? t("未知错误"));
       return false;
     }
     return true;
@@ -28,7 +27,7 @@ export function useDefinitionOps() {
   /** A legacy definition may need migration before its complete stored value can be edited. */
   const migrateAndLoadFullDefinition = async (name: string): Promise<Record<string, unknown> | null> => {
     const fail = (message: string) => {
-      toast.error(t("保存定义 {0} 失败:{1}", name, message));
+      notifyError(t("保存定义 {0} 失败", name), message);
       return null;
     };
     let migrated;
@@ -63,6 +62,7 @@ export function useDefinitionOps() {
     definition: Record<string, unknown>;
     isNew: boolean;
     complete?: boolean;
+    silent?: boolean;
   }): Promise<boolean> => {
     let definition = input.definition;
     if (!input.isNew && input.complete === false) {
@@ -77,7 +77,9 @@ export function useDefinitionOps() {
     ];
     if (!(await writePolicy(args))) return false;
     void queryClient.invalidateQueries({ queryKey: engineKeys.all });
-    toast.success(t("已保存定义 {0} 到本地资源库（不会自动安装或同步）", input.name));
+    if (!input.silent) toast.success(t("来源已保存：{0}", input.name), {
+      description: t("保存不会自动应用；需要时请在来源页更新或重新扫描。"),
+    });
     return true;
   };
 

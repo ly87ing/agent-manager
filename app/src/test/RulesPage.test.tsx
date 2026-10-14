@@ -220,7 +220,7 @@ describe("RulesPage：实际文件为准", () => {
   });
 
   it("应用模板：先展示现有内容到模板正文的差异，确认后发出 --template；现有内容另存为备份时给出提示", async () => {
-    const infoSpy = vi.spyOn(toast, "info");
+    const infoSpy = vi.spyOn(toast, "success");
     const routes = rulesRoutes();
     routes["rules:apply"] = makeEnvelope(
       { domain: "rules", steps: [
@@ -254,7 +254,7 @@ describe("RulesPage：实际文件为准", () => {
     const applyCall = calls.find((call) => call.command === "rules:apply")!;
     expect(applyCall.args).toEqual(["--only", "rules:codex_global", "--base", CODEX_BASE, "--template", "tpl-team"]);
     expect(applyCall.options?.runId).toMatch(/^gui-/);
-    await waitFor(() => expect(infoSpy).toHaveBeenCalledWith("原内容已另存为备份模板"));
+    await waitFor(() => expect(infoSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ description: expect.stringContaining("原内容已另存为备份模板") })));
   });
 
   it("内容与所选来源相同时不提供写入；切换到来源规则后发出 --source-rule", async () => {
@@ -308,7 +308,7 @@ describe("RulesPage：实际文件为准", () => {
   });
 
   it("文件与来源规则一致但还没跟随：点「跟随来源更新」只记下跟随，不弹差异", async () => {
-    const infoSpy = vi.spyOn(toast, "info");
+    const infoSpy = vi.spyOn(toast, "success");
     const { calls } = renderWithEngine(<RulesPage />, rulesRoutes());
 
     const card = await screen.findByTestId("rules-target-rules:codex_global");
@@ -319,7 +319,7 @@ describe("RulesPage：实际文件为准", () => {
     expect(calls.find((call) => call.command === "rules:apply")!.args).toEqual([
       "--only", "rules:codex_global", "--base", CODEX_BASE, "--source-rule", "agent-skills/core",
     ]);
-    await waitFor(() => expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining("已跟随规则「core」")));
+    await waitFor(() => expect(infoSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ description: expect.stringContaining("已跟随规则「core」") })));
   });
 
   it("来源出了新版且文件没改过：标出「来源有新版本」，一键打开差异后更新", async () => {

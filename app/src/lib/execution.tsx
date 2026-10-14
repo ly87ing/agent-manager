@@ -1,8 +1,7 @@
 import { t } from "./i18n";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-import { errorSummary } from "./errorAdvice";
+import { notifyError, toast } from "./notifications";
 import { effectHint } from "./effectHints";
 import { engineErrorMessage, runEngine } from "./engine";
 import type { Diagnostic, Envelope } from "./contract";
@@ -47,6 +46,7 @@ export interface ExecuteRequest {
   runId?: string;
   /** Batch callers refresh affected domains once in finally. */
   refresh?: boolean;
+  successDescription?: string | ((envelope: Envelope) => string | undefined);
 }
 
 export const COMPLETED_EXECUTION_LIMIT = 50;
@@ -106,9 +106,7 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
         const message = engineErrorMessage(err);
         patch({ status: "failed", finishedAt: Date.now(), bridgeError: textSummary(message) });
         if (!request.silent) {
-          const summary = errorSummary(message);
-          if (summary.description) toast.error(t("{0} 调用失败：{1}", request.label, summary.text), { description: summary.description });
-          else toast.error(t("{0} 调用失败：{1}", request.label, summary.text));
+          notifyError(t("{0}失败", request.label), message);
         }
         if (request.refresh !== false) void invalidateEngineQueries(queryClient, request.command);
         return null;
@@ -121,15 +119,15 @@ export function ExecutionProvider({ children }: { children: ReactNode }) {
         if (ok) {
           // 写入完成不等于助手已经用上：直接把生效条件说清楚
           const hint = effectHint(request.command, request.args ?? []);
+          const description = [typeof request.successDescription === "function" ? request.successDescription(envelope) : request.successDescription, hint,
+            ...envelope.warnings.map((warning) => warning.message)].filter(Boolean).join("\n");
           const undo = request.undo;
-          toast.success(t("{0}完成", request.label), {
-            ...(hint ? { description: hint } : {}),
+          toast[envelope.warnings.length ? "warning" : "success"](t("{0}完成", request.label), {
+            ...(description ? { description } : {}),
             ...(undo ? { action: { label: t("撤销"), onClick: () => undo() } } : {}),
           });
         } else {
-          const summary = errorSummary(firstError?.message ?? t("详见任务记录"));
-          if (summary.description) toast.error(t("{0} 失败：{1}", request.label, summary.text), { description: summary.description });
-          else toast.error(t("{0} 失败：{1}", request.label, summary.text));
+          notifyError(t("{0}失败", request.label), firstError?.message ?? t("详见任务记录"));
         }
       }
       if (request.refresh !== false) void invalidateEngineQueries(queryClient, request.command);

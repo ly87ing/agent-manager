@@ -21,6 +21,7 @@ export function ConfirmModal({
   confirmDisabled = false,
   executing,
   resultErrors,
+  error,
   children,
   secondaryLabel,
   onSecondary,
@@ -36,6 +37,7 @@ export function ConfirmModal({
   confirmDisabled?: boolean;
   executing: boolean;
   resultErrors?: Diagnostic[] | null;
+  error?: string | null;
   children?: ReactNode;
   secondaryLabel?: string;
   onSecondary?: () => void;
@@ -61,6 +63,7 @@ export function ConfirmModal({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        aria-busy={executing}
         aria-label={title}
         tabIndex={-1}
         onKeyDown={onDialogKeyDown}
@@ -93,10 +96,13 @@ export function ConfirmModal({
             />
           )}
 
-          {resultErrors && resultErrors.length > 0 && <div className="mt-3"><ErrorPanel title={t("执行失败")} errors={resultErrors} /></div>}
         </div>
 
-        <div className="mt-4 flex shrink-0 flex-wrap justify-end gap-2">
+        <div data-testid="confirm-modal-feedback" className="mt-4 max-h-32 shrink-0 overflow-y-auto break-words">
+          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          {resultErrors && resultErrors.length > 0 && <ErrorPanel title={t("执行失败")} errors={resultErrors} />}
+        </div>
+        <div className="mt-3 flex shrink-0 flex-wrap justify-end gap-2">
           {secondaryLabel && onSecondary && (
             <button type="button" data-testid="confirm-modal-secondary" onClick={onSecondary} disabled={executing} className="rounded-md border border-primary/30 px-4 py-2 text-sm text-primary hover:bg-primary/10 disabled:opacity-40">
               {secondaryLabel}
@@ -120,7 +126,7 @@ export function ConfirmModal({
             )}
           >
             {executing && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
-            {confirmLabel}
+            {executing && !confirmLabel.endsWith("…") ? t("正在处理…") : confirmLabel}
           </button>
         </div>
       </div>

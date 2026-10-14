@@ -55,7 +55,7 @@ describe("application language", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save settings" }));
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
     expect(document.documentElement.lang).toBe("zh-CN");
-    expect(success).toHaveBeenLastCalledWith("设置已保存");
+    expect(success).toHaveBeenLastCalledWith("设置已保存", expect.objectContaining({ closeButton: true, duration: 4000 }));
     expect(save).toHaveBeenCalledExactlyOnceWith({ language: "zh-CN", logRetentionDays: 30 });
     expect(within(screen.getByRole("navigation")).getByRole("button", { name: "技能" })).toBeInTheDocument();
     first.unmount();
@@ -67,7 +67,7 @@ describe("application language", () => {
     await chooseOption(language, "en");
     await userEvent.click(screen.getByRole("button", { name: "保存设置" }));
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    expect(success).toHaveBeenLastCalledWith("Settings saved");
+    expect(success).toHaveBeenLastCalledWith("Settings saved", expect.objectContaining({ closeButton: true, duration: 4000 }));
     expect(saved.preferences.language).toBe("en");
   });
 

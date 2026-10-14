@@ -37,3 +37,24 @@ read-only disclosures should not look like a second primary card.
 13. Interface text defaults to English and supports Simplified Chinese through Settings → Language. Translate application-owned labels, instructions and messages; preserve user content, resource names, paths and original engine diagnostics. Both languages avoid engineering jargon; the banned words are listed in the guard test.
 
 Rules 9–12 were adopted on 2026-10-09 from a comparison with Magpie's GUI standards; rules 1–8 collect layout problems reported repeatedly during September 2026.
+
+## Feedback
+
+- Route action notifications through `lib/notifications.ts`. Success and information
+  last four seconds; errors, warnings and undo actions last ten seconds. Detailed
+  check summaries may explicitly keep ten seconds. Every notification can close.
+- Keep the action title short. Put the cause, next step, effect conditions and
+  original diagnostic in the description. Long text wraps and scrolls within its
+  own bounded area. At most two notifications expand in the viewport.
+- Page notifications appear at the bottom right. Dialog notifications appear at
+  the top right so the confirm/cancel footer stays available.
+- One user operation has one completion summary. Multi-step callers suppress
+  intermediate success messages while keeping execution records and failure
+  details. Partial completion and unknown evidence use warnings; they never
+  announce complete success.
+- Loading messages are visible. Initial read failures stay beside Retry; they do
+  not create unsolicited notifications. Empty states explain the next useful action.
+- Form errors stay beside the relevant field or in the fixed action footer.
+  Submission failures also announce their outcome immediately when needed.
+  Launch/copy errors expire without leaving persistent error rows. Check reports
+  and operation records retain their complete results.

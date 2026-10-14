@@ -1,6 +1,6 @@
 import { t } from "../lib/i18n";
 import { Copy } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "../lib/notifications";
 
 function Example({ label, text }: { label: string; text: string }) {
   const copy = async () => {

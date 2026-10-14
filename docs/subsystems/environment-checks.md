@@ -62,6 +62,10 @@ with untargeted unknown observations disclosed separately. Inventory-only checks
 never claim an all-clear. Failed requests and unconfirmed time correction do not
 show success. Starting a new check, selecting a collection or leaving the page
 clears the previous notification. Opening the page does not announce completion.
+Collection save/delete, settings opening and inspection outcomes use the shared
+[interface feedback](interface-feedback.md) policy. Transient action messages do
+not add permanent status rows; comparison and correction evidence remain in the
+report.
 
 Add/Edit opens the criteria editor; Use current values as targets explicitly
 prefills its fields without asserting those values are correct. Save persists

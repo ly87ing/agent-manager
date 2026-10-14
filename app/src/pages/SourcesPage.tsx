@@ -1,7 +1,7 @@
 import { t } from "../lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { Link2, Plus, RefreshCw } from "lucide-react";
-import { toast } from "sonner";
+import { notifyError, toast } from "../lib/notifications";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ActionMenu } from "../components/AccountGrid";
@@ -187,7 +187,7 @@ export default function SourcesPage({
         silent: true,
       });
       if (!envelope?.ok) {
-        toast.error(t("没有切换：{0}", envelope?.errors[0]?.message ?? t("详见任务记录")));
+        notifyError(t("来源切换失败"), envelope?.errors[0]?.message ?? t("详见任务记录"));
         return false;
       }
       await runEngine("system:refresh-upstream", ["--only", collection.id]).catch(() => undefined);
@@ -195,16 +195,19 @@ export default function SourcesPage({
       const rows = fresh.ok
         ? versionUpdateRows(fresh.data.elements ?? []).filter((row) => row.elementId.startsWith(`${collection.id}/`))
         : [];
-      const result = await batchApply.applyBatch({ actionLabel: t("更新"), rows });
+      const result = await batchApply.applyBatch({ actionLabel: t("更新"), rows, silent: true });
       const failed = result?.rows.filter((item) => item.status === "failed").length ?? 0;
       if (!fresh.ok || failed || (rows.length > 0 && !result)) {
-        toast.error(t("{0} 来源已{1}，但技能应用未全部完成，请查看批量结果", name, ref ? t("切换") : t("更新")));
+        toast.warning(t("{0} 来源已{1}，但技能应用未全部完成，请查看批量结果", name, ref ? t("切换") : t("更新")));
         return false;
       }
       toast.success(t("{0} 已{1}到 {2}", name, ref ? t("切换") : t("更新"), label), {
         description: rows.length ? t("{0} 处技能换到了这个版本", rows.length) : t("各助手在用的技能内容没有变化"),
       });
       return true;
+    } catch (error) {
+      notifyError(t("来源切换失败"), error);
+      return false;
     } finally {
       setSwitching(false);
       await queryClient.invalidateQueries({ queryKey: engineKeys.all });
@@ -227,7 +230,7 @@ export default function SourcesPage({
       await navigator.clipboard.writeText(link);
       toast.success(t("已复制 {0} 的分享链接", name));
     } catch (reason) {
-      toast.error(t("没能复制：{0}", reason instanceof Error ? reason.message : String(reason)));
+      notifyError(t("复制失败"), reason);
     }
   };
 
@@ -238,27 +241,29 @@ export default function SourcesPage({
   const enableRecommended = async (item: SkillRecommendation) => {
     setEnablingBusy(true);
     try {
-      if (!(await definitionOps.saveDefinition({ name: item.name, definition: item.definition, isNew: true }))) return;
+      if (!(await definitionOps.saveDefinition({ name: item.name, definition: item.definition, isNew: true, silent: true }))) return;
       const fetched = await execute({ command: "skills:apply", label: t("下载 {0}", item.name), args: ["--only", `skill:${item.name}`, "--action", "update"], silent: true });
       if (!fetched?.ok) {
-        toast.error(t("{0} 已添加，但下载失败：{1}。请在来源列表选择「更新」重试。", item.name, fetched?.errors[0]?.message ?? t("详见任务记录")));
+        toast.warning(t("{0} 已添加，但下载失败：{1}。请在来源列表选择「更新」重试。", item.name, fetched?.errors[0]?.message ?? t("详见任务记录")));
         return;
       }
       const fresh = await runEngine<StatusData>("skills:status", []);
       if (!fresh.ok) {
-        toast.error(t("{0} 来源已添加，但读取技能状态失败，请刷新后应用", item.name));
+        toast.warning(t("{0} 来源已添加，但读取技能状态失败，请刷新后应用", item.name));
         return;
       }
       const rows = (fresh.ok ? fresh.data.elements ?? [] : [])
         .filter((element) => (element.spec as SkillSpec).collection === item.name)
         .flatMap(addToAllRows);
-      const result = await batchApply.applyBatch({ actionLabel: t("添加"), rows });
+      const result = await batchApply.applyBatch({ actionLabel: t("添加"), rows, silent: true });
       const failed = result?.rows.filter((item) => item.status === "failed").length ?? 0;
       if (failed || (rows.length > 0 && !result)) {
-        toast.error(t("{0} 来源已添加，但技能应用未全部完成，请查看批量结果", item.name));
+        toast.warning(t("{0} 来源已添加，但技能应用未全部完成，请查看批量结果", item.name));
       } else {
         toast.info(t("{0} 已添加并启用。推荐规则需在规则页预览后单独应用。", item.name));
       }
+    } catch (error) {
+      notifyError(t("来源操作失败"), error);
     } finally {
       setEnablingBusy(false);
       setEnabling(null);
@@ -271,7 +276,7 @@ export default function SourcesPage({
     const envelope = await execute({ command: "skills:adopt", label, args, silent: true, runId });
     await queryClient.invalidateQueries({ queryKey: engineKeys.all });
     if (!envelope?.ok) {
-      toast.error(t("没有完成：{0}", envelope?.errors[0]?.message ?? t("详见任务记录")));
+      notifyError(t("来源操作失败"), envelope?.errors[0]?.message ?? t("详见任务记录"));
       return false;
     }
     const data = envelope.data as { backup?: string; removed?: string[]; linked?: string[] };
@@ -517,9 +522,7 @@ export default function SourcesPage({
             setAdding(null);
             setEditing(null);
             setDraft(null);
-            void definitionOps.saveDefinition({ name, definition, isNew, complete }).then((ok) => {
-              if (ok && isNew) toast.info(t("来源 {0} 已添加，点「更新」取回内容。", name));
-            });
+            void definitionOps.saveDefinition({ name, definition, isNew, complete });
           }}
         />
       )}

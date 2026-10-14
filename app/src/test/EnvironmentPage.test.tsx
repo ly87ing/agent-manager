@@ -202,7 +202,7 @@ describe("Environment checks", () => {
     await userEvent.type(screen.getByRole("textbox", { name: "集合名称" }), "Preserve this");
     await userEvent.type(screen.getByRole("textbox", { name: "目标地区" }), "US");
     await userEvent.click(screen.getByRole("button", { name: "保存期望集合" }));
-    await screen.findByText("Collection changed; reload before editing.");
+    expect(await within(screen.getByRole("dialog")).findByRole("alert")).toHaveTextContent("Collection changed; reload before editing.");
     expect(screen.getByRole("textbox", { name: "集合名称" })).toHaveValue("Preserve this");
     expect(screen.getByRole("textbox", { name: "目标地区" })).toHaveValue("US");
     expect(screen.getByRole("button", { name: "保存期望集合" })).toBeEnabled();
@@ -311,7 +311,7 @@ describe("Environment checks", () => {
     expect(calls.some((call) => call.command === "environment:check-time-settings")).toBe(false);
     await userEvent.click(within(dialog).getByRole("button", { name: "继续只读检查" }));
     const messages = { read: "已读取自动设置时间开关并更新检查结果，未修改系统设置。", cancelled: "已取消授权，保留原检查结果。", failed: "未能读取自动设置时间开关，保留原检查结果。可在系统设置中确认。" };
-    await within(screen.getByTestId("environment-page")).findByText(messages[status]);
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast]')).toHaveTextContent(messages[status]));
     await waitFor(() => expect(document.querySelector(`[data-sonner-toast][data-type="${status === "read" ? "success" : status === "cancelled" ? "info" : "error"}"]`)).not.toBeNull());
     expect(calls[calls.length - 1]).toMatchObject({ command: "environment:check-time-settings", args: ["--spec", expect.any(String), "--confirm"] });
     expect(JSON.parse(calls[calls.length - 1].args[1])).toMatchObject(target);

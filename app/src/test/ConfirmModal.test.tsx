@@ -24,6 +24,16 @@ function Harness() {
 }
 
 describe("ConfirmModal 焦点管理", () => {
+  it("keeps submit errors and busy feedback beside the fixed actions", () => {
+    const view = render(<ConfirmModal title="Save" description="Review" risk="write-local" executing={false}
+      error="Save failed" onConfirm={vi.fn()} onClose={vi.fn()}><div>Long editable content</div></ConfirmModal>);
+    const error = screen.getByRole("alert");
+    expect(screen.getByTestId("confirm-modal-feedback")).toContainElement(error);
+    expect(screen.getByTestId("confirm-modal-body")).not.toContainElement(error);
+    view.rerender(<ConfirmModal title="Save" description="Review" risk="write-local" executing onConfirm={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByTestId("confirm-modal-confirm")).toHaveTextContent("正在处理…");
+    expect(screen.getByTestId("confirm-modal-confirm")).toBeDisabled();
+  });
   it("打开后接管焦点，Tab 不逃到背景，关闭后回到触发按钮", async () => {
     render(<Harness />);
     const trigger = screen.getByRole("button", { name: "删除配置" });

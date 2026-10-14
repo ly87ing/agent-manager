@@ -213,7 +213,7 @@ describe("执行中心", () => {
 
     expect(calls.some((c) => c.command === "runs:clear")).toBe(true);
     expect(screen.queryByText("mcp:example-search")).toBeNull();
-    expect(await screen.findByRole("status")).toHaveTextContent("任务记录已清空");
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toHaveTextContent("任务记录已清空"));
   });
 
   it("清空任务记录失败时展示错误反馈横幅", async () => {

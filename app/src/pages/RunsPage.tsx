@@ -2,7 +2,7 @@ import { getLanguage, t } from "../lib/i18n";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { CheckCircle2, History, Loader2, SearchX, Trash2, Undo2, XCircle } from "lucide-react";
-import { toast } from "sonner";
+import { notifyError, toast } from "../lib/notifications";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
@@ -199,12 +199,11 @@ export default function RunsPage() {
       setShowClearConfirm(false);
       const count = res.data?.deleted ?? 0;
       const msg = t("任务记录已清空（共清理 {0} 条记录）", count);
-      setClearStatus(msg);
       toast.success(msg);
     } catch (err) {
       const msg = t("清空任务记录失败：{0}", engineErrorMessage(err));
       setClearStatus(msg);
-      toast.error(msg);
+      notifyError(t("清空任务记录失败"), err);
     } finally {
       setIsClearing(false);
     }
@@ -242,8 +241,8 @@ export default function RunsPage() {
 
       {clearStatus && (
         <p
-          role={clearStatus.startsWith(t("清空任务记录失败")) ? "alert" : "status"}
-          className={cn("text-xs", clearStatus.startsWith(t("清空任务记录失败")) ? "text-destructive" : "text-success")}
+          role="alert"
+          className="text-xs text-destructive"
         >
           {clearStatus}
         </p>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { toast } from "sonner";
+import { notifyError, toast } from "../lib/notifications";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { ActionMenu } from "../components/AccountGrid";
 import { Select } from "../components/Select";
@@ -32,7 +32,6 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   const [editing, setEditing] = useState(Boolean(initialRecipe));
   const [readError, setReadError] = useState<string | null>(null);
   const [error, setError] = useState<{ message: string; location: "editor" | "delete" } | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
   const [confirmation, setConfirmation] = useState<SavedLaunch | null>(null);
@@ -45,7 +44,7 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   });
 
   useEffect(() => { if (initialRecipe) onInitialConsumed?.(); }, [initialRecipe, onInitialConsumed]);
-  useEffect(() => () => { toast.dismiss("launch-error"); }, []);
+  useEffect(() => () => { toast.dismiss("launch-feedback"); }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,13 +66,12 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   }, [revision]);
 
   function clearFeedback() {
-    setError(null); setMessage(null); toast.dismiss("launch-error");
+    setError(null); toast.dismiss("launch-feedback");
   }
   function fail(reason: unknown, title: string, location: "editor" | "delete" | null = "editor") {
     const message = engineErrorMessage(reason);
     setError(location ? { message, location } : null);
-    toast.error(title, { id: "launch-error", description: message, duration: 10000, closeButton: true,
-      position: editing ? "top-right" : "bottom-right" });
+    notifyError(title, message, { id: "launch-feedback" });
   }
   function change(next: LaunchRecipe) {
     generation.current++;
@@ -106,7 +104,7 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   }
   async function copy(value: string) {
     clearFeedback();
-    try { await navigator.clipboard.writeText(value); toast.success(t("已复制到剪贴板"), { position: editing ? "top-right" : "bottom-right" }); }
+    try { await navigator.clipboard.writeText(value); toast.success(t("已复制到剪贴板"), { id: "launch-feedback" }); }
     catch (err) { fail(err, t("复制命令失败"), null); }
   }
   function openSaved(item: SavedLaunch) {
@@ -134,7 +132,7 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
         ...(selected ? ["--id", selected.id, "--base", selected.revision] : [])]);
       setSelected(data.item); setBuilt({ spec, entries: data.item.entries });
       setSaved((items) => [...(items ?? []).filter((item) => item.id !== data.item.id), data.item]);
-      setMessage(t("配置已保存到 Agent Manager。"));
+      toast.success(t("配置已保存到 Agent Manager。"), { id: "launch-feedback" });
     } catch (err) { fail(err, t("保存配置失败")); }
     finally { setBusy(false); }
   }
@@ -142,7 +140,7 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
     setBusy(true); clearFeedback();
     try {
       await launchRequest("run", ["--spec", JSON.stringify(spec), "--name", entry.name, "--confirm"]);
-      setMessage(t("已发送启动请求。请在应用中确认时间和环境。"));
+      toast.success(t("已发送启动请求。请在应用中确认时间和环境。"), { id: "launch-feedback" });
     } catch (err) { fail(err, t("启动失败"), null); }
     finally { setBusy(false); }
   }
@@ -157,7 +155,7 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
         setEditing(false);
         setBuilt(null);
       }
-      setMessage(t("已删除保存的配置。"));
+      toast.success(t("已删除保存的配置。"), { id: "launch-feedback" });
       setConfirmation(null);
     } catch (err) { fail(err, t("删除配置失败"), "delete"); }
     finally { setBusy(false); }
@@ -312,7 +310,6 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
       </div>
       <div data-testid="launch-editor-actions" className="shrink-0 space-y-2 border-t px-4 py-3">
         {error?.location === "editor" && <p role="alert" className="max-h-24 overflow-y-auto whitespace-pre-wrap break-words text-xs text-destructive">{error.message}</p>}
-        {message && <p role="status" className="text-xs text-success">{message}</p>}
         <div className="flex flex-wrap items-center justify-end gap-2">
           {recipe.target.trim() && <span className="mr-auto text-xs text-muted-foreground">{dirty ? t("未保存") : t("已保存")}</span>}
           <button type="button" className={button} disabled={busy} onClick={cancelEditing}>{t("取消")}</button>
@@ -322,7 +319,6 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
       </div>
       </div>
     </div>, document.body)}
-    {!editing && message && <p role="status" className="text-xs text-success">{message}</p>}
     {confirmation && <ConfirmModal title={t("删除配置")}
       description={t("仅删除 Agent Manager 中保存的配置。你自行添加的别名不受影响。")}
       risk="write-local" executing={busy}

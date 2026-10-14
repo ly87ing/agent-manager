@@ -2,11 +2,10 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { Toaster } from "sonner";
 import { setEngineClient, type EngineRunOptions } from "../lib/engine";
 import { ExecutionProvider } from "../lib/execution";
 import { createQueryClient } from "../lib/queries";
-import { ThemeProvider } from "../lib/theme";
+import { ThemedToaster, ThemeProvider } from "../lib/theme";
 import type { Envelope } from "../lib/contract";
 import { createFakeEngineClient } from "./engine-test-client";
 import { makeEnvelope } from "./fixtures";
@@ -54,7 +53,7 @@ export function renderWithEngine(
       <ExecutionProvider>
         <ThemeProvider>
           {ui}
-          <Toaster richColors position="bottom-right" />
+          <ThemedToaster />
         </ThemeProvider>
       </ExecutionProvider>
     </QueryClientProvider>,

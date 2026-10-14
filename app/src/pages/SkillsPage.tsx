@@ -2,7 +2,7 @@ import { t } from "../lib/i18n";
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Library, PackageOpen, SearchX } from "lucide-react";
-import { toast } from "sonner";
+import { notifyError, toast } from "../lib/notifications";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
@@ -185,7 +185,7 @@ export default function SkillsPage({
         silent: true,
       });
       if (!forked?.ok) {
-        toast.error(t("没有复制：{0}", forked?.errors[0]?.message ?? t("详见任务记录")));
+        notifyError(t("技能复制失败"), forked?.errors[0]?.message ?? t("详见任务记录"));
         return;
       }
       let failed = 0;
@@ -197,7 +197,7 @@ export default function SkillsPage({
         if (!added?.ok) failed += 1;
       }
       const path = (forked.data as { path?: string }).path ?? input.dest;
-      (failed ? toast.error : toast.success)(
+      (failed ? toast.warning : toast.success)(
         failed ? t("已复制到 {0}，但 {1} 个助手没换过去，详见任务记录", path, failed) : t("已复制到 {0}，{1} 个助手换成了你的版本", path, input.switchAccounts.length),
       );
       setForking(null);

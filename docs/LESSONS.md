@@ -8,6 +8,18 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## Tests that prove something
 
+**Audit notification ownership across complete user operations.**
+- A shared renderer cannot prevent one workflow from announcing both step success
+  and a final result. Inspect execution helpers and their callers together; one
+  multi-step operation owns one completion summary while preserving row records.
+- Test backend success with warnings, a failed later preference write and unknown
+  version checks. These must not announce complete success. Keep the original
+  diagnostic in the description when translating the cause or recovery advice.
+- Clear notification state between tests, use the actual themed renderer, and
+  exercise long stacked messages in both languages and window widths. When closing
+  a filtered list of notifications, re-read it after each close; indexes shift.
+- Seen 1× (2026-10-14; application-wide feedback audit).
+
 **Open launch editors independently of the saved-list length.**
 - Keeping controls sticky inside a page-end editor still leaves the form below
   the viewport when editing the first saved item. Use a modal with an internally

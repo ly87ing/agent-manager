@@ -74,6 +74,11 @@ status badges do not repeat long version strings. Paths and current versions wra
 
 ## Verification
 
+The interface uses the shared [feedback policy](interface-feedback.md). MCP
+version changes report success only when both entry edits and any required
+version-preference updates succeed. Partial work keeps its failure records and
+does not close the version dialog as a successful change.
+
 ```sh
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_programs
 cargo test --manifest-path engine-rs/Cargo.toml --test native_extension_program_scope

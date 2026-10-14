@@ -1,6 +1,6 @@
 import { t } from "../lib/i18n";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "../lib/notifications";
 import { FolderSymlink, Link2Off, PackageCheck, RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import { ConfirmModal } from "./ConfirmModal";
 import { PageError } from "./PageState";
@@ -191,7 +191,7 @@ export function DiscoverPanel() {
       setFailed(failures);
       setSelected((previous) => new Set([...previous].filter((key) => !keys.includes(key) || failedKeys.has(key)).concat([...failedKeys])));
       const summary = t("{0}完成：成功 {1}，失败 {2}", cleanup ? t("清理") : t("接管"), list.length - failures.length, failures.length);
-      if (failures.length) toast.error(summary);
+      if (failures.length) toast[list.length > failures.length ? "warning" : "error"](summary);
       else toast.success(summary);
     }
   };

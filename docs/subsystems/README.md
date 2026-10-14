@@ -19,6 +19,7 @@ Each page describes how one subsystem works now: what it is responsible for, whe
 | Saved launch recipes and copyable commands | [Launch configurations](launch-configurations.md) |
 | Read-only macOS regional and process checks | [Environment checks](environment-checks.md) |
 | English default and saved interface language | [Interface language](interface-language.md) |
+| Action notifications, loading, validation and result summaries | [Interface feedback](interface-feedback.md) |
 
 Product scope is governed by [Extensions only](../EXTENSIONS-ONLY.md). Earlier account designs and acceptance records are historical. Data semantics remain in [GUI Redesign](../GUI-REDESIGN.md); implementation history and acceptance stay in [goal-rust-gui.md](../goal-rust-gui.md).
 

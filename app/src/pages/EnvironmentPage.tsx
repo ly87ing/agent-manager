@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { notifyError, toast } from "../lib/notifications";
 import { Select } from "../components/Select";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EnvironmentProfileEditor } from "../components/EnvironmentProfileEditor";
@@ -76,7 +76,7 @@ function findingDetails(report: EnvironmentReport, limit = Infinity) {
     return t(text, names.join(t("、")));
   });
 }
-function notifyReport(report: EnvironmentReport) {
+function notifyReport(report: EnvironmentReport, actionNote?: string) {
   const { matched, mismatched, unknown, compared } = report.summary;
   const repairUnconfirmed = report.time_repair && !["not_needed", "verified"].includes(report.time_repair.status);
   const title = mismatched || unknown ? t("检查完成：{0} 项不符，{1} 项无法确认。", String(mismatched), String(unknown))
@@ -85,13 +85,12 @@ function notifyReport(report: EnvironmentReport) {
   const level = mismatched || unknown || repairUnconfirmed ? "warning" : compared ? "success" : "info";
   toast[level](title, { id: "environment-result", duration: 10000, closeButton: true,
     description: [t("符合 {0} 项，不符 {1} 项，无法确认 {2} 项。", String(matched), String(mismatched), String(unknown)),
-      ...findingDetails(report, 3), repairDescription(report), t("完整明细见检查结果。")].filter(Boolean).join("\n"),
+      ...findingDetails(report, 3), repairDescription(report), actionNote, t("完整明细见检查结果。")].filter(Boolean).join("\n"),
     classNames: { description: "whitespace-pre-line" },
   });
 }
 function notifyCheckError(message: string) {
-  toast.error(t("环境检查失败"), { id: "environment-result", description: message, duration: 10000, closeButton: true,
-    classNames: { description: "max-h-48 overflow-y-auto whitespace-pre-wrap break-words" } });
+  notifyError(t("环境检查失败"), message, { id: "environment-result" });
 }
 
 export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaunch?: (recipe: LaunchRecipe) => void }) {
@@ -108,7 +107,6 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   const [evidence, setEvidence] = useState(false);
   const [cooldown, setCooldown] = useState(false);
   const [authorizing, setAuthorizing] = useState(false);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const generation = useRef(0);
   const cooldownTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
@@ -124,14 +122,14 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
 
   const selected = profiles.find((profile) => profile.id === selectedId);
   const server = selected?.target.ntp_server;
-  function select(id: string) { generation.current++; setSelectedId(id); setData(null); setError(null); setActionMessage(null); toast.dismiss("environment-result"); }
+  function select(id: string) { generation.current++; setSelectedId(id); setData(null); setError(null); toast.dismiss("environment-result"); }
   function startCooldown() {
     setCooldown(true); clearTimeout(cooldownTimer.current);
     cooldownTimer.current = setTimeout(() => setCooldown(false), 4000);
   }
   async function run(forceRepair = false) {
     const id = ++generation.current;
-    setBusy(true); setError(null); setData(null); setActionMessage(null);
+    setBusy(true); setError(null); setData(null);
     toast.dismiss("environment-result");
     const target = selected ? profileTarget(selected) : {};
     const repair = forceRepair || Boolean(selected?.auto_sync);
@@ -151,25 +149,23 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
     finally { if (id === generation.current) setBusy(false); }
   }
   async function openSettings(pane: "date-time" | "language-region") {
-    setBusy(true); setError(null); setActionMessage(null);
-    try { await openEnvironmentSettings(pane); setActionMessage(t("已请求打开系统设置。完成调整后，请重新检查。")); }
-    catch (err) { setError(engineErrorMessage(err)); }
+    setBusy(true); setError(null);
+    try { await openEnvironmentSettings(pane); toast.info(t("已请求打开系统设置。完成调整后，请重新检查。"), { id: "environment-result" }); }
+    catch (err) { setError(engineErrorMessage(err)); notifyError(t("打开系统设置失败"), err, { id: "environment-result" }); }
     finally { setBusy(false); }
   }
   async function authorizeTimeSettings() {
     const id = ++generation.current;
-    setBusy(true); setError(null); setActionMessage(null);
+    setBusy(true); setError(null);
     toast.dismiss("environment-result");
     try {
       const result = await checkTimeSettings(selected ? profileTarget(selected) : {}, Boolean(server));
       if (id !== generation.current) return;
       if (result.status === "read") {
         setData(result.report); if (server) startCooldown();
-        notifyReport(result.report);
-        setActionMessage(t("已读取自动设置时间开关并更新检查结果，未修改系统设置。"));
+        notifyReport(result.report, t("已读取自动设置时间开关并更新检查结果，未修改系统设置。"));
       } else {
         const message = result.status === "cancelled" ? t("已取消授权，保留原检查结果。") : t("未能读取自动设置时间开关，保留原检查结果。可在系统设置中确认。");
-        setActionMessage(message);
         toast[result.status === "cancelled" ? "info" : "error"](message, { id: "environment-result", duration: 10000, closeButton: true });
       }
     } catch (err) { if (id === generation.current) { const message = engineErrorMessage(err); setError(message); notifyCheckError(message); } }
@@ -179,6 +175,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
     const saved = await saveEnvironmentProfile(input, editor?.initial ?? undefined);
     setProfiles((items) => [...items.filter((item) => item.id !== saved.id), saved]);
     select(saved.id); setEditor(null);
+    toast.success(t("期望集合已保存"));
   }
   async function reloadProfiles() {
     setBusy(true); setProfilesError(null);
@@ -189,8 +186,8 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   async function remove() {
     if (!selected) return;
     setRemoving(true); setProfilesError(null);
-    try { await deleteEnvironmentProfile(selected); setProfiles((items) => items.filter((item) => item.id !== selected.id)); select(""); setDeleting(false); }
-    catch (err) { setProfilesError(engineErrorMessage(err)); }
+    try { await deleteEnvironmentProfile(selected); setProfiles((items) => items.filter((item) => item.id !== selected.id)); select(""); setDeleting(false); toast.success(t("期望集合已删除")); }
+    catch (err) { setProfilesError(engineErrorMessage(err)); notifyError(t("删除期望集合失败"), err); }
     finally { setRemoving(false); }
   }
   const repairMessage = data ? repairDescription(data) : null;
@@ -232,7 +229,6 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
     </ConfirmModal>}
     {error && <div role="alert" className="space-y-2 rounded-md border border-destructive/30 p-3 text-sm"><p className="break-words text-destructive">{error}</p><button className={button} disabled={busy} onClick={() => void run()}>{t("重试检查")}</button></div>}
     {repairMessage && <p role="status" className="rounded-md border p-3 text-sm">{repairMessage}</p>}
-    {actionMessage && <p role="status" className="rounded-md border p-3 text-sm">{actionMessage}</p>}
     {data && <>
       <section className="space-y-2 rounded-md border p-3" aria-label={t("检查结果")}>
         <p role="status" className="text-sm font-medium">{data.summary.compared === 0 ? t("已读取环境，尚未设置比较目标。") : data.summary.status === "match" ? t("已检查的目标全部符合。") : data.summary.status === "mismatch" ? t("发现与目标不符的项目。") : t("仍有目标项目无法确认。")}</p>

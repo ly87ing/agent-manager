@@ -13,10 +13,10 @@ describe("Skeleton", () => {
 });
 
 describe("PageLoading", () => {
-  it("渲染页面骨架：sr-only 文案 + 标题条 + 与真实卡片同配方的轮廓", () => {
+  it("renders a visible loading message and page skeleton", () => {
     const { container } = render(<PageLoading text="正在读取应用设置…" />);
-    // 文案以 sr-only 保留，供屏幕阅读器播报
-    expect(screen.getByText("正在读取应用设置…")).toHaveClass("sr-only");
+    expect(screen.getByText("正在读取应用设置…")).toBeVisible();
+    expect(screen.getByText("正在读取应用设置…")).not.toHaveClass("sr-only");
     expect(screen.getByRole("status")).toBeInTheDocument();
     // 3 张卡片轮廓，配方对齐真实卡片 rounded-lg border bg-card p-5
     const cardOutlines = container.querySelectorAll(".rounded-lg.border.bg-card.p-5");

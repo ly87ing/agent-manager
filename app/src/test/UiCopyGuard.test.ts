@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -70,4 +70,12 @@ describe("界面规则防回归", () => {
       expect(text.match(/\bborder-l-(?:\d|\[)[^\s"]*/g) ?? [], `${rel} 用了彩色左边框条，状态改用圆点或色块`).toEqual([]);
     });
   }
+});
+
+describe("action feedback entry point", () => {
+  it("routes every production toast through the shared notification policy", () => {
+    const files = SCAN_DIRS.flatMap((dir) => collectFiles(join(SRC_ROOT, dir))).filter((file) => basename(file) !== "notifications.ts");
+    const direct = files.filter((file) => /import\s*\{[^}]*\btoast\b[^}]*\}\s*from\s*["']sonner["']/.test(readFileSync(file, "utf8")));
+    expect(direct).toEqual([]);
+  });
 });

@@ -14,6 +14,11 @@ Checks one account's actual MCP entry once. This is a separate protocol session,
 
 ## Constraints and failure behavior
 
+The dialog announces completion through the shared
+[interface feedback](interface-feedback.md) policy. Protocol success is decided
+by the result's `ok` field, independently of command collection success. The full
+result remains in the dialog; request failures stay above its action footer.
+
 - A variable without a value stops the check before anything runs and names the variable.
 - Resolved values are replaced with `***` in the message and stderr, then the usual diagnostic sanitizer runs.
 - Working directory: entry `cwd`, then explicit `--cwd`, then the tool's HOME. Paths must be existing absolute directories. A project-dependent server needs the correct project directory. The tool's process environment, selected secrets file and proxy fallback can differ from the assistant's environment.

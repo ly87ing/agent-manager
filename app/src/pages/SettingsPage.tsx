@@ -12,7 +12,7 @@ import {
   Terminal,
   Sun,
 } from "lucide-react";
-import { toast } from "sonner";
+import { notifyError, toast } from "../lib/notifications";
 import { PageError, PageLoading } from "../components/PageState";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { engineErrorMessage } from "../lib/engine";
@@ -80,7 +80,10 @@ function AutostartControl({ canEnable }: { canEnable: boolean }) {
       <div className="inline-flex rounded-lg border bg-muted p-0.5" role="group" aria-label={t("开机启动")}>
         {[true, false].map((enabled) => <button key={String(enabled)} type="button" aria-pressed={state.data === enabled}
           disabled={state.isPending || state.isError || change.isPending || (enabled && !canEnable)}
-          onClick={() => change.mutate(enabled)} className={cn(
+          onClick={() => change.mutate(enabled, {
+            onSuccess: (actual) => toast.success(actual ? t("已启用开机启动") : t("已停用开机启动")),
+            onError: (reason) => notifyError(t("设置开机启动失败"), reason),
+          })} className={cn(
             "rounded-md px-3 py-1 text-xs transition-colors disabled:opacity-50",
             state.data === enabled ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
           )}>{enabled ? t("启用") : t("停用")}</button>)}
@@ -203,9 +206,9 @@ export default function SettingsPage({
     setSaveStatus(null);
     save.mutate(preferences, {
       onSuccess: () => {
-        setSaveStatus(t("设置已保存（已从引擎读回）")); toast.success(t("设置已保存"));
+        toast.success(t("设置已保存"));
       },
-      onError: (error) => { setSaveStatus(t("设置保存失败：{0}", engineErrorMessage(error))); toast.error(t("设置保存失败：{0}", engineErrorMessage(error))); },
+      onError: (error) => { setSaveStatus(t("设置保存失败：{0}", engineErrorMessage(error))); notifyError(t("设置保存失败"), error); },
     });
   };
 
@@ -279,7 +282,7 @@ export default function SettingsPage({
       }
     } catch (error) {
       const msg = t("更新安装失败：{0}", engineErrorMessage(error));
-      toast.error(msg);
+      notifyError(t("更新安装失败"), error);
       if (!isMountedRef.current) {
         void currentUpdate.close().catch(() => {});
       } else {

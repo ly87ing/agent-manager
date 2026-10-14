@@ -9,6 +9,7 @@ export interface ErrorAdvice {
 }
 
 const RULES: [RegExp, ErrorAdvice][] = [
+  [/the application is already running/i, { get what() { return t("应用已在运行，未重新启动"); }, get todo() { return t("正常退出应用后，再使用此配置启动。"); } }],
   [
     /已在外部修改|被外部修改|外部改过|被别处改过|与打开时读到的内容不同|base mismatch/i,
     { get what() { return t("文件在你打开之后被别处改过，这次没有写入"); }, get todo() { return t("页面已按文件的最新内容刷新，看一眼再重做一次"); } },
@@ -26,7 +27,7 @@ const RULES: [RegExp, ErrorAdvice][] = [
   ],
   [/解析失败|parse error|invalid json|语法错误/i, { get what() { return t("配置文件的格式有错，读不出来"); }, get todo() { return t("用编辑器打开这个文件修好格式（多半是少了逗号或括号），再回来刷新"); } }],
   [/疑似凭据|明文取值|明文凭据/, { get what() { return t("内容里像是写了密钥"); }, get todo() { return t("改写成 ${变量名}，把取值放进密钥文件（设置 → MCP 密钥）"); } }],
-  [/no such file or directory/i, { get what() { return t("要用的文件或目录不存在"); }, get todo() { return t("核对资源路径与来源是否存在；助手扩展路径可在助手页查看"); } }],
+  [/no such file or directory/i, { get what() { return t("要用的文件或目录不存在"); }, get todo() { return t("确认文件、目录或应用路径存在，必要时重新选择。"); } }],
 ];
 
 export function adviseError(message: string): ErrorAdvice | null {

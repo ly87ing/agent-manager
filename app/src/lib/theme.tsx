@@ -119,7 +119,7 @@ export function useTheme(): ThemeContextValue {
 /** 跟随当前主题的 toast 出口。 */
 export function ThemedToaster() {
   const { resolvedTheme } = useTheme();
-  // 右下角：右上角会盖住各页顶部的标题与主操作按钮（执行结果恰恰是点完那些按钮才出现的，
-  // 挡住的正是用户此刻要看的地方）。expand 让多条失败原因完整展开而不是挤成一行。
-  return <Toaster richColors expand position="bottom-right" theme={resolvedTheme} />;
+  // Page feedback stays at the bottom; modal feedback uses the top via notifications.
+  // Keep two expanded notifications visible so bounded details fit the default window.
+  return <Toaster richColors expand visibleToasts={2} position="bottom-right" theme={resolvedTheme} />;
 }

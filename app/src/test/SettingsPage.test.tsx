@@ -355,7 +355,7 @@ describe("SettingsPage", () => {
 
     // Close must now be called upon completion, and global toast reported
     expect(close).toHaveBeenCalledTimes(1);
-    expect(toastSuccessSpy).toHaveBeenCalledWith("更新已安装，请重启应用生效");
+    expect(toastSuccessSpy).toHaveBeenCalledWith("更新已安装，请重启应用生效", expect.objectContaining({ closeButton: true, duration: 4000 }));
   });
 
   it("安装过程中实际切页导航离开，完成后通过全局 toast 报告成功且延迟释放句柄", async () => {
@@ -408,7 +408,7 @@ describe("SettingsPage", () => {
     await Promise.resolve();
 
     expect(close).toHaveBeenCalledTimes(1);
-    expect(toastSuccessSpy).toHaveBeenCalledWith("更新已安装，请重启应用生效");
+    expect(toastSuccessSpy).toHaveBeenCalledWith("更新已安装，请重启应用生效", expect.objectContaining({ closeButton: true, duration: 4000 }));
     expect(await screen.findByText("更新已安装，请重启应用生效")).toBeInTheDocument();
   });
 
@@ -452,7 +452,7 @@ describe("SettingsPage", () => {
 
     // Handle must be closed to prevent leak, and toast.error must be called
     expect(close).toHaveBeenCalledTimes(1);
-    expect(toastErrorSpy).toHaveBeenCalledWith(expect.stringContaining("网络中断校验失败"));
+    expect(toastErrorSpy).toHaveBeenCalledWith("更新安装失败", expect.objectContaining({ description: expect.stringContaining("网络中断校验失败"), duration: 10000 }));
   });
 
   it("句柄 close 抛出异常时不产生未捕获的 Promise rejection", async () => {

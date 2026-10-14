@@ -1,9 +1,9 @@
 import { t } from "../lib/i18n";
 import { useState } from "react";
-import { toast } from "sonner";
+import { notifyError, toast } from "../lib/notifications";
 import { Download, Upload } from "lucide-react";
 import { diffBackup, sourceLabel, selectBackupModules, BACKUP_MODULES, BACKUP_MODULE_LABELS, type BackupModule, type BackupDiff } from "../lib/backupDiff";
-import { engineErrorMessage, runEngine } from "../lib/engine";
+import { runEngine } from "../lib/engine";
 import { engineKeys } from "../lib/queries";
 import { useQueryClient } from "@tanstack/react-query";
 import { useDialogFocus } from "../lib/dialogFocus";
@@ -39,7 +39,7 @@ export function ConfigBackupSection() {
     try {
       const envelope = await runEngine<Record<string, unknown>>("config:export");
       if (!envelope.ok) {
-        toast.error(t("导出失败:{0}", envelope.errors[0]?.message ?? t("未知错误")));
+        notifyError(t("导出失败"), envelope.errors[0]?.message ?? t("未知错误"));
         return;
       }
       const data = envelope.data as {
@@ -58,7 +58,7 @@ export function ConfigBackupSection() {
       );
       toast.success(t("已生成备份内容"));
     } catch (err) {
-      toast.error(t("导出失败:{0}", engineErrorMessage(err)));
+      notifyError(t("导出失败"), err);
     } finally {
       setBusy(false);
     }
@@ -100,7 +100,7 @@ export function ConfigBackupSection() {
     try {
       const envelope = await runEngine<Record<string, unknown>>("config:export");
       if (!envelope.ok) {
-        toast.error(t("读取当前配置失败:{0}", envelope.errors[0]?.message ?? t("未知错误")));
+        notifyError(t("读取当前配置失败"), envelope.errors[0]?.message ?? t("未知错误"));
         return;
       }
       if (typeof envelope.data.base !== "string") throw new Error(t("当前引擎未提供恢复基准，请更新后重试"));
@@ -108,7 +108,7 @@ export function ConfigBackupSection() {
       setDiff(diffBackup(envelope.data, selectBackupModules(envelope.data, parsed, modules)));
       setConfirming(true);
     } catch (err) {
-      toast.error(t("读取当前配置失败:{0}", engineErrorMessage(err)));
+      notifyError(t("读取当前配置失败"), err);
     } finally {
       setBusy(false);
     }
@@ -121,7 +121,7 @@ export function ConfigBackupSection() {
       if (!base || modules.length === 0) return;
       const envelope = await runEngine("config:import", ["--value", importText.trim(), "--modules", modules.join(","), "--base", base]);
       if (!envelope.ok) {
-        toast.error(t("导入失败:{0}", envelope.errors[0]?.message ?? t("未知错误")));
+        notifyError(t("导入失败"), envelope.errors[0]?.message ?? t("未知错误"));
         return;
       }
       setImportText("");
@@ -131,7 +131,7 @@ export function ConfigBackupSection() {
         description: t("助手配置未改动；请到对应页面逐项预览和应用，密钥需另行配置。"),
       });
     } catch (err) {
-      toast.error(t("导入失败:{0}", engineErrorMessage(err)));
+      notifyError(t("导入失败"), err);
     } finally {
       setBusy(false);
     }

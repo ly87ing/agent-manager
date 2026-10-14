@@ -240,6 +240,9 @@ describe("来源页：添加、编辑、更新、移除", () => {
     await userEvent.click(within(dialog).getByTestId("collection-form-submit"));
 
     const setCalls = calls.filter((call) => call.command === "policy:set");
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toHaveTextContent("来源已保存：vendor-tool"));
+    expect(document.querySelector('[data-sonner-toast]')).toHaveTextContent("更新或重新扫描");
+    expect(document.querySelectorAll('[data-sonner-toast]')).toHaveLength(1);
     expect(setCalls).toHaveLength(1);
     const write = setCalls[0];
     expect(write.args[write.args.indexOf("--key") + 1]).toBe("skills.repositories.vendor-tool");
@@ -354,7 +357,9 @@ describe("来源页：添加、编辑、更新、移除", () => {
     expect(screen.queryByText(/技能部署：|处技能换到新版本|各账号的技能都已是最新/)).toBeNull();
     expect(screen.getByTestId("sources-update-all")).toBeDisabled();
     release(makeEnvelope({}, { ok: false, errors: [{ code: "DEPLOY_FAILED", element: null, message: "部署被拒绝" }] }));
-    expect(await screen.findByText("来源更新：成功 1，失败 0；技能部署：成功 0，失败 1（详见任务记录）")).toBeVisible();
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toHaveTextContent("来源更新：成功 1，失败 0"));
+    expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toHaveTextContent("技能部署：成功 0，失败 1（详见任务记录）");
+    expect(document.querySelectorAll('[data-sonner-toast]')).toHaveLength(1);
     expect(screen.getByText(/部署被拒绝/)).toBeVisible();
   });
 

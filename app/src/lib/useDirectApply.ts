@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { Envelope } from "./contract";
-import { useExecutions } from "./execution";
+import { useExecutions, type ExecuteRequest } from "./execution";
 
 /**
  * 写操作直执入口：点击即真实 apply，不开预览弹窗。
@@ -12,7 +12,7 @@ export function useDirectApply() {
   const busyRef = useRef(false);
   const [executing, setExecuting] = useState(false);
 
-  const apply = (request: { command: string; label: string; args?: string[]; undo?: () => void }): Promise<Envelope | null> => {
+  const apply = (request: Pick<ExecuteRequest, "command" | "label" | "args" | "undo" | "successDescription" | "silent">): Promise<Envelope | null> => {
     if (busyRef.current) return Promise.resolve(null);
     busyRef.current = true;
     setExecuting(true);
@@ -21,6 +21,8 @@ export function useDirectApply() {
       args: request.args ?? [],
       label: request.label,
       undo: request.undo,
+      successDescription: request.successDescription,
+      silent: request.silent,
     }).finally(() => {
       busyRef.current = false;
       setExecuting(false);

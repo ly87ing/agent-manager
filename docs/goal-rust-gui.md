@@ -1631,3 +1631,44 @@ expiry without an inline error. The draft was cancelled. Existing saved recipes,
 environment collections and system settings were preserved. Rust suites were not
 repeated because no backend code changed. No installed app, installer, tag or
 Release was changed or published.
+
+
+## 2026-10-14: unified interface feedback
+
+All production notification producers now share one presentation policy. Success
+and information last four seconds; warnings, errors and undo actions last ten.
+Notifications close explicitly, wrap long text in bounded scroll areas and use
+the top of dialogs or bottom of pages. At most two notifications expand at once.
+Original diagnostics remain available alongside translated causes and next steps.
+
+The audit covered Launch, Environment, Skills, MCP, Rules, Sources, Programs,
+Assistants, Settings, activity records, MCP variables and Tips. Loading text is
+visible, empty/read-error states retain useful guidance and retry, and form errors
+stay near fields or fixed controls. Transient success messages no longer leave
+permanent status rows. Connection tests and environment/profile/settings actions
+announce outcomes immediately.
+
+Multi-step source operations, multi-target MCP writes and rule follow/backup
+outcomes now produce one completion summary. Partial completion and unknown
+version evidence use warnings. A failed version-preference write after a successful
+MCP edit no longer reports a completed version change or closes its dialog.
+
+Verification: the full frontend suite passed 623 tests in 56 files; production
+type checking/build passed. Focused regressions cover notification defaults,
+placement, diagnostics, callback preservation, dialog footers, duplicate-summary
+prevention, unknown checks and later-step failure. A source guard enforces the
+single notification entry point, using portable path handling.
+
+Browser mock acceptance covered all twelve pages, six empty-list states, long
+stacked notifications and collection submission errors in English and Chinese at
+1000 x 650 and 760 x 650. Notifications and fixed controls fit the viewport;
+closing notifications retained necessary form errors. Actual native acceptance
+used an owned inactive missing-application recipe in the isolated preview after
+window focus prevented text input. Its launch was rejected, and the native toast
+showed the translated cause, guidance and original diagnostic. The temporary
+recipe was deleted with its exact revision; CLI/database and desktop readback
+confirmed the original saved recipes and collections were preserved. System,
+shell and NTP baselines stayed unchanged.
+
+Rust suites were not repeated because no backend code or command protocol changed.
+No real application was launched. No installer, tag or Release was produced.

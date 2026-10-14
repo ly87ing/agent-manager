@@ -1,11 +1,11 @@
 import { t } from "../lib/i18n";
 import { X } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
+import { notifyError, toast } from "../lib/notifications";
 import { useQueryClient } from "@tanstack/react-query";
 import type { PolicyData } from "../lib/contract";
 import { useDialogFocus } from "../lib/dialogFocus";
-import { engineErrorMessage, runEngine } from "../lib/engine";
+import { runEngine } from "../lib/engine";
 import { engineKeys, useEngineQuery } from "../lib/queries";
 import { ConfirmModal } from "./ConfirmModal";
 
@@ -48,13 +48,13 @@ export function useRuleSources() {
     try {
       const envelope = await runEngine("policy:set", ["--layer", "local", "--key", key, "--value", JSON.stringify(value)]);
       if (!envelope.ok) {
-        toast.error(t("没有保存：{0}", envelope.errors[0]?.message ?? t("未知错误")));
+        notifyError(t("保存规则来源失败"), envelope.errors[0]?.message ?? t("未知错误"));
         return false;
       }
       if (verify) {
         const fresh = await runEngine<PolicyData>("policy:get").catch(() => null);
         if (!fresh?.ok || !verify(fresh.data)) {
-          toast.error(t("已写入，但无法确认规则来源的新路径；请重新读取后检查"));
+          toast.warning(t("已写入，但无法确认规则来源的新路径；请重新读取后检查"));
           return false;
         }
       }
@@ -62,7 +62,7 @@ export function useRuleSources() {
       toast.success(done);
       return true;
     } catch (error) {
-      toast.error(t("没有保存：{0}", engineErrorMessage(error)));
+      notifyError(t("保存规则来源失败"), error);
       return false;
     } finally {
       setBusy(false);

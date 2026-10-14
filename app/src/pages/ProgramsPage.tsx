@@ -1,7 +1,7 @@
 import { t } from "../lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw, ScanSearch } from "lucide-react";
-import { toast } from "sonner";
+import { notifyError, toast } from "../lib/notifications";
 import { useQueryClient } from "@tanstack/react-query";
 import { ActionMenu } from "../components/AccountGrid";
 import { EmptyState } from "../components/EmptyState";
@@ -48,7 +48,7 @@ async function copy(text: string, what: string) {
     await navigator.clipboard.writeText(text);
     toast.success(t("已复制{0}", what));
   } catch (reason) {
-    toast.error(t("没能复制：{0}", reason instanceof Error ? reason.message : String(reason)));
+    notifyError(t("复制失败"), reason);
   }
 }
 

@@ -1,7 +1,7 @@
 import { t } from "../lib/i18n";
 import { useEffect, useState } from "react";
 import { Copy } from "lucide-react";
-import { toast } from "sonner";
+import { notifyError, toast } from "../lib/notifications";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "./ConfirmModal";
 import { runEngine, engineErrorMessage } from "../lib/engine";
@@ -128,7 +128,8 @@ export function ProgramActionDialog({
           .catch(() => undefined)
           .finally(() => void queryClient.invalidateQueries({ queryKey: engineKeys.all }));
       } else {
-        setFailed(envelope?.errors[0]?.message ?? t("没有完成，详见操作记录"));
+        const message = envelope?.errors[0]?.message ?? t("没有完成，详见操作记录");
+        setFailed(message); notifyError(t("{0}失败", TITLE[action]), message);
       }
     } finally {
       setExecuting(false);
@@ -142,7 +143,7 @@ export function ProgramActionDialog({
       await navigator.clipboard.writeText(plan.manual.join("\n"));
       toast.success(t("已复制命令"));
     } catch (reason) {
-      toast.error(t("没能复制：{0}", reason instanceof Error ? reason.message : String(reason)));
+      notifyError(t("复制失败"), reason);
     }
   };
 
@@ -156,6 +157,7 @@ export function ProgramActionDialog({
       confirmLabel={TITLE[action]}
       confirmDisabled={loading || Boolean(error) || !plan || (withEntry && !chosenEntry)}
       executing={executing}
+      error={failed ? `${t("执行未完成，请核对当前状态：")}${failed}${plan?.manual.length ? `\n${t("可以复制上面的命令自己执行。")}` : ""}` : null}
       onConfirm={() => void confirm()}
       onClose={() => !executing && onClose()}
     >
@@ -212,11 +214,6 @@ export function ProgramActionDialog({
               </div>
             )}
           </>
-        )}
-        {failed && (
-          <p data-testid="program-apply-failed" className="whitespace-pre-wrap rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{t("执行未完成，请核对当前状态：")}{failed}
-            {plan?.manual.length ? ("\n" + t("可以复制上面的命令自己执行。")) : ""}
-          </p>
         )}
       </div>
     </ConfirmModal>

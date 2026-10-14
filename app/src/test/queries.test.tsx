@@ -2,10 +2,22 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { setEngineClient } from "../lib/engine";
-import { createQueryClient, engineKeys, invalidateEngineQueries, useEngineQuery } from "../lib/queries";
+import { createQueryClient, engineKeys, invalidateEngineQueries, useEngineQuery, useRefreshUpstream } from "../lib/queries";
 import { makeEnvelope } from "./fixtures";
+import { renderWithEngine, userEvent } from "./render-with-engine";
 
 describe("useEngineQuery 请求缓存键", () => {
+  it("reports unknown update checks as incomplete rather than success", async () => {
+    function Refresh() {
+      const refresh = useRefreshUpstream();
+      return <button onClick={() => refresh.mutate(undefined)}>Check updates</button>;
+    }
+    const { calls } = renderWithEngine(<Refresh />, { "system:refresh-upstream": makeEnvelope({ summary: { current: 1, behind: 0, ahead: 0, unknown: 1 }, elements: [] }) });
+    await userEvent.click(screen.getByRole("button", { name: "Check updates" }));
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toHaveTextContent("未检查 1"));
+    expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toBeNull();
+    expect(calls.filter((call) => call.command === "system:refresh-upstream")).toHaveLength(1);
+  });
   it("MCP 写入使程序依赖列表过期，同时保留不相关的规则缓存", async () => {
     const client = createQueryClient({ retry: false });
     const programs = engineKeys.request("programs:status");
