@@ -2,7 +2,55 @@
 
 > Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
 
+## 2026-10-14: Audit Corrections and Current Verification
+
+Source changes: clock correction audit `4b7e596`, local-first skill adoption
+`620850c`, and saved-tool backups `fd54f17`. These preserve the extension-only
+boundary and add no background scheduling or automatic system remediation.
+
+- A clear clock mismatch now records its request before authorization and its
+  numeric outcome after independent measurement. Initial audit failure prevents
+  authorization; completion audit failure retains the result with a visible warning.
+  Matching or uncertain samples and ordinary checks still do not write state.
+- Skill adoption opens with a local-only plan. A real isolated CLI call returned
+  in 145 ms without invoking a failing Git shim, changing source bytes or creating
+  manager data. Remote comparison is a separate explicit action, and its failure
+  leaves local adoption available. Destination refresh retains local-only behavior.
+- Backup v1 adds optional launch and environment sections with independent module
+  selection, ID/name validation, secret rejection and transaction rollback. Old
+  omitted sections preserve local data. Stale previews include tool edits too.
+- Full local verification: engine 424, Tauri 26, frontend 629 across 57 files;
+  type checking, frontend production build and native debug build passed.
+  One first full-run MCP Boolean assertion failed without its protocol diagnostic.
+  Replaying the retained isolated fixture and rerunning the entire engine passed;
+  its initial cause remains unconfirmed. `8a991b2` retains that diagnostic without
+  weakening assertions or changing runtime timeouts.
+- Real CLI roundtrip used two isolated HOME/data contexts. Actual macOS x86_64
+  desktop clicks at the committed 1000 × 650 geometry previewed and restored the
+  two tool modules; Launch and Environment read back the restored names. A separate
+  CLI read back their rows and the `config:import` audit counts. No target launched.
+- The native administrator-authorized read succeeded and displayed automatic time
+  as On. A real reference query followed by the explicit correction endpoint with
+  a 60,000 ms test tolerance returned `not_needed`; database bytes were identical.
+  This proves the no-adjustment path, not actual excessive-offset correction.
+- Browser checks covered English and Simplified Chinese at 1000 × 650 and 760 × 650:
+  audit warnings, local adoption, remote-failure fallback and long backup previews.
+  Confirmation actions stayed reachable, with no horizontal overflow.
+- [CI](https://github.com/ly87ing/agent-manager/actions/runs/38548297434) and
+  [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/38548297906)
+  passed for `fd54f17`, including native Windows engine tests and four installer
+  builds. The repository is public; the old private-download statement is retired.
+
+Remaining verification is explicit in [platform status](GUI-PLATFORM-STATUS.md):
+actual excessive-offset clock correction on an isolated system, physical
+Windows/Linux/arm64 desktop interaction, and signed update download/install/restart.
+No tag, Release or new installer publication was created by this correction.
+
 ## 2026-10-13: Immediate Launch Failure Feedback
+
+Historical receipt for `5c8d50c`. Later `2cb0bb5` removed persistent launch/copy
+error rows; [launch configurations](subsystems/launch-configurations.md) describes
+the current transient feedback contract.
 
 Verification base: `b0fc1e1`, plus the launch-feedback changes. Action failures
 now show a dismissible ten-second toast immediately. Persistent diagnostics sit

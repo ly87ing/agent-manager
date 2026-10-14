@@ -47,7 +47,7 @@
       "app"
     ],
     "shortDescription": "Manage MCP servers, rules, and skills",
-    "longDescription": "Agent Manager manages MCP servers, rules, skills, their sources, and extension dependencies for existing assistant configuration directories. It does not manage accounts, authentication, launch commands, or assistant installation and upgrades.",
+    "longDescription": "Agent Manager manages MCP servers, rules, skills, extension dependencies, saved general launch configurations, and macOS environment checks. It does not manage assistant accounts, authentication, provider settings, or assistant installation and upgrades.",
     "copyright": "Copyright (c) 2026 ly87ing",
     "publisher": "ly87ing",
     "category": "DeveloperTool",

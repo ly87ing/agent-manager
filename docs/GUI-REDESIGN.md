@@ -1,6 +1,6 @@
 # GUI Redesign: Current Contract
 
-[Extensions only](EXTENSIONS-ONLY.md) defines the product boundary. The current interface covers MCP, rules, skills, their sources and dependency programs, immutable extension target labels, and user-controlled general launch configurations. Historical account and alias designs are archived in [implementation history](goal-rust-gui.md) and [multi-account design](MULTI-ACCOUNT-DESIGN.md).
+[Extensions only](EXTENSIONS-ONLY.md) defines the product boundary. The current interface covers MCP, rules, skills, their sources and dependency programs, immutable extension target labels, user-controlled general launch configurations, and macOS environment checks. Historical account and alias designs are archived in [implementation history](goal-rust-gui.md) and [multi-account design](MULTI-ACCOUNT-DESIGN.md).
 
 ## Data model: the actual configuration is authoritative
 
@@ -9,7 +9,7 @@ Each assistant's real files and directories are the sole source of truth for act
 | Layer | Content | Location |
 | --- | --- | --- |
 | Active | MCP entries, rule files, skill links and directories | Assistant files and directories |
-| Saved but inactive | Disabled MCP snapshots, rule templates, skill source definitions and assignments, launch recipes | `native-manager.db` |
+| Saved but inactive | Disabled MCP snapshots, rule templates, skill source definitions and assignments, launch recipes, environment comparison collections | `native-manager.db` |
 | Recommendations | Suggested skill sources and rule text from those sources | Read-only catalogs and source repositories |
 
 The database also holds app preferences, immutable recognition and location metadata, ownership records with digests, and sanitized operation history. It does not keep a second writable copy of active assistant configuration or plaintext secrets. Recommended rules are maintained in the agent-skills repository; frozen legacy rule copies are migration fingerprints only.
@@ -22,7 +22,7 @@ Historical account registrations locate existing extension targets but cannot be
 
 ## Navigation and resource behavior
 
-Launch opens by default. Skills, MCP, Rules, Sources, Dependency Programs, Assistants, and Settings follow. Assistants displays target labels and paths from registration metadata only. Settings includes static More Tips; its examples can be copied but are not executed or installed.
+Launch opens by default. Environment, Skills, MCP, Rules, Sources, Dependency Programs, Assistants, and Settings follow. Assistants displays target labels and paths from registration metadata only. Settings includes static More Tips; its examples can be copied but are not executed or installed.
 
 `system:discover --only skills` classifies local skill entries as native directories, external links, links belonging to a known collection, or cleanup candidates. It is read-only and network-free. Native directories remain with their original installer. External sources are adopted only on an explicit skill action. A missing upstream skill is actionable only after successful source discovery; failed or unfetched sources do not prove deletion.
 
@@ -33,6 +33,18 @@ Rules status reads actual target file text and baselines. Users can edit text, a
 Skill collections use verified git snapshots or user-owned local directories. Assignments and links are applied per assistant. Dependency Programs handles tools required by MCP or skills, with previewed actions and protected filesystem destinations; assistant executable installation remains outside scope. MCP Secrets edits only dedicated variables referenced by MCP and stores values in a selected external private file.
 
 Launch builds copyable commands and alias/function definitions from saved or draft recipes. Saving a recipe changes Agent Manager data only. Explicit Run can start a local graphical application. No launch action writes shell startup files or manages an assistant account. See [launch configurations](subsystems/launch-configurations.md).
+
+Environment compares macOS and caller-process observations with optional saved
+criteria. Settings panes, unsaved launch drafts and administrator-authorized
+read-only inspection are separate handling actions. Explicitly enabled clock
+correction alone may adjust time after a fresh clear mismatch and authorization,
+with independent verification and request/completion audit evidence. See
+[environment checks](subsystems/environment-checks.md).
+
+[Configuration backups](subsystems/extension-backups.md) can select saved launch
+recipes and environment collections independently of extension modules. A stale
+preview refuses restore, missing legacy sections preserve local data, and restored
+tools remain inactive until a later explicit launch or check.
 
 ## Verification boundary
 

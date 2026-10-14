@@ -7,7 +7,7 @@ Product scope is governed by [Extensions only](EXTENSIONS-ONLY.md).
 
 ## Product boundary
 
-Launch is the default opening page, followed by Skills, MCP, Rules, Sources,
+Launch is the default opening page, followed by Environment, Skills, MCP, Rules, Sources,
 Dependency Programs, and Assistants. Assistants lists immutable extension-target metadata only: type,
 display name, and extension paths. It does not inspect login identity or invoke
 assistant executables. Account, profile, historical alias, account launch, authentication and
@@ -24,6 +24,14 @@ function definitions for manual copying; it does not write shell configuration.
 The Settings shortcut opens the same page. See
 [launch configurations](subsystems/launch-configurations.md).
 
+Environment inspects macOS regional settings and the caller's process environment.
+Named comparison collections live in the same database. Local checks remain
+read-only; external time queries and administrator-authorized inspection are
+explicit actions. Opted-in clock correction requires a fresh clear mismatch,
+records its request before authorization and independently verifies its result.
+No environment action edits shell files or assistant identity. See
+[environment checks](subsystems/environment-checks.md).
+
 Dependency Programs manages programs explicitly required by skills or MCP.
 Assistant packages and command names are excluded, and filesystem mutation
 paths cannot overlap protected account or manager identity data. See
@@ -33,7 +41,8 @@ paths cannot overlap protected account or manager identity data. See
 
 Actual assistant files and skill links are authoritative. `native-manager.db`
 stores preferences, recognition definitions, source registrations, assignments,
-ownership digests, inactive alternatives, and sanitized operation history.
+ownership digests, inactive alternatives, saved launch recipes, environment
+comparison collections, and sanitized operation history.
 Queries, previews, cancellation, and diagnostics do not apply resources. Saving
 a source or alternative does not install software or activate it.
 
@@ -56,10 +65,12 @@ user-selected external private file and never enter the database, diagnostics,
 or backups. Only explicitly referenced MCP variables are editable; identity and
 unrelated variables remain read-only. Historical secret migration is retired.
 
-[Extension definition backups](subsystems/extension-backups.md) exclude accounts,
+[Extension and tool backups](subsystems/extension-backups.md) exclude accounts,
 aliases, credentials, active assistant files, assignments, and ownership records.
-Restore can select skills, MCP, or rules, with a preview baseline checked again
-before committing the transaction. It never applies resources to assistants.
+Restore can select skills, MCP, rules, launch recipes or environment collections,
+with a preview baseline checked again before committing the transaction. Missing
+tool sections in older backups preserve local data. Restore never applies
+resources to assistants, launches an application or changes system settings.
 
 ## Queries and execution records
 
@@ -69,7 +80,10 @@ background version polling, or account discovery. Extension targets use
 uses collection-only skill inventory; writes fetch full status when needed.
 [Resource bounds](subsystems/resource-bounds.md) describes query and retention limits.
 
-Each write has a run identifier and sanitized audit entry. Batch results group
+Resource applies and saved-tool mutations use run identifiers and sanitized audit
+entries. Clock correction records its request and completion; a failed completion
+audit retains the measured result with a visible warning. Ordinary environment
+checks and authorized inspection do not write audit state. Batch results group
 per-target successes and failures during the session and retain individual audit
 records. Failed-only retry re-reads current status and checks action eligibility;
 external takeover requires fresh confirmation on the resource page. Historical

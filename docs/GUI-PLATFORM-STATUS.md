@@ -1,13 +1,54 @@
 # GUI Platform Status
 
-The current product manages extensions and independent general launch recipes.
+The current product manages extensions, independent general launch recipes and
+macOS environment inspection with explicit authorized clock correction.
 Account management, login, provider settings, account-bound launch commands,
 shell-file alias management, quota, and assistant lifecycle capabilities described
 in older records below are retired. The Assistants page lists immutable extension-target metadata;
 it does not restore account management. See [current architecture](ARCHITECTURE.md)
 and [scope](EXTENSIONS-ONLY.md).
 
-## Current acceptance boundary (2026-10-12)
+## Current acceptance boundary (2026-10-14)
+
+The functional corrections are `4b7e596`, `620850c` and `fd54f17`.
+The [current verification receipt](goal-rust-gui.md#2026-10-14-audit-corrections-and-current-verification)
+separates local execution, desktop interaction and remaining acceptance.
+
+| Area | Current evidence | Remaining boundary |
+| --- | --- | --- |
+| Extension and saved-tool source | Engine 424, Tauri 26, frontend 629 tests; type checking/build and isolated CLI readback passed | These are not consumer acceptance of an installed package |
+| macOS x86_64 desktop | Isolated native backup preview, restore, Launch/Environment readback and authorized time-settings read passed at 1000 × 650 | Current installed-package business workflows still need their own receipt |
+| Environment correction | Request/completion audit and failure gates tested; live `not_needed` returned with unchanged database bytes | Actual excessive-offset adjustment needs an isolated system where changing its clock is safe |
+| Skill adoption | Local-only CLI preview made no Git call or state write; explicit comparison and failure fallback passed | Real SSH repository access depends on the configured source and network |
+| Platform CI | [CI](https://github.com/ly87ing/agent-manager/actions/runs/38548297434) and [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/38548297906) passed for `fd54f17`; Windows native engine and four installer builds passed | Windows/Linux/arm64 desktop business interaction remains unverified |
+| Distribution and updater | Repository is public; current test installers are available from successful GUI CI artifacts | Only the old preview is published; no stable latest release or real signed update loop is verified |
+
+### Remaining acceptance checklist
+
+Each receipt must name the exact commit, artifact digest, operating system and
+architecture. Use isolated HOME/data and test-assistant directories; preserve real
+accounts, shell files and system preferences.
+
+| Check | Required execution and readback |
+| --- | --- |
+| Installed desktop | Install/copy the exact artifact into an isolated test environment, open it, and exercise extension writes and failures through its UI; read back selected and unselected target files |
+| Saved tools | Save, restart, edit and restore each module; reject stale previews and confirm no application starts or system setting changes during restore |
+| Cross-platform UI | Repeat empty/populated/error states and dialogs in both languages at 1000 × 650 and 760 px where supported; inspect text bounds and reachable confirm/cancel actions |
+| Launch environment | Use a disposable graphical target that reads its received variables; verify the target application's own behavior separately before claiming it honors them; do not restart an in-use application without permission |
+| Excessive clock offset | In a disposable macOS system/VM, measure a clear offset, authorize correction, independently remeasure and read its audit; retain cancellation/failure and no-adjustment cases |
+| Signed updater | With explicit release authorization, use two identified versions in an isolated installation; verify the target signature, download, install, restart and version/build identity. A prerelease test may use an explicitly pinned candidate endpoint; it does not establish the production latest endpoint |
+
+The public preview predates extension-only scope and has no updater public key;
+moving from it to the first signed build requires manual installation. Ordinary
+GUI CI leaves updater configuration disabled. Signing secret/variable names are
+present, but their presence is not signing or download/install evidence.
+
+No new tag, Release or installer publication is authorized by routine source
+pushes. At the 2026-10-14 readback, `v0.1.0-rc.1` and `v0.1.0-rc.2` exist;
+`v0.1.0-rc.3` is the next unused candidate. Recheck the inventory before an
+authorized release, and never move an existing tag.
+
+## Previous verification snapshot (2026-10-12)
 
 - macOS isolated CLI and UI checks exercise extension operations with temporary
   HOME/data directories; real accounts and sessions are not test targets.
@@ -48,7 +89,11 @@ Builds for all four platforms and macOS / Linux launch checks passed. GitHub bil
 - Local Tauri ad-hoc packaging, update archive signing, independent signature verification, and tamper rejection passed. The update private key and password were stored in the maintainer's private repository and configured as Actions Secrets; ordinary users do not need access to them.
 - The first private draft, `v0.1.0-rc.1`, exposed an outdated build identity test expectation, fixed by `2a71f12`. All 6 release-mode tests and all 443 regular-mode tests passed. Before any steps started, GitHub rejected the second [GUI Release](https://github.com/ly87ing/agent-manager/actions/runs/37770628640) because payment failed or the spending limit needed to be raised. No formal version was published, and repository visibility was not changed.
 
-To resume, resolve GitHub Billing first, then create a new candidate tag from the latest `main` (the next available candidate is `v0.1.0-rc.3`); do not move existing tags. Full signed release, actual downloading, and automatic update installation still require verification. The distribution scope of installation packages remains to be confirmed. Published preview packages do not contain the update public key; switching to the first signed release requires manual installation.
+The billing rejection above is a dated observation, not a current diagnosis.
+Regular and GUI CI now run successfully. Follow the current acceptance checklist
+before an authorized signed release; the historical failure alone does not prove
+that billing still blocks it. Actual updater download, installation and restart
+remain unverified.
 
 ## Feature Status
 
