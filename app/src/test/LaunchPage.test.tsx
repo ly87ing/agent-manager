@@ -69,7 +69,7 @@ async function generate() {
   await startNew();
   await chooseExample();
   await userEvent.click(screen.getByRole("button", { name: "预览命令" }));
-  await screen.findAllByRole("button", { name: "复制运行命令" });
+  await screen.findAllByRole("button", { name: "复制命令" });
 }
 
 async function savedAction(name: string) {
@@ -78,21 +78,26 @@ async function savedAction(name: string) {
 }
 
 describe("launch configuration controls", () => {
-  it.each(["saved", "preview"])("announces %s launch failures immediately and retains details beside the triggering entry", async (location) => {
+  it.each(["saved", "preview"])("announces %s launch failures without adding a persistent error row", async (location) => {
     const reason = "The application is already running. Quit it normally before launching with a different time zone";
     const { calls } = setup({ items: location === "saved" ? [savedItem] : [], runError: reason });
     if (location === "preview") await generate();
-    const launch = location === "saved" ? await screen.findByTestId("run-saved-saved-1-example-sg") : screen.getAllByRole("button", { name: "启动一次" })[0];
+    const launch = location === "saved" ? await screen.findByTestId("run-saved-saved-1-example-sg") : screen.getAllByRole("button", { name: "启动" })[0];
     await userEvent.click(launch);
     await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent(reason));
     expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent("启动失败");
     expect(document.querySelector('[data-sonner-toast][data-type="error"]')?.closest('[data-sonner-toaster]'))
       .toHaveAttribute("data-y-position", location === "preview" ? "top" : "bottom");
-    const detail = screen.getByRole("alert");
-    expect(detail).toHaveTextContent(reason);
-    expect(launch.closest('[data-launch-entry]')).toContainElement(detail);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(launch.closest('[data-launch-entry]')).not.toHaveTextContent(reason);
     expect(calls.filter((call) => call.command === "launch:run")).toHaveLength(1);
     expect(calls.some((call) => ["launch:save", "launch:delete"].includes(call.command))).toBe(false);
+    await userEvent.click(within(document.querySelector('[data-sonner-toast][data-type="error"]') as HTMLElement).getByRole("button"));
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).not.toBeInTheDocument());
+    expect(screen.queryByText(reason)).not.toBeInTheDocument();
+    await userEvent.click(launch);
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent(reason));
+    expect(calls.filter((call) => call.command === "launch:run")).toHaveLength(2);
   });
 
   it("shows saved launchers first and opens the editor only on request", async () => {
@@ -134,14 +139,16 @@ describe("launch configuration controls", () => {
     setup({ items: [savedItem] });
     const launch = await screen.findByTestId("run-saved-saved-1-example-la");
     const row = launch.closest("tr")!;
+    expect(launch).toHaveAccessibleName("启动");
     expect(within(row).getByText(recipe.target)).toBeVisible();
     expect(within(row).getByText("example-la")).toBeVisible();
     expect(within(row).getByText("America/Los_Angeles")).toBeVisible();
-    expect(within(row).queryByRole("button", { name: "复制完整别名定义" })).toBeNull();
+    expect(within(row).queryByRole("button", { name: "复制别名" })).toBeNull();
     const write = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
     await userEvent.click(within(row).getByRole("button", { name: "配置操作 example-la" }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: "复制完整别名定义" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["编辑", "复制命令", "复制别名", "删除"]);
+    await userEvent.click(await screen.findByRole("menuitem", { name: "复制别名" }));
     expect(write).toHaveBeenCalledWith(savedItem.entries[1].definition);
   });
 
@@ -163,7 +170,7 @@ describe("launch configuration controls", () => {
     await generate();
     const write = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
-    await userEvent.click(screen.getAllByRole("button", { name: "复制运行命令" })[0]);
+    await userEvent.click(screen.getAllByRole("button", { name: "复制命令" })[0]);
     expect(write).toHaveBeenLastCalledWith(entries(recipe)[0].command);
     await userEvent.click(screen.getByRole("button", { name: "复制全部定义" }));
     expect(write).toHaveBeenLastCalledWith(entries(recipe).map((item) => item.definition).join("\n"));
@@ -201,7 +208,7 @@ describe("launch configuration controls", () => {
   it("deletes only after a separate confirmation", async () => {
     const { calls } = setup({ items: [savedItem] });
     await screen.findAllByText("example-sg");
-    await savedAction("删除配置");
+    await savedAction("删除");
     expect(await screen.findByRole("dialog")).toHaveTextContent("你自行添加的别名不受影响");
     expect(calls.some((call) => call.command === "launch:delete")).toBe(false);
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
@@ -214,7 +221,7 @@ describe("launch configuration controls", () => {
     const { calls } = setup();
     await generate();
     const editor = screen.getByRole("dialog");
-    await userEvent.click(screen.getAllByRole("button", { name: "启动一次" })[0]);
+    await userEvent.click(screen.getAllByRole("button", { name: "启动" })[0]);
     expect(await screen.findByRole("status")).toHaveTextContent("已发送启动请求。请在应用中确认时间和环境。");
     expect(screen.getAllByRole("dialog")).toEqual([editor]);
     expect(calls.find((call) => call.command === "launch:run")?.args).toContain("--confirm");
@@ -225,7 +232,7 @@ describe("launch configuration controls", () => {
     const { calls } = setup({ items: [savedItem] });
     const write = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
-    await savedAction("复制运行命令");
+    await savedAction("复制命令");
     expect(write).toHaveBeenLastCalledWith(savedItem.entries[0].command);
     await userEvent.click(screen.getByTestId("run-saved-saved-1-example-sg"));
     expect(await screen.findByRole("status")).toHaveTextContent("已发送启动请求");
@@ -267,15 +274,16 @@ describe("launch configuration controls", () => {
     expect(calls.filter((call) => call.command === "launch:save")).toHaveLength(1);
   });
 
-  it("announces clipboard failure at the entry and clears it on a successful retry", async () => {
+  it("announces clipboard failure without a persistent row and clears it on a successful retry", async () => {
     setup({ items: [savedItem] });
     const write = vi.fn().mockRejectedValueOnce(new Error("Clipboard unavailable")).mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
     const row = (await screen.findByTestId("run-saved-saved-1-example-sg")).closest("[data-launch-entry]");
-    await savedAction("复制运行命令");
+    await savedAction("复制命令");
     await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent("Clipboard unavailable"));
-    expect(row).toContainElement(screen.getByRole("alert"));
-    await savedAction("复制运行命令");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(row).not.toHaveTextContent("Clipboard unavailable");
+    await savedAction("复制命令");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).not.toBeInTheDocument());
     expect(write).toHaveBeenCalledTimes(2);
@@ -289,12 +297,12 @@ describe("launch configuration controls", () => {
     await userEvent.type(screen.getByRole("textbox", { name: "程序路径或命令" }), "example.exe");
     await chooseOption(screen.getByRole("combobox", { name: "目标系统" }), "windows");
     await userEvent.click(screen.getByRole("button", { name: "预览命令" }));
-    const copy = await screen.findAllByRole("button", { name: "复制完整函数定义" });
+    const copy = await screen.findAllByRole("button", { name: "复制函数" });
     const write = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: write } });
     await userEvent.click(copy[0]);
     expect(write).toHaveBeenCalledWith(expect.stringMatching(/^function example-sg \{/));
-    expect(screen.queryByRole("button", { name: "启动一次" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "启动" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
     await screen.findByRole("status");
     expect(calls.some((call) => call.command === "launch:save")).toBe(true);

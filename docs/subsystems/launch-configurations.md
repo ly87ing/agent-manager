@@ -60,6 +60,8 @@ application bundles. Other executable paths can be chosen in the desktop file
 picker or entered manually. A saved local graphical application's variant has a
 direct Launch action. That click supplies the explicit `--confirm` marker to
 `launch:run --spec <JSON> --name <variant> --confirm`; no second dialog is needed.
+Row controls use concise labels: Launch, Edit, Copy command, Copy alias/function,
+and Delete. The complete alias/function definition is still copied.
 The operation refuses an already-running target and never quits or restarts it.
 Windows checks executable names
 conservatively; Linux checks `/proc` executable paths; macOS checks bundle process
@@ -75,8 +77,10 @@ never process arguments, rendered commands, or definitions.
 User-triggered action failures immediately show a dismissible viewport toast for
 ten seconds, with a translated action title and the original diagnostic. Editor
 notifications appear at the top so they cannot cover its action footer. Details
-also remain beside the affected saved/preview entry, in the editor's fixed
-action footer, or inside the delete confirmation. Read failures appear beside the
+for launch and copy failures appear only in the toast and disappear on dismissal
+or expiry; saved and preview entries do not acquire persistent error rows.
+Form failures remain in the editor's fixed action footer, and delete failures
+remain inside the confirmation. Read failures appear beside the
 saved-list controls. A new action, draft change or page exit clears stale action
 feedback. No error path scrolls the page or retries a launch automatically.
 

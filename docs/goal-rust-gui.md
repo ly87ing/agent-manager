@@ -1610,3 +1610,24 @@ clock sample was within tolerance and correctly skipped correction.
 Rust and native clock-writing acceptance were not repeated because this slice
 changes frontend feedback only. System configuration and the installed app were
 preserved. No installer, tag or Release was produced.
+
+## 2026-10-13: concise launch actions and transient action errors
+
+Saved and preview controls now use Launch, Edit, Copy command, Copy alias/function
+and Delete. Copying still preserves the complete command or definition. Launch
+and clipboard failures use the existing dismissible ten-second toast without
+adding persistent error rows. Form and delete failures keep their local details.
+
+Verification: 177 focused frontend tests passed, including all 16 Launch tests;
+the full frontend suite passed 611 tests in 54 files, and production type checking
+and build passed. Browser mocks checked saved/preview failures, dismissal, retry,
+unchanged row heights and scroll positions in both languages at 1000 × 650 and
+760 × 650. A real-time browser check confirmed automatic toast expiry.
+
+The isolated native desktop used an unsaved draft with a missing application path
+and the existing Los Angeles variant. The actual launch was rejected before a
+process could start; screenshots confirmed the error toast and its subsequent
+expiry without an inline error. The draft was cancelled. Existing saved recipes,
+environment collections and system settings were preserved. Rust suites were not
+repeated because no backend code changed. No installed app, installer, tag or
+Release was changed or published.

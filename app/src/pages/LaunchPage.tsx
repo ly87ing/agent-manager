@@ -31,7 +31,7 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   const [selected, setSelected] = useState<SavedLaunch | null>(null);
   const [editing, setEditing] = useState(Boolean(initialRecipe));
   const [readError, setReadError] = useState<string | null>(null);
-  const [error, setError] = useState<{ message: string; location: string } | null>(null);
+  const [error, setError] = useState<{ message: string; location: "editor" | "delete" } | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -69,9 +69,9 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   function clearFeedback() {
     setError(null); setMessage(null); toast.dismiss("launch-error");
   }
-  function fail(reason: unknown, title: string, location = "editor") {
+  function fail(reason: unknown, title: string, location: "editor" | "delete" | null = "editor") {
     const message = engineErrorMessage(reason);
-    setError({ message, location });
+    setError(location ? { message, location } : null);
     toast.error(title, { id: "launch-error", description: message, duration: 10000, closeButton: true,
       position: editing ? "top-right" : "bottom-right" });
   }
@@ -104,10 +104,10 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
     } catch (err) { if (id === generation.current) fail(err, t("预览失败")); }
     finally { setBusy(false); }
   }
-  async function copy(value: string, location: string) {
+  async function copy(value: string) {
     clearFeedback();
     try { await navigator.clipboard.writeText(value); toast.success(t("已复制到剪贴板"), { position: editing ? "top-right" : "bottom-right" }); }
-    catch (err) { fail(err, t("复制命令失败"), location); }
+    catch (err) { fail(err, t("复制命令失败"), null); }
   }
   function openSaved(item: SavedLaunch) {
     const normalized = { ...item.recipe, env: item.recipe.env ?? [] };
@@ -138,12 +138,12 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
     } catch (err) { fail(err, t("保存配置失败")); }
     finally { setBusy(false); }
   }
-  async function run(spec: LaunchRecipe, entry: LaunchEntry, location: string) {
+  async function run(spec: LaunchRecipe, entry: LaunchEntry) {
     setBusy(true); clearFeedback();
     try {
       await launchRequest("run", ["--spec", JSON.stringify(spec), "--name", entry.name, "--confirm"]);
       setMessage(t("已发送启动请求。请在应用中确认时间和环境。"));
-    } catch (err) { fail(err, t("启动失败"), location); }
+    } catch (err) { fail(err, t("启动失败"), null); }
     finally { setBusy(false); }
   }
   async function confirm() {
@@ -201,18 +201,17 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
                 <td className="px-3 py-2"><div className="flex items-center gap-2">
                   <button type="button" className={`${button} min-w-0 flex-1`} disabled={busy}
                     data-testid={runnable ? `run-saved-${item.id}-${entry.name}` : undefined}
-                    onClick={() => void (runnable ? run(item.recipe, entry, location) : copy(entry.command, location))}>{runnable ? t("启动一次") : t("复制运行命令")}</button>
+                    onClick={() => void (runnable ? run(item.recipe, entry) : copy(entry.command))}>{runnable ? t("启动") : t("复制命令")}</button>
                   <ActionMenu label={t("配置操作 {0}", entry.name)} items={[
-                    { label: t("编辑配置"), testId: `edit-launch-${item.id}-${entry.name}`, disabled: busy, onSelect: () => openSaved(item) },
-                    { label: t("复制运行命令"), testId: `copy-launch-${item.id}-${entry.name}`, disabled: busy, onSelect: () => void copy(entry.command, location) },
-                    { label: item.recipe.platform === "windows" ? t("复制完整函数定义") : t("复制完整别名定义"), testId: `copy-definition-${item.id}-${entry.name}`, disabled: busy,
-                      onSelect: () => void copy(entry.definition, location) },
-                    { label: t("删除配置"), testId: `delete-launch-${item.id}-${entry.name}`, danger: true, disabled: busy,
+                    { label: t("编辑"), testId: `edit-launch-${item.id}-${entry.name}`, disabled: busy, onSelect: () => openSaved(item) },
+                    { label: t("复制命令"), testId: `copy-launch-${item.id}-${entry.name}`, disabled: busy, onSelect: () => void copy(entry.command) },
+                    { label: item.recipe.platform === "windows" ? t("复制函数") : t("复制别名"), testId: `copy-definition-${item.id}-${entry.name}`, disabled: busy,
+                      onSelect: () => void copy(entry.definition) },
+                    { label: t("删除"), testId: `delete-launch-${item.id}-${entry.name}`, danger: true, disabled: busy,
                       onSelect: () => { clearFeedback(); setConfirmation(item); } },
                   ]} />
                 </div></td>
               </tr>
-              {error?.location === location && <tr><td colSpan={4} className="px-3 pb-2"><p role="alert" className="whitespace-pre-wrap break-words text-destructive">{error.message}</p></td></tr>}
             </tbody>;
           }))}
         </table>
@@ -296,16 +295,14 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
           <span className="text-xs text-muted-foreground">{entry.timezone || t("系统默认时区")}</span></div>
         <pre className="whitespace-pre-wrap break-all rounded bg-muted p-2 text-xs" data-testid={`launch-command-${entry.name}`}>{entry.command}</pre>
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={button} onClick={() => void copy(entry.command, `preview-${entry.name}`)}>{t("复制运行命令")}</button>
-          <button type="button" className={button} onClick={() => void copy(entry.definition, `preview-${entry.name}`)}>{recipe.platform === "windows" ? t("复制完整函数定义") : t("复制完整别名定义")}</button>
+          <button type="button" className={button} onClick={() => void copy(entry.command)}>{t("复制命令")}</button>
+          <button type="button" className={button} onClick={() => void copy(entry.definition)}>{recipe.platform === "windows" ? t("复制函数") : t("复制别名")}</button>
           {local && recipe.kind === "app" && <button type="button" disabled={busy} className={button}
-            onClick={() => void run(recipe, entry, `preview-${entry.name}`)}>{t("启动一次")}</button>}
+            onClick={() => void run(recipe, entry)}>{t("启动")}</button>}
         </div>
-        {error?.location === `preview-${entry.name}` && <p role="alert" className="whitespace-pre-wrap break-words text-xs text-destructive">{error.message}</p>}
       </div>)}
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={button} onClick={() => void copy(built.entries.map((entry) => entry.definition).join("\n"), "copy-all")}>{t("复制全部定义")}</button>
-        {error?.location === "copy-all" && <p role="alert" className="w-full whitespace-pre-wrap break-words text-xs text-destructive">{error.message}</p>}
+        <button type="button" className={button} onClick={() => void copy(built.entries.map((entry) => entry.definition).join("\n"))}>{t("复制全部定义")}</button>
       </div>
       <p className="text-xs text-muted-foreground">{recipe.shell === "powershell" ? t("将完整函数定义粘贴到 PowerShell 的 $PROFILE，或当前会话中。")
         : recipe.shell === "zsh" ? t("将完整别名定义粘贴到 .zshrc，或当前终端会话中。") : t("将完整别名定义粘贴到 .bashrc，或当前终端会话中。")}</p>

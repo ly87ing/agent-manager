@@ -19,11 +19,13 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 **Exercise launch failures from the triggering viewport.**
 - A page-end alert can exist in tests while remaining off screen after a launch
-  click. Require an immediate viewport toast and persistent details beside the
-  affected entry or sticky editor controls. Verify saved and preview actions at
-  both window widths without scrolling after the click, and preserve drafts on
-  failure. Test clipboard recovery so an earlier error does not outlive a new action.
-- Seen 1× (2026-10-13; launch-error placement reported in the desktop preview).
+  click. Require an immediate dismissible toast for launch/copy failures; verify
+  dismissal and expiry remove the message without changing row height or leaving
+  a persistent error line. Form failures still need details beside editor controls.
+- Verify saved and preview actions at both window widths without scrolling after
+  the click, preserve drafts on failure, and test retry without automatic relaunch.
+  Test clipboard recovery so an earlier error does not outlive a new action.
+- Seen 1× (2026-10-13; placement and stale error rows reported in the preview).
 
 **Verify environment completion feedback from the triggering viewport.**
 - Persistent report counts alone do not prove that a user immediately sees the
