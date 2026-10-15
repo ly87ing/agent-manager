@@ -38,6 +38,8 @@ export type EnvironmentReport = z.infer<typeof reportSchema>;
 export type EnvironmentCheck = z.infer<typeof checkSchema>;
 const profileSchema = z.object({ id: z.string(), revision: z.string(), name: z.string(), target: targetSchema, auto_sync: z.boolean() }).strict();
 export type EnvironmentProfile = z.infer<typeof profileSchema>;
+const builtinSchema = z.object({ id: z.string(), name: z.string(), target: targetSchema, time_service: z.string(), source_url: z.string().url() }).strict();
+export type EnvironmentBuiltin = z.infer<typeof builtinSchema>;
 export interface EnvironmentProfileInput { name: string; target: EnvironmentTarget }
 
 async function request(operation: string, args: string[] = []) {
@@ -47,12 +49,12 @@ async function request(operation: string, args: string[] = []) {
   return result.data;
 }
 
-export function profileTarget(profile: EnvironmentProfile): EnvironmentTarget {
+export function profileTarget(profile: Pick<EnvironmentProfile, "target">): EnvironmentTarget {
   return Object.fromEntries(Object.entries(profile.target).filter(([, value]) => value !== null)) as EnvironmentTarget;
 }
 
-export async function listEnvironmentProfiles(): Promise<EnvironmentProfile[]> {
-  return z.object({ items: z.array(profileSchema) }).strict().parse(await request("profiles")).items;
+export async function listEnvironmentProfiles() {
+  return z.object({ items: z.array(profileSchema), builtins: z.array(builtinSchema) }).strict().parse(await request("profiles"));
 }
 
 export async function saveEnvironmentProfile(input: EnvironmentProfileInput, previous?: EnvironmentProfile): Promise<EnvironmentProfile> {

@@ -4,8 +4,9 @@
 
 The Environment page inspects macOS regional settings and the caller's process
 environment. Targets are optional and grouped into user-created named profiles.
-Blank targets provide observations without a comparison. No country, time zone,
-language, locale or time server is a product default.
+Blank targets provide observations without a comparison. Los Angeles and
+Singapore built-in profiles are explicit recommendations, never selected or
+applied automatically. No region is inferred from the machine or network.
 
 The desktop and CLI share `environment:check` in
 [native_environment](../../engine-rs/src/native_environment/mod.rs). It returns
@@ -63,6 +64,44 @@ definitions do not change the current selection or report. Profile-list reads
 are independent of environment-read failures. Blank clock tolerance is valid
 unless a clock-correction action is requested. Missing names, empty criteria and
 invalid tolerances are explained in the editor's fixed footer.
+
+`environment:profiles` returns saved definitions in `items` and read-only
+recommendations in `builtins`. Both desktop and CLI receive the same built-in
+definitions from Rust. Reading does not persist them or create HOME/data. Their
+`builtin:` IDs cannot be saved, deleted or restored as database records through
+the existing saved-ID validation. Copying creates an ordinary new custom profile;
+later edits to that copy do not change the built-in. Backups contain only saved
+custom definitions.
+
+| Built-in | Time zone | Exact language list | Region | Process locale | Reference server |
+| --- | --- | --- | --- | --- | --- |
+| Los Angeles (US) | `America/Los_Angeles` | `en-US` | `US` | `en_US.UTF-8` | `time.nist.gov` |
+| Singapore (SG) | `Asia/Singapore` | `en-SG` | `SG` | `en_US.UTF-8` | `nets.org.sg` |
+
+Both require strict raw-locale consistency, automatic time on, automatic time
+zone off, kernel synchronization and a 2000 ms clock tolerance. Unset raw locale
+variables may inherit; explicitly set nonempty variables must agree. The exact
+language list is intentional, so adding another language is a mismatch until
+the user explicitly copies and changes the standard. These are bounded product
+criteria, not a claim that every user in those regions has identical preferences.
+Singapore uses the supported macOS POSIX English locale `en_US.UTF-8` for process
+compatibility. Foundation supports the Singapore system locale independently;
+the tested macOS POSIX locale inventory lacks `en_SG.UTF-8`, and requesting it
+with `/usr/bin/locale` fell back to `C`. This profile therefore does not assert
+Singapore-specific POSIX monetary/date formats. The system region target remains
+`SG`; the explicit process target is visible and can be changed in a custom copy.
+
+The [NIST server list](https://tf.nist.gov/tf-cgi/servers.cgi) recommends the
+load-balanced `time.nist.gov` name. Its published current nodes are in Colorado
+and Maryland, not Los Angeles. Singapore's
+[A*STAR NMC time laboratory](https://www.a-star.edu.sg/nmc/Research-and-Development/Labs/FL)
+publishes `nets.org.sg` as a free Stratum-1 service for UTC(SG). Authority and
+regional suitability are the selection basis, not an unmeasured claim of best
+latency or guaranteed availability. Each explicit comparison queries only its
+selected server and reports unreachable or invalid evidence as unknown. There
+is no silent fallback, automatic server ranking or geographically inferred
+switch. The provider and official-reference URL accompany each definition so
+users can review the source or copy the profile to choose another server.
 
 Apply profile opens an action preview with the profile name, relevant expected
 values, available observations and the effect's scope. Nothing executes before
@@ -247,6 +286,10 @@ no HOME/data creation on reads or invalid requests, and no implicit network quer
 Frontend tests cover independent profile CRUD/reopen, target invalidation, explicit prefill,
 confirmed correction, legacy-flag read-only comparison, destination disclosure, unknown evidence, malformed results,
 retry and English rendering.
+Built-in regressions cover read-without-state, immutable IDs, independent copies,
+explicit selection without execution, full strict target forwarding and preserved
+comparison after reload. Existing backup tests retain the custom-only storage
+contract.
 Completion-feedback regressions cover mixed differences/unknowns, matching
 targets with untargeted unknowns, inventory-only results, failed request/retry,
 stale notification dismissal and unconfirmed correction despite a matching sample.

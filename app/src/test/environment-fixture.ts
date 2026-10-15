@@ -1,4 +1,13 @@
-import type { EnvironmentReport, EnvironmentTarget } from "../lib/environment";
+import type { EnvironmentBuiltin, EnvironmentReport, EnvironmentTarget } from "../lib/environment";
+
+export function environmentBuiltinsFixture(): EnvironmentBuiltin[] {
+  return [
+    { id: "builtin:los-angeles", name: "Los Angeles (US)", timezone: "America/Los_Angeles", language: "en-US", region: "US", locale: "en_US.UTF-8", server: "time.nist.gov", time_service: "NIST", source_url: "https://tf.nist.gov/tf-cgi/servers.cgi" },
+    { id: "builtin:singapore", name: "Singapore (SG)", timezone: "Asia/Singapore", language: "en-SG", region: "SG", locale: "en_US.UTF-8", server: "nets.org.sg", time_service: "A*STAR NMC", source_url: "https://www.a-star.edu.sg/nmc/Research-and-Development/Labs/FL" },
+  ].map(({ id, name, timezone, language, region, locale, server, time_service, source_url }) => ({ id, name, time_service, source_url,
+    target: environmentFixture({ timezone, languages: [language], region, locale, strict_locale: true, ntp_server: server, automatic_time: true, time_synchronized: true, automatic_timezone: false, max_clock_offset_ms: 2000 }).target,
+  }));
+}
 
 export function environmentFixture(target: EnvironmentTarget = {}, probe = false, synchronized: boolean | null = true): EnvironmentReport {
   const actual = { timezone: "Europe/London", languages: ["en-GB"], region: "GB", locale: "en_GB.UTF-8", ntp_server: "pool.ntp.org", automatic_time: null, automatic_timezone: false };

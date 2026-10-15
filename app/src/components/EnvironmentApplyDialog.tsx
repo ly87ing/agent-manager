@@ -7,7 +7,7 @@ import { t } from "../lib/i18n";
 export type EnvironmentApplication = "clock" | "launch" | "date-time" | "language-region";
 
 export function EnvironmentApplyDialog({ profile, report, busy, cooldown, error, canConfigureLaunch, onApply, onClose, onClearError }: {
-  profile: EnvironmentProfile; report: EnvironmentReport | null; busy: boolean; error: string | null;
+  profile: Pick<EnvironmentProfile, "name" | "target">; report: EnvironmentReport | null; busy: boolean; error: string | null;
   cooldown: boolean;
   canConfigureLaunch: boolean; onApply: (action: EnvironmentApplication) => void; onClose: () => void; onClearError: () => void;
 }) {

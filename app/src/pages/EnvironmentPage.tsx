@@ -6,7 +6,7 @@ import { EnvironmentProfileEditor } from "../components/EnvironmentProfileEditor
 import { EnvironmentProfiles } from "../components/EnvironmentProfiles";
 import { EnvironmentApplyDialog, type EnvironmentApplication } from "../components/EnvironmentApplyDialog";
 import { EnvironmentRemediation } from "../components/EnvironmentRemediation";
-import { checkEnvironment, checkTimeSettings, deleteEnvironmentProfile, environmentLaunchRecipe, listEnvironmentProfiles, openEnvironmentSettings, profileTarget, repairEnvironmentTime, saveEnvironmentProfile, type EnvironmentCheck, type EnvironmentProfile, type EnvironmentProfileInput, type EnvironmentReport } from "../lib/environment";
+import { checkEnvironment, checkTimeSettings, deleteEnvironmentProfile, environmentLaunchRecipe, listEnvironmentProfiles, openEnvironmentSettings, profileTarget, repairEnvironmentTime, saveEnvironmentProfile, type EnvironmentBuiltin, type EnvironmentCheck, type EnvironmentProfile, type EnvironmentProfileInput, type EnvironmentReport } from "../lib/environment";
 import type { LaunchRecipe } from "../lib/launch";
 import { engineErrorMessage } from "../lib/engine";
 import { t, useLanguage } from "../lib/i18n";
@@ -101,6 +101,7 @@ function notifyCheckError(message: string) {
 export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaunch?: (recipe: LaunchRecipe) => void }) {
   useLanguage();
   const [profiles, setProfiles] = useState<EnvironmentProfile[]>([]);
+  const [builtins, setBuiltins] = useState<EnvironmentBuiltin[]>([]);
   const [view, setView] = useState<"compare" | "profiles">("compare");
   const [profilesLoading, setProfilesLoading] = useState(true);
   const [selectedId, setSelectedId] = useState("");
@@ -127,13 +128,15 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
     }).catch((err) => { if (id === generation.current) setError(engineErrorMessage(err)); })
       .finally(() => { if (id === generation.current) setBusy(false); });
     let cancelled = false;
-    void listEnvironmentProfiles().then((items) => { if (!cancelled) setProfiles(items); })
+    void listEnvironmentProfiles().then(({ items, builtins }) => { if (!cancelled) { setProfiles(items); setBuiltins(builtins); } })
       .catch((err) => { if (!cancelled) setProfilesError(engineErrorMessage(err)); })
       .finally(() => { if (!cancelled) setProfilesLoading(false); });
     return () => { cancelled = true; generation.current++; clearTimeout(cooldownTimer.current); toast.dismiss("environment-result"); };
   }, []);
 
-  const selected = profiles.find((profile) => profile.id === selectedId);
+  const savedSelection = profiles.find((profile) => profile.id === selectedId);
+  const builtinSelection = builtins.find((profile) => profile.id === selectedId);
+  const selected = savedSelection ?? builtinSelection;
   const server = selected?.target.ntp_server;
   function showView(next: "compare" | "profiles") { setView(next); toast.dismiss("environment-result"); }
   function select(id: string) { generation.current++; setSelectedId(id); setData(null); setError(null); toast.dismiss("environment-result"); }
@@ -204,9 +207,9 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   async function reloadProfiles() {
     setProfilesLoading(true); setProfilesError(null);
     try {
-      const items = await listEnvironmentProfiles(); setProfiles(items);
+      const { items, builtins } = await listEnvironmentProfiles(); setProfiles(items); setBuiltins(builtins);
       const current = items.find((item) => item.id === selectedId);
-      if (selected && current?.revision !== selected.revision) select(current?.id ?? "");
+      if (savedSelection && current?.revision !== savedSelection.revision) select(current?.id ?? "");
     }
     catch (err) { setProfilesError(engineErrorMessage(err)); }
     finally { setProfilesLoading(false); }
@@ -237,7 +240,8 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
       </button>)}
     </div>
     {view === "profiles" && <div role="tabpanel" id="environment-profiles" aria-labelledby="environment-tab-profiles">
-      <EnvironmentProfiles profiles={profiles} loading={profilesLoading} error={profilesError} busy={removing || busy && Boolean(selected)}
+      <EnvironmentProfiles profiles={profiles} builtins={builtins} loading={profilesLoading} error={profilesError} busy={removing || busy && Boolean(selected)} selectDisabled={busy || profilesLoading || removing}
+        onSelectBuiltin={(profile) => { select(profile.id); showView("compare"); }}
         onReload={() => void reloadProfiles()} onNew={() => setEditor({ initial: null })} onEdit={(initial) => setEditor({ initial })}
         onCopy={(profile) => setEditor({ initial: null, draft: { name: t("{0} 副本", profile.name), target: profileTarget(profile) } })}
         onDelete={setDeleting} />
@@ -247,12 +251,13 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
       <h2 className="text-sm font-medium">{t("选择环境 Profile")}</h2>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <div className="min-w-0 flex-1 basis-56"><Select className={input} label={t("选择环境 Profile")} value={selectedId} disabled={busy || profilesLoading || removing}
-          options={[{ value: "", label: t("仅查看本机环境") }, ...profiles.slice().sort((a, b) => a.name.localeCompare(b.name)).map((profile) => ({ value: profile.id, label: profile.name }))]} onChange={select} /></div>
+          options={[{ value: "", label: t("仅查看本机环境") }, ...builtins.map((profile) => ({ value: profile.id, label: `${profile.name} · ${t("内置")}` })), ...profiles.slice().sort((a, b) => a.name.localeCompare(b.name)).map((profile) => ({ value: profile.id, label: profile.name }))]} onChange={select} /></div>
         <button className={button} onClick={() => showView("profiles")}>{t("管理 Profiles")}</button>
       </div>
       {profilesLoading && <p role="status" className="text-xs text-muted-foreground">{t("正在读取环境 Profiles…")}</p>}
-      {!profilesLoading && !profiles.length && !profilesError && <p className="text-xs text-muted-foreground">{t("尚无环境 Profile。先新增一份，再选择它对比或应用。")}</p>}
+      {!profilesLoading && !profiles.length && !builtins.length && !profilesError && <p className="text-xs text-muted-foreground">{t("尚无环境 Profile。先新增一份，再选择它对比或应用。")}</p>}
       {selected && <p className="text-xs text-muted-foreground">{t("所选 Profile：{0}", selected.name)}</p>}
+      {builtinSelection && <p className="text-xs text-muted-foreground">{t("内置 Profile 严格比较完整语言顺序、原始 locale、固定时区和时间设置。需要调整标准时，可复制为自定义 Profile。")}</p>}
       <div className="flex flex-wrap gap-2">
         <button className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={busy || cooldown || removing}
           onClick={() => void run()}>{busy ? t("正在检查…") : selected ? t("对比 Profile") : t("检查本机环境")}</button>

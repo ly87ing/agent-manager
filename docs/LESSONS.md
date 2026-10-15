@@ -16,6 +16,24 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Verify built-in process locales against the target platform.**
+- Foundation recognized `en_SG`, but the macOS POSIX inventory lacked
+  `en_SG.UTF-8`; forcing it caused `/usr/bin/locale` to fall back to `C`.
+  Environment strings alone cannot establish runtime locale support.
+- Check both `locale -a` and an isolated real locale invocation before choosing
+  a preset. Keep Singapore's system region separate from the explicitly stated
+  compatible POSIX process locale, and leave customization available.
+- Seen 1× (2026-10-15; built-in Singapore profile compatibility correction).
+
+**Dismiss portal menus when scrolling moves their anchor.**
+- The longer profile list exposed ActionMenu closing on a queued outer scroll
+  after its trigger became visible. The trigger's coordinates were unchanged
+  before and during that event; the new menu was immediately unusable.
+- Preserve outside-click, Escape and resize dismissal. Ignore a queued scroll
+  only while the trigger stays in place, and retain a regression that moves the
+  trigger before asserting dismissal. Exercise the real scrolled-list flow.
+- Seen 1× (2026-10-15; built-in profile list acceptance).
+
 **Keep saved environment criteria independent of execution choices.**
 - The profile editor coupled saving a reusable comparison standard to an
   automatic-correction flag. A placeholder tolerance looked filled while Save

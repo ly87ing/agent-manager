@@ -141,6 +141,21 @@ fn item(id: &str, raw: &str) -> Result<Value> {
     )
 }
 
+fn builtins() -> Vec<Value> {
+    [
+        ("builtin:los-angeles", "Los Angeles (US)", "America/Los_Angeles", "en-US", "US", "en_US.UTF-8", "time.nist.gov", "NIST", "https://tf.nist.gov/tf-cgi/servers.cgi"),
+        ("builtin:singapore", "Singapore (SG)", "Asia/Singapore", "en-SG", "SG", "en_US.UTF-8", "nets.org.sg", "A*STAR NMC", "https://www.a-star.edu.sg/nmc/Research-and-Development/Labs/FL"),
+    ].into_iter().map(|(id, name, timezone, language, region, locale, server, time_service, source_url)| {
+        let target = Target {
+            timezone: Some(timezone.into()), languages: vec![language.into()],
+            region: Some(region.into()), locale: Some(locale.into()), strict_locale: true,
+            ntp_server: Some(server.into()), automatic_time: Some(true),
+            time_synchronized: Some(true), automatic_timezone: Some(false), max_clock_offset_ms: Some(2000),
+        };
+        json!({"id":id,"name":name,"target":target,"time_service":time_service,"source_url":source_url})
+    }).collect()
+}
+
 fn list(conn: Option<&Connection>) -> Result<Vec<Value>> {
     let Some(conn) = conn else {
         return Ok(vec![]);
@@ -183,7 +198,9 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         if !req.args.is_empty() {
             bail!("profiles accepts no arguments.");
         }
-        return Ok(json!({"items":list(store::open_readonly(ctx)?.as_ref())?}));
+        return Ok(
+            json!({"items":list(store::open_readonly(ctx)?.as_ref())?,"builtins":builtins()}),
+        );
     }
     let mut seen = BTreeSet::new();
     if req.args.len() % 2 != 0 {

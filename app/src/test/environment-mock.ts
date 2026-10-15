@@ -1,5 +1,5 @@
 import type { EnvironmentProfile, EnvironmentProfileInput, EnvironmentReport } from "../lib/environment";
-import { environmentFixture } from "./environment-fixture";
+import { environmentBuiltinsFixture, environmentFixture } from "./environment-fixture";
 import { makeEnvelope } from "./fixtures";
 
 /** Dev-only persistence lasts for this mock client's lifetime. */
@@ -8,7 +8,7 @@ export function createEnvironmentMock() {
   const arg = (args: string[], key: string) => args[args.indexOf(key) + 1];
   return (command: string, args: string[]) => {
     if (command === "environment:open-settings") return makeEnvelope({ pane: arg(args, "--pane") });
-    if (command === "environment:profiles") return makeEnvelope({ items });
+    if (command === "environment:profiles") return makeEnvelope({ items, builtins: environmentBuiltinsFixture() });
     if (command === "environment:save-profile") {
       const input = JSON.parse(arg(args, "--spec")) as EnvironmentProfileInput;
       const id = args.includes("--id") ? arg(args, "--id") : crypto.randomUUID();

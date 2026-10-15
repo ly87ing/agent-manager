@@ -13,7 +13,7 @@ function collection(target: EnvironmentTarget = {}, auto_sync = false): Environm
 }
 function setup(item?: EnvironmentProfile, synchronized: boolean | null = true) {
   return renderWithEngine(<EnvironmentPage />, {
-    "environment:profiles": makeEnvelope({ items: item ? [item] : [] }),
+    "environment:profiles": makeEnvelope({ builtins: [], items: item ? [item] : [] }),
     "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]), args.includes("--probe-time"), synchronized)),
   });
 }
@@ -80,7 +80,7 @@ describe("Environment checks", () => {
     const report = environmentFixture(target, true);
     report.time_repair = { status: "failed", before_offset_ms: 3000, before_uncertainty_ms: 20 };
     renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ items: [collection(target, true)] }),
+      "environment:profiles": makeEnvelope({ builtins: [], items: [collection(target, true)] }),
       "environment:check": makeEnvelope(environmentFixture()), "environment:sync-time": makeEnvelope(report),
     });
     await screen.findByText("已读取环境，尚未设置比较目标。");
@@ -178,7 +178,7 @@ describe("Environment checks", () => {
       report.summary.matched++; report.summary.mismatched--;
     }
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ items: [item] }), "environment:check": makeEnvelope(environmentFixture()), "environment:sync-time": makeEnvelope(report),
+      "environment:profiles": makeEnvelope({ builtins: [], items: [item] }), "environment:check": makeEnvelope(environmentFixture()), "environment:sync-time": makeEnvelope(report),
     });
     await screen.findByText("已读取环境，尚未设置比较目标。");
     await chooseOption(screen.getByRole("combobox", { name: "选择环境 Profile" }), "sample");
@@ -200,7 +200,7 @@ describe("Environment checks", () => {
     report.time_sample!.offset_ms = 0; report.time_sample!.uncertainty_ms = 1;
     report.summary.matched++; report.summary.mismatched--; report.summary.status = "match";
     renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ items: [collection(target, true)] }),
+      "environment:profiles": makeEnvelope({ builtins: [], items: [collection(target, true)] }),
       "environment:check": makeEnvelope(environmentFixture()), "environment:sync-time": makeEnvelope(report),
     });
     await screen.findByText("已读取环境，尚未设置比较目标。");
@@ -227,7 +227,7 @@ describe("Environment checks", () => {
     let reads = 0;
     renderWithEngine(<EnvironmentPage />, {
       "environment:check": makeEnvelope(environmentFixture()),
-      "environment:profiles": async () => makeEnvelope(++reads === 1 ? { items: [{}] } : { items: [] }),
+      "environment:profiles": async () => makeEnvelope(++reads === 1 ? { builtins: [], items: [{}] } : { builtins: [], items: [] }),
       "environment:save-profile": makeEnvelope({}, { ok: false, errors: [{ code: "CONFLICT", element: null, message: "Collection changed; reload before editing." }] }),
     });
     await screen.findByText("已读取环境，尚未设置比较目标。");
@@ -257,7 +257,7 @@ describe("Environment checks", () => {
     const corrected = environmentFixture(target, true);
     corrected.time_repair = { status: "cancelled", before_offset_ms: 20, before_uncertainty_ms: 5 };
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ items: [collection(target)] }),
+      "environment:profiles": makeEnvelope({ builtins: [], items: [collection(target)] }),
       "environment:check": async (args) => makeEnvelope(environmentFixture(args.includes("--probe-time") ? target : {}, args.includes("--probe-time"))),
       "environment:sync-time": makeEnvelope(corrected),
     });
@@ -288,7 +288,7 @@ describe("Environment checks", () => {
   it("shows remediation without enabling source details and opens only the requested settings pane", async () => {
     const target = { timezone: "Asia/Tokyo", region: "JP" };
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ items: [collection(target)] }),
+      "environment:profiles": makeEnvelope({ builtins: [], items: [collection(target)] }),
       "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]))),
       "environment:open-settings": async (args) => makeEnvelope({ pane: args[1] }),
     });
@@ -317,7 +317,7 @@ describe("Environment checks", () => {
     report.summary.matched--; report.summary.mismatched++; report.summary.status = "mismatch";
     let draft: unknown;
     renderWithEngine(<EnvironmentPage onConfigureLaunch={(recipe) => { draft = recipe; }} />, {
-      "environment:profiles": makeEnvelope({ items: [collection(target)] }),
+      "environment:profiles": makeEnvelope({ builtins: [], items: [collection(target)] }),
       "environment:check": async (args) => makeEnvelope(JSON.parse(args[args.indexOf("--spec") + 1]).locale ? report : environmentFixture()),
     });
     await screen.findByText("已读取环境，尚未设置比较目标。");
@@ -335,7 +335,7 @@ describe("Environment checks", () => {
     row.state = "match"; row.observed = "true"; row.note = "automatic_time";
     updated.summary.unknown--; updated.summary.matched++; updated.summary.status = "match";
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ items: [collection(target)] }),
+      "environment:profiles": makeEnvelope({ builtins: [], items: [collection(target)] }),
       "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]))),
       "environment:check-time-settings": makeEnvelope({ status, report: status === "read" ? updated : null }),
     });
