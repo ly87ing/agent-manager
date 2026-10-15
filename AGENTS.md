@@ -2,7 +2,7 @@
 
 ## Current goal
 
-- The independent environment tool inspects macOS regional settings and the caller's process environment. Checks remain read-only; named expected-value collections live in Agent Manager's database. Explicit checks may query the selected collection's time server. `environment:sync-time --confirm` and an enabled collection's automatic correction may adjust only the system clock, after a fresh clearly excessive offset and macOS authorization, followed by independent verification. Preserve unknown evidence and process boundaries. See [Environment checks](docs/subsystems/environment-checks.md).
+- The independent environment tool inspects macOS regional settings and the caller's process environment. Environment profiles are maintained independently in Agent Manager's database. Comparisons remain read-only, including profiles with a legacy automatic-correction flag, and may query the selected profile's time server. Applying a profile is a separate preview and confirmation. `environment:sync-time --confirm` may adjust only the system clock, after a fresh clearly excessive offset and macOS authorization, followed by independent verification. Preserve unknown evidence and process boundaries. See [Environment checks](docs/subsystems/environment-checks.md).
 
 - Environment remediation can open only the date/time or language/region settings pane, prefill an unsaved general launch recipe, or read the automatic-time switch through `environment:check-time-settings --confirm`. Authorized inspection stays read-only and never invokes correction. Keep mismatch explanations and scope visible without source details; do not change the checker process to make a result match.
 

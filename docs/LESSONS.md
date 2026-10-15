@@ -16,6 +16,20 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Keep saved environment criteria independent of execution choices.**
+- The profile editor coupled saving a reusable comparison standard to an
+  automatic-correction flag. A placeholder tolerance looked filled while Save
+  stayed disabled, and checking a flagged profile could invoke correction.
+- Verify profile-only save with a blank tolerance, visible validation in the
+  fixed footer, legacy-flag comparisons with no correction, and a separate apply
+  preview whose cancellation performs no work. Existing profile and backup data
+  remain readable; application-prefill values do not prove a target app's state.
+- Real duplicate/edit interaction exposed a dropdown closing on a queued dialog
+  scroll after focus. Scroll only the option list, and dismiss an outside scroll
+  only when it actually moves the trigger. Exercise mouse selection in scrolled
+  dialogs; a mocked `scrollIntoView` cannot prove this browser behavior.
+- Seen 1× (2026-10-15; independent environment-profile design correction).
+
 **Execute generated Windows commands through their actual shell and entry type.**
 - Renderer assertions covered native quoting while `.cmd` and `.bat` targets were
   handed directly to `ProcessStartInfo`. Run generated functions against a native

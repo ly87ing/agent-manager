@@ -10,14 +10,15 @@ import { listTimeZones } from "../lib/launch";
 const input = "w-full min-w-0 rounded-md border border-input bg-background px-2 py-1.5 text-sm";
 const booleanText = (value: boolean | null | undefined) => value == null ? "" : String(value);
 
-export function EnvironmentProfileEditor({ initial, observation, onSave, onClose }: {
+export function EnvironmentProfileEditor({ initial, draft, observation, onSave, onClose }: {
   initial: EnvironmentProfile | null; observation: EnvironmentReport | null;
+  draft?: EnvironmentProfileInput;
   onSave: (input: EnvironmentProfileInput) => Promise<void>; onClose: () => void;
 }) {
-  const target = initial?.target;
-  const [name, setName] = useState(initial?.name ?? "");
+  const target = (initial ?? draft)?.target;
+  const [name, setName] = useState((initial ?? draft)?.name ?? "");
   const [timezone, setTimezone] = useState(target?.timezone ?? "");
-  const [languages, setLanguages] = useState(target?.languages.join(", ") ?? "");
+  const [languages, setLanguages] = useState(target?.languages?.join(", ") ?? "");
   const [region, setRegion] = useState(target?.region ?? "");
   const [locale, setLocale] = useState(target?.locale ?? "");
   const [strictLocale, setStrictLocale] = useState(target?.strict_locale ?? true);
@@ -26,10 +27,12 @@ export function EnvironmentProfileEditor({ initial, observation, onSave, onClose
   const [automaticTimezone, setAutomaticTimezone] = useState(booleanText(target?.automatic_timezone));
   const [timeSynchronized, setTimeSynchronized] = useState(booleanText(target?.time_synchronized));
   const [tolerance, setTolerance] = useState(target?.max_clock_offset_ms == null ? "" : String(target.max_clock_offset_ms));
-  const [autoSync, setAutoSync] = useState(initial?.auto_sync ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const validTolerance = !tolerance || (Number.isInteger(Number(tolerance)) && Number(tolerance) >= 1 && Number(tolerance) <= 60000);
+  const hasTargets = Boolean(timezone || languages.trim() || region || locale.trim() || server.trim() || automaticTime || automaticTimezone || timeSynchronized || tolerance);
+  const validation = !name.trim() ? t("请填写 Profile 名称。") : !hasTargets ? t("请至少填写一项期望值。")
+    : !validTolerance ? t("时间偏差请输入 1 到 60000 之间的整数。") : null;
   const choices = [{ value: "", label: t("不比较") }, { value: "true", label: t("开启") }, { value: "false", label: t("已关闭") }];
   const zones = [{ value: "", label: t("不比较") }, ...listTimeZones().map((zone) => ({ value: zone, label: zone }))];
 
@@ -51,14 +54,14 @@ export function EnvironmentProfileEditor({ initial, observation, onSave, onClose
       ...(tolerance && { max_clock_offset_ms: Number(tolerance) }),
     };
     setSaving(true); setError(null);
-    try { await onSave({ name: name.trim(), target: expected, auto_sync: autoSync }); }
+    try { await onSave({ name: name.trim(), target: expected }); }
     catch (err) { setError(engineErrorMessage(err)); notifyError(t("保存期望集合失败"), err); setSaving(false); }
   }
-  return <ConfirmModal title={initial ? t("编辑期望集合") : t("新增期望集合")} description={t("保存的是比较基准，不会应用到系统。留空的项目只展示实际值。")}
-    risk="write-local" riskLabel={t("仅保存比较基准")} error={error} executing={saving} confirmLabel={t("保存期望集合")} confirmDisabled={!name.trim() || !validTolerance || (autoSync && (!server.trim() || !tolerance))}
+  return <ConfirmModal title={initial ? t("编辑环境 Profile") : t("新增环境 Profile")} description={t("保存期望值和比较标准。对比和应用时再选择此 Profile；留空的项目只展示实际值。")}
+    risk="write-local" riskLabel={t("仅保存比较基准")} error={error ?? validation} executing={saving} confirmLabel={t("保存 Profile")} confirmDisabled={Boolean(validation)}
     onConfirm={() => void save()} onClose={onClose}>
     <fieldset disabled={saving} className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2">
-      <label className="min-w-0 text-xs sm:col-span-2">{t("集合名称")}<input className={`${input} mt-1`} value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
+      <label className="min-w-0 text-xs sm:col-span-2">{t("Profile 名称")}<input className={`${input} mt-1`} value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
       <button type="button" className="justify-self-start rounded-md border px-3 py-1.5 text-xs disabled:opacity-50 sm:col-span-2" disabled={!observation} onClick={useCurrent}>{t("用当前值填写目标")}</button>
       <div className="min-w-0"><span className="mb-1 block text-xs">{t("目标时区")}</span><Select label={t("目标时区")} value={timezone} options={zones} disabled={saving} onChange={setTimezone} /></div>
       <label className="min-w-0 text-xs">{t("目标语言顺序")}<input className={`${input} mt-1`} value={languages} placeholder="en-GB, fr-FR" onChange={(event) => setLanguages(event.target.value)} /></label>
@@ -71,9 +74,7 @@ export function EnvironmentProfileEditor({ initial, observation, onSave, onClose
       <div className="min-w-0 sm:col-span-2"><span className="mb-1 block text-xs">{t("目标时间同步状态")}</span><Select label={t("目标时间同步状态")} value={timeSynchronized}
         options={[{ value: "", label: t("不比较") }, { value: "true", label: t("已同步（内核报告）") }, { value: "false", label: t("未同步或时钟错误（内核报告）") }]} disabled={saving} onChange={setTimeSynchronized} /></div>
       <label className="flex items-center gap-2 text-xs sm:col-span-2"><input type="checkbox" checked={strictLocale} onChange={(event) => setStrictLocale(event.target.checked)} />{t("同时检查已设置的原始 locale 变量")}</label>
-      <label className="flex items-center gap-2 text-xs sm:col-span-2"><input type="checkbox" checked={autoSync} onChange={(event) => setAutoSync(event.target.checked)} />{t("检查发现时间偏差超限时自动校时")}</label>
-      <p className="text-xs text-muted-foreground sm:col-span-2">{t("自动校时需要填写时间服务器和偏差容限。仅在主动检查此集合时执行，macOS 可能请求管理员授权，随后自动复测。")}</p>
+      <p className="text-xs text-muted-foreground sm:col-span-2">{t("时间偏差容限可留空。填写后用于判断时间是否准确；校正系统时间需另行选择应用操作。")}</p>
     </fieldset>
-    {!validTolerance && <p role="alert" className="mt-2 text-xs text-destructive">{t("时间偏差请输入 1 到 60000 之间的整数。")}</p>}
   </ConfirmModal>;
 }

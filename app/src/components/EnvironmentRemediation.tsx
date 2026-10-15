@@ -30,7 +30,7 @@ export function EnvironmentRemediation({ row, report, reason, busy, cooldown, on
     guidance = t("在系统设置 → 通用 → 语言与地区中调整此项；部分应用需要重启。完成后重新检查。");
     action = <button className={button} disabled={busy} onClick={() => onSettings("language-region")}>{t("打开语言与地区设置")}</button>;
   } else if ((clock || row.id === "ntp.synchronized") && report.target.ntp_server) {
-    action = <button className={button} disabled={busy || cooldown} onClick={onRecheck}>{t("重新检查所选集合")}</button>;
+    action = <button className={button} disabled={busy || cooldown} onClick={onRecheck}>{t("重新对比 Profile")}</button>;
   }
   return <div className="space-y-2 rounded bg-muted/40 p-2 sm:col-span-3" aria-label={t("处理建议")}>
     <p className="text-xs">{guidance}</p>

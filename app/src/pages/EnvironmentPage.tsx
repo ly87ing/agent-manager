@@ -3,6 +3,8 @@ import { notifyError, toast } from "../lib/notifications";
 import { Select } from "../components/Select";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EnvironmentProfileEditor } from "../components/EnvironmentProfileEditor";
+import { EnvironmentProfiles } from "../components/EnvironmentProfiles";
+import { EnvironmentApplyDialog, type EnvironmentApplication } from "../components/EnvironmentApplyDialog";
 import { EnvironmentRemediation } from "../components/EnvironmentRemediation";
 import { checkEnvironment, checkTimeSettings, deleteEnvironmentProfile, environmentLaunchRecipe, listEnvironmentProfiles, openEnvironmentSettings, profileTarget, repairEnvironmentTime, saveEnvironmentProfile, type EnvironmentCheck, type EnvironmentProfile, type EnvironmentProfileInput, type EnvironmentReport } from "../lib/environment";
 import type { LaunchRecipe } from "../lib/launch";
@@ -99,12 +101,17 @@ function notifyCheckError(message: string) {
 export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaunch?: (recipe: LaunchRecipe) => void }) {
   useLanguage();
   const [profiles, setProfiles] = useState<EnvironmentProfile[]>([]);
+  const [view, setView] = useState<"compare" | "profiles">("compare");
+  const [profilesLoading, setProfilesLoading] = useState(true);
   const [selectedId, setSelectedId] = useState("");
   const [profilesError, setProfilesError] = useState<string | null>(null);
-  const [editor, setEditor] = useState<{ initial: EnvironmentProfile | null } | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [editor, setEditor] = useState<{ initial: EnvironmentProfile | null; draft?: EnvironmentProfileInput } | null>(null);
+  const [deleting, setDeleting] = useState<EnvironmentProfile | null>(null);
   const [removing, setRemoving] = useState(false);
   const [data, setData] = useState<EnvironmentReport | null>(null);
+  const [observation, setObservation] = useState<EnvironmentReport | null>(null);
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [evidence, setEvidence] = useState(false);
@@ -114,48 +121,61 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   const cooldownTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
     const id = ++generation.current;
-    void Promise.allSettled([checkEnvironment(), listEnvironmentProfiles()]).then(([report, collections]) => {
+    void checkEnvironment().then((report) => {
       if (id !== generation.current) return;
-      if (report.status === "fulfilled") setData(report.value); else setError(engineErrorMessage(report.reason));
-      if (collections.status === "fulfilled") setProfiles(collections.value); else setProfilesError(engineErrorMessage(collections.reason));
-      setBusy(false);
-    });
-    return () => { generation.current++; clearTimeout(cooldownTimer.current); toast.dismiss("environment-result"); };
+      setData(report); setObservation(report);
+    }).catch((err) => { if (id === generation.current) setError(engineErrorMessage(err)); })
+      .finally(() => { if (id === generation.current) setBusy(false); });
+    let cancelled = false;
+    void listEnvironmentProfiles().then((items) => { if (!cancelled) setProfiles(items); })
+      .catch((err) => { if (!cancelled) setProfilesError(engineErrorMessage(err)); })
+      .finally(() => { if (!cancelled) setProfilesLoading(false); });
+    return () => { cancelled = true; generation.current++; clearTimeout(cooldownTimer.current); toast.dismiss("environment-result"); };
   }, []);
 
   const selected = profiles.find((profile) => profile.id === selectedId);
   const server = selected?.target.ntp_server;
+  function showView(next: "compare" | "profiles") { setView(next); toast.dismiss("environment-result"); }
   function select(id: string) { generation.current++; setSelectedId(id); setData(null); setError(null); toast.dismiss("environment-result"); }
   function startCooldown() {
     setCooldown(true); clearTimeout(cooldownTimer.current);
     cooldownTimer.current = setTimeout(() => setCooldown(false), 4000);
   }
-  async function run(forceRepair = false) {
+  async function run(repair = false) {
     const id = ++generation.current;
-    setBusy(true); setError(null); setData(null);
+    setBusy(true); setError(null); setApplyError(null); if (!repair) setData(null);
     toast.dismiss("environment-result");
     const target = selected ? profileTarget(selected) : {};
-    const repair = forceRepair || Boolean(selected?.auto_sync);
     try {
       const result = await (repair ? repairEnvironmentTime(target) : checkEnvironment(target, Boolean(server)));
       if (id === generation.current) {
         setData(result);
+        setObservation(result);
         notifyReport(result);
         if (server) {
           startCooldown();
         }
       }
+      return true;
     } catch (err) { if (id === generation.current) {
-      const message = engineErrorMessage(err); setError(message);
-      notifyCheckError(message);
-    } }
+      const message = engineErrorMessage(err);
+      if (repair) { setApplyError(message); notifyError(t("应用 Profile 失败"), message, { id: "environment-result" }); }
+      else { setError(message); notifyCheckError(message); }
+    } return false; }
     finally { if (id === generation.current) setBusy(false); }
   }
   async function openSettings(pane: "date-time" | "language-region") {
     setBusy(true); setError(null);
-    try { await openEnvironmentSettings(pane); toast.info(t("已请求打开系统设置。完成调整后，请重新检查。"), { id: "environment-result" }); }
-    catch (err) { setError(engineErrorMessage(err)); notifyError(t("打开系统设置失败"), err, { id: "environment-result" }); }
+    try { await openEnvironmentSettings(pane); toast.info(t("已请求打开系统设置。完成调整后，请重新检查。"), { id: "environment-result" }); return true; }
+    catch (err) { if (applying) setApplyError(engineErrorMessage(err)); else setError(engineErrorMessage(err)); notifyError(t("打开系统设置失败"), err, { id: "environment-result" }); return false; }
     finally { setBusy(false); }
+  }
+  function openApplication() { setApplyError(null); toast.dismiss("environment-result"); setApplying(true); }
+  async function apply(action: EnvironmentApplication) {
+    if (!selected) return;
+    if (action === "clock") { if (await run(true)) setApplying(false); }
+    else if (action === "launch") { setApplying(false); onConfigureLaunch?.(environmentLaunchRecipe(profileTarget(selected))); }
+    else if (await openSettings(action)) setApplying(false);
   }
   async function authorizeTimeSettings() {
     const id = ++generation.current;
@@ -177,19 +197,24 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   async function save(input: EnvironmentProfileInput) {
     const saved = await saveEnvironmentProfile(input, editor?.initial ?? undefined);
     setProfiles((items) => [...items.filter((item) => item.id !== saved.id), saved]);
-    select(saved.id); setEditor(null);
-    toast.success(t("期望集合已保存"));
+    if (selectedId === saved.id) select(saved.id);
+    setEditor(null);
+    toast.success(t("环境 Profile 已保存"));
   }
   async function reloadProfiles() {
-    setBusy(true); setProfilesError(null);
-    try { const items = await listEnvironmentProfiles(); setProfiles(items); select(""); }
+    setProfilesLoading(true); setProfilesError(null);
+    try {
+      const items = await listEnvironmentProfiles(); setProfiles(items);
+      const current = items.find((item) => item.id === selectedId);
+      if (selected && current?.revision !== selected.revision) select(current?.id ?? "");
+    }
     catch (err) { setProfilesError(engineErrorMessage(err)); }
-    finally { setBusy(false); }
+    finally { setProfilesLoading(false); }
   }
   async function remove() {
-    if (!selected) return;
+    if (!deleting) return;
     setRemoving(true); setProfilesError(null);
-    try { await deleteEnvironmentProfile(selected); setProfiles((items) => items.filter((item) => item.id !== selected.id)); select(""); setDeleting(false); toast.success(t("期望集合已删除")); }
+    try { await deleteEnvironmentProfile(deleting); setProfiles((items) => items.filter((item) => item.id !== deleting.id)); if (selectedId === deleting.id) select(""); setDeleting(null); toast.success(t("环境 Profile 已删除")); }
     catch (err) { setProfilesError(engineErrorMessage(err)); notifyError(t("删除期望集合失败"), err); }
     finally { setRemoving(false); }
   }
@@ -197,38 +222,52 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   return <div className="space-y-4" data-testid="environment-page">
     <div>
       <h1 className="text-lg font-semibold">{t("环境检查")}</h1>
-      <p className="mt-1 text-xs text-muted-foreground">{t("选择已保存的期望集合，比较本机实际环境。集合只定义检查基准，不会应用区域或语言设置。")}</p>
+      <p className="mt-1 text-xs text-muted-foreground">{t("独立维护环境 Profile，选择它对比本机环境，或预览后执行应用操作。")}</p>
     </div>
-    <section className="space-y-3 rounded-lg border bg-card p-4" aria-label={t("期望值集合")}>
-      <h2 className="text-sm font-medium">{t("期望值集合")}</h2>
+    <div role="tablist" aria-label={t("环境功能")} className="flex flex-wrap gap-2 border-b pb-2">
+      {(["compare", "profiles"] as const).map((tab) => <button key={tab} type="button" role="tab" aria-selected={view === tab}
+        aria-controls={`environment-${tab}`} id={`environment-tab-${tab}`} tabIndex={view === tab ? 0 : -1} disabled={busy && applying || removing}
+        className={`${button} ${view === tab ? "bg-accent font-medium" : "text-muted-foreground"}`} onClick={() => showView(tab)} onKeyDown={(event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          const next = event.key === "Home" ? "compare" : event.key === "End" ? "profiles" : tab === "compare" ? "profiles" : "compare";
+          showView(next); document.getElementById(`environment-tab-${next}`)?.focus();
+        }}>
+        {tab === "compare" ? t("对比与应用") : t("环境 Profiles")}
+      </button>)}
+    </div>
+    {view === "profiles" && <div role="tabpanel" id="environment-profiles" aria-labelledby="environment-tab-profiles">
+      <EnvironmentProfiles profiles={profiles} loading={profilesLoading} error={profilesError} busy={removing || busy && Boolean(selected)}
+        onReload={() => void reloadProfiles()} onNew={() => setEditor({ initial: null })} onEdit={(initial) => setEditor({ initial })}
+        onCopy={(profile) => setEditor({ initial: null, draft: { name: t("{0} 副本", profile.name), target: profileTarget(profile) } })}
+        onDelete={setDeleting} />
+    </div>}
+    {view === "compare" && <div role="tabpanel" id="environment-compare" aria-labelledby="environment-tab-compare" className="space-y-4">
+    <section className="space-y-3 rounded-lg border bg-card p-4" aria-label={t("对比与应用")}>
+      <h2 className="text-sm font-medium">{t("选择环境 Profile")}</h2>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <div className="min-w-0 flex-1 basis-56"><Select className={input} label={t("选择期望集合")} value={selectedId} disabled={busy || removing}
+        <div className="min-w-0 flex-1 basis-56"><Select className={input} label={t("选择环境 Profile")} value={selectedId} disabled={busy || profilesLoading || removing}
           options={[{ value: "", label: t("仅查看本机环境") }, ...profiles.slice().sort((a, b) => a.name.localeCompare(b.name)).map((profile) => ({ value: profile.id, label: profile.name }))]} onChange={select} /></div>
-        <button className={button} disabled={busy || Boolean(profilesError)} onClick={() => setEditor({ initial: null })}>{t("新增期望集合")}</button>
-        {selected && <><button className={button} disabled={busy} onClick={() => setEditor({ initial: selected })}>{t("编辑期望集合")}</button>
-          <button className={button} disabled={busy} onClick={() => setDeleting(true)}>{t("删除期望集合")}</button></>}
+        <button className={button} onClick={() => showView("profiles")}>{t("管理 Profiles")}</button>
       </div>
-      {!profiles.length && !profilesError && <p className="text-xs text-muted-foreground">{t("尚无期望集合。新增并保存一次，之后选择集合即可重复检查。")}</p>}
-      {selected && <p className="text-xs text-muted-foreground">{t("正在比较集合：{0}", selected.name)}</p>}
+      {profilesLoading && <p role="status" className="text-xs text-muted-foreground">{t("正在读取环境 Profiles…")}</p>}
+      {!profilesLoading && !profiles.length && !profilesError && <p className="text-xs text-muted-foreground">{t("尚无环境 Profile。先新增一份，再选择它对比或应用。")}</p>}
+      {selected && <p className="text-xs text-muted-foreground">{t("所选 Profile：{0}", selected.name)}</p>}
       <div className="flex flex-wrap gap-2">
         <button className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={busy || cooldown || removing}
-          onClick={() => void run()}>{busy ? t("正在检查…") : selected ? t("检查所选集合") : t("检查本机环境")}</button>
+          onClick={() => void run()}>{busy ? t("正在检查…") : selected ? t("对比 Profile") : t("检查本机环境")}</button>
+        <button className={button} disabled={!selected || profilesLoading || busy || removing} onClick={openApplication}>{t("应用 Profile")}</button>
       </div>
       {server && <p className="break-all text-xs text-muted-foreground">{t("检查会向 {0} 的 UDP 123 端口查询参考时间。", server)}</p>}
-      {selected?.auto_sync && <p className="text-xs text-muted-foreground">{t("此集合已启用自动校时：偏差明确超限时会校正系统时间，macOS 可能请求管理员授权，完成后自动复测。")}</p>}
+      <p className="text-xs text-muted-foreground">{t("对比始终只读。校时、系统设置和启动配置通过“应用 Profile”单独选择。")}</p>
       {cooldown && <p role="status" className="text-xs text-muted-foreground">{t("两次时间查询至少间隔 4 秒。")}</p>}
       {profilesError && <div role="alert" className="space-y-2"><p className="break-words text-xs text-destructive">{profilesError}</p><button className={button} disabled={busy} onClick={() => void reloadProfiles()}>{t("重新读取集合")}</button></div>}
     </section>
-    {editor && <EnvironmentProfileEditor initial={editor.initial} observation={data} onSave={save} onClose={() => setEditor(null)} />}
     {authorizing && <ConfirmModal title={t("授权后重新检查")} description={t("macOS 将请求管理员授权，仅运行以下只读查询，完成后更新检查结果。")}
       risk="read" riskLabel={t("只读时间设置")} executing={busy} confirmLabel={t("继续只读检查")} onConfirm={() => void authorizeTimeSettings()} onClose={() => setAuthorizing(false)}>
       <p className="mt-3 whitespace-pre-wrap break-all font-mono text-xs">/usr/sbin/systemsetup -getusingnetworktime</p>
       <p className="mt-3 text-xs text-muted-foreground">{t("不会调整系统时间、时间服务器或任何区域设置。")}</p>
       {server && <p className="mt-2 break-all text-xs text-muted-foreground">{t("检查会向 {0} 的 UDP 123 端口查询参考时间。", server)}</p>}
-    </ConfirmModal>}
-    {deleting && selected && <ConfirmModal title={t("删除期望集合")} description={t("仅删除集合 {0}，不修改系统环境。", selected.name)} risk="write-local" riskLabel={t("仅删除比较基准")} executing={removing}
-      confirmLabel={t("删除期望集合")} onConfirm={() => void remove()} onClose={() => setDeleting(false)}>
-      {profilesError && <p role="alert" className="mt-2 break-words text-xs text-destructive">{profilesError}</p>}
     </ConfirmModal>}
     {error && <div role="alert" className="space-y-2 rounded-md border border-destructive/30 p-3 text-sm"><p className="break-words text-destructive">{error}</p><button className={button} disabled={busy} onClick={() => void run()}>{t("重试检查")}</button></div>}
     {repairMessage && <p role="status" className="rounded-md border p-3 text-sm">{repairMessage}</p>}
@@ -249,13 +288,21 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
           <div className="min-w-0"><p className="text-xs text-muted-foreground">{t("实际值")}</p><p className="whitespace-pre-wrap break-all font-mono text-xs">{showValue(row.observed)}</p>{evidence && <p className="mt-1 break-all text-xs text-muted-foreground">{row.source}</p>}</div>
           <div className="min-w-0"><p className="text-xs text-muted-foreground">{t("期望值")}</p><p className="whitespace-pre-wrap break-all font-mono text-xs">{row.expected === null ? t("未设置目标") : showValue(row.expected)}</p>{evidence && row.state !== "mismatch" && row.state !== "unknown" && <p className="mt-1 text-xs text-muted-foreground">{note(row.note)}</p>}</div>
           <EnvironmentRemediation row={row} report={data} reason={note(row.note)} busy={busy} cooldown={cooldown}
-            onRepair={() => void run(true)} onAuthorize={() => setAuthorizing(true)} onSettings={(pane) => void openSettings(pane)} onRecheck={() => void run()}
+            onRepair={openApplication} onAuthorize={() => setAuthorizing(true)} onSettings={(pane) => void openSettings(pane)} onRecheck={() => void run()}
             onConfigureLaunch={onConfigureLaunch && selected ? () => onConfigureLaunch(environmentLaunchRecipe(profileTarget(selected))) : undefined} />
         </div>)}</div>
       </section>)}
       {data.time_sample && <p className="break-all text-xs text-muted-foreground">{t("查询地址：{0}；往返耗时：{1} ms；服务器层级：{2}。", data.time_sample.peer_address, data.time_sample.round_trip_ms.toFixed(1), String(data.time_sample.stratum))}{data.time_sample.special_use_address && ` ${t("该地址属于本地或特殊用途范围，无法据此确认实际服务器位置。")}`}</p>}
       {data.probe_error && <p role="alert" className="break-words text-xs text-destructive">{data.probe_error}</p>}
     </>}
-    <p className="text-xs text-muted-foreground">{t("环境比较保持只读；仅主动校时或集合中启用的自动校时会调整系统时间。其他应用环境与后台实际授时来源仍需另行验证。")}</p>
+    <p className="text-xs text-muted-foreground">{t("对比仅检查本机系统和 Agent Manager 当前进程。其他应用的环境需在该应用中另行验证。")}</p>
+    </div>}
+    {editor && <EnvironmentProfileEditor initial={editor.initial} draft={editor.draft} observation={observation} onSave={save} onClose={() => setEditor(null)} />}
+    {applying && selected && <EnvironmentApplyDialog profile={selected} report={data} busy={busy} cooldown={cooldown} error={applyError} canConfigureLaunch={Boolean(onConfigureLaunch)}
+      onApply={(action) => void apply(action)} onClose={() => { setApplying(false); setApplyError(null); }} onClearError={() => setApplyError(null)} />}
+    {deleting && <ConfirmModal title={t("删除 Profile")} description={t("仅删除集合 {0}，不修改系统环境。", deleting.name)} risk="write-local" riskLabel={t("仅删除比较基准")} executing={removing}
+      confirmLabel={t("删除 Profile")} onConfirm={() => void remove()} onClose={() => setDeleting(null)}>
+      {profilesError && <p role="alert" className="mt-2 break-words text-xs text-destructive">{profilesError}</p>}
+    </ConfirmModal>}
   </div>;
 }

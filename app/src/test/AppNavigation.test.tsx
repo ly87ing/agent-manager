@@ -44,7 +44,7 @@ describe("App 顶层导航", () => {
     ]);
   });
 
-  it("prefills a launch draft from the selected environment without saving or running it", async () => {
+  it.each(["remediation", "apply"])("prefills a launch draft from the selected environment without saving or running it (%s)", async (entry) => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     const target = { timezone: "Europe/Paris", locale: "fr_FR.UTF-8", strict_locale: true };
     const { calls } = renderWithEngine(<App />, {
@@ -55,10 +55,19 @@ describe("App 顶层导航", () => {
     await screen.findByRole("heading", { name: "启动配置" });
     await userEvent.click(within(screen.getByRole("navigation")).getByRole("button", { name: "环境" }));
     await screen.findByText("已读取环境，尚未设置比较目标。");
-    await chooseOption(screen.getByRole("combobox", { name: "选择期望集合" }), "french");
-    await userEvent.click(screen.getByRole("button", { name: "检查所选集合" }));
-    await screen.findByText("发现与目标不符的项目。");
-    await userEvent.click(within(document.querySelector('[data-check-id="process.raw_locale"]') as HTMLElement).getByRole("button", { name: "创建启动配置" }));
+    await chooseOption(screen.getByRole("combobox", { name: "选择环境 Profile" }), "french");
+    if (entry === "remediation") {
+      await userEvent.click(screen.getByRole("button", { name: "对比 Profile" }));
+      await screen.findByText("发现与目标不符的项目。");
+      await userEvent.click(within(document.querySelector('[data-check-id="process.raw_locale"]') as HTMLElement).getByRole("button", { name: "创建启动配置" }));
+    } else {
+      await userEvent.click(screen.getByRole("button", { name: "应用 Profile" }));
+      const dialog = screen.getByRole("dialog", { name: "应用环境 Profile" });
+      expect(dialog).toHaveTextContent("Europe/Paris");
+      expect(dialog).toHaveTextContent("fr_FR.UTF-8");
+      expect(calls.some((call) => ["launch:save", "launch:run", "launch:build"].includes(call.command))).toBe(false);
+      await userEvent.click(within(dialog).getByRole("button", { name: "生成启动配置" }));
+    }
     await screen.findByRole("heading", { name: "新建配置" });
     expect(screen.getByRole("combobox", { name: "目标系统" })).toHaveAttribute("data-value", "macos");
     expect(screen.getByRole("combobox", { name: "选择时区 1" })).toHaveAttribute("data-value", "Europe/Paris");

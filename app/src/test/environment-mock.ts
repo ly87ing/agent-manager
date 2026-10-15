@@ -12,7 +12,7 @@ export function createEnvironmentMock() {
     if (command === "environment:save-profile") {
       const input = JSON.parse(arg(args, "--spec")) as EnvironmentProfileInput;
       const id = args.includes("--id") ? arg(args, "--id") : crypto.randomUUID();
-      const item = { ...input, id, revision: crypto.randomUUID().replaceAll("-", "").repeat(2), target: environmentFixture(input.target).target };
+      const item = { ...input, auto_sync: false, id, revision: crypto.randomUUID().replaceAll("-", "").repeat(2), target: environmentFixture(input.target).target };
       const index = items.findIndex((entry) => entry.id === id);
       if (index >= 0) items[index] = item; else items.push(item);
       return makeEnvelope({ item });

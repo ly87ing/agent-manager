@@ -3,7 +3,7 @@
 ## Responsibilities and sources of truth
 
 The Environment page inspects macOS regional settings and the caller's process
-environment. Targets are optional and grouped into user-created named collections.
+environment. Targets are optional and grouped into user-created named profiles.
 Blank targets provide observations without a comparison. No country, time zone,
 language, locale or time server is a product default.
 
@@ -48,11 +48,37 @@ these facts.
 
 ## Runtime path
 
-Opening Environment reads local observations and saved collections without any
-network query or write. Selecting a collection clears the old report. Check
-selected collection compares its values and queries its explicit time server,
-when configured. The destination and automatic-correction behavior are disclosed
-before checking. No collection is selected by default.
+Opening Environment reads local observations and saved profiles without any
+network query or write. Selecting a profile clears the old report. Compare
+profile compares its values and queries its explicit time server,
+when configured. The destination is disclosed before checking. Comparisons never
+correct time, including profiles saved with the legacy `auto_sync` flag. No
+profile is selected by default.
+
+The Environment profiles tab maintains a separate list with create, edit,
+duplicate and delete actions. The Compare and apply tab selects a profile for an
+operation. Saving a definition does not select it, run a comparison or apply it.
+Editing or deleting the selected definition invalidates its comparison; other
+definitions do not change the current selection or report. Profile-list reads
+are independent of environment-read failures. Blank clock tolerance is valid
+unless a clock-correction action is requested. Missing names, empty criteria and
+invalid tolerances are explained in the editor's fixed footer.
+
+Apply profile opens an action preview with the profile name, relevant expected
+values, available observations and the effect's scope. Nothing executes before
+the action-specific confirmation. The supported targets are:
+
+| Target | Effect |
+| --- | --- |
+| System clock | Measure, correct only a clearly excessive offset with macOS authorization, then independently verify. Requires an explicit server and tolerance. |
+| Application launch environment | Prefill an unsaved launch recipe with the profile's time zone and locale; the user chooses an application and explicitly saves or launches it. |
+| Date/time or language/region settings | Open the corresponding system pane for manual adjustment; opening it does not establish that settings were applied. |
+
+The application target is unknown during launch prefill; Agent Manager's observed
+process environment is not presented as evidence for that application. Saved
+launch recipes retain their explicit values rather than a live profile binding.
+Profile edits do not change existing recipes or running applications. Clock
+request failures keep the preview and previous comparison available for retry.
 
 An explicit check immediately shows a dismissible completion toast with target
 counts and the names of differences or unknown checks. Long lists show three
@@ -69,8 +95,10 @@ report.
 
 Add/Edit opens the criteria editor; Use current values as targets explicitly
 prefills its fields without asserting those values are correct. Save persists
-the name, target and optional `auto_sync` flag in `environment_profiles` inside
-the existing `native-manager.db`. It does not apply settings. Missing database
+the name and target in `environment_profiles` inside the existing
+`native-manager.db`, with `auto_sync:false` for the existing storage contract.
+The old flag remains readable and portable in backups but is not an execution
+instruction. Saving does not apply settings. Missing database
 or table reads as an empty list without creating either. Save/delete use an
 Immediate transaction and revision-based compare-and-swap, preserving concurrent
 edits. Duplicate names are rejected. No separate settings file or account state
@@ -81,7 +109,8 @@ is involved. The collection endpoints are `environment:profiles`,
 [Configuration backups](extension-backups.md) include these collections as an
 optional selectable module. Restore validates targets and unique collection
 names without inspecting or applying system settings. Restoring `auto_sync:true`
-does not query or correct time; correction still requires a later explicit check.
+does not query or correct time; correction still requires a later explicit apply
+confirmation.
 
 ```sh
 cargo run --manifest-path engine-rs/Cargo.toml -- environment:check --json
@@ -116,7 +145,7 @@ with `auto_sync` enabled. Cancellation or failure retains the previous report;
 neither is a successful read. No credentials are handled or stored by the app.
 Background peer identity stays unknown and has no repair action.
 
-The CLI explicitly adds `--probe-time`. The page's Check selected collection
+The CLI explicitly adds `--probe-time`. The page's Compare profile
 action discloses the saved time server and UDP port 123. CLI queries use the target server, or the
 configured server when no target is supplied. Name lookup and UDP response each
 have a three-second deadline. One request is sent, with no retries; the desktop
@@ -134,9 +163,10 @@ proves which server `timed` currently uses.
 
 `environment:sync-time --spec JSON --confirm` is the only clock-writing endpoint.
 Its target must explicitly include a valid `ntp_server` and
-`max_clock_offset_ms`. A collection's `auto_sync` defaults to false; enabling it
-selects this endpoint when the user clicks Check selected collection. Selecting
-or saving the collection never corrects time. No background schedule runs.
+`max_clock_offset_ms`. Apply profile and clock-remediation actions preview this
+operation and require an explicit clock-correction confirmation. Compare profile
+never selects this endpoint. Selecting or saving a profile never
+corrects time. No background schedule runs.
 
 The endpoint makes a fresh independent measurement. A matching offset returns
 `not_needed`; missing or overlapping evidence returns `unavailable`. Neither
@@ -205,7 +235,7 @@ cargo test --manifest-path engine-rs/Cargo.toml --lib native_environment
 cargo test --manifest-path engine-rs/Cargo.toml --test native_environment
 cargo test --manifest-path engine-rs/Cargo.toml --test native_environment_profiles
 cargo test --manifest-path app/src-tauri/Cargo.toml environment_
-pnpm --dir app test:unit run src/test/EnvironmentPage.test.tsx src/test/AppNavigation.test.tsx src/test/UiCopyGuard.test.ts --maxWorkers=1
+pnpm --dir app test:unit run src/test/EnvironmentPage.test.tsx src/test/EnvironmentProfiles.test.tsx src/test/AppNavigation.test.tsx src/test/UiCopyGuard.test.ts --maxWorkers=1
 ```
 
 Fixtures cover locale precedence, process overrides, ordered languages, absent
@@ -214,11 +244,14 @@ timestamp eras and timeout. Correction fixtures verify the no-write gate,
 cancellation, failure and independent post-correction measurements.
 Integration checks collection persistence, concurrent-edit rejection, deletion,
 no HOME/data creation on reads or invalid requests, and no implicit network query.
-Frontend tests cover collection CRUD/reopen, target invalidation, explicit prefill,
-opt-in correction, destination disclosure, unknown evidence, malformed results,
+Frontend tests cover independent profile CRUD/reopen, target invalidation, explicit prefill,
+confirmed correction, legacy-flag read-only comparison, destination disclosure, unknown evidence, malformed results,
 retry and English rendering.
 Completion-feedback regressions cover mixed differences/unknowns, matching
 targets with untargeted unknowns, inventory-only results, failed request/retry,
 stale notification dismissal and unconfirmed correction despite a matching sample.
-Browser mock acceptance at 1000 and 760 px proves the UI; real CLI and isolated
-native desktop readback separately establish system and bridge behavior.
+Browser acceptance at 1000 and 760 px exercises CRUD, read-only comparison,
+apply preview/cancel and unsaved launch prefill against an isolated real CLI.
+Unavailable clock evidence is exercised without correction. Isolated native
+desktop save/close and independent CLI readback establish bridge persistence;
+these checks do not claim real administrator-authorized clock correction.
