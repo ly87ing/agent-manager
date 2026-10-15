@@ -42,6 +42,15 @@ The CLI and desktop bridge use the same Rust renderer. Building does not read
 shell files, load secret sources, create HOME/data, or execute commands. POSIX
 output provides a complete alias definition. Windows output provides a named
 PowerShell function that can be pasted into `$PROFILE` or the current session.
+Windows command recipes can resolve bare batch names through the calling terminal's
+PATH, excluding aliases and PowerShell functions; native executable lookup remains
+unchanged. Batch targets (`.cmd` / `.bat`)
+use the system `cmd.exe` with AutoRun and delayed expansion disabled, batch-specific
+literal argument quoting, and the same child-only environment. Commands beyond
+the 8,191-character batch limit fail before execution. Conventional `%*` forwarding
+is covered; a batch script can still reinterpret arguments in its own body.
+Batch paths with quotes, surrounding whitespace or trailing dots are refused
+before execution; those aliases cannot fall through to native argument quoting.
 
 `launch:list` reads saved recipes without creating a database or table.
 `launch:save --spec <JSON>` creates a saved recipe. Updating uses the returned
@@ -75,6 +84,13 @@ Launched GUI applications do not belong to the manager's temporary command jobs
 and survive its exit. Command-line programs are copied to the user's terminal for
 normal interactive input and output. Launch audits record save/delete/run events,
 never process arguments, rendered commands, or definitions.
+An actual run records `requested` before the system call, then `accepted` or
+`failed` with the available system exit code. Acceptance means the system accepted
+the request, not that the application loaded or honored its environment. A failed
+completion audit preserves the actual outcome: accepted requests return
+`audit_recorded:false` and a warning asking the user to inspect the application
+before retrying; failed requests retain their launch error and disclose the
+recording failure. A request-audit failure prevents the system call.
 
 ## Constraints and failure behavior
 
@@ -87,6 +103,8 @@ Form failures remain in the editor's fixed action footer, and delete failures
 remain inside the confirmation. Read failures appear beside the
 saved-list controls. A new action, draft change or page exit clears stale action
 feedback. No error path scrolls the page or retries a launch automatically.
+Catalog and saved-list read errors remain independent. Read again retries both
+requests; one successful response cannot clear the other request's failure.
 Save/delete/request success is transient too. All action feedback uses the shared
 [interface feedback](interface-feedback.md) policy; form errors retain their
 local correction context.
@@ -122,4 +140,10 @@ text, and generic environment variables. The runtime regression reads back the
 scoped environment from a real child process. Saved-recipe tests restart the CLI
 and read the recipe back while checking that shell files are unchanged and no
 target process starts. Windows rendering tests are source-level evidence, not
-native Windows application acceptance.
+native Windows application acceptance. On Windows, the execution regression runs
+generated functions through Windows PowerShell and, when available, PowerShell 7.
+It reads back native executable and batch-shim arguments, child environment and
+nonzero exit status, including PATH lookup and special characters in file paths.
+Runtime cases read back failed system requests and accepted requests whose
+completion audit failed. Frontend cases cover either asynchronous read ordering,
+full retry recovery and the accepted-request audit warning.

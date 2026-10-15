@@ -90,7 +90,64 @@ fn launch_requires_confirmation_and_rejects_cli_and_duplicate_flags_before_state
 }
 
 #[test]
+fn rejected_system_launch_records_its_failure_without_command_details() {
+    let f = Fixture::new();
+    std::fs::create_dir_all(&f.root).unwrap();
+    let target = if cfg!(target_os = "macos") {
+        let app = f.root.join("Broken.app");
+        std::fs::create_dir_all(app.join("Contents")).unwrap();
+        std::fs::write(app.join("Contents/Info.plist"), r#"<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>missing</string><key>CFBundleIdentifier</key><string>test.agentmanager.brokenprobe</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>"#).unwrap();
+        app
+    } else {
+        let path = f.root.join(if cfg!(windows) {
+            "broken.exe"
+        } else {
+            "broken"
+        });
+        std::fs::write(&path, "not an executable").unwrap();
+        path
+    };
+    let mut recipe = spec(target.to_str().unwrap());
+    recipe["args"] = json!(["private-argument"]);
+    let result = f.call(
+        "run",
+        vec![
+            "--spec".into(),
+            recipe.to_string(),
+            "--name".into(),
+            "example-sg".into(),
+            "--confirm".into(),
+        ],
+    );
+    assert!(!result.ok, "{result:?}");
+    let detail = execute(
+        &f.ctx,
+        &Request {
+            command: "runs:get".into(),
+            args: vec!["--run".into(), "runtime-test".into()],
+            run_id: "readback".into(),
+        },
+    );
+    assert!(detail.ok, "{detail:?}");
+    let operations = detail.data["operations"].as_array().unwrap();
+    assert_eq!(operations.len(), 2, "{detail:?}");
+    assert_eq!(operations[0]["detail"]["state"], "requested");
+    assert_eq!(operations[1]["detail"]["state"], "failed");
+    assert!(!detail.data.to_string().contains("private-argument"));
+    assert!(!detail.data.to_string().contains(target.to_str().unwrap()));
+}
+
+#[test]
 fn real_cli_launches_an_independent_application_with_literal_args_and_scoped_timezone() {
+    check_real_cli_launch(false);
+}
+
+#[test]
+fn accepted_launch_preserves_its_outcome_when_completion_audit_fails() {
+    check_real_cli_launch(true);
+}
+
+fn check_real_cli_launch(reject_completion_audit: bool) {
     let f = Fixture::new();
     std::fs::create_dir_all(&f.root).unwrap();
     let source = f.root.join("probe.rs");
@@ -134,6 +191,12 @@ fn real_cli_launches_an_independent_application_with_literal_args_and_scoped_tim
     };
     let mut recipe = spec(target.to_str().unwrap());
     recipe["args"] = json!([ready, done, "O'Brien", "$(touch unexpected)", ""]);
+    if reject_completion_audit {
+        let db = agent_manager_engine::store::open_write(&f.ctx).unwrap();
+        db.execute_batch("CREATE TRIGGER reject_launch_result BEFORE INSERT ON operation_logs
+            WHEN NEW.operation_type='launch:run' AND json_extract(NEW.detail_json, '$.state')='accepted'
+            BEGIN SELECT RAISE(ABORT, 'fixture completion failure'); END;").unwrap();
+    }
     let output_file = f.root.join("launch-result.json");
     let status = std::process::Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
         .env("HOME", &f.ctx.home_dir)
@@ -154,6 +217,33 @@ fn real_cli_launches_an_independent_application_with_literal_args_and_scoped_tim
     let result: Value = serde_json::from_slice(&std::fs::read(output_file).unwrap()).unwrap();
     assert_eq!(result["ok"], true, "{result}");
     assert_eq!(result["data"]["timezone_verified"], false);
+    assert_eq!(result["data"]["audit_recorded"], !reject_completion_audit);
+    assert_eq!(
+        result["warnings"].as_array().unwrap().len(),
+        usize::from(reject_completion_audit)
+    );
+    let history = execute(
+        &f.ctx,
+        &Request {
+            command: "runs:get".into(),
+            args: vec!["--run".into(), result["run_id"].as_str().unwrap().into()],
+            run_id: "history".into(),
+        },
+    );
+    assert!(history.ok, "{history:?}");
+    let operations = history.data["operations"].as_array().unwrap();
+    assert_eq!(
+        operations.len(),
+        if reject_completion_audit { 1 } else { 2 }
+    );
+    assert_eq!(
+        operations.last().unwrap()["detail"]["state"],
+        if reject_completion_audit {
+            "requested"
+        } else {
+            "accepted"
+        }
+    );
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     while !ready.exists() && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(30));

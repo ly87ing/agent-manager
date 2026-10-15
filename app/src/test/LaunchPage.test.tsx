@@ -28,7 +28,7 @@ function entries(spec: LaunchRecipe): LaunchEntry[] {
   });
 }
 
-function setup(options: { items?: SavedLaunch[]; saveError?: string; runError?: string } = {}) {
+function setup(options: { items?: SavedLaunch[]; saveError?: string; runError?: string; runAuditError?: boolean } = {}) {
   let items = [...(options.items ?? [])];
   let revision = 1;
   const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1];
@@ -52,7 +52,7 @@ function setup(options: { items?: SavedLaunch[]; saveError?: string; runError?: 
       items = items.filter((item) => item.id !== id);
       return makeEnvelope({ id });
     },
-    "launch:run": options.runError ? makeEnvelope({}, { ok: false, errors: [{ code: "LAUNCH_ERROR", element: null, message: options.runError }] }) : makeEnvelope({ state: "requested", timezone_verified: false }),
+    "launch:run": options.runError ? makeEnvelope({}, { ok: false, errors: [{ code: "LAUNCH_ERROR", element: null, message: options.runError }] }) : makeEnvelope({ state: "requested", timezone_verified: false, audit_recorded: !options.runAuditError }),
   });
 }
 
@@ -82,6 +82,62 @@ async function successToast() {
 }
 
 describe("launch configuration controls", () => {
+  it("warns about a failed audit after an accepted launch without retrying", async () => {
+    const { calls } = setup({ items: [savedItem], runAuditError: true });
+    await userEvent.click(await screen.findByTestId("run-saved-saved-1-example-sg"));
+    await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toHaveTextContent("启动请求已发送，但记录失败"));
+    expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toBeNull();
+    expect(calls.filter((call) => call.command === "launch:run")).toHaveLength(1);
+  });
+
+  it.each(["catalog-first", "list-first"])("retains catalog errors and retries both reads (%s)", async (order) => {
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    let catalogs = 0;
+    const { calls } = renderWithEngine(<LaunchPage />, {
+      "launch:catalog": async () => {
+        if (++catalogs > 1) return makeEnvelope({ platform: "macos", shell: "zsh", apps: [] });
+        if (order === "list-first") await gate;
+        return makeEnvelope({}, { ok: false, errors: [{ code: "LAUNCH_ERROR", element: null, message: "Catalog unavailable" }] });
+      },
+      "launch:list": async () => {
+        if (order === "catalog-first") await gate;
+        return makeEnvelope({ items: [savedItem] });
+      },
+    });
+    if (order === "catalog-first") await screen.findByRole("alert");
+    else await screen.findByRole("button", { name: "编辑配置 example-sg" });
+    finish();
+    await screen.findByRole("button", { name: "编辑配置 example-sg" });
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Catalog unavailable"));
+    await userEvent.click(screen.getByRole("button", { name: "重新读取" }));
+    await screen.findByTestId("run-saved-saved-1-example-sg");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(calls.filter((call) => call.command === "launch:catalog")).toHaveLength(2);
+    expect(calls.filter((call) => call.command === "launch:list")).toHaveLength(2);
+    expect(calls.some((call) => ["launch:save", "launch:run", "launch:delete"].includes(call.command))).toBe(false);
+  });
+
+  it("retains list errors when catalog succeeds and clears them after retry", async () => {
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    let lists = 0;
+    renderWithEngine(<LaunchPage />, {
+      "launch:catalog": async () => { await gate; return makeEnvelope({ platform: "macos", shell: "zsh", apps: [{ name: "Example", path: recipe.target }] }); },
+      "launch:list": async () => ++lists > 1 ? makeEnvelope({ items: [savedItem] })
+        : makeEnvelope({}, { ok: false, errors: [{ code: "LAUNCH_ERROR", element: null, message: "List unavailable" }] }),
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("List unavailable");
+    finish();
+    await startNew();
+    await screen.findByRole("combobox", { name: "本机应用" });
+    expect(screen.getByRole("alert")).toHaveTextContent("List unavailable");
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await userEvent.click(screen.getByRole("button", { name: "重新读取" }));
+    await screen.findByTestId("run-saved-saved-1-example-sg");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it.each(["saved", "preview"])("announces %s launch failures without adding a persistent error row", async (location) => {
     const reason = "The application is already running. Quit it normally before launching with a different time zone";
     const { calls } = setup({ items: location === "saved" ? [savedItem] : [], runError: reason });

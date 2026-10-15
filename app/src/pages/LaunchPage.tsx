@@ -31,6 +31,7 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   const [selected, setSelected] = useState<SavedLaunch | null>(null);
   const [editing, setEditing] = useState(Boolean(initialRecipe));
   const [readError, setReadError] = useState<string | null>(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [error, setError] = useState<{ message: string; location: "editor" | "delete" } | null>(null);
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -51,10 +52,11 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
     void launchRequest<LaunchCatalog>("catalog").then((data) => {
       if (cancelled) return;
       setCatalog(data);
+      setCatalogError(null);
       if (generation.current === 0) setRecipe((old) => ({ ...old, platform: data.platform, shell: data.shell }));
-    }).catch((err) => { if (!cancelled) setReadError(engineErrorMessage(err)); });
+    }).catch((err) => { if (!cancelled) setCatalogError(engineErrorMessage(err)); });
     return () => { cancelled = true; };
-  }, []);
+  }, [revision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,8 +141,11 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   async function run(spec: LaunchRecipe, entry: LaunchEntry) {
     setBusy(true); clearFeedback();
     try {
-      await launchRequest("run", ["--spec", JSON.stringify(spec), "--name", entry.name, "--confirm"]);
-      toast.success(t("已发送启动请求。请在应用中确认时间和环境。"), { id: "launch-feedback" });
+      const result = await launchRequest<{ audit_recorded?: boolean }>("run", ["--spec", JSON.stringify(spec), "--name", entry.name, "--confirm"]);
+      if (result.audit_recorded === false) toast.warning(t("启动请求已发送，但记录失败"), {
+        id: "launch-feedback", description: t("请先确认应用状态，再决定是否重试。"),
+      });
+      else toast.success(t("已发送启动请求。请在应用中确认时间和环境。"), { id: "launch-feedback" });
     } catch (err) { fail(err, t("启动失败"), null); }
     finally { setBusy(false); }
   }
@@ -173,6 +178,7 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
     <section className="space-y-2" aria-label={t("已保存配置")}>
       <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-medium">{t("已保存配置")}</h2>
         <button type="button" className={button} disabled={busy} onClick={() => setRevision((value) => value + 1)}>{t("重新读取")}</button></div>
+      {catalogError && <p role="alert" className="break-words text-xs text-destructive">{catalogError}</p>}
       {readError && <p role="alert" className="break-words text-xs text-destructive">{readError}</p>}
       {saved?.length === 0 && <p className="text-xs text-muted-foreground">{t("尚未保存配置。点击“新增配置”创建常用应用或命令。")}</p>}
       {Boolean(saved?.length) && <div className="rounded-md border">

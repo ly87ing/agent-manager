@@ -1730,3 +1730,34 @@ shell and NTP baselines stayed unchanged.
 
 Rust suites were not repeated because no backend code or command protocol changed.
 No real application was launched. No installer, tag or Release was produced.
+
+## 2026-10-14: audit corrections and current verification
+
+Launch command generation now routes Windows batch targets through the system
+command interpreter with batch-specific literal quoting, child-only environment
+and exit-code propagation. Native executable targets retain their existing path.
+Quoted or trailing-space/dot batch aliases and oversized batch commands fail
+before execution. Native Windows regressions exercise generated functions under
+Windows PowerShell and PowerShell 7 when present, with fresh per-invocation
+receipts, special paths/arguments and refusal cases.
+
+System launch requests now record their accepted or failed outcome after the
+initial request. A completion-audit failure preserves an accepted request and
+shows a warning; it cannot imply the application never ran. Catalog and saved-list
+errors remain independent, and Read again retries both requests.
+
+Local verification on macOS x86_64: 427 engine tests plus the portable program
+lifecycle harness, 26 Tauri tests, 633 frontend tests and 23 script tests passed;
+production type checking/build, formatting and Windows test cross-compilation
+passed. Against the original `aeb55e7` behavior, the same isolated broken-app
+request now reads back `requested` and `failed` with system exit code 1 rather
+than only `requested`. The new initial-read regressions failed before correction
+and passed after it. Browser fixtures verified error retention, retry recovery
+and audit warnings in both languages at 1000 x 650 and 760 x 650, without overflow
+or console errors. Temporary browser fixtures were removed.
+
+Windows cross-compilation does not establish execution; the native execution
+cases belong to GUI CI. Installed desktop business workflows, physical login,
+consumer application environment behavior and signed update-chain acceptance
+remain separate. No installed application, real account, shell file or system
+clock was changed, and no Release or tag was created.

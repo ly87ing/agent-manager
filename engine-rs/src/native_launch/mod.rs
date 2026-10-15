@@ -202,6 +202,12 @@ pub(crate) fn execute(ctx: &Context, req: &Request) -> Envelope {
             )],
         ),
     };
+    let warnings = if data["audit_recorded"] == false {
+        vec![diagnostic("LAUNCH_AUDIT_FAILED", None,
+            "The launch request was accepted, but its result could not be recorded. Check the application before trying again.".into())]
+    } else {
+        vec![]
+    };
     Envelope::new(
         req.command.replacen(':', ".", 1),
         Mode { offline: true },
@@ -211,7 +217,7 @@ pub(crate) fn execute(ctx: &Context, req: &Request) -> Envelope {
         },
         req.run_id.clone(),
         data,
-        vec![],
+        warnings,
         errors,
     )
 }

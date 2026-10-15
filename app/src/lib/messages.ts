@@ -291,6 +291,8 @@ export const messages = {
   "确认启动": "Confirm launch",
   "已发送启动请求。请在应用中确认时间。": "Launch requested. Check the time inside the application.",
   "已发送启动请求。请在应用中确认时间和环境。": "Launch requested. Check the time and environment inside the application.",
+  "启动请求已发送，但记录失败": "Launch requested, but the result could not be recorded",
+  "请先确认应用状态，再决定是否重试。": "Check the application before deciding whether to try again.",
   "提供代码审查、方案设计、改动验证、文档写作等通用技能。推荐规则可在规则页预览后单独应用。": "General skills for code review, design, verification, and documentation. Preview and apply recommended rules individually on the Rules page.",
   ", 退出码 {0}": ", exit code {0}",
   "/ 工具 /": "/ Tools /",

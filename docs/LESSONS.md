@@ -16,6 +16,21 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Execute generated Windows commands through their actual shell and entry type.**
+- Renderer assertions covered native quoting while `.cmd` and `.bat` targets were
+  handed directly to `ProcessStartInfo`. Run generated functions against a native
+  argument recorder and conventional batch shims, preserving empty arguments,
+  quotes, percent signs, delayed-expansion characters, environment and exit status.
+  A macOS rendering pass cannot establish Windows execution.
+
+**Keep independent reads and external-operation outcomes independent.**
+- A successful saved-list response cleared a catalog failure, and Read again
+  omitted the catalog. Exercise both response orders and verify the recovered
+  direct action without executing it.
+- A launch request record survived a rejected system call without a failure
+  conclusion. Read back both phases, including an accepted request whose final
+  audit write fails; recording failure must not imply the application never ran.
+
 **Publish complete file receipts before their existence signals readiness.**
 - Ubuntu CI for `f4e8a11` read an empty launch-probe receipt after `exists()` became
   true. [`std::fs::write`](https://doc.rust-lang.org/std/fs/fn.write.html) creates

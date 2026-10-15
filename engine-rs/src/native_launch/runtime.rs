@@ -123,39 +123,61 @@ fn run(ctx: &Context, req: &Request, spec: Recipe) -> Result<Value> {
         Some("application"),
         Some(&json!({"name":variant.name,"state":"requested"})),
     )?;
-    let mut cmd;
-    if cfg!(target_os = "macos") {
-        cmd = crate::process::launch_command("/usr/bin/open");
-        for (name, value) in spec.environment(variant) {
-            cmd.arg("--env").arg(format!("{name}={value}"));
+    let mut exit_code = None;
+    let result = (|| {
+        let mut cmd;
+        if cfg!(target_os = "macos") {
+            cmd = crate::process::launch_command("/usr/bin/open");
+            for (name, value) in spec.environment(variant) {
+                cmd.arg("--env").arg(format!("{name}={value}"));
+            }
+            cmd.arg("-a").arg(&target);
+            if !spec.args.is_empty() {
+                cmd.arg("--args").args(&spec.args);
+            }
+            let status = cmd
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()?;
+            exit_code = status.code();
+            if !status.success() {
+                bail!("The system did not accept the application launch request");
+            }
+            Ok(json!({"state":"requested","name":variant.name,"timezone_verified":false}))
+        } else {
+            cmd = crate::process::launch_command(&target);
+            cmd.args(&spec.args).envs(spec.environment(variant));
+            // GUI applications are independent of the manager's temporary command jobs.
+            let mut child = cmd
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()?;
+            let pid = child.id();
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            Ok(json!({"state":"requested","name":variant.name,"pid":pid,"timezone_verified":false}))
         }
-        cmd.arg("-a").arg(&target);
-        if !spec.args.is_empty() {
-            cmd.arg("--args").args(&spec.args);
+    })();
+    let audit_recorded = crate::store::record_operation(
+        &db,
+        Some(&req.run_id),
+        "launch:run",
+        Some("application"),
+        Some(&json!({"name":variant.name,
+            "state":if result.is_ok() {"accepted"} else {"failed"},
+            "exit_code":exit_code})),
+    )
+    .is_ok();
+    match result {
+        Ok(mut value) => {
+            value["audit_recorded"] = json!(audit_recorded);
+            Ok(value)
         }
-        let status = cmd
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()?;
-        if !status.success() {
-            bail!("The system did not accept the application launch request");
-        }
-        Ok(json!({"state":"requested","name":variant.name,"timezone_verified":false}))
-    } else {
-        cmd = crate::process::launch_command(&target);
-        cmd.args(&spec.args).envs(spec.environment(variant));
-        // GUI applications are independent of the manager's temporary command jobs.
-        let mut child = cmd
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-        let pid = child.id();
-        std::thread::spawn(move || {
-            let _ = child.wait();
-        });
-        Ok(json!({"state":"requested","name":variant.name,"pid":pid,"timezone_verified":false}))
+        Err(error) if !audit_recorded => bail!("{error}; the launch result could not be recorded"),
+        Err(error) => Err(error),
     }
 }
 

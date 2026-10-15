@@ -205,6 +205,223 @@ fn windows_shortcut_names_are_case_insensitive_and_not_device_names() {
     }
 }
 
+#[test]
+fn windows_batch_commands_use_literal_arguments_and_guard_batch_paths() {
+    let mut input = spec("windows", "powershell");
+    input["kind"] = json!("command");
+    input["target"] = json!(r"C:\Tools\npm.cmd");
+    input["args"] = json!(["", "%PATH%", "!value! & | < > ^", "a\"b\\"]);
+    let result = execute(
+        &context(),
+        &Request {
+            command: "launch:build".into(),
+            args: vec!["--spec".into(), input.to_string()],
+            run_id: "batch".into(),
+        },
+    );
+    assert!(result.ok, "{result:?}");
+    let command = result.data["entries"][0]["command"].as_str().unwrap();
+    assert!(command.contains("-CommandType Application -ErrorAction SilentlyContinue"));
+    assert!(command.contains("/e:ON /v:OFF /d /c"));
+    assert!(command.contains("%%cd:~,%PATH%%cd:~,%"));
+    assert!(command.contains("SystemDirectory, 'cmd.exe'"));
+    assert!(command.contains("-gt 8191"));
+    assert!(command.contains("Batch paths must not use quotes or surrounding spaces/dots"));
+}
+
+#[cfg(windows)]
+#[test]
+fn generated_windows_functions_execute_native_and_batch_commands_literally() {
+    use std::process::Command;
+    let root = std::env::temp_dir().join(format!(
+        "launch-windows-{}",
+        agent_manager_engine::store::uuid_v4()
+    ));
+    let tools = root.join("O'Brien %REVIEW_EXPAND% !bang! & ^");
+    std::fs::create_dir_all(&tools).unwrap();
+    let source = root.join("probe.rs");
+    std::fs::write(&source, r#"fn main() {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        std::fs::write(&args[0], format!("{}\n{}\n{:?}", std::env::var("TZ").unwrap_or_default(), std::env::var("REVIEW_ENV").unwrap_or_default(), &args[1..])).unwrap();
+        std::process::exit(37);
+    }"#).unwrap();
+    let executable = tools.join("probe.exe");
+    assert!(Command::new("rustc")
+        .arg(&source)
+        .arg("-o")
+        .arg(&executable)
+        .status()
+        .unwrap()
+        .success());
+    for extension in ["cmd", "bat"] {
+        std::fs::write(
+            tools.join(format!("review-probe.{extension}")),
+            "@echo off\r\n\"%~dp0probe.exe\" %*\r\nexit /b %errorlevel%\r\n",
+        )
+        .unwrap();
+    }
+    let mut shells = vec![PathBuf::from("powershell.exe")];
+    if let Some(shell) = agent_manager_engine::platform::find_command(
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+        "pwsh",
+    ) {
+        shells.push(shell);
+    }
+    let arguments = vec![
+        "",
+        "two words",
+        "O'Brien",
+        "a\"b",
+        "a\\\"b",
+        "tail\\",
+        "%REVIEW_EXPAND%",
+        "!REVIEW_EXPAND!",
+        "literal & | < > ^ ( )",
+        "x\"& echo injected>unexpected & rem \"",
+        "$(touch unexpected)",
+        "测试",
+    ];
+    let receipt = root.join("receipt");
+    let script = root.join("invoke.ps1");
+    for shell in shells {
+        for target in [
+            executable.to_string_lossy().into_owned(),
+            "probe.exe".into(),
+            format!("\"{}\"", executable.display()),
+            tools
+                .join("review-probe.cmd")
+                .to_string_lossy()
+                .into_owned(),
+            tools
+                .join("review-probe.bat")
+                .to_string_lossy()
+                .into_owned(),
+            "review-probe".into(),
+        ] {
+            if receipt.exists() {
+                std::fs::remove_file(&receipt).unwrap();
+            }
+            let mut input = spec("windows", "powershell");
+            input["kind"] = json!("command");
+            input["target"] = json!(target);
+            input["args"] = json!([receipt.to_string_lossy()]
+                .into_iter()
+                .chain(
+                    arguments
+                        .iter()
+                        .map(|value| std::borrow::Cow::Borrowed(*value))
+                )
+                .collect::<Vec<_>>());
+            input["env"] = json!([{"name":"REVIEW_ENV","value":"child %REVIEW_EXPAND% ! &"}]);
+            let result = execute(
+                &context(),
+                &Request {
+                    command: "launch:build".into(),
+                    args: vec!["--spec".into(), input.to_string()],
+                    run_id: "windows-literal".into(),
+                },
+            );
+            assert!(result.ok, "{result:?}");
+            let definition = result.data["entries"][0]["definition"].as_str().unwrap();
+            std::fs::write(&script, format!("\u{feff}$ErrorActionPreference = 'Stop'\n$env:REVIEW_ENV = 'parent'\n{definition}\nexample-sg\nif ($LASTEXITCODE -ne 37) {{ throw \"Wrong exit code: $LASTEXITCODE\" }}\nif ($env:REVIEW_ENV -ne 'parent') {{ throw 'Parent environment changed' }}\n")).unwrap();
+            let output = Command::new(&shell)
+                .current_dir(&tools)
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                ])
+                .arg(&script)
+                .env(
+                    "PATH",
+                    std::env::join_paths([tools.clone()].into_iter().chain(std::env::split_paths(
+                        &std::env::var_os("PATH").unwrap_or_default(),
+                    )))
+                    .unwrap(),
+                )
+                .env("REVIEW_EXPAND", "must-not-expand")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{shell:?} {target}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert_eq!(
+                std::fs::read_to_string(&receipt).unwrap(),
+                format!("Asia/Singapore\nchild %REVIEW_EXPAND% ! &\n{arguments:?}"),
+                "{shell:?} {target}"
+            );
+            assert!(!tools.join("unexpected").exists());
+        }
+        std::fs::remove_file(&receipt).unwrap();
+        let mut input = spec("windows", "powershell");
+        input["kind"] = json!("command");
+        input["target"] = json!(tools.join("review-probe.cmd"));
+        input["args"] = json!([receipt, "x".repeat(9000)]);
+        let mut quoted = spec("windows", "powershell");
+        quoted["target"] = json!("bad\" & echo injected>unexpected & \".cmd");
+        let mut refused = vec![
+            (
+                input,
+                "Batch command exceeds the Windows command-line limit",
+            ),
+            (
+                quoted,
+                "Batch paths must not use quotes or surrounding spaces/dots",
+            ),
+        ];
+        for target in [
+            format!("\"{}\"", tools.join("review-probe.cmd").display()),
+            format!("{}.", tools.join("review-probe.cmd").display()),
+            format!("{} ", tools.join("review-probe.cmd").display()),
+        ] {
+            let mut input = spec("windows", "powershell");
+            input["target"] = json!(target);
+            refused.push((
+                input,
+                "Batch paths must not use quotes or surrounding spaces/dots",
+            ));
+        }
+        for (input, reason) in refused {
+            let result = execute(
+                &context(),
+                &Request {
+                    command: "launch:build".into(),
+                    args: vec!["--spec".into(), input.to_string()],
+                    run_id: "batch-limit".into(),
+                },
+            );
+            assert!(result.ok, "{result:?}");
+            let definition = result.data["entries"][0]["definition"].as_str().unwrap();
+            std::fs::write(
+                &script,
+                format!("\u{feff}$ErrorActionPreference = 'Stop'\n{definition}\nexample-sg\n"),
+            )
+            .unwrap();
+            let output = Command::new(&shell)
+                .current_dir(&root)
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                ])
+                .arg(&script)
+                .output()
+                .unwrap();
+            assert!(!output.status.success());
+            assert!(String::from_utf8_lossy(&output.stderr).contains(reason));
+            assert!(!receipt.exists());
+            assert!(!root.join("unexpected").exists());
+        }
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn generated_alias_executes_literal_arguments_under_both_shells() {

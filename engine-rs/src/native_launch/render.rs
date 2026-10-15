@@ -36,6 +36,28 @@ fn windows_arg(value: &str) -> String {
     out
 }
 
+// Batch files double embedded quotes; the empty CD expansion protects literal %.
+fn batch_arg(value: &str) -> String {
+    let mut out = String::from("\"");
+    let mut slashes = 0;
+    for c in value.chars() {
+        if c == '\\' {
+            slashes += 1;
+            continue;
+        }
+        out.push_str(&"\\".repeat(if c == '"' { slashes * 2 } else { slashes }));
+        slashes = 0;
+        match c {
+            '"' => out.push_str("\"\""),
+            '%' => out.push_str("%%cd:~,%"),
+            _ => out.push(c),
+        }
+    }
+    out.push_str(&"\\".repeat(slashes * 2));
+    out.push('"');
+    out
+}
+
 pub(super) fn build(spec: &Recipe, variant: &Variant) -> Built {
     let environment = spec.environment(variant);
     let timezone = environment
@@ -73,7 +95,22 @@ pub(super) fn build(spec: &Recipe, variant: &Variant) -> Built {
             })
             .collect::<Vec<_>>()
             .join(" ");
-        format!("& {{ $p = New-Object System.Diagnostics.ProcessStartInfo; $p.FileName = {}; $p.UseShellExecute = $false; $p.Arguments = {}; {environment} {completion} }}",
+        let resolve = if spec.kind == "command" {
+            r#"if ([IO.Path]::GetExtension($p.FileName.Trim().Trim('"')) -eq '' -and -not [IO.File]::Exists($p.FileName + '.exe')) { $batch = Get-Command -Name ([System.Management.Automation.WildcardPattern]::Escape($p.FileName)) -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1; if ($batch -and [IO.Path]::GetExtension($batch.Source) -in @('.cmd', '.bat')) { $p.FileName = $batch.Source; } }"#
+        } else {
+            ""
+        };
+        let batch_args = spec
+            .args
+            .iter()
+            .map(|arg| batch_arg(arg))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let batch = format!(
+            r#"$batchPath = $p.FileName.Trim().Trim('"').TrimEnd([char[]]' .'); if ($batchPath -match '\.(cmd|bat)$') {{ if ($batchPath -ne $p.FileName -or $batchPath.Contains('"')) {{ throw 'Batch paths must not use quotes or surrounding spaces/dots' }} $p.Arguments = '/e:ON /v:OFF /d /c ""' + $p.FileName.Replace('%', '%%cd:~,%') + '" ' + {} + '"'; $p.FileName = [IO.Path]::Combine([Environment]::SystemDirectory, 'cmd.exe'); if ($p.FileName.Length + $p.Arguments.Length + 3 -gt 8191) {{ throw 'Batch command exceeds the Windows command-line limit' }} }}"#,
+            powershell(&batch_args)
+        );
+        format!("& {{ $p = New-Object System.Diagnostics.ProcessStartInfo; $p.FileName = {}; $p.UseShellExecute = $false; $p.Arguments = {}; {resolve} {batch} {environment} {completion} }}",
             powershell(&spec.target), powershell(&args))
     } else if spec.platform == "macos" && spec.kind == "app" {
         let mut value = String::from("open");
@@ -137,6 +174,12 @@ mod tests {
         assert_eq!(posix("O'Brien $HOME"), "'O'\\''Brien $HOME'");
         assert_eq!(windows_arg("a\\\"b\\"), "\"a\\\\\\\"b\\\\\"");
         assert_eq!(powershell("O'Brien"), "'O''Brien'");
+        assert_eq!(batch_arg(""), "\"\"");
+        assert_eq!(batch_arg("a\\\"b\\"), "\"a\\\\\"\"b\\\\\"");
+        assert_eq!(
+            batch_arg("%PATH% ! & | < > ^"),
+            "\"%%cd:~,%PATH%%cd:~,% ! & | < > ^\""
+        );
         let definition = build(
             &Recipe {
                 platform: "windows".into(),
