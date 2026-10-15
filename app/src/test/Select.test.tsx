@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { Select } from "../components/Select";
@@ -28,6 +28,32 @@ function Harness({ onChange }: { onChange: (value: string) => void }) {
 }
 
 describe("应用自己的下拉", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("只滚动选项列表；延迟的聚焦滚动不关闭，外部滚动移动按钮后关闭", async () => {
+    let top = 0;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => new DOMRect(0, top, 160, 30));
+    vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (this: HTMLElement) {
+      return Number(this.dataset.index ?? 0) * 30;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(30);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(60);
+    render(<Select label="时区" value="Europe/Berlin" options={OPTIONS} onChange={vi.fn()} />);
+    const trigger = screen.getByRole("combobox", { name: "时区" });
+    await userEvent.click(trigger);
+    const list = screen.getByRole("listbox");
+    expect(list.scrollTop).toBe(60);
+    fireEvent.scroll(list);
+    expect(screen.getByRole("listbox")).toBe(list);
+    await userEvent.keyboard("{Home}");
+    expect(list.scrollTop).toBe(0);
+    fireEvent.scroll(document.body);
+    expect(screen.getByRole("listbox")).toBe(list);
+    top = 20;
+    fireEvent.scroll(document.body);
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
   it("显示当前项；点开后点一项即选中并关闭", async () => {
     const onChange = vi.fn();
     render(<Harness onChange={onChange} />);

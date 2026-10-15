@@ -42,6 +42,7 @@ export function Select({
   const [position, setPosition] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<{ top: number; left: number } | null>(null);
   const typed = useRef({ text: "", at: 0 });
   const listId = useId();
   const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value));
@@ -67,6 +68,7 @@ export function Select({
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) return;
     const rect = buttonRef.current.getBoundingClientRect();
+    anchorRef.current = { top: rect.top, left: rect.left };
     const margin = 8;
     const gap = 4;
     const below = window.innerHeight - rect.bottom - gap - margin;
@@ -85,8 +87,15 @@ export function Select({
   }, [open, position, options.length]);
 
   useEffect(() => {
-    if (!open) return;
-    listRef.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView?.({ block: "nearest" });
+    if (!open || !position) return;
+    const list = listRef.current;
+    const option = list?.querySelector<HTMLElement>(`[data-index="${active}"]`);
+    if (!list || !option) return;
+    // Keep the active option visible without scrolling the dialog or page.
+    const top = option.offsetTop;
+    const bottom = top + option.offsetHeight;
+    if (top < list.scrollTop) list.scrollTop = top;
+    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight;
   }, [open, active, position]);
 
   useEffect(() => {
@@ -96,9 +105,13 @@ export function Select({
     const onMouseDown = (event: MouseEvent) => {
       if (!inside(event.target)) close(false);
     };
-    // 固定定位不跟着内容滚：外面滚动或窗口变化时关掉，免得弹出层与按钮错位
+    // A queued scroll from focusing the trigger may arrive after opening.
+    // Close only if an outside scroll actually moved the anchor.
     const onScroll = (event: Event) => {
-      if (!inside(event.target)) close(false);
+      if (inside(event.target)) return;
+      const rect = buttonRef.current?.getBoundingClientRect();
+      const anchor = anchorRef.current;
+      if (!rect || !anchor || rect.top !== anchor.top || rect.left !== anchor.left) close(false);
     };
     const onResize = () => close(false);
     window.addEventListener("mousedown", onMouseDown);
