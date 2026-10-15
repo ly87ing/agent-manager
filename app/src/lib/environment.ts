@@ -36,6 +36,12 @@ const reportSchema = z.object({
 
 export type EnvironmentReport = z.infer<typeof reportSchema>;
 export type EnvironmentCheck = z.infer<typeof checkSchema>;
+const repairItemSchema = z.object({ id: z.string(), scope: z.enum(["system", "user", "session"]), before: z.union([z.string(), z.boolean(), z.array(z.string())]).nullable(),
+  expected: z.union([z.string(), z.boolean(), z.array(z.string())]).nullable(), status: z.enum(["unchanged", "change", "unavailable", "verified", "verified_after_error", "outcome_unknown", "stale", "not_applied", "unverified", "failed"]) }).strict();
+const repairPlanSchema = z.object({ base: z.string().regex(/^[0-9a-f]{64}$/), target: targetSchema, items: z.array(repairItemSchema), session_scope: z.string() }).strict();
+const repairResultSchema = z.object({ status: z.enum(["not_needed", "applied", "partial", "cancelled", "audit_failed"]), items: z.array(repairItemSchema), report: reportSchema.nullable(), restart_required: z.boolean(), clock_error: z.string().nullable() }).strict();
+export type EnvironmentRepairPlan = z.infer<typeof repairPlanSchema>;
+export type EnvironmentRepairResult = z.infer<typeof repairResultSchema>;
 const profileSchema = z.object({ id: z.string(), revision: z.string(), name: z.string(), target: targetSchema, auto_sync: z.boolean() }).strict();
 export type EnvironmentProfile = z.infer<typeof profileSchema>;
 const builtinSchema = z.object({ id: z.string(), name: z.string(), target: targetSchema, time_service: z.string(), source_url: z.string().url() }).strict();
@@ -44,7 +50,7 @@ export interface EnvironmentProfileInput { name: string; target: EnvironmentTarg
 
 async function request(operation: string, args: string[] = []) {
   const result = await runEngine(`environment:${operation}`, args,
-    ["save-profile", "delete-profile", "sync-time"].includes(operation) ? { runId: crypto.randomUUID() } : undefined);
+    ["save-profile", "delete-profile", "sync-time", "repair"].includes(operation) ? { runId: crypto.randomUUID() } : undefined);
   if (!result.ok) throw new Error(result.errors.map((error) => error.message).join("\n"));
   return result.data;
 }
@@ -67,6 +73,14 @@ export async function deleteEnvironmentProfile(profile: EnvironmentProfile): Pro
 
 export async function repairEnvironmentTime(target: EnvironmentTarget): Promise<EnvironmentReport> {
   return reportSchema.parse(await request("sync-time", ["--spec", JSON.stringify(target), "--confirm"]));
+}
+
+export async function previewEnvironmentRepair(target: EnvironmentTarget): Promise<EnvironmentRepairPlan> {
+  return repairPlanSchema.parse(await request("repair-preview", ["--spec", JSON.stringify(target)]));
+}
+
+export async function repairEnvironment(target: EnvironmentTarget, base: string): Promise<EnvironmentRepairResult> {
+  return repairResultSchema.parse(await request("repair", ["--spec", JSON.stringify(target), "--base", base, "--confirm"]));
 }
 
 export async function checkEnvironment(target: EnvironmentTarget = {}, probeTime = false): Promise<EnvironmentReport> {

@@ -45,6 +45,8 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
             | "save-profile"
             | "delete-profile"
             | "sync-time"
+            | "repair-preview"
+            | "repair"
             | "check-time-settings"
             | "open-settings",
         ) => true,
@@ -134,6 +136,13 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
         ("environment", "sync-time") => {
             specs.push(("--spec", ArgValueKind::JsonValue));
             specs.push(("--confirm", ArgValueKind::Flag));
+        }
+        ("environment", "repair-preview" | "repair") => {
+            specs.push(("--spec", ArgValueKind::JsonValue));
+            if verb == "repair" {
+                specs.push(("--base", ArgValueKind::Digest));
+                specs.push(("--confirm", ArgValueKind::Flag));
+            }
         }
         ("environment", "check-time-settings") => {
             specs.push(("--spec", ArgValueKind::JsonValue));
@@ -753,6 +762,33 @@ mod tests {
             validate_args("environment:open-settings", &["--spec".into(), "{}".into()]).is_err()
         );
         assert!(validate_args("environment:check", &["--confirm".into()]).is_err());
+    }
+
+    #[test]
+    fn environment_repair_requires_a_separate_preview_and_confirmation_surface() {
+        for command in ["environment:repair-preview", "environment:repair"] {
+            assert!(validate_command(command).is_ok());
+            assert!(validate_args(command, &["--spec".into(), "{}".into()]).is_ok());
+            assert!(validate_args(command, &["--probe-time".into()]).is_err());
+        }
+        assert!(validate_args("environment:repair-preview", &["--confirm".into()]).is_err());
+        assert!(validate_args(
+            "environment:repair-preview",
+            &["--base".into(), "a".repeat(64)]
+        )
+        .is_err());
+        assert!(validate_args(
+            "environment:repair",
+            &[
+                "--spec".into(),
+                "{}".into(),
+                "--base".into(),
+                "a".repeat(64),
+                "--confirm".into()
+            ]
+        )
+        .is_ok());
+        assert!(validate_args("environment:repair", &["--base".into(), "invalid".into()]).is_err());
     }
 
     #[test]

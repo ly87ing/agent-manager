@@ -3,6 +3,10 @@ mod actions;
 #[cfg(target_os = "macos")]
 mod macos;
 pub(crate) mod profiles;
+#[cfg(any(target_os = "macos", test))]
+mod repair;
+#[cfg(target_os = "macos")]
+mod repair_macos;
 mod time_probe;
 mod time_repair;
 #[cfg(target_os = "macos")]
@@ -584,6 +588,21 @@ fn report_with_automatic_time(
 
 pub(crate) fn execute(ctx: &Context, req: &Request) -> Envelope {
     let command = req.command.replace('.', ":");
+    if matches!(
+        command.as_str(),
+        "environment:repair-preview" | "environment:repair"
+    ) {
+        #[cfg(any(target_os = "macos", test))]
+        return envelope(req, command.ends_with("preview"), repair::handle(ctx, req));
+        #[cfg(all(not(target_os = "macos"), not(test)))]
+        return envelope(
+            req,
+            true,
+            Err(anyhow::anyhow!(
+                "Environment repair currently supports macOS only."
+            )),
+        );
+    }
     if command == "environment:open-settings" {
         return envelope(req, true, actions::open_settings(req));
     }

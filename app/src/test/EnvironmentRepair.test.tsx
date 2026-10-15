@@ -1,0 +1,129 @@
+import { describe, expect, it } from "vitest";
+import { waitFor } from "@testing-library/react";
+import EnvironmentPage from "../pages/EnvironmentPage";
+import { EnvironmentRepairDialog } from "../components/EnvironmentRepairDialog";
+import { setLanguage } from "../lib/i18n";
+import type { EnvironmentRepairPlan, EnvironmentRepairResult } from "../lib/environment";
+import { environmentFixture } from "./environment-fixture";
+import { makeEnvelope } from "./fixtures";
+import { chooseOption, renderWithEngine, screen, userEvent, within } from "./render-with-engine";
+
+const target = { region: "US", locale: "en_US.UTF-8", strict_locale: true };
+const profile = { id: "sample", name: "Example standard", revision: "b".repeat(64), target: environmentFixture(target).target, auto_sync: false };
+const plan: EnvironmentRepairPlan = { base: "a".repeat(64), target: profile.target, session_scope: "uid:1000 launchd:10", items: [
+  { id: "language.region", scope: "user", before: "en_GB", expected: "en_US", status: "change" },
+  { id: "session.LC_CTYPE", scope: "session", before: "C.UTF-8", expected: "en_US.UTF-8", status: "change" },
+] };
+function result(status: EnvironmentRepairResult["status"] = "applied"): EnvironmentRepairResult {
+  return { status, items: plan.items.map((item) => ({ ...item, status: status === "applied" ? "verified" : "not_applied" })),
+    report: environmentFixture(target), restart_required: status === "applied", clock_error: null };
+}
+function setup(outcome = result()) {
+  return renderWithEngine(<EnvironmentPage />, {
+    "environment:profiles": makeEnvelope({ builtins: [], items: [profile] }),
+    "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[1]))),
+    "environment:repair-preview": makeEnvelope(plan), "environment:repair": makeEnvelope(outcome),
+  });
+}
+async function open() {
+  await screen.findByText("已读取环境，尚未设置比较目标。");
+  await chooseOption(screen.getByRole("combobox", { name: "选择环境 Profile" }), profile.id);
+  await userEvent.click(screen.getByRole("button", { name: "自动修复" }));
+  const dialog = await screen.findByRole("dialog", { name: "自动修复环境" });
+  await within(dialog).findByText("en_GB → en_US");
+  return dialog;
+}
+
+describe("Automatic environment repair", () => {
+  it("previews the selected criteria and cancellation performs no repair or correction", async () => {
+    const { calls } = setup();
+    expect(screen.getByRole("button", { name: "自动修复" })).toBeDisabled();
+    const dialog = await open();
+    expect(dialog).toHaveTextContent("退出登录后失效");
+    expect(dialog).toHaveTextContent("已有应用和终端不会被退出或改写");
+    const preview = calls.find((call) => call.command === "environment:repair-preview")!;
+    expect(JSON.parse(preview.args[1])).toEqual({ languages: [], ...target });
+    expect(preview.args).not.toContain("--confirm");
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    expect(calls.filter((call) => ["environment:repair", "environment:sync-time", "launch:run"].includes(call.command))).toHaveLength(0);
+  });
+  it("forwards the preview fingerprint only after confirmation and preserves process mismatches", async () => {
+    const { calls } = setup();
+    const dialog = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认自动修复" }));
+    await within(dialog).findByText("已执行自动修复，仍有项目需要重启或继续确认。");
+    const request = calls.find((call) => call.command === "environment:repair")!;
+    expect(JSON.parse(request.args[1])).toEqual({ languages: [], ...target });
+    expect(request.args).toEqual(["--spec", request.args[1], "--base", plan.base, "--confirm"]);
+    expect(request.options?.runId).toBeTruthy();
+    expect(dialog).toHaveTextContent("请保存工作并重新启动相关应用");
+    expect(document.querySelector('[data-check-id="LC_CTYPE"]')).toHaveTextContent("不符");
+    expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toBeNull();
+    expect(calls.filter((call) => ["launch:run", "environment:sync-time"].includes(call.command))).toHaveLength(0);
+  });
+  it.each(["cancelled", "partial", "audit_failed"] as const)("keeps %s results visible without claiming all-clear", async (status) => {
+    setup(result(status));
+    const dialog = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认自动修复" }));
+    await waitFor(() => expect(within(dialog).getByTestId("confirm-modal-confirm")).toHaveTextContent("关闭"));
+    expect(dialog).toHaveTextContent("未执行");
+    expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toBeNull();
+  });
+  it("requires a new preview after a stale rejection and keeps the failure readable", async () => {
+    const { calls } = renderWithEngine(<EnvironmentPage />, {
+      "environment:profiles": makeEnvelope({ builtins: [], items: [profile] }), "environment:check": makeEnvelope(environmentFixture()),
+      "environment:repair-preview": makeEnvelope(plan), "environment:repair": async () => { throw new Error("Environment settings changed after preview."); },
+    });
+    const dialog = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认自动修复" }));
+    await within(dialog).findByRole("alert");
+    expect(within(dialog).getByRole("button", { name: "确认自动修复" })).toBeDisabled();
+    await userEvent.click(within(dialog).getByRole("button", { name: "重新预览修复" }));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "确认自动修复" })).toBeEnabled());
+    expect(calls.filter((call) => call.command === "environment:repair-preview")).toHaveLength(2);
+    expect(calls.filter((call) => call.command === "environment:repair")).toHaveLength(1);
+  });
+  it("renders repair copy in English without translating engine diagnostics", async () => {
+    setLanguage("en"); setup();
+    await screen.findByText("Environment read. No comparison targets selected.");
+    await chooseOption(screen.getByRole("combobox", { name: "Select an environment profile" }), profile.id);
+    await userEvent.click(screen.getByRole("button", { name: "Repair automatically" }));
+    const dialog = await screen.findByRole("dialog", { name: "Repair environment automatically" });
+    await within(dialog).findByText("en_GB → en_US");
+    expect(dialog).toHaveTextContent("expire at logout");
+    expect(dialog).toHaveTextContent("Shell files and login items are preserved");
+  });
+  it("clears the previous repair conclusion when a new comparison starts", async () => {
+    setup();
+    const dialog = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认自动修复" }));
+    await within(dialog).findByText("已执行自动修复，仍有项目需要重启或继续确认。");
+    await userEvent.click(within(dialog).getByTestId("confirm-modal-confirm"));
+    expect(within(screen.getByTestId("environment-page")).getByText("已执行自动修复，仍有项目需要重启或继续确认。", { exact: false })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "对比 Profile" }));
+    await screen.findByText("发现与目标不符的项目。");
+    expect(within(screen.getByTestId("environment-page")).queryByText("已执行自动修复，仍有项目需要重启或继续确认。", { exact: false })).not.toBeInTheDocument();
+  });
+  it("does not announce success when clock correction could not record its outcome", async () => {
+    const repaired = result();
+    repaired.report!.checks.forEach((row) => { if (row.expected !== null) { row.observed = row.expected; row.state = "match"; } });
+    repaired.report!.summary = { ...repaired.report!.summary, status: "match", matched: repaired.report!.summary.compared, mismatched: 0, unknown: 0 };
+    repaired.report!.time_repair = { status: "verified", before_offset_ms: 3000, before_uncertainty_ms: 20, audit_recorded: false };
+    setup(repaired);
+    const dialog = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认自动修复" }));
+    await within(dialog).findByText("校时结果未能写入操作记录，本页保留复测结果。");
+    expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toBeNull();
+    expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toHaveTextContent("校时结果未能写入操作记录");
+  });
+  it.each([null, 2000])("discloses the actual clock tolerance only when correction is available (%s)", async (tolerance) => {
+    const configured = { ...profile, target: { ...profile.target, ntp_server: "time.example", max_clock_offset_ms: tolerance } };
+    renderWithEngine(<EnvironmentRepairDialog profile={configured} onResult={() => {}} onClose={() => {}} />, {
+      "environment:repair-preview": makeEnvelope({ ...plan, target: configured.target }),
+    });
+    const dialog = await screen.findByRole("dialog", { name: "自动修复环境" });
+    await within(dialog).findByText("复查会查询 time.example 的 UDP 123 端口。");
+    expect(dialog.textContent!.includes("时间偏差容限：± 2000 ms")).toBe(tolerance !== null);
+    expect(dialog.textContent!.includes("仅在新测量明确超限时校正时钟")).toBe(tolerance !== null);
+  });
+});

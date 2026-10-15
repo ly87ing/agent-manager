@@ -1,0 +1,75 @@
+import { useEffect, useState } from "react";
+import { ConfirmModal } from "./ConfirmModal";
+import { previewEnvironmentRepair, profileTarget, repairEnvironment, type EnvironmentProfile, type EnvironmentRepairPlan, type EnvironmentRepairResult } from "../lib/environment";
+import { engineErrorMessage } from "../lib/engine";
+import { notifyError } from "../lib/notifications";
+import { t } from "../lib/i18n";
+
+export function repairStatus(status: string) {
+  return ({ unchanged: t("无需修改"), change: t("将修复"), unavailable: t("暂无法修复"), verified: t("已修复并验证"), verified_after_error: t("已符合，但命令异常"),
+    outcome_unknown: t("结果无法确认"), stale: t("实际值已变化"), not_applied: t("未执行"), unverified: t("尚未验证符合"), failed: t("修复失败") } as Record<string, string>)[status] ?? status;
+}
+function label(id: string) {
+  return ({ "time.timezone": t("系统时区"), "time.automatic_timezone": t("自动设置时区"), "ntp.server": t("配置的时间服务器"), "ntp.automatic_time": t("自动设置时间"),
+    "language.preferred": t("首选语言顺序"), "language.region": t("地区（系统区域格式）") } as Record<string, string>)[id] ?? id.replace("session.", "");
+}
+function value(value: EnvironmentRepairPlan["items"][number]["before"]) {
+  return value === null ? t("无法读取") : value === "" ? t("未设置") : typeof value === "boolean" ? value ? t("开启") : t("已关闭") : Array.isArray(value) ? value.join(", ") : value;
+}
+export function repairSummary(result: EnvironmentRepairResult) {
+  if (result.status === "cancelled") return t("已取消系统授权，未继续修复。操作请求已记录。");
+  if (result.status === "audit_failed") return t("修复结果未能写入操作记录，请查看逐项结果。");
+  if (result.report?.time_repair?.audit_recorded === false) return t("校时结果未能写入操作记录，本页保留复测结果。");
+  if (result.status === "partial" || result.clock_error) return t("自动修复未全部完成，请查看逐项结果和重新检查。");
+  if (result.report?.summary.status === "match" && (!result.report.time_repair || ["not_needed", "verified"].includes(result.report.time_repair.status))) return t("修复后复查：所选目标全部符合。");
+  return t("已执行自动修复，仍有项目需要重启或继续确认。");
+}
+
+export function EnvironmentRepairDialog({ profile, onResult, onClose }: {
+  profile: Pick<EnvironmentProfile, "name" | "target">; onResult: (result: EnvironmentRepairResult) => void; onClose: () => void;
+}) {
+  const [plan, setPlan] = useState<EnvironmentRepairPlan | null>(null);
+  const [result, setResult] = useState<EnvironmentRepairResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [executing, setExecuting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setLoading(true); setPlan(null); setError(null); setResult(null);
+    void previewEnvironmentRepair(profileTarget(profile)).then((plan) => { if (active) setPlan(plan); })
+      .catch((error) => { if (active) setError(engineErrorMessage(error)); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [profile, reload]);
+  async function apply() {
+    if (result) { onClose(); return; }
+    if (!plan) return;
+    setExecuting(true); setError(null);
+    try { const result = await repairEnvironment(profileTarget(profile), plan.base); setResult(result); onResult(result); }
+    catch (error) { const message = engineErrorMessage(error); setError(message); setPlan(null); notifyError(t("自动修复失败"), message); }
+    finally { setExecuting(false); }
+  }
+  const items = result?.items ?? plan?.items ?? [];
+  return <ConfirmModal title={t("自动修复环境")} description={t("所选 Profile：{0}。确认以下变更及影响范围后执行。", profile.name)} risk="write-local" riskLabel={t("修改系统与登录会话设置")}
+    executing={executing} confirmLabel={result ? t("关闭") : t("确认自动修复")} confirmDisabled={!result && (loading || !plan)} onConfirm={() => void apply()} onClose={onClose}
+    error={error} secondaryLabel={error || result ? t("重新预览修复") : undefined} onSecondary={() => setReload((value) => value + 1)}>
+    {loading ? <p role="status" className="mt-3 text-xs">{t("正在读取修复预览…")}</p> : <div className="mt-3 space-y-3">
+      {result && <p role="status" className="text-sm">{repairSummary(result)}</p>}
+      <p className="text-xs text-muted-foreground">{t("系统设置影响本机；语言与地区影响当前用户。登录会话环境仅供该会话中后续由系统启动的进程使用，退出登录后失效。")}</p>
+      <p className="text-xs text-muted-foreground">{t("已有应用和终端不会被退出或改写；请保存工作后重新启动，并在目标应用中验证。shell 文件和登录项保持不变。")}</p>
+      {plan && <p className="break-all text-xs text-muted-foreground">{t("启动会话：{0}", plan.session_scope)}</p>}
+      {profile.target.ntp_server && <p className="break-all text-xs">{t("复查会查询 {0} 的 UDP 123 端口。", profile.target.ntp_server)}</p>}
+      {profile.target.ntp_server && profile.target.max_clock_offset_ms && <p className="text-xs">{t("时间偏差容限：± {0} ms。仅在新测量明确超限时校正时钟，可能再次请求系统授权。", String(profile.target.max_clock_offset_ms))}</p>}
+      <div className="space-y-2">{items.map((item) => <div key={item.id} className="rounded border p-2 text-xs" data-repair-id={item.id}>
+        <div className="flex flex-wrap justify-between gap-2"><span className="font-medium">{label(item.id)}</span><span>{repairStatus(item.status)}</span></div>
+        <p className="mt-1 break-all font-mono">{value(item.before)} → {value(item.expected)}</p>
+        <p className="mt-1 text-muted-foreground">{t("影响范围：{0}", item.scope === "system" ? t("本机系统") : item.scope === "user" ? t("当前 macOS 用户") : t("后续启动的会话进程"))}</p>
+      </div>)}</div>
+      {profile.target.automatic_timezone && profile.target.timezone && <p className="text-xs text-amber-500">{t("自动时区开启后，系统可能根据位置再次改变固定时区。")}</p>}
+      <p className="text-xs text-muted-foreground">{t("系统项目可能请求 macOS 管理员授权。部分失败会停止后续修改，保留已完成结果；不会自动撤销或重试。")}</p>
+      {result?.restart_required && <p className="text-xs font-medium">{t("请保存工作并重新启动相关应用；当前进程的检查结果保留原样。")}</p>}
+      {result?.clock_error && <p role="alert" className="break-words text-xs text-destructive">{result.clock_error}</p>}
+      {result && !result.report && <p className="text-xs text-amber-500">{t("修复后未能读取检查结果，请重新对比 Profile。")} </p>}
+    </div>}
+  </ConfirmModal>;
+}

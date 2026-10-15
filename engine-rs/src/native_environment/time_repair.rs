@@ -17,6 +17,7 @@ enum Adjustment {
     Applied,
     Cancelled,
     Failed,
+    Stale,
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -64,6 +65,7 @@ fn run(
     let status = match outcome {
         Adjustment::Cancelled => "cancelled",
         Adjustment::Failed => "failed",
+        Adjustment::Stale => "unavailable",
         Adjustment::Applied if clock_state(&after) == Some("match") => "verified",
         Adjustment::Applied => "unverified",
     };
@@ -94,10 +96,12 @@ fn record(ctx: &Context, req: &Request, report: &Value) -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
+const CLOCK_COMMAND: &str = r#"age=$(( $(/bin/date +%s) - $2 )); if [ $age -lt 0 ] || [ $age -gt 10 ]; then echo stale; exit 0; fi; /usr/bin/sntp -S -s -n 1 -g 4000 -t 5 "$1" >/dev/null 2>&1 && echo applied"#;
+
+#[cfg(target_os = "macos")]
 const SCRIPT: &str = r#"on run argv
 try
-    do shell script "/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C /usr/bin/sntp -S -s -n 1 -g 4000 -t 5 " & quoted form of (item 1 of argv) with administrator privileges
-    return "applied"
+    return do shell script "/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin LC_ALL=C /bin/sh -c " & quoted form of (item 3 of argv) & " clock " & quoted form of (item 1 of argv) & " " & quoted form of (item 2 of argv) with administrator privileges
 on error messageText number errorNumber
     if errorNumber is -128 then return "cancelled"
     return "failed"
@@ -105,14 +109,20 @@ end try
 end run"#;
 
 #[cfg(target_os = "macos")]
-fn adjust(peer: IpAddr) -> Adjustment {
+fn adjust(peer: IpAddr, measured_at: i64) -> Adjustment {
     super::time_probe::wait_for_interval();
     let mut command = crate::process::launch_command("/usr/bin/osascript");
     command
         .env_clear()
         .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
         .env("LC_ALL", "C")
-        .args(["-e", SCRIPT, &peer.to_string()])
+        .args([
+            "-e",
+            SCRIPT,
+            &peer.to_string(),
+            &measured_at.to_string(),
+            CLOCK_COMMAND,
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -125,6 +135,7 @@ fn adjust(peer: IpAddr) -> Adjustment {
         Ok(value) if value.status.success() && value.stdout == b"cancelled\n" => {
             Adjustment::Cancelled
         }
+        Ok(value) if value.status.success() && value.stdout == b"stale\n" => Adjustment::Stale,
         _ => Adjustment::Failed,
     }
 }
@@ -133,17 +144,8 @@ pub(super) fn handle(ctx: &Context, req: &Request, target: &Target) -> Result<Va
     target.validate_time_repair()?;
     #[cfg(target_os = "macos")]
     {
-        let _guard = REPAIR
-            .try_lock()
-            .map_err(|_| anyhow::anyhow!("A time correction is already running."))?;
-        run(
-            || {
-                super::time_probe::wait_for_interval();
-                super::report(target, true)
-            },
-            adjust,
-            |report| record(ctx, req, report),
-        )
+        let file_guard = super::repair_macos::mutation_lock()?;
+        handle_locked(ctx, req, target, &file_guard)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -152,10 +154,53 @@ pub(super) fn handle(ctx: &Context, req: &Request, target: &Target) -> Result<Va
     }
 }
 
+#[cfg(target_os = "macos")]
+pub(super) fn handle_locked(
+    ctx: &Context,
+    req: &Request,
+    target: &Target,
+    _file_guard: &std::fs::File,
+) -> Result<Value> {
+    target.validate_time_repair()?;
+    let _guard = REPAIR
+        .try_lock()
+        .map_err(|_| anyhow::anyhow!("A time correction is already running."))?;
+    let measured_at = std::cell::Cell::new(0);
+    run(
+        || {
+            super::time_probe::wait_for_interval();
+            let report = super::report(target, true)?;
+            measured_at.set(chrono::Utc::now().timestamp());
+            Ok(report)
+        },
+        |peer| adjust(peer, measured_at.get()),
+        |report| record(ctx, req, report),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::Cell;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn authorization_delay_or_backwards_clock_never_reaches_sntp() {
+        for measured_at in [0, chrono::Utc::now().timestamp() + 60] {
+            let output = std::process::Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    CLOCK_COMMAND,
+                    "clock",
+                    "192.0.2.1",
+                    &measured_at.to_string(),
+                ])
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            assert_eq!(output.stdout, b"stale\n");
+        }
+    }
 
     fn sample(state: &str) -> Value {
         json!({"checks":[{"id":"ntp.clock_offset","state":state}],"time_sample":{"peer_address":"192.0.2.1","offset_ms":3000.0,"uncertainty_ms":20.0}})
@@ -182,6 +227,7 @@ mod tests {
             (Adjustment::Applied, "mismatch", "unverified"),
             (Adjustment::Cancelled, "mismatch", "cancelled"),
             (Adjustment::Failed, "match", "failed"),
+            (Adjustment::Stale, "match", "unavailable"),
         ] {
             let calls = Cell::new(0);
             let result = run(

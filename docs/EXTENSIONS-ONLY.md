@@ -18,9 +18,10 @@ macOS time, language, region, locale and NTP settings. The desktop and CLI share
 `environment:check`; reference-time queries require an explicit action. It reads
 no account identity or credentials and changes no system or shell settings.
 The follow-up adds named expected-value collections stored in Agent Manager and
-authorized one-shot time correction. Only `environment:sync-time --confirm`,
-including a collection's explicitly enabled automatic correction during a user
-check, may adjust the system clock. It requires a fresh excessive offset and
+authorized one-shot time correction. `environment:sync-time --confirm`, including
+the explicitly confirmed automatic-repair flow, may adjust the system clock.
+Comparison never executes a legacy collection's automatic-correction flag.
+Correction requires a fresh excessive offset and
 macOS administrator authorization, then independently checks the result. It
 does not alter the time zone, regional preferences, NTP configuration or shell
 files, and installs no privileged service. See
@@ -31,6 +32,16 @@ unsaved process-environment draft to the existing launch editor, or explicitly
 read the automatic-time switch with administrator authorization. That authorized
 query is read-only and cannot correct time or change settings. These actions
 never normalize the checking process to hide a mismatch or restore account APIs.
+
+The explicit automatic-repair request additionally permits previewed, confirmed
+changes to macOS time zone, automatic-time/time-zone preferences, NTP server,
+current-user languages/region and the calling launchd context's future-process
+regional variables. `environment:repair-preview` is read-only;
+`environment:repair --base SHA256 --confirm` revalidates the preview, applies only
+targeted differences and reports independent readback. Existing processes, shell
+files, login items, unrelated format preferences and all account resources remain
+untouched. Session variables expire at logout; application-specific overrides
+remain outside this guarantee. Partial/unknown outcomes never count as alignment.
 
 Account creation, registration edits, removal, switching, login/logout, account-bound launch commands, credentials, provider/model/runtime settings, and assistant installation/upgrades are retired. Existing account directories, authentication files, sessions, configuration, shell files, and historical launch scripts are preserved. Official assistant tools remain responsible for them.
 

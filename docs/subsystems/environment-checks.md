@@ -113,6 +113,83 @@ the action-specific confirmation. The supported targets are:
 | Application launch environment | Prefill an unsaved launch recipe with the profile's time zone and locale; the user chooses an application and explicitly saves or launches it. |
 | Date/time or language/region settings | Open the corresponding system pane for manual adjustment; opening it does not establish that settings were applied. |
 
+### Automatic repair
+
+**Repair automatically** is a separate action for the explicitly selected profile.
+`environment:repair-preview --spec JSON` reads the current settings and returns
+the targeted rows, original values, proposed values, scope and `base` fingerprint.
+It performs no authorization, network query, database write or system change.
+The fingerprint binds the target, stable setting values and the calling UID/
+launchd context; moving timestamps, clock samples and kernel error estimates are
+excluded. No saved profile or region is selected implicitly.
+
+`environment:repair --spec JSON --base SHA256 --confirm` requires that same target
+and fingerprint. It re-reads the settings before recording a request or writing,
+then checks each baseline again immediately before its change. Stale values stop
+further changes and require a new preview. System commands lack atomic CAS, so
+this detects observed external changes without guaranteeing exclusion of other
+system tools or users. Repair and one-shot clock correction share a private
+per-UID advisory file lock independent of the configurable app data directory.
+
+| Target | Write and verification |
+| --- | --- |
+| System time zone | `systemsetup -settimezone`; read `/etc/localtime` again. Disable targeted automatic time zone first. |
+| Automatic time zone | Write only `Active` in `/Library/Preferences/com.apple.timezone.auto`; independently read that preference. This does not verify location-service behavior. |
+| NTP server and automatic time | `systemsetup -setnetworktimeserver` / `-setusingnetworktime`; separate read commands verify the result. |
+| Ordered languages | Write only current-user `AppleLanguages`; re-read through Foundation. |
+| Region | Replace only the country component in current-user `AppleLocale`, preserving language, script, extensions and all separate format overrides; re-read through Foundation. Unknown/unparseable originals are not replaced. |
+| Future-process environment | Allowlisted `launchctl setenv` for `TZ`, `LANG`, `LC_ALL` and the six supported locale categories; separate `getenv` readback. |
+
+System changes run in a fixed, clean command environment with macOS administrator
+authorization. Values are validated and quoted as data. The privileged batch
+re-reads baselines after authorization and reads again after every write; no
+password, arbitrary executable or arbitrary preference path is accepted.
+Locale repair first verifies the platform inventory and an isolated real
+`locale` invocation. Unsupported locales are rejected before any write.
+See Apple's [systemsetup reference](https://support.apple.com/guide/remote-desktop/apd95406b8d/mac).
+
+Session repair requires an identified Aqua graphical-login context: manager UID
+must match the caller, and its native Mach audit token must identify an existing
+`login/ASID` domain. No launchd environment dump is read to identify the domain.
+The preview displays and fingerprints that `gui/UID` + `login/ASID` scope.
+`managerpid` alone is insufficient because modern launchd always reports PID 1.
+Background/SSH or unreadable context identities leave session items unavailable;
+read failures remain distinct from successfully read empty values. Session
+settings expire at logout. Existing
+apps, terminals and this checker retain their environment; shell startup files,
+application overrides and explicit launch configurations can still override new
+session values. No shell file or login item is created, and no app is restarted.
+Readback of launchd values does not prove a target app's effective environment.
+The result preserves current-process mismatches and prompts the user to save
+work and relaunch affected applications through an appropriate launch entry.
+
+After successful settings repair (or a no-op), a profile with an explicit server
+and clock tolerance enters the existing fresh-measurement clock gate, then returns
+an independent comparison. Synchronization state, actual background peer identity
+and measured clock accuracy are observations, never writable success flags.
+Missing evidence remains unknown. The mutation lock spans settings, guarded clock
+correction and final verification. Automatic-time criteria receive a new
+authorized read after those operations; an earlier batch read is never reused to
+override fresh observations. Cancellation/failure of this final read leaves the
+switch unknown. A clock/auth failure does not erase completed setting changes.
+
+Each result distinguishes unchanged, verified, verified-after-command-error,
+unverified, stale, not applied and unknown outcomes. Errors stop later changes;
+commands are not retried and completed changes are not automatically undone.
+Preview cancellation writes nothing. Once confirmed, request/outcome audits
+contain setting IDs and statuses only; cancellation of administrator authorization
+can retain that request without performing OS writes. Failure to record the
+request stops before authorization. Completion-audit failure retains the actual
+results and shows a warning. A source rollback does not restore OS settings:
+review the original values in the preview/results before explicitly restoring
+them or applying a previous profile, accounting for intervening external changes.
+
+```sh
+cargo run --manifest-path engine-rs/Cargo.toml -- environment:repair-preview --spec '{"region":"US"}' --json
+# Review the returned rows, then supply their exact base fingerprint:
+cargo run --manifest-path engine-rs/Cargo.toml -- environment:repair --spec '{"region":"US"}' --base YOUR_PREVIEW_SHA256 --confirm --json
+```
+
 The application target is unknown during launch prefill; Agent Manager's observed
 process environment is not presented as evidence for that application. Saved
 launch recipes retain their explicit values rather than a live profile binding.
@@ -200,7 +277,8 @@ proves which server `timed` currently uses.
 
 ## Time correction
 
-`environment:sync-time --spec JSON --confirm` is the only clock-writing endpoint.
+`environment:sync-time --spec JSON --confirm` exposes standalone clock correction;
+confirmed automatic repair reuses the same guarded implementation.
 Its target must explicitly include a valid `ntp_server` and
 `max_clock_offset_ms`. Apply profile and clock-remediation actions preview this
 operation and require an explicit clock-correction confirmation. Compare profile
@@ -217,11 +295,13 @@ No privileged helper/service is installed and no authorization policy is changed
 See Apple's [administrator authorization guidance](https://developer.apple.com/library/archive/technotes/tn2065/_index.html).
 
 SNTP uses `-S -s -n 1 -g 4000 -t 5`; it may step the clock or request a gradual adjustment.
-The authorization subprocess has a 150-second deadline. A second independent
-measurement follows correction, cancellation or failure. Query intervals are at
+The authorization subprocess has a 150-second deadline. A measurement
+older than ten seconds is rejected inside the authorized command
+before SNTP starts; a delayed authorization requires another explicit attempt.
+A second independent measurement follows correction, cancellation or failure. Query intervals are at
 least four seconds within this flow, including around the privileged request.
 Only an applied command with a matching new measurement returns `verified`.
-Other outcomes are `unverified`, `cancelled` or `failed`; an exit code alone
+Other outcomes are `unverified`, `cancelled`, `unavailable` or `failed`; an exit code alone
 cannot establish success. Results include the pre-correction offset and
 uncertainty in `time_repair`.
 
@@ -273,8 +353,9 @@ or a replacement time daemon.
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_environment
 cargo test --manifest-path engine-rs/Cargo.toml --test native_environment
 cargo test --manifest-path engine-rs/Cargo.toml --test native_environment_profiles
+cargo test --manifest-path engine-rs/Cargo.toml --test native_environment_repair
 cargo test --manifest-path app/src-tauri/Cargo.toml environment_
-pnpm --dir app test:unit run src/test/EnvironmentPage.test.tsx src/test/EnvironmentProfiles.test.tsx src/test/AppNavigation.test.tsx src/test/UiCopyGuard.test.ts --maxWorkers=1
+pnpm --dir app test:unit run src/test/EnvironmentPage.test.tsx src/test/EnvironmentProfiles.test.tsx src/test/EnvironmentRepair.test.tsx src/test/AppNavigation.test.tsx src/test/UiCopyGuard.test.ts --maxWorkers=1
 ```
 
 Fixtures cover locale precedence, process overrides, ordered languages, absent
@@ -298,3 +379,11 @@ apply preview/cancel and unsaved launch prefill against an isolated real CLI.
 Unavailable clock evidence is exercised without correction. Isolated native
 desktop save/close and independent CLI readback establish bridge persistence;
 these checks do not claim real administrator-authorized clock correction.
+Automatic-repair coverage additionally exercises stable preview fingerprints,
+no-op convergence, stale/audit failure gates, authorization cancellation, partial
+failure and preserved current-process differences. The generated privileged
+shell runs against disposable settings for write/readback and stale refusal;
+real macOS integration exercises read-only preview and confirmed no-op without
+writing system preferences. This does not establish real administrator-authorized
+system-setting writes or target-app inheritance; those require a disposable macOS
+environment or a separately chosen, authorized live application.

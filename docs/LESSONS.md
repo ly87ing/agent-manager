@@ -16,6 +16,16 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Revalidate after administrator authorization, and verify actual postconditions.**
+- A repair preview can remain open while external settings change, and an
+  authorization prompt can outlive its clock sample. Re-read settings inside
+  the authorized batch and reject a clock sample older than ten seconds before
+  SNTP. A command exit status alone never establishes an applied setting.
+- Isolated HOME/data do not isolate system preferences, clock or launchd. Replay
+  privileged shell logic against disposable settings, retain real preview/no-op
+  checks, and report that live privileged writes remain unverified.
+- Seen 1× (2026-10-15; automatic environment repair).
+
 **Verify built-in process locales against the target platform.**
 - Foundation recognized `en_SG`, but the macOS POSIX inventory lacked
   `en_SG.UTF-8`; forcing it caused `/usr/bin/locale` to fall back to `C`.

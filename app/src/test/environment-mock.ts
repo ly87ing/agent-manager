@@ -24,6 +24,17 @@ export function createEnvironmentMock() {
     const target = args.includes("--spec") ? JSON.parse(arg(args, "--spec")) : {};
     const probe = args.includes("--probe-time") || command === "environment:sync-time";
     const report = environmentFixture(target, probe);
+    if (["environment:repair-preview", "environment:repair"].includes(command)) {
+      const items = [
+        ...[["time.timezone", "system", "Europe/London", target.timezone], ["time.automatic_timezone", "system", false, target.automatic_timezone],
+          ["ntp.server", "system", "pool.ntp.org", target.ntp_server], ["ntp.automatic_time", "system", null, target.automatic_time],
+          ["language.preferred", "user", ["en-GB"], target.languages?.length ? target.languages : undefined], ["language.region", "user", "en_GB", target.region ? `en_${target.region}` : undefined]] as const,
+        ...(target.timezone ? [["session.TZ", "session", null, target.timezone]] : []),
+        ...(target.locale ? ["LANG", "LC_ALL", "LC_CTYPE", "LC_COLLATE", "LC_MESSAGES", "LC_MONETARY", "LC_NUMERIC", "LC_TIME"].map((key) => [`session.${key}`, "session", null, target.locale]) : []),
+      ].filter(([, , , expected]) => expected !== undefined).map(([id, scope, before, expected]) => ({ id, scope, before, expected, status: JSON.stringify(before) === JSON.stringify(expected) ? "unchanged" : "change" }));
+      if (command === "environment:repair-preview") return makeEnvelope({ base: "a".repeat(64), target: report.target, items, session_scope: "Development launchd context" });
+      return makeEnvelope({ status: "applied", items: items.map((item) => ({ ...item, status: item.status === "change" ? "verified" : item.status })), report, restart_required: Boolean(target.timezone || target.locale || target.region || target.languages?.length), clock_error: null });
+    }
     if (command === "environment:check-time-settings") {
       const row = report.checks.find((item) => item.id === "ntp.automatic_time")!;
       if (row.expected !== null) {

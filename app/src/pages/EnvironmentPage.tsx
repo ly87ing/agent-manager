@@ -5,8 +5,9 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { EnvironmentProfileEditor } from "../components/EnvironmentProfileEditor";
 import { EnvironmentProfiles } from "../components/EnvironmentProfiles";
 import { EnvironmentApplyDialog, type EnvironmentApplication } from "../components/EnvironmentApplyDialog";
+import { EnvironmentRepairDialog, repairSummary } from "../components/EnvironmentRepairDialog";
 import { EnvironmentRemediation } from "../components/EnvironmentRemediation";
-import { checkEnvironment, checkTimeSettings, deleteEnvironmentProfile, environmentLaunchRecipe, listEnvironmentProfiles, openEnvironmentSettings, profileTarget, repairEnvironmentTime, saveEnvironmentProfile, type EnvironmentBuiltin, type EnvironmentCheck, type EnvironmentProfile, type EnvironmentProfileInput, type EnvironmentReport } from "../lib/environment";
+import { checkEnvironment, checkTimeSettings, deleteEnvironmentProfile, environmentLaunchRecipe, listEnvironmentProfiles, openEnvironmentSettings, profileTarget, repairEnvironmentTime, saveEnvironmentProfile, type EnvironmentBuiltin, type EnvironmentCheck, type EnvironmentProfile, type EnvironmentProfileInput, type EnvironmentReport, type EnvironmentRepairResult } from "../lib/environment";
 import type { LaunchRecipe } from "../lib/launch";
 import { engineErrorMessage } from "../lib/engine";
 import { t, useLanguage } from "../lib/i18n";
@@ -112,6 +113,8 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   const [data, setData] = useState<EnvironmentReport | null>(null);
   const [observation, setObservation] = useState<EnvironmentReport | null>(null);
   const [applying, setApplying] = useState(false);
+  const [repairing, setRepairing] = useState(false);
+  const [repairResult, setRepairResult] = useState<EnvironmentRepairResult | null>(null);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
@@ -139,14 +142,22 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   const selected = savedSelection ?? builtinSelection;
   const server = selected?.target.ntp_server;
   function showView(next: "compare" | "profiles") { setView(next); toast.dismiss("environment-result"); }
-  function select(id: string) { generation.current++; setSelectedId(id); setData(null); setError(null); toast.dismiss("environment-result"); }
+  function select(id: string) { generation.current++; setSelectedId(id); setData(null); setRepairResult(null); setError(null); toast.dismiss("environment-result"); }
+  function repaired(result: EnvironmentRepairResult) {
+    generation.current++;
+    setRepairResult(result);
+    if (result.report) { setData(result.report); setObservation(result.report); }
+    if (server) startCooldown();
+    const complete = result.report?.summary.status === "match" && ["applied", "not_needed"].includes(result.status) && !result.clock_error && result.report.time_repair?.audit_recorded !== false && (!result.report.time_repair || ["not_needed", "verified"].includes(result.report.time_repair.status));
+    toast[complete ? "success" : "warning"](repairSummary(result), { id: "environment-result", description: t("逐项修复结果见弹框；环境复查结果见本页。"), duration: 10000, closeButton: true });
+  }
   function startCooldown() {
     setCooldown(true); clearTimeout(cooldownTimer.current);
     cooldownTimer.current = setTimeout(() => setCooldown(false), 4000);
   }
   async function run(repair = false) {
     const id = ++generation.current;
-    setBusy(true); setError(null); setApplyError(null); if (!repair) setData(null);
+    setBusy(true); setError(null); setApplyError(null); setRepairResult(null); if (!repair) setData(null);
     toast.dismiss("environment-result");
     const target = selected ? profileTarget(selected) : {};
     try {
@@ -182,7 +193,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   }
   async function authorizeTimeSettings() {
     const id = ++generation.current;
-    setBusy(true); setError(null);
+    setBusy(true); setError(null); setRepairResult(null);
     toast.dismiss("environment-result");
     try {
       const result = await checkTimeSettings(selected ? profileTarget(selected) : {}, Boolean(server));
@@ -262,9 +273,10 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
         <button className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={busy || cooldown || removing}
           onClick={() => void run()}>{busy ? t("正在检查…") : selected ? t("对比 Profile") : t("检查本机环境")}</button>
         <button className={button} disabled={!selected || profilesLoading || busy || removing} onClick={openApplication}>{t("应用 Profile")}</button>
+        <button className={button} disabled={!selected || profilesLoading || busy || removing} onClick={() => { toast.dismiss("environment-result"); setRepairing(true); }}>{t("自动修复")}</button>
       </div>
       {server && <p className="break-all text-xs text-muted-foreground">{t("检查会向 {0} 的 UDP 123 端口查询参考时间。", server)}</p>}
-      <p className="text-xs text-muted-foreground">{t("对比始终只读。校时、系统设置和启动配置通过“应用 Profile”单独选择。")}</p>
+      <p className="text-xs text-muted-foreground">{t("对比始终只读。自动修复需先预览并确认；也可通过“应用 Profile”选择单项操作。")}</p>
       {cooldown && <p role="status" className="text-xs text-muted-foreground">{t("两次时间查询至少间隔 4 秒。")}</p>}
       {profilesError && <div role="alert" className="space-y-2"><p className="break-words text-xs text-destructive">{profilesError}</p><button className={button} disabled={busy} onClick={() => void reloadProfiles()}>{t("重新读取集合")}</button></div>}
     </section>
@@ -305,6 +317,8 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
     {editor && <EnvironmentProfileEditor initial={editor.initial} draft={editor.draft} observation={observation} onSave={save} onClose={() => setEditor(null)} />}
     {applying && selected && <EnvironmentApplyDialog profile={selected} report={data} busy={busy} cooldown={cooldown} error={applyError} canConfigureLaunch={Boolean(onConfigureLaunch)}
       onApply={(action) => void apply(action)} onClose={() => { setApplying(false); setApplyError(null); }} onClearError={() => setApplyError(null)} />}
+    {repairing && selected && <EnvironmentRepairDialog profile={selected} onResult={repaired} onClose={() => setRepairing(false)} />}
+    {repairResult && <p role="status" className="text-xs text-muted-foreground">{repairSummary(repairResult)} {repairResult.restart_required && t("请保存工作并重新启动相关应用；当前进程的检查结果保留原样。")}</p>}
     {deleting && <ConfirmModal title={t("删除 Profile")} description={t("仅删除集合 {0}，不修改系统环境。", deleting.name)} risk="write-local" riskLabel={t("仅删除比较基准")} executing={removing}
       confirmLabel={t("删除 Profile")} onConfirm={() => void remove()} onClose={() => setDeleting(null)}>
       {profilesError && <p role="alert" className="mt-2 break-words text-xs text-destructive">{profilesError}</p>}
