@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ActionMenu } from "../components/AccountGrid";
 
@@ -8,6 +8,18 @@ import { ActionMenu } from "../components/AccountGrid";
  * 菜单要渲染在页面最外层，不能是被裁切容器的后代。
  */
 describe("ActionMenu", () => {
+  it("延迟到达的外部滚动未移动按钮时，菜单保持可操作", async () => {
+    const onSelect = vi.fn();
+    render(<main data-testid="scroller"><ActionMenu label="更多操作" items={[{ label: "编辑", testId: "edit", onSelect }]} /></main>);
+    await userEvent.click(screen.getByRole("button", { name: "更多操作" }));
+    fireEvent.scroll(screen.getByTestId("scroller"));
+    const menu = screen.getByRole("menu");
+    fireEvent.scroll(menu);
+    expect(screen.getByRole("menu")).toBe(menu);
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "编辑" }));
+    expect(onSelect).toHaveBeenCalledOnce();
+  });
+
   it("定位完成、菜单可见后才聚焦（浏览器不允许隐藏项取得焦点）", async () => {
     const focus = HTMLButtonElement.prototype.focus;
     const spy = vi.spyOn(HTMLButtonElement.prototype, "focus").mockImplementation(function (this: HTMLButtonElement, options) {
@@ -70,7 +82,9 @@ describe("ActionMenu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("点外面、按 Esc 或滚动时关闭", async () => {
+  it("点外面、按 Esc 或滚动移动按钮时关闭", async () => {
+    let top = 0;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => new DOMRect(0, top, 28, 28));
     render(
       <div>
         <button type="button">外面</button>
@@ -86,6 +100,7 @@ describe("ActionMenu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     expect(trigger).toHaveFocus();
     await userEvent.click(trigger);
+    top = 20;
     window.dispatchEvent(new Event("scroll"));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.queryByRole("menu")).toBeNull();

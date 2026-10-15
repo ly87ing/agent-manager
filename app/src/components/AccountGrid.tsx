@@ -223,6 +223,7 @@ export function ActionMenu({ label, items }: { label: string; items: MenuAction[
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<{ top: number; left: number } | null>(null);
   const focusLast = useRef(false);
   /** 菜单的固定定位：渲染到页面最外层，不被表格等容器的 overflow 裁掉。 */
   const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
@@ -237,6 +238,7 @@ export function ActionMenu({ label, items }: { label: string; items: MenuAction[
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) return;
     const button = buttonRef.current.getBoundingClientRect();
+    anchorRef.current = { top: button.top, left: button.left };
     const height = menuRef.current?.offsetHeight ?? 0;
     const width = menuRef.current?.offsetWidth ?? 0;
     const gap = 4;
@@ -261,9 +263,12 @@ export function ActionMenu({ label, items }: { label: string; items: MenuAction[
         buttonRef.current?.focus();
       }
     };
-    // 固定定位不跟着内容滚：页面滚动或窗口变化时直接关掉，免得菜单与按钮错位
+    // A queued focus scroll can arrive after opening without moving the anchor.
     const onScroll = (event: Event) => {
-      if (!inside(event.target)) setOpen(false);
+      if (inside(event.target)) return;
+      const rect = buttonRef.current?.getBoundingClientRect();
+      const anchor = anchorRef.current;
+      if (!rect || !anchor || rect.top !== anchor.top || rect.left !== anchor.left) setOpen(false);
     };
     const onResize = () => setOpen(false);
     window.addEventListener("mousedown", onMouseDown);
