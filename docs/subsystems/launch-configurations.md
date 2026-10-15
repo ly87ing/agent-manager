@@ -8,6 +8,8 @@ literal argument list, generic environment-variable list, and one or more named
 variants. Each variant can optionally set `TZ`; `la` and `sg` are examples, not
 required names or a fixed list of time zones. A variant's time zone overrides a
 recipe-level `TZ` variable so regional shortcuts remain concise.
+New configuration starts with one Singapore variant (`Asia/Singapore`). Users can
+change it or add other variants; opening a saved recipe preserves its variants.
 
 Saved recipes live in the `launch_recipes` table of `native-manager.db`. They are
 inactive application data. Only the recipe is stored; complete commands are
@@ -28,6 +30,8 @@ row's Edit configuration action opens a modal editor. Its form and generated
 commands scroll independently of the fixed action footer. Cancel or Escape
 discards the draft and returns focus to the original trigger without moving the
 list. The retained Settings entry routes to this same top-level page.
+Successful saves update the list and close the editor. Failed saves keep the
+editor open with the draft and error details available for correction.
 
 Environment remediation can open a new unsaved draft with the selected
 collection's time zone and locale variables. The application target stays empty

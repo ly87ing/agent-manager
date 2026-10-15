@@ -19,7 +19,7 @@ const targetBase = (value: string) => value.split(/[\\/]/).pop()?.replace(/\.(ap
   .replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "app";
 const emptyRecipe = (platform: LaunchRecipe["platform"] = "macos", shell: LaunchRecipe["shell"] = "zsh"): LaunchRecipe => ({
   platform, shell, kind: "app", target: "", args: [], env: [],
-  variants: [{ name: "app-sg", timezone: "Asia/Singapore" }, { name: "app-la", timezone: "America/Los_Angeles" }],
+  variants: [{ name: "app-sg", timezone: "Asia/Singapore" }],
 });
 
 export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initialRecipe?: LaunchRecipe | null; onInitialConsumed?: () => void }) {
@@ -132,8 +132,8 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
     try {
       const data = await launchRequest<{ item: SavedLaunch }>("save", ["--spec", spec,
         ...(selected ? ["--id", selected.id, "--base", selected.revision] : [])]);
-      setSelected(data.item); setBuilt({ spec, entries: data.item.entries });
       setSaved((items) => [...(items ?? []).filter((item) => item.id !== data.item.id), data.item]);
+      cancelEditing();
       toast.success(t("配置已保存到 Agent Manager。"), { id: "launch-feedback" });
     } catch (err) { fail(err, t("保存配置失败")); }
     finally { setBusy(false); }

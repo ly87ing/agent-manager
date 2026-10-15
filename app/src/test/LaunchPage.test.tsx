@@ -175,6 +175,9 @@ describe("launch configuration controls", () => {
     expect(actions).toContainElement(screen.getByRole("button", { name: "取消" }));
     expect(actions).toContainElement(screen.getByRole("button", { name: "预览命令" }));
     expect(actions).toContainElement(screen.getByRole("button", { name: "保存到 Agent Manager" }));
+    expect(screen.getByRole("textbox", { name: "别名 1" })).toHaveValue("app-sg");
+    expect(screen.getByRole("textbox", { name: "自定义时区 1" })).toHaveValue("Asia/Singapore");
+    expect(screen.queryByRole("textbox", { name: "别名 2" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.queryByRole("textbox", { name: "程序路径或命令" })).toBeNull();
     expect(screen.getByRole("button", { name: "新增配置" })).toHaveFocus();
@@ -233,23 +236,52 @@ describe("launch configuration controls", () => {
     await userEvent.click(screen.getAllByRole("button", { name: "复制命令" })[0]);
     expect(write).toHaveBeenLastCalledWith(entries(recipe)[0].command);
     await userEvent.click(screen.getByRole("button", { name: "复制全部定义" }));
-    expect(write).toHaveBeenLastCalledWith(entries(recipe).map((item) => item.definition).join("\n"));
+    expect(write).toHaveBeenLastCalledWith(entries(recipe)[0].definition);
     expect(calls.some((call) => ["launch:save", "launch:delete", "launch:run"].includes(call.command))).toBe(false);
     expect(calls.some((call) => ["launch:status", "launch:preview", "launch:apply"].includes(call.command))).toBe(false);
   });
 
-  it("saves a configuration without generating, launching or writing shell files", async () => {
+  it("saves a single Singapore configuration, closes the editor and starts a fresh draft", async () => {
     const { calls } = setup();
     await startNew();
     await chooseExample();
     await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
     expect(await successToast()).toHaveTextContent("配置已保存到 Agent Manager。");
     const saved = calls.find((call) => call.command === "launch:save")!;
-    expect(JSON.parse(saved.args[1])).toMatchObject({ target: recipe.target, variants: recipe.variants });
+    expect(JSON.parse(saved.args[1])).toMatchObject({ target: recipe.target, variants: [recipe.variants[0]] });
     expect(saved.args).not.toContain("--confirm");
     expect(saved.options?.runId).toBeTruthy();
     expect(calls.some((call) => ["launch:build", "launch:run", "launch:status", "launch:preview", "launch:apply"].includes(call.command))).toBe(false);
     expect((await screen.findAllByText("example-sg"))[0]).toBeVisible();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByText("example-la")).toBeNull();
+    expect(screen.getByRole("button", { name: "新增配置" })).toHaveFocus();
+    await userEvent.click(screen.getByRole("button", { name: "编辑配置 example-sg" }));
+    expect(screen.getByRole("textbox", { name: "程序路径或命令" })).toHaveValue(recipe.target);
+    expect(screen.getByRole("textbox", { name: "别名 1" })).toHaveValue("example-sg");
+    expect(screen.queryByRole("textbox", { name: "别名 2" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "取消" }));
+    await startNew();
+    expect(screen.getByRole("textbox", { name: "程序路径或命令" })).toHaveValue("");
+    expect(screen.getByRole("textbox", { name: "别名 1" })).toHaveValue("app-sg");
+    expect(screen.queryByRole("textbox", { name: "别名 2" })).toBeNull();
+    expect(calls.filter((call) => call.command === "launch:save")).toHaveLength(1);
+  });
+
+  it("saves an explicitly added regional variant without making it a new-draft default", async () => {
+    const { calls } = setup();
+    await startNew();
+    await chooseExample();
+    await userEvent.click(screen.getByRole("button", { name: "添加别名" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "别名 2" }), "example-la");
+    await chooseOption(screen.getByRole("combobox", { name: "选择时区 2" }), "America/Los_Angeles");
+    await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
+    await successToast();
+    expect(JSON.parse(calls.find((call) => call.command === "launch:save")!.args[1]).variants).toEqual(recipe.variants);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByTestId("run-saved-saved-2-example-la")).toBeVisible();
+    await startNew();
+    expect(screen.queryByRole("textbox", { name: "别名 2" })).toBeNull();
   });
 
   it("opens and updates a saved configuration with its revision", async () => {
@@ -263,6 +295,11 @@ describe("launch configuration controls", () => {
     const saves = calls.filter((call) => call.command === "launch:save");
     const saved = saves[saves.length - 1]!;
     expect(saved.args).toEqual(expect.arrayContaining(["--id", savedItem.id, "--base", savedItem.revision]));
+    expect(JSON.parse(saved.args[1]).variants).toEqual([{ ...recipe.variants[0], name: "example-sin" }, recipe.variants[1]]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "编辑配置 example-sin" }));
+    expect(screen.getByRole("textbox", { name: "别名 1" })).toHaveValue("example-sin");
+    expect(screen.getByRole("textbox", { name: "别名 2" })).toHaveValue("example-la");
   });
 
   it("deletes only after a separate confirmation", async () => {
@@ -332,6 +369,9 @@ describe("launch configuration controls", () => {
     await waitFor(() => expect(document.querySelector('[data-sonner-toast][data-type="error"]')).toHaveTextContent("保存配置失败"));
     expect(document.querySelector('[data-sonner-toast][data-type="error"]')?.closest('[data-sonner-toaster]')).toHaveAttribute("data-y-position", "top");
     expect(calls.filter((call) => call.command === "launch:save")).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: "编辑配置" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "程序路径或命令" })).toHaveValue(`${recipe.target} changed`);
+    expect(screen.getByRole("textbox", { name: "自定义时区 2" })).toHaveValue("America/Los_Angeles");
   });
 
   it("announces clipboard failure without a persistent row and clears it on a successful retry", async () => {
@@ -363,9 +403,10 @@ describe("launch configuration controls", () => {
     await userEvent.click(copy[0]);
     expect(write).toHaveBeenCalledWith(expect.stringMatching(/^function example-sg \{/));
     expect(screen.queryByRole("button", { name: "启动" })).toBeNull();
+    expect(screen.getByText("命令行程序请在终端运行复制的命令，保留正常交互。")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "保存到 Agent Manager" }));
     await successToast();
     expect(calls.some((call) => call.command === "launch:save")).toBe(true);
-    expect(screen.getByText("命令行程序请在终端运行复制的命令，保留正常交互。")).toBeVisible();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
