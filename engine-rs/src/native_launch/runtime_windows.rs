@@ -7,7 +7,7 @@ use std::{
 use windows_sys::Win32::{
     Foundation::{
         CloseHandle, GetLastError, ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES, HANDLE,
-        INVALID_HANDLE_VALUE, STILL_ACTIVE,
+        INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
     },
     Globalization::{CompareStringOrdinal, CSTR_EQUAL},
     Storage::FileSystem::{
@@ -19,8 +19,8 @@ use windows_sys::Win32::{
             TH32CS_SNAPPROCESS,
         },
         Threading::{
-            GetExitCodeProcess, OpenProcess, QueryFullProcessImageNameW,
-            PROCESS_QUERY_LIMITED_INFORMATION,
+            OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject,
+            PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
         },
     },
 };
@@ -56,8 +56,7 @@ fn file_id(path: &Path) -> std::io::Result<(u64, [u8; 16])> {
 }
 
 fn exited(process: HANDLE) -> bool {
-    let mut code = STILL_ACTIVE as u32;
-    unsafe { GetExitCodeProcess(process, &mut code) != 0 && code != STILL_ACTIVE as u32 }
+    unsafe { WaitForSingleObject(process, 0) == WAIT_OBJECT_0 }
 }
 
 pub(super) fn already_running(target: &Path) -> Result<bool> {
@@ -99,8 +98,13 @@ pub(super) fn already_running(target: &Path) -> Result<bool> {
             bail!("Unable to compare running application names");
         }
         {
-            let process =
-                unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, entry.th32ProcessID) };
+            let process = unsafe {
+                OpenProcess(
+                    PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                    0,
+                    entry.th32ProcessID,
+                )
+            };
             if process.is_null() {
                 if same_name == CSTR_EQUAL && unsafe { GetLastError() } != ERROR_INVALID_PARAMETER {
                     bail!("Unable to verify a matching running application");
@@ -121,7 +125,7 @@ pub(super) fn already_running(target: &Path) -> Result<bool> {
                     Err(std::io::Error::last_os_error())
                 };
                 match image {
-                    Ok(id) if id == selected => return Ok(true),
+                    Ok(id) if id == selected && !exited(process.0) => return Ok(true),
                     Ok(_) => {}
                     Err(_) if exited(process.0) => {}
                     Err(_) if same_name == CSTR_EQUAL => {
@@ -185,7 +189,7 @@ mod tests {
                 let _ = self.0.wait();
             }
         }
-        let _child = Owned(
+        let mut child = Owned(
             std::process::Command::new(&first)
                 .args([
                     "--exact",
@@ -208,5 +212,8 @@ mod tests {
         assert!(!already_running(&second).unwrap());
         assert!(already_running(&alias).unwrap());
         assert!(already_running(&renamed).unwrap());
+        child.0.kill().unwrap();
+        child.0.wait().unwrap();
+        assert!(!already_running(&first).unwrap());
     }
 }
