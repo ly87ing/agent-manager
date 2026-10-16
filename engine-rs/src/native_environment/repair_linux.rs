@@ -172,6 +172,8 @@ pub(super) struct LinuxSettings {
     manager: Option<Manager>,
     bound: Option<(String, String)>,
     time: Option<super::repair_linux_time::State>,
+    desktop: Option<super::repair_linux_desktop::State>,
+    context: Value,
 }
 
 #[cfg(target_os = "linux")]
@@ -194,6 +196,14 @@ impl Settings for LinuxSettings {
             .timezone
             .as_ref()
             .and_then(|_| super::repair_linux_time::read());
+        let gnome = super::repair_linux_desktop::gnome(
+            &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
+        );
+        self.desktop = if target.timezone.is_some() || target.automatic_timezone.is_some() {
+            super::repair_linux_desktop::read()
+        } else {
+            None
+        };
         let zone = target.timezone.as_ref().map(|zone| {
             std::fs::metadata(std::path::Path::new("/usr/share/zoneinfo").join(zone))
                 .is_ok_and(|meta| meta.is_file())
@@ -210,12 +220,11 @@ impl Settings for LinuxSettings {
                     )
                 })
                 .unwrap_or_else(|| "systemd user manager unavailable".into()),
-            context: json!({"manager":self.manager,"locale_installed":locale,"zone_installed":zone,"time":self.time}),
+            context: json!({"manager":self.manager,"locale_installed":locale,"zone_installed":zone,"time":self.time,"gnome":gnome,"desktop_time":self.desktop}),
             ..Snapshot::default()
         };
         snapshot.unavailable.extend(
             [
-                "time.automatic_timezone",
                 "ntp.server",
                 "ntp.automatic_time",
                 "language.preferred",
@@ -223,12 +232,33 @@ impl Settings for LinuxSettings {
             ]
             .map(str::to_string),
         );
+        snapshot
+            .scope_overrides
+            .insert("time.automatic_timezone".into(), "user".into());
+        snapshot.values.insert(
+            "time.automatic_timezone".into(),
+            self.desktop.as_ref().map(|state| json!(state.automatic)),
+        );
+        if !self.desktop.as_ref().is_some_and(|state| {
+            target
+                .automatic_timezone
+                .is_none_or(|value| state.available(value))
+        }) {
+            snapshot
+                .unavailable
+                .insert("time.automatic_timezone".into());
+        }
         snapshot.values.insert(
             "time.timezone".into(),
             self.time.as_ref().map(|time| json!(time.zone)),
         );
         if self.time.is_none()
-            || target.automatic_timezone.is_some()
+            || (target.automatic_timezone.is_some()
+                && snapshot.unavailable.contains("time.automatic_timezone"))
+            || (gnome && self.desktop.is_none())
+            || (self.desktop.as_ref().is_some_and(|state| state.automatic)
+                && target.automatic_timezone != Some(false)
+                && target.timezone.as_ref() != self.time.as_ref().map(|state| &state.zone))
             || target
                 .timezone
                 .as_ref()
@@ -253,18 +283,133 @@ impl Settings for LinuxSettings {
                 snapshot.unavailable.insert(id);
             }
         }
+        self.context = snapshot.context.clone();
         Ok(snapshot)
     }
+    fn in_system_batch(&self, item: &Item) -> bool {
+        item.scope == "system" || item.id == "time.automatic_timezone"
+    }
     fn system(&mut self, items: &[Item]) -> Result<(String, Vec<Item>, Option<bool>)> {
-        if items.len() != 1 || items[0].id != "time.timezone" {
+        if items.iter().any(|item| {
+            !matches!(
+                item.id.as_str(),
+                "time.timezone" | "time.automatic_timezone"
+            )
+        }) {
             anyhow::bail!("Unsupported Linux system repair batch.");
         }
-        let before = self
-            .time
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Linux system timezone is unavailable."))?;
-        let (status, result) = super::repair_linux_time::apply(&items[0], before);
-        Ok((status, vec![result], None))
+        let target = self.target.clone();
+        let mut baseline = self.context.clone();
+        let authorization = items
+            .iter()
+            .any(|item| item.id == "time.timezone")
+            .then(super::repair_linux_time::authorize);
+        let mut results = Vec::new();
+        for item in items {
+            let mut result = item.clone();
+            if let Some(status) = authorization.as_ref().and_then(|auth| auth.failure()) {
+                result.status = if status == "cancelled" {
+                    "not_applied"
+                } else {
+                    status
+                }
+                .into();
+                results.push(result);
+                return Ok((
+                    if status == "cancelled" {
+                        "cancelled"
+                    } else {
+                        "partial"
+                    }
+                    .into(),
+                    results,
+                    None,
+                ));
+            }
+            let snapshot = self.snapshot(&target)?;
+            if snapshot.context != baseline || snapshot.unavailable.contains(&item.id) {
+                result.status = "stale".into();
+                results.push(result);
+                return Ok(("partial".into(), results, None));
+            }
+            if item.id == "time.timezone" {
+                let before = self
+                    .time
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Linux system timezone is unavailable."))?;
+                let desktop = self.desktop.clone();
+                let (status, result) = super::repair_linux_time::apply(
+                    item,
+                    before,
+                    authorization.as_ref().expect("timezone authorization"),
+                    move || super::repair_linux_desktop::read() == desktop,
+                );
+                results.push(result);
+                if status != "applied" {
+                    return Ok((status, results, None));
+                }
+                let snapshot = self.snapshot(&target)?;
+                if snapshot.values.get(&item.id).and_then(Option::as_ref) != Some(&item.expected)
+                    || snapshot.context["time"]["adjtime"] != baseline["time"]["adjtime"]
+                {
+                    results.last_mut().unwrap().status = "unverified".into();
+                    return Ok(("partial".into(), results, None));
+                }
+                baseline["time"] = snapshot.context["time"].clone();
+            } else {
+                let expected = item
+                    .expected
+                    .as_bool()
+                    .ok_or_else(|| anyhow::anyhow!("Invalid automatic timezone target."))?;
+                let before = self
+                    .desktop
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("GNOME automatic timezone is unavailable."))?;
+                let written = super::repair_linux_desktop::write(before, expected, || {
+                    authorization
+                        .as_ref()
+                        .is_none_or(|auth| auth.failure().is_none())
+                });
+                let mut expected_after = before.clone();
+                expected_after.automatic = expected;
+                result.status = match super::repair_linux_desktop::read() {
+                    Some(after) if after == expected_after => {
+                        if written {
+                            "verified"
+                        } else {
+                            "verified_after_error"
+                        }
+                    }
+                    None => "outcome_unknown",
+                    _ if written => "unverified",
+                    _ if authorization.as_ref().and_then(|auth| auth.failure())
+                        == Some("stale") =>
+                    {
+                        "stale"
+                    }
+                    _ => "failed",
+                }
+                .into();
+                let verified = result.status == "verified";
+                results.push(result);
+                if !verified {
+                    return Ok(("partial".into(), results, None));
+                }
+                baseline["desktop_time"] = json!(expected_after);
+            }
+            let snapshot = self.snapshot(&target)?;
+            if snapshot.context != baseline {
+                if snapshot.context["time"] != baseline["time"] {
+                    for result in &mut results {
+                        if result.id == "time.timezone" && result.status == "verified" {
+                            result.status = "unverified".into();
+                        }
+                    }
+                }
+                return Ok(("partial".into(), results, None));
+            }
+        }
+        Ok(("applied".into(), results, None))
     }
     fn write_user(&mut self, item: &Item) -> bool {
         let Some(key) = item.id.strip_prefix("session.") else {

@@ -61,6 +61,26 @@ describe("Automatic environment repair", () => {
     expect(await screen.findByText("Linux 会话变量仅供用户服务管理器以后启动的进程使用，管理器退出后失效；已有桌面应用不受影响。")).toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).toBeNull();
   });
+  it.each(["en", "zh-CN"] as const)("keeps GNOME preference verification distinct from geolocation in %s", async (language) => {
+    setLanguage(language);
+    const configured = { ...profile, target: environmentFixture({ automatic_timezone: true }).target };
+    const preview = { ...plan, platform: "linux" as const, target: configured.target, items: [
+      { id: "time.automatic_timezone", scope: "user" as const, before: false, expected: true, status: "change" as const },
+    ] };
+    renderWithEngine(<EnvironmentRepairDialog profile={configured} onResult={() => {}} onClose={() => {}} />, {
+      "environment:repair-preview": makeEnvelope(preview),
+      "environment:repair": makeEnvelope({ ...result(), items: preview.items.map(item => ({ ...item, status: "verified" })),
+        restart_required: false, verification_limits: ["GNOME geolocation and automatic switching remain unverified."] }),
+    });
+    await screen.findByText(language === "en" ? /GNOME automatic time zone is verified by preference readback only/ : /GNOME 自动时区仅验证偏好回读/);
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await screen.findByText(language === "en" ? "Preference saved and read back" : "偏好已保存并读回");
+    expect(screen.getByRole("status")).toHaveTextContent(language === "en" ? "Verify their effect in the target environment" : "实际效果仍需在目标环境中确认");
+    expect(screen.queryByText(language === "en" ? "Repaired and verified" : "已修复并验证")).toBeNull();
+    expect(screen.queryByText(language === "en" ? /^Save your work and restart the affected apps/ : /^请保存工作并重新启动相关应用/)).toBeNull();
+    expect(screen.queryByText(language === "en" ? /Save your work, restart them/ : /请保存工作后重新启动/)).toBeNull();
+    expect(screen.queryByText(language === "en" ? /Environment variable scope:/ : /环境变量范围：/)).toBeNull();
+  });
   it("previews the selected criteria and cancellation performs no repair or correction", async () => {
     const { calls } = setup();
     expect(screen.getByRole("button", { name: "自动修复" })).toBeDisabled();
@@ -141,6 +161,17 @@ describe("Automatic environment repair", () => {
     await within(dialog).findByText("校时结果未能写入操作记录，本页保留复测结果。");
     expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toBeNull();
     expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toHaveTextContent("校时结果未能写入操作记录");
+  });
+  it("keeps an explicit verification limit visible even when all reported settings match", async () => {
+    const repaired = result();
+    repaired.report!.summary = { status: "match", matched: 1, mismatched: 0, unknown: 0, compared: 1 };
+    repaired.verification_limits = ["Automatic switching remains unverified."];
+    setup(repaired);
+    const dialog = await open();
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认自动修复" }));
+    await within(dialog).findByText("已保存所选设置，实际效果仍需在目标环境中确认。");
+    expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toBeNull();
+    expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toHaveTextContent("实际效果仍需在目标环境中确认");
   });
   it.each([null, 2000])("discloses the actual clock tolerance only when correction is available (%s)", async (tolerance) => {
     const configured = { ...profile, target: { ...profile.target, ntp_server: "time.example", max_clock_offset_ms: tolerance } };

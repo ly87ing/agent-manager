@@ -39,7 +39,7 @@ export type EnvironmentCheck = z.infer<typeof checkSchema>;
 const repairItemSchema = z.object({ id: z.string(), scope: z.enum(["system", "user", "session"]), before: z.union([z.string(), z.boolean(), z.array(z.string())]).nullable(),
   expected: z.union([z.string(), z.boolean(), z.array(z.string())]).nullable(), status: z.enum(["unchanged", "change", "unavailable", "verified", "verified_after_error", "outcome_unknown", "stale", "not_applied", "unverified", "failed"]) }).strict();
 const repairPlanSchema = z.object({ base: z.string().regex(/^[0-9a-f]{64}$/), target: targetSchema, items: z.array(repairItemSchema), session_scope: z.string(), platform: z.enum(["macos", "windows", "linux"]).optional() }).strict();
-const repairResultSchema = z.object({ status: z.enum(["not_needed", "applied", "partial", "cancelled", "audit_failed"]), items: z.array(repairItemSchema), report: reportSchema.nullable(), restart_required: z.boolean(), clock_error: z.string().nullable() }).strict();
+const repairResultSchema = z.object({ status: z.enum(["not_needed", "applied", "partial", "cancelled", "audit_failed"]), items: z.array(repairItemSchema), report: reportSchema.nullable(), restart_required: z.boolean(), clock_error: z.string().nullable(), verification_limits: z.array(z.string()).optional() }).strict();
 export type EnvironmentRepairPlan = z.infer<typeof repairPlanSchema>;
 export type EnvironmentRepairResult = z.infer<typeof repairResultSchema>;
 const profileSchema = z.object({ id: z.string(), revision: z.string(), name: z.string(), target: targetSchema, auto_sync: z.boolean() }).strict();
