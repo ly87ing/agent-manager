@@ -1,6 +1,10 @@
 //! External commands: desktop window flags, timeout process groups, and manual system proxies.
 //! Explicit environment settings take precedence; discovery never writes system settings.
 
+#[cfg(any(target_os = "linux", test))]
+#[path = "process_proxy_linux.rs"]
+mod linux_proxy;
+
 use std::ffi::OsStr;
 use std::process::{Child, Command};
 use std::sync::Mutex;
@@ -423,7 +427,12 @@ fn read_system_proxy() -> SystemProxy {
     parse_windows(enabled, &server, &bypass)
 }
 
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(target_os = "linux")]
+fn read_system_proxy() -> SystemProxy {
+    linux_proxy::read()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 fn read_system_proxy() -> SystemProxy {
     SystemProxy::default()
 }
