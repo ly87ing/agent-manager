@@ -11,20 +11,22 @@ in older records below are retired. The Assistants page lists immutable extensio
 it does not restore account management. See [current architecture](ARCHITECTURE.md)
 and [scope](EXTENSIONS-ONLY.md).
 
-## Current acceptance boundary (2026-10-15)
+## Current acceptance boundary (2026-10-16)
 
-The latest audit corrections cover shared CLI/desktop database selection, modal
-shortcut protection, explicit resource rereads and native environment capabilities.
-The [current verification receipt](goal-rust-gui.md#2026-10-15-project-audit-corrections)
-separates local execution, browser interaction and remaining acceptance.
+Verified corrections through `c766083` cover native command/MCP execution,
+snapshot ownership, typed skill identities and Windows ordinary-file skill
+materialization. The [snapshot receipt](goal-rust-gui.md#2026-10-16-cross-platform-snapshot-integrity)
+separates native execution from installed-client acceptance. Earlier database,
+modal and reread checks remain in the [previous receipt](goal-rust-gui.md#2026-10-15-project-audit-corrections).
 
 | Area | Current evidence | Remaining boundary |
 | --- | --- | --- |
-| Extension and saved-tool source | Engine 445 plus the program lifecycle harness, Tauri 27, frontend 674 and release-script 23 tests; type checking/build, smoke and isolated CLI readback passed | These are not consumer acceptance of an installed package |
+| Extension and saved-tool source | Complete macOS engine suite including 256 library cases and native program/MCP harnesses, Tauri 27, frontend 690, type checking/build and Windows/Linux all-target checks passed for the snapshot candidate | These are not consumer acceptance of an installed package |
 | Desktop interaction | Current browser fixtures verified modal drafts, resource rereads and unsupported-platform controls in both languages at 1000 × 650 and 760 × 650 | Earlier native receipts do not establish installed-package business workflows for these corrections |
-| Environment correction | Read-only preview, no-op, guarded audit and disposable settings verification are covered by the current tests | Actual administrator-authorized settings writes, excessive-offset adjustment and target-app inheritance need a disposable macOS environment |
+| Environment correction | Read-only inspection, previews, guarded authorization and supported platform-specific repair paths have native regression coverage; Linux service inspection avoids activation | Additional Linux desktop/provider repair capabilities, real privileged writes and target-app inheritance remain separate acceptance work; see the platform controls in the subsystem reference |
 | Skill adoption | Local-only CLI preview made no Git call or state write; explicit comparison and failure fallback passed | Real SSH repository access depends on the configured source and network |
-| Platform CI | [CI](https://github.com/ly87ing/agent-manager/actions/runs/38836505099) and [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/38836505316) passed for `2d361ad`, including four installer targets | Later audit commits require their own completed CI receipts; Windows/Linux/arm64 desktop business interaction remains unverified |
+| Skill snapshots | Native Windows CLI verified ordinary output, immutable reuse, disable/enable, tamper refusal, assistant isolation and offline editable fork; all three systems executed the typed/materialized verifier cases | Git `core.symlinks=false` interpretation and directory/mixed-link materialization are not established by this slice; real assistant consumption remains unverified |
+| Platform CI | Candidate `62881b7` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/38951426424) and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38951421392), including four installer targets; its runtime/reference files match main `c766083` | A candidate receipt does not claim a later main run passed; Windows/Linux/arm64 installed desktop business interaction remains unverified |
 | Distribution and updater | Repository is public; current test installers are available from successful GUI CI artifacts | Only the old preview is published; no stable latest release or real signed update loop is verified |
 
 ### Remaining acceptance checklist

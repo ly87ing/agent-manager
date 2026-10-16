@@ -1802,3 +1802,50 @@ built, no installed application was changed, and no tag or Release was created.
 Real privileged settings/time
 writes, consumer-app inheritance, other-platform installed workflows and signed
 update installation remain pending as listed in [platform status](GUI-PLATFORM-STATUS.md).
+
+## 2026-10-16: cross-platform snapshot integrity
+
+Main `6a46831` preserves immutable existing versions and binds parent, staging
+and content-root identities through copy, cleanup and no-replace publication.
+Native Windows failures from pathname-bound descendant handles were reproduced
+and corrected with independently checked full file-ID references; the complete
+candidate passed all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38942737810).
+Main `4817c03` also bounds retries for disappearing X11 children in native KDE
+acceptance, retaining the original discovery deadline and unrelated-error failures.
+
+Main `2a648e1` introduces typed v2 Git skill identities without rewriting legacy
+bindings. Main `04f7a8e` separately extracts the inventory while preserving fixed
+fingerprints and mixed-format behavior. Main `c766083` adds schema 3 ordinary-file
+materialization for supported Windows file links, verified against the same
+logical v2 identity. Existing versions verify before new writer policy applies.
+Strict cross-host verification includes all physical entries, raw target meaning,
+actual alias/target bytes and the caller's fixed expected version.
+
+Candidate `62881b7` passed all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38951421392)
+and [regular CI](https://github.com/ly87ing/agent-manager/actions/runs/38951426424).
+Its runtime and owning reference match main `c766083`; only lesson ordering
+differs. Actual Windows [engine logs](https://github.com/ly87ing/agent-manager/actions/runs/38951421392/job/117143474249)
+confirm the native CLI add/reuse/disable/enable, failed-enable isolation and
+offline editable fork case, plus ordinary non-reparse output, later-sorted targets,
+native nested traversal, verbatim paths and absent copied alternate streams.
+Actual Linux and macOS logs confirm the cross-host verifier and legacy-reuse cases.
+The original Windows receipt fixture failed while reading a slash-target source
+link before verification; the corrected native-target fixture passed with all
+integrity assertions retained. Repeated Intel DMG `Resource busy` failures and
+their successful same-revision reruns do not identify the process holding the
+volume or establish a packaging reliability fix.
+
+Local macOS verification passed the complete engine suite, including 256 library
+cases and the native program/MCP harnesses, Tauri 27 tests, frontend 690 tests and
+production build. Windows/Linux all-target checks, formatting, documentation
+links and diff checks passed. Windows-only CLI tests executed on Windows rather
+than being inferred from their zero-test result on macOS.
+
+This slice does not establish Git plaintext-link checkout interpretation,
+directory/mixed-link materialization, every Linux desktop/time-provider repair,
+installed desktop business workflows, real assistant consumption or a signed
+updater installation. Source fixtures use the runner's existing link capability;
+the new output writer itself does not call file-link APIs. No personal regional
+setting, real assistant configuration, installed application, Release or tag was
+changed. Older readers need a capable schema 3 verifier to manage new bindings;
+rollback must not remove manifests or rewrite version IDs.
