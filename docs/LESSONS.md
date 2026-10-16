@@ -18,6 +18,10 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Exercise malformed and expired requests through the actual CLI/helper binaries
   and read back absent HOME/database state. Pure boundary tests and native CI do
   not establish real privileged desktop acceptance.
+- Resolve helper resources only on platforms that use them. An unnecessary
+  macOS `resource_dir()?` lookup passed Tauri unit tests but aborted direct
+  packaged-binary startup with `unknown path`; native installer acceptance
+  caught it before the main push.
 
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
