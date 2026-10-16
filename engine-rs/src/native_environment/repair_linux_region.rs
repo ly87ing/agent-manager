@@ -11,104 +11,8 @@ pub(super) struct State {
     inherited: Option<Primary>,
 }
 
-#[derive(Clone, PartialEq, Eq, Serialize)]
-struct Primary {
-    locale: String,
-    uid: u32,
-    bus: String,
-    owner: String,
-    path: String,
-}
-
-#[cfg(target_os = "linux")]
-fn primary() -> Option<Primary> {
-    use std::time::Duration;
-    zbus::block_on(futures_lite::future::race(
-        async {
-            let connection = zbus::Connection::system().await.ok()?;
-            let bus = zbus::Proxy::new(
-                &connection,
-                "org.freedesktop.DBus",
-                "/org/freedesktop/DBus",
-                "org.freedesktop.DBus",
-            )
-            .await
-            .ok()?;
-            let id: String = bus.call("GetId", &()).await.ok()?;
-            let owner: String = bus
-                .call("GetNameOwner", &("org.freedesktop.Accounts",))
-                .await
-                .ok()?;
-            let accounts = zbus::Proxy::new(
-                &connection,
-                owner.as_str(),
-                "/org/freedesktop/Accounts",
-                "org.freedesktop.Accounts",
-            )
-            .await
-            .ok()?;
-            let uid = unsafe { libc::geteuid() };
-            let path: zbus::zvariant::OwnedObjectPath = accounts
-                .call_with_flags(
-                    "FindUserById",
-                    zbus::proxy::MethodFlags::NoAutoStart.into(),
-                    &(uid as i64,),
-                )
-                .await
-                .ok()??;
-            if !path.as_str().starts_with("/org/freedesktop/Accounts/User") {
-                return None;
-            }
-            let properties = zbus::Proxy::new(
-                &connection,
-                owner.as_str(),
-                path.as_str(),
-                "org.freedesktop.DBus.Properties",
-            )
-            .await
-            .ok()?;
-            async fn get(
-                properties: &zbus::Proxy<'_>,
-                key: &str,
-            ) -> Option<zbus::zvariant::OwnedValue> {
-                properties
-                    .call_with_flags(
-                        "Get",
-                        zbus::proxy::MethodFlags::NoAutoStart.into(),
-                        &("org.freedesktop.Accounts.User", key),
-                    )
-                    .await
-                    .ok()?
-            }
-            if u64::try_from(&get(&properties, "Uid").await?).ok()? != uid as u64 {
-                return None;
-            }
-            let value = get(&properties, "Language").await?;
-            let locale = locale(<&str>::try_from(&value).ok()?)?;
-            if u64::try_from(&get(&properties, "Uid").await?).ok()? != uid as u64 {
-                return None;
-            }
-            let after_id: String = bus.call("GetId", &()).await.ok()?;
-            let after_owner: String = bus
-                .call("GetNameOwner", &("org.freedesktop.Accounts",))
-                .await
-                .ok()?;
-            (id == after_id && owner == after_owner).then_some(Primary {
-                locale,
-                uid,
-                bus: id,
-                owner,
-                path: path.to_string(),
-            })
-        },
-        async {
-            async_io::Timer::after(Duration::from_secs(8)).await;
-            None
-        },
-    ))
-}
-
-fn locale(value: &str) -> Option<String> {
+use super::linux_accounts::Primary;
+pub(super) fn locale(value: &str) -> Option<String> {
     super::Target {
         locale: Some(value.into()),
         ..Default::default()
@@ -149,7 +53,7 @@ pub(super) fn read() -> Option<State> {
     let raw = super::linux::gsetting("org.gnome.system.locale", "region")?;
     let raw = raw.strip_prefix('\'')?.strip_suffix('\'')?.to_string();
     let inherited = if raw.is_empty() {
-        Some(primary()?)
+        Some(super::linux_accounts::read()?)
     } else {
         None
     };
