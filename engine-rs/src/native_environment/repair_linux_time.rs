@@ -22,7 +22,7 @@ fn zone(value: &Value) -> Option<String> {
     Some(timezone.into())
 }
 
-fn start_time(stat: &str) -> Option<u64> {
+pub(super) fn start_time(stat: &str) -> Option<u64> {
     // comm is parenthesized and may itself contain spaces and parentheses.
     stat.rsplit_once(')')?
         .1
@@ -129,7 +129,7 @@ fn disk(zone: String) -> Option<State> {
 }
 
 #[cfg(target_os = "linux")]
-fn authorize() -> Option<i32> {
+fn authorization_code() -> Option<i32> {
     use std::{process::Stdio, time::Duration};
     let start = start_time(&std::fs::read_to_string("/proc/self/stat").ok()?)?;
     let subject = format!("{},{},{}", std::process::id(), start, unsafe {
@@ -151,6 +151,37 @@ fn authorize() -> Option<i32> {
         .ok()?
         .status
         .code()
+}
+
+#[cfg(target_os = "linux")]
+pub(super) struct Authorization {
+    code: Option<i32>,
+    deadline: Option<u64>,
+}
+
+#[cfg(target_os = "linux")]
+impl Authorization {
+    pub(super) fn failure(&self) -> Option<&'static str> {
+        match guarded(self.code, self.fresh(), true, || true) {
+            "written" => None,
+            other => Some(other),
+        }
+    }
+
+    fn fresh(&self) -> bool {
+        self.deadline
+            .zip(super::clock_helper::boot_ms())
+            .is_some_and(|(deadline, now)| super::clock_helper::valid_window(now, deadline))
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn authorize() -> Authorization {
+    let deadline = super::clock_helper::boot_ms().and_then(|now| now.checked_add(120_000));
+    Authorization {
+        code: authorization_code(),
+        deadline,
+    }
 }
 
 // Authorization may take time or let an external settings change occur.
@@ -187,7 +218,12 @@ fn definite_refusal(name: &str) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn set_zone(target: &str, before: &State, deadline: Option<u64>) -> Dispatch {
+fn set_zone(
+    target: &str,
+    before: &State,
+    deadline: Option<u64>,
+    related_unchanged: impl FnOnce() -> bool + Send + 'static,
+) -> Dispatch {
     use std::time::{Duration, Instant};
     let started = Instant::now();
     zbus::block_on(futures_lite::future::race(
@@ -225,12 +261,13 @@ fn set_zone(target: &str, before: &State, deadline: Option<u64>) -> Dispatch {
                 return Dispatch::Stale;
             };
             let requested = target.to_string();
-            let (fresh, available) =
-                blocking::unblock(move || (disk(zone), installed(&requested))).await;
+            let (fresh, available, related) =
+                blocking::unblock(move || (disk(zone), installed(&requested), related_unchanged()))
+                    .await;
             if started.elapsed() >= Duration::from_secs(8) {
                 return Dispatch::Unknown;
             }
-            if fresh.as_ref() != Some(before) || !available {
+            if fresh.as_ref() != Some(before) || !available || !related {
                 return Dispatch::Stale;
             }
             if !deadline
@@ -266,28 +303,28 @@ fn set_zone(target: &str, before: &State, deadline: Option<u64>) -> Dispatch {
 }
 
 #[cfg(target_os = "linux")]
-pub(super) fn apply(item: &Item, before: &State) -> (String, Item) {
+pub(super) fn apply(
+    item: &Item,
+    before: &State,
+    authorization: &Authorization,
+    related_unchanged: impl FnOnce() -> bool + Send + 'static,
+) -> (String, Item) {
     let mut result = item.clone();
     let Some(target) = item.expected.as_str().filter(|zone| installed(zone)) else {
         result.status = "unavailable".into();
         return ("partial".into(), result);
     };
-    let deadline = super::clock_helper::boot_ms().and_then(|now| now.checked_add(120_000));
-    let authorization = authorize();
     let current = read();
-    let fresh = deadline
-        .zip(super::clock_helper::boot_ms())
-        .is_some_and(|(deadline, now)| super::clock_helper::valid_window(now, deadline));
     let mut dispatch = Dispatch::Refused;
     let status = guarded(
-        authorization,
-        fresh,
+        authorization.code,
+        authorization.fresh(),
         current.as_ref() == Some(before),
         || {
             if !installed(target) {
                 return false;
             }
-            dispatch = set_zone(target, before, deadline);
+            dispatch = set_zone(target, before, authorization.deadline, related_unchanged);
             dispatch == Dispatch::Written
         },
     );

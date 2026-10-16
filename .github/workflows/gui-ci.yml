@@ -49,6 +49,12 @@ jobs:
       - name: Run cargo tests
         run: cargo test --manifest-path engine-rs/Cargo.toml
 
+      - name: Install GNOME preference fixture tools
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libglib2.0-bin gsettings-desktop-schemas
+
       - name: Verify disposable Linux user-manager environment
         if: ${{ runner.os == 'Linux' }}
         shell: bash
@@ -60,6 +66,7 @@ jobs:
           systemctl --user start dbus.socket
           AM_ISOLATED_LINUX_USER_MANAGER=1 node scripts/verify-linux-user-environment.mjs
           cargo build --manifest-path engine-rs/Cargo.toml --example linux_polkit_fixture
+          cargo build --manifest-path engine-rs/Cargo.toml --example linux_gnome_fixture
           AM_ISOLATED_LINUX_TIMEZONE=1 node scripts/verify-linux-timezone.mjs
 
       - name: Run cargo checks

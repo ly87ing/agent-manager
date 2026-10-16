@@ -156,7 +156,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
     setRepairResult(result);
     if (result.report) { setData(result.report); setObservation(result.report); }
     if (server) startCooldown();
-    const complete = result.report?.summary.status === "match" && ["applied", "not_needed"].includes(result.status) && !result.clock_error && result.report.time_repair?.audit_recorded !== false && (!result.report.time_repair || ["not_needed", "verified"].includes(result.report.time_repair.status));
+    const complete = result.report?.summary.status === "match" && ["applied", "not_needed"].includes(result.status) && !result.clock_error && !result.verification_limits?.length && result.report.time_repair?.audit_recorded !== false && (!result.report.time_repair || ["not_needed", "verified"].includes(result.report.time_repair.status));
     toast[complete ? "success" : "warning"](repairSummary(result), { id: "environment-result", description: t("逐项修复结果见弹框；环境复查结果见本页。"), duration: 10000, closeButton: true });
   }
   function startCooldown() {

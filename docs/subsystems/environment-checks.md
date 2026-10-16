@@ -196,8 +196,8 @@ entries are edited.
 
 #### Linux
 
-The first Linux settings slice repairs only selected regional variables in the
-existing systemd user manager. It never creates or starts that manager or a user
+Linux repairs selected regional variables in the existing systemd user manager.
+It never creates or starts that manager or a user
 bus. The bus ID, manager owner and original caller UID are bound for the entire
 operation; a manager or bus replacement stops the repair. Reads retain only the
 selected regional keys, including known absence, and setters recheck their
@@ -220,9 +220,29 @@ Connection setup and dispatch share an eight-second bound; transport uncertainty
 remains an unknown outcome and stops subsequent changes. A timeout cannot revoke
 a request already dispatched to the system service.
 The current slice requires a UTC hardware clock and a root-owned zoneinfo symlink
-matching timedated. Unknown/local RTC, cache/disk disagreement and a profile that
-also requests automatic-time-zone changes remain unavailable. This preserves the
-hardware clock and avoids applying the fixed zone before an unimplemented switch.
+matching timedated. Unknown/local RTC and cache/disk disagreement remain
+unavailable. This preserves the hardware clock.
+
+On a GNOME session, automatic-time-zone preferences use the original user's
+GSettings backend and remain user-scoped in the preview. They join the ordered
+time batch: authorization for an actual system timezone change finishes before
+any preference write, then disable precedes fixed timezone, and enable follows
+it. Auto-only changes do not request system authorization. Every step compares
+fresh related evidence and independently reads back its result; only that exact
+own change advances the baseline. Unknown/writable-policy loss, bus/daemon
+replacement, changed authorization evidence or outcome uncertainty stops later
+items, including session variables. Fixed-zone changes while automatic timezone
+remains enabled are unavailable; there is no hidden temporary pause or retry.
+
+Enabling requires location already enabled, an existing caller-owned GNOME
+Datetime D-Bus service, and a noninteractive authorization check for that service's
+actual PID/start-time/UID. Disabling does not require location or daemon
+permission. No location permission, GeoClue client, daemon lifecycle, coordinates
+or user privacy settings are changed. Preference readback does not prove that
+GNOME has drained an earlier request or that geolocation/automatic switching
+works. A final timezone drift is partial, not an invitation to compete with the
+daemon. CLI `verification_limits` and the dialog retain that distinction;
+auto-only changes do not request an application restart.
 Automatic time/NTP and desktop language/region settings remain unavailable here.
 
 GUI CI verifies actual apply, future-unit inheritance, no-op, stale refusal and
@@ -239,6 +259,12 @@ If the hosted image has globally writable zoneinfo, the fixture first verifies
 the production refusal. It temporarily removes group/world write bits from its
 exact test files, binding root ownership, inode and content, and restores their
 original modes independently during cleanup. Production trust is unchanged.
+An additional real GSettings/keyfile fixture isolates the user's configuration
+directory and exclusively owns a disposable Datetime bus name. It checks ordered
+repair, denial before user writes, privacy/service-policy gates, stale identity,
+no-op and readback. That owned name is a test double, not desktop/geolocation
+acceptance. See the [GNOME monitor](https://github.com/GNOME/gnome-settings-daemon/blob/master/plugins/datetime/gsd-timezone-monitor.c)
+and [preference listener](https://github.com/GNOME/gnome-settings-daemon/blob/master/plugins/datetime/gsd-datetime-manager.c).
 No personal host settings are test targets. Both scripts are guarded
 against execution outside that explicit CI scope.
 

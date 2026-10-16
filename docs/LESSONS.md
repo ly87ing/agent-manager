@@ -96,6 +96,20 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   temporary modes, and independently attempt cleanup after partial preparation.
   This setup does not authorize production normalization of timezone data.
 
+## 2026-10-16: ordered desktop repair must preserve scope and related evidence
+
+- A user-scoped GNOME switch may need to precede a privileged timezone write.
+  Keep its true scope while assigning one batch owner; complete authorization
+  before any write, and exclude owned items from the later user loop.
+- Advance the baseline only for the independently verified own setting. Reading
+  an entire new context as the next baseline would absorb an external timezone
+  or manager change and allow the following step to overwrite it.
+- GNOME's daemon checks its own Polkit identity. Caller authorization does not
+  prove daemon permission, and a preference readback does not prove geolocation
+  or drained requests. Do not hide these limits behind a generic verified label.
+- Exercise a matching report with an explicit verification limit. A mismatching
+  mock report already produces a warning and cannot test the all-clear guard.
+
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
 The focused dialog tests passed before the full suite reached Sources' existing

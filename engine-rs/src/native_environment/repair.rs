@@ -186,6 +186,9 @@ fn add_session(items: &mut Vec<Item>, snapshot: &Snapshot, key: &str, value: &st
 
 pub(super) trait Settings {
     fn snapshot(&mut self, target: &Target) -> Result<Snapshot>;
+    fn in_system_batch(&self, item: &Item) -> bool {
+        item.scope == "system"
+    }
     fn system(&mut self, items: &[Item]) -> Result<(String, Vec<Item>, Option<bool>)>;
     fn write_user(&mut self, item: &Item) -> bool;
 }
@@ -212,7 +215,7 @@ pub(super) fn apply(
     audit("requested", &items)?;
     let system: Vec<_> = items
         .iter()
-        .filter(|item| item.scope == "system" && item.status == "change")
+        .filter(|item| settings.in_system_batch(item) && item.status == "change")
         .cloned()
         .collect();
     let mut automatic = None;
@@ -238,10 +241,11 @@ pub(super) fn apply(
             return Ok((status, items, automatic));
         }
     }
-    for item in items
-        .iter_mut()
-        .filter(|item| item.scope != "system" && item.status == "change")
-    {
+    for item in items.iter_mut().filter(|item| {
+        item.scope != "system"
+            && item.status == "change"
+            && !system.iter().any(|batched| batched.id == item.id)
+    }) {
         let Ok(snapshot) = settings.snapshot(target) else {
             item.status = "outcome_unknown".into();
             break;
@@ -436,6 +440,7 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         drop(guard);
         let restart_required = items.iter().any(|item| {
             matches!(item.scope.as_str(), "session" | "user")
+                && item.id != "time.automatic_timezone"
                 && matches!(item.status.as_str(), "verified" | "verified_after_error")
         }) || report.as_ref().is_some_and(|report| {
             report["checks"].as_array().is_some_and(|checks| {
@@ -444,8 +449,15 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
                     .any(|row| row["group"] == "process" && row["state"] == "mismatch")
             })
         });
+        let verification_limits = if cfg!(target_os = "linux")
+            && target.automatic_timezone.is_some()
+        {
+            vec!["GNOME automatic-timezone verification covers preference readback only; geolocation and automatic switching remain unverified."]
+        } else {
+            vec![]
+        };
         Ok(
-            json!({"status":status,"items":items,"report":report,"restart_required":restart_required,"clock_error":clock_error}),
+            json!({"status":status,"items":items,"report":report,"restart_required":restart_required,"clock_error":clock_error,"verification_limits":verification_limits}),
         )
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
@@ -565,6 +577,75 @@ mod tests {
         );
         fake.snapshot.context = json!({"persistent":true,"policy":"external-change"});
         assert_ne!(before.base, plan(&target, &fake.snapshot).unwrap().base);
+    }
+    #[test]
+    fn user_scoped_batch_items_keep_order_and_are_never_retried_as_user_writes() {
+        struct Ordered {
+            inner: Fake,
+            seen: Vec<String>,
+        }
+        impl Settings for Ordered {
+            fn snapshot(&mut self, target: &Target) -> Result<Snapshot> {
+                self.inner.snapshot(target)
+            }
+            fn in_system_batch(&self, item: &Item) -> bool {
+                item.scope == "system" || item.id == "time.automatic_timezone"
+            }
+            fn system(&mut self, items: &[Item]) -> Result<(String, Vec<Item>, Option<bool>)> {
+                self.seen = items.iter().map(|item| item.id.clone()).collect();
+                // Even an incomplete batch receipt must not cause a second path
+                // to retry a user-scoped operation that the batch already owns.
+                if self.inner.fails {
+                    return Ok(("applied".into(), vec![], None));
+                }
+                self.inner.system(items)
+            }
+            fn write_user(&mut self, item: &Item) -> bool {
+                assert_ne!(item.id, "time.automatic_timezone");
+                self.inner.write_user(item)
+            }
+        }
+        let target: Target =
+            serde_json::from_value(json!({"automatic_timezone":false,"timezone":"Europe/London"}))
+                .unwrap();
+        for (cancel, fails) in [(false, false), (true, false), (false, true)] {
+            let mut inner = fake();
+            inner.cancel = cancel;
+            inner.fails = fails;
+            inner
+                .snapshot
+                .values
+                .insert("time.automatic_timezone".into(), Some(json!(true)));
+            inner
+                .snapshot
+                .values
+                .insert("time.timezone".into(), Some(json!("Etc/UTC")));
+            inner
+                .snapshot
+                .scope_overrides
+                .insert("time.automatic_timezone".into(), "user".into());
+            let base = plan(&target, &inner.snapshot).unwrap().base;
+            let mut ordered = Ordered {
+                inner,
+                seen: vec![],
+            };
+            let (status, items, _) = apply(&mut ordered, &target, &base, |_, _| Ok(())).unwrap();
+            assert_eq!(ordered.seen, ["time.automatic_timezone", "time.timezone"]);
+            assert_eq!(items[0].scope, "user");
+            assert_eq!(
+                status,
+                if cancel {
+                    "cancelled"
+                } else if fails {
+                    "partial"
+                } else {
+                    "applied"
+                }
+            );
+            if cancel {
+                assert_eq!(ordered.inner.writes, 0);
+            }
+        }
     }
     #[test]
     fn loss_of_related_evidence_before_or_after_a_write_never_reports_verified() {

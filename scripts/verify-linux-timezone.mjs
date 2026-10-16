@@ -27,8 +27,8 @@ const data = join(root, 'missing-data');
 const env = { ...process.env, HOME: home, AGENT_MANAGER_DATA_DIR: data, XDG_CURRENT_DESKTOP: '' };
 const binary = resolve('engine-rs/target/debug/agent-manager-engine');
 const spec = JSON.stringify({ timezone: selected });
-function cli(command, flags = [], failure = false) {
-  const result = run(binary, [command, '--spec', spec, ...flags, '--json'], env, failure);
+function cli(command, flags = [], failure = false, profile = spec, caller = env) {
+  const result = run(binary, [command, '--spec', profile, ...flags, '--json'], caller, failure);
   const envelope = JSON.parse(result.stdout);
   if (!failure) assert.equal(envelope.ok, true, JSON.stringify(envelope.errors));
   return envelope;
@@ -263,6 +263,127 @@ try {
   assert.equal(realpathSync('/etc/localtime'), realpathSync('/usr/share/zoneinfo/Pacific/Honolulu'));
   assert.deepEqual(managerTZ(), ['TZ=Etc/UTC'], 'Changed authorization baseline continued to session writes');
   console.log('Linux timezone: actual Polkit challenge/cache, apply, disk readback, no-op, stale, cache disagreement and denied authorization passed.');
+
+  // Real GSettings uses an isolated keyfile backend. The owned D-Bus name proves
+  // process identity/policy gates, not GNOME/GeoClue desktop behavior.
+  run('/usr/bin/sudo', ['-n', '/usr/bin/timedatectl', 'set-timezone', originalZone]);
+  const desktopEnv = { ...env, XDG_CURRENT_DESKTOP: 'GNOME', GSETTINGS_BACKEND: 'keyfile',
+    XDG_CONFIG_HOME: join(root, 'gnome-config') };
+  function gsettings(verb, schema, key, value) {
+    return run('/usr/bin/gsettings', [verb, schema, key, ...(value === undefined ? [] : [value])], desktopEnv).stdout.trim();
+  }
+  function automatic(value) {
+    return gsettings('set', 'org.gnome.desktop.datetime', 'automatic-timezone', String(value));
+  }
+  function location(value) {
+    return gsettings('set', 'org.gnome.system.location', 'enabled', String(value));
+  }
+  function readAutomatic() {
+    return gsettings('get', 'org.gnome.desktop.datetime', 'automatic-timezone');
+  }
+  function replacePolicy(next) {
+    rootNode("import fs from 'node:fs'; const [p,old,t]=process.argv.slice(1); if(fs.readFileSync(p,'utf8')!==old) throw Error('Foreign policy'); fs.writeFileSync(p,t);", [rule, installedPolicy, next]);
+    installedPolicy = next;
+  }
+  async function loadedPolicy(allowed) {
+    const by = Date.now() + 10_000;
+    while (run('/usr/bin/pkcheck', ['--action-id', 'org.freedesktop.timedate1.set-timezone', '--process', subject], process.env, true).status !== (allowed ? 0 : 1)) {
+      assert(Date.now() < by, 'Disposable desktop policy was not loaded');
+      await delay(100);
+    }
+  }
+  const desktop = spawn(resolve('engine-rs/target/debug/examples/linux_gnome_fixture'), [],
+    { env: { ...desktopEnv, AM_ISOLATED_LINUX_TIMEZONE: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const desktopResult = collected(desktop);
+  // Keep timeout rejection observed while the other fixture assertions run;
+  // the original result is still awaited and only this owned child is cleaned.
+  void desktopResult.catch(() => {});
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Owned desktop fixture did not register')), 10_000);
+      desktop.stdout.once('data', chunk => {
+        clearTimeout(timer);
+        try { assert.equal(JSON.parse(String(chunk)).ready, true); resolve(); } catch (error) { reject(error); }
+      });
+      desktop.once('close', () => { clearTimeout(timer); reject(new Error('Owned desktop fixture exited')); });
+    });
+    automatic(true);
+    location(false);
+    const combined = JSON.stringify({ timezone: selected, automatic_timezone: false });
+    replacePolicy(deniedPolicy);
+    await loadedPolicy(false);
+    const rejected = cli('environment:repair-preview', [], false, combined, desktopEnv).data;
+    assert.equal(rejected.items.find(item => item.id === 'time.automatic_timezone').scope, 'user');
+    const deniedBatch = cli('environment:repair', ['--base', rejected.base, '--confirm'], false, combined, desktopEnv).data;
+    assert.equal(deniedBatch.status, 'partial');
+    assert.equal(readAutomatic(), 'true', 'Authorization denial wrote a user preference');
+    assert.equal(realpathSync('/etc/localtime'), realpathSync(`/usr/share/zoneinfo/${originalZone}`));
+    assert.deepEqual(managerTZ(), ['TZ=Etc/UTC']);
+
+    const disable = JSON.stringify({ automatic_timezone: false });
+    const disablePreview = cli('environment:repair-preview', [], false, disable, desktopEnv).data;
+    assert.equal(disablePreview.items[0].status, 'change', 'Privacy or daemon denial blocked explicit disable');
+    const disabled = cli('environment:repair', ['--base', disablePreview.base, '--confirm'], false, disable, desktopEnv).data;
+    assert.equal(disabled.status, 'applied');
+    assert.equal(disabled.restart_required, false);
+    assert.equal(readAutomatic(), 'false');
+    automatic(true);
+
+    replacePolicy(policy);
+    await loadedPolicy(true);
+    const ordered = cli('environment:repair-preview', [], false, combined, desktopEnv).data;
+    assert.deepEqual(ordered.items.slice(0, 2).map(item => item.id), ['time.automatic_timezone', 'time.timezone']);
+    const fixed = cli('environment:repair', ['--base', ordered.base, '--confirm'], false, combined, desktopEnv).data;
+    assert.equal(fixed.status, 'applied');
+    assert(fixed.items.every(item => ['verified', 'unchanged'].includes(item.status)));
+    assert.equal(readAutomatic(), 'false');
+    assert.equal(realpathSync('/etc/localtime'), realpathSync(`/usr/share/zoneinfo/${selected}`));
+    const saved = readFileSync(db);
+    const noop = cli('environment:repair-preview', [], false, combined, desktopEnv).data;
+    assert.equal(cli('environment:repair', ['--base', noop.base, '--confirm'], false, combined, desktopEnv).data.status, 'not_needed');
+    assert.deepEqual(readFileSync(db), saved);
+    automatic(true);
+    assert.equal(cli('environment:repair', ['--base', noop.base, '--confirm'], true, combined, desktopEnv).ok, false);
+    assert.equal(readAutomatic(), 'true');
+    assert.deepEqual(readFileSync(db), saved);
+
+    const enable = JSON.stringify({ automatic_timezone: true });
+    automatic(false);
+    let unavailable = cli('environment:repair-preview', [], false, enable, desktopEnv).data;
+    assert.equal(unavailable.items[0].status, 'unavailable');
+    assert.equal(cli('environment:repair', ['--base', unavailable.base, '--confirm'], false, enable, desktopEnv).data.status, 'partial');
+    assert.deepEqual(readFileSync(db), saved);
+    assert.equal(gsettings('get', 'org.gnome.system.location', 'enabled'), 'false');
+    location(true);
+    replacePolicy(deniedPolicy);
+    await loadedPolicy(false);
+    unavailable = cli('environment:repair-preview', [], false, enable, desktopEnv).data;
+    assert.equal(unavailable.items[0].status, 'unavailable', 'Denied daemon policy allowed automatic enable');
+    replacePolicy(policy);
+    await loadedPolicy(true);
+    const enabled = cli('environment:repair-preview', [], false, enable, desktopEnv).data;
+    assert.equal(enabled.items[0].status, 'change');
+    const enabledResult = cli('environment:repair', ['--base', enabled.base, '--confirm'], false, enable, desktopEnv).data;
+    assert.equal(enabledResult.status, 'applied');
+    assert.equal(enabledResult.restart_required, false, 'Automatic timezone alone does not require restarting apps');
+    assert(enabledResult.verification_limits.some(value => value.includes('geolocation')));
+    assert.equal(readAutomatic(), 'true');
+    const competing = cli('environment:repair-preview', [], false,
+      JSON.stringify({ timezone: originalZone, automatic_timezone: true }), desktopEnv).data;
+    assert.equal(competing.items.find(item => item.id === 'time.timezone').status, 'unavailable', 'Fixed-zone repair competed with enabled automatic timezone');
+
+    const beforeExit = cli('environment:repair-preview', [], false, JSON.stringify({ automatic_timezone: false }), desktopEnv).data;
+    desktop.kill('SIGTERM');
+    await desktopResult;
+    assert.equal(cli('environment:repair', ['--base', beforeExit.base, '--confirm'], true,
+      JSON.stringify({ automatic_timezone: false }), desktopEnv).ok, false);
+    assert.equal(readAutomatic(), 'true');
+    assert(!existsSync(home));
+    console.log('GNOME preference fixture: caller-scoped ordering, denial zero-write, real GSettings readback, no-op, stale, privacy and daemon-policy gates passed; geolocation is not exercised.');
+  } finally {
+    if (desktop.exitCode === null) desktop.kill('SIGTERM');
+    await desktopResult.catch(() => {});
+  }
 } finally {
   const cleanupErrors = [];
   try {

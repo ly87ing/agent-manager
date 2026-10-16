@@ -128,10 +128,9 @@ fn user_locale() -> (Option<Vec<String>>, Option<String>, Option<bool>) {
             }
         }
     }
-    let gnome = std::env::var("XDG_CURRENT_DESKTOP")
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .contains("gnome");
+    let gnome = super::repair_linux_desktop::gnome(
+        &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
+    );
     let region = if gnome {
         gsetting("org.gnome.system.locale", "region")
             .and_then(|value| {
@@ -280,7 +279,7 @@ pub(super) fn collect() -> Observation {
         ),
         (
             "time.automatic_timezone",
-            "GNOME org.gnome.desktop.datetime automatic-timezone",
+            "GNOME automatic-timezone preference; geolocation/switching effect unverified",
         ),
         (
             "language.preferred",
