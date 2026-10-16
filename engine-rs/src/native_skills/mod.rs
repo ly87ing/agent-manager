@@ -15,6 +15,7 @@ mod persistence;
 mod preflight;
 mod recommend;
 mod snapshot;
+mod snapshot_storage;
 mod status;
 pub(crate) mod track;
 pub(crate) mod versioning;

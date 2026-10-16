@@ -138,42 +138,26 @@ pub fn snapshot_skill(source_dir: &Path, data_dir: &Path, version: &str) -> Resu
     // The caller binds this exact version in its assignment transaction.
     let version_dir = data_dir.join("skill-versions").join(version);
     let content_path = version_dir.join("content");
-    if content_path.is_dir() {
-        let existing = hash_skill_dir(&content_path)?;
-        if existing == version {
-            return Ok(content_path);
-        }
-        bail!(
-            "版本快照 {} 内容被篡改（期望 {} 实际 {}），拒绝复用",
-            version_dir.display(),
-            version,
-            existing
-        );
+    match std::fs::symlink_metadata(&version_dir) {
+        Ok(_) => return verify_skill_version(data_dir, version),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
-    let staging = data_dir.join("skill-versions").join(format!(
-        ".staging-{}-{}",
-        version,
-        crate::store::uuid_v4()
-    ));
-    std::fs::create_dir_all(data_dir.join("skill-versions"))?;
-    std::fs::create_dir(&staging)?;
+    let parent = data_dir.join("skill-versions");
+    std::fs::create_dir_all(&parent)?;
+    let staging = super::snapshot_storage::Staging::create(&parent, version)?;
     let copied = (|| -> Result<()> {
-        let content = staging.join("content");
+        let content = staging.path().join("content");
         copy_dir_recursive(source_dir, &content)?;
         let actual = hash_skill_dir(&content)?;
         if actual != version {
             bail!("Skill snapshot copy does not match the chosen version {version} (actual {actual}); refusing to publish.");
         }
-        std::fs::rename(&staging, &version_dir)?;
+        staging.publish(&version_dir)?;
         Ok(())
     })();
     if let Err(error) = copied {
-        let cleanup = (|| -> Result<()> {
-            #[cfg(windows)]
-            super::fork::make_writable(&staging)?;
-            std::fs::remove_dir_all(&staging)?;
-            Ok(())
-        })();
+        let cleanup = staging.cleanup();
         if let Err(cleanup) = cleanup {
             return Err(error.context(format!("Snapshot staging cleanup failed: {cleanup}")));
         }
@@ -186,13 +170,12 @@ pub fn verify_skill_version(data_dir: &Path, version: &str) -> Result<PathBuf> {
     if !is_sha256_hex(version) {
         bail!("version 格式非法: {:?}", version);
     }
-    let content_path = data_dir
-        .join("skill-versions")
-        .join(version)
-        .join("content");
-    if !content_path.is_dir() {
-        bail!("版本快照不存在: {}", content_path.display());
-    }
+    let parent = data_dir.join("skill-versions");
+    let version_dir = parent.join(version);
+    let content_path = version_dir.join("content");
+    let (_parent_file, parent_id) = super::snapshot_storage::open_directory(&parent)?;
+    let (_version_file, version_id) = super::snapshot_storage::open_directory(&version_dir)?;
+    let (_content_file, content_id) = super::snapshot_storage::open_directory(&content_path)?;
     let actual = hash_skill_dir(&content_path)?;
     if actual != version {
         bail!(
@@ -201,6 +184,9 @@ pub fn verify_skill_version(data_dir: &Path, version: &str) -> Result<PathBuf> {
             actual
         );
     }
+    super::snapshot_storage::unchanged(&parent, parent_id)?;
+    super::snapshot_storage::unchanged(&version_dir, version_id)?;
+    super::snapshot_storage::unchanged(&content_path, content_id)?;
     Ok(content_path)
 }
 
@@ -442,6 +428,80 @@ pub fn discover_repo_skills(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn incomplete_existing_version_is_preserved_instead_of_republished() {
+        let root = std::env::temp_dir().join(format!(
+            "am-incomplete-snapshot-{}",
+            crate::store::uuid_v4()
+        ));
+        let source = root.join("source");
+        let data = root.join("data");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("SKILL.md"), b"selected content").unwrap();
+        let version = hash_skill_dir(&source).unwrap();
+        let existing = data.join("skill-versions").join(&version);
+        std::fs::create_dir_all(&existing).unwrap();
+        let result = snapshot_skill(&source, &data, &version);
+        assert!(
+            result.is_err(),
+            "An existing incomplete version was replaced"
+        );
+        assert!(existing.is_dir());
+        assert_eq!(std::fs::read_dir(&existing).unwrap().count(), 0);
+        assert_eq!(
+            std::fs::read_dir(data.join("skill-versions"))
+                .unwrap()
+                .count(),
+            1
+        );
+        assert_eq!(
+            std::fs::read(source.join("SKILL.md")).unwrap(),
+            b"selected content"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn version_and_content_directory_links_are_refused_without_touching_targets() {
+        let root = std::env::temp_dir().join(format!(
+            "am-snapshot-root-links-{}",
+            crate::store::uuid_v4()
+        ));
+        let source = root.join("source");
+        let data = root.join("data");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("SKILL.md"), b"selected content").unwrap();
+        let version = hash_skill_dir(&source).unwrap();
+        let content = snapshot_skill(&source, &data, &version).unwrap();
+        let version_dir = content.parent().unwrap();
+        let moved_version = root.join("moved-version");
+        std::fs::rename(version_dir, &moved_version).unwrap();
+        crate::platform::link_dir(&moved_version, version_dir).unwrap();
+        assert!(verify_skill_version(&data, &version).is_err());
+        assert!(snapshot_skill(&source, &data, &version).is_err());
+        assert_eq!(
+            std::fs::read(moved_version.join("content/SKILL.md")).unwrap(),
+            b"selected content"
+        );
+        crate::platform::remove_link(version_dir).unwrap();
+        std::fs::rename(&moved_version, version_dir).unwrap();
+        let moved_content = root.join("moved-content");
+        std::fs::rename(&content, &moved_content).unwrap();
+        crate::platform::link_dir(&moved_content, &content).unwrap();
+        assert!(verify_skill_version(&data, &version).is_err());
+        assert!(snapshot_skill(&source, &data, &version).is_err());
+        assert_eq!(
+            std::fs::read(moved_content.join("SKILL.md")).unwrap(),
+            b"selected content"
+        );
+        crate::platform::remove_link(&content).unwrap();
+        std::fs::rename(moved_content, &content).unwrap();
+        assert_eq!(verify_skill_version(&data, &version).unwrap(), content);
+        #[cfg(windows)]
+        super::super::fork::make_writable(&root).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn stale_content_cannot_publish_a_snapshot_or_replace_an_existing_version() {

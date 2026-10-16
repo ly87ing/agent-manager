@@ -12,6 +12,21 @@ exact version chosen for the assignment. Copy errors or mismatches remove only
 that operation's uniquely created staging directory and leave existing versions
 and bindings unchanged. Reusing or enabling a version retains strict content
 verification; a copied replacement for a symbolic link is not the same snapshot.
+An existing version entry is always verified; an incomplete directory, directory
+link or reparse root is refused. Publication uses the platform's no-replace
+directory rename, including when an empty destination appears after preparation.
+Staging cleanup and publication retain open parent, staging and content root
+handles and recheck their recorded file identities, including after publication.
+Changed or uncertain ownership stops cleanup and preserves the entry with an
+error. Content roots must be ordinary directories; reuse holds their original
+handles while hashing and rechecking identities. These checks detect observed
+replacement; they do not lock every source path or every content byte against an
+actively concurrent writer.
+On Windows, retained references open directories by their full file IDs after
+checking ordinary pathname roots, then independently recheck identity and type.
+This avoids pathname-bound descendants blocking ancestor rename while preserving
+the original objects. Filesystems that cannot provide those references are
+refused; there is no numeric-ID-only fallback or permission relaxation.
 
 ## Runtime path and failure behavior
 
