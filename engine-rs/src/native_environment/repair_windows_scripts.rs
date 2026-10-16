@@ -122,22 +122,66 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn native_public_policy_binding_executes_without_hiding_type_errors() {
-        let script = r#"
+        use std::process::Stdio;
+        let marker =
+            std::env::temp_dir().join(format!("am-policy-stage-{}", crate::store::uuid_v4()));
+        let source = r#"
 $ErrorActionPreference='Stop'
 $stage='type'
+[IO.File]::WriteAllText($marker,$stage)
 try {
 $type=[Windows.Management.Policies.NamedPolicy,Windows.Management,ContentType=WindowsRuntime]
 $stage='assembly'
+[IO.File]::WriteAllText($marker,$stage)
 $result=@{type=$type.FullName;assembly=$type.Assembly.GetName().Name;called=$false;available=$false;hresult=$null}
 $stage='method'
+[IO.File]::WriteAllText($marker,$stage)
 try {$result.called=$true;$policy=$type::GetPolicyFromPath('System','AllowLocation');$result.available=($null -ne $policy)}
 catch {$exception=$_.Exception;while ($exception.InnerException) {$exception=$exception.InnerException};if (@(-2147221164,-2147467263,-2147024846,-2147024891) -notcontains $exception.HResult) {throw};$result.hresult=$exception.HResult}
 $result | ConvertTo-Json -Compress
 } catch {@{stage=$stage;binding_error=$_.Exception.Message;exception_type=$_.Exception.GetType().FullName;hresult=$_.Exception.HResult} | ConvertTo-Json -Compress}
+[IO.File]::WriteAllText($marker,'complete')
 "#;
+        let script = format!(
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$marker={};{source}",
+            quote(marker.to_str().unwrap())
+        );
+        let program = super::super::windows::powershell().unwrap();
+        let mut command = crate::process::launch_command(&program);
+        command
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &script,
+            ])
+            .env("PSModuleAnalysisCachePath", "NUL")
+            .env(
+                "PSModulePath",
+                std::path::Path::new(&program)
+                    .parent()
+                    .unwrap()
+                    .join("Modules"),
+            )
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let output =
+            crate::process::capture_group(&mut command, std::time::Duration::from_secs(30), 8192);
+        let stage = std::fs::read_to_string(&marker).unwrap_or_else(|_| "not-started".into());
+        let _ = std::fs::remove_file(&marker);
+        let output =
+            output.unwrap_or_else(|error| panic!("Policy probe failed at {stage}: {error}"));
+        assert!(
+            output.status.success(),
+            "Policy probe at {stage}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         let result: serde_json::Value = serde_json::from_str(
-            &super::super::windows::script_timeout(script, std::time::Duration::from_secs(30))
-                .expect("The public WinRT type and documented method must bind"),
+            String::from_utf8_lossy(&output.stdout)
+                .trim_start_matches('\u{feff}')
+                .trim(),
         )
         .unwrap();
         assert!(result["binding_error"].is_null(), "{result}");
