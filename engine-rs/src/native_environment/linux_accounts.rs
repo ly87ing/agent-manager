@@ -1,7 +1,15 @@
 //! Existing-service, current-UID primary locale evidence.
-#[cfg(target_os = "linux")]
-use super::repair_linux_region::locale;
 use serde::Serialize;
+
+fn locale(value: &str) -> Option<String> {
+    super::Target {
+        locale: Some(value.into()),
+        ..Default::default()
+    }
+    .validate()
+    .ok()?;
+    Some(value.into())
+}
 
 #[derive(Clone, PartialEq, Eq, Serialize)]
 pub(super) struct Primary {
@@ -98,4 +106,18 @@ pub(super) fn read() -> Option<Primary> {
             None
         },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn primary_locale_keeps_countryless_and_unmapped_formats_evidence() {
+        for value in ["en", "en_US.UTF-8", "C.UTF-8", "sr_RS@latin"] {
+            assert_eq!(locale(value).as_deref(), Some(value));
+        }
+        for value in ["", "en_US;touch /tmp/unexpected", "$(unexpected)"] {
+            assert!(locale(value).is_none());
+        }
+    }
 }
