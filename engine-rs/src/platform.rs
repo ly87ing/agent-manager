@@ -138,6 +138,17 @@ pub fn join_slash(base: &Path, rel: &str) -> PathBuf {
 /// 技能里的 `.sh` 在 Git Bash 里也会因为多出的 `\r` 跑不起来。
 pub fn git_command() -> std::process::Command {
     let mut command = crate::process::command("git");
+    for variable in [
+        "GIT_DIR",
+        "GIT_COMMON_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_NAMESPACE",
+    ] {
+        command.env_remove(variable);
+    }
     command
         .env("GIT_CONFIG_COUNT", "1")
         .env("GIT_CONFIG_KEY_0", "core.autocrlf")
@@ -388,6 +399,136 @@ pub fn command_link_target(path: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_repository_environment_cannot_redirect_explicit_commands() {
+        use std::process::Stdio;
+        use std::time::Duration;
+        if let Some(root) = std::env::var_os("AM_GIT_ENV_FIXTURE_CHILD") {
+            let root = PathBuf::from(root);
+            assert_eq!(
+                root.parent().unwrap().canon().unwrap(),
+                std::env::temp_dir().canon().unwrap()
+            );
+            assert!(root
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("am-git-env-test-"));
+            assert_eq!(
+                std::fs::read(root.join("fixture-owner")).unwrap(),
+                b"owned fixture"
+            );
+            let mut command = git_command();
+            command.current_dir(root.join("owned")).args([
+                "config",
+                "--local",
+                "agentmanager.fixture",
+                "expected-target",
+            ]);
+            command.stdout(Stdio::piped()).stderr(Stdio::piped());
+            let result =
+                crate::process::capture_group(&mut command, Duration::from_secs(10), 64 * 1024)
+                    .unwrap();
+            assert!(result.status.success(), "{:?}", result.status);
+            for args in [["add", "--", "item"], ["hash-object", "-w", "item"]] {
+                let mut command = git_command();
+                command.current_dir(root.join("owned")).args(args);
+                command.stdout(Stdio::piped()).stderr(Stdio::piped());
+                let result =
+                    crate::process::capture_group(&mut command, Duration::from_secs(10), 64 * 1024)
+                        .unwrap();
+                assert!(result.status.success(), "{:?}", result.status);
+                if args[0] == "hash-object" {
+                    std::fs::write(root.join("object-id"), result.stdout).unwrap();
+                }
+            }
+            return;
+        }
+        let root =
+            std::env::temp_dir().join(format!("am-git-env-test-{}", crate::store::uuid_v4()));
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("fixture-owner"), b"owned fixture").unwrap();
+        let empty = root.join("empty-config");
+        std::fs::write(&empty, b"").unwrap();
+        let templates = root.join("empty-templates");
+        std::fs::create_dir(&templates).unwrap();
+        for name in ["owned", "other"] {
+            let mut command = git_command();
+            for variable in [
+                "GIT_DIR",
+                "GIT_COMMON_DIR",
+                "GIT_WORK_TREE",
+                "GIT_INDEX_FILE",
+                "GIT_OBJECT_DIRECTORY",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                "GIT_NAMESPACE",
+            ] {
+                command.env_remove(variable);
+            }
+            command
+                .args(["init", "--quiet", "--object-format=sha1"])
+                .arg(format!("--template={}", templates.display()))
+                .arg(root.join(name))
+                .env("GIT_CONFIG_GLOBAL", &empty)
+                .env("GIT_CONFIG_NOSYSTEM", "1");
+            command.stdout(Stdio::piped()).stderr(Stdio::piped());
+            let result =
+                crate::process::capture_group(&mut command, Duration::from_secs(10), 64 * 1024)
+                    .unwrap();
+            assert!(result.status.success(), "{:?}", result.status);
+        }
+        let other = root.join("other/.git");
+        std::fs::write(root.join("owned/item"), b"fixture object content\n").unwrap();
+        let before = std::fs::read(other.join("config")).unwrap();
+        let mut child = crate::process::command(std::env::current_exe().unwrap());
+        child
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .args([
+                "--exact",
+                "platform::tests::git_repository_environment_cannot_redirect_explicit_commands",
+                "--nocapture",
+            ])
+            .env("AM_GIT_ENV_FIXTURE_CHILD", &root)
+            .env("GIT_CONFIG_GLOBAL", &empty)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_DIR", &other)
+            .env("GIT_COMMON_DIR", &other)
+            .env("GIT_WORK_TREE", root.join("other"))
+            .env("GIT_INDEX_FILE", other.join("index"))
+            .env("GIT_OBJECT_DIRECTORY", other.join("objects"));
+        let result =
+            crate::process::capture_group(&mut child, Duration::from_secs(30), 64 * 1024).unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+        assert_eq!(
+            std::fs::read(other.join("config")).unwrap(),
+            before,
+            "Ambient Git selectors must not redirect a local write into the other repository"
+        );
+        let owned = std::fs::read_to_string(root.join("owned/.git/config")).unwrap();
+        assert!(owned.contains("expected-target"));
+        assert!(root.join("owned/.git/index").is_file());
+        assert!(
+            !other.join("index").exists(),
+            "Ambient GIT_INDEX_FILE must not receive the new entry"
+        );
+        let id = std::fs::read_to_string(root.join("object-id")).unwrap();
+        let id = id.trim();
+        assert_eq!(id.len(), 40);
+        assert!(id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        let object = Path::new("objects").join(&id[..2]).join(&id[2..]);
+        assert!(root.join("owned/.git").join(&object).is_file());
+        assert!(
+            !other.join(object).exists(),
+            "Ambient GIT_OBJECT_DIRECTORY must not receive the blob"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn home_must_be_an_absolute_path() {

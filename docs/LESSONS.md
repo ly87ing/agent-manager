@@ -42,6 +42,18 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   Use `.\z-target` there and keep both separator styles in the cross-host parser
   cases; a fixture-preparation failure is not verifier evidence.
 
+## 2026-10-16: a working directory does not bind Git's repository target
+
+- Inherited `GIT_DIR`, index and object-store selectors override an explicit
+  working directory. The isolated two-repository regression observed a successful
+  command writing the other repository's config. Clear repository selectors in
+  the shared command factory while preserving transport configuration; read back
+  config, index and object destinations instead of accepting the exit status.
+- `capture_group` only collects streams configured as pipes by its caller. The
+  first expanded regression recorded an empty blob ID despite command success
+  because stdout was not piped. Set both capture streams before using their
+  contents as an independent receipt.
+
 ## 2026-10-16: window-tree enumeration is not an atomic observation
 
 - Native KDE acceptance passed initially, then main CI failed because an X11
