@@ -27,6 +27,37 @@ fn language_tag(locale: &str) -> Option<String> {
     .then_some(tag)
 }
 
+// GetAll preserves typed arrays. RuntimeNTPServers is absent before systemd 251.
+fn timesync_values(text: &str) -> Option<BTreeMap<String, Vec<String>>> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    if value["type"] != "a{sv}" || value["data"].as_array()?.len() != 1 {
+        return None;
+    }
+    let object = value["data"][0].as_object()?;
+    let mut values = BTreeMap::new();
+    for key in ["SystemNTPServers", "LinkNTPServers", "RuntimeNTPServers"] {
+        let Some(value) = object.get(key) else {
+            if key == "RuntimeNTPServers" {
+                continue;
+            } else {
+                return None;
+            }
+        };
+        if value["type"] != "as" {
+            return None;
+        }
+        values.insert(
+            key.into(),
+            value["data"]
+                .as_array()?
+                .iter()
+                .map(|value| value.as_str().map(str::to_string))
+                .collect::<Option<Vec<_>>>()?,
+        );
+    }
+    Some(values)
+}
+
 #[cfg(target_os = "linux")]
 pub(super) fn account_user_path() -> Option<String> {
     let uid = unsafe { libc::geteuid() }.to_string();
@@ -180,12 +211,29 @@ pub(super) fn collect() -> Observation {
     )
     .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok());
     let (languages, user_locale, automatic_timezone) = user_locale();
-    let timesync = read("/usr/bin/timedatectl", &["show-timesync"]).unwrap_or_default();
-    let ntp = properties(&timesync);
+    // show-timesync/get-property can auto-activate a stopped clock service.
+    // `call` applies --auto-start=no even on systemd 249; get-property does not.
+    let ntp = read(
+        "/usr/bin/busctl",
+        &[
+            "--system",
+            "--auto-start=no",
+            "--json=short",
+            "call",
+            "org.freedesktop.timesync1",
+            "/org/freedesktop/timesync1",
+            "org.freedesktop.DBus.Properties",
+            "GetAll",
+            "s",
+            "org.freedesktop.timesync1.Manager",
+        ],
+    )
+    .and_then(|value| timesync_values(&value))
+    .unwrap_or_default();
     let servers: Vec<_> = ["RuntimeNTPServers", "SystemNTPServers", "LinkNTPServers"]
         .iter()
-        .filter_map(|key| ntp.get(key))
-        .flat_map(|value| value.split_whitespace())
+        .filter_map(|key| ntp.get(*key))
+        .flat_map(|value| value.iter().map(String::as_str))
         .collect();
     let mut observed = Observation {
         platform: Some("linux"),
@@ -249,7 +297,7 @@ pub(super) fn collect() -> Observation {
         ),
         (
             "ntp.server",
-            "timedatectl show-timesync configured server lists",
+            "timesync1 GetAll configured server lists (no service activation)",
         ),
         ("ntp.automatic_time", "timedatectl NTP"),
         ("ntp.service", "time daemon service unavailable"),
@@ -266,6 +314,31 @@ pub(super) fn collect() -> Observation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn timesync_typed_arrays_preserve_v249_support_and_reject_uncertain_shapes() {
+        let value = serde_json::json!({"type":"a{sv}","data":[{"SystemNTPServers":{"type":"as","data":["time.example"]},"LinkNTPServers":{"type":"as","data":[]}}]});
+        let result = timesync_values(&value.to_string()).unwrap();
+        assert_eq!(result["SystemNTPServers"], ["time.example"]);
+        assert!(!result.contains_key("RuntimeNTPServers"));
+        for field in [
+            serde_json::json!({"type":"s","data":"time.example"}),
+            serde_json::json!({"type":"as","data":[false]}),
+            serde_json::Value::Null,
+        ] {
+            let mut invalid = value.clone();
+            invalid["data"][0]["SystemNTPServers"] = field;
+            assert!(timesync_values(&invalid.to_string()).is_none());
+        }
+        for data in [
+            serde_json::json!([]),
+            serde_json::json!([{}, {}]),
+            serde_json::json!(["wrong"]),
+        ] {
+            let mut invalid = value.clone();
+            invalid["data"] = data;
+            assert!(timesync_values(&invalid.to_string()).is_none());
+        }
+    }
     #[test]
     fn missing_properties_are_unknown_and_values_do_not_require_localized_labels() {
         let values = properties("Timezone=Asia/Singapore\nNTP=yes\nNTPSynchronized=no\nUnknown=\n");

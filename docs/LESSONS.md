@@ -36,6 +36,15 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Use the public policy API and test its real type/method binding. A catch-to-null
   reader can otherwise hide a misspelled native API behind a passing preview.
 
+## 2026-10-16: read-only time inspection must not activate the clock daemon
+
+- `timedatectl show-timesync` can start an inactive timesyncd through D-Bus. On
+  systemd 249, `busctl get-property` ignores `--auto-start=no`; use a `call` to
+  Properties.GetAll, which applies the flag, and retain typed arrays.
+- Exercise the actual CLI against a private activation-only bus. Keep a positive
+  control that creates a disposable marker; an unconfigured fixture can otherwise
+  pass the zero-activation assertion without testing the boundary.
+
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
 The focused dialog tests passed before the full suite reached Sources' existing

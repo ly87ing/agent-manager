@@ -47,7 +47,11 @@ inheriting the known current-user language. GNOME's automatic-time-zone preferen
 is a requested switch, not proof of location behavior. Missing user evidence stays
 unknown. systemd-localed's D-Bus `Locale` supplies untargeted system-default inventory
 only. `/etc/localtime` supplies a zone fallback and `/etc/os-release` supplies
-the OS version. Missing systemd services/properties remain unknown. No daemon or
+the OS version. Configured timesyncd servers use a typed D-Bus `GetAll` call with
+service activation disabled, including on systemd 249. A stopped service remains
+stopped and its server lists remain unknown; `show-timesync` and older `busctl
+get-property` paths must not be used for this read. Missing systemd
+services/properties remain unknown. No daemon or
 locale package is installed during a read. The NTP measurement client is shared
 on all three platforms. System settings open Windows Settings, GNOME Settings or
 KDE System Settings using fixed destinations; requesting a pane is not readback.
