@@ -63,8 +63,24 @@ function signal(pid, expected, name) {
     if (error.code !== 'ESRCH') throw error;
   }
 }
-function windows() {
-  const tree = command('/usr/bin/xwininfo', ['-root', '-tree']).stdout;
+async function windows() {
+  let tree;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const result = command('/usr/bin/xwininfo', ['-root', '-tree'], true);
+    if (result.status === 0) {
+      tree = result.stdout;
+      break;
+    }
+    // A child can disappear between QueryTree and its geometry query.
+    const errors = [...(result.stderr ?? '').matchAll(/X Error: (\d+): ([^\r\n]+)/g)];
+    const vanished = result.status === 1 && !result.error && errors.length > 0
+      && errors.every(([, code, name]) => code === '3' && name === 'Bad Window'
+        || code === '9' && name === 'Bad Drawable')
+      && result.stderr.includes("error: Can't query window tree.");
+    assert(vanished && attempt < 4, `Window tree query failed: ${result.stderr || result.error}`);
+    console.log('A window disappeared during discovery; querying the tree again');
+    await delay(50);
+  }
   const ids = [...tree.matchAll(/^\s+(0x[\da-f]+)\s/gim)].map(match => match[1]);
   const found = [];
   for (const id of ids) {
@@ -114,7 +130,7 @@ async function stopWindows() {
 }
 
 try {
-  assert.equal(windows().length, 0, 'The private display must start without settings windows');
+  assert.equal((await windows()).length, 0, 'The private display must start without settings windows');
   const listed = command('/usr/bin/systemsettings', ['--list']).stdout;
   const modules = new Set(listed.split('\n').map(line => line.split(' - ')[0].trim()));
   const merged = modules.has('kcm_regionandlang');
@@ -133,7 +149,7 @@ try {
     const deadline = Date.now() + 20_000;
     let visible;
     do {
-      visible = windows();
+      visible = await windows();
       for (const window of visible) {
         if (window.uid === process.getuid() && sessions.has(window.session) && window.group === window.session) {
           owned.set(window.pid, window);
