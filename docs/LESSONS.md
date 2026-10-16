@@ -6,6 +6,20 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: a staging name does not establish filesystem ownership
+
+- An empty existing version was overwritten by ordinary directory rename. Treat
+  every existing entry as immutable and use native no-replace publication so a
+  destination created after the check also survives.
+- A unique staging name cannot prove that its directory is still ours. Bind the
+  parent, staging and content root identities before copying, retain their open
+  handles, recheck before cleanup or publication, and refuse directory/reparse
+  aliases. A first fix checked only the staging root: content replacement was
+  detected but then removed during cleanup. The replacement-content regression
+  must fail before the fix and preserve both original and external markers after
+  it. Preserve replacements and report uncertain cleanup instead of deleting by
+  pathname alone.
+
 ## 2026-10-16: service activation safety must cover every observation path
 
 - A protected time-property reader does not make language inspection read-only.
