@@ -97,8 +97,11 @@ The operation refuses an already-running target and never quits or restarts it.
 Windows compares the volume and 128-bit file identity of queryable process images,
 including hard-link aliases. Different files with the same name remain independent.
 An inaccessible matching-name process or an incomplete process enumeration
-refuses the request; inaccessible unrelated processes are skipped. Linux checks
-`/proc` executable paths; macOS checks bundle process paths. A launch request does
+refuses the request; inaccessible unrelated processes are skipped. Linux compares
+device/inode identities of readable `/proc/<PID>/exe` images, including hard links
+and renamed images; same-name different files remain independent. Exited or
+unreadable Linux images do not establish a match, and failed process-directory
+enumeration refuses the request. macOS checks bundle process paths. A launch request does
 not prove the application accepted its environment.
 
 Launched GUI applications do not belong to the manager's temporary command jobs
