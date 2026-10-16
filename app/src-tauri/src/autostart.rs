@@ -234,28 +234,104 @@ fn set_status(identifier: &str, executable: &Path, enabled: bool) -> std::io::Re
 #[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
+    use std::collections::BTreeMap;
     use winreg::{
         enums::{HKEY_CURRENT_USER, REG_BINARY},
         RegKey, RegValue,
     };
 
+    fn values(key: &RegKey) -> BTreeMap<String, RegValue> {
+        key.enum_values().collect::<std::io::Result<_>>().unwrap()
+    }
+
+    struct Fixture {
+        run: RegKey,
+        approved: RegKey,
+        identifier: String,
+        sentinel: String,
+    }
+    impl Fixture {
+        fn cleanup(&self) -> std::io::Result<()> {
+            let mut failure = None;
+            for key in [&self.run, &self.approved] {
+                for name in [&self.identifier, &self.sentinel] {
+                    if let Err(error) = key.delete_value(name) {
+                        if error.kind() != std::io::ErrorKind::NotFound {
+                            failure.get_or_insert(error);
+                        }
+                    }
+                }
+            }
+            failure.map_or(Ok(()), Err)
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = self.cleanup();
+        }
+    }
+
     #[test]
-    #[ignore = "Requires an isolated Windows user hive; run explicitly in Wine"]
+    #[ignore = "Requires the explicitly authorized disposable Windows CI hive"]
     fn quoted_registry_entry_roundtrip_and_task_manager_override() {
-        assert_eq!(
-            std::env::var("AM_ISOLATED_WINDOWS_HIVE").as_deref(),
-            Ok("1")
+        for (key, expected) in [
+            ("AM_ISOLATED_WINDOWS_HIVE", "1"),
+            ("CI", "true"),
+            ("GITHUB_ACTIONS", "true"),
+            ("RUNNER_OS", "Windows"),
+        ] {
+            assert_eq!(std::env::var(key).as_deref(), Ok(expected), "{key}");
+        }
+        let identifier = format!(
+            "org.example.agent-manager.test-{}",
+            agent_manager_engine::store::uuid_v4()
         );
-        let identifier = format!("org.example.agent-manager.test-{}", std::process::id());
+        let sentinel = format!("{identifier}.unrelated");
         let executable = Path::new(r"C:\Program Files\Agent Manager\app.exe");
         let user = RegKey::predef(HKEY_CURRENT_USER);
         let (run, _) = user.create_subkey(RUN).unwrap();
         let (approved, _) = user.create_subkey(APPROVED).unwrap();
+        for key in [&run, &approved] {
+            for name in [&identifier, &sentinel] {
+                assert_eq!(
+                    key.get_raw_value(name).unwrap_err().kind(),
+                    std::io::ErrorKind::NotFound
+                );
+            }
+        }
+        let before_run = values(&run);
+        let before_approved = values(&approved);
+        let fixture = Fixture {
+            run,
+            approved,
+            identifier,
+            sentinel,
+        };
+        let Fixture {
+            run,
+            approved,
+            identifier,
+            sentinel,
+        } = &fixture;
+        run.set_value(sentinel, &"unrelated fixture entry").unwrap();
+        let sentinel_state = RegValue {
+            vtype: REG_BINARY,
+            bytes: vec![3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+        };
+        approved.set_raw_value(sentinel, &sentinel_state).unwrap();
         assert!(!status(&identifier, executable).unwrap());
         set_status(&identifier, executable, true).unwrap();
         let value: String = run.get_value(&identifier).unwrap();
         assert_eq!(value, r#""C:\Program Files\Agent Manager\app.exe""#);
         assert!(status(&identifier, executable).unwrap());
+        let enabled_run = run.get_raw_value(identifier).unwrap();
+        let enabled_approval = approved.get_raw_value(identifier).unwrap();
+        set_status(identifier, executable, true).unwrap();
+        assert_eq!(run.get_raw_value(identifier).unwrap(), enabled_run);
+        assert_eq!(
+            approved.get_raw_value(identifier).unwrap(),
+            enabled_approval
+        );
         approved
             .set_raw_value(
                 &identifier,
@@ -277,7 +353,17 @@ mod windows_tests {
         run.set_value(&identifier, &value).unwrap();
         set_status(&identifier, executable, false).unwrap();
         assert!(!status(&identifier, executable).unwrap());
-        approved.delete_value(&identifier).unwrap();
+        assert_eq!(
+            run.get_value::<String, _>(sentinel).unwrap(),
+            "unrelated fixture entry"
+        );
+        assert_eq!(approved.get_raw_value(sentinel).unwrap(), sentinel_state);
+        fixture.cleanup().unwrap();
+        assert!(values(run) == before_run, "Unrelated Run entries changed");
+        assert!(
+            values(approved) == before_approved,
+            "Unrelated approval entries changed"
+        );
     }
 }
 
