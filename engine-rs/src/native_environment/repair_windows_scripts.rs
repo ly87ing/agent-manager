@@ -124,17 +124,23 @@ mod tests {
     fn native_public_policy_binding_executes_without_hiding_type_errors() {
         let script = r#"
 $ErrorActionPreference='Stop'
+$stage='type'
+try {
 $type=[Windows.Management.Policies.NamedPolicy,Windows.Management,ContentType=WindowsRuntime]
+$stage='assembly'
 $result=@{type=$type.FullName;assembly=$type.Assembly.GetName().Name;called=$false;available=$false;hresult=$null}
+$stage='method'
 try {$result.called=$true;$policy=$type::GetPolicyFromPath('System','AllowLocation');$result.available=($null -ne $policy)}
 catch {$exception=$_.Exception;while ($exception.InnerException) {$exception=$exception.InnerException};if (@(-2147221164,-2147467263,-2147024846,-2147024891) -notcontains $exception.HResult) {throw};$result.hresult=$exception.HResult}
 $result | ConvertTo-Json -Compress
+} catch {@{stage=$stage;binding_error=$_.Exception.Message;exception_type=$_.Exception.GetType().FullName;hresult=$_.Exception.HResult} | ConvertTo-Json -Compress}
 "#;
         let result: serde_json::Value = serde_json::from_str(
-            &super::super::windows::script(script)
+            &super::super::windows::script_timeout(script, std::time::Duration::from_secs(30))
                 .expect("The public WinRT type and documented method must bind"),
         )
         .unwrap();
+        assert!(result["binding_error"].is_null(), "{result}");
         assert_eq!(result["type"], "Windows.Management.Policies.NamedPolicy");
         assert_eq!(result["called"], true);
         assert!(result["assembly"]
