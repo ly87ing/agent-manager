@@ -131,7 +131,23 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 pub fn snapshot_skill(source_dir: &Path, data_dir: &Path, version: &str) -> Result<PathBuf> {
+    create_snapshot(source_dir, data_dir, version, false)
+}
+
+pub(super) fn snapshot_git_skill(source_dir: &Path, data_dir: &Path) -> Result<(String, PathBuf)> {
+    let version = super::snapshot_v2::source_versions(source_dir)?.current;
+    let path = create_snapshot(source_dir, data_dir, &version, true)?;
+    Ok((version, path))
+}
+
+fn create_snapshot(
+    source_dir: &Path,
+    data_dir: &Path,
+    version: &str,
+    typed: bool,
+) -> Result<PathBuf> {
     if !is_sha256_hex(version) {
         bail!("Invalid skill snapshot version.");
     }
@@ -149,7 +165,12 @@ pub fn snapshot_skill(source_dir: &Path, data_dir: &Path, version: &str) -> Resu
     let copied = (|| -> Result<()> {
         let content = staging.path().join("content");
         copy_dir_recursive(source_dir, &content)?;
-        let actual = hash_skill_dir(&content)?;
+        let actual = if typed {
+            super::snapshot_v2::write_manifest(staging.path(), version)?;
+            super::snapshot_v2::source_versions(&content)?.current
+        } else {
+            hash_skill_dir(&content)?
+        };
         if actual != version {
             bail!("Skill snapshot copy does not match the chosen version {version} (actual {actual}); refusing to publish.");
         }
@@ -176,7 +197,11 @@ pub fn verify_skill_version(data_dir: &Path, version: &str) -> Result<PathBuf> {
     let (_parent_file, parent_id) = super::snapshot_storage::open_directory(&parent)?;
     let (_version_file, version_id) = super::snapshot_storage::open_directory(&version_dir)?;
     let (_content_file, content_id) = super::snapshot_storage::open_directory(&content_path)?;
-    let actual = hash_skill_dir(&content_path)?;
+    let actual = if super::snapshot_v2::is_typed(&version_dir, version)? {
+        super::snapshot_v2::source_versions(&content_path)?.current
+    } else {
+        hash_skill_dir(&content_path)?
+    };
     if actual != version {
         bail!(
             "版本快照 {} 内容不一致（实际 {}），拒绝使用",

@@ -6,6 +6,20 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: type evidence must be bound into a snapshot version
+
+- The old digest gives a file containing `symlink:target` the same slot as a
+  symbolic link to `target`. An adjacent receipt cannot safely reinterpret those
+  untyped entries. New Git snapshots bind entry kinds, raw targets, host-relative
+  target meaning and included directories into a separate hash domain; keep old
+  bindings explicit rather than silently migrating or claiming they are repaired.
+- Test the actual mixed-format status and fork paths, not only the hash helper.
+  An unassigned fork need not have a bindings table; read its unassigned status
+  and verify that it did not create one instead of assuming the table exists.
+- Unix does not mean every filesystem accepts invalid UTF-8 names. The initial
+  fixture failed with `Illegal byte sequence` on macOS before exercising the
+  checker. Test raw path encoding on Unix and actual invalid filenames on Linux.
+
 ## 2026-10-16: window-tree enumeration is not an atomic observation
 
 - Native KDE acceptance passed initially, then main CI failed because an X11

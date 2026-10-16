@@ -13,7 +13,7 @@ use super::paths::{
 use super::persistence::{
     delete_binding, load_bindings_from_conn, load_bindings_readonly, write_binding,
 };
-use super::snapshot::{discover_repo_skills, hash_skill_dir, snapshot_skill};
+use super::snapshot::{discover_repo_skills, hash_skill_dir, snapshot_git_skill};
 use super::status::{load_metadata, record_apply_operation, DomainMetadata};
 use super::CollectionDef;
 use crate::native::{Context, Request};
@@ -367,12 +367,13 @@ fn apply_skill_add(
         &load_metadata(ctx)?,
     )?;
     let takeover = is_unmanaged_link(link_path, bases);
-    let version = hash_skill_dir(source_dir)?;
     // 本地来源集合直链源目录（内容归外部所有、跟随其更新）；git 集合落内容快照。
-    let content_path = if is_local_source(coll) {
-        expected_link_target(ctx, coll, skill, &version)?
+    let (version, content_path) = if is_local_source(coll) {
+        let version = hash_skill_dir(source_dir)?;
+        let path = expected_link_target(ctx, coll, skill, &version)?;
+        (version, path)
     } else {
-        snapshot_skill(source_dir, &ctx.data_dir, &version)?
+        snapshot_git_skill(source_dir, &ctx.data_dir)?
     };
 
     let mut rollback_guard = RollbackGuard::new();
@@ -444,11 +445,12 @@ fn apply_skill_update(
             agent
         );
     }
-    let version = hash_skill_dir(source_dir)?;
-    let content_path = if is_local_source(coll) {
-        expected_link_target(ctx, coll, skill, &version)?
+    let (version, content_path) = if is_local_source(coll) {
+        let version = hash_skill_dir(source_dir)?;
+        let path = expected_link_target(ctx, coll, skill, &version)?;
+        (version, path)
     } else {
-        snapshot_skill(source_dir, &ctx.data_dir, &version)?
+        snapshot_git_skill(source_dir, &ctx.data_dir)?
     };
 
     let mut rollback_guard = RollbackGuard::new();

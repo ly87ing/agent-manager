@@ -1544,6 +1544,191 @@ fn skill_action(
 }
 
 #[test]
+fn typed_git_snapshots_preserve_mixed_legacy_bindings_until_explicit_update() {
+    let (root, context) = temp_ctx("typed-snapshot-mixed");
+    let repo = context.data_dir.join("repositories/upstream");
+    let source = repo.join("skills/alpha");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("SKILL.md"), b"# Alpha\n").unwrap();
+    set_collection(
+        &context,
+        "upstream",
+        r#"{"url":"https://example.com/upstream.git","skill_paths":["skills"]}"#,
+    );
+    let id = "skill:upstream/alpha";
+    assert!(skill_action(&context, id, "add", "claude-code").ok);
+    let current = skill_cell(&context, id, "claude-code").unwrap()["version"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let legacy = agent_manager_engine::native_skills::hash_skill_dir(&source).unwrap();
+    assert_ne!(current, legacy);
+    let old_content = context
+        .data_dir
+        .join("skill-versions")
+        .join(&legacy)
+        .join("content");
+    std::fs::create_dir_all(&old_content).unwrap();
+    std::fs::copy(source.join("SKILL.md"), old_content.join("SKILL.md")).unwrap();
+    let link = context.home_dir.join(".claude/skills/alpha");
+    agent_manager_engine::platform::remove_link(&link).unwrap();
+    link_dir(&old_content, &link).unwrap();
+    {
+        let conn = store::open_write(&context).unwrap();
+        conn.execute("UPDATE skill_bindings SET version=?1 WHERE collection='upstream' AND skill='alpha' AND agent='claude-code'", [&legacy]).unwrap();
+    }
+    let added = skill_action(&context, id, "add", "codex");
+    assert!(added.ok, "{:?}", added.errors);
+    let before = tree_digest(&context.data_dir);
+    for (agent, expected) in [("claude-code", &legacy), ("codex", &current)] {
+        let cell = skill_cell(&context, id, agent).unwrap();
+        assert_eq!(cell["version"], *expected);
+        assert_eq!(cell["available_version"], *expected);
+    }
+    assert_eq!(
+        tree_digest(&context.data_dir),
+        before,
+        "Status must not migrate or rewrite stored data"
+    );
+    for (agent, expected) in [("claude-code", &legacy), ("codex", &current)] {
+        for action in ["disable", "enable"] {
+            let result = skill_action(&context, id, action, agent);
+            assert!(result.ok, "{agent} {action}: {:?}", result.errors);
+            assert_eq!(
+                skill_cell(&context, id, agent).unwrap()["version"],
+                *expected
+            );
+        }
+    }
+    // A bound Git fork can verify the recorded snapshot while its cache is offline.
+    let offline = root.join("offline-source");
+    std::fs::rename(&repo, &offline).unwrap();
+    let destination = root.join("personal").to_string_lossy().into_owned();
+    let forked = execute(
+        &context,
+        &request("skills:fork", &["--only", id, "--dest", &destination]),
+    );
+    assert!(forked.ok, "{:?}", forked.errors);
+    assert_eq!(
+        std::fs::read(root.join("personal/alpha/SKILL.md")).unwrap(),
+        b"# Alpha\n"
+    );
+    std::fs::rename(offline, &repo).unwrap();
+    let status = execute(&context, &request("skills:status", &[]));
+    let origin = &status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == "skill:my-skills/alpha")
+        .unwrap()["observed"]["forked_from"];
+    assert_eq!(origin["version"], legacy);
+    assert_eq!(origin["upstream_changed"], false);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let unsupported = source.join("unsupported-fifo");
+        let name = std::ffi::CString::new(unsupported.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert_eq!(
+            skill_cell(&context, id, "claude-code").unwrap()["available_version"],
+            legacy
+        );
+        assert!(skill_cell(&context, id, "codex").unwrap()["available_version"].is_null());
+        let update = skill_action(&context, id, "update", "codex");
+        assert!(
+            !update.ok,
+            "An unsupported typed source must not produce a new assignment"
+        );
+        assert_eq!(
+            skill_cell(&context, id, "codex").unwrap()["version"],
+            current
+        );
+        std::fs::remove_file(unsupported).unwrap();
+    }
+    let updated = skill_action(&context, id, "update", "claude-code");
+    assert!(updated.ok, "{:?}", updated.errors);
+    assert_eq!(
+        skill_cell(&context, id, "claude-code").unwrap()["version"],
+        current
+    );
+    assert_eq!(std::fs::read_dir(&old_content).unwrap().count(), 1);
+    assert!(!old_content.parent().unwrap().join("snapshot.json").exists());
+    assert!(context
+        .data_dir
+        .join("skill-versions")
+        .join(&current)
+        .join("snapshot.json")
+        .is_file());
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn unassigned_git_fork_records_a_verified_typed_snapshot() {
+    let (root, context) = temp_ctx("typed-snapshot-unassigned-fork");
+    let source = context.data_dir.join("repositories/upstream/skills/alpha");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("SKILL.md"), b"# Alpha\n").unwrap();
+    std::fs::create_dir(source.join("empty")).unwrap();
+    set_collection(
+        &context,
+        "upstream",
+        r#"{"url":"https://example.com/upstream.git","skill_paths":["skills"]}"#,
+    );
+    let destination = root.join("personal").to_string_lossy().into_owned();
+    let result = execute(
+        &context,
+        &request(
+            "skills:fork",
+            &["--only", "skill:upstream/alpha", "--dest", &destination],
+        ),
+    );
+    assert!(result.ok, "{:?}", result.errors);
+    let status = execute(&context, &request("skills:status", &[]));
+    let origin = &status.data["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == "skill:my-skills/alpha")
+        .unwrap()["observed"]["forked_from"];
+    let version = origin["version"].as_str().unwrap();
+    assert_ne!(
+        version,
+        agent_manager_engine::native_skills::hash_skill_dir(&source).unwrap()
+    );
+    let snapshot = context.data_dir.join("skill-versions").join(version);
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(
+            &std::fs::read(snapshot.join("snapshot.json")).unwrap()
+        )
+        .unwrap()["schema"],
+        2
+    );
+    assert_eq!(
+        std::fs::read(snapshot.join("content/SKILL.md")).unwrap(),
+        b"# Alpha\n"
+    );
+    assert!(snapshot.join("content/empty").is_dir());
+    assert!(root.join("personal/alpha/empty").is_dir());
+    assert_eq!(origin["upstream_changed"], false);
+    assert_eq!(
+        skill_cell(&context, "skill:upstream/alpha", "claude-code").unwrap()["assigned"],
+        false
+    );
+    let conn = store::open_readonly(&context).unwrap().unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name='skill_bindings'",
+            [],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    drop(conn);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn skill_dropped_by_its_source_can_only_be_removed_and_leaves_no_record() {
     let (root, context) = temp_ctx("skills-dropped-upstream");
     let repo_dir = context.data_dir.join("repositories").join("drop-skills");
