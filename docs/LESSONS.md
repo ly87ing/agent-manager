@@ -42,6 +42,15 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   unknown policy gates, and prove that a deliberately blocked child cannot erase
   unrelated system evidence. More timeout allowance does not fix a blocked API.
 
+## 2026-10-16: verify desktop associations with the actual launch parser
+
+- Old generic xdg-mime queries split Exec on whitespace without decoding desktop
+  quoting. A valid generated entry could launch through GIO yet be ignored by the
+  association query. Read the effective default with GIO under a fixed C message
+  locale; do not simplify supported paths or weaken the literal-path fixture.
+- macOS quoting tests and Linux cross-compilation did not exercise registration.
+  Native Linux CI caught the failed default-handler readback before main promotion.
+
 ## 2026-10-16: read-only time inspection must not activate the clock daemon
 
 - `timedatectl show-timesync` can start an inactive timesyncd through D-Bus. On

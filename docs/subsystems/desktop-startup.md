@@ -50,7 +50,10 @@ handler and previews the original AppImage path and current-user desktop entry.
 Confirmation rechecks that fingerprint, creates only an exact owned entry under
 `$XDG_DATA_HOME/applications` (default `~/.local/share/applications`), and asks
 `xdg-mime` to associate `x-scheme-handler/agentmanager`. It then reads the actual
-default back. Merely opening Settings, previewing or canceling never registers.
+default through `gio mime` under a fixed English UTF-8 message locale. Older generic
+`xdg-mime query` implementations split `Exec` without parsing desktop quoting
+and reject valid quoted AppImage paths; GIO uses the launch parser instead.
+Merely opening Settings, previewing or canceling never registers.
 Existing handler files and other MIME associations are preserved. Changed,
 non-regular or symlinked owned entries are refused; moving the AppImage requires
 manual review of an old entry rather than silently overwriting it. A failed

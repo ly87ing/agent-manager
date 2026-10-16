@@ -4,6 +4,18 @@ use std::{io::Write, path::PathBuf, process::Stdio, time::Duration};
 
 const MIME: &str = "x-scheme-handler/agentmanager";
 
+fn default_handler(text: &str, mime: &str) -> Result<String> {
+    let first = text.lines().next().unwrap_or("");
+    if first == format!("No default applications for “{mime}”") {
+        return Ok(String::new());
+    }
+    first
+        .strip_prefix(&format!("Default application for “{mime}”: "))
+        .filter(|handler| !handler.is_empty() && !handler.chars().any(char::is_control))
+        .map(str::to_string)
+        .context("The desktop returned an unknown association response.")
+}
+
 pub struct Registration {
     home: PathBuf,
     data: PathBuf,
@@ -68,12 +80,33 @@ impl Registration {
     }
 
     fn mime(&self, args: &[&str]) -> Result<String> {
-        let mut command = crate::process::launch_command("/usr/bin/xdg-mime");
+        // Older xdg-mime query implementations split Exec on whitespace without
+        // parsing desktop quoting, rejecting valid AppImage paths. GIO uses the
+        // same desktop-entry parser as actual URI launching.
+        let query = match args {
+            ["query", "default", mime] => Some(*mime),
+            _ => None,
+        };
+        let mut command = crate::process::launch_command(if query.is_some() {
+            "/usr/bin/gio"
+        } else {
+            "/usr/bin/xdg-mime"
+        });
+        let query_args;
+        let args = if let Some(mime) = query {
+            query_args = ["mime", mime];
+            &query_args[..]
+        } else {
+            args
+        };
         command
             .args(args)
             .env("HOME", &self.home)
             .env("XDG_DATA_HOME", &self.data)
             .env("XDG_CONFIG_HOME", &self.config)
+            .env("LC_ALL", "C.UTF-8")
+            .env("LANGUAGE", "C")
+            .env_remove("CHARSET")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
@@ -82,6 +115,11 @@ impl Registration {
             bail!("The desktop could not read or update the share-link association.");
         }
         let value = String::from_utf8(output.stdout)?.trim().to_string();
+        let value = if let Some(mime) = query {
+            default_handler(&value, mime)?
+        } else {
+            value
+        };
         if value.chars().any(char::is_control) {
             bail!("The desktop returned an invalid share-link association.");
         }
@@ -167,6 +205,23 @@ impl Registration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn gio_default_response_preserves_ids_and_rejects_unknown_or_wrong_types() {
+        assert_eq!(default_handler(&format!("Default application for “{MIME}”: foreign.desktop\nRegistered applications:\n\tother.desktop"),MIME).unwrap(),"foreign.desktop");
+        assert_eq!(
+            default_handler(&format!("No default applications for “{MIME}”"), MIME).unwrap(),
+            ""
+        );
+        for text in [
+            "",
+            "localized or failed output",
+            "No default applications for “text/plain”",
+            "Default application for “text/plain”: foreign.desktop",
+            "Default application for “x-scheme-handler/agentmanager”: ",
+        ] {
+            assert!(default_handler(text, MIME).is_err());
+        }
+    }
     #[test]
     fn desktop_entry_quotes_literal_paths_and_rejects_unusable_paths() {
         let mut registration = Registration {
