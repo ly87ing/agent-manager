@@ -94,9 +94,12 @@ direct Launch action. That click supplies the explicit `--confirm` marker to
 Row controls use concise labels: Launch, Edit, Copy command, Copy alias/function,
 and Delete. The complete alias/function definition is still copied.
 The operation refuses an already-running target and never quits or restarts it.
-Windows checks executable names
-conservatively; Linux checks `/proc` executable paths; macOS checks bundle process
-paths. A launch request does not prove the application accepted its environment.
+Windows compares the volume and 128-bit file identity of queryable process images,
+including hard-link aliases. Different files with the same name remain independent.
+An inaccessible matching-name process or an incomplete process enumeration
+refuses the request; inaccessible unrelated processes are skipped. Linux checks
+`/proc` executable paths; macOS checks bundle process paths. A launch request does
+not prove the application accepted its environment.
 
 Launched GUI applications do not belong to the manager's temporary command jobs
 and survive its exit. Command-line programs are copied to the user's terminal for

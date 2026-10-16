@@ -4,6 +4,9 @@ use anyhow::{bail, Result};
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Stdio;
+#[cfg(windows)]
+#[path = "runtime_windows.rs"]
+mod windows;
 
 fn catalog(ctx: &Context) -> Value {
     let mut apps = Vec::<Value>::new();
@@ -68,23 +71,7 @@ fn already_running(target: &Path) -> Result<bool> {
     }
     #[cfg(windows)]
     {
-        let name = target
-            .file_name()
-            .ok_or_else(|| anyhow::anyhow!("Missing executable name"))?
-            .to_string_lossy();
-        let output = crate::process::launch_command("tasklist.exe")
-            .args(["/FO", "CSV", "/NH", "/FI", &format!("IMAGENAME eq {name}")])
-            .output()?;
-        if !output.status.success() {
-            bail!("Unable to check running applications");
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).lines().any(|line| {
-            line.split(',')
-                .next()
-                .unwrap_or_default()
-                .trim_matches('"')
-                .eq_ignore_ascii_case(&name)
-        }))
+        windows::already_running(target)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
