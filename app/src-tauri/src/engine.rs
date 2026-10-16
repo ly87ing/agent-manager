@@ -674,9 +674,7 @@ pub async fn engine_invoke(
     args: Option<Vec<String>>,
     run_id: Option<String>,
 ) -> Result<agent_manager_engine::Envelope, EngineError> {
-    let data_dir = std::env::var_os("AGENT_MANAGER_DATA_DIR")
-        .map(std::path::PathBuf::from)
-        .or_else(|| app.path().app_data_dir().ok())
+    let data_dir = agent_manager_engine::data_dir::resolve(app.path().app_data_dir().ok())
         .ok_or_else(|| EngineError::new("data_dir_unavailable", "无法定位应用数据目录"))?;
     let home_dir = agent_manager_engine::platform::home_dir().ok_or_else(|| {
         EngineError::new(

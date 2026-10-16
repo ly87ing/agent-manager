@@ -9,27 +9,10 @@ fn home_dir() -> PathBuf {
     })
 }
 fn data_dir() -> PathBuf {
-    if let Some(path) = std::env::var_os("AGENT_MANAGER_DATA_DIR") {
-        return PathBuf::from(path);
-    }
-    #[cfg(target_os = "macos")]
-    {
-        home_dir().join("Library/Application Support/agent-manager")
-    }
-    #[cfg(windows)]
-    {
-        std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home_dir().join("AppData").join("Roaming"))
-            .join("agent-manager")
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home_dir().join(".local/share"))
-            .join("agent-manager")
-    }
+    agent_manager_engine::data_dir::resolve(Some(agent_manager_engine::data_dir::preferred(
+        &home_dir(),
+    )))
+    .expect("The home directory supplies a default data directory")
 }
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();

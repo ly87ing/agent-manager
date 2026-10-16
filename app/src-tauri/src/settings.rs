@@ -35,10 +35,7 @@ pub struct SettingsData {
 }
 
 fn data_root(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    std::env::var_os("AGENT_MANAGER_DATA_DIR")
-        .map(std::path::PathBuf::from)
-        .filter(|p| !p.as_os_str().is_empty())
-        .or_else(|| app.path().app_data_dir().ok())
+    agent_manager_engine::data_dir::resolve(app.path().app_data_dir().ok())
         .ok_or_else(|| "无法定位应用数据目录".into())
 }
 fn context(data_dir: &Path, home_dir: &Path) -> Context {

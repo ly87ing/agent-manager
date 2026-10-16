@@ -8,6 +8,16 @@ The current executable's location determines whether macOS needs an installation
 
 ## Runtime path
 
+The CLI, desktop engine and Settings use the shared
+[`data_dir`](../../engine-rs/src/data_dir.rs) selector. A nonempty
+`AGENT_MANAGER_DATA_DIR` takes precedence. New installations use the platform's
+application-data root plus `io.github.ly87ing.agent-manager`. When only the sibling
+legacy `agent-manager/native-manager.db` exists, both entry points keep using it.
+When both databases exist, the current application directory wins; neither file
+is moved, merged or deleted. To inspect the other database, explicitly select its
+directory. Separate application identifiers do not adopt the main app's legacy
+database. Reads never create a directory or database.
+
 [`settings_data`](../../app/src-tauri/src/settings.rs) includes an optional `runtimeWarning`. [`App`](../../app/src/App.tsx) displays it above the current page. The [Settings page](../../app/src/pages/SettingsPage.tsx) suppresses manual update checks and installation while the warning is present. There is no automatic update check. Closing the main window uses Tauri's normal close/exit flow; no tray or second webview is created.
 
 Settings reads `autostart_get` on opening and presents explicit Enable and Disable

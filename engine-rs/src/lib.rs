@@ -11,6 +11,7 @@
 //! Resource domains not yet implemented return an explicit
 //! `DOMAIN_NOT_IMPLEMENTED` error; this core never fabricates success.
 
+pub mod data_dir;
 pub mod envelope;
 pub mod native;
 pub mod native_account_context;
