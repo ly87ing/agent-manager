@@ -1,6 +1,8 @@
 //! Real CLI and native stdio protocol acceptance, including Windows batch shims.
 #[cfg(windows)]
 mod common;
+#[path = "native_mcp_protocol/http.rs"]
+mod http;
 
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
@@ -409,6 +411,8 @@ fn fixture(args: &[String]) {
         json!({"error":{"code":-32603,"message":format!("fixture rejected: {token}")}})
     } else if mode == "missing-tools" {
         json!({"result":{}})
+    } else if mode == "malformed-tools" {
+        json!({"result":{"tools":[{"name":"valid"},{"name":7}]}})
     } else {
         json!({"result":{"tools":[{"name":if mode == "echo" { format!("native_{token}") } else { "native_tool".into() }},{"name":"other_tool"}]}})
     };
@@ -425,12 +429,17 @@ fn main() {
         fixture(&args);
         return;
     }
+    if args == ["--http-only"] {
+        http::run();
+        return;
+    }
     for mode in [
         "ok",
         "no-tools",
         "invalid",
         "tools-error",
         "missing-tools",
+        "malformed-tools",
         "exit",
         "closed-output",
         "timeout",
@@ -440,4 +449,5 @@ fn main() {
     }
     #[cfg(windows)]
     stdio_case("ok", true);
+    http::run();
 }
