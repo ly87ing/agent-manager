@@ -276,7 +276,8 @@ GNOME has drained an earlier request or that geolocation/automatic switching
 works. A final timezone drift is partial, not an invitation to compete with the
 daemon. CLI `verification_limits` and the dialog retain that distinction;
 auto-only changes do not request an application restart.
-Automatic time/NTP and desktop language/region settings remain unavailable here.
+Automatic time/NTP and desktop language repair remain unavailable here.
+GNOME regional-format repair is described below.
 
 GUI CI verifies actual apply, future-unit inheritance, no-op, stale refusal and
 restoration on a disposable runner's existing user manager, with isolated HOME
