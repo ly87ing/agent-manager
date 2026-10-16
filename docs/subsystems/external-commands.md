@@ -29,6 +29,13 @@ The engine starts external commands through `process::command` or `command_with_
   sanitization. Failed operations do not automatically delete an existing cache.
   A missing sparse-checkout setting uses Git's explicit default; execution errors
   and timeouts cannot be treated as an absent setting.
+- Shared Git commands clear inherited repository, worktree, index, object-store
+  and namespace selectors before resolving their explicit URL or working
+  directory. SSH, proxy and credential connection configuration remains available;
+  the existing per-command `core.autocrlf=false` setting is retained. These
+  inherited selectors no longer redirect commands created by the shared Git
+  factory to a different repository, index or object store. Other Git configuration
+  and read-only upstream probes outside this factory remain outside this guarantee.
 - Timeout handlers terminate the process group, including descendants. Dropping
   the guard also terminates remaining descendants after normal completion, even
   if they closed the captured pipes. Windows closes its kill-on-close job; Unix
@@ -49,6 +56,7 @@ cargo test --manifest-path engine-rs/Cargo.toml --lib native_programs::apply::ca
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_programs::locate::capture_tests
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_upstream::capture_tests
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::versioning::tests
+cargo test --manifest-path engine-rs/Cargo.toml --lib git_repository_environment_cannot_redirect
 cargo test --manifest-path engine-rs/Cargo.toml --test native_mcp check_
 cargo check --manifest-path engine-rs/Cargo.toml --target x86_64-pc-windows-gnu --all-targets
 ```
