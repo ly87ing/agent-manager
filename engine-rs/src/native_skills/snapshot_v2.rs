@@ -15,6 +15,17 @@ pub(super) struct SourceVersions {
     pub(super) current: String,
 }
 
+pub(super) enum Entry {
+    File(String),
+    Directory,
+    Link {
+        raw_target: String,
+        target_relative: String,
+    },
+}
+
+pub(super) type Entries = BTreeMap<String, Entry>;
+
 fn relative_key(path: &Path) -> Result<String> {
     let mut parts = Vec::new();
     for part in path.components() {
@@ -46,7 +57,30 @@ fn target_key(relative_link: &Path, target: &Path) -> Result<String> {
 }
 
 pub(super) fn source_versions(root: &Path) -> Result<SourceVersions> {
-    let mut legacy = Vec::new();
+    let entries = source_entries(root)?;
+    let legacy = entries
+        .iter()
+        .filter_map(|(path, entry)| {
+            let digest = match entry {
+                Entry::File(digest) => digest.clone(),
+                Entry::Directory => return None,
+                Entry::Link { raw_target, .. } => {
+                    let mut hash = Sha256::new();
+                    hash.update(b"symlink:");
+                    hash.update(raw_target.as_bytes());
+                    format!("{:x}", hash.finalize())
+                }
+            };
+            Some((path.replace('\\', "/"), digest))
+        })
+        .collect();
+    Ok(SourceVersions {
+        legacy: super::snapshot::hash_entries(legacy),
+        current: typed_hash(&entries),
+    })
+}
+
+pub(super) fn source_entries(root: &Path) -> Result<Entries> {
     let mut entries = BTreeMap::new();
     let mut stack = vec![root.to_path_buf()];
     let mut buffer = [0u8; 64 * 1024];
@@ -73,25 +107,19 @@ pub(super) fn source_versions(root: &Path) -> Result<SourceVersions> {
             }
             let relative = path.strip_prefix(root)?;
             let key = relative_key(relative)?;
-            let legacy_key = relative.to_string_lossy().replace('\\', "/");
-            let (kind, digest, target) = if metadata.file_type().is_symlink() {
+            let entry = if metadata.file_type().is_symlink() {
                 let raw = std::fs::read_link(&path)?;
                 validate_symlink_internal(root, &path, &raw)?;
                 let raw_text = raw
                     .to_str()
                     .context("Skill link targets must be UTF-8 for typed snapshots")?;
-                let mut old = Sha256::new();
-                old.update(b"symlink:");
-                old.update(raw_text.as_bytes());
-                legacy.push((legacy_key, format!("{:x}", old.finalize())));
-                (
-                    b'l',
-                    format!("{:x}", Sha256::digest(raw_text.as_bytes())),
-                    target_key(relative, &raw)?,
-                )
+                Entry::Link {
+                    raw_target: raw_text.into(),
+                    target_relative: target_key(relative, &raw)?,
+                }
             } else if metadata.is_dir() {
                 stack.push(path.clone());
-                (b'd', String::new(), String::new())
+                Entry::Directory
             } else if metadata.is_file() {
                 let mut file = std::fs::File::open(&path)?;
                 let mut hash = Sha256::new();
@@ -105,30 +133,41 @@ pub(super) fn source_versions(root: &Path) -> Result<SourceVersions> {
                     }
                     hash.update(&buffer[..count]);
                 }
-                let digest = format!("{:x}", hash.finalize());
-                legacy.push((legacy_key, digest.clone()));
-                (b'f', digest, String::new())
+                Entry::File(format!("{:x}", hash.finalize()))
             } else {
                 bail!("Unsupported entry in typed skill snapshot");
             };
-            if entries.insert(key, (kind, digest, target)).is_some() {
+            if entries.insert(key, entry).is_some() {
                 bail!("Duplicate path in typed skill snapshot");
             }
         }
     }
+    Ok(entries)
+}
+
+pub(super) fn typed_hash(entries: &Entries) -> String {
     let mut hash = Sha256::new();
     hash.update(b"\0agent-manager-skill-v2\0");
-    for (path, (kind, digest, target)) in entries {
+    for (path, entry) in entries {
+        let (kind, digest, target) = match entry {
+            Entry::File(digest) => (b'f', digest.clone(), ""),
+            Entry::Directory => (b'd', String::new(), ""),
+            Entry::Link {
+                raw_target,
+                target_relative,
+            } => (
+                b'l',
+                format!("{:x}", Sha256::digest(raw_target.as_bytes())),
+                target_relative.as_str(),
+            ),
+        };
         hash.update([kind, 0]);
-        for value in [path, digest, target] {
+        for value in [path.as_str(), digest.as_str(), target] {
             hash.update(value.as_bytes());
             hash.update([0]);
         }
     }
-    Ok(SourceVersions {
-        legacy: super::snapshot::hash_entries(legacy),
-        current: format!("{:x}", hash.finalize()),
-    })
+    format!("{:x}", hash.finalize())
 }
 
 #[derive(Serialize, Deserialize)]
