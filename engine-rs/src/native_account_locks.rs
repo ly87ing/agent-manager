@@ -944,6 +944,15 @@ mod tests {
 
     #[test]
     fn upgraded_legacy_bridge_remains_locked_for_the_whole_session() {
+        const CHILD: &str = "AM_LEGACY_LOCK_TEST_CHILD";
+        // An unrelated fork can retain the CLOEXEC lock until that child executes.
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "native_account_locks::tests::upgraded_legacy_bridge_remains_locked_for_the_whole_session", "--nocapture"])
+                .env(CHILD, "1").output().unwrap();
+            assert!(output.status.success(), "{output:?}");
+            return;
+        }
         let f = Fixture::new("legacy-new");
         let (path, old_file) = f.legacy(&f.ctx);
         drop(old_file);

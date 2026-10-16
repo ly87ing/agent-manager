@@ -44,7 +44,9 @@ confirmation back to the verified source plan.
 - Run the lock assertion in its own test process, preserving both exclusive
   acquisition and release-after-drop checks. Retain the actual acquisition error.
   Production lock and authorization behavior stay unchanged.
-- Seen 1× (2026-10-15; environment lock regression isolation).
+- The legacy bridge's immediate release assertion has the same fork boundary;
+  isolate that test process too, preserving both lifetime-collision checks.
+- Seen 1× (2026-10-15; environment and legacy bridge lock regression isolation).
 
 **Keep page refresh distinct from local recovery controls.**
 - MCP's unreadable-target panel and Sources' empty guidance already owned local
