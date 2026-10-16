@@ -17,22 +17,40 @@ use crate::native::Context;
 
 pub(crate) const STATE_FILE: &str = ".agent-manager-state.json";
 const STATE_LIMIT: u64 = 4 * 1024 * 1024;
+const GIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+const GIT_OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 
 /// 在镜像目录里执行 git；不交互，失败时带上 git 的错误输出。
 pub(crate) fn git_in(repo_dir: &Path, args: &[&str], coll_name: &str) -> Result<String> {
-    let out = crate::platform::git_command()
-        .args(args)
-        .current_dir(repo_dir)
+    let mut command = crate::platform::git_command();
+    command.args(args).current_dir(repo_dir);
+    capture_git(&mut command, args[0], coll_name, GIT_TIMEOUT)
+}
+
+fn capture_git(
+    command: &mut std::process::Command,
+    operation: &str,
+    coll_name: &str,
+    timeout: std::time::Duration,
+) -> Result<String> {
+    use std::process::Stdio;
+    command
         .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-        .with_context(|| format!("git {} 启动失败: {}", args[0], repo_dir.display()))?;
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let out = crate::process::capture_group(command, timeout, GIT_OUTPUT_LIMIT + 1)
+        .with_context(|| format!("[{coll_name}] git {operation} execution failed"))?;
+    if out.stdout.len() > GIT_OUTPUT_LIMIT || out.stderr.len() > GIT_OUTPUT_LIMIT {
+        bail!("[{coll_name}] git {operation} output exceeded the 4 MiB stream limit");
+    }
     if !out.status.success() {
         let detail = String::from_utf8_lossy(&out.stderr);
         let detail = detail.trim();
         bail!(
             "[{}] git {} 失败{}",
             coll_name,
-            args[0],
+            operation,
             if detail.is_empty() {
                 String::new()
             } else {
@@ -451,7 +469,8 @@ pub(crate) fn update_repo(
 
     if !repo_dir.join(".git").is_dir() {
         std::fs::create_dir_all(super::repo_base_dir(ctx))?;
-        let status = crate::platform::git_command()
+        let mut command = crate::platform::git_command();
+        command
             .args([
                 "clone",
                 "--quiet",
@@ -460,13 +479,8 @@ pub(crate) fn update_repo(
                 "--",
                 url,
             ])
-            .arg(repo_dir)
-            .env("GIT_TERMINAL_PROMPT", "0")
-            .status()
-            .with_context(|| "git clone 启动失败")?;
-        if !status.success() {
-            bail!("[{}] git clone 失败", coll.name);
-        }
+            .arg(repo_dir);
+        capture_git(&mut command, "clone", &coll.name, GIT_TIMEOUT)?;
         std::fs::write(
             repo_dir.join(".agent-manager-owned"),
             serde_json::to_string_pretty(&json!({
@@ -486,10 +500,9 @@ pub(crate) fn update_repo(
             // 之前是稀疏检出、现在要整个仓库：关掉稀疏
             let sparse = git_in(
                 repo_dir,
-                &["config", "--get", "core.sparseCheckout"],
+                &["config", "--default=false", "--get", "core.sparseCheckout"],
                 &coll.name,
-            )
-            .unwrap_or_default();
+            )?;
             if sparse.trim() == "true" {
                 git_in(repo_dir, &["sparse-checkout", "disable"], &coll.name)?;
             }
@@ -571,6 +584,51 @@ pub(crate) fn versions(ctx: &Context, coll: &CollectionDef, repo_dir: &Path) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_capture_times_out_and_stops_descendants_holding_output_pipes() {
+        use crate::process::capture_test_support as fixture;
+        for stream in ["stdout", "stderr"] {
+            let root = fixture::root(&format!("git-{stream}"));
+            let mut command = fixture::command(&root, stream);
+            let started = std::time::Instant::now();
+            let error = capture_git(
+                &mut command,
+                "fetch",
+                "fixture",
+                std::time::Duration::from_secs(2),
+            )
+            .unwrap_err();
+            assert!(error.chain().any(|error| error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::TimedOut)));
+            assert!(started.elapsed() < std::time::Duration::from_secs(3));
+            fixture::assert_descendant_stopped(&root, started);
+        }
+    }
+
+    #[test]
+    fn git_capture_preserves_failure_diagnostics_and_refuses_truncated_results() {
+        use crate::process::capture_test_support as fixture;
+        let root = fixture::root("git-output");
+        let error = capture_git(
+            &mut fixture::command(&root, "output"),
+            "clone",
+            "fixture",
+            std::time::Duration::from_secs(10),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("diagnostic-9"));
+        let error = capture_git(
+            &mut fixture::command(&root, "large-output"),
+            "ls-tree",
+            "fixture",
+            std::time::Duration::from_secs(10),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("output exceeded"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn git_preview_retains_a_bounded_blob_and_distinguishes_empty_and_missing() {
