@@ -485,7 +485,12 @@ fn bin_links_into(bin_dir: &Path, package_dir: &Path, bins: &[String]) -> Vec<Pa
         .flat_map(|b| {
             let primary = bin_dir.join(crate::platform::command_link_name(b));
             if cfg!(windows) {
-                vec![primary, bin_dir.join(format!("{b}.ps1")), bin_dir.join(b)]
+                vec![
+                    primary,
+                    bin_dir.join(format!("{b}.ps1")),
+                    bin_dir.join(format!("{b}.exe")),
+                    bin_dir.join(b),
+                ]
             } else {
                 vec![primary]
             }
@@ -500,6 +505,11 @@ fn bin_links_into(bin_dir: &Path, package_dir: &Path, bins: &[String]) -> Vec<Pa
                 .unwrap_or(false);
             if direct || !cfg!(windows) {
                 return direct;
+            }
+            if p.extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+            {
+                return super::locate::uv_owned_copy(package_dir, p);
             }
             // npm also writes PowerShell and POSIX launchers beside its .cmd.
             // Only move scripts whose explicit $basedir target is in this package.

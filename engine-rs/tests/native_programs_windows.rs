@@ -6,6 +6,90 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Command;
 
+#[test]
+fn uv_copied_entry_is_read_from_receipt_and_preserved_in_upgrade_preview() {
+    let root = std::env::temp_dir().join(format!("am-uv-win-{}", std::process::id()));
+    let home = root.join("home");
+    let data = root.join("data");
+    let tools = home.join("AppData/Roaming/uv/data/tools");
+    let package = tools.join("tool-a");
+    let bin = home.join(".local/bin");
+    let skill = home.join(".claude/skills/tool-a");
+    for path in [
+        package.join("Scripts"),
+        package.join("Lib/site-packages/tool_a-1.2.3.dist-info"),
+        bin.clone(),
+        skill.clone(),
+    ] {
+        std::fs::create_dir_all(path).unwrap();
+    }
+    std::fs::write(package.join("Scripts/tool-a.exe"), b"copied uv executable").unwrap();
+    std::fs::copy(package.join("Scripts/tool-a.exe"), bin.join("tool-a.exe")).unwrap();
+    std::fs::write(bin.join("uv.exe"), b"preview-only executable").unwrap();
+    std::fs::write(
+        package.join("uv-receipt.toml"),
+        format!(
+            "[tool]\nentrypoints = [{{ name = 'tool-a', install-path = {} }}]\n",
+            serde_json::to_string(&bin.join("tool-a.exe").to_string_lossy()).unwrap()
+        ),
+    )
+    .unwrap();
+    std::fs::write(skill.join("SKILL.md"), "---\nname: tool-a\ndescription: fixture\nmetadata:\n  requires:\n    bins: [tool-a]\n---\nFixture\n").unwrap();
+    let run = |command: &str, args: &[&str]| -> Value {
+        let output = Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
+            .arg(command)
+            .args(args)
+            .arg("--json")
+            .env("HOME", &home)
+            .env("AGENT_MANAGER_DATA_DIR", &data)
+            .env("AGENT_MANAGER_USER_PATH", &bin)
+            .env("UV_TOOL_DIR", &tools)
+            .env_remove("AGENT_MANAGER_LOCK_HELD")
+            .output()
+            .unwrap();
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let status = run("programs:status", &[]);
+    assert_eq!(status["ok"], true, "{status}");
+    let element = status["data"]["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["program"] == "pypi:tool-a")
+        .unwrap();
+    assert_eq!(element["owner"], "uv-tool");
+    assert_eq!(element["version"], "1.2.3");
+    let preview = run(
+        "programs:preview",
+        &[
+            "--program",
+            "pypi:tool-a",
+            "--action",
+            "upgrade",
+            "--version",
+            "2.0.0",
+        ],
+    );
+    assert_eq!(preview["ok"], true, "{preview}");
+    assert!(
+        preview["data"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|step| step.to_string().contains("tool-a.exe")),
+        "{preview}"
+    );
+    assert!(!data.exists(), "Status and preview must not write app data");
+    std::fs::write(bin.join("tool-a.exe"), b"external modification").unwrap();
+    let status = run("programs:status", &[]);
+    assert!(!status["data"]["elements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["owner"] == "uv-tool"));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// npm 生成的 cmd-shim（节选，保留定位目标的那一行）。
 fn cmd_shim(rel: &str) -> String {
     format!(

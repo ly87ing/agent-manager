@@ -84,14 +84,19 @@ fn probe_user_path(_home: &Path) -> UserPath {
 }
 
 #[cfg(not(windows))]
-fn probe_user_path(home: &Path) -> UserPath {
-    let shell = std::env::var("SHELL")
-        .ok()
+fn user_shell(configured: Option<&str>, macos: bool) -> &str {
+    configured
         .filter(|s| s.starts_with('/'))
-        .unwrap_or_else(|| "/bin/zsh".to_string());
+        .unwrap_or(if macos { "/bin/zsh" } else { "/bin/bash" })
+}
+
+#[cfg(not(windows))]
+fn probe_user_path(home: &Path) -> UserPath {
+    let configured = std::env::var("SHELL").ok();
+    let shell = user_shell(configured.as_deref(), cfg!(target_os = "macos"));
     let forms: Vec<Result<Vec<PathBuf>, String>> = ["-lic", "-lc", "-c"]
         .iter()
-        .map(|flag| shell_path(&shell, flag, home))
+        .map(|flag| shell_path(shell, flag, home))
         .collect();
     let ok: Vec<&Vec<PathBuf>> = forms.iter().filter_map(|r| r.as_ref().ok()).collect();
     if ok.is_empty() {
@@ -292,15 +297,28 @@ pub fn classify(ctx: &Context, path: &Path) -> Located {
             ..base
         };
     }
-    if let Some(pos) = text.find("/uv/tools/") {
-        let rest = &text[pos + "/uv/tools/".len()..];
+    if let Some((pos, marker)) = ["/uv/tools/", "/uv/data/tools/"]
+        .into_iter()
+        .find_map(|marker| text.find(marker).map(|pos| (pos, marker)))
+    {
+        let rest = &text[pos + marker.len()..];
         let tool = rest.split('/').next().unwrap_or_default().to_string();
-        let dir = PathBuf::from(&text[..pos + "/uv/tools/".len()]).join(&tool);
+        let dir = PathBuf::from(&text[..pos + marker.len()]).join(&tool);
         let version = uv_tool_version(&dir, &tool);
         return Located {
             owner: "uv-tool",
             program: Some(format!("pypi:{tool}")),
             version,
+            package_dir: Some(dir),
+            ..base
+        };
+    }
+    #[cfg(windows)]
+    if let Some((tool, dir)) = windows_uv_copy(ctx, path) {
+        return Located {
+            owner: "uv-tool",
+            program: Some(format!("pypi:{tool}")),
+            version: uv_tool_version(&dir, &tool),
             package_dir: Some(dir),
             ..base
         };
@@ -345,9 +363,15 @@ pub fn classify(ctx: &Context, path: &Path) -> Located {
 /// uv tool 环境里这个包的版本：site-packages 下 `<名>-<版本>.dist-info`。
 fn uv_tool_version(dir: &Path, tool: &str) -> Option<String> {
     let normalized = tool.replace('-', "_").to_lowercase();
-    let lib = std::fs::read_dir(dir.join("lib")).ok()?;
-    for python in lib.filter_map(|e| e.ok()) {
-        let Ok(entries) = std::fs::read_dir(python.path().join("site-packages")) else {
+    let mut roots = vec![dir.join("Lib/site-packages")];
+    if let Ok(lib) = std::fs::read_dir(dir.join("lib")) {
+        roots.extend(
+            lib.filter_map(|entry| entry.ok())
+                .map(|entry| entry.path().join("site-packages")),
+        );
+    }
+    for root in roots {
+        let Ok(entries) = std::fs::read_dir(root) else {
             continue;
         };
         for entry in entries.filter_map(|e| e.ok()) {
@@ -359,6 +383,100 @@ fn uv_tool_version(dir: &Path, tool: &str) -> Option<String> {
                     }
                 }
             }
+        }
+    }
+    None
+}
+
+/// Windows uv copies entry points. A receipt path alone does not prove ownership.
+pub(super) fn uv_owned_copy(dir: &Path, path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() || metadata.len() > 64 * 1024 * 1024 {
+        return false;
+    }
+    let receipt = dir.join("uv-receipt.toml");
+    if std::fs::metadata(&receipt).map_or(true, |meta| meta.len() > 64 * 1024) {
+        return false;
+    }
+    let Some(receipt) = std::fs::read_to_string(receipt)
+        .ok()
+        .and_then(|text| text.parse::<toml::Value>().ok())
+    else {
+        return false;
+    };
+    let Some(entries) = receipt
+        .get("tool")
+        .and_then(|tool| tool.get("entrypoints"))
+        .and_then(toml::Value::as_array)
+    else {
+        return false;
+    };
+    let Ok(actual) = path.canon() else {
+        return false;
+    };
+    if !entries.iter().any(|entry| {
+        entry
+            .get("install-path")
+            .and_then(toml::Value::as_str)
+            .and_then(|value| Path::new(value).canon().ok())
+            .is_some_and(|value| value == actual)
+    }) {
+        return false;
+    }
+    let Some(name) = path.file_name() else {
+        return false;
+    };
+    let source = dir.join("Scripts").join(name);
+    if std::fs::metadata(&source)
+        .map_or(true, |meta| !meta.is_file() || meta.len() != metadata.len())
+    {
+        return false;
+    }
+    let (Ok(mut source), Ok(mut installed)) =
+        (std::fs::File::open(source), std::fs::File::open(path))
+    else {
+        return false;
+    };
+    let (mut a, mut b) = ([0; 8192], [0; 8192]);
+    loop {
+        let (Ok(a_len), Ok(b_len)) = (source.read(&mut a), installed.read(&mut b)) else {
+            return false;
+        };
+        if a_len != b_len || a[..a_len] != b[..b_len] {
+            return false;
+        }
+        if a_len == 0 {
+            return true;
+        }
+    }
+}
+
+#[cfg(windows)]
+fn windows_uv_copy(ctx: &Context, path: &Path) -> Option<(String, PathBuf)> {
+    if !path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+    {
+        return None;
+    }
+    let root = std::env::var_os("UV_TOOL_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::var_os("APPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| ctx.home_dir.join("AppData/Roaming"))
+                .join("uv/data/tools")
+        });
+    if !root.is_absolute() {
+        return None;
+    }
+    for entry in std::fs::read_dir(root).ok()?.take(512).flatten() {
+        if uv_owned_copy(&entry.path(), path) {
+            return Some((entry.file_name().to_str()?.to_string(), entry.path()));
         }
     }
     None
@@ -410,6 +528,15 @@ mod capture_tests {
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
+    fn missing_or_unusable_shell_uses_the_platform_default() {
+        for configured in [None, Some(""), Some("bash")] {
+            assert_eq!(user_shell(configured, false), "/bin/bash");
+            assert_eq!(user_shell(configured, true), "/bin/zsh");
+        }
+        assert_eq!(user_shell(Some("/custom/shell"), false), "/custom/shell");
+    }
+
+    #[test]
     fn shell_path_deadline_covers_descendant_output_after_shell_exit() {
         let root = crate::process::capture_test_support::root("shell-path");
         let shell = root.join("shell");
@@ -458,6 +585,37 @@ head -c 524288 /dev/zero
             shell_path(shell.to_str().unwrap(), "-c", &root).unwrap(),
             vec![PathBuf::from("/usr/bin"), PathBuf::from("/bin")]
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod uv_tests {
+    use super::*;
+    #[test]
+    fn windows_uv_layout_and_copied_entry_require_receipt_and_matching_bytes() {
+        let root = std::env::temp_dir().join(format!("am-uv-copy-{}", crate::store::uuid_v4()));
+        let dir = root.join("uv/data/tools/tool-a");
+        let source = dir.join("Scripts/tool-a.exe");
+        let installed = root.join("bin/tool-a.exe");
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(dir.join("Lib/site-packages/tool_a-1.2.3.dist-info")).unwrap();
+        std::fs::write(&source, b"original entry").unwrap();
+        std::fs::copy(&source, &installed).unwrap();
+        assert!(!uv_owned_copy(&dir, &installed));
+        std::fs::write(
+            dir.join("uv-receipt.toml"),
+            format!(
+                "[tool]\nentrypoints = [{{ name = 'tool-a', install-path = {} }}]\n",
+                serde_json::to_string(&installed.to_string_lossy()).unwrap()
+            ),
+        )
+        .unwrap();
+        assert!(uv_owned_copy(&dir, &installed));
+        assert_eq!(uv_tool_version(&dir, "tool-a").as_deref(), Some("1.2.3"));
+        std::fs::write(&installed, b"modified entry").unwrap();
+        assert!(!uv_owned_copy(&dir, &installed));
         std::fs::remove_dir_all(root).unwrap();
     }
 }

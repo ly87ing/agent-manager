@@ -30,6 +30,13 @@ An npm global package's prefix is derived from its validated native layout:
 the same helper for delegated upgrades and adoption. Windows npm `.cmd`, `.ps1`,
 and POSIX launchers are backed up only when their targets resolve into the package.
 
+Windows uv environments use `uv/data/tools` and `Lib/site-packages`. Copied `.exe`
+entries are recognized and backed up only when `uv-receipt.toml` names the actual
+entry and its bytes match the environment's `Scripts` entry. A changed copy stays
+unowned. Receipt reads and byte comparisons are bounded; queries never invoke uv.
+An absent, empty or relative `SHELL` uses `/bin/bash` on Linux and `/bin/zsh` on
+macOS; an explicit absolute shell retains its own failure diagnostics.
+
 A managed installation has completed version directories and a `current`
 directory link. Status and individual-version removal share the same resolver:
 the link must resolve to a completed direct child of the program directory.
