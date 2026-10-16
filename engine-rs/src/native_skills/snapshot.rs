@@ -9,6 +9,10 @@ use super::paths::{is_path_within, is_sha256_hex, resolve_loose, validate_symlin
 use super::EXCLUDED_DIRS;
 
 pub fn hash_skill_dir(dir: &Path) -> Result<String> {
+    Ok(hash_entries(skill_entries(dir)?))
+}
+
+pub(super) fn skill_entries(dir: &Path) -> Result<Vec<(String, String)>> {
     let mut entries: Vec<(String, String)> = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     let mut buffer = [0u8; 64 * 1024];
@@ -63,6 +67,10 @@ pub fn hash_skill_dir(dir: &Path) -> Result<String> {
             }
         }
     }
+    Ok(entries)
+}
+
+pub(super) fn hash_entries(mut entries: Vec<(String, String)>) -> String {
     entries.sort();
     let mut h = Sha256::new();
     for (rel, digest) in &entries {
@@ -71,7 +79,7 @@ pub fn hash_skill_dir(dir: &Path) -> Result<String> {
         h.update(digest.as_bytes());
         h.update(b"\0");
     }
-    Ok(format!("{:x}", h.finalize()))
+    format!("{:x}", h.finalize())
 }
 
 pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
