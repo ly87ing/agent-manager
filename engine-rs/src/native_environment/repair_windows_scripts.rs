@@ -1,6 +1,10 @@
 //! Fixed PowerShell reads and setters. User settings never enter the elevated batch.
 #[cfg(windows)]
 pub(super) const SYSTEM: &str = r#"
+function Read-Policies {
+ $source=@'
+[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+$ErrorActionPreference='Stop'
 function Read-Policy($area,$name) {
  try {
   $null=[Windows.Management.Policies.NamedPolicy,Windows.Management.Policies,ContentType=WindowsRuntime]
@@ -9,7 +13,28 @@ function Read-Policy($area,$name) {
   $value=$null
   if ($p.IsManaged) {switch ($p.Kind.ToString()) {'String' {$value=$p.GetString()} 'Int32' {$value=$p.GetInt32()} default {return $null}}}
   return [ordered]@{managed=[bool]$p.IsManaged;value=$value}
- } catch {return $null}
+ } catch {throw}
+}
+try {
+ $values=[ordered]@{timezone=(Read-Policy 'TimeLanguageSettings' 'ConfigureTimeZone');apps=(Read-Policy 'Privacy' 'LetAppsAccessLocation');master=(Read-Policy 'System' 'AllowLocation')}
+ @{status='read';values=$values} | ConvertTo-Json -Depth 8 -Compress
+} catch {$e=$_.Exception;while ($e.InnerException) {$e=$e.InnerException};@{status='error';hresult=$e.HResult;exception=$e.GetType().FullName} | ConvertTo-Json -Compress}
+'@
+ $start=[Diagnostics.ProcessStartInfo]::new()
+ $start.FileName=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\powershell.exe')
+ $start.Arguments='-NoLogo -NoProfile -NonInteractive -EncodedCommand '+[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($source))
+ $start.UseShellExecute=$false;$start.CreateNoWindow=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+ $start.StandardOutputEncoding=[Text.UTF8Encoding]::new($false)
+ $start.EnvironmentVariables['PSModuleAnalysisCachePath']='NUL'
+ $start.EnvironmentVariables['PSModulePath']=[IO.Path]::Combine([Environment]::SystemDirectory,'WindowsPowerShell\v1.0\Modules')
+ $child=[Diagnostics.Process]::new();$child.StartInfo=$start
+ try {
+  if (-not $child.Start()) {return @{status='unavailable'}}
+  $output=$child.StandardOutput.ReadToEndAsync();$errors=$child.StandardError.ReadToEndAsync()
+  if (-not $child.WaitForExit(2000)) {$child.Kill();$null=$child.WaitForExit(250);return @{status='timeout'}}
+  if (-not $output.Wait(250) -or -not $errors.Wait(250) -or $child.ExitCode -ne 0 -or $output.Result.Length -gt 8192) {return @{status='unavailable'}}
+  return ($output.Result | ConvertFrom-Json -ErrorAction Stop)
+ } catch {return @{status='unavailable'}} finally {$child.Dispose()}
 }
 function Update-TimeService {
  Fresh
@@ -29,11 +54,12 @@ function Read-LocationPolicy($name) {
 function Read-System {
  $r=[ordered]@{zone=$null; zone_start=$null; zone_status=$null; zone_policy=$null; timezone_policy=$null; ntp=$null; type=$null; policy=$null; ntp_enabled=$null; time_start=$null; service=$null}
  try {$r.zone=(Get-TimeZone -ErrorAction Stop).Id} catch {}
- $r.timezone_policy=Read-Policy 'TimeLanguageSettings' 'ConfigureTimeZone'
+ $policies=Read-Policies
+ $r.timezone_policy=$policies.values.timezone
  try {$r.zone_start=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\tzautoupdate' -ErrorAction Stop).Start; $r.zone_status=(Get-Service tzautoupdate -ErrorAction Stop).Status.ToString()} catch {}
  $consent=$null
  try {$consent=(Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\location' -ErrorAction Stop).Value} catch {}
- $r.zone_policy=[ordered]@{consent=$consent;disable_location=(Read-LocationPolicy 'DisableLocation');disable_provider=(Read-LocationPolicy 'DisableWindowsLocationProvider');apps=(Read-Policy 'Privacy' 'LetAppsAccessLocation');master=(Read-Policy 'System' 'AllowLocation')}
+ $r.zone_policy=[ordered]@{consent=$consent;disable_location=(Read-LocationPolicy 'DisableLocation');disable_provider=(Read-LocationPolicy 'DisableWindowsLocationProvider');apps=$policies.values.apps;master=$policies.values.master}
  try {$p=Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters' -ErrorAction Stop; $r.ntp=$p.NtpServer; $r.type=$p.Type; $r.policy=Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\W32Time' -ErrorAction Stop; $r.ntp_enabled=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpClient' -ErrorAction Stop).Enabled; $r.time_start=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time' -ErrorAction Stop).Start; $r.service=(Get-Service W32Time -ErrorAction Stop).Status.ToString()} catch {}
  return $r
 }
@@ -134,11 +160,10 @@ try {
 $type=[Windows.Management.Policies.NamedPolicy,Windows.Management.Policies,ContentType=WindowsRuntime]
 $stage='assembly'
 [IO.File]::WriteAllText($marker,$stage)
-$result=@{type=$type.FullName;assembly=$type.Assembly.GetName().Name;called=$false;available=$false;hresult=$null}
+$result=@{type=$type.FullName;assembly=$type.Assembly.GetName().Name;method=$null}
 $stage='method'
 [IO.File]::WriteAllText($marker,$stage)
-try {$result.called=$true;$policy=[Windows.Management.Policies.NamedPolicy]::GetPolicyFromPath('System','AllowLocation');$result.available=($null -ne $policy)}
-catch {$exception=$_.Exception;while ($exception.InnerException) {$exception=$exception.InnerException};if (@(-2147221164,-2147467263,-2147024846,-2147024891) -notcontains $exception.HResult) {throw};$result.hresult=$exception.HResult}
+$result.method=$type.GetMethod('GetPolicyFromPath').Name
 $result | ConvertTo-Json -Compress
 } catch {@{stage=$stage;binding_error=$_.Exception.Message;exception_type=$_.Exception.GetType().FullName;hresult=$_.Exception.HResult} | ConvertTo-Json -Compress}
 [IO.File]::WriteAllText($marker,'complete')
@@ -187,12 +212,44 @@ $result | ConvertTo-Json -Compress
         .unwrap();
         assert!(result["binding_error"].is_null(), "{result}");
         assert_eq!(result["type"], "Windows.Management.Policies.NamedPolicy");
-        assert_eq!(result["called"], true);
+        assert_eq!(result["method"], "GetPolicyFromPath");
         assert!(result["assembly"]
             .as_str()
             .is_some_and(|name| !name.is_empty()));
-        assert!(result["available"] == true || result["hresult"].as_i64().is_some());
         eprintln!("Native policy binding: {result}");
+        let observed: serde_json::Value = serde_json::from_str(
+            &super::super::windows::script_timeout(
+                &format!("{SYSTEM} Read-Policies | ConvertTo-Json -Depth 10 -Compress"),
+                std::time::Duration::from_secs(15),
+            )
+            .expect("The bounded native policy reader must finish"),
+        )
+        .unwrap();
+        match observed["status"].as_str() {
+            Some("read" | "timeout") => {}
+            Some("error") => assert!(
+                [-2147221164, -2147467263, -2147024846, -2147024891]
+                    .contains(&observed["hresult"].as_i64().unwrap()),
+                "Unexpected public policy error: {observed}"
+            ),
+            other => panic!("Native policy reader failed: {other:?}"),
+        }
+        eprintln!("Native policy availability: {}", observed["status"]);
+    }
+    #[cfg(windows)]
+    #[test]
+    fn blocked_policy_query_keeps_other_system_evidence_and_forbids_policy_assumptions() {
+        let start = SYSTEM.find(" $source=@'\n").unwrap() + " $source=@'\n".len();
+        let end = start + SYSTEM[start..].find("\n'@").unwrap();
+        let mut fixture = SYSTEM.to_string();
+        fixture.replace_range(start..end, "Start-Sleep -Seconds 30");
+        let result:serde_json::Value=serde_json::from_str(&super::super::windows::script_timeout(
+            &format!("{fixture} $r=Read-System; @{{zone_known=($null -ne $r.zone);policy_unknown=($null -eq $r.timezone_policy);location_unknown=($null -eq $r.zone_policy.apps -and $null -eq $r.zone_policy.master)}} | ConvertTo-Json -Compress"),
+            std::time::Duration::from_secs(15)
+        ).expect("A blocked policy child must not block the system snapshot")).unwrap();
+        assert_eq!(result["zone_known"], true);
+        assert_eq!(result["policy_unknown"], true);
+        assert_eq!(result["location_unknown"], true);
     }
     #[cfg(windows)]
     #[test]
