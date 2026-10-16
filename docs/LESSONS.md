@@ -36,6 +36,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   both to the same new bytes in the regression and still require rejection by
   the fixed logical version. Test each manifest format's actual size boundary,
   including a valid schema 3 receipt larger than schema 2 permits.
+- Windows source-link fixtures must use native target separators when they read
+  through the link. The first schema 3 fixture used `./z-target`; native CI
+  returned `InvalidFilename` while preparing copied bytes, before verification.
+  Use `.\z-target` there and keep both separator styles in the cross-host parser
+  cases; a fixture-preparation failure is not verifier evidence.
 
 ## 2026-10-16: window-tree enumeration is not an atomic observation
 

@@ -345,7 +345,7 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink("./z-target", source.join("alias")).unwrap();
         #[cfg(windows)]
-        std::os::windows::fs::symlink_file("./z-target", source.join("alias")).unwrap();
+        std::os::windows::fs::symlink_file(r".\z-target", source.join("alias")).unwrap();
         let raw_target = std::fs::read_link(source.join("alias"))
             .unwrap()
             .to_str()
