@@ -269,8 +269,8 @@ fn check_real_cli_launch(reject_completion_audit: bool) {
         ])
         .status()
         .unwrap();
-    assert!(status.success(), "CLI launch request failed: {status}");
     let result: Value = serde_json::from_slice(&std::fs::read(output_file).unwrap()).unwrap();
+    assert!(status.success(), "CLI launch request failed: {status}; {result}");
     assert_eq!(result["ok"], true, "{result}");
     assert_eq!(result["data"]["timezone_verified"], false);
     assert_eq!(result["data"]["audit_recorded"], !reject_completion_audit);
