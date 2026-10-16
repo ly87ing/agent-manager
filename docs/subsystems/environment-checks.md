@@ -213,8 +213,12 @@ database. Linux clock correction remains independent.
 System time-zone repair uses the original caller's exact Polkit
 `org.freedesktop.timedate1.set-timezone` action with PID, start time and UID.
 Authorization finishes before a fresh comparison of timedated and disk evidence;
-the subsequent setter disables interactive authorization, and the original caller
+the subsequent native Rust D-Bus setter uses the same process that owns the
+authorization, with both payload and message flags noninteractive. The original caller
 independently checks both sources. No root helper is used for this action.
+Connection setup and dispatch share an eight-second bound; transport uncertainty
+remains an unknown outcome and stops subsequent changes. A timeout cannot revoke
+a request already dispatched to the system service.
 The current slice requires a UTC hardware clock and a root-owned zoneinfo symlink
 matching timedated. Unknown/local RTC, cache/disk disagreement and a profile that
 also requests automatic-time-zone changes remain unavailable. This preserves the
@@ -226,7 +230,12 @@ restoration on a disposable runner's existing user manager, with isolated HOME
 and data. Its separate timezone receipt exercises an actual caller-authorized
 timedate1 write, disk readback, no-op, stale refusal and cache/disk disagreement.
 A temporary, exact-user/exact-action Polkit fixture is exclusively created and
-removed; no personal host settings are test targets. Both scripts are guarded
+removed. A second exact-process AUTH_SELF_KEEP case uses a CI-only root
+authentication agent to exercise the actual daemon's challenge/cache/setter
+protocol, including an external settings change during authorization. That agent
+substitutes the credential verifier; it does not establish PAM, password or
+desktop authentication-dialog acceptance. Cookies are never logged or persisted.
+No personal host settings are test targets. Both scripts are guarded
 against execution outside that explicit CI scope.
 
 #### macOS

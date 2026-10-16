@@ -38,6 +38,12 @@ dunce = "1"
 # Account-lock ownership/no-follow opens, and macOS read-only mount metadata.
 libc = "0.2"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Keep confirmed D-Bus setters in the process that owns Polkit authorization.
+zbus = "=5.19.0"
+async-io = "2.6"
+futures-lite = "2.6"
+
 [target.'cfg(windows)'.dependencies]
 # Windows 普通用户建不了符号链接时，目录链接改用联接（junction）。
 junction = "1"

@@ -33,9 +33,11 @@ name = "agent-manager-engine"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-io",
  "chrono",
  "dunce",
  "fs2",
+ "futures-lite",
  "junction",
  "libc",
  "regex",
@@ -48,6 +50,7 @@ dependencies = [
  "toml_edit 0.20.2",
  "windows-sys 0.59.0",
  "winreg",
+ "zbus",
 ]
 
 [[package]]
