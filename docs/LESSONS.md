@@ -14,6 +14,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Per-read socket timeouts can be repeatedly extended by slow input. Apply the
   shared absolute deadline and stop condition to each actual read and write,
   including accepted connections, before relying on joined fixture cleanup.
+- Accepted sockets can inherit a nonblocking listener's mode on Windows/macOS.
+  Native CI saw connection resets while Linux passed; a controlled client that
+  waits after acceptance reproduced an empty response on macOS. Explicitly set
+  accepted streams to blocking mode before bounded reads; retain that delayed
+  request as a regression instead of relaxing timeouts or retrying failures.
 
 ## 2026-10-16: measure cleanup evidence from descendant readiness
 

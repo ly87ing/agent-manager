@@ -1,6 +1,6 @@
 //! Actual system curl and loopback HTTP acceptance; no external service is used.
 use super::{database_bytes, Env, OTHER_TOKEN, TOKEN};
-use anyhow::{ensure, Result};
+use anyhow::{ensure, Context as _, Result};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::sync::{
@@ -53,6 +53,7 @@ impl Write for BoundedSocket {
 
 struct Server {
     url: String,
+    accepted: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<Result<Vec<Request>>>>,
 }
@@ -64,6 +65,8 @@ impl Server {
         let url = format!("http://{}/mcp", listener.local_addr().unwrap());
         let stop = Arc::new(AtomicBool::new(false));
         let stopped = Arc::clone(&stop);
+        let accepted = Arc::new(AtomicBool::new(false));
+        let did_accept = Arc::clone(&accepted);
         let thread = std::thread::spawn(move || {
             let mut requests = Vec::new();
             let deadline = Instant::now() + lifetime;
@@ -82,6 +85,9 @@ impl Server {
                     }
                     Err(error) => return Err(error.into()),
                 };
+                did_accept.store(true, Ordering::Relaxed);
+                // Windows/macOS can inherit the listener's nonblocking mode.
+                stream.set_nonblocking(false)?;
                 let mut reader = BufReader::new(BoundedSocket {
                     stream,
                     stop: Arc::clone(&stopped),
@@ -92,11 +98,25 @@ impl Server {
                 {
                     let mut limited = (&mut reader).take(16 * 1024);
                     let mut request_line = String::new();
-                    ensure!(limited.read_line(&mut request_line)? > 0);
+                    ensure!(
+                        limited
+                            .read_line(&mut request_line)
+                            .with_context(|| format!(
+                                "HTTP {mode} request {} start line",
+                                requests.len()
+                            ))?
+                            > 0
+                    );
                     ensure!(request_line.trim_end_matches(['\r', '\n']) == "POST /mcp HTTP/1.1");
                     loop {
                         let mut line = String::new();
-                        ensure!(limited.read_line(&mut line)? > 0, "Incomplete HTTP headers");
+                        ensure!(
+                            limited.read_line(&mut line).with_context(|| format!(
+                                "HTTP {mode} request {} headers",
+                                requests.len()
+                            ))? > 0,
+                            "Incomplete HTTP headers"
+                        );
                         let line = line.trim_end_matches(['\r', '\n']);
                         if line.is_empty() {
                             break;
@@ -116,7 +136,12 @@ impl Server {
                 let length = length.ok_or_else(|| anyhow::anyhow!("Missing content length"))?;
                 ensure!(length <= 16 * 1024, "Oversized HTTP fixture body");
                 let mut bytes = vec![0; length];
-                reader.read_exact(&mut bytes)?;
+                reader.read_exact(&mut bytes).with_context(|| {
+                    format!(
+                        "HTTP {mode} request {} body ({length} bytes)",
+                        requests.len()
+                    )
+                })?;
                 let body: Value = serde_json::from_slice(&bytes)?;
                 let method = body["method"].as_str().unwrap_or_default();
                 let (status, content_type, session, response) = match method {
@@ -180,13 +205,19 @@ impl Server {
         });
         Self {
             url,
+            accepted,
             stop,
             thread: Some(thread),
         }
     }
 
-    fn receipts(mut self) -> Vec<Request> {
-        self.thread.take().unwrap().join().unwrap().unwrap()
+    fn receipts(mut self, result: &Value) -> Vec<Request> {
+        self.thread
+            .take()
+            .unwrap()
+            .join()
+            .unwrap()
+            .unwrap_or_else(|error| panic!("HTTP receipt failure: {error:#}; CLI {result}"))
     }
 }
 
@@ -199,7 +230,52 @@ impl Drop for Server {
     }
 }
 
+fn delayed_request_reaches_fixture() {
+    // A nonblocking listener must still accept a client that sends later.
+    let server = Server::start("invalid-init", Duration::from_secs(30));
+    let address = server
+        .url
+        .strip_prefix("http://")
+        .unwrap()
+        .strip_suffix("/mcp")
+        .unwrap();
+    let mut client = std::net::TcpStream::connect(address).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    client
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !server.accepted.load(Ordering::Relaxed) {
+        assert!(
+            Instant::now() < deadline,
+            "Fixture never accepted the owned client"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize"}).to_string();
+    client
+        .write_all(
+            format!(
+                "POST /mcp HTTP/1.1\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let mut response = String::new();
+    client.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+    let requests = server.receipts(&Value::Null);
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].body["method"], "initialize");
+    println!("native MCP HTTP delayed request: passed");
+}
+
 pub(super) fn run() {
+    delayed_request_reaches_fixture();
     for mode in [
         "json",
         "sse",
@@ -256,7 +332,7 @@ pub(super) fn run() {
         } else {
             assert_eq!(data["tools"], Value::Null);
         }
-        let requests = server.receipts();
+        let requests = server.receipts(&result);
         let expected = if mode == "invalid-init" {
             1
         } else if mode == "no-tools" {
