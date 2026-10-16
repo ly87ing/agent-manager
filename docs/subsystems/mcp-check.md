@@ -20,9 +20,23 @@ by the result's `ok` field, independently of command collection success. The ful
 result remains in the dialog; request failures stay above its action footer.
 
 - A variable without a value stops the check before anything runs and names the variable.
-- Resolved values are replaced with `***` in the message and stderr, then the usual diagnostic sanitizer runs.
+- Resolved nonempty values are replaced with `***` in messages, stderr, tool
+  names and recursively in service-provided metadata values and keys, then the
+  usual diagnostic sanitizer runs. Original matching ranges are merged before
+  replacement, including overlapping and repeated values; masks are never
+  processed as input. Non-string service metadata leaves containing a resolved
+  value become the display string `***`. Masking keys may merge otherwise
+  distinct keys; this is display-only data, never an executable configuration.
+  A shared 8 MiB conservative matching-work budget covers suffix searches,
+  value preparation and range marking. Exhaustion masks text and omits service
+  metadata (`null`); it never returns an incompletely sanitized field.
 - Working directory: entry `cwd`, then explicit `--cwd`, then the tool's HOME. Paths must be existing absolute directories. A project-dependent server needs the correct project directory. The tool's process environment, selected secrets file and proxy fallback can differ from the assistant's environment.
-- Initialization uses `startup_timeout_sec`, then `startup_timeout_ms`, then Codex's 10 s default (other formats: stdio 30 s, HTTP 20 s). Tool listing gets a separate `tool_timeout_sec`, defaulting to 60 s for Codex and the transport default for others. Codex defaults follow its [official MCP guide](https://learn.chatgpt.com/docs/extend/mcp).
+- Initialization uses modeled `startup_timeout_sec` (Codex stdio), then
+  `startup_timeout_ms`, then Codex's 10 s default (other formats: stdio 30 s,
+  HTTP 20 s). Other entries retain unmodeled fields without treating a seconds
+  field as this check's timeout. Tool listing gets a separate `tool_timeout_sec`,
+  defaulting to 60 s for Codex and the transport default for others. Codex defaults
+  follow its [official MCP guide](https://learn.chatgpt.com/docs/extend/mcp).
 - Invalid initialization, tool-list RPC errors, missing results, early exits and timeouts fail at their respective stage. Servers without the [tools capability](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) succeed at initialization without claiming a tool list. Only the first tool-list page is read; no tools are invoked.
 - Results include `base`, `cwd`, `cwd_source`, both effective timeouts and optional `exit_code`. Only exits observed before shutdown are reported; closing stdin or forced termination must not manufacture a failure exit code.
 - Afterwards stdin is closed and the server gets up to 0.5 s to exit. The whole
@@ -50,7 +64,18 @@ MCP rows expose legacy `_MANAGED_BY` fields as configuration warnings, independe
 
 ```sh
 cargo test --manifest-path engine-rs/Cargo.toml --test native_mcp check_
+cargo test --manifest-path engine-rs/Cargo.toml --test native_mcp_protocol
 cd app && pnpm vitest run src/test/McpPage.test.tsx
 ```
 
 The historical real-server check used an isolated HOME with `npx -y @modelcontextprotocol/server-everything@2025.9.25` (10 tools). Current account-isolation acceptance uses fake stdio and HTTP executables and a loopback server; it does not request a real account's service.
+
+The native protocol target uses copied native executables and the actual CLI,
+without a shell or an external language runtime for its stdio server. It records
+and independently checks request order, literal arguments, working directory,
+selected-variable isolation, protocol failures, natural exits, timeout outcomes,
+serialized-result redaction (including numeric echoes and ten thousand metadata
+records) and unchanged source/database bytes. Windows also
+exercises a real `npx.cmd` behind a stored `cmd /c npx` entry with ordinary space
+and Unicode arguments; special-character round trips apply to the direct native
+executable case. Compiling the target alone does not establish native acceptance.

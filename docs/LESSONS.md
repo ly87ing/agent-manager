@@ -6,6 +6,22 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: protocol success data also needs secret redaction
+
+- Sanitizing stderr and error messages does not cover service-provided success
+  metadata or tool names. A native CLI fixture reproduced a resolved test token
+  in nested metadata, object keys and a tool name despite existing checks passing.
+- The first candidate used sequential replacement and retained numeric leaves.
+  Independent review and negative tests exposed partial-overlap suffixes, mask
+  reprocessing growth and numeric echoes. Merge matches in the original text,
+  mask secret-bearing primitive metadata and test short, repeated, self-overlapping
+  and Unicode values as well as serialized CLI output. Fixed diagnostic regexes
+  must be cached before recursively processing many metadata records.
+- Bounded storage does not bound matching work: long self-overlapping values
+  can repeatedly search and mark the same text. Charge a shared work budget
+  before those operations and omit metadata on exhaustion; retain the long
+  repeated-input regression as well as the many-small-record CLI case.
+
 ## 2026-10-15: remeasure after authorization before correcting the clock
 
 - A pre-authorization offset can be obsolete when a system time service corrects
