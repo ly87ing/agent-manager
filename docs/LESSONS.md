@@ -143,7 +143,11 @@ confirmation back to the verified source plan.
   Production lock and authorization behavior stay unchanged.
 - The legacy bridge's immediate release assertion has the same fork boundary;
   isolate that test process too, preserving both lifetime-collision checks.
-- Seen 1× (2026-10-15; environment and legacy bridge lock regression isolation).
+- Native Linux CI later reached the core apply-lock grace fixture. A controlled
+  fork again retained the parent's flock after its 100 ms release; isolate that
+  fixture too. Preserve the 100 ms release and 500 ms refusal checks and the
+  production grace period.
+- Seen 2× (2026-10-15–16; environment, legacy bridge and core apply-lock isolation).
 
 **Keep page refresh distinct from local recovery controls.**
 - MCP's unreadable-target panel and Sources' empty guidance already owned local
