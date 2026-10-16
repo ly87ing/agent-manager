@@ -52,11 +52,31 @@ fn region_locale(locale: &str, region: &str) -> Option<String> {
     Some(result)
 }
 
+fn same_value(id: &str, actual: &Value, expected: &Value) -> bool {
+    if id == "language.preferred" {
+        let (Some(actual), Some(expected)) = (actual.as_array(), expected.as_array()) else {
+            return false;
+        };
+        actual.len() == expected.len()
+            && actual.iter().zip(expected).all(|(actual, expected)| {
+                actual
+                    .as_str()
+                    .zip(expected.as_str())
+                    .is_some_and(|(a, b)| a.eq_ignore_ascii_case(b))
+            })
+    } else {
+        actual == expected
+    }
+}
+
 pub(super) fn plan(target: &Target, snapshot: &Snapshot) -> Result<Plan> {
     let mut items = Vec::new();
     let mut add = |id: &str, scope: &str, expected: Value| {
         let before = snapshot.values.get(id).cloned().flatten();
-        let status = if before.as_ref() == Some(&expected) {
+        let status = if before
+            .as_ref()
+            .is_some_and(|before| same_value(id, before, &expected))
+        {
             "unchanged"
         } else {
             "change"
@@ -255,7 +275,10 @@ pub(super) fn apply(
             break;
         }
         let actual = snapshot.values.get(&item.id).cloned().flatten();
-        if actual.as_ref() == Some(&item.expected) {
+        if actual
+            .as_ref()
+            .is_some_and(|actual| same_value(&item.id, actual, &item.expected))
+        {
             item.status = "unchanged".into();
             continue;
         }
@@ -276,8 +299,10 @@ pub(super) fn apply(
             }
         });
         item.status = match (command_ok, after) {
-            (true, Some(value)) if value == item.expected => "verified",
-            (false, Some(value)) if value == item.expected => "verified_after_error",
+            (true, Some(value)) if same_value(&item.id, &value, &item.expected) => "verified",
+            (false, Some(value)) if same_value(&item.id, &value, &item.expected) => {
+                "verified_after_error"
+            }
             (_, None) => "outcome_unknown",
             (true, _) => "unverified",
             (false, _) => "failed",
@@ -534,6 +559,90 @@ mod tests {
             cancel: false,
             fails: false,
         }
+    }
+    #[test]
+    fn language_case_is_idempotent_but_order_and_other_settings_remain_exact() {
+        let target: Target =
+            serde_json::from_value(json!({"languages":["en-us","FR-fr"]})).unwrap();
+        let mut fake = fake();
+        fake.snapshot
+            .values
+            .insert("language.preferred".into(), Some(json!(["en-US", "fr-FR"])));
+        let base = plan(&target, &fake.snapshot).unwrap().base;
+        assert_eq!(
+            apply(&mut fake, &target, &base, |_, _| panic!(
+                "Case-only no-op must not audit"
+            ))
+            .unwrap()
+            .0,
+            "not_needed"
+        );
+        assert_eq!(fake.writes, 0);
+        fake.snapshot
+            .values
+            .insert("language.preferred".into(), Some(json!(["fr-FR", "en-US"])));
+        let changed = plan(&target, &fake.snapshot).unwrap();
+        assert_ne!(base, changed.base);
+        assert_eq!(changed.items[0].status, "change");
+        assert!(!same_value(
+            "language.preferred",
+            &json!(["en-US"]),
+            &json!(["en-US", "fr-FR"])
+        ));
+        assert!(!same_value(
+            "language.region",
+            &json!("en_US.UTF-8"),
+            &json!("en_us.UTF-8")
+        ));
+        assert!(apply(&mut fake, &target, &base, |_, _| panic!(
+            "Stale preview must not audit"
+        ))
+        .is_err());
+        assert_eq!(fake.writes, 0);
+    }
+
+    #[test]
+    fn canonicalized_language_readback_verifies_and_the_next_repair_is_a_noop() {
+        struct Canonical(Fake);
+        impl Settings for Canonical {
+            fn snapshot(&mut self, target: &Target) -> Result<Snapshot> {
+                self.0.snapshot(target)
+            }
+            fn system(&mut self, _: &[Item]) -> Result<(String, Vec<Item>, Option<bool>)> {
+                panic!("No system setting")
+            }
+            fn write_user(&mut self, item: &Item) -> bool {
+                assert_eq!(item.expected, json!(["en-us", "fr-fr"]));
+                self.0.writes += 1;
+                self.0
+                    .snapshot
+                    .values
+                    .insert(item.id.clone(), Some(json!(["en-US", "fr-FR"])));
+                true
+            }
+        }
+        let target: Target =
+            serde_json::from_value(json!({"languages":["en-us","fr-fr"]})).unwrap();
+        let mut settings = Canonical(fake());
+        settings
+            .0
+            .snapshot
+            .values
+            .insert("language.preferred".into(), Some(json!(["de-DE"])));
+        let base = plan(&target, &settings.0.snapshot).unwrap().base;
+        let (status, items, _) = apply(&mut settings, &target, &base, |_, _| Ok(())).unwrap();
+        assert_eq!(status, "applied");
+        assert_eq!(items[0].status, "verified");
+        let base = plan(&target, &settings.0.snapshot).unwrap().base;
+        assert_eq!(
+            apply(&mut settings, &target, &base, |_, _| panic!(
+                "No audit for canonicalized no-op"
+            ))
+            .unwrap()
+            .0,
+            "not_needed"
+        );
+        assert_eq!(settings.0.writes, 1);
     }
     #[test]
     fn native_context_and_explicit_persistence_are_bound_to_the_preview() {
