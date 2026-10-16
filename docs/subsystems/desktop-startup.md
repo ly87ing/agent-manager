@@ -44,6 +44,21 @@ Account authentication command generation and its shell selector have been remov
 The [read-only Assistants page](account-context.md) only lists immutable extension
 target metadata; generic tips do not generate or execute account commands.
 
+Linux AppImages expose an explicit Settings action to associate share links.
+[`desktop_links`](../../engine-rs/src/desktop_links.rs) reads the actual default
+handler and previews the original AppImage path and current-user desktop entry.
+Confirmation rechecks that fingerprint, creates only an exact owned entry under
+`$XDG_DATA_HOME/applications` (default `~/.local/share/applications`), and asks
+`xdg-mime` to associate `x-scheme-handler/agentmanager`. It then reads the actual
+default back. Merely opening Settings, previewing or canceling never registers.
+Existing handler files and other MIME associations are preserved. Changed,
+non-regular or symlinked owned entries are refused; moving the AppImage requires
+manual review of an old entry rather than silently overwriting it. A failed
+association may leave the exact owned entry, allowing a safe fresh retry.
+The asynchronous Tauri bridge bounds each desktop utility call to eight seconds.
+This action is omitted for macOS, Windows and installed Linux DEBs, whose scheme
+declarations belong to the package. See [xdg-mime](https://portland.freedesktop.org/doc/xdg-mime.html).
+
 ## Constraints and failure behavior
 
 - Detection only reads the executable path and mount flags; it does not move the app or write configuration.
@@ -62,9 +77,11 @@ target metadata; generic tips do not generate or execute account commands.
 cargo test --manifest-path app/src-tauri/Cargo.toml import_links::tests
 cargo test --manifest-path app/src-tauri/Cargo.toml startup::tests
 cargo test --manifest-path app/src-tauri/Cargo.toml autostart::tests
+cargo test --manifest-path engine-rs/Cargo.toml --lib desktop_links
 cargo check --manifest-path app/src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --all-targets
 cd app
 pnpm test:unit run src/test/SettingsPage.test.tsx src/test/UpdateBadge.test.tsx --maxWorkers=2
+pnpm test:unit run src/test/ShareLinkRegistration.test.tsx --maxWorkers=2
 pnpm test:unit run src/test/importLinkSubscription.test.ts src/test/AgentsPage.test.tsx src/test/AppNavigation.test.tsx --maxWorkers=2
 ```
 
@@ -72,6 +89,12 @@ Share-link tests cover cold and warm openings, either snapshot/event race orderi
 repeated URLs, and unmount during both asynchronous steps. Assistants tests preserve
 metadata-only navigation and failure handling. These checks do not replace native
 OS link activation.
+
+Native Linux registration tests use isolated HOME/XDG directories, preserve a
+foreign handler and unrelated MIME type, reject stale/changed/symlinked entries,
+and launch the generated entry through real GIO to read back the exact URI.
+This proves desktop-entry argument delivery, not an installed AppImage's full
+Tauri import-dialog acceptance.
 
 Tests distinguish real read-only system and writable development mounts, translocated paths, and writable external-volume paths. Frontend tests cover the banner and both update-check paths. Browser layout acceptance uses mock settings at 1000 and 760 px; a controlled native executable path exercises the Tauri warning response without creating an installer.
 
