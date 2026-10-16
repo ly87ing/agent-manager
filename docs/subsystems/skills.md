@@ -19,11 +19,40 @@ Typed link inspection reads the OS target before any comparison helper strips
 Windows namespace prefixes; absolute/drive/namespace targets are refused.
 
 Each typed version has an immutable `snapshot.json` outside `content`, declaring
-exactly schema 2 and its version ID. Verification reads the actual contents;
-the manifest cannot declare replacement entries. A present malformed, oversized,
+schema 2 and its version ID, or the Windows materialization described below.
+Schema 2 metadata remains limited to 4096 bytes. Verification reads the actual contents.
+A present malformed, oversized,
 unknown-schema, duplicate-field or directory/reparse manifest is refused. Only
 an absent manifest selects the original hash format. Removing a typed manifest
 or adding one to a legacy snapshot does not preserve a valid version.
+
+On Windows, new Git snapshots whose links all point directly to included ordinary
+files use schema 3 and ordinary file copies. The dedicated writer copies each
+validated source target, even if its name sorts after the alias; it never attempts
+to create a file symbolic link. Existing directory/mixed-link copying retains
+the schema 2 path and its platform capability requirements.
+Existing versions are verified with their recorded format before new writer
+eligibility is considered; stricter creation rules do not reinterpret them.
+
+Schema 3 declares exactly its schema, version and `materialized_file_links`, each
+containing only `path` and `raw_target`, within 64 KiB. Readers on every platform
+inventory all physical files and directories without source exclusions, refuse
+links/reparse entries, and require unique alias records. Windows relative-path
+rules apply on every verifier host: exact spelling, no drive/namespace/device/ADS
+names, and no traversal through missing entries, files or aliases. Each alias's
+actual default-stream digest must match its included ordinary non-alias target.
+Replacing only those file entries with their recorded logical links must produce
+the caller's expected typed v2 ID. Receipt text cannot override a fixed ID;
+additional files or empty excluded directories invalidate it.
+
+The new writer creates files exclusively and copies default-stream bytes without
+propagating NTFS alternate streams. Typed identities cover names, kinds, included
+directories, raw link targets and default-stream digests; ACLs, timestamps,
+hardlink identity and alternate streams are outside that existing content model.
+A personal fork of a materialized snapshot contains editable ordinary files and
+does not inherit the sibling integrity manifest. Schema 2-only readers cannot
+manage schema 3 bindings: rollback must retain a capable verifier or restore a
+capable build, never remove manifests or rewrite IDs/bindings.
 
 Existing snapshots and bindings retain their original IDs and are not rewritten.
 Local assignments still follow their actual sources with the legacy hash. Status
@@ -38,7 +67,8 @@ Before publishing a new snapshot, the copied staging contents must match the
 exact version chosen for the assignment. Copy errors or mismatches remove only
 that operation's uniquely created staging directory and leave existing versions
 and bindings unchanged. Reusing or enabling a version retains strict content
-verification; a copied replacement for a symbolic link is not the same snapshot.
+verification; an unrecorded ordinary-file replacement for a symbolic link is
+refused. Only a verified schema 3 record permits that representation.
 An existing version entry is always verified; an incomplete directory, directory
 link or reparse root is refused. Publication uses the platform's no-replace
 directory rename, including when an empty destination appears after preparation.
@@ -49,6 +79,7 @@ error. Content roots must be ordinary directories; reuse holds their original
 handles while hashing and rechecking identities. These checks detect observed
 replacement; they do not lock every source path or every content byte against an
 actively concurrent writer.
+They do not provide atomic traversal against concurrent child-directory replacement.
 On Windows, retained references open directories by their full file IDs after
 checking ordinary pathname roots, then independently recheck identity and type.
 This avoids pathname-bound descendants blocking ancestor rename while preserving
@@ -144,7 +175,9 @@ the explicit original collection/version replacement contract above.
 cargo test --manifest-path engine-rs/Cargo.toml --test native_skills replacing_a_skill
 cargo test --manifest-path engine-rs/Cargo.toml --test native_skills personal_skill
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::snapshot_v2
+cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::snapshot_materialized
 cargo test --manifest-path engine-rs/Cargo.toml --test native_skills typed
+cargo test --manifest-path engine-rs/Cargo.toml --test native_skills_windows
 cd app && pnpm vitest run src/test/SkillsPage.test.tsx src/test/SourcesLifecycle.test.tsx src/test/rollback.test.ts
 ```
 
@@ -157,5 +190,11 @@ bindings, zero-write status, enable/disable, explicit update, offline bound fork
 and unassigned Git fork. Unix path-key tests reject invalid UTF-8 without needing
 the host filesystem to create such names; the real invalid-filename fixture runs
 on Linux. Windows link tests require the native CI runner's existing symlink
-capability; ordinary-file materialization without that capability is a separate
-implementation and is not established by these tests.
+capability to prepare source fixtures. Materialization tests independently read
+ordinary, non-reparse output files, later-sorted targets, nested traversal,
+verbatim Windows roots, absent copied alternate streams, immutable snapshot reuse,
+disable/enable, tamper refusal and an offline personal fork through the native CLI.
+The Windows-only CLI case must execute on a native Windows runner; its zero-test
+result on another host does not establish Windows acceptance. Cross-host verifier
+cases reject forged receipts, duplicate/unknown fields, extra excluded directories,
+physical links, ambiguous Windows paths and alias/target changes.

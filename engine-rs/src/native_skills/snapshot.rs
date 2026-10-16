@@ -133,12 +133,13 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 
 #[cfg(test)]
 pub fn snapshot_skill(source_dir: &Path, data_dir: &Path, version: &str) -> Result<PathBuf> {
-    create_snapshot(source_dir, data_dir, version, false)
+    create_snapshot(source_dir, data_dir, version, None)
 }
 
 pub(super) fn snapshot_git_skill(source_dir: &Path, data_dir: &Path) -> Result<(String, PathBuf)> {
-    let version = super::snapshot_v2::source_versions(source_dir)?.current;
-    let path = create_snapshot(source_dir, data_dir, &version, true)?;
+    let entries = super::snapshot_v2::source_entries(source_dir)?;
+    let version = super::snapshot_v2::typed_hash(&entries);
+    let path = create_snapshot(source_dir, data_dir, &version, Some(&entries))?;
     Ok((version, path))
 }
 
@@ -146,7 +147,7 @@ fn create_snapshot(
     source_dir: &Path,
     data_dir: &Path,
     version: &str,
-    typed: bool,
+    entries: Option<&super::snapshot_v2::Entries>,
 ) -> Result<PathBuf> {
     if !is_sha256_hex(version) {
         bail!("Invalid skill snapshot version.");
@@ -159,15 +160,31 @@ fn create_snapshot(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
     }
+    #[cfg(windows)]
+    let links = entries
+        .map(super::snapshot_materialized::plan)
+        .transpose()?
+        .flatten();
+    #[cfg(not(windows))]
+    let links: Option<Vec<super::snapshot_materialized::FileLink>> = None;
+    let materialized = entries.zip(links.as_deref());
     let parent = data_dir.join("skill-versions");
     std::fs::create_dir_all(&parent)?;
     let staging = super::snapshot_storage::Staging::create(&parent, version)?;
     let copied = (|| -> Result<()> {
         let content = staging.path().join("content");
-        copy_dir_recursive(source_dir, &content)?;
-        let actual = if typed {
-            super::snapshot_v2::write_manifest(staging.path(), version)?;
-            super::snapshot_v2::source_versions(&content)?.current
+        if let Some((entries, links)) = materialized {
+            super::snapshot_materialized::copy(source_dir, &content, entries, links)?;
+            super::snapshot_v2::write_materialized_manifest(staging.path(), version, links)?;
+        } else {
+            copy_dir_recursive(source_dir, &content)?;
+        }
+        let actual = if entries.is_some() {
+            if materialized.is_none() {
+                super::snapshot_v2::write_manifest(staging.path(), version)?;
+            }
+            super::snapshot_v2::snapshot_hash(staging.path(), &content, version)?
+                .context("Typed snapshot manifest is missing")?
         } else {
             hash_skill_dir(&content)?
         };
@@ -197,10 +214,9 @@ pub fn verify_skill_version(data_dir: &Path, version: &str) -> Result<PathBuf> {
     let (_parent_file, parent_id) = super::snapshot_storage::open_directory(&parent)?;
     let (_version_file, version_id) = super::snapshot_storage::open_directory(&version_dir)?;
     let (_content_file, content_id) = super::snapshot_storage::open_directory(&content_path)?;
-    let actual = if super::snapshot_v2::is_typed(&version_dir, version)? {
-        super::snapshot_v2::source_versions(&content_path)?.current
-    } else {
-        hash_skill_dir(&content_path)?
+    let actual = match super::snapshot_v2::snapshot_hash(&version_dir, &content_path, version)? {
+        Some(actual) => actual,
+        None => hash_skill_dir(&content_path)?,
     };
     if actual != version {
         bail!(

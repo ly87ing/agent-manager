@@ -15,6 +15,7 @@ mod persistence;
 mod preflight;
 mod recommend;
 mod snapshot;
+mod snapshot_materialized;
 mod snapshot_storage;
 mod snapshot_v2;
 mod status;
