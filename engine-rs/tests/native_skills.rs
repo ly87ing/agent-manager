@@ -3412,6 +3412,79 @@ fn forking_a_skill_copies_it_into_the_users_collection_and_tracks_upstream() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[cfg(windows)]
+#[test]
+fn windows_personal_skill_copy_is_editable_without_changing_readonly_source() {
+    use std::os::windows::fs::MetadataExt;
+    let (root, context) = temp_ctx("windows-fork-readonly");
+    let repo = context.data_dir.join("repositories/upstream");
+    std::fs::create_dir_all(repo.join("skills/alpha/nested")).unwrap();
+    std::fs::write(repo.join(".agent-manager-owned"), "{}").unwrap();
+    let names = ["SKILL.md", "nested/helper.txt"];
+    for name in names {
+        let file = repo.join("skills/alpha").join(name);
+        std::fs::write(&file, b"original skill content").unwrap();
+        let mut permissions = std::fs::metadata(&file).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(file, permissions).unwrap();
+    }
+    set_collection(
+        &context,
+        "upstream",
+        r#"{"url":"https://example.com/upstream.git","skill_paths":["skills"]}"#,
+    );
+    let added = skill_action(&context, "skill:upstream/alpha", "add", "claude-code");
+    assert!(added.ok, "{:?}", added.errors);
+    let source = std::fs::canonicalize(context.home_dir.join(".claude/skills/alpha")).unwrap();
+    let before: Vec<_> = names
+        .iter()
+        .map(|name| {
+            let file = source.join(name);
+            let metadata = std::fs::metadata(&file).unwrap();
+            assert!(metadata.permissions().readonly());
+            (std::fs::read(&file).unwrap(), metadata.file_attributes())
+        })
+        .collect();
+    let mine = root.join("mine");
+    let dest = mine.to_str().unwrap();
+    let forked = execute(
+        &context,
+        &request(
+            "skills:fork",
+            &["--only", "skill:upstream/alpha", "--dest", dest],
+        ),
+    );
+    assert!(forked.ok, "{:?}", forked.errors);
+    for (name, (bytes, attributes)) in names.iter().zip(before) {
+        let copy = mine.join("alpha").join(name);
+        assert!(!std::fs::metadata(&copy).unwrap().permissions().readonly());
+        std::fs::write(&copy, b"edited personal content").unwrap();
+        assert_eq!(std::fs::read(copy).unwrap(), b"edited personal content");
+        assert_eq!(std::fs::read(source.join(name)).unwrap(), bytes);
+        assert_eq!(
+            std::fs::metadata(source.join(name))
+                .unwrap()
+                .file_attributes(),
+            attributes
+        );
+        assert_eq!(
+            std::fs::read(repo.join("skills/alpha").join(name)).unwrap(),
+            bytes
+        );
+        assert!(std::fs::metadata(repo.join("skills/alpha").join(name))
+            .unwrap()
+            .permissions()
+            .readonly());
+        // Only test-owned originals are made removable after preservation is proven.
+        for file in [source.join(name), repo.join("skills/alpha").join(name)] {
+            let mut permissions = std::fs::metadata(&file).unwrap().permissions();
+            permissions.set_readonly(false);
+            std::fs::set_permissions(file, permissions).unwrap();
+        }
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn personal_skill_collections_group_new_copies_and_preserve_existing_locations() {
     let (root, ctx) = temp_ctx("personal-directories");
