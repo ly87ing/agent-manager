@@ -99,7 +99,7 @@ mod tests {
             std::fs::create_dir_all(path).unwrap();
         }
         std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o700)).unwrap();
-        std::fs::write(user.join("00-settings"), "[org/gnome/desktop/datetime]\nautomatic-timezone=true\n[org/gnome/system/locale]\nregion='fr_FR.UTF-8'\n").unwrap();
+        std::fs::write(user.join("00-settings"), "[org/gnome/desktop/datetime]\nautomatic-timezone=true\n[system/locale]\nregion='fr_FR.UTF-8'\n").unwrap();
         std::fs::write(
             system.join("00-settings"),
             "[org/gnome/desktop/datetime]\nautomatic-timezone=false\n",

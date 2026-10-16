@@ -131,6 +131,9 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   child execution, retaining actual backend and policy semantics. Unsupported
   kernels return unknown. Test real non-default dconf values and locks as well as
   keyfile defaults; replacing the backend with memory would hide user settings.
+- Verify fixture database paths against the schema's declared path, not its ID.
+  `org.gnome.system.locale` uses `/system/locale/`; a similarly named path
+  returned the default and failed the retained non-default native assertion.
 
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
