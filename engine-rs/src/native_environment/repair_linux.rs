@@ -136,7 +136,7 @@ fn manager(keys: &[&str]) -> Option<Manager> {
 }
 
 #[cfg(target_os = "linux")]
-fn installed_locale(locale: &str) -> bool {
+pub(super) fn installed_locale(locale: &str) -> bool {
     let listed = super::command::read("/usr/bin/locale", &["-a"]).is_some_and(|values| {
         values
             .lines()
@@ -173,6 +173,7 @@ pub(super) struct LinuxSettings {
     bound: Option<(String, String)>,
     time: Option<super::repair_linux_time::State>,
     desktop: Option<super::repair_linux_desktop::State>,
+    region: Option<super::repair_linux_region::State>,
     context: Value,
 }
 
@@ -204,6 +205,10 @@ impl Settings for LinuxSettings {
         } else {
             None
         };
+        self.region = target
+            .region
+            .as_ref()
+            .and_then(|_| super::repair_linux_region::read());
         let zone = target.timezone.as_ref().map(|zone| {
             std::fs::metadata(std::path::Path::new("/usr/share/zoneinfo").join(zone))
                 .is_ok_and(|meta| meta.is_file())
@@ -220,7 +225,7 @@ impl Settings for LinuxSettings {
                     )
                 })
                 .unwrap_or_else(|| "systemd user manager unavailable".into()),
-            context: json!({"manager":self.manager,"locale_installed":locale,"zone_installed":zone,"time":self.time,"gnome":gnome,"desktop_time":self.desktop}),
+            context: json!({"manager":self.manager,"locale_installed":locale,"zone_installed":zone,"time":self.time,"gnome":gnome,"desktop_time":self.desktop,"region":self.region}),
             ..Snapshot::default()
         };
         snapshot.unavailable.extend(
@@ -232,6 +237,18 @@ impl Settings for LinuxSettings {
             ]
             .map(str::to_string),
         );
+        snapshot.values.insert(
+            "language.region".into(),
+            self.region.as_ref().map(|state| json!(state.locale)),
+        );
+        if self.region.as_ref().is_some_and(|state| {
+            target.region.as_ref().is_some_and(|region| {
+                super::repair::region_locale(&state.locale, region)
+                    .is_some_and(|locale| state.available(&locale))
+            })
+        }) {
+            snapshot.unavailable.remove("language.region");
+        }
         snapshot
             .scope_overrides
             .insert("time.automatic_timezone".into(), "user".into());
@@ -287,13 +304,17 @@ impl Settings for LinuxSettings {
         Ok(snapshot)
     }
     fn in_system_batch(&self, item: &Item) -> bool {
-        item.scope == "system" || item.id == "time.automatic_timezone"
+        item.scope == "system"
+            || matches!(
+                item.id.as_str(),
+                "time.automatic_timezone" | "language.region"
+            )
     }
     fn system(&mut self, items: &[Item]) -> Result<(String, Vec<Item>, Option<bool>)> {
         if items.iter().any(|item| {
             !matches!(
                 item.id.as_str(),
-                "time.timezone" | "time.automatic_timezone"
+                "time.timezone" | "time.automatic_timezone" | "language.region"
             )
         }) {
             anyhow::bail!("Unsupported Linux system repair batch.");
@@ -332,7 +353,37 @@ impl Settings for LinuxSettings {
                 results.push(result);
                 return Ok(("partial".into(), results, None));
             }
-            if item.id == "time.timezone" {
+            if item.id == "language.region" {
+                let expected = item
+                    .expected
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("Invalid GNOME formats locale."))?;
+                let before = self
+                    .region
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("GNOME formats are unavailable."))?;
+                let expected_after = before.explicit(expected);
+                let written = super::repair_linux_region::write(before, expected);
+                result.status = match super::repair_linux_region::read() {
+                    Some(after) if after == expected_after => {
+                        if written {
+                            "verified"
+                        } else {
+                            "verified_after_error"
+                        }
+                    }
+                    None => "outcome_unknown",
+                    _ if written => "unverified",
+                    _ => "failed",
+                }
+                .into();
+                let verified = result.status == "verified";
+                results.push(result);
+                if !verified {
+                    return Ok(("partial".into(), results, None));
+                }
+                baseline["region"] = json!(expected_after);
+            } else if item.id == "time.timezone" {
                 let before = self
                     .time
                     .as_ref()
@@ -399,6 +450,18 @@ impl Settings for LinuxSettings {
             }
             let snapshot = self.snapshot(&target)?;
             if snapshot.context != baseline {
+                if snapshot.context["region"] != baseline["region"] {
+                    for result in &mut results {
+                        if result.id == "language.region" && result.status == "verified" {
+                            result.status = if self.region.is_some() {
+                                "unverified"
+                            } else {
+                                "outcome_unknown"
+                            }
+                            .into();
+                        }
+                    }
+                }
                 if snapshot.context["time"] != baseline["time"] {
                     for result in &mut results {
                         if result.id == "time.timezone" && result.status == "verified" {

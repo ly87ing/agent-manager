@@ -93,6 +93,23 @@ describe("Automatic environment repair", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     expect(calls.filter((call) => ["environment:repair", "environment:sync-time", "launch:run"].includes(call.command))).toHaveLength(0);
   });
+  it.each(["en", "zh-CN"] as const)("explains GNOME formats readback and a user-controlled new login in %s", async (language) => {
+    setLanguage(language);
+    const configured = { ...profile, target: environmentFixture({ region: "US" }).target };
+    const preview = { ...plan, platform: "linux" as const, target: configured.target, items: [plan.items[0]] };
+    const { calls } = renderWithEngine(<EnvironmentRepairDialog profile={configured} onResult={() => {}} onClose={() => {}} />, {
+      "environment:repair-preview": makeEnvelope(preview),
+      "environment:repair": makeEnvelope({ ...result(), items: [{ ...plan.items[0], status: "verified" }], relogin_required: true,
+        verification_limits: ["Desktop and new-login formats remain unverified."] }),
+    });
+    await screen.findByText(language === "en" ? /GNOME formats will use the locale shown in the preview/ : /GNOME 地区格式将保存为预览中的 locale/);
+    expect(calls.filter(call => call.command === "environment:repair")).toHaveLength(0);
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await screen.findByText(language === "en" ? "Preference saved and read back" : "偏好已保存并读回");
+    expect(screen.getByRole("dialog")).toHaveTextContent(language === "en" ? "This app will not sign you out" : "应用不会替你退出登录");
+    expect(screen.queryByText(language === "en" ? /^Save your work and restart the affected apps/ : /^请保存工作并重新启动相关应用/)).toBeNull();
+    expect(calls.filter(call => call.command === "environment:repair")).toHaveLength(1);
+  });
   it("forwards the preview fingerprint only after confirmation and preserves process mismatches", async () => {
     const { calls } = setup();
     const dialog = await open();

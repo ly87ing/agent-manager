@@ -74,7 +74,9 @@ setters do not enter its restriction domain. A missing/disabled kernel capabilit
 returns unknown, never an unguarded retry. A missing keyfile directory can make
 `writable` false; this is unavailable write evidence, not proof of a policy lock.
 The native `GetUserDefaultGeoName` API reads the Windows current-user home region
-independently of culture. Automatic settings repair supports macOS and Windows.
+independently of culture. Automatic settings repair has native adapters on all
+three platforms; Linux capabilities depend on the inspected desktop and provider,
+with unavailable controls listed explicitly in the preview.
 Explicit clock correction is implemented on macOS, Windows and Linux; platform acceptance is
 tracked separately from compilation and source tests.
 
@@ -283,6 +285,33 @@ repair, denial before user writes, privacy/service-policy gates, stale identity,
 no-op and readback. That owned name is a test double, not desktop/geolocation
 acceptance. See the [GNOME monitor](https://github.com/GNOME/gnome-settings-daemon/blob/master/plugins/datetime/gsd-timezone-monitor.c)
 and [preference listener](https://github.com/GNOME/gnome-settings-daemon/blob/master/plugins/datetime/gsd-datetime-manager.c).
+
+GNOME regional-format repair writes only the original user's
+`org.gnome.system.locale region` through GSettings. The preview shows the full
+effective locale; an empty preference inherits the independently known current
+primary locale. The selected country replaces only that locale's country,
+preserving language, script, codeset and modifiers. The resulting locale must be
+installed and load successfully; the tool never generates locales or substitutes
+another language. Unknown inheritance, an unreadable/locked backend and other
+desktops remain unavailable. The preview binds the raw inheritance setting,
+effective locale, writable evidence, caller UID and backend location inputs.
+Inherited formats read only the existing AccountsService owner's typed current-UID
+primary locale, binding its bus/owner/object identity and rechecking the raw
+preference. Caller LANG and installer-interest metadata are not fallbacks.
+The ordered Linux batch retains its original full context before each write,
+including user-scoped formats; a same-effective-value inheritance/source change
+still stops. Fresh reread and complete State readback surround the confirmed
+setter; verification requires the explicit raw locale and original source/UID,
+not merely an effective value inherited after an external reset. Untargeted
+preferences and UI language are preserved. With available evidence, a matching
+preference is a zero-write no-op; a changed preview stops before audit/database
+initialization. A change after that initial validation may retain the requested
+audit but still stops before the regional write.
+The result records preference-only verification and asks the user to save work
+and sign out/back in themselves. It never logs out, restarts applications or
+claims that the current desktop or a later login has adopted the formats. A native
+isolated keyfile fixture exercises real preview/confirmation, stale refusal,
+untargeted preference preservation, idempotency and unavailable locales/desktops.
 No personal host settings are test targets. Both scripts are guarded
 against execution outside that explicit CI scope.
 

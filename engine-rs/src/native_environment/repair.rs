@@ -35,7 +35,7 @@ pub(super) struct Plan {
     pub platform: &'static str,
 }
 
-fn region_locale(locale: &str, region: &str) -> Option<String> {
+pub(super) fn region_locale(locale: &str, region: &str) -> Option<String> {
     let current = super::region(locale)?;
     let prefix = locale.split('@').next()?;
     let start = prefix
@@ -474,15 +474,20 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
                     .any(|row| row["group"] == "process" && row["state"] == "mismatch")
             })
         });
-        let verification_limits = if cfg!(target_os = "linux")
-            && target.automatic_timezone.is_some()
-        {
-            vec!["GNOME automatic-timezone verification covers preference readback only; geolocation and automatic switching remain unverified."]
-        } else {
-            vec![]
-        };
+        let mut verification_limits = Vec::new();
+        if cfg!(target_os = "linux") && target.automatic_timezone.is_some() {
+            verification_limits.push("GNOME automatic-timezone verification covers preference readback only; geolocation and automatic switching remain unverified.");
+        }
+        if cfg!(target_os = "linux") && target.region.is_some() {
+            verification_limits.push("GNOME formats verification covers preference readback only; the desktop and a new login remain unverified.");
+        }
+        let relogin_required = cfg!(target_os = "linux")
+            && items.iter().any(|item| {
+                item.id == "language.region"
+                    && matches!(item.status.as_str(), "verified" | "verified_after_error")
+            });
         Ok(
-            json!({"status":status,"items":items,"report":report,"restart_required":restart_required,"clock_error":clock_error,"verification_limits":verification_limits}),
+            json!({"status":status,"items":items,"report":report,"restart_required":restart_required,"relogin_required":relogin_required,"clock_error":clock_error,"verification_limits":verification_limits}),
         )
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]

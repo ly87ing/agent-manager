@@ -55,28 +55,30 @@ export function EnvironmentRepairDialog({ profile, onResult, onClose }: {
   }
   const items = result?.items ?? plan?.items ?? [];
   const needsProcessVerification = items.some(item => item.id.startsWith("session.") || item.id.startsWith("language."));
+  const gnomeFormats = platform === "linux" && items.some(item => item.id === "language.region");
   return <ConfirmModal title={t("自动修复环境")} description={t("所选 Profile：{0}。确认以下变更及影响范围后执行。", profile.name)} risk="write-local" riskLabel={t("修改系统与用户设置")}
     executing={executing} confirmLabel={result ? t("关闭") : t("确认自动修复")} confirmDisabled={!result && (loading || !plan)} onConfirm={() => void apply()} onClose={onClose}
     error={error} secondaryLabel={error || result ? t("重新预览修复") : undefined} onSecondary={() => setReload((value) => value + 1)}>
     {loading ? <p role="status" className="mt-3 text-xs">{t("正在读取修复预览…")}</p> : <div className="mt-3 space-y-3">
       {result && <p role="status" className="text-sm">{repairSummary(result)}</p>}
-      <p className="text-xs text-muted-foreground">{platform === "windows" ? t("Windows 语言与地区仅修改当前用户。持久环境变量影响以后登录及资源管理器新启动的进程，不会在退出登录时清除。") : platform === "linux" ? t("Linux 系统时区影响本机；GNOME 自动时区偏好仅修改当前用户。") : t("系统设置影响本机；语言与地区影响当前用户。登录会话环境仅供该会话中后续由系统启动的进程使用，退出登录后失效。")}</p>
+      <p className="text-xs text-muted-foreground">{platform === "windows" ? t("Windows 语言与地区仅修改当前用户。持久环境变量影响以后登录及资源管理器新启动的进程，不会在退出登录时清除。") : platform === "linux" ? t("Linux 系统时区影响本机；GNOME 自动时区和地区格式偏好仅修改当前用户。") : t("系统设置影响本机；语言与地区影响当前用户。登录会话环境仅供该会话中后续由系统启动的进程使用，退出登录后失效。")}</p>
       {platform === "linux" && items.some(item => item.scope === "session") && <p className="text-xs text-muted-foreground">{t("Linux 会话变量仅供用户服务管理器以后启动的进程使用，管理器退出后失效；已有桌面应用不受影响。")}</p>}
       {platform === "windows" && (profile.target.timezone || profile.target.locale) && !result && <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={persistent} disabled={executing} onChange={(event) => setPersistent(event.target.checked)} />{t("允许写入 Windows 当前用户的持久环境变量（新进程生效）")}</label>}
       {platform === "windows" && profile.target.languages.length > 0 && <p className="text-xs text-muted-foreground">{t("保留已有语言的输入法选项；新增语言使用系统默认选项。区域格式独立设置会作为单独变更列出。")}</p>}
-      {needsProcessVerification && <p className="text-xs text-muted-foreground">{platform === "windows" ? t("Windows 会通知应用环境变量已改变；当前检查进程保持原样。请在重新启动的目标应用中验证。shell 文件和登录项保持不变。") : t("已有应用和终端不会被退出或改写；请保存工作后重新启动，并在目标应用中验证。shell 文件和登录项保持不变。")}</p>}
+      {gnomeFormats && <p className="text-xs text-muted-foreground">{t("GNOME 地区格式将保存为预览中的 locale，语言偏好保持原样。请保存工作后自行退出并重新登录，在新会话中验证；现有应用和当前检查进程保持原样。")}</p>}
+      {needsProcessVerification && !gnomeFormats && <p className="text-xs text-muted-foreground">{platform === "windows" ? t("Windows 会通知应用环境变量已改变；当前检查进程保持原样。请在重新启动的目标应用中验证。shell 文件和登录项保持不变。") : t("已有应用和终端不会被退出或改写；请保存工作后重新启动，并在目标应用中验证。shell 文件和登录项保持不变。")}</p>}
       {plan && items.some(item => item.id.startsWith("session.")) && <p className="break-all text-xs text-muted-foreground">{t("环境变量范围：{0}", plan.session_scope)}</p>}
       {profile.target.ntp_server && <p className="break-all text-xs">{t("复查会查询 {0} 的 UDP 123 端口。", profile.target.ntp_server)}</p>}
       {profile.target.ntp_server && profile.target.max_clock_offset_ms && <p className="text-xs">{t("时间偏差容限：± {0} ms。仅在新测量明确超限时校正时钟，可能再次请求系统授权。", String(profile.target.max_clock_offset_ms))}</p>}
       <div className="space-y-2">{items.map((item) => <div key={item.id} className="rounded border p-2 text-xs" data-repair-id={item.id}>
-        <div className="flex flex-wrap justify-between gap-2"><span className="font-medium">{label(item.id, platform)}</span><span>{platform === "linux" && item.id === "time.automatic_timezone" && item.status === "verified" ? t("偏好已保存并读回") : repairStatus(item.status)}</span></div>
+        <div className="flex flex-wrap justify-between gap-2"><span className="font-medium">{label(item.id, platform)}</span><span>{platform === "linux" && ["time.automatic_timezone", "language.region"].includes(item.id) && item.status === "verified" ? t("偏好已保存并读回") : repairStatus(item.status)}</span></div>
         <p className="mt-1 break-all font-mono">{value(item.before)} → {value(item.expected)}</p>
         <p className="mt-1 text-muted-foreground">{t("影响范围：{0}", item.scope === "system" ? t("本机系统") : item.scope === "user" ? t("当前用户") : t("后续启动的会话进程"))}</p>
       </div>)}</div>
       {platform === "linux" && profile.target.automatic_timezone != null && <p className="text-xs text-muted-foreground">{t("GNOME 自动时区仅验证偏好回读；定位与自动切换效果尚未验证。开启需要定位已启用且桌面服务有时区权限。")}</p>}
       {profile.target.automatic_timezone && profile.target.timezone && <p className="text-xs text-amber-500">{t("自动时区开启后，系统可能根据位置再次改变固定时区。")}</p>}
       <p className="text-xs text-muted-foreground">{t("系统项目可能请求管理员授权。部分失败会停止后续修改，保留已完成结果；不会自动撤销或重试。")}</p>
-      {result?.restart_required && <p className="text-xs font-medium">{t("请保存工作并重新启动相关应用；当前进程的检查结果保留原样。")}</p>}
+      {result?.relogin_required ? <p className="text-xs font-medium">{t("请保存工作后自行退出并重新登录，再验证地区格式。应用不会替你退出登录。")}</p> : result?.restart_required && <p className="text-xs font-medium">{t("请保存工作并重新启动相关应用；当前进程的检查结果保留原样。")}</p>}
       {result?.clock_error && <p role="alert" className="break-words text-xs text-destructive">{result.clock_error}</p>}
       {result && !result.report && <p className="text-xs text-amber-500">{t("修复后未能读取检查结果，请重新对比 Profile。")} </p>}
     </div>}
