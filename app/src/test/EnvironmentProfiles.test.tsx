@@ -10,7 +10,7 @@ import type { LaunchRecipe } from "../lib/launch";
 describe("Independent environment profiles", () => {
   it.each(environmentBuiltinsFixture())("selects $name explicitly and compares every strict criterion without writes", async (builtin) => {
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ items: [], builtins: environmentBuiltinsFixture() }),
+      "environment:profiles": makeEnvelope({ checks_supported: true, items: [], builtins: environmentBuiltinsFixture() }),
       "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]), args.includes("--probe-time"))),
     });
     await screen.findByText("已读取环境，尚未设置比较目标。");
@@ -68,7 +68,7 @@ describe("Independent environment profiles", () => {
   it("compares a legacy auto-sync profile without correcting time", async () => {
     const target = { ntp_server: "time.example.org", max_clock_offset_ms: 2000 };
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ builtins: [], items: [{ id: "legacy", revision: "a".repeat(64), name: "Legacy", target: environmentFixture(target).target, auto_sync: true }] }),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [{ id: "legacy", revision: "a".repeat(64), name: "Legacy", target: environmentFixture(target).target, auto_sync: true }] }),
       "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]), args.includes("--probe-time"))),
       "environment:sync-time": makeEnvelope(environmentFixture(target, true)),
     });
@@ -109,7 +109,7 @@ describe("Independent environment profiles", () => {
   it("previews clock application and keeps a failed attempt available without retrying", async () => {
     const target = { ntp_server: "time.example.org", max_clock_offset_ms: 2000 };
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ builtins: [], items: [{ id: "profile", revision: "a".repeat(64), name: "Clock", target: environmentFixture(target).target, auto_sync: false }] }),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [{ id: "profile", revision: "a".repeat(64), name: "Clock", target: environmentFixture(target).target, auto_sync: false }] }),
       "environment:check": makeEnvelope(environmentFixture()),
       "environment:sync-time": makeEnvelope({}, { ok: false, errors: [{ code: "FAILED", element: null, message: "Clock service unavailable" }] }),
     });
@@ -164,7 +164,7 @@ describe("Independent environment profiles", () => {
   it("can maintain definitions while the unrelated initial observation is pending", async () => {
     let finish!: (value: ReturnType<typeof makeEnvelope>) => void;
     const pending = new Promise<ReturnType<typeof makeEnvelope>>((resolve) => { finish = resolve; });
-    renderWithEngine(<EnvironmentPage />, { "environment:check": async () => pending, "environment:profiles": makeEnvelope({ builtins: [], items: [] }) });
+    renderWithEngine(<EnvironmentPage />, { "environment:check": async () => pending, "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [] }) });
     await userEvent.click(screen.getByRole("tab", { name: "环境 Profiles" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "新增 Profile" })).toBeEnabled());
     await userEvent.click(screen.getByRole("button", { name: "新增 Profile" }));
@@ -179,7 +179,7 @@ describe("Independent environment profiles", () => {
     let draft: LaunchRecipe | undefined;
     const target = { timezone: "Asia/Singapore", locale: "en_SG.UTF-8" };
     const { calls } = renderWithEngine(<EnvironmentPage onConfigureLaunch={(value) => { draft = value; }} />, {
-      "environment:profiles": makeEnvelope({ builtins: [], items: [{ id: "sg", revision: "a".repeat(64), name: "Singapore", target: environmentFixture(target).target, auto_sync: false }] }),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [{ id: "sg", revision: "a".repeat(64), name: "Singapore", target: environmentFixture(target).target, auto_sync: false }] }),
       "environment:check": makeEnvelope(environmentFixture()),
     });
     await screen.findByText("已读取环境，尚未设置比较目标。");
@@ -201,7 +201,7 @@ describe("Independent environment profiles", () => {
   it("opens only the selected manual settings pane after preview confirmation", async () => {
     const target = { timezone: "Asia/Singapore", region: "SG" };
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ builtins: [], items: [{ id: "sg", revision: "a".repeat(64), name: "Singapore", target: environmentFixture(target).target, auto_sync: false }] }),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [{ id: "sg", revision: "a".repeat(64), name: "Singapore", target: environmentFixture(target).target, auto_sync: false }] }),
       "environment:check": makeEnvelope(environmentFixture()),
       "environment:open-settings": makeEnvelope({ pane: "language-region" }),
     });

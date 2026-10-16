@@ -13,7 +13,7 @@ function collection(target: EnvironmentTarget = {}, auto_sync = false): Environm
 }
 function setup(item?: EnvironmentProfile, synchronized: boolean | null = true) {
   return renderWithEngine(<EnvironmentPage />, {
-    "environment:profiles": makeEnvelope({ builtins: [], items: item ? [item] : [] }),
+    "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: item ? [item] : [] }),
     "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]), args.includes("--probe-time"), synchronized)),
   });
 }
@@ -26,6 +26,34 @@ async function applyClock() {
 }
 
 describe("Environment checks", () => {
+  it("keeps profile management available when native system checks are unsupported", async () => {
+    const mock = createEnvironmentMock();
+    const { calls } = renderWithEngine(<EnvironmentPage />, {
+      "environment:profiles": makeEnvelope({ checks_supported: false, builtins: [], items: [] }),
+      "environment:save-profile": async (args) => mock("environment:save-profile", args),
+    });
+    await screen.findByText("环境检查与系统操作目前仅支持 macOS。你仍可管理环境 Profiles。");
+    for (const name of ["检查本机环境", "应用 Profile", "自动修复"]) expect(screen.getByRole("button", { name })).toBeDisabled();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(calls.map((call) => call.command)).toEqual(["environment:profiles"]);
+    await openProfiles();
+    await userEvent.click(screen.getByRole("button", { name: "新增 Profile" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "Profile 名称" }), "Portable profile");
+    await userEvent.type(screen.getByRole("textbox", { name: "目标地区" }), "US");
+    await userEvent.click(screen.getByRole("button", { name: "保存 Profile" }));
+    await screen.findByText("Portable profile");
+    expect(calls.map((call) => call.command)).toEqual(["environment:profiles", "environment:save-profile"]);
+  });
+
+  it.each([{}, { checks_supported: "true" }])("does not inspect the machine without a valid native capability (%s)", async (capability) => {
+    const { calls } = renderWithEngine(<EnvironmentPage />, {
+      "environment:profiles": makeEnvelope({ items: [], builtins: [], ...capability }),
+    });
+    await screen.findByRole("alert");
+    expect(screen.getByRole("button", { name: "检查本机环境" })).toBeDisabled();
+    expect(calls.map((call) => call.command)).toEqual(["environment:profiles"]);
+  });
+
   it("announces matching targets immediately while disclosing untargeted unknowns, then clears stale feedback", async () => {
     const view = setup(collection({ region: "GB" }));
     await screen.findByText("已读取环境，尚未设置比较目标。");
@@ -80,7 +108,7 @@ describe("Environment checks", () => {
     const report = environmentFixture(target, true);
     report.time_repair = { status: "failed", before_offset_ms: 3000, before_uncertainty_ms: 20 };
     renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ builtins: [], items: [collection(target, true)] }),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [collection(target, true)] }),
       "environment:check": makeEnvelope(environmentFixture()), "environment:sync-time": makeEnvelope(report),
     });
     await screen.findByText("已读取环境，尚未设置比较目标。");
@@ -178,7 +206,7 @@ describe("Environment checks", () => {
       report.summary.matched++; report.summary.mismatched--;
     }
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ builtins: [], items: [item] }), "environment:check": makeEnvelope(environmentFixture()), "environment:sync-time": makeEnvelope(report),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [item] }), "environment:check": makeEnvelope(environmentFixture()), "environment:sync-time": makeEnvelope(report),
     });
     await screen.findByText("已读取环境，尚未设置比较目标。");
     await chooseOption(screen.getByRole("combobox", { name: "选择环境 Profile" }), "sample");
@@ -200,7 +228,7 @@ describe("Environment checks", () => {
     report.time_sample!.offset_ms = 0; report.time_sample!.uncertainty_ms = 1;
     report.summary.matched++; report.summary.mismatched--; report.summary.status = "match";
     renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ builtins: [], items: [collection(target, true)] }),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [collection(target, true)] }),
       "environment:check": makeEnvelope(environmentFixture()), "environment:sync-time": makeEnvelope(report),
     });
     await screen.findByText("已读取环境，尚未设置比较目标。");
@@ -227,10 +255,10 @@ describe("Environment checks", () => {
     let reads = 0;
     renderWithEngine(<EnvironmentPage />, {
       "environment:check": makeEnvelope(environmentFixture()),
-      "environment:profiles": async () => makeEnvelope(++reads === 1 ? { builtins: [], items: [{}] } : { builtins: [], items: [] }),
+      "environment:profiles": async () => makeEnvelope(++reads === 1 ? { checks_supported: true, builtins: [], items: [{}] } : { checks_supported: true, builtins: [], items: [] }),
       "environment:save-profile": makeEnvelope({}, { ok: false, errors: [{ code: "CONFLICT", element: null, message: "Collection changed; reload before editing." }] }),
     });
-    await screen.findByText("已读取环境，尚未设置比较目标。");
+    await screen.findByRole("alert");
     await openProfiles();
     expect(screen.getByRole("button", { name: "新增 Profile" })).toBeDisabled();
     await userEvent.click(screen.getByRole("button", { name: "重新读取集合" }));
@@ -257,7 +285,7 @@ describe("Environment checks", () => {
     const corrected = environmentFixture(target, true);
     corrected.time_repair = { status: "cancelled", before_offset_ms: 20, before_uncertainty_ms: 5 };
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ builtins: [], items: [collection(target)] }),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [collection(target)] }),
       "environment:check": async (args) => makeEnvelope(environmentFixture(args.includes("--probe-time") ? target : {}, args.includes("--probe-time"))),
       "environment:sync-time": makeEnvelope(corrected),
     });
@@ -288,7 +316,7 @@ describe("Environment checks", () => {
   it("shows remediation without enabling source details and opens only the requested settings pane", async () => {
     const target = { timezone: "Asia/Tokyo", region: "JP" };
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ builtins: [], items: [collection(target)] }),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [collection(target)] }),
       "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]))),
       "environment:open-settings": async (args) => makeEnvelope({ pane: args[1] }),
     });
@@ -317,7 +345,7 @@ describe("Environment checks", () => {
     report.summary.matched--; report.summary.mismatched++; report.summary.status = "mismatch";
     let draft: unknown;
     renderWithEngine(<EnvironmentPage onConfigureLaunch={(recipe) => { draft = recipe; }} />, {
-      "environment:profiles": makeEnvelope({ builtins: [], items: [collection(target)] }),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [collection(target)] }),
       "environment:check": async (args) => makeEnvelope(JSON.parse(args[args.indexOf("--spec") + 1]).locale ? report : environmentFixture()),
     });
     await screen.findByText("已读取环境，尚未设置比较目标。");
@@ -335,7 +363,7 @@ describe("Environment checks", () => {
     row.state = "match"; row.observed = "true"; row.note = "automatic_time";
     updated.summary.unknown--; updated.summary.matched++; updated.summary.status = "match";
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ builtins: [], items: [collection(target)] }),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [collection(target)] }),
       "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]))),
       "environment:check-time-settings": makeEnvelope({ status, report: status === "read" ? updated : null }),
     });

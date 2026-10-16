@@ -27,6 +27,7 @@ fn builtin_profiles_are_strict_read_only_and_separate_from_saved_copies() {
     let ctx = context();
     let listed = call(&ctx, "profiles", vec![]);
     assert!(listed.ok, "{:?}", listed.errors);
+    assert_eq!(listed.data["checks_supported"], cfg!(target_os = "macos"));
     let builtins = listed.data["builtins"]
         .as_array()
         .expect("built-in profiles");

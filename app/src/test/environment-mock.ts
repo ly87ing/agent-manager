@@ -8,7 +8,7 @@ export function createEnvironmentMock() {
   const arg = (args: string[], key: string) => args[args.indexOf(key) + 1];
   return (command: string, args: string[]) => {
     if (command === "environment:open-settings") return makeEnvelope({ pane: arg(args, "--pane") });
-    if (command === "environment:profiles") return makeEnvelope({ items, builtins: environmentBuiltinsFixture() });
+    if (command === "environment:profiles") return makeEnvelope({ items, builtins: environmentBuiltinsFixture(), checks_supported: true });
     if (command === "environment:save-profile") {
       const input = JSON.parse(arg(args, "--spec")) as EnvironmentProfileInput;
       const id = args.includes("--id") ? arg(args, "--id") : crypto.randomUUID();

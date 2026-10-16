@@ -20,7 +20,7 @@ function result(status: EnvironmentRepairResult["status"] = "applied"): Environm
 }
 function setup(outcome = result()) {
   return renderWithEngine(<EnvironmentPage />, {
-    "environment:profiles": makeEnvelope({ builtins: [], items: [profile] }),
+    "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [profile] }),
     "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[1]))),
     "environment:repair-preview": makeEnvelope(plan), "environment:repair": makeEnvelope(outcome),
   });
@@ -71,7 +71,7 @@ describe("Automatic environment repair", () => {
   });
   it("requires a new preview after a stale rejection and keeps the failure readable", async () => {
     const { calls } = renderWithEngine(<EnvironmentPage />, {
-      "environment:profiles": makeEnvelope({ builtins: [], items: [profile] }), "environment:check": makeEnvelope(environmentFixture()),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [profile] }), "environment:check": makeEnvelope(environmentFixture()),
       "environment:repair-preview": makeEnvelope(plan), "environment:repair": async () => { throw new Error("Environment settings changed after preview."); },
     });
     const dialog = await open();

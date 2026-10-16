@@ -199,7 +199,7 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             bail!("profiles accepts no arguments.");
         }
         return Ok(
-            json!({"items":list(store::open_readonly(ctx)?.as_ref())?,"builtins":builtins()}),
+            json!({"items":list(store::open_readonly(ctx)?.as_ref())?,"builtins":builtins(),"checks_supported":cfg!(target_os = "macos")}),
         );
     }
     let mut seen = BTreeSet::new();

@@ -1,5 +1,6 @@
 /** Application copy only; user content and engine diagnostics are never translation keys. */
 export const messages = {
+  "环境检查与系统操作目前仅支持 macOS。你仍可管理环境 Profiles。": "Environment checks and system actions currently support macOS only. You can still manage environment profiles.",
   "读取时间：{0}": "Last read: {0}",
   "重新读取页面": "Read page again",
   "自动修复": "Repair automatically",

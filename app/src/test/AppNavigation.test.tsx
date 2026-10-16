@@ -69,7 +69,7 @@ describe("App 顶层导航", () => {
     const target = { timezone: "Europe/Paris", locale: "fr_FR.UTF-8", strict_locale: true };
     const { calls } = renderWithEngine(<App />, {
       ...routes(),
-      "environment:profiles": makeEnvelope({ builtins: [], items: [{ id: "french", name: "French", revision: "a".repeat(64), target: environmentFixture(target).target, auto_sync: false }] }),
+      "environment:profiles": makeEnvelope({ checks_supported: true, builtins: [], items: [{ id: "french", name: "French", revision: "a".repeat(64), target: environmentFixture(target).target, auto_sync: false }] }),
       "environment:check": async (args) => makeEnvelope(environmentFixture(JSON.parse(args[args.indexOf("--spec") + 1]))),
     });
     await screen.findByRole("heading", { name: "启动配置" });

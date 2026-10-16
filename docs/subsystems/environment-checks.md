@@ -2,6 +2,12 @@
 
 ## Responsibilities and sources of truth
 
+`environment:profiles` reports `checks_supported` from the native target platform.
+The page reads this capability before inspecting the machine. On Windows/Linux it
+explains the macOS-only boundary and disables compare, apply and repair; saved
+profile management remains available. A missing or invalid capability blocks
+inspection until the profile read succeeds.
+
 The Environment page inspects macOS regional settings and the caller's process
 environment. Targets are optional and grouped into user-created named profiles.
 Blank targets provide observations without a comparison. Los Angeles and

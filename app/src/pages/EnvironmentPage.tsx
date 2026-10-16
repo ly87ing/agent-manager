@@ -105,6 +105,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   const [builtins, setBuiltins] = useState<EnvironmentBuiltin[]>([]);
   const [view, setView] = useState<"compare" | "profiles">("compare");
   const [profilesLoading, setProfilesLoading] = useState(true);
+  const [checksSupported, setChecksSupported] = useState<boolean | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [profilesError, setProfilesError] = useState<string | null>(null);
   const [editor, setEditor] = useState<{ initial: EnvironmentProfile | null; draft?: EnvironmentProfileInput } | null>(null);
@@ -125,14 +126,18 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   const cooldownTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
     const id = ++generation.current;
-    void checkEnvironment().then((report) => {
-      if (id !== generation.current) return;
-      setData(report); setObservation(report);
-    }).catch((err) => { if (id === generation.current) setError(engineErrorMessage(err)); })
-      .finally(() => { if (id === generation.current) setBusy(false); });
     let cancelled = false;
-    void listEnvironmentProfiles().then(({ items, builtins }) => { if (!cancelled) { setProfiles(items); setBuiltins(builtins); } })
-      .catch((err) => { if (!cancelled) setProfilesError(engineErrorMessage(err)); })
+    void listEnvironmentProfiles().then(({ items, builtins, checks_supported }) => {
+      if (cancelled) return;
+      setProfiles(items); setBuiltins(builtins); setChecksSupported(checks_supported);
+      if (!checks_supported) { setBusy(false); return; }
+      void checkEnvironment().then((report) => {
+        if (id !== generation.current) return;
+        setData(report); setObservation(report);
+      }).catch((err) => { if (id === generation.current) setError(engineErrorMessage(err)); })
+        .finally(() => { if (id === generation.current) setBusy(false); });
+    })
+      .catch((err) => { if (!cancelled) { setProfilesError(engineErrorMessage(err)); setBusy(false); } })
       .finally(() => { if (!cancelled) setProfilesLoading(false); });
     return () => { cancelled = true; generation.current++; clearTimeout(cooldownTimer.current); toast.dismiss("environment-result"); };
   }, []);
@@ -218,7 +223,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   async function reloadProfiles() {
     setProfilesLoading(true); setProfilesError(null);
     try {
-      const { items, builtins } = await listEnvironmentProfiles(); setProfiles(items); setBuiltins(builtins);
+      const { items, builtins, checks_supported } = await listEnvironmentProfiles(); setProfiles(items); setBuiltins(builtins); setChecksSupported(checks_supported);
       const current = items.find((item) => item.id === selectedId);
       if (savedSelection && current?.revision !== savedSelection.revision) select(current?.id ?? "");
     }
@@ -237,6 +242,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
     <div>
       <h1 className="text-lg font-semibold">{t("环境检查")}</h1>
       <p className="mt-1 text-xs text-muted-foreground">{t("独立维护环境 Profile，选择它对比本机环境，或预览后执行应用操作。")}</p>
+      {checksSupported === false && <p role="status" className="mt-2 text-sm text-muted-foreground">{t("环境检查与系统操作目前仅支持 macOS。你仍可管理环境 Profiles。")}</p>}
     </div>
     <div role="tablist" aria-label={t("环境功能")} className="flex flex-wrap gap-2 border-b pb-2">
       {(["compare", "profiles"] as const).map((tab) => <button key={tab} type="button" role="tab" aria-selected={view === tab}
@@ -270,10 +276,10 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
       {selected && <p className="text-xs text-muted-foreground">{t("所选 Profile：{0}", selected.name)}</p>}
       {builtinSelection && <p className="text-xs text-muted-foreground">{t("内置 Profile 严格比较完整语言顺序、原始 locale、固定时区和时间设置。需要调整标准时，可复制为自定义 Profile。")}</p>}
       <div className="flex flex-wrap gap-2">
-        <button className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={busy || cooldown || removing}
+        <button className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`} disabled={!checksSupported || busy || cooldown || removing}
           onClick={() => void run()}>{busy ? t("正在检查…") : selected ? t("对比 Profile") : t("检查本机环境")}</button>
-        <button className={button} disabled={!selected || profilesLoading || busy || removing} onClick={openApplication}>{t("应用 Profile")}</button>
-        <button className={button} disabled={!selected || profilesLoading || busy || removing} onClick={() => { toast.dismiss("environment-result"); setRepairing(true); }}>{t("自动修复")}</button>
+        <button className={button} disabled={!checksSupported || !selected || profilesLoading || busy || removing} onClick={openApplication}>{t("应用 Profile")}</button>
+        <button className={button} disabled={!checksSupported || !selected || profilesLoading || busy || removing} onClick={() => { toast.dismiss("environment-result"); setRepairing(true); }}>{t("自动修复")}</button>
       </div>
       {server && <p className="break-all text-xs text-muted-foreground">{t("检查会向 {0} 的 UDP 123 端口查询参考时间。", server)}</p>}
       <p className="text-xs text-muted-foreground">{t("对比始终只读。自动修复需先预览并确认；也可通过“应用 Profile”选择单项操作。")}</p>

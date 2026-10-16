@@ -60,7 +60,7 @@ export function profileTarget(profile: Pick<EnvironmentProfile, "target">): Envi
 }
 
 export async function listEnvironmentProfiles() {
-  return z.object({ items: z.array(profileSchema), builtins: z.array(builtinSchema) }).strict().parse(await request("profiles"));
+  return z.object({ items: z.array(profileSchema), builtins: z.array(builtinSchema), checks_supported: z.boolean() }).strict().parse(await request("profiles"));
 }
 
 export async function saveEnvironmentProfile(input: EnvironmentProfileInput, previous?: EnvironmentProfile): Promise<EnvironmentProfile> {
