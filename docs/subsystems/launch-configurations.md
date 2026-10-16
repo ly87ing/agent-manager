@@ -45,6 +45,16 @@ navigation, and existing saved recipes are preserved.
 
 ## Runtime path
 
+`launch:catalog` scans macOS application bundles, Windows current-user/system
+App Paths registrations, and Linux XDG application desktop entries. Reads are
+bounded and never execute entries. Linux user entries override matching system
+desktop IDs, including hidden entries. Only graphical application entries with a
+resolvable executable are offered; shell/env wrappers and unsupported field codes
+are skipped. Required literal arguments are retained when an entry is selected;
+optional file/URL placeholders are omitted. Distinct desktop IDs can share an
+executable while retaining different argument lists. Applications that lack a
+supported registration can still be selected by their executable path.
+
 `launch:build --spec <JSON>` returns each complete launch command and definition.
 The CLI and desktop bridge use the same Rust renderer. Building does not read
 shell files, load secret sources, create HOME/data, or execute commands. POSIX
@@ -155,3 +165,5 @@ nonzero exit status, including PATH lookup and special characters in file paths.
 Runtime cases read back failed system requests and accepted requests whose
 completion audit failed. Frontend cases cover either asynchronous read ordering,
 full retry recovery and the accepted-request audit warning.
+
+Linux entries with a nonempty `Path` working directory are omitted because launch recipes do not currently represent a working directory. Desktop string escaping is decoded before Exec quoting; discovery never executes desktop entries.

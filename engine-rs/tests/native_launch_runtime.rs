@@ -4,6 +4,62 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_catalog_reads_xdg_overrides_and_fixed_arguments_without_writes() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new();
+    let user = f.root.join("user-data/applications");
+    let system = f.root.join("system-data/applications");
+    std::fs::create_dir_all(&user).unwrap();
+    std::fs::create_dir_all(&system).unwrap();
+    let executable = f.root.join("sample app");
+    std::fs::write(&executable, b"#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let entry = |name: &str, args: &str| {
+        format!(
+            "[Desktop Entry]\nType=Application\nName={name}\nExec=\"{}\" {args}\n",
+            executable.display()
+        )
+    };
+    std::fs::write(
+        system.join("hidden.desktop"),
+        entry("Hidden system app", "%U"),
+    )
+    .unwrap();
+    std::fs::write(
+        user.join("hidden.desktop"),
+        "[Desktop Entry]\nHidden=true\n",
+    )
+    .unwrap();
+    std::fs::write(
+        user.join("sample.desktop"),
+        entry("Sample", "--label \"two words\" %F"),
+    )
+    .unwrap();
+    std::fs::write(
+        user.join("private.desktop"),
+        entry("Sample private", "--private"),
+    )
+    .unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
+        .args(["launch:catalog", "--json"])
+        .env("HOME", &f.ctx.home_dir)
+        .env("AGENT_MANAGER_DATA_DIR", &f.ctx.data_dir)
+        .env("XDG_DATA_HOME", user.parent().unwrap())
+        .env("XDG_DATA_DIRS", system.parent().unwrap())
+        .output()
+        .unwrap();
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["ok"], true, "{value}");
+    let apps = value["data"]["apps"].as_array().unwrap();
+    assert_eq!(apps.len(), 2, "{value}");
+    assert_eq!(apps[0]["args"], json!(["--label", "two words"]));
+    assert_eq!(apps[1]["args"], json!(["--private"]));
+    assert!(!f.ctx.home_dir.exists());
+    assert!(!f.ctx.data_dir.exists());
+}
 struct Fixture {
     root: PathBuf,
     ctx: Context,

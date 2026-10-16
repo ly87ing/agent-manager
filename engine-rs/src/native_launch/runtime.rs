@@ -16,8 +16,13 @@ fn catalog(ctx: &Context) -> Value {
             scan_apps(&root, 2, &mut apps);
         }
     }
+    #[cfg(target_os = "linux")]
+    super::catalog::linux(ctx, &mut apps);
+    #[cfg(windows)]
+    super::catalog::windows(&mut apps);
     apps.sort_by_key(|app| app["name"].as_str().unwrap_or_default().to_lowercase());
-    apps.dedup_by(|a, b| a["path"] == b["path"]);
+    let mut seen = std::collections::BTreeSet::new();
+    apps.retain(|app| seen.insert((app["path"].to_string(), app["args"].to_string())));
     json!({"platform":std::env::consts::OS,
         "shell":if cfg!(windows) {"powershell"} else if cfg!(target_os = "macos") {"zsh"} else {"bash"}, "apps":apps})
 }

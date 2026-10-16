@@ -79,10 +79,10 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
     generation.current++;
     setRecipe(next); setBuilt(null); setConfirmation(null); clearFeedback();
   }
-  function target(value: string) {
+  function target(value: string, args?: string[]) {
     const previous = targetBase(recipe.target);
     const base = targetBase(value);
-    change({ ...recipe, target: value, variants: recipe.variants.map((variant) => ({ ...variant,
+    change({ ...recipe, target: value, args: args ?? recipe.args, variants: recipe.variants.map((variant) => ({ ...variant,
       name: variant.name === `${previous}-sg` ? `${base}-sg` : variant.name === `${previous}-la` ? `${base}-la` : variant.name })) });
   }
   async function browse() {
@@ -242,9 +242,9 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
             onChange={(value) => change({ ...recipe, kind: value as LaunchRecipe["kind"] })} /></div>
         </div>
         {local && recipe.kind === "app" && Boolean(catalog?.apps.length) && <Select label={t("本机应用")}
-          value={catalog!.apps.some((app) => app.path === recipe.target) ? recipe.target : ""}
-          options={[{ value: "", label: t("选择本机应用或输入路径") }, ...catalog!.apps.map((app) => ({ value: app.path, label: app.name }))]}
-          onChange={(value) => target(value)} />}
+          value={catalog!.apps.find((app) => app.path === recipe.target && (!app.args || JSON.stringify(app.args) === JSON.stringify(recipe.args)))?.id ?? (catalog!.apps.some((app) => !app.id && app.path === recipe.target) ? recipe.target : "")}
+          options={[{ value: "", label: t("选择本机应用或输入路径") }, ...catalog!.apps.map((app) => ({ value: app.id ?? app.path, label: app.name }))]}
+          onChange={(value) => { const app = catalog!.apps.find((app) => (app.id ?? app.path) === value); target(app?.path ?? value, app?.args); }} />}
         <div className="text-xs"><label htmlFor="launch-target">{t("程序路径或命令")}</label><div className="mt-1 flex gap-2">
           <input id="launch-target" aria-label={t("程序路径或命令")} className={`${input} font-mono`} value={recipe.target} onChange={(event) => target(event.target.value)}
             placeholder={recipe.platform === "macos" && recipe.kind === "app" ? "/Applications/Example.app" : recipe.platform === "windows" ? "C:\\Apps\\Example.exe" : "/path/to/program"} />

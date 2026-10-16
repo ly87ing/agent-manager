@@ -10,7 +10,7 @@ export interface LaunchRecipe {
   variants: { name: string; timezone: string }[];
 }
 export interface LaunchEntry { name: string; timezone: string; command: string; definition: string }
-export interface LaunchCatalog { platform: LaunchRecipe["platform"]; shell: LaunchRecipe["shell"]; apps: { name: string; path: string }[] }
+export interface LaunchCatalog { platform: LaunchRecipe["platform"]; shell: LaunchRecipe["shell"]; apps: { id?: string; name: string; path: string; args?: string[] }[] }
 export interface SavedLaunch { id: string; revision: string; recipe: LaunchRecipe; entries: LaunchEntry[] }
 
 export async function launchRequest<T>(operation: string, args: string[] = []): Promise<T> {

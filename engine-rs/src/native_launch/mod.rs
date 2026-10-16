@@ -1,4 +1,6 @@
 //! General launch recipes are independent of assistant accounts and MCP secrets.
+#[cfg(any(target_os = "linux", windows, test))]
+mod catalog;
 mod render;
 mod runtime;
 pub(crate) mod saved;

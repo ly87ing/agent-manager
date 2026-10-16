@@ -82,6 +82,24 @@ async function successToast() {
 }
 
 describe("launch configuration controls", () => {
+  it("selects Linux desktop entries by identity and retains their literal arguments", async () => {
+    const { calls } = renderWithEngine(<LaunchPage />, {
+      "launch:catalog": makeEnvelope({ platform: "linux", shell: "bash", apps: [
+        { id: "/share/applications/sample.desktop", name: "Sample", path: "/usr/bin/sample", args: ["--label", "two words"] },
+        { id: "/share/applications/sample-private.desktop", name: "Sample private", path: "/usr/bin/sample", args: ["--private"] },
+      ] }),
+      "launch:build": async (args) => makeEnvelope({ entries: entries(JSON.parse(args[args.indexOf("--spec") + 1])), timezone_verified: false }),
+    });
+    await startNew();
+    await chooseOption(screen.getByRole("combobox", { name: "本机应用" }), "/share/applications/sample-private.desktop");
+    expect(screen.getByRole("textbox", { name: "程序路径或命令" })).toHaveValue("/usr/bin/sample");
+    await userEvent.click(screen.getByRole("button", { name: "预览命令" }));
+    await waitFor(() => expect(calls.some((call) => call.command === "launch:build")).toBe(true));
+    const spec = JSON.parse(calls.find((call) => call.command === "launch:build")!.args[1]);
+    expect(spec.platform).toBe("linux");
+    expect(spec.shell).toBe("bash");
+    expect(spec.args).toEqual(["--private"]);
+  });
   it("warns about a failed audit after an accepted launch without retrying", async () => {
     const { calls } = setup({ items: [savedItem], runAuditError: true });
     await userEvent.click(await screen.findByTestId("run-saved-saved-1-example-sg"));
