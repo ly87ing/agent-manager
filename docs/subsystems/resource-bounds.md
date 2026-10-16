@@ -79,6 +79,10 @@ MCP checks retain at most 1 MiB per stdout line, 4 MiB total, and 16 queued line
 Oversized or flooded output fails explicitly. Stderr keeps its existing bounded
 tail; HTTP body accumulation uses one string rather than a per-line vector. Normal
 process-group cleanup, credential scrubbing, and account locks remain in place.
+MCP result redaction shares an 8 MiB matching-work budget across display fields.
+Long overlapping values cannot repeatedly search and mark the entire payload
+without spending that budget. Exhaustion masks text and omits server metadata;
+see [MCP test connection](mcp-check.md) for the display-only contract.
 Git previews retain at most 64 KiB plus one sentinel byte per blob through the
 shared deadline-aware process capture. Oversized files remain distinguishable from
 empty and missing files; previews still display at most 30 file contents.

@@ -39,6 +39,7 @@ const STDERR_TAIL: usize = 600;
 const LINE_LIMIT: usize = 1024 * 1024;
 const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 const QUEUED_LINES: usize = 16;
+const REDACTION_WORK_LIMIT: usize = 8 * 1024 * 1024;
 
 struct Outcome {
     ok: bool,
@@ -149,12 +150,104 @@ fn resolve_ref(name: &str, used: &mut Vec<String>) -> std::result::Result<String
 }
 
 /// 去掉输出里的变量取值，再走统一脱敏。
-fn scrub(text: &str, secrets: &[String]) -> String {
-    let mut out = text.to_string();
-    for secret in secrets.iter().filter(|value| value.len() >= 4) {
-        out = out.replace(secret.as_str(), "***");
+fn mask_known_values(
+    text: &str,
+    secrets: &[String],
+    budget: &mut usize,
+) -> std::result::Result<String, ()> {
+    let mut spend = |amount: usize| {
+        if amount > *budget {
+            *budget = 0;
+            return Err(());
+        }
+        *budget -= amount;
+        Ok(())
+    };
+    spend(text.len() + 1)?;
+    let mut masked: Option<Vec<bool>> = None;
+    for secret in secrets.iter().filter(|value| !value.is_empty()) {
+        let mut offset = 0;
+        loop {
+            // Charge suffix search, needle preparation and range marking before
+            // doing work, including heavily self-overlapping long values.
+            spend(text.len() - offset + 2 * secret.len())?;
+            let Some(index) = text[offset..].find(secret.as_str()) else {
+                break;
+            };
+            let start = offset + index;
+            let bytes = masked.get_or_insert_with(|| vec![false; text.len()]);
+            bytes[start..start + secret.len()].fill(true);
+            // Advance one original character to retain self-overlapping matches.
+            offset = start + text[start..].chars().next().unwrap().len_utf8();
+        }
     }
-    crate::sanitize::sanitize_diagnostic_message(&out)
+    let Some(masked) = masked else {
+        return Ok(text.to_string());
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut index = 0;
+    while index < text.len() {
+        let start = index;
+        let redact = masked[index];
+        while index < text.len() && masked[index] == redact {
+            index += 1;
+        }
+        if redact {
+            out.push_str("***");
+        } else {
+            out.push_str(&text[start..index]);
+        }
+    }
+    Ok(out)
+}
+
+fn scrub(text: &str, secrets: &[String], budget: &mut usize) -> String {
+    mask_known_values(text, secrets, budget)
+        .map(|text| crate::sanitize::sanitize_diagnostic_message(&text))
+        .unwrap_or_else(|_| "***".into())
+}
+
+fn scrub_server_data(value: Value, secrets: &[String], budget: &mut usize) -> Value {
+    fn inner(
+        value: Value,
+        secrets: &[String],
+        budget: &mut usize,
+    ) -> std::result::Result<Value, ()> {
+        if *budget == 0 {
+            return Err(());
+        }
+        Ok(match value {
+            Value::String(text) => Value::String(crate::sanitize::sanitize_diagnostic_message(
+                &mask_known_values(&text, secrets, budget)?,
+            )),
+            Value::Array(items) => Value::Array(
+                items
+                    .into_iter()
+                    .map(|value| inner(value, secrets, budget))
+                    .collect::<std::result::Result<_, ()>>()?,
+            ),
+            Value::Object(items) => Value::Object(
+                items
+                    .into_iter()
+                    .map(|(key, value)| {
+                        let key = crate::sanitize::sanitize_diagnostic_message(&mask_known_values(
+                            &key, secrets, budget,
+                        )?);
+                        Ok((key, inner(value, secrets, budget)?))
+                    })
+                    .collect::<std::result::Result<_, ()>>()?,
+            ),
+            other => {
+                let text = other.to_string();
+                if mask_known_values(&text, secrets, budget)? != text {
+                    Value::String("***".into())
+                } else {
+                    other
+                }
+            }
+        })
+    }
+    inner(value, secrets, budget).unwrap_or(Value::Null)
 }
 
 fn request(id: u64, method: &str, params: Value) -> Value {
@@ -310,11 +403,19 @@ impl Running {
                 }
                 Err(RecvTimeoutError::Timeout) => return Err(Waited::Timeout),
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(if self.overflow.load(Ordering::Relaxed) {
-                        Waited::Limit
-                    } else {
-                        Waited::Exited
-                    })
+                    if self.overflow.load(Ordering::Relaxed) {
+                        return Err(Waited::Limit);
+                    }
+                    // EOF may precede process termination, especially on Windows.
+                    // Observe the natural exit before closing stdin or killing the job.
+                    let until = deadline.min(Instant::now() + Duration::from_millis(500));
+                    while Instant::now() < until {
+                        if !matches!(self.child.try_wait(), Ok(None)) {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    return Err(Waited::Exited);
                 }
             }
         }
@@ -963,7 +1064,7 @@ pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
             default_timeout
         });
     let started = Instant::now();
-    let (outcome, secrets) = match view.transport {
+    let (outcome, mut secrets) = match view.transport {
         Transport::Stdio
             if !cwd.is_absolute()
                 || !cwd.is_dir()
@@ -986,6 +1087,9 @@ pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
             tool_timeout,
         ),
     };
+    secrets.sort_unstable();
+    secrets.dedup();
+    let mut redaction_budget = REDACTION_WORK_LIMIT;
     let tools = outcome.tools.as_ref();
     Ok(json!({
         "domain": "mcp",
@@ -1000,11 +1104,11 @@ pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
         "exit_code": outcome.exit_code,
         "ok": outcome.ok,
         "stage": outcome.stage,
-        "message": scrub(&outcome.message, &secrets),
-        "server_info": outcome.server,
+        "message": scrub(&outcome.message, &secrets, &mut redaction_budget),
+        "server_info": outcome.server.map(|value| scrub_server_data(value, &secrets, &mut redaction_budget)),
         "tool_count": tools.map(Vec::len),
-        "tools": tools.map(|names| names.iter().take(TOOL_NAMES).cloned().collect::<Vec<_>>()),
-        "detail": outcome.detail.map(|text| scrub(&text, &secrets)),
+        "tools": tools.map(|names| names.iter().take(TOOL_NAMES).map(|name| scrub(name, &secrets, &mut redaction_budget)).collect::<Vec<_>>()),
+        "detail": outcome.detail.map(|text| scrub(&text, &secrets, &mut redaction_budget)),
         "elapsed_ms": started.elapsed().as_millis() as u64,
     }))
 }
@@ -1012,6 +1116,59 @@ pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn known_redaction_merges_original_overlaps_without_reprocessing_placeholders() {
+        let redact = |text: &str, secrets: &[String]| {
+            let mut budget = REDACTION_WORK_LIMIT;
+            scrub(text, secrets, &mut budget)
+        };
+        assert_eq!(redact("abcd", &["abc".into(), "bcd".into()]), "***");
+        assert_eq!(redact("abcdefgh", &["abcde".into(), "defgh".into()]), "***");
+        assert_eq!(redact("aaa", &["aa".into()]), "***");
+        assert_eq!(redact("*", &vec!["*".into(); 5]), "***");
+        assert_eq!(redact("αβα", &["αβ".into(), "βα".into()]), "***");
+    }
+
+    #[test]
+    fn known_redaction_masks_secret_bearing_non_string_service_leaves() {
+        let secrets = ["731942", "true", "null"].map(str::to_string);
+        let mut budget = REDACTION_WORK_LIMIT;
+        assert_eq!(
+            scrub_server_data(
+                json!({"number":731942,"flag":true,"missing":null,"other":99}),
+                &secrets,
+                &mut budget
+            ),
+            json!({"number":"***","flag":"***","missing":"***","other":99})
+        );
+    }
+
+    #[test]
+    fn returned_server_data_scrubs_nested_values_keys_short_and_overlapping_secrets() {
+        let secrets =
+            ["YOUR_FAKE", "YOUR_FAKE_TOKEN", "x7", "quote\"slash\\\n"].map(str::to_string);
+        let value = json!({"name":"YOUR_FAKE_TOKEN", "nested":[{"echo":"x7", "YOUR_FAKE_TOKEN":["quote\"slash\\\n",true,7,null]}]});
+        let mut budget = REDACTION_WORK_LIMIT;
+        assert_eq!(
+            scrub_server_data(value, &secrets, &mut budget),
+            json!({"name":"***","nested":[{"echo":"***","***":["***",true,7,null]}]})
+        );
+        assert_eq!(
+            scrub("YOUR_FAKE_TOKEN x7", &secrets, &mut budget),
+            "*** ***"
+        );
+    }
+
+    #[test]
+    fn known_redaction_stops_long_self_overlap_with_a_shared_matching_budget() {
+        let secrets = ["a".repeat(16 * 1024)];
+        let value = json!({"repeated":"a".repeat(1024 * 1024)});
+        let mut budget = REDACTION_WORK_LIMIT;
+        assert_eq!(scrub_server_data(value, &secrets, &mut budget), Value::Null);
+        assert_eq!(budget, 0);
+        assert_eq!(scrub("later display text", &secrets, &mut budget), "***");
+    }
 
     #[test]
     fn oversized_line_and_a_flooded_queue_fail_without_unbounded_retention() {
