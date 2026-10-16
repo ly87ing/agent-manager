@@ -97,6 +97,13 @@ jobs:
       - name: Build engine release binary
         run: cargo build --release --manifest-path engine-rs/Cargo.toml
 
+      - name: Verify disposable native Linux NTP repair
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          sudo apt-get install --no-install-recommends -y systemd-timesyncd libcap2-bin libsystemd-dev
+          AM_ISOLATED_LINUX_NTP=1 node scripts/verify-linux-ntp.mjs
+
   app:
     name: "${{ matrix.target }} / installer"
     timeout-minutes: 90

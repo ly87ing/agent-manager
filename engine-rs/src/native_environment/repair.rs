@@ -475,6 +475,9 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             })
         });
         let mut verification_limits = Vec::new();
+        if cfg!(target_os = "linux") && target.ntp_server.is_some() {
+            verification_limits.push("The service was not restarted. Whether a future instance loads the saved standard-host-path override on this device remains unverified. Runtime and file readback do not establish the actual NTP peer, synchronization, or clock accuracy.");
+        }
         if cfg!(target_os = "linux") && target.automatic_timezone.is_some() {
             verification_limits.push("GNOME automatic-timezone verification covers preference readback only; geolocation and automatic switching remain unverified.");
         }

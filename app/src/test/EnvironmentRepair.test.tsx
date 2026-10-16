@@ -35,6 +35,29 @@ async function open() {
 }
 
 describe("Automatic environment repair", () => {
+  it.each(["en", "zh-CN"] as const)("separates Linux runtime and saved NTP receipts and retains limits in %s", async (language) => {
+    setLanguage(language);
+    const configured = { ...profile, target: environmentFixture({ ntp_server: "selected.example", max_clock_offset_ms: 2000 }).target };
+    const preview = { ...plan, platform: "linux" as const, target: configured.target, items: [
+      { id: "ntp.server", scope: "system" as const, before: "selected.example", expected: "selected.example", status: "unchanged" as const },
+      { id: "ntp.server.directory", scope: "system" as const, before: false, expected: true, status: "change" as const },
+      { id: "ntp.server.persistent", scope: "system" as const, before: null, expected: "selected.example", status: "change" as const },
+    ] };
+    renderWithEngine(<EnvironmentRepairDialog profile={configured} onResult={() => {}} onClose={() => {}} />, {
+      "environment:repair-preview": makeEnvelope(preview),
+      "environment:repair": makeEnvelope({ ...result(), items: preview.items.map(item => ({ ...item, status: item.status === "unchanged" ? "unchanged" : "verified" })), restart_required: false,
+        verification_limits: ["Future service loading, actual peer, synchronization and clock accuracy remain unverified."] }),
+    });
+    await screen.findByText(language === "en" ? "Save the standard-host-path NTP override file" : "保存标准主机路径的 NTP 配置文件");
+    expect(screen.getByRole("dialog")).toHaveTextContent("/etc/systemd/timesyncd.conf.d/90-agent-manager.conf");
+    expect(screen.getByRole("dialog")).toHaveTextContent(language === "en" ? "adjust the system clock immediately" : "立即查询服务器并调整系统时钟");
+    expect(screen.getByRole("dialog")).toHaveTextContent(language === "en" ? "Absent → create directory" : "不存在 → 创建目录");
+    expect(screen.queryByText(language === "en" ? /Only correct the clock after a fresh/ : /仅在新测量明确超限时校正时钟/)).toBeNull();
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await screen.findByText(language === "en" ? "File saved and read back" : "文件已保存并读回");
+    expect(screen.getByRole("dialog")).toHaveTextContent(language === "en" ? "Whether a future instance loads this host-path file remains unverified" : "以后启动的实例是否加载此主机路径文件仍未验证");
+    expect(screen.getByRole("status")).toHaveTextContent(language === "en" ? "Verify their effect in the target environment" : "实际效果仍需在目标环境中确认");
+  });
   it("requires a fresh explicit Windows persistence preview and forwards that choice only on confirm", async () => {
     const { calls }=renderWithEngine(<EnvironmentRepairDialog profile={profile} onResult={() => {}} onClose={() => {}} />, {
       "environment:repair-preview": async (args) => makeEnvelope({ ...plan, platform:"windows",base:(args.includes("--allow-persistent-user-env") ? "c" : "a").repeat(64) }),

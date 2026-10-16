@@ -13,8 +13,8 @@ pub(super) fn configure(path: PathBuf) {
     }
 }
 
-struct Prepared {
-    path: PathBuf,
+pub(super) struct Prepared {
+    pub(super) path: PathBuf,
     #[cfg(target_os = "linux")]
     root: (PathBuf, u64, u64),
 }
@@ -33,7 +33,7 @@ impl Drop for Prepared {
         }
     }
 }
-fn prepare() -> Option<Prepared> {
+pub(super) fn prepare() -> Option<Prepared> {
     let source = HELPER
         .get()
         .cloned()

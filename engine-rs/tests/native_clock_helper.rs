@@ -11,6 +11,25 @@ fn helper_entry_points_reject_malformed_and_expired_requests_without_creating_st
     ] {
         for args in [
             vec!["--environment-clock-helper"],
+            vec!["--environment-ntp-helper"],
+            vec![
+                "--environment-ntp-helper",
+                "time.example",
+                "2",
+                "1",
+                "1000",
+                "0",
+                "--confirm",
+            ],
+            vec![
+                "--environment-ntp-helper",
+                "https://time.example",
+                "2",
+                "1",
+                "1000",
+                "0",
+                "--confirm",
+            ],
             vec![
                 "--environment-clock-helper",
                 "example.invalid",
@@ -33,14 +52,17 @@ fn helper_entry_points_reject_malformed_and_expired_requests_without_creating_st
                 .env("AGENT_MANAGER_DATA_DIR", root.join("data"))
                 .output()
                 .unwrap();
-            let expected = if args.len() == 5
-                && args[1] == "192.0.2.1"
-                && cfg!(any(target_os = "linux", windows))
-            {
-                74
-            } else {
-                2
-            };
+            let expected =
+                if args.len() == 7 && args[1] == "time.example" && cfg!(target_os = "linux") {
+                    74
+                } else if args.len() == 5
+                    && args[1] == "192.0.2.1"
+                    && cfg!(any(target_os = "linux", windows))
+                {
+                    74
+                } else {
+                    2
+                };
             assert_eq!(result.status.code(), Some(expected), "{result:?}");
             assert!(
                 result.stdout.is_empty() && result.stderr.is_empty(),

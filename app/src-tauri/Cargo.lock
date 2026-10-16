@@ -53,6 +53,7 @@ dependencies = [
  "windows-sys 0.59.0",
  "winreg",
  "zbus",
+ "zbus_xml",
 ]
 
 [[package]]
@@ -5717,6 +5718,18 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zbus_xml"
+version = "5.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1586c021a01ca0a9216dcd874e546382e156a5cbab5fab6cb5f10087e22682a"
+dependencies = [
+ "serde",
+ "winnow 1.0.4",
+ "zbus_names",
+ "zvariant",
+]
 
 [[package]]
 name = "zvariant"

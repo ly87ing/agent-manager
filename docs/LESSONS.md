@@ -6,6 +6,25 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: filesystem rehearsals need platform-specific metadata evidence
+
+- Fresh macOS fixture nodes acquired `com.apple.provenance`, so a Linux
+  no-extended-metadata admission rule rejected the filesystem rehearsal. Keep
+  production Linux strict; the macOS-only rehearsal admits that observed host
+  attribute and still rejects an explicitly added unknown attribute.
+- A macOS rename/readback result does not exercise Linux metadata admission or
+  elevated authorization. Require native Linux receipts before accepting those
+  claims; do not infer an ACL or security label is absent from an unprivileged
+  attribute listing. The elevated helper must establish its inspection privilege
+  before any write, then repeat the source checks.
+- A socket-pair test blocked while filling the write buffer before its reader
+  started. Feed oversized input concurrently and assert the actual bounded-read
+  result; a hanging test is not evidence of a product timeout.
+- Parse generated Polkit policy text as well as the containing JavaScript file.
+  A template literal consumed regex slash escapes; `node --check` on the script
+  passed while the resulting policy was invalid. Preserve those escapes and
+  compile the exact generated policy before installing the disposable fixture.
+
 ## 2026-10-16: type evidence must be bound into a snapshot version
 
 - The old digest gives a file containing `symlink:target` the same slot as a
