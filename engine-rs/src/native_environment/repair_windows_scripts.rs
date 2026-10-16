@@ -3,7 +3,8 @@
 pub(super) const SYSTEM: &str = r#"
 function Read-Policy($area,$name) {
  try {
-  $p=[Windows.Management.Policies.NamedPolicy,Windows.Management,ContentType=WindowsRuntime]::GetPolicyFromPath($area,$name)
+  $null=[Windows.Management.Policies.NamedPolicy,Windows.Management.Policies,ContentType=WindowsRuntime]
+  $p=[Windows.Management.Policies.NamedPolicy]::GetPolicyFromPath($area,$name)
   if ($null -eq $p -or $p.IsUserPolicy) {return $null}
   $value=$null
   if ($p.IsManaged) {switch ($p.Kind.ToString()) {'String' {$value=$p.GetString()} 'Int32' {$value=$p.GetInt32()} default {return $null}}}
@@ -130,13 +131,13 @@ $ErrorActionPreference='Stop'
 $stage='type'
 [IO.File]::WriteAllText($marker,$stage)
 try {
-$type=[Windows.Management.Policies.NamedPolicy,Windows.Management,ContentType=WindowsRuntime]
+$type=[Windows.Management.Policies.NamedPolicy,Windows.Management.Policies,ContentType=WindowsRuntime]
 $stage='assembly'
 [IO.File]::WriteAllText($marker,$stage)
 $result=@{type=$type.FullName;assembly=$type.Assembly.GetName().Name;called=$false;available=$false;hresult=$null}
 $stage='method'
 [IO.File]::WriteAllText($marker,$stage)
-try {$result.called=$true;$policy=$type::GetPolicyFromPath('System','AllowLocation');$result.available=($null -ne $policy)}
+try {$result.called=$true;$policy=[Windows.Management.Policies.NamedPolicy]::GetPolicyFromPath('System','AllowLocation');$result.available=($null -ne $policy)}
 catch {$exception=$_.Exception;while ($exception.InnerException) {$exception=$exception.InnerException};if (@(-2147221164,-2147467263,-2147024846,-2147024891) -notcontains $exception.HResult) {throw};$result.hresult=$exception.HResult}
 $result | ConvertTo-Json -Compress
 } catch {@{stage=$stage;binding_error=$_.Exception.Message;exception_type=$_.Exception.GetType().FullName;hresult=$_.Exception.HResult} | ConvertTo-Json -Compress}
