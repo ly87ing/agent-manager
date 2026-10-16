@@ -647,10 +647,12 @@ pub(crate) mod capture_test_support {
         command
     }
 
-    pub fn assert_descendant_stopped(root: &Path, start: Instant) {
+    pub fn assert_descendant_stopped(root: &Path) {
         assert!(root.join("ready").exists(), "Descendant never started");
         assert!(root.join("parent-exited").exists(), "Parent did not finish");
-        std::thread::sleep(Duration::from_secs(6).saturating_sub(start.elapsed()));
+        // The descendant's five-second timer starts after its own startup,
+        // not when the parent capture began. Observe the full window after ready.
+        std::thread::sleep(Duration::from_secs(6));
         assert!(
             !root.join("late").exists(),
             "Descendant survived the timeout"
@@ -978,7 +980,7 @@ mod tests {
             !root.join("late").exists(),
             "Fixture retained captured pipes until the descendant wrote its marker"
         );
-        assert_descendant_stopped(&root, start);
+        assert_descendant_stopped(&root);
     }
 
     // Shutdown is process-wide; exercise it in a separate test process.

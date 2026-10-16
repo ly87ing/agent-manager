@@ -2070,7 +2070,7 @@ mod capture_tests {
             "Waited for an inherited {stream} pipe: {elapsed:?}"
         );
         assert!(result.err().unwrap().to_string().contains("超时"));
-        fixture::assert_descendant_stopped(&root, start);
+        fixture::assert_descendant_stopped(&root);
     }
 
     #[test]
