@@ -59,6 +59,10 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   API-internal fault. Bound that call in a disposable child, retain
   unknown policy gates, and prove that a deliberately blocked child cannot erase
   unrelated system evidence. More timeout allowance does not fix a blocked API.
+- Restrict the effective PowerShell module path after startup, before any cmdlet.
+  Windows PowerShell reconstructs a pre-set path and can prepend AllUsers modules;
+  inherited PowerShell 7 modules can break Windows PowerShell autoloading. Keep
+  the NUL module-cache guard and verify the resulting path in the real reader.
 
 ## 2026-10-14: local adoption previews cover every entry and refresh
 

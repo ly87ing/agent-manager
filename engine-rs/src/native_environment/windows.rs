@@ -30,7 +30,7 @@ pub(super) fn script_timeout(text: &str, timeout: std::time::Duration) -> Option
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            &format!("[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); {text}"),
+            &format!("$env:PSModulePath=[IO.Path]::Combine($PSHOME,'Modules'); [Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); {text}"),
         ],
         timeout,
     )
