@@ -5,6 +5,8 @@ mod clock_helper;
 mod command;
 #[cfg(any(target_os = "linux", test))]
 mod linux;
+#[cfg(any(target_os = "linux", test))]
+mod linux_accounts;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(any(target_os = "linux", windows))]
