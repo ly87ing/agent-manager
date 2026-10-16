@@ -1457,6 +1457,21 @@ mod tests {
 
     #[test]
     fn apply_lock_waits_out_a_briefly_held_handle_but_refuses_a_real_holder() {
+        const CHILD: &str = "AM_APPLY_LOCK_TEST_CHILD";
+        if std::env::var_os(CHILD).as_deref() != Some(std::ffi::OsStr::new("1")) {
+            // Other library tests may fork while this test holds a flock.
+            let mut command = crate::process::launch_command(std::env::current_exe().unwrap());
+            command.args(["--exact", "native::tests::apply_lock_waits_out_a_briefly_held_handle_but_refuses_a_real_holder", "--nocapture"])
+                .env(CHILD, "1");
+            let output = crate::process::capture_group(
+                &mut command,
+                std::time::Duration::from_secs(10),
+                64 * 1024,
+            )
+            .expect("Isolated apply-lock test must complete");
+            assert!(output.status.success(), "{output:?}");
+            return;
+        }
         let (root, ctx) = temp_ctx("apply-lock-grace");
         std::fs::create_dir_all(&ctx.data_dir).unwrap();
         let path = ctx.data_dir.join("agent-manager.apply.lock");
