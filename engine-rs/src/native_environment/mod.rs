@@ -1,5 +1,8 @@
 //! Read-only regional environment checks shared by the desktop and CLI.
 mod actions;
+mod command;
+#[cfg(any(target_os = "linux", test))]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
 pub(crate) mod profiles;
@@ -11,15 +14,15 @@ mod time_probe;
 mod time_repair;
 #[cfg(target_os = "macos")]
 mod time_sync;
+#[cfg(any(target_os = "windows", test))]
+mod windows;
 
 use crate::{diagnostic, Context, Envelope, Lock, Mode, Request};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-#[cfg(any(target_os = "macos", test))]
 use std::collections::BTreeMap;
 
-#[cfg(any(target_os = "macos", test))]
 const LOCALE_CATEGORIES: &[&str] = &[
     "LC_CTYPE",
     "LC_COLLATE",
@@ -120,12 +123,13 @@ impl Target {
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
 #[derive(Default)]
 struct Observation {
+    platform: Option<&'static str>,
     timezone: Option<String>,
     languages: Option<Vec<String>>,
     apple_locale: Option<String>,
+    user_region: Option<String>,
     format_overrides: Option<Value>,
     automatic_time: Option<bool>,
     automatic_timezone: Option<bool>,
@@ -137,9 +141,9 @@ struct Observation {
     local_time: Option<String>,
     os_version: Option<String>,
     env: BTreeMap<String, String>,
+    sources: BTreeMap<&'static str, &'static str>,
 }
 
-#[cfg(any(target_os = "macos", test))]
 #[derive(Serialize)]
 struct Check {
     id: String,
@@ -151,7 +155,6 @@ struct Check {
     note: &'static str,
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn check(
     id: &str,
     group: &'static str,
@@ -177,12 +180,10 @@ fn check(
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn locale_key(value: &str) -> String {
     value.to_ascii_lowercase().replace("utf-8", "utf8")
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn locale_check(id: &str, observed: String, expected: Option<String>) -> Check {
     let matches = expected
         .as_ref()
@@ -201,7 +202,6 @@ fn locale_check(id: &str, observed: String, expected: Option<String>) -> Check {
     item
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn region(locale: &str) -> Option<String> {
     locale
         .split('@')
@@ -212,8 +212,12 @@ fn region(locale: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn evaluate(observed: &Observation, target: &Target) -> Vec<Check> {
+    let user_region = if observed.platform == Some("windows") {
+        observed.user_region.clone()
+    } else {
+        observed.apple_locale.as_deref().and_then(region)
+    };
     let mut rows = vec![
         check(
             "ntp.actual_source",
@@ -278,7 +282,7 @@ fn evaluate(observed: &Observation, target: &Target) -> Vec<Check> {
         check(
             "language.region",
             "language",
-            observed.apple_locale.as_deref().and_then(region),
+            user_region,
             target.region.clone(),
             "current user AppleLocale",
             "user_region",
@@ -434,10 +438,48 @@ fn evaluate(observed: &Observation, target: &Target) -> Vec<Check> {
             "raw_locale_consistency",
         ));
     }
+    for row in &mut rows {
+        if let Some(source) = observed.sources.get(row.id.as_str()) {
+            row.source = source;
+        }
+    }
+    #[cfg(windows)]
+    if observed.platform == Some("windows") {
+        if let Some(row) = rows.iter_mut().find(|row| row.id == "time.timezone") {
+            if observed
+                .timezone
+                .as_deref()
+                .zip(target.timezone.as_deref())
+                .is_some_and(|(actual, expected)| {
+                    windows::zone_id(actual)
+                        .zip(windows::zone_id(expected))
+                        .is_some_and(|(a, b)| a == b)
+                })
+            {
+                row.state = "match";
+            }
+            row.note = "windows_timezone";
+        }
+        for row in rows
+            .iter_mut()
+            .filter(|row| row.group == "process" && row.id != "process.variables")
+        {
+            // POSIX variables are launch inputs, not proof of a Win32 application's locale.
+            row.note = "windows_process_environment";
+            if row.id == "process.timezone" && observed.env.contains_key("TZ") {
+                row.observed = None;
+                row.state = "unknown";
+            }
+        }
+    }
+    if observed.platform == Some("linux") {
+        for row in rows.iter_mut().filter(|row| row.group == "language") {
+            row.note = "linux_system_locale";
+        }
+    }
     rows
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn sync_value(value: bool) -> String {
     if value {
         "synchronized"
@@ -488,7 +530,6 @@ fn arguments(req: &Request) -> Result<(Target, bool)> {
     Ok((target, probe))
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn clock_state(offset_ms: f64, uncertainty_ms: f64, limit_ms: u32) -> &'static str {
     if offset_ms.abs() + uncertainty_ms <= limit_ms as f64 {
         "match"
@@ -510,17 +551,25 @@ fn report_with_automatic_time(
 ) -> Result<Value> {
     #[cfg(target_os = "macos")]
     let mut observed = macos::collect();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    let mut observed = linux::collect();
+    #[cfg(target_os = "windows")]
+    let mut observed = windows::collect();
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         let _ = (target, probe, automatic_time);
-        bail!("Environment checks currently support macOS only.");
+        bail!("Environment checks require macOS, Windows or Linux.");
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     {
         if let Some(value) = automatic_time {
             observed.automatic_time = Some(value);
         }
+        #[cfg(target_os = "macos")]
         let time_sync = time_sync::collect();
+        #[cfg(not(target_os = "macos"))]
+        let time_sync: Option<Value> = None;
+        #[cfg(target_os = "macos")]
         if let Some(value) = &time_sync {
             observed.time_synchronized = Some(value.synchronized);
             observed.kernel_max_error_ms = Some(value.max_error_ms);
@@ -579,7 +628,7 @@ fn report_with_automatic_time(
             "match"
         };
         Ok(
-            json!({"platform":"macos", "checked_at":chrono::Utc::now().to_rfc3339(), "target":target, "checks":rows,
+            json!({"platform":std::env::consts::OS, "checked_at":chrono::Utc::now().to_rfc3339(), "target":target, "checks":rows,
             "summary":{"status":status,"matched":matched,"mismatched":mismatched,"unknown":unknown,"compared":compared},
             "process_scope":"caller", "probe_server":server, "time_sync":time_sync, "time_sample":sample, "probe_error":probe_error, "time_repair":null}),
         )

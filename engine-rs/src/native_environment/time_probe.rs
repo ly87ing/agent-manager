@@ -1,21 +1,14 @@
-#[cfg(any(target_os = "macos", test))]
 use anyhow::{bail, Result};
-#[cfg(any(target_os = "macos", test))]
 use serde::Serialize;
 use std::net::IpAddr;
-#[cfg(any(target_os = "macos", test))]
 use std::net::{SocketAddr, UdpSocket};
-#[cfg(target_os = "macos")]
 use std::sync::Mutex;
-#[cfg(any(target_os = "macos", test))]
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[cfg(any(target_os = "macos", test))]
 const EPOCH: f64 = 2_208_988_800.0;
-#[cfg(target_os = "macos")]
 static LAST_QUERY: Mutex<Option<Instant>> = Mutex::new(None);
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 pub(super) fn wait_for_interval() {
     let remaining = LAST_QUERY
         .lock()
@@ -25,12 +18,11 @@ pub(super) fn wait_for_interval() {
     std::thread::sleep(remaining);
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 pub(super) fn mark_query() {
     *LAST_QUERY.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
 }
 
-#[cfg(any(target_os = "macos", test))]
 #[derive(Serialize)]
 pub(super) struct Sample {
     pub server: String,
@@ -57,7 +49,6 @@ pub(super) fn valid_host(host: &str) -> bool {
         })
 }
 
-#[cfg(target_os = "macos")]
 pub(super) fn query(host: &str) -> Result<Sample> {
     if !valid_host(host) {
         bail!("Invalid time server.");
@@ -72,27 +63,38 @@ pub(super) fn query(host: &str) -> Result<Sample> {
     let address = if let Ok(ip) = host.parse::<IpAddr>() {
         ip
     } else {
+        #[cfg(target_os = "macos")]
         let output =
             super::macos::command("/usr/bin/dscacheutil", &["-q", "host", "-a", "name", host])
                 .ok_or_else(|| anyhow::anyhow!("Name lookup did not finish."))?;
-        output
+        #[cfg(target_os = "macos")]
+        let address = output
             .lines()
             .find_map(|line| {
                 line.strip_prefix("ip_address: ")
                     .or_else(|| line.strip_prefix("ipv6_address: "))
                     .and_then(|value| value.parse().ok())
             })
-            .ok_or_else(|| anyhow::anyhow!("No time-server address was found."))?
+            .ok_or_else(|| anyhow::anyhow!("No time-server address was found."))?;
+        #[cfg(target_os = "linux")]
+        let address =
+            super::command::bounded("/usr/bin/getent", &["ahosts", host], Duration::from_secs(3))
+                .and_then(|text| {
+                    text.lines()
+                        .find_map(|line| line.split_whitespace().next()?.parse::<IpAddr>().ok())
+                })
+                .ok_or_else(|| anyhow::anyhow!("No time-server address was found."))?;
+        #[cfg(target_os = "windows")]
+        let address = super::windows::resolve(host)?;
+        address
     };
     query_address(host, SocketAddr::new(address, 123), Duration::from_secs(3))
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn seconds() -> Result<f64> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64())
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn timestamp(value: f64) -> [u8; 8] {
     let ntp = value + EPOCH;
     let mut out = [0; 8];
@@ -101,7 +103,6 @@ fn timestamp(value: f64) -> [u8; 8] {
     out
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn decode(bytes: &[u8], reference: f64) -> f64 {
     let seconds = u32::from_be_bytes(bytes[..4].try_into().unwrap()) as f64;
     let fraction = u32::from_be_bytes(bytes[4..8].try_into().unwrap()) as f64 / 4_294_967_296.0;
@@ -109,7 +110,6 @@ fn decode(bytes: &[u8], reference: f64) -> f64 {
     seconds + era * 4_294_967_296.0 + fraction - EPOCH
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn query_address(host: &str, address: SocketAddr, timeout: Duration) -> Result<Sample> {
     let socket = UdpSocket::bind(if address.is_ipv4() {
         "0.0.0.0:0"

@@ -17,7 +17,7 @@ Each page describes how one subsystem works now: what it is responsible for, whe
 | Managed program versions, npm layouts and executable discovery | [Programs](programs.md) |
 | On-demand queries and memory constraints | [Resource bounds](resource-bounds.md) |
 | Saved launch recipes and copyable commands | [Launch configurations](launch-configurations.md) |
-| macOS regional checks and explicitly confirmed repair | [Environment checks](environment-checks.md) |
+| Regional checks and explicitly confirmed repair | [Environment checks](environment-checks.md) |
 | English default and saved interface language | [Interface language](interface-language.md) |
 | Action notifications, loading, validation and result summaries | [Interface feedback](interface-feedback.md) |
 

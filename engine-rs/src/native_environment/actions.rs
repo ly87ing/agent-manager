@@ -8,10 +8,16 @@ fn settings_url(args: &[String]) -> Result<&'static str> {
         bail!("Choose a supported system settings pane.");
     }
     match args[1].as_str() {
-        "date-time" => Ok("x-apple.systempreferences:com.apple.Date-Time-Settings.extension"),
-        "language-region" => {
-            Ok("x-apple.systempreferences:com.apple.Localization-Settings.extension")
-        }
+        "date-time" => Ok(if cfg!(windows) {
+            "ms-settings:dateandtime"
+        } else {
+            "x-apple.systempreferences:com.apple.Date-Time-Settings.extension"
+        }),
+        "language-region" => Ok(if cfg!(windows) {
+            "ms-settings:regionlanguage"
+        } else {
+            "x-apple.systempreferences:com.apple.Localization-Settings.extension"
+        }),
         _ => bail!("Choose a supported system settings pane."),
     }
 }
@@ -24,10 +30,47 @@ pub(super) fn open_settings(req: &Request) -> Result<Value> {
             .ok_or_else(|| anyhow::anyhow!("Could not open System Settings."))?;
         Ok(json!({"pane":req.args[1]}))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        super::windows::script(&format!("Start-Process '{url}' -ErrorAction Stop"))
+            .ok_or_else(|| anyhow::anyhow!("Could not open Windows Settings."))?;
+        Ok(json!({"pane":req.args[1]}))
+    }
+    #[cfg(target_os = "linux")]
     {
         let _ = url;
-        bail!("Environment actions currently support macOS only.");
+        let kde = std::env::var("XDG_CURRENT_DESKTOP")
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .contains("kde");
+        let (program, pane) = if kde {
+            (
+                "/usr/bin/systemsettings",
+                if req.args[1] == "date-time" {
+                    "kcm_clock"
+                } else {
+                    "kcm_regionandlang"
+                },
+            )
+        } else {
+            (
+                "/usr/bin/gnome-control-center",
+                if req.args[1] == "date-time" {
+                    "datetime"
+                } else {
+                    "region"
+                },
+            )
+        };
+        crate::process::launch_command(program).arg(pane).stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn()
+            .map_err(|_| anyhow::anyhow!("Could not open the desktop's date/time or region settings. Use your desktop settings application."))?;
+        Ok(json!({"pane":req.args[1]}))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+    {
+        let _ = url;
+        bail!("Environment actions require a supported desktop.");
     }
 }
 
@@ -74,10 +117,14 @@ pub(super) fn check_time_settings(target: &Target, probe: bool) -> Result<Value>
             super::report_with_automatic_time(target, probe, Some(automatic))
         })
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        Ok(json!({"status":"read", "report":super::report(target, probe)?}))
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
     {
         let _ = (target, probe);
-        bail!("Environment actions currently support macOS only.");
+        bail!("Environment actions require a supported desktop.");
     }
 }
 
@@ -90,7 +137,11 @@ mod tests {
         for pane in ["date-time", "language-region"] {
             assert!(settings_url(&["--pane".into(), pane.into()])
                 .unwrap()
-                .starts_with("x-apple.systempreferences:"));
+                .starts_with(if cfg!(windows) {
+                    "ms-settings:"
+                } else {
+                    "x-apple.systempreferences:"
+                }));
         }
         for args in [
             vec![],

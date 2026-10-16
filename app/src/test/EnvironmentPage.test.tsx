@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { waitFor } from "@testing-library/react";
 import EnvironmentPage from "../pages/EnvironmentPage";
 import { setLanguage } from "../lib/i18n";
-import type { EnvironmentProfile, EnvironmentTarget } from "../lib/environment";
+import { environmentLaunchRecipe, type EnvironmentProfile, type EnvironmentTarget } from "../lib/environment";
 import { environmentFixture } from "./environment-fixture";
 import { createEnvironmentMock } from "./environment-mock";
 import { makeEnvelope } from "./fixtures";
@@ -26,6 +26,17 @@ async function applyClock() {
 }
 
 describe("Environment checks", () => {
+  it.each(["windows", "linux"] as const)("reads %s reports and prefills a native launch recipe", async (platform) => {
+    const report = { ...environmentFixture(), platform, time_sync: null };
+    renderWithEngine(<EnvironmentPage />, { "environment:check": makeEnvelope(report) });
+    await screen.findByText("已读取环境，尚未设置比较目标。");
+    expect(screen.queryByRole("alert")).toBeNull();
+    const recipe = environmentLaunchRecipe({ timezone: "Asia/Singapore", locale: "en_US.UTF-8" }, platform);
+    expect(recipe.platform).toBe(platform);
+    expect(recipe.shell).toBe(platform === "windows" ? "powershell" : "bash");
+    expect(recipe.variants[0].timezone).toBe("Asia/Singapore");
+    expect(recipe.env).toContainEqual({ name: "LANG", value: "en_US.UTF-8" });
+  });
   it("keeps profile management available when native system checks are unsupported", async () => {
     const mock = createEnvironmentMock();
     const { calls } = renderWithEngine(<EnvironmentPage />, {

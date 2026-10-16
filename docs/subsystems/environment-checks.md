@@ -3,12 +3,11 @@
 ## Responsibilities and sources of truth
 
 `environment:profiles` reports `checks_supported` from the native target platform.
-The page reads this capability before inspecting the machine. On Windows/Linux it
-explains the macOS-only boundary and disables compare, apply and repair; saved
-profile management remains available. A missing or invalid capability blocks
+The page reads this capability before inspecting the machine. macOS, Windows and
+Linux support inspection and comparison. A missing or invalid capability blocks
 inspection until the profile read succeeds.
 
-The Environment page inspects macOS regional settings and the caller's process
+The Environment page inspects regional settings and the caller's process
 environment. Targets are optional and grouped into user-created named profiles.
 Blank targets provide observations without a comparison. Los Angeles and
 Singapore built-in profiles are explicit recommendations, never selected or
@@ -26,6 +25,26 @@ and the read-only Darwin `ntp_gettime` kernel interface.
 Only `TZ`, `LANG`, `LC_ALL` and the six macOS POSIX locale categories are read from
 the caller's environment. System local time is read without a process `TZ`
 override. Every observation names its source.
+
+On Windows, bounded, profile-free Windows PowerShell reads `Get-TimeZone`,
+`Get-WinUserLanguageList`, `Get-WinHomeLocation`, `Get-Culture`, selected current-user
+format values and W32Time configuration/service state. System ICU maps IANA names
+to Windows zone IDs; names mapped to the same Windows zone compare equally.
+Domain time mode never presents a manual peer as the active configured server.
+W32Time synchronization and live peer identity remain unknown when unavailable;
+service state is not synchronization evidence. POSIX locale variables are inputs
+for compatible applications, not proof of a native Windows application's locale.
+An explicit Windows `TZ` leaves effective process time zone unknown.
+
+On Linux, `timedatectl` machine-readable properties and systemd-localed's D-Bus
+`Locale` supply system defaults. These do not establish desktop-user language
+overrides. `/etc/localtime` supplies a zone fallback and `/etc/os-release` supplies
+the OS version. Missing systemd services/properties remain unknown. No daemon or
+locale package is installed during a read. The NTP measurement client is shared
+on all three platforms. System settings open Windows Settings, GNOME Settings or
+KDE System Settings using fixed destinations; requesting a pane is not readback.
+Automatic settings repair and privileged clock adjustment are currently macOS
+operations; Windows/Linux mutation support is being implemented separately.
 
 Language comparison uses the complete ordered list, ignoring tag casing.
 Region uses the country component of `AppleLocale`. Each process locale category

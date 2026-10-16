@@ -23,7 +23,7 @@ const checkSchema = z.object({
 const targetSchema = z.object({ timezone: z.string().nullable(), languages: z.array(z.string()), region: z.string().nullable(), locale: z.string().nullable(), strict_locale: z.boolean(),
   ntp_server: z.string().nullable(), automatic_time: z.boolean().nullable(), time_synchronized: z.boolean().nullable(), automatic_timezone: z.boolean().nullable(), max_clock_offset_ms: z.number().nullable() }).strict();
 const reportSchema = z.object({
-  platform: z.literal("macos"), checked_at: z.string(),
+  platform: z.enum(["macos", "windows", "linux"]), checked_at: z.string(),
   target: targetSchema,
   checks: z.array(checkSchema),
   summary: z.object({ status: z.enum(["match", "mismatch", "incomplete"]), matched: z.number().int().nonnegative(), mismatched: z.number().int().nonnegative(), unknown: z.number().int().nonnegative(), compared: z.number().int().nonnegative() }).strict(),
@@ -87,8 +87,8 @@ export async function checkEnvironment(target: EnvironmentTarget = {}, probeTime
   return reportSchema.parse(await request("check", ["--spec", JSON.stringify(target), ...(probeTime ? ["--probe-time"] : [])]));
 }
 
-export function environmentLaunchRecipe(target: EnvironmentTarget): LaunchRecipe {
-  return { platform: "macos", shell: "zsh", kind: "app", target: "", args: [],
+export function environmentLaunchRecipe(target: EnvironmentTarget, platform: LaunchRecipe["platform"] = "macos"): LaunchRecipe {
+  return { platform, shell: platform === "windows" ? "powershell" : platform === "linux" ? "bash" : "zsh", kind: "app", target: "", args: [],
     env: target.locale ? ["LANG", "LC_ALL", "LC_CTYPE", "LC_COLLATE", "LC_MESSAGES", "LC_MONETARY", "LC_NUMERIC", "LC_TIME"].map((name) => ({ name, value: target.locale! })) : [],
     variants: [{ name: "environment", timezone: target.timezone ?? "" }] };
 }

@@ -47,6 +47,9 @@ function note(code: string) {
     clock_uncertain: t("测量误差覆盖了容许范围的边界，无法明确判断。"),
     actual_source_unavailable: t("本次无法可靠读取后台当前采用的授时节点。配置文件和单次查询不能代替此项证据。"),
     raw_locale_consistency: t("未设置的变量不强求；已设置的 locale 值都与目标比较，包括被 LC_ALL 覆盖的值。实际生效值在各 LC_* 项中展示。"),
+    windows_timezone: t("Windows 使用系统 ICU 将 IANA 名称映射到 Windows 时区；映射到同一 Windows 时区视为符合。"),
+    windows_process_environment: t("这些变量供支持 POSIX 环境的应用使用；Windows 原生应用可使用用户区域设置，需在目标应用中验证。"),
+    linux_system_locale: t("此项来自 Linux 系统默认 locale，桌面用户或应用可以覆盖；不代表当前用户的显示语言。"),
   } as Record<string, string>)[code] ?? code;
 }
 function stateLabel(state: EnvironmentCheck["state"]) {
@@ -193,7 +196,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   async function apply(action: EnvironmentApplication) {
     if (!selected) return;
     if (action === "clock") { if (await run(true)) setApplying(false); }
-    else if (action === "launch") { setApplying(false); onConfigureLaunch?.(environmentLaunchRecipe(profileTarget(selected))); }
+    else if (action === "launch") { if (observation) { setApplying(false); onConfigureLaunch?.(environmentLaunchRecipe(profileTarget(selected), observation.platform)); } }
     else if (await openSettings(action)) setApplying(false);
   }
   async function authorizeTimeSettings() {
@@ -312,7 +315,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
           <div className="min-w-0"><p className="text-xs text-muted-foreground">{t("期望值")}</p><p className="whitespace-pre-wrap break-all font-mono text-xs">{row.expected === null ? t("未设置目标") : showValue(row.expected)}</p>{evidence && row.state !== "mismatch" && row.state !== "unknown" && <p className="mt-1 text-xs text-muted-foreground">{note(row.note)}</p>}</div>
           <EnvironmentRemediation row={row} report={data} reason={note(row.note)} busy={busy} cooldown={cooldown}
             onRepair={openApplication} onAuthorize={() => setAuthorizing(true)} onSettings={(pane) => void openSettings(pane)} onRecheck={() => void run()}
-            onConfigureLaunch={onConfigureLaunch && selected ? () => onConfigureLaunch(environmentLaunchRecipe(profileTarget(selected))) : undefined} />
+            onConfigureLaunch={onConfigureLaunch && selected ? () => onConfigureLaunch(environmentLaunchRecipe(profileTarget(selected), data.platform)) : undefined} />
         </div>)}</div>
       </section>)}
       {data.time_sample && <p className="break-all text-xs text-muted-foreground">{t("查询地址：{0}；往返耗时：{1} ms；服务器层级：{2}。", data.time_sample.peer_address, data.time_sample.round_trip_ms.toFixed(1), String(data.time_sample.stratum))}{data.time_sample.special_use_address && ` ${t("该地址属于本地或特殊用途范围，无法据此确认实际服务器位置。")}`}</p>}
@@ -321,7 +324,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
     <p className="text-xs text-muted-foreground">{t("对比仅检查本机系统和 Agent Manager 当前进程。其他应用的环境需在该应用中另行验证。")}</p>
     </div>}
     {editor && <EnvironmentProfileEditor initial={editor.initial} draft={editor.draft} observation={observation} onSave={save} onClose={() => setEditor(null)} />}
-    {applying && selected && <EnvironmentApplyDialog profile={selected} report={data} busy={busy} cooldown={cooldown} error={applyError} canConfigureLaunch={Boolean(onConfigureLaunch)}
+    {applying && selected && <EnvironmentApplyDialog profile={selected} report={data} busy={busy} cooldown={cooldown} error={applyError} canConfigureLaunch={Boolean(onConfigureLaunch && observation)}
       onApply={(action) => void apply(action)} onClose={() => { setApplying(false); setApplyError(null); }} onClearError={() => setApplyError(null)} />}
     {repairing && selected && <EnvironmentRepairDialog profile={selected} onResult={repaired} onClose={() => setRepairing(false)} />}
     {repairResult && <p role="status" className="text-xs text-muted-foreground">{repairSummary(repairResult)} {repairResult.restart_required && t("请保存工作并重新启动相关应用；当前进程的检查结果保留原样。")}</p>}

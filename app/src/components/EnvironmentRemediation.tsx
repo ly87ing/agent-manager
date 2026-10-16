@@ -11,8 +11,8 @@ export function EnvironmentRemediation({ row, report, reason, busy, cooldown, on
   if (row.state !== "mismatch" && row.state !== "unknown") return null;
   const process = row.group === "process";
   const clock = row.id === "ntp.clock_offset";
-  const permission = row.id === "ntp.automatic_time" && row.state === "unknown";
-  const scope = process ? t("Agent Manager 当前进程") : row.group === "language" ? t("当前 macOS 用户") : clock ? t("本次参考时间测量") : t("本机系统");
+  const permission = report.platform === "macos" && row.id === "ntp.automatic_time" && row.state === "unknown";
+  const scope = process ? t("Agent Manager 当前进程") : row.group === "language" ? report.platform === "linux" ? t("本机系统") : t("当前用户") : clock ? t("本次参考时间测量") : t("本机系统");
   const effectiveLocaleMatches = row.id === "process.raw_locale" && report.checks.filter((item) => item.id.startsWith("LC_")).every((item) => item.state === "match");
   let guidance = reason;
   let action = null;
@@ -24,10 +24,10 @@ export function EnvironmentRemediation({ row, report, reason, busy, cooldown, on
   } else if (clock && row.state === "mismatch" && report.target.ntp_server && report.target.max_clock_offset_ms) {
     action = <button className={button} disabled={busy || cooldown} onClick={onRepair}>{t("立即校时（系统授权）")}</button>;
   } else if (row.state === "mismatch" && (row.group === "time" || row.id === "ntp.server" || row.id === "ntp.automatic_time")) {
-    guidance = t("在系统设置 → 通用 → 日期与时间中，将此项调整为期望值，然后重新检查。");
+    guidance = t("在系统的日期与时间设置中，将此项调整为期望值，然后重新检查。");
     action = <button className={button} disabled={busy} onClick={() => onSettings("date-time")}>{t("打开日期与时间设置")}</button>;
   } else if (row.state === "mismatch" && row.group === "language") {
-    guidance = t("在系统设置 → 通用 → 语言与地区中调整此项；部分应用需要重启。完成后重新检查。");
+    guidance = t("在系统的语言与地区设置中调整此项；部分应用需要重启。完成后重新检查。");
     action = <button className={button} disabled={busy} onClick={() => onSettings("language-region")}>{t("打开语言与地区设置")}</button>;
   } else if ((clock || row.id === "ntp.synchronized") && report.target.ntp_server) {
     action = <button className={button} disabled={busy || cooldown} onClick={onRecheck}>{t("重新对比 Profile")}</button>;

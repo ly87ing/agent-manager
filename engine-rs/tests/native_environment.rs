@@ -15,7 +15,7 @@ fn environment_check_does_not_create_home_or_data() {
             run_id: "read-only".into(),
         },
     );
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     {
         assert!(result.ok, "{:?}", result.errors);
         assert!(result.data["checks"].as_array().unwrap().len() >= 20);
@@ -43,7 +43,7 @@ fn environment_check_does_not_create_home_or_data() {
         }
         assert_eq!(result.data["summary"]["status"], "incomplete");
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     assert!(!result.ok);
     assert!(result.mode.offline);
     assert!(!ctx.home_dir.exists());

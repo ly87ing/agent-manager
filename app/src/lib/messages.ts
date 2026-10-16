@@ -1,5 +1,11 @@
 /** Application copy only; user content and engine diagnostics are never translation keys. */
 export const messages = {
+  "当前用户": "Current user",
+  "在系统的日期与时间设置中，将此项调整为期望值，然后重新检查。": "Adjust this item in the system date and time settings, then check again.",
+  "在系统的语言与地区设置中调整此项；部分应用需要重启。完成后重新检查。": "Adjust this item in the system language and region settings. Some applications need to restart; check again afterward.",
+  "Windows 使用系统 ICU 将 IANA 名称映射到 Windows 时区；映射到同一 Windows 时区视为符合。": "Windows maps IANA names using system ICU; names mapped to the same Windows time zone match.",
+  "这些变量供支持 POSIX 环境的应用使用；Windows 原生应用可使用用户区域设置，需在目标应用中验证。": "These variables are inputs for POSIX-aware applications. Native Windows applications may use user regional settings; verify in the target application.",
+  "此项来自 Linux 系统默认 locale，桌面用户或应用可以覆盖；不代表当前用户的显示语言。": "This is the Linux system locale default. Desktop users and applications can override it; it does not establish the current user's display language.",
   "环境检查与系统操作目前仅支持 macOS。你仍可管理环境 Profiles。": "Environment checks and system actions currently support macOS only. You can still manage environment profiles.",
   "读取时间：{0}": "Last read: {0}",
   "重新读取页面": "Read page again",
