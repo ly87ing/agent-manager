@@ -164,7 +164,11 @@ expired boot-time lease or changed system fingerprint before each write, and
 stop on uncertain outcomes. User APIs and HKCU always run in the original caller,
 even when UAC uses a different administrator. Domain W32Time modes, managed time
 policies and unknown evidence are unavailable; the tool never overrides policy or
-changes privacy. Time-zone policy uses the public Windows
+changes privacy. Native policy calls run in a separate profile-free process with
+a two-second deadline. A blocked policy API leaves only the dependent policy
+evidence unknown; the remaining system snapshot stays readable. Fresh privileged
+snapshots repeat this bounded read and never treat a timeout as unmanaged.
+Time-zone policy uses the public Windows
 [NamedPolicy API](https://learn.microsoft.com/en-us/uwp/api/windows.management.policies.namedpolicy).
 Enabling automatic time zone also requires known permitted machine location
 settings; disabling does not require location permission.

@@ -35,6 +35,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   include polling behavior; a fixed `0x8` would silently remove SpecialInterval.
 - Use the public policy API and test its real type/method binding. A catch-to-null
   reader can otherwise hide a misspelled native API behind a passing preview.
+- Separate API binding from availability. Native Windows CI loaded the correct
+  type but blocked inside GetPolicyFromPath beyond 30 seconds, including with the
+  official PowerShell invocation. Bound that call in a disposable child, retain
+  unknown policy gates, and prove that a deliberately blocked child cannot erase
+  unrelated system evidence. More timeout allowance does not fix a blocked API.
 
 ## 2026-10-16: read-only time inspection must not activate the clock daemon
 
