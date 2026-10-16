@@ -22,6 +22,31 @@ fn settings_url(args: &[String]) -> Result<&'static str> {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn kde_settings_command(pane: &str, listed: &str) -> Option<(&'static str, Vec<&'static str>)> {
+    let modules: std::collections::BTreeSet<_> = listed
+        .lines()
+        .filter_map(|line| line.split_once(" - ").map(|(id, _)| id.trim()))
+        .collect();
+    match pane {
+        "date-time" if modules.contains("kcm_clock") => {
+            Some(("/usr/bin/systemsettings", vec!["kcm_clock"]))
+        }
+        "language-region" if modules.contains("kcm_regionandlang") => {
+            Some(("/usr/bin/systemsettings", vec!["kcm_regionandlang"]))
+        }
+        "language-region"
+            if modules.contains("kcm_translations") && modules.contains("kcm_formats") =>
+        {
+            Some((
+                "/usr/bin/kcmshell5",
+                vec!["kcm_translations", "kcm_formats"],
+            ))
+        }
+        _ => None,
+    }
+}
+
 pub(super) fn open_settings(req: &Request) -> Result<Value> {
     let url = settings_url(&req.args)?;
     #[cfg(target_os = "macos")]
@@ -43,26 +68,26 @@ pub(super) fn open_settings(req: &Request) -> Result<Value> {
             .unwrap_or_default()
             .to_ascii_lowercase()
             .contains("kde");
-        let (program, pane) = if kde {
-            (
-                "/usr/bin/systemsettings",
-                if req.args[1] == "date-time" {
-                    "kcm_clock"
-                } else {
-                    "kcm_regionandlang"
-                },
-            )
+        let (program, panes) = if kde {
+            let listed =
+                super::command::read("/usr/bin/systemsettings", &["--list"]).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Could not discover KDE settings modules. Open System Settings manually."
+                    )
+                })?;
+            kde_settings_command(&req.args[1], &listed)
+                .ok_or_else(|| anyhow::anyhow!("The requested KDE settings modules are unavailable. Open System Settings manually."))?
         } else {
             (
                 "/usr/bin/gnome-control-center",
-                if req.args[1] == "date-time" {
+                vec![if req.args[1] == "date-time" {
                     "datetime"
                 } else {
                     "region"
-                },
+                }],
             )
         };
-        crate::process::launch_command(program).arg(pane).stdin(std::process::Stdio::null())
+        crate::process::launch_command(program).args(&panes).stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn()
             .map_err(|_| anyhow::anyhow!("Could not open the desktop's date/time or region settings. Use your desktop settings application."))?;
         Ok(json!({"pane":req.args[1]}))
@@ -152,6 +177,41 @@ mod tests {
                 settings_url(&args.into_iter().map(str::to_string).collect::<Vec<_>>()).is_err()
             );
         }
+    }
+
+    #[test]
+    fn kde_settings_use_only_complete_discovered_module_ids() {
+        let legacy = "Modules:\nkcm_clock        - Date and Time\nkcm_translations - Language\nkcm_formats      - Formats\n";
+        assert_eq!(
+            kde_settings_command("language-region", legacy),
+            Some((
+                "/usr/bin/kcmshell5",
+                vec!["kcm_translations", "kcm_formats"]
+            ))
+        );
+        assert_eq!(
+            kde_settings_command("date-time", legacy),
+            Some(("/usr/bin/systemsettings", vec!["kcm_clock"]))
+        );
+        assert_eq!(
+            kde_settings_command(
+                "language-region",
+                &format!("{legacy}kcm_regionandlang - 语言与区域\n")
+            ),
+            Some(("/usr/bin/systemsettings", vec!["kcm_regionandlang"]))
+        );
+        for listed in [
+            "",
+            "kcm_translations - Language",
+            "kcm_formats - Formats",
+            "fake - kcm_regionandlang",
+            "fake_kcm_regionandlang - Region",
+            "kcm_regionandlang_suffix - Region",
+        ] {
+            assert!(kde_settings_command("language-region", listed).is_none());
+        }
+        assert!(kde_settings_command("date-time", "fake - kcm_clock").is_none());
+        assert!(kde_settings_command("arbitrary", legacy).is_none());
     }
 
     #[test]

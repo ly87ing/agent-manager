@@ -63,6 +63,19 @@ services/properties remain unknown. No daemon or
 locale package is installed during a read. The NTP measurement client is shared
 on all three platforms. System settings open Windows Settings, GNOME Settings or
 KDE System Settings using fixed destinations; requesting a pane is not readback.
+Only an explicit KDE open-settings action runs a bounded `systemsettings --list`
+discovery. It opens the installed `kcm_clock` or merged `kcm_regionandlang`;
+older installations with both `kcm_translations` and `kcm_formats` open those
+two modules together through `kcmshell5`. Missing or unreadable modules produce
+an actionable failure. Descriptions and version strings never become arguments.
+This discovery creates a Qt application and may use desktop caches; it never
+runs during environment inspection, comparison or repair preview.
+GUI CI's [KDE fixture](../../scripts/verify-linux-settings.sh) uses real installed
+module catalogs and verifies the requested native window's process and module
+arguments on its Linux runners. Its HOME/XDG environment precedes private D-Bus
+activation; cleanup binds processes to the fixture's CLI session, UID, executable
+and start identity. This proves entry-point dispatch and window creation, not
+module content, a saved preference or full desktop-session behavior.
 GSettings `get` and `writable` run in a child with a Landlock ABI 3 or newer
 filesystem restriction (Linux 6.2 or newer with Landlock enabled). This blocks
 the verified GLib keyfile/dconf paths for file creation, content writes,

@@ -75,6 +75,13 @@ jobs:
           cargo fmt --manifest-path engine-rs/Cargo.toml -- --check
           cargo check --manifest-path engine-rs/Cargo.toml --all-targets
 
+      - name: Verify native KDE settings entry points
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          sudo apt-get install --no-install-recommends -y systemsettings kde-cli-tools plasma-workspace plasma-desktop xvfb x11-utils dbus-x11
+          bash scripts/verify-linux-settings.sh
+
       - name: Configure rust path remapping
         shell: bash
         run: |
@@ -185,6 +192,14 @@ jobs:
           cargo fmt --manifest-path app/src-tauri/Cargo.toml -- --check
           cargo test --manifest-path app/src-tauri/Cargo.toml
           cargo check --manifest-path app/src-tauri/Cargo.toml --all-targets
+
+      - name: Verify native KDE settings on the package platform
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          sudo apt-get install --no-install-recommends -y systemsettings kde-cli-tools plasma-workspace plasma-desktop x11-utils
+          CARGO_TARGET_DIR=app/src-tauri/target cargo build --manifest-path engine-rs/Cargo.toml --bin agent-manager-engine
+          bash scripts/verify-linux-settings.sh app/src-tauri/target/debug/agent-manager-engine
 
       - name: Configure build identity and path remapping
         shell: bash

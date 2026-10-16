@@ -6,6 +6,16 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: isolate desktop activation and bind cleanup to process birth
+
+- Changing HOME only for clients leaves a private D-Bus daemon's activation
+  environment unchanged. Establish HOME/XDG isolation before creating the bus,
+  and keep its directory until the bus/display wrappers have finished.
+- Initial window inventory never grants ownership. Bind later processes to the
+  created CLI session/group, current UID, executable and start identity; check
+  actual module arguments. Failure cleanup must also find those processes
+  through `/proc` before any window exists and must not depend on X11 queries.
+
 ## 2026-10-16: transport fixtures must preserve values and total deadlines
 
 - Lowercasing complete HTTP headers also lowercases case-sensitive tokens and
