@@ -18,13 +18,24 @@ fn boolean(value: Option<&&str>) -> Option<bool> {
 }
 
 fn language_tag(locale: &str) -> Option<String> {
-    let tag = locale.split(['.', '@']).next()?.replace('_', "-");
+    // POSIX modifiers can select a script; dropping one can change the language.
+    if locale.contains('@') {
+        return None;
+    }
+    let tag = locale.split('.').next()?.replace('_', "-");
     let language = tag.split('-').next()?;
     (language.len() >= 2
         && language.len() <= 8
         && language.bytes().all(|c| c.is_ascii_alphabetic())
         && !matches!(language, "POSIX"))
     .then_some(tag)
+}
+
+fn property(text: &str, signature: &str) -> Option<serde_json::Value> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    (value["type"] == signature)
+        .then(|| value.get("data").cloned())
+        .flatten()
 }
 
 // GetAll preserves typed arrays. RuntimeNTPServers is absent before systemd 251.
@@ -76,13 +87,26 @@ pub(super) fn account_user_path() -> Option<String> {
         ],
     )?;
     let value: serde_json::Value = serde_json::from_str(&output).ok()?;
-    value["data"][0]
+    if value["type"] != "o" || value["data"].as_array()?.len() != 1 {
+        return None;
+    }
+    let path = value["data"][0]
         .as_str()
         .filter(|path| {
             path.starts_with("/org/freedesktop/Accounts/User")
                 && path.chars().all(|c| c.is_ascii_alphanumeric() || c == '/')
         })
-        .map(str::to_string)
+        .map(str::to_string)?;
+    let actual = bus_property(
+        "org.freedesktop.Accounts",
+        &path,
+        "org.freedesktop.Accounts.User",
+        "Uid",
+        false,
+        "t",
+    )?
+    .as_u64()?;
+    (actual == unsafe { libc::geteuid() } as u64).then_some(path)
 }
 
 #[cfg(target_os = "linux")]
@@ -92,6 +116,14 @@ pub(super) fn gsetting(schema: &str, key: &str) -> Option<String> {
 
 #[cfg(target_os = "linux")]
 fn user_locale() -> (Option<Vec<String>>, Option<String>, Option<bool>) {
+    let gnome = super::repair_linux_desktop::gnome(
+        &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
+    );
+    if !gnome {
+        // Other desktops may override AccountsService; their defaults are not
+        // evidence of this user's actual desktop configuration.
+        return (None, None, None);
+    }
     let mut locales = Vec::<String>::new();
     if let Some(path) = account_user_path() {
         if let Some(primary) = bus_property(
@@ -100,37 +132,22 @@ fn user_locale() -> (Option<Vec<String>>, Option<String>, Option<bool>) {
             "org.freedesktop.Accounts.User",
             "Language",
             false,
+            "s",
         )
         .and_then(|value| value.as_str().map(str::to_string))
-        .filter(|value| language_tag(value).is_some())
-        {
-            locales.push(primary);
-            if let Some(extra) = bus_property(
-                "org.freedesktop.Accounts",
-                &path,
-                "org.freedesktop.Accounts.User",
-                "Languages",
-                false,
-            )
-            .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok())
-            {
-                for locale in extra {
-                    if language_tag(&locale).is_none() {
-                        return (None, None, None);
-                    }
-                    if !locales
-                        .iter()
-                        .any(|prior| prior.eq_ignore_ascii_case(&locale))
-                    {
-                        locales.push(locale);
-                    }
-                }
+        .filter(|value| {
+            super::Target {
+                locale: Some(value.clone()),
+                ..Default::default()
             }
+            .validate()
+            .is_ok()
+        }) {
+            locales.push(primary);
+            // GNOME also puts its formats locale in Languages for installers.
+            // Only Language establishes the primary desktop UI locale.
         }
     }
-    let gnome = super::repair_linux_desktop::gnome(
-        &std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default(),
-    );
     let region = if gnome {
         gsetting("org.gnome.system.locale", "region")
             .and_then(|value| {
@@ -178,6 +195,7 @@ pub(super) fn bus_property(
     interface: &str,
     key: &str,
     user: bool,
+    signature: &str,
 ) -> Option<serde_json::Value> {
     let text = read(
         "/usr/bin/busctl",
@@ -191,10 +209,7 @@ pub(super) fn bus_property(
             key,
         ],
     )?;
-    serde_json::from_str::<serde_json::Value>(&text)
-        .ok()?
-        .get("data")
-        .cloned()
+    property(&text, signature)
 }
 
 #[cfg(target_os = "linux")]
@@ -207,6 +222,7 @@ pub(super) fn collect() -> Observation {
         "org.freedesktop.locale1",
         "Locale",
         false,
+        "as",
     )
     .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok());
     let (languages, user_locale, automatic_timezone) = user_locale();
@@ -283,7 +299,7 @@ pub(super) fn collect() -> Observation {
         ),
         (
             "language.preferred",
-            "AccountsService current-UID Language/Languages (session preference)",
+            "GNOME current-UID AccountsService Language (primary UI preference only)",
         ),
         (
             "language.region",
@@ -348,11 +364,32 @@ mod tests {
         assert_eq!(boolean(values.get("Unknown")), None);
         assert_eq!(language_tag("en_US.UTF-8").as_deref(), Some("en-US"));
         assert_eq!(
-            language_tag("zh_Hant_TW@calendar=chinese").as_deref(),
+            language_tag("zh_Hant_TW.UTF-8").as_deref(),
             Some("zh-Hant-TW")
         );
-        for locale in ["C", "C.UTF-8", "POSIX", ""] {
+        for locale in [
+            "C",
+            "C.UTF-8",
+            "POSIX",
+            "",
+            "sr_RS@latin",
+            "zh_Hant_TW@calendar=chinese",
+        ] {
             assert!(language_tag(locale).is_none());
         }
+    }
+    #[test]
+    fn property_signature_preserves_unknown_and_never_coerces_current_user_identity() {
+        assert_eq!(
+            property(r#"{"type":"t","data":1000}"#, "t"),
+            Some(serde_json::json!(1000))
+        );
+        assert!(property(r#"{"type":"x","data":1000}"#, "t").is_none());
+        assert!(property(r#"{"type":"s","data":"1000"}"#, "t").is_none());
+        assert!(property(r#"{"type":"t"}"#, "t").is_none());
+        assert_eq!(
+            property(r#"{"type":"as","data":["LANG=en_US.UTF-8"]}"#, "as"),
+            Some(serde_json::json!(["LANG=en_US.UTF-8"]))
+        );
     }
 }

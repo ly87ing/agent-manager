@@ -110,6 +110,17 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Exercise a matching report with an explicit verification limit. A mismatching
   mock report already produces a warning and cannot test the all-clear guard.
 
+## 2026-10-16: desktop language lists are not interchangeable
+
+- GNOME writes its formats locale into AccountsService `Languages` for package
+  installers. Merging that list into UI language order invents fallback behavior.
+  Inspect the current user's typed UID and primary `Language`; preserve other
+  desktop defaults as unknown until their actual configuration is inspected.
+- Dropping POSIX `@latin` loses script identity. Keep an unmapped UI language
+  unknown without discarding a separately known formats locale. Native private
+  bus fixtures must exercise installer metadata, wrong UID and process-LANG
+  fallback refusal, not only string parsers.
+
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
 The focused dialog tests passed before the full suite reached Sources' existing

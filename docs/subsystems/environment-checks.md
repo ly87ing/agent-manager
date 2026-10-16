@@ -44,7 +44,12 @@ reconstructs the module path and can prepend AllUsers modules. The isolated
 policy child uses the same post-startup restriction.
 
 On Linux, `timedatectl` machine-readable properties supply time settings.
-AccountsService reads only the current UID's language preferences; GNOME's
+GNOME inspection verifies the returned AccountsService object's typed `Uid`
+against the original caller and reads its primary `Language`. `Languages` is
+installer-interest metadata that may also contain the formats locale, not proof
+of UI fallback order. POSIX modifiers with no verified language-tag mapping stay
+unknown; their independently known regional locale is preserved. Other desktops
+do not inherit GNOME account defaults. GNOME's
 `org.gnome.system.locale region` supplies the user region, with an empty setting
 inheriting the known current-user language. GNOME's automatic-time-zone preference
 is a requested switch, not proof of location behavior. Missing user evidence stays
