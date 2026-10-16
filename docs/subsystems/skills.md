@@ -15,6 +15,8 @@ separated by NUL bytes. Included empty directories affect v2; excluded directory
 names retain their existing behavior. Included unsupported entry types, reparse
 points other than supported symbolic links, and non-UTF-8 paths or targets cannot
 produce a new typed version.
+Typed link inspection reads the OS target before any comparison helper strips
+Windows namespace prefixes; absolute/drive/namespace targets are refused.
 
 Each typed version has an immutable `snapshot.json` outside `content`, declaring
 exactly schema 2 and its version ID. Verification reads the actual contents;

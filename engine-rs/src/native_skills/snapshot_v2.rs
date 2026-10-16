@@ -75,7 +75,7 @@ pub(super) fn source_versions(root: &Path) -> Result<SourceVersions> {
             let key = relative_key(relative)?;
             let legacy_key = relative.to_string_lossy().replace('\\', "/");
             let (kind, digest, target) = if metadata.file_type().is_symlink() {
-                let raw = crate::platform::read_link(&path)?;
+                let raw = std::fs::read_link(&path)?;
                 validate_symlink_internal(root, &path, &raw)?;
                 let raw_text = raw
                     .to_str()
@@ -374,6 +374,44 @@ mod tests {
         use std::os::unix::ffi::OsStringExt;
         let path = Path::new("nested").join(std::ffi::OsString::from_vec(vec![0xff]));
         assert!(relative_key(&path).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn typed_sources_refuse_absolute_namespaces_before_path_comparison_normalization() {
+        let root = Root::new();
+        let source = root.source();
+        let alias = source.join("alias");
+        for target in [
+            r"\\?\Volume{00000000-0000-0000-0000-000000000000}\outside".to_string(),
+            // Rust keeps an extended UNC prefix when its UTF-16 path exceeds
+            // MAX_PATH; short UNC targets may be returned in ordinary UNC form.
+            format!(
+                r"\\?\UNC\YOUR_SERVER\YOUR_SHARE\{}\{}\outside",
+                "a".repeat(130),
+                "b".repeat(130)
+            ),
+        ] {
+            std::os::windows::fs::symlink_file(&target, &alias).unwrap();
+            let original = std::fs::read_link(&alias).unwrap();
+            assert!(
+                original.is_absolute(),
+                "The fixture must retain an absolute namespace target"
+            );
+            let comparison = crate::platform::read_link(&alias).unwrap();
+            assert!(
+                !comparison.is_absolute(),
+                "The legacy comparison helper exposes the original normalization defect"
+            );
+            assert!(
+                hash_skill_dir(&source).is_ok(),
+                "The legacy control must exercise its existing behavior"
+            );
+            assert!(source_versions(&source).is_err());
+            assert!(snapshot_git_skill(&source, &root.data()).is_err());
+            assert!(!root.data().exists());
+            std::fs::remove_file(&alias).unwrap();
+        }
     }
 
     #[cfg(target_os = "linux")]

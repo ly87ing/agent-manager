@@ -13,6 +13,12 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   untyped entries. New Git snapshots bind entry kinds, raw targets, host-relative
   target meaning and included directories into a separate hash domain; keep old
   bindings explicit rather than silently migrating or claiming they are repaired.
+- Integrity readers must inspect the OS link target before pathname-comparison
+  normalization. The existing Windows helper strips namespace prefixes for
+  comparisons, which can turn an absolute volume/UNC target into relative text.
+  Typed source validation uses the unstripped OS readback; the native negative
+  case retains the legacy helper as a positive control rather than changing old
+  fingerprints globally.
 - Test the actual mixed-format status and fork paths, not only the hash helper.
   An unassigned fork need not have a bindings table; read its unassigned status
   and verify that it did not create one instead of assuming the table exists.
