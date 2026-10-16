@@ -64,6 +64,16 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   control that creates a disposable marker; an unconfigured fixture can otherwise
   pass the zero-activation assertion without testing the boundary.
 
+## 2026-10-16: executable names do not identify running applications
+
+- Parallel native Windows launch fixtures used independent files named probe.exe.
+  A basename-only tasklist check incorrectly blocked one fixture, exposing the
+  same defect for users with separate installations. Compare actual running-image
+  file identities; keep same-name/different-file and hard-link cases, including a
+  renamed alias. Renaming fixtures or serializing the suite would hide the defect.
+- Query limited process information without reading arguments or account data.
+  Retain conservative refusal for unreadable matching names and failed enumeration.
+
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
 The focused dialog tests passed before the full suite reached Sources' existing
