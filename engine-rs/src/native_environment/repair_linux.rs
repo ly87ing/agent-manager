@@ -171,6 +171,7 @@ pub(super) struct LinuxSettings {
     target: Target,
     manager: Option<Manager>,
     bound: Option<(String, String)>,
+    time: Option<super::repair_linux_time::State>,
 }
 
 #[cfg(target_os = "linux")]
@@ -189,6 +190,10 @@ impl Settings for LinuxSettings {
             })
         };
         let locale = target.locale.as_ref().map(|value| installed_locale(value));
+        self.time = target
+            .timezone
+            .as_ref()
+            .and_then(|_| super::repair_linux_time::read());
         let zone = target.timezone.as_ref().map(|zone| {
             std::fs::metadata(std::path::Path::new("/usr/share/zoneinfo").join(zone))
                 .is_ok_and(|meta| meta.is_file())
@@ -205,12 +210,11 @@ impl Settings for LinuxSettings {
                     )
                 })
                 .unwrap_or_else(|| "systemd user manager unavailable".into()),
-            context: json!({"manager":self.manager,"locale_installed":locale,"zone_installed":zone}),
+            context: json!({"manager":self.manager,"locale_installed":locale,"zone_installed":zone,"time":self.time}),
             ..Snapshot::default()
         };
         snapshot.unavailable.extend(
             [
-                "time.timezone",
                 "time.automatic_timezone",
                 "ntp.server",
                 "ntp.automatic_time",
@@ -219,6 +223,19 @@ impl Settings for LinuxSettings {
             ]
             .map(str::to_string),
         );
+        snapshot.values.insert(
+            "time.timezone".into(),
+            self.time.as_ref().map(|time| json!(time.zone)),
+        );
+        if self.time.is_none()
+            || target.automatic_timezone.is_some()
+            || target
+                .timezone
+                .as_ref()
+                .is_some_and(|zone| !super::repair_linux_time::installed(zone))
+        {
+            snapshot.unavailable.insert("time.timezone".into());
+        }
         for key in &keys {
             let id = format!("session.{key}");
             snapshot.values.insert(
@@ -238,8 +255,16 @@ impl Settings for LinuxSettings {
         }
         Ok(snapshot)
     }
-    fn system(&mut self, _: &[Item]) -> Result<(String, Vec<Item>, Option<bool>)> {
-        anyhow::bail!("No verified Linux system setting is available in this preview.");
+    fn system(&mut self, items: &[Item]) -> Result<(String, Vec<Item>, Option<bool>)> {
+        if items.len() != 1 || items[0].id != "time.timezone" {
+            anyhow::bail!("Unsupported Linux system repair batch.");
+        }
+        let before = self
+            .time
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Linux system timezone is unavailable."))?;
+        let (status, result) = super::repair_linux_time::apply(&items[0], before);
+        Ok((status, vec![result], None))
     }
     fn write_user(&mut self, item: &Item) -> bool {
         let Some(key) = item.id.strip_prefix("session.") else {

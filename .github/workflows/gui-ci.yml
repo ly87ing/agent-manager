@@ -59,6 +59,7 @@ jobs:
           export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
           systemctl --user start dbus.socket
           AM_ISOLATED_LINUX_USER_MANAGER=1 node scripts/verify-linux-user-environment.mjs
+          AM_ISOLATED_LINUX_TIMEZONE=1 node scripts/verify-linux-timezone.mjs
 
       - name: Run cargo checks
         shell: bash
