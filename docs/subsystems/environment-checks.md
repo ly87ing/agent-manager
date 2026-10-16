@@ -51,8 +51,9 @@ the OS version. Missing systemd services/properties remain unknown. No daemon or
 locale package is installed during a read. The NTP measurement client is shared
 on all three platforms. System settings open Windows Settings, GNOME Settings or
 KDE System Settings using fixed destinations; requesting a pane is not readback.
-Automatic settings repair and privileged clock adjustment are currently macOS
-operations; Windows/Linux mutation support is being implemented separately.
+Automatic settings repair is currently a macOS operation. Explicit clock
+correction is implemented on macOS, Windows and Linux; platform acceptance is
+tracked separately from compilation and source tests.
 
 Language comparison uses the complete ordered list, ignoring tag casing.
 Region uses the country component of `AppleLocale`. Each process locale category
@@ -420,3 +421,30 @@ real macOS integration exercises read-only preview and confirmed no-op without
 writing system preferences. This does not establish real administrator-authorized
 system-setting writes or target-app inheritance; those require a disposable macOS
 environment or a separately chosen, authorized live application.
+
+### Windows and Linux explicit clock correction
+
+`environment:sync-time --confirm` uses the shared fresh NTP measurement and
+uncertainty gate. Windows requests UAC and Linux requests Polkit through `pkexec`.
+The restricted native helper takes a fixed peer address, tolerance, boot-time
+deadline and explicit confirmation. After authorization it queries that peer
+again; it never replays the offset measured before the authorization dialog.
+Expired requests, ambiguous measurements, and samples already within tolerance
+perform no write. Immediately before writing it checks the deadline, sample age
+and wall-clock movement against monotonic elapsed time. Windows enables its own
+clock privilege and calls `SetSystemTime`; Linux uses the kernel-relative
+`clock_adjtime` offset operation, avoiding external read/compute/set delays.
+Neither changes time-service configuration. Cancellation/failed authorization
+stops the write; an independent NTP query establishes the result, never the exit
+code alone. A current-user OS mutation lock prevents concurrent repair and clock
+correction across different application data directories.
+
+The Tauri build hook includes the GUI-independent native helper in Windows and
+Linux resources. Linux executes a private, size-bounded temporary copy under the
+root-owned sticky system `/tmp`, rejecting unsafe parents and ignoring `TMPDIR`, so that
+authorization also works when an AppImage sidecar resides on a user-only FUSE
+mount. The helper's two-minute boot-time lease expires before the parent command's
+150-second deadline. Malformed/expired native CLI fixtures stop before privilege
+checks, NTP, HOME inspection or database creation. Pure tests cover uncertainty,
+already-corrected clocks and clock steps in both directions; they do not prove an
+actual privileged clock adjustment or its effect on an installed application.

@@ -2,6 +2,7 @@
 name = "agent-manager-engine"
 version = "0.1.0"
 edition = "2021"
+default-run = "agent-manager-engine"
 description = "Shared Rust engine library and CLI for Agent Manager"
 license = "MIT"
 repository = "https://github.com/ly87ing/agent-manager"

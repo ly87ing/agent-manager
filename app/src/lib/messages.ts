@@ -207,7 +207,7 @@ export const messages = {
   "校时需要此 Profile 填写时间服务器和偏差容限。可以先保存其他期望值，之后再补充。": "Clock correction needs a time server and tolerance in this profile. Other criteria can be saved first and these values added later.",
   "请先在 Profile 中填写时区或进程 locale。": "First set a time zone or process locale in this profile.",
   "时间服务器：{0}；偏差容限：{1}。": "Time server: {0}; clock tolerance: {1}.",
-  "执行前重新测量，仅在偏差明确超限时请求 macOS 授权并校正系统时钟，之后独立复测。其他期望值继续用于对比。": "Measure again before applying. Only a clearly excessive offset requests macOS authorization to correct the clock, followed by an independent check. Other criteria remain comparison targets.",
+  "执行前重新测量，仅在偏差明确超限时请求系统授权并校正时钟，之后独立复测。其他期望值继续用于对比。": "Measure again before applying. Only a clearly excessive offset requests system authorization to correct the clock, followed by an independent check. Other criteria remain comparison targets.",
   "将时区和 locale 填入未保存的启动配置，再选择应用。已有进程需正常退出后，由你重新启动；系统设置保持不变。": "Prefill a new unsaved launch configuration with the time zone and locale, then choose an application. Quit existing processes normally before launching them again. System settings remain unchanged.",
   "本次只打开系统设置。请按上方期望值手动调整，完成后重新对比；打开设置不代表已经应用成功。": "This action opens System Settings. Adjust the values above manually, then compare again. Opening settings does not establish that the values were applied.",
   "仅删除集合 {0}，不修改系统环境。": "Delete collection {0} without changing the system environment.",

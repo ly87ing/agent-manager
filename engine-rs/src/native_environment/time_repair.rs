@@ -1,26 +1,28 @@
 use super::Target;
 use crate::{Context, Request};
 use anyhow::Result;
-#[cfg(any(target_os = "macos", test))]
 use serde_json::json;
 use serde_json::Value;
-#[cfg(any(target_os = "macos", test))]
 use std::net::IpAddr;
+use std::sync::Mutex;
 #[cfg(target_os = "macos")]
-use std::{process::Stdio, sync::Mutex, time::Duration};
+use std::{process::Stdio, time::Duration};
+#[cfg(target_os = "macos")]
+type MutationGuard = std::fs::File;
+#[cfg(any(target_os = "linux", windows))]
+type MutationGuard = super::mutation_lock::Guard;
 
-#[cfg(target_os = "macos")]
 static REPAIR: Mutex<()> = Mutex::new(());
 
-#[cfg(any(target_os = "macos", test))]
-enum Adjustment {
+pub(super) enum Adjustment {
     Applied,
     Cancelled,
     Failed,
     Stale,
+    #[cfg(any(target_os = "linux", windows, test))]
+    NotNeeded,
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn clock_state(report: &Value) -> Option<&str> {
     report["checks"]
         .as_array()?
@@ -29,7 +31,6 @@ fn clock_state(report: &Value) -> Option<&str> {
         .as_str()
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn finish(mut report: Value, before: &Value, status: &str) -> Value {
     report["time_repair"] = json!({"status":status,
         "before_offset_ms":before["time_sample"]["offset_ms"],
@@ -39,7 +40,6 @@ fn finish(mut report: Value, before: &Value, status: &str) -> Value {
 
 // The command runner is a separate boundary so tests can prove that no
 // authorization or clock write occurs for an uncertain/in-tolerance sample.
-#[cfg(any(target_os = "macos", test))]
 fn run(
     mut measure: impl FnMut() -> Result<Value>,
     adjust: impl FnOnce(IpAddr) -> Adjustment,
@@ -66,6 +66,10 @@ fn run(
         Adjustment::Cancelled => "cancelled",
         Adjustment::Failed => "failed",
         Adjustment::Stale => "unavailable",
+        #[cfg(any(target_os = "linux", windows, test))]
+        Adjustment::NotNeeded if clock_state(&after) == Some("match") => "not_needed",
+        #[cfg(any(target_os = "linux", windows, test))]
+        Adjustment::NotNeeded => "unverified",
         Adjustment::Applied if clock_state(&after) == Some("match") => "verified",
         Adjustment::Applied => "unverified",
     };
@@ -74,7 +78,6 @@ fn run(
     Ok(result)
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn record(ctx: &Context, req: &Request, report: &Value) -> Result<()> {
     let repair = &report["time_repair"];
     let number = |value: &Value| value.as_f64().filter(|value| value.is_finite());
@@ -143,37 +146,42 @@ fn adjust(peer: IpAddr, measured_at: i64) -> Adjustment {
 pub(super) fn handle(ctx: &Context, req: &Request, target: &Target) -> Result<Value> {
     target.validate_time_repair()?;
     #[cfg(target_os = "macos")]
-    {
-        let file_guard = super::repair_macos::mutation_lock()?;
-        handle_locked(ctx, req, target, &file_guard)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (ctx, req);
-        anyhow::bail!("Time correction currently supports macOS only.");
-    }
+    let guard = super::repair_macos::mutation_lock()?;
+    #[cfg(any(target_os = "linux", windows))]
+    let guard = super::mutation_lock::acquire()?;
+    handle_locked(ctx, req, target, &guard)
 }
 
-#[cfg(target_os = "macos")]
 pub(super) fn handle_locked(
     ctx: &Context,
     req: &Request,
     target: &Target,
-    _file_guard: &std::fs::File,
+    _guard: &MutationGuard,
 ) -> Result<Value> {
     target.validate_time_repair()?;
     let _guard = REPAIR
         .try_lock()
         .map_err(|_| anyhow::anyhow!("A time correction is already running."))?;
+    #[cfg(target_os = "macos")]
     let measured_at = std::cell::Cell::new(0);
     run(
         || {
             super::time_probe::wait_for_interval();
             let report = super::report(target, true)?;
+            #[cfg(target_os = "macos")]
             measured_at.set(chrono::Utc::now().timestamp());
             Ok(report)
         },
-        |peer| adjust(peer, measured_at.get()),
+        |peer| {
+            #[cfg(target_os = "macos")]
+            {
+                adjust(peer, measured_at.get())
+            }
+            #[cfg(any(target_os = "linux", windows))]
+            {
+                super::time_repair_native::adjust(peer, target.max_clock_offset_ms.unwrap())
+            }
+        },
         |report| record(ctx, req, report),
     )
 }
@@ -228,6 +236,8 @@ mod tests {
             (Adjustment::Cancelled, "mismatch", "cancelled"),
             (Adjustment::Failed, "match", "failed"),
             (Adjustment::Stale, "match", "unavailable"),
+            (Adjustment::NotNeeded, "match", "not_needed"),
+            (Adjustment::NotNeeded, "mismatch", "unverified"),
         ] {
             let calls = Cell::new(0);
             let result = run(

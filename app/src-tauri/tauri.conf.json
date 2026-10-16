@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "io.github.ly87ing.agent-manager",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "node ../scripts/build-clock-helper.mjs --debug && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm build && node ../scripts/build-clock-helper.mjs",
     "frontendDist": "../dist"
   },
   "app": {
@@ -47,7 +47,7 @@
       "app"
     ],
     "shortDescription": "Manage MCP servers, rules, and skills",
-    "longDescription": "Agent Manager manages MCP servers, rules, skills, extension dependencies, saved general launch configurations, and macOS environment checks. It does not manage assistant accounts, authentication, provider settings, or assistant installation and upgrades.",
+    "longDescription": "Agent Manager manages MCP servers, rules, skills, extension dependencies, saved general launch configurations, and environment checks. It does not manage assistant accounts, authentication, provider settings, or assistant installation and upgrades.",
     "copyright": "Copyright (c) 2026 ly87ing",
     "publisher": "ly87ing",
     "category": "DeveloperTool",

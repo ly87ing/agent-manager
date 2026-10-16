@@ -1,10 +1,14 @@
 //! Read-only regional environment checks shared by the desktop and CLI.
 mod actions;
+#[cfg(any(target_os = "linux", windows, test))]
+mod clock_helper;
 mod command;
 #[cfg(any(target_os = "linux", test))]
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(any(target_os = "linux", windows))]
+mod mutation_lock;
 pub(crate) mod profiles;
 #[cfg(any(target_os = "macos", test))]
 mod repair;
@@ -12,6 +16,8 @@ mod repair;
 mod repair_macos;
 mod time_probe;
 mod time_repair;
+#[cfg(any(target_os = "linux", windows))]
+mod time_repair_native;
 #[cfg(target_os = "macos")]
 mod time_sync;
 #[cfg(any(target_os = "windows", test))]
@@ -704,3 +710,26 @@ fn envelope(req: &Request, offline: bool, result: Result<Value>) -> Envelope {
 
 #[cfg(test)]
 mod tests;
+
+// Runs before either desktop or CLI initialization; malformed helper arguments
+// never inspect HOME, configuration, credentials or application storage.
+pub(crate) fn clock_helper_cli(args: &[String]) -> Option<i32> {
+    if args.first().map(String::as_str) != Some("--environment-clock-helper") {
+        return None;
+    }
+    #[cfg(any(target_os = "linux", windows))]
+    {
+        Some(clock_helper::run(args))
+    }
+    #[cfg(not(any(target_os = "linux", windows)))]
+    {
+        Some(2)
+    }
+}
+
+pub(crate) fn configure_clock_helper(path: std::path::PathBuf) {
+    #[cfg(any(target_os = "linux", windows))]
+    time_repair_native::configure(path);
+    #[cfg(not(any(target_os = "linux", windows)))]
+    let _ = path;
+}

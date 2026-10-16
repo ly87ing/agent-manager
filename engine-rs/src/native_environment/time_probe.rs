@@ -8,7 +8,6 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const EPOCH: f64 = 2_208_988_800.0;
 static LAST_QUERY: Mutex<Option<Instant>> = Mutex::new(None);
 
-#[cfg(any(target_os = "macos", test))]
 pub(super) fn wait_for_interval() {
     let remaining = LAST_QUERY
         .lock()
@@ -18,7 +17,6 @@ pub(super) fn wait_for_interval() {
     std::thread::sleep(remaining);
 }
 
-#[cfg(any(target_os = "macos", test))]
 pub(super) fn mark_query() {
     *LAST_QUERY.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
 }
@@ -32,6 +30,12 @@ pub(super) struct Sample {
     pub offset_ms: f64,
     pub round_trip_ms: f64,
     pub uncertainty_ms: f64,
+    #[cfg(any(target_os = "linux", windows))]
+    #[serde(skip)]
+    pub captured: Instant,
+    #[cfg(any(target_os = "linux", windows))]
+    #[serde(skip)]
+    pub captured_wall: f64,
 }
 
 pub(super) fn valid_host(host: &str) -> bool {
@@ -128,6 +132,8 @@ fn query_address(host: &str, address: SocketAddr, timeout: Duration) -> Result<S
     let mut response = [0u8; 512];
     let length = socket.recv(&mut response)?;
     let received_at = seconds()?;
+    #[cfg(any(target_os = "linux", windows))]
+    let captured = Instant::now();
     if (received_at - sent_at - start.elapsed().as_secs_f64()).abs() > 0.1 {
         bail!("The local clock changed during the query.");
     }
@@ -176,6 +182,10 @@ fn query_address(host: &str, address: SocketAddr, timeout: Duration) -> Result<S
         offset_ms: ((server_received - sent_at) + (server_sent - received_at)) * 500.0,
         round_trip_ms: round_trip.max(0.0) * 1000.0,
         uncertainty_ms: uncertainty * 1000.0,
+        #[cfg(any(target_os = "linux", windows))]
+        captured,
+        #[cfg(any(target_os = "linux", windows))]
+        captured_wall: received_at,
     })
 }
 

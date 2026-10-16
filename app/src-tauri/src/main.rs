@@ -49,6 +49,9 @@ fn show_main_window(app: &tauri::AppHandle) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = agent_manager_engine::environment_clock_helper_cli(&args) {
+        std::process::exit(code);
+    }
     if args.first().is_some_and(|arg| arg == "--account-launch") {
         let code = match agent_manager_engine::native_account_context::run_cli(&args[1..]) {
             Ok(code) => code,
@@ -79,6 +82,15 @@ fn main() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            let helper = app
+                .path()
+                .resource_dir()?
+                .join("clock-helper")
+                .join(format!(
+                    "agent-manager-clock-helper{}",
+                    std::env::consts::EXE_SUFFIX
+                ));
+            agent_manager_engine::configure_clock_helper(helper);
             // 分享链接 agentmanager://import?data=…：只把链接文字交给界面的导入对话框，
             // 由界面校验、展示并等用户确认；这里不解析、不写任何东西。其他链接一律忽略。
             let handle = app.handle().clone();

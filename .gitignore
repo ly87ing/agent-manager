@@ -48,6 +48,8 @@ app/node_modules/
 app/dist/
 app/src-tauri/target/
 app/src-tauri/gen/
+app/src-tauri/clock-helper/agent-manager-clock-helper
+app/src-tauri/clock-helper/agent-manager-clock-helper.exe
 
 # Rust engine slice (engine-rs/)
 engine-rs/target/

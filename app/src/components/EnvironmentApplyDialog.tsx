@@ -41,7 +41,7 @@ export function EnvironmentApplyDialog({ profile, report, busy, cooldown, error,
         </tr>)}</tbody>
       </table></div>
       {action === "clock" && <><p className="break-all text-xs">{t("时间服务器：{0}；偏差容限：{1}。", target.ntp_server ?? t("未设置目标"), target.max_clock_offset_ms == null ? t("未设置目标") : `${target.max_clock_offset_ms} ms`)}</p>
-        <p className="text-xs text-muted-foreground">{t("执行前重新测量，仅在偏差明确超限时请求 macOS 授权并校正系统时钟，之后独立复测。其他期望值继续用于对比。")}</p></>}
+        <p className="text-xs text-muted-foreground">{t("执行前重新测量，仅在偏差明确超限时请求系统授权并校正时钟，之后独立复测。其他期望值继续用于对比。")}</p></>}
       {action === "launch" && <p className="text-xs text-muted-foreground">{t("将时区和 locale 填入未保存的启动配置，再选择应用。已有进程需正常退出后，由你重新启动；系统设置保持不变。")}</p>}
       {(action === "date-time" || action === "language-region") && <p className="text-xs text-muted-foreground">{t("本次只打开系统设置。请按上方期望值手动调整，完成后重新对比；打开设置不代表已经应用成功。")}</p>}
     </div>

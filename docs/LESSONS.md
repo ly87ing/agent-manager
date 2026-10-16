@@ -6,6 +6,19 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-15: remeasure after authorization before correcting the clock
+
+- A pre-authorization offset can be obsolete when a system time service corrects
+  the clock during UAC/Polkit. Wall-clock age alone cannot distinguish that case.
+  The native helper must query the fixed peer again after authorization and check
+  uncertainty, a boot-time lease and wall/monotonic consistency before writing.
+- An absolute Linux target computed by separate `date`/`awk` commands loses their
+  startup time. Use the kernel-relative offset operation instead. Request only
+  `ADJ_SETOFFSET`; `ADJ_NANO` also changes persistent kernel NTP resolution state.
+- Exercise malformed and expired requests through the actual CLI/helper binaries
+  and read back absent HOME/database state. Pure boundary tests and native CI do
+  not establish real privileged desktop acceptance.
+
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
 The focused dialog tests passed before the full suite reached Sources' existing

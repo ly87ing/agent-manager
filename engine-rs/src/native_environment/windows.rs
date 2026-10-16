@@ -22,7 +22,7 @@ pub(super) fn script(text: &str) -> Option<String> {
 }
 
 #[cfg(windows)]
-fn script_timeout(text: &str, timeout: std::time::Duration) -> Option<String> {
+pub(super) fn script_timeout(text: &str, timeout: std::time::Duration) -> Option<String> {
     super::command::bounded(
         &powershell()?,
         &[

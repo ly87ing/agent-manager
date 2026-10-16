@@ -41,3 +41,13 @@ pub mod store;
 pub use envelope::{diagnostic, Diagnostic, Envelope, Lock, Mode, CONTRACT_ID};
 pub use native::{execute, Context, Request};
 pub use process::shutdown_groups as shutdown_temporary_commands;
+
+/// Restricted startup dispatch for the explicitly confirmed native clock helper.
+pub fn environment_clock_helper_cli(args: &[String]) -> Option<i32> {
+    native_environment::clock_helper_cli(args)
+}
+
+/// Use the packaged native sidecar for confirmed clock correction.
+pub fn configure_clock_helper(path: std::path::PathBuf) {
+    native_environment::configure_clock_helper(path);
+}

@@ -16,6 +16,9 @@ fn data_dir() -> PathBuf {
 }
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = agent_manager_engine::environment_clock_helper_cli(&argv) {
+        std::process::exit(code);
+    }
     if argv.first().map(String::as_str) == Some("--account-launch") {
         match agent_manager_engine::native_account_context::run_cli(&argv[1..]) {
             Ok(code) => std::process::exit(code),
