@@ -6,6 +6,14 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: window-tree enumeration is not an atomic observation
+
+- Native KDE acceptance passed initially, then main CI failed because an X11
+  child disappeared between tree and geometry queries. Retry only the reported
+  `Bad Window`/`Bad Drawable` tree-query failures, with a fixed retry bound.
+  Display errors, timeouts and unrelated X errors still fail immediately; keep
+  native window ownership, exact arguments and the original discovery deadline.
+
 ## 2026-10-16: a staging name does not establish filesystem ownership
 
 - An empty existing version was overwritten by ordinary directory rename. Treat
