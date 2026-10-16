@@ -10,6 +10,18 @@ pub(super) fn read(program: &str, args: &[&str]) -> Option<String> {
 #[cfg(any(target_os = "linux", windows))]
 pub(super) fn bounded(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
     let mut command = crate::process::launch_command(program);
+    #[cfg(windows)]
+    if std::path::Path::new(program)
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("powershell.exe"))
+    {
+        // NoProfile does not disable module-cache writes or user module discovery.
+        command.env("PSModuleAnalysisCachePath", "NUL");
+        command.env(
+            "PSModulePath",
+            std::path::Path::new(program).parent()?.join("Modules"),
+        );
+    }
     command
         .args(args)
         .env("LC_ALL", "C")

@@ -204,7 +204,7 @@ fn locale_check(id: &str, observed: String, expected: Option<String>) -> Check {
 
 fn region(locale: &str) -> Option<String> {
     locale
-        .split('@')
+        .split(['@', '.'])
         .next()?
         .split(['_', '-'])
         .skip(1)
@@ -473,7 +473,7 @@ fn evaluate(observed: &Observation, target: &Target) -> Vec<Check> {
         }
     }
     if observed.platform == Some("linux") {
-        for row in rows.iter_mut().filter(|row| row.group == "language") {
+        for row in rows.iter_mut().filter(|row| row.id == "language.formats") {
             row.note = "linux_system_locale";
         }
     }

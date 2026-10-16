@@ -1,6 +1,19 @@
 use super::*;
 
 #[test]
+fn region_parsing_separates_encoding_script_and_modifiers() {
+    for (locale, expected) in [
+        ("en_US.UTF-8", Some("US")),
+        ("sr_RS.UTF-8@latin", Some("RS")),
+        ("zh_Hant_TW@calendar=chinese", Some("TW")),
+        ("en-GB", Some("GB")),
+        ("C.UTF-8", None),
+    ] {
+        assert_eq!(region(locale).as_deref(), expected);
+    }
+}
+
+#[test]
 fn clock_tolerance_keeps_overlapping_uncertainty_inconclusive() {
     assert_eq!(clock_state(5.0, 2.0, 10), "match");
     assert_eq!(clock_state(-15.0, 2.0, 10), "mismatch");

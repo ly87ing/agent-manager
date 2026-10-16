@@ -87,7 +87,7 @@ export async function checkEnvironment(target: EnvironmentTarget = {}, probeTime
   return reportSchema.parse(await request("check", ["--spec", JSON.stringify(target), ...(probeTime ? ["--probe-time"] : [])]));
 }
 
-export function environmentLaunchRecipe(target: EnvironmentTarget, platform: LaunchRecipe["platform"] = "macos"): LaunchRecipe {
+export function environmentLaunchRecipe(target: EnvironmentTarget, platform: LaunchRecipe["platform"]): LaunchRecipe {
   return { platform, shell: platform === "windows" ? "powershell" : platform === "linux" ? "bash" : "zsh", kind: "app", target: "", args: [],
     env: target.locale ? ["LANG", "LC_ALL", "LC_CTYPE", "LC_COLLATE", "LC_MESSAGES", "LC_MONETARY", "LC_NUMERIC", "LC_TIME"].map((name) => ({ name, value: target.locale! })) : [],
     variants: [{ name: "environment", timezone: target.timezone ?? "" }] };

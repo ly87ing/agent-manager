@@ -1,5 +1,39 @@
 use agent_manager_engine::{execute, Context, Request};
 
+#[cfg(windows)]
+#[test]
+fn windows_inspection_does_not_load_user_modules_or_write_module_cache() {
+    let root = std::env::temp_dir().join(format!("am-environment-ps-{}", std::process::id()));
+    let module = root.join("modules/International");
+    std::fs::create_dir_all(&module).unwrap();
+    let marker = root.join("unexpected-module");
+    std::fs::write(
+        module.join("International.psm1"),
+        format!(
+            "[IO.File]::WriteAllText('{}','loaded')",
+            marker.to_string_lossy().replace('\'', "''")
+        ),
+    )
+    .unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
+        .args(["environment:check", "--json"])
+        .env("HOME", root.join("home"))
+        .env("AGENT_MANAGER_DATA_DIR", root.join("data"))
+        .env("LOCALAPPDATA", root.join("local"))
+        .env("PSModulePath", root.join("modules"))
+        .env("PSModuleAnalysisCachePath", root.join("unexpected-cache"))
+        .output()
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["ok"], true, "{value}");
+    assert!(!marker.exists());
+    assert!(!root.join("unexpected-cache").exists());
+    assert!(!root.join("local").exists());
+    assert!(!root.join("home").exists());
+    assert!(!root.join("data").exists());
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn environment_check_does_not_create_home_or_data() {
     let root = std::env::temp_dir().join(format!("environment-check-{}", std::process::id()));
@@ -27,8 +61,17 @@ fn environment_check_does_not_create_home_or_data() {
             .find(|row| row["id"] == "ntp.synchronized")
             .unwrap();
         if result.data["time_sync"].is_null() {
-            assert_eq!(sync["state"], "unknown");
-            assert!(sync["observed"].is_null());
+            #[cfg(not(target_os = "linux"))]
+            {
+                assert_eq!(sync["state"], "unknown");
+                assert!(sync["observed"].is_null());
+            }
+            #[cfg(target_os = "linux")]
+            match sync["observed"].as_str() {
+                Some("synchronized" | "unsynchronized") => assert_eq!(sync["state"], "observed"),
+                None => assert_eq!(sync["state"], "unknown"),
+                other => panic!("Invalid Linux kernel synchronization observation: {other:?}"),
+            }
         } else {
             let synchronized = result.data["time_sync"]["synchronized"].as_bool().unwrap();
             assert_eq!(

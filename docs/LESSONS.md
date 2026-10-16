@@ -16,6 +16,18 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Treat platform read tools as part of the zero-write boundary.**
+- Windows PowerShell `-NoProfile` still permits a module-analysis cache and user
+  module discovery. Disable that cache and restrict module search to system
+  modules before any environment read; test with hostile module/cache variables.
+- Keep current-user regional observations separate from Linux system defaults.
+  Strip POSIX encodings before extracting a region, and account for Windows time
+  policy/provider state instead of trusting local parameters alone.
+- A native Linux CI run exposed a macOS-only test assumption: kernel sync can be
+  readable without Darwin's `time_sync` structure. Preserve the Darwin assertion
+  and independently validate the Linux observation instead of discarding it.
+- Seen 1× (2026-10-15; cross-platform environment reads).
+
 **Isolate drop-based lock assertions from concurrent process-launch tests.**
 - A full-suite environment lock assertion failed after the owning handle closed.
   A controlled fork reproduced a child retaining a CLOEXEC flock until exec/exit.

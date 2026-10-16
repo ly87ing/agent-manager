@@ -31,14 +31,22 @@ On Windows, bounded, profile-free Windows PowerShell reads `Get-TimeZone`,
 format values and W32Time configuration/service state. System ICU maps IANA names
 to Windows zone IDs; names mapped to the same Windows zone compare equally.
 Domain time mode never presents a manual peer as the active configured server.
+Time policy ownership or unreadable policy state leaves local switch/peer evidence
+unknown; disabled NtpClient or W32Time service settings are not reported as on.
 W32Time synchronization and live peer identity remain unknown when unavailable;
 service state is not synchronization evidence. POSIX locale variables are inputs
 for compatible applications, not proof of a native Windows application's locale.
 An explicit Windows `TZ` leaves effective process time zone unknown.
+The reader disables PowerShell's module-analysis cache and searches only the
+system PowerShell module directory; caller-provided module paths are not executed.
 
-On Linux, `timedatectl` machine-readable properties and systemd-localed's D-Bus
-`Locale` supply system defaults. These do not establish desktop-user language
-overrides. `/etc/localtime` supplies a zone fallback and `/etc/os-release` supplies
+On Linux, `timedatectl` machine-readable properties supply time settings.
+AccountsService reads only the current UID's language preferences; GNOME's
+`org.gnome.system.locale region` supplies the user region, with an empty setting
+inheriting the known current-user language. GNOME's automatic-time-zone preference
+is a requested switch, not proof of location behavior. Missing user evidence stays
+unknown. systemd-localed's D-Bus `Locale` supplies untargeted system-default inventory
+only. `/etc/localtime` supplies a zone fallback and `/etc/os-release` supplies
 the OS version. Missing systemd services/properties remain unknown. No daemon or
 locale package is installed during a read. The NTP measurement client is shared
 on all three platforms. System settings open Windows Settings, GNOME Settings or

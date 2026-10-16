@@ -123,6 +123,7 @@ try { $geo=(Get-WinHomeLocation -ErrorAction Stop).GeoId; $result.region=([Globa
 try { $result.formats=Get-ItemProperty 'HKCU:\Control Panel\International' -ErrorAction Stop | Select-Object sShortDate,sLongDate,sTimeFormat,sDecimal,sThousand,sCurrency } catch {}
 try { $service=Get-Service W32Time -ErrorAction Stop; $result.service=($service.Status -eq 'Running') } catch {}
 try { $key=Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters' -ErrorAction Stop; $result.ntp=$key.NtpServer; $result.type=$key.Type } catch {}
+try { $result.policy=Test-Path 'HKLM:\SOFTWARE\Policies\Microsoft\W32Time' -ErrorAction Stop; $result.ntp_enabled=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders\NtpClient' -ErrorAction Stop).Enabled; $result.time_start=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time' -ErrorAction Stop).Start } catch {}
 try { $result.zone_start=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\tzautoupdate' -ErrorAction Stop).Start } catch {}
 $result.local_time=(Get-Date).ToString('yyyy-MM-dd HH:mm:ss zzz')
 $result.os=[Environment]::OSVersion.Version.ToString()
@@ -131,8 +132,9 @@ $result | ConvertTo-Json -Depth 5 -Compress
 
 pub(super) fn decode(value: &Value) -> Observation {
     let text = |key: &str| value[key].as_str().map(str::to_string);
+    let unmanaged = value["policy"] == false;
     let server = text("ntp")
-        .filter(|_| value["type"] == "NTP")
+        .filter(|_| unmanaged && value["type"] == "NTP" && value["ntp_enabled"] == 1)
         .and_then(|value| {
             let mut peers = value.split_whitespace();
             let server = peers.next()?.split(',').next()?;
@@ -147,10 +149,20 @@ pub(super) fn decode(value: &Value) -> Observation {
         format_overrides: value.get("formats").cloned(),
         ntp_server: server,
         // Registry Type is configuration; it does not prove W32Time synchronized.
-        automatic_time: match value["type"].as_str() {
-            Some("NoSync") => Some(false),
-            Some("NTP" | "NT5DS" | "AllSync") => Some(true),
-            _ => None,
+        automatic_time: if !unmanaged {
+            None
+        } else if value["type"] == "NoSync" || value["ntp_enabled"] == 0 || value["time_start"] == 4
+        {
+            Some(false)
+        } else {
+            match (
+                value["type"].as_str(),
+                value["ntp_enabled"].as_u64(),
+                value["time_start"].as_u64(),
+            ) {
+                (Some("NTP" | "NT5DS" | "AllSync"), Some(1), Some(2 | 3)) => Some(true),
+                _ => None,
+            }
         },
         automatic_timezone: match value["zone_start"].as_u64() {
             Some(3) => Some(true),
@@ -202,15 +214,31 @@ mod tests {
     #[test]
     fn windows_reads_preserve_unknowns_and_do_not_infer_sync_from_a_running_service() {
         let read = decode(
-            &serde_json::json!({"type":"NT5DS","ntp":"example.org,0x9","service":true,"languages":["en-US","zh-CN"]}),
+            &serde_json::json!({"policy":false,"ntp_enabled":1,"time_start":3,"type":"NT5DS","ntp":"example.org,0x9","service":true,"languages":["en-US","zh-CN"]}),
         );
         assert_eq!(read.automatic_time, Some(true));
         assert_eq!(read.time_synchronized, None);
         assert_eq!(read.ntp_server, None);
         assert_eq!(read.languages.unwrap(), ["en-US", "zh-CN"]);
         assert!(decode(&Value::Null).automatic_time.is_none());
-        let read = decode(&serde_json::json!({"type":"NTP","ntp":"Example.ORG.,0x9"}));
+        let read = decode(
+            &serde_json::json!({"policy":false,"ntp_enabled":1,"time_start":3,"type":"NTP","ntp":"Example.ORG.,0x9"}),
+        );
         assert_eq!(read.ntp_server.as_deref(), Some("example.org"));
+        for policy in [Value::Null, Value::Bool(true)] {
+            let read = decode(
+                &serde_json::json!({"policy":policy,"type":"NTP","ntp_enabled":1,"time_start":3,"ntp":"example.org"}),
+            );
+            assert!(read.automatic_time.is_none());
+            assert!(read.ntp_server.is_none());
+        }
+        assert_eq!(
+            decode(
+                &serde_json::json!({"policy":false,"type":"NTP","ntp_enabled":0,"time_start":3})
+            )
+            .automatic_time,
+            Some(false)
+        );
     }
     #[cfg(windows)]
     #[test]
