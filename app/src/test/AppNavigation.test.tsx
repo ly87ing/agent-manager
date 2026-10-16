@@ -46,6 +46,8 @@ describe("App 顶层导航", () => {
 
   it.each(["metaKey", "ctrlKey"])("keeps global navigation shortcuts inside an open editor (%s)", async (modifier) => {
     const { calls } = renderWithEngine(<App />, routes());
+    // This case tests shortcuts, not the first lazy page's import latency.
+    await screen.findByTestId("launch-page", {}, { timeout: 5000 });
     await userEvent.click(await screen.findByRole("button", { name: "新增配置" }));
     const dialog = screen.getByRole("dialog", { name: "新建配置" });
     const target = within(dialog).getByRole("textbox", { name: "程序路径或命令" });
@@ -61,7 +63,7 @@ describe("App 顶层导航", () => {
     expect(calls.some((call) => ["launch:save", "launch:run"].includes(call.command))).toBe(false);
     await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     fireEvent.keyDown(window, { key: ",", [modifier]: true });
-    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "设置" }, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it.each(["remediation", "apply"])("prefills a launch draft from the selected environment without saving or running it (%s)", async (entry) => {

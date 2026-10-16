@@ -117,7 +117,7 @@ describe("SettingsPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(runtimeWarning);
     await screen.findByRole("heading", { name: "启动配置" });
     await userEvent.click(await screen.findByRole("button", { name: "设置" }));
-    expect(await screen.findByRole("button", { name: "检查更新" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "检查更新" }, { timeout: 5000 })).toBeDisabled();
     expect(check).not.toHaveBeenCalled();
   });
   it("应用从设置加载态进入主界面时 Hook 顺序保持一致", async () => {

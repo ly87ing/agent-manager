@@ -16,6 +16,15 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Wait for lazy-page readiness before testing editor shortcuts and update gating.**
+- Module-cache preloading and async `act` did not establish first Suspense
+  readiness under load. Native macOS and a focused diagnostic showed the loading
+  fallback when the default one-second role query expired.
+- Give initial page readiness and lazy Settings transitions an explicit
+  five-second bound. Keep the editor's draft, shortcut, focus and no-write
+  assertions unchanged; this regression does not define an import latency budget.
+- Seen 1× (2026-10-15; cross-platform navigation verification).
+
 **Exercise batch fixtures through the production command renderer.**
 - A direct `cmd /c` fixture constructed a different quote boundary from the
   application's PowerShell/ProcessStartInfo renderer and failed before executing
