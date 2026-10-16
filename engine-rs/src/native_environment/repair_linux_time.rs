@@ -177,9 +177,19 @@ enum Dispatch {
     Stale,
 }
 
+fn definite_refusal(name: &str) -> bool {
+    matches!(
+        name,
+        "org.freedesktop.DBus.Error.AccessDenied"
+            | "org.freedesktop.DBus.Error.InteractiveAuthorizationRequired"
+            | "org.freedesktop.DBus.Error.InvalidArgs"
+    )
+}
+
 #[cfg(target_os = "linux")]
 fn set_zone(target: &str, before: &State, deadline: Option<u64>) -> Dispatch {
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
+    let started = Instant::now();
     zbus::block_on(futures_lite::future::race(
         async {
             let Ok(connection) = zbus::Connection::system().await else {
@@ -208,10 +218,19 @@ fn set_zone(target: &str, before: &State, deadline: Option<u64>) -> Dispatch {
                 }
                 .validate()
                 .ok()?;
-                disk(zone)
+                Some(zone)
             }
             .await;
-            if fresh.as_ref() != Some(before) || !installed(target) {
+            let Some(zone) = fresh else {
+                return Dispatch::Stale;
+            };
+            let requested = target.to_string();
+            let (fresh, available) =
+                blocking::unblock(move || (disk(zone), installed(&requested))).await;
+            if started.elapsed() >= Duration::from_secs(8) {
+                return Dispatch::Unknown;
+            }
+            if fresh.as_ref() != Some(before) || !available {
                 return Dispatch::Stale;
             }
             if !deadline
@@ -233,7 +252,9 @@ fn set_zone(target: &str, before: &State, deadline: Option<u64>) -> Dispatch {
                 .await
             {
                 Ok(_) => Dispatch::Written,
-                Err(zbus::Error::MethodError(..)) => Dispatch::Refused,
+                Err(zbus::Error::MethodError(name, ..)) if definite_refusal(name.as_str()) => {
+                    Dispatch::Refused
+                }
                 Err(_) => Dispatch::Unknown,
             }
         },
@@ -303,6 +324,21 @@ pub(super) fn apply(item: &Item, before: &State) -> (String, Item) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn broker_timeout_or_service_errors_do_not_prove_a_setting_was_refused() {
+        for name in [
+            "org.freedesktop.DBus.Error.NoReply",
+            "org.freedesktop.DBus.Error.Timeout",
+            "org.freedesktop.DBus.Error.Failed",
+            "org.freedesktop.timedate1.Error.Failed",
+        ] {
+            assert!(!definite_refusal(name));
+        }
+        assert!(definite_refusal("org.freedesktop.DBus.Error.AccessDenied"));
+        assert!(definite_refusal(
+            "org.freedesktop.DBus.Error.InteractiveAuthorizationRequired"
+        ));
+    }
     #[test]
     fn cached_zone_requires_typed_utc_rtc_and_valid_zone() {
         let mut raw = serde_json::json!({"type":"a{sv}","data":[{"Timezone":{"type":"s","data":"Europe/London"},"LocalRTC":{"type":"b","data":false}}]});
