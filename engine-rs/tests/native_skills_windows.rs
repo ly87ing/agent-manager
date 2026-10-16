@@ -1,6 +1,8 @@
 #![cfg(windows)]
 
 mod common;
+#[path = "common/skill_repo.rs"]
+mod skill_repo;
 
 use serde_json::Value;
 use std::os::windows::fs::MetadataExt;
@@ -142,6 +144,7 @@ fn native_cli_materialized_skill_lifecycle_uses_ordinary_files_and_offline_snaps
     ] {
         std::os::windows::fs::symlink_file(raw, source.join(path)).unwrap();
     }
+    skill_repo::index(&repo);
     fixture.run(
         &[
             "policy:set",

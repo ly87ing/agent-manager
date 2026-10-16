@@ -10,6 +10,8 @@ mod adopt;
 mod apply;
 mod discover;
 mod fork;
+mod git_index;
+mod git_source;
 mod paths;
 mod persistence;
 mod preflight;

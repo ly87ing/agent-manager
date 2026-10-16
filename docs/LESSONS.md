@@ -54,6 +54,41 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   because stdout was not piped. Set both capture streams before using their
   contents as an independent receipt.
 
+## 2026-10-16: bounded Git metadata needs path and work bounds
+
+- An exact index key alone misses filesystem aliases in another prefix. An index
+  can describe both `skills/foo` and `skills/Foo` while a case-insensitive volume
+  resolves them to one directory. Inspect actual component spelling for indexed
+  links and gitlinks globally, and refuse linked selected roots before either
+  typed inventory or legacy fallback. Native CLI regressions exercise both modes.
+- An input byte limit does not bound repeated comparisons of growing prefixes.
+  The first D/F guard searched once per slash; two long shared paths could cause
+  quadratic work. Search once per full path and retain the 3.6 MiB regression.
+  Bound directory-name enumeration while reading it, including cached path keys.
+- Path spelling and path identity are different evidence. The first real source
+  update failed because `/var` and its canonical spelling were compared as raw
+  prefixes. Validate ordinary roots and retain identities before resolving them;
+  compare canonical scope and read back the original identities afterwards.
+- A successful Git command does not prove a requested index shape. Combining
+  version and split-index switches did not produce the split fixture locally;
+  separate the operations and inspect actual results. Apple Git 2.39 also ignored
+  the newer `index.skipHash` writer option. Test the documented zero-footer reader
+  input explicitly instead of reporting that unsupported writer as exercised.
+- Reusing a platform-specific writer on another OS also carries permission
+  behavior. The first Unix materialization draft left new files writable instead
+  of retaining the existing `0444` snapshot policy. Check that flag and editable
+  personal copies; tamper fixtures must deliberately change their own permissions
+  before testing content-verification failures.
+
+## 2026-10-16: page overflow checks do not detect clipped child text
+
+- The first long-path browser check passed because the page itself did not
+  overflow, while the Skills warning clipped a long unbroken component. Read the
+  screenshot and compare text range rectangles with the warning's own bounds;
+  DOM visibility and document width alone do not prove the message is readable.
+  The stronger check failed before wrapping the warning and must pass afterwards
+  at both required widths and in both interface languages.
+
 ## 2026-10-16: window-tree enumeration is not an atomic observation
 
 - Native KDE acceptance passed initially, then main CI failed because an X11

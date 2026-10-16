@@ -133,14 +133,31 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 
 #[cfg(test)]
 pub fn snapshot_skill(source_dir: &Path, data_dir: &Path, version: &str) -> Result<PathBuf> {
-    create_snapshot(source_dir, data_dir, version, None)
+    create_snapshot(source_dir, data_dir, version, None, false)
 }
 
+#[cfg(test)]
 pub(super) fn snapshot_git_skill(source_dir: &Path, data_dir: &Path) -> Result<(String, PathBuf)> {
     let entries = super::snapshot_v2::source_entries(source_dir)?;
     let version = super::snapshot_v2::typed_hash(&entries);
-    let path = create_snapshot(source_dir, data_dir, &version, Some(&entries))?;
+    let path = snapshot_git_entries(source_dir, data_dir, &entries, false)?;
     Ok((version, path))
+}
+
+pub(super) fn snapshot_git_entries(
+    source_dir: &Path,
+    data_dir: &Path,
+    entries: &super::snapshot_v2::Entries,
+    plaintext_links: bool,
+) -> Result<PathBuf> {
+    let version = super::snapshot_v2::typed_hash(entries);
+    create_snapshot(
+        source_dir,
+        data_dir,
+        &version,
+        Some(entries),
+        plaintext_links,
+    )
 }
 
 fn create_snapshot(
@@ -148,6 +165,7 @@ fn create_snapshot(
     data_dir: &Path,
     version: &str,
     entries: Option<&super::snapshot_v2::Entries>,
+    plaintext_links: bool,
 ) -> Result<PathBuf> {
     if !is_sha256_hex(version) {
         bail!("Invalid skill snapshot version.");
@@ -160,13 +178,17 @@ fn create_snapshot(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error.into()),
     }
-    #[cfg(windows)]
-    let links = entries
-        .map(super::snapshot_materialized::plan)
-        .transpose()?
-        .flatten();
-    #[cfg(not(windows))]
-    let links: Option<Vec<super::snapshot_materialized::FileLink>> = None;
+    let links = if cfg!(windows) || plaintext_links {
+        entries
+            .map(super::snapshot_materialized::plan)
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
+    if plaintext_links && links.is_none() {
+        bail!("Git plaintext links require direct included ordinary file targets");
+    }
     let materialized = entries.zip(links.as_deref());
     let parent = data_dir.join("skill-versions");
     std::fs::create_dir_all(&parent)?;

@@ -458,7 +458,7 @@ export default function SkillsPage({
                     {observed.discovery_error.message ?? t("技能发现失败")}
                   </p>
                 )}
-                {observed.blocked_reason && <p className="bg-warning/10 px-4 py-1.5 text-xs text-warning">{observed.blocked_reason}</p>}
+                {observed.blocked_reason && <p className="break-all bg-warning/10 px-4 py-1.5 text-xs text-warning">{observed.blocked_reason}</p>}
                 {open && rows.length === 0 && !search.trim() && (
                   <p className="px-4 py-2 text-xs text-muted-foreground">
                     {observed.repo_cached ? t("没有找到技能") : t("到来源页点「更新」取回后，技能会出现在这里")}

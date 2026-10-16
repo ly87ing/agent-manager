@@ -1,5 +1,7 @@
 // 部分辅助只给 Unix 专属的用例用
 #![cfg_attr(not(unix), allow(dead_code))]
+#[path = "common/skill_repo.rs"]
+mod skill_repo;
 use agent_manager_engine::{execute, store, Context, Request};
 use fs2::FileExt;
 use std::fs::OpenOptions;
@@ -86,6 +88,8 @@ fn skills_collection_and_skill_lifecycle_and_cascading() {
         "{\"managed_by\":\"agent-manager\"}\n",
     )
     .unwrap();
+
+    skill_repo::index(&repo_dir);
 
     // 写入集合定义到 policy
     let set_res = execute(
@@ -281,6 +285,8 @@ fn skills_safety_unmanaged_content_rejected() {
     std::fs::create_dir_all(repo_dir.join("alpha")).unwrap();
     std::fs::write(repo_dir.join("alpha").join("SKILL.md"), "# content").unwrap();
 
+    skill_repo::index(&repo_dir);
+
     let set_res = execute(
         &context,
         &request(
@@ -334,6 +340,8 @@ fn skills_apply_rejects_contended_lock_and_audits_operations() {
     let repo_dir = ctx.data_dir.join("repositories").join("test-repo");
     std::fs::create_dir_all(repo_dir.join("demo-skill")).unwrap();
     std::fs::write(repo_dir.join("demo-skill").join("SKILL.md"), "# demo skill").unwrap();
+
+    skill_repo::index(&repo_dir);
 
     let set_res = execute(
         &ctx,
@@ -487,6 +495,9 @@ fn skills_disable_collection_does_not_affect_other_collections() {
     std::fs::create_dir_all(repo_b.join("beta")).unwrap();
     std::fs::write(repo_b.join("beta").join("SKILL.md"), "# beta").unwrap();
 
+    skill_repo::index(&repo_a);
+    skill_repo::index(&repo_b);
+
     let set_a = execute(
         &ctx,
         &request(
@@ -599,6 +610,8 @@ fn skills_collection_external_conflict_aborts_with_zero_changes() {
     std::fs::create_dir_all(repo_dir.join("skill-2")).unwrap();
     std::fs::write(repo_dir.join("skill-2").join("SKILL.md"), "# 2").unwrap();
 
+    skill_repo::index(&repo_dir);
+
     let set = execute(
         &ctx,
         &request(
@@ -691,6 +704,8 @@ fn skills_enable_rejected_when_collection_or_agent_disabled() {
     let repo_dir = ctx.data_dir.join("repositories").join("coll-gate");
     std::fs::create_dir_all(repo_dir.join("skill-gate")).unwrap();
     std::fs::write(repo_dir.join("skill-gate").join("SKILL.md"), "# gate").unwrap();
+
+    skill_repo::index(&repo_dir);
 
     let set = execute(
         &ctx,
@@ -841,6 +856,8 @@ fn skills_transaction_failure_rolls_back_symlinks() {
     std::fs::create_dir_all(repo_dir.join("rb-skill")).unwrap();
     std::fs::write(repo_dir.join("rb-skill").join("SKILL.md"), "# rb").unwrap();
 
+    skill_repo::index(&repo_dir);
+
     let set = execute(
         &ctx,
         &request(
@@ -988,6 +1005,8 @@ fn skills_apply_rejects_dry_run_without_lock_or_writes() {
     std::fs::write(skill_dir.join("SKILL.md"), "# dry run test").unwrap();
 
     // 先写入策略，确保 native-manager.db 真实存在
+    skill_repo::index(&repo_dir);
+
     let set = execute(
         &ctx,
         &request(
@@ -1094,6 +1113,8 @@ fn skills_discovery_error_surfaces_on_collection_and_recovers() {
     let repo_dir = context.data_dir.join("repositories").join("broken-skills");
     std::fs::create_dir_all(repo_dir.join("alpha")).unwrap();
     std::fs::write(repo_dir.join("alpha").join("SKILL.md"), "# Alpha\n").unwrap();
+
+    skill_repo::index(&repo_dir);
 
     let set_res = execute(
         &context,
@@ -1452,6 +1473,8 @@ fn skills_moved_under_skills_dir_are_found_by_old_and_new_definitions() {
     std::fs::create_dir_all(repo_dir.join("rules")).unwrap();
     std::fs::write(repo_dir.join("rules").join("core.md"), "# core\n").unwrap();
 
+    skill_repo::index(&repo_dir);
+
     // 1. 旧定义列的是顶层技能名：到 skills/<名> 找到，照常发现
     set_collection(
         &context,
@@ -1550,6 +1573,8 @@ fn typed_git_snapshots_preserve_mixed_legacy_bindings_until_explicit_update() {
     let source = repo.join("skills/alpha");
     std::fs::create_dir_all(&source).unwrap();
     std::fs::write(source.join("SKILL.md"), b"# Alpha\n").unwrap();
+    skill_repo::index(&repo);
+
     set_collection(
         &context,
         "upstream",
@@ -1590,6 +1615,20 @@ fn typed_git_snapshots_preserve_mixed_legacy_bindings_until_explicit_update() {
         before,
         "Status must not migrate or rewrite stored data"
     );
+    let saved_index = root.join("saved-index");
+    std::fs::rename(repo.join(".git/index"), &saved_index).unwrap();
+    let before = tree_digest(&context.data_dir);
+    assert_eq!(
+        skill_cell(&context, id, "claude-code").unwrap()["available_version"],
+        legacy
+    );
+    assert!(skill_cell(&context, id, "codex").unwrap()["available_version"].is_null());
+    assert_eq!(
+        tree_digest(&context.data_dir),
+        before,
+        "Unknown index inspection must remain zero-write"
+    );
+    std::fs::rename(&saved_index, repo.join(".git/index")).unwrap();
     for (agent, expected) in [("claude-code", &legacy), ("codex", &current)] {
         for action in ["disable", "enable"] {
             let result = skill_action(&context, id, action, agent);
@@ -1614,6 +1653,7 @@ fn typed_git_snapshots_preserve_mixed_legacy_bindings_until_explicit_update() {
         b"# Alpha\n"
     );
     std::fs::rename(offline, &repo).unwrap();
+    std::fs::rename(repo.join(".git/index"), &saved_index).unwrap();
     let status = execute(&context, &request("skills:status", &[]));
     let origin = &status.data["elements"]
         .as_array()
@@ -1622,7 +1662,9 @@ fn typed_git_snapshots_preserve_mixed_legacy_bindings_until_explicit_update() {
         .find(|row| row["id"] == "skill:my-skills/alpha")
         .unwrap()["observed"]["forked_from"];
     assert_eq!(origin["version"], legacy);
+    assert_eq!(origin["upstream_version"], legacy);
     assert_eq!(origin["upstream_changed"], false);
+    std::fs::rename(&saved_index, repo.join(".git/index")).unwrap();
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::ffi::OsStrExt;
@@ -1669,6 +1711,8 @@ fn unassigned_git_fork_records_a_verified_typed_snapshot() {
     std::fs::create_dir_all(&source).unwrap();
     std::fs::write(source.join("SKILL.md"), b"# Alpha\n").unwrap();
     std::fs::create_dir(source.join("empty")).unwrap();
+    skill_repo::index(&context.data_dir.join("repositories/upstream"));
+
     set_collection(
         &context,
         "upstream",
@@ -1740,6 +1784,7 @@ fn skill_dropped_by_its_source_can_only_be_removed_and_leaves_no_record() {
         )
         .unwrap();
     }
+    skill_repo::index(&repo_dir);
     set_collection(
         &context,
         "drop-skills",
@@ -1822,6 +1867,7 @@ fn unfetched_or_broken_source_is_not_mistaken_for_a_dropped_skill() {
     let repo_dir = context.data_dir.join("repositories").join("flaky-skills");
     std::fs::create_dir_all(repo_dir.join("skills").join("alpha")).unwrap();
     std::fs::write(repo_dir.join("skills/alpha/SKILL.md"), "# alpha\n").unwrap();
+    skill_repo::index(&repo_dir);
     set_collection(
         &context,
         "flaky-skills",
@@ -1885,6 +1931,8 @@ fn skills_extra_link_takeover_and_unlink() {
     std::fs::write(repo_dir.join("alpha").join("SKILL.md"), "# alpha").unwrap();
     std::fs::create_dir_all(repo_dir.join("beta")).unwrap();
     std::fs::write(repo_dir.join("beta").join("SKILL.md"), "# beta").unwrap();
+
+    skill_repo::index(&repo_dir);
 
     let set = execute(
         &ctx,
@@ -3140,6 +3188,7 @@ fn adding_recommendation_creates_unassigned_collection_then_per_skill_enable() {
             std::fs::write(path.join("SKILL.md"), format!("# {skill}")).unwrap();
         }
     }
+    skill_repo::index(&mirror);
     let status = execute(&ctx, &request("skills:status", &[]));
     let skill = status.data["elements"]
         .as_array()
@@ -3208,6 +3257,8 @@ fn installed_view_classifies_real_entries_with_zero_writes() {
     let repo_dir = ctx.data_dir.join("repositories").join("test-skills");
     std::fs::create_dir_all(repo_dir.join("alpha")).unwrap();
     std::fs::write(repo_dir.join("alpha").join("SKILL.md"), "# Alpha").unwrap();
+    skill_repo::index(&repo_dir);
+
     let set = execute(
         &ctx,
         &request(
@@ -3354,6 +3405,8 @@ fn collection_lists_all_available_skills_regardless_of_skill_paths() {
     }
     std::fs::create_dir_all(repo_dir.join("rules")).unwrap();
     std::fs::write(repo_dir.join("rules").join("core.md"), "# core\n").unwrap();
+    skill_repo::index(&repo_dir);
+
     set_collection(
         &context,
         "picked",
@@ -3394,6 +3447,7 @@ fn removing_a_collection_with_purge_cleans_up_only_what_it_owned() {
         std::fs::create_dir_all(repo.join("skills").join(skill)).unwrap();
         std::fs::write(repo.join("skills").join(skill).join("SKILL.md"), body).unwrap();
         std::fs::write(repo.join(".agent-manager-owned"), "{}").unwrap();
+        skill_repo::index(&repo);
         repo
     };
     let gone_repo = make_repo("gone", "alpha", "# alpha\n");
@@ -3478,6 +3532,8 @@ fn removing_a_collection_without_purge_keeps_downloads() {
     std::fs::create_dir_all(repo.join("skills/alpha")).unwrap();
     std::fs::write(repo.join("skills/alpha/SKILL.md"), "# alpha\n").unwrap();
     std::fs::write(repo.join(".agent-manager-owned"), "{}").unwrap();
+    skill_repo::index(&repo);
+
     set_collection(
         &context,
         "gone",
@@ -3506,6 +3562,8 @@ fn forking_a_skill_copies_it_into_the_users_collection_and_tracks_upstream() {
     std::fs::create_dir_all(repo.join("skills/alpha")).unwrap();
     std::fs::write(repo.join("skills/alpha/SKILL.md"), "# alpha v1\n").unwrap();
     std::fs::write(repo.join(".agent-manager-owned"), "{}").unwrap();
+    skill_repo::index(&repo);
+
     set_collection(
         &context,
         "upstream",
@@ -3613,6 +3671,8 @@ fn windows_personal_skill_copy_is_editable_without_changing_readonly_source() {
         permissions.set_readonly(true);
         std::fs::set_permissions(file, permissions).unwrap();
     }
+    skill_repo::index(&repo);
+
     set_collection(
         &context,
         "upstream",
@@ -3995,6 +4055,8 @@ fn replacing_a_skill_is_atomic_and_refuses_stale_bindings_or_changed_links() {
     std::fs::create_dir_all(repo.join("alpha")).unwrap();
     std::fs::write(repo.join("alpha/SKILL.md"), "# Original\n").unwrap();
     std::fs::write(repo.join(".agent-manager-owned"), "{}").unwrap();
+    skill_repo::index(&repo);
+
     set_collection(
         &context,
         "upstream",
@@ -4141,6 +4203,8 @@ fn disabling_or_removing_the_origin_keeps_the_users_version_linked() {
     std::fs::create_dir_all(repo.join("skills/alpha")).unwrap();
     std::fs::write(repo.join("skills/alpha/SKILL.md"), "# alpha\n").unwrap();
     std::fs::write(repo.join(".agent-manager-owned"), "{}").unwrap();
+    skill_repo::index(&repo);
+
     set_collection(
         &context,
         "upstream",
@@ -4203,6 +4267,8 @@ fn unmanaged_view_detects_sources_shared_dir_and_duplicates_with_zero_writes() {
     let repo_dir = ctx.data_dir.join("repositories").join("test-skills");
     std::fs::create_dir_all(repo_dir.join("alpha")).unwrap();
     std::fs::write(repo_dir.join("alpha").join("SKILL.md"), "# Alpha").unwrap();
+    skill_repo::index(&repo_dir);
+
     let set = execute(
         &ctx,
         &request(

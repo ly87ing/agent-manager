@@ -152,6 +152,22 @@ function skillsRoutes() {
   };
 }
 
+it("shows unknown Git source evidence while retaining recorded-version controls", async () => {
+  const routes = skillsRoutes();
+  const data = routes["skills:status"].data as { elements: ReturnType<typeof makeElement>[] };
+  const collection = data.elements.find(element => element.id === "skill:agent-skills")!;
+  const diagnostic = `Git source entry kinds are unknown: /YOUR_CACHE/${"X".repeat(240)}/.git/index. Existing assignments retain their recorded versions.`;
+  collection.observed = { ...collection.observed, blocked_reason: diagnostic };
+  const alpha = data.elements.find(element => element.id === "skill:agent-skills/alpha")!;
+  alpha.observed = { agents: { "claude-code": { state: "linked", version: "recorded-version", available_version: null, assigned: true, enabled: true, actions: ["disable", "remove"] } } };
+  renderWithEngine(<SkillsPage />, routes);
+  expect(await screen.findByText(diagnostic)).toBeVisible();
+  await expandAll();
+  const row = screen.getByTestId("skill-row-skill:agent-skills/alpha");
+  expect(within(row).getByTestId("action-disable-skill:agent-skills/alpha-claude-code")).toBeEnabled();
+  expect(within(row).queryByTestId("action-update-skill:agent-skills/alpha-claude-code")).toBeNull();
+});
+
 describe("SkillsPage 三级视图", () => {
   it("其他来源的同名技能只读显示归属，不提供接管或移除入口", async () => {
     const routes = skillsRoutes();

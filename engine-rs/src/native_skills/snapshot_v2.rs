@@ -26,7 +26,7 @@ pub(super) enum Entry {
 
 pub(super) type Entries = BTreeMap<String, Entry>;
 
-fn relative_key(path: &Path) -> Result<String> {
+pub(super) fn relative_key(path: &Path) -> Result<String> {
     let mut parts = Vec::new();
     for part in path.components() {
         match part {
@@ -40,7 +40,7 @@ fn relative_key(path: &Path) -> Result<String> {
     Ok(parts.join("/"))
 }
 
-fn target_key(relative_link: &Path, target: &Path) -> Result<String> {
+pub(super) fn target_key(relative_link: &Path, target: &Path) -> Result<String> {
     let mut resolved = relative_link
         .parent()
         .unwrap_or(Path::new(""))
@@ -58,6 +58,10 @@ fn target_key(relative_link: &Path, target: &Path) -> Result<String> {
 
 pub(super) fn source_versions(root: &Path) -> Result<SourceVersions> {
     let entries = source_entries(root)?;
+    Ok(entry_versions(&entries))
+}
+
+pub(super) fn entry_versions(entries: &Entries) -> SourceVersions {
     let legacy = entries
         .iter()
         .filter_map(|(path, entry)| {
@@ -74,10 +78,10 @@ pub(super) fn source_versions(root: &Path) -> Result<SourceVersions> {
             Some((path.replace('\\', "/"), digest))
         })
         .collect();
-    Ok(SourceVersions {
+    SourceVersions {
         legacy: super::snapshot::hash_entries(legacy),
-        current: typed_hash(&entries),
-    })
+        current: typed_hash(entries),
+    }
 }
 
 pub(super) fn source_entries(root: &Path) -> Result<Entries> {
