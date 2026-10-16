@@ -493,7 +493,6 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn native_cmd_shim_preserves_metacharacter_targets_arguments_and_exit_status() {
-        use std::os::windows::process::CommandExt;
         let root = std::env::temp_dir().join(format!("am-shim-{}", crate::store::uuid_v4()));
         std::fs::create_dir_all(&root).unwrap();
         let source = root.join("probe.rs");
@@ -510,15 +509,29 @@ mod tests {
         write_cmd_shim(&target, &shim).unwrap();
         assert_eq!(cmd_shim_target(&shim), Some(target));
         let output_file = root.join("args.txt");
-        let output = std::process::Command::new(
-            Path::new(&std::env::var("SystemRoot").unwrap()).join("System32/cmd.exe"),
+        let command = crate::native_launch::windows_program_command(
+            shim.to_str().unwrap(),
+            &[
+                output_file.to_string_lossy().into_owned(),
+                "literal %NO_SUCH_VAR% & ! ^ (x)".into(),
+                "".into(),
+            ],
+            &[("AM_SHIM_HACK".into(), "wrong".into())],
+            None,
         )
-        .args(["/d", "/v:OFF", "/c"])
-        .raw_arg(r#"""%AM_SHIM%" "%AM_OUTPUT%" "%AM_ARG%" """"#)
-        .env("AM_SHIM", &shim)
-        .env("AM_OUTPUT", &output_file)
-        .env("AM_SHIM_HACK", "wrong")
-        .env("AM_ARG", "literal %NO_SUCH_VAR% & ! ^ (x)")
+        .unwrap();
+        let output = std::process::Command::new(
+            Path::new(&std::env::var("SystemRoot").unwrap())
+                .join("System32/WindowsPowerShell/v1.0/powershell.exe"),
+        )
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &format!("{command}; exit $LASTEXITCODE"),
+        ])
+        .env("PSModuleAnalysisCachePath", "NUL")
         .output()
         .unwrap();
         assert_eq!(output.status.code(), Some(37), "{:?}", output);

@@ -16,6 +16,14 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Exercise batch fixtures through the production command renderer.**
+- A direct `cmd /c` fixture constructed a different quote boundary from the
+  application's PowerShell/ProcessStartInfo renderer and failed before executing
+  the shim. Use the production boundary for the literal-path/argument/exit test;
+  keep its assertions and inspect native results before accepting the behavior.
+- Seen 1× (2026-10-15; native Windows recovery verification).
+
+
 **Drain delayed notification removals before destroying the browser test context.**
 - Native Linux CI recorded a Sonner callback reading `window` after jsdom teardown.
   The existing zero-delay barrier covered subscription callbacks but missed the
