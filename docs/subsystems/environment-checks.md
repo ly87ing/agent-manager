@@ -192,8 +192,28 @@ and requests a new preview. These user variables persist after logout and affect
 future logins and new Explorer-launched processes. Windows sends
 [`WM_SETTINGCHANGE`](https://learn.microsoft.com/en-us/dotnet/api/system.environment.setenvironmentvariable?view=netframework-4.8.1); other applications may refresh their environment. The checker
 process is unchanged. No shell files or login
-entries are edited. Linux settings repair is the next platform adapter; its clock
-correction is already independent of settings repair.
+entries are edited.
+
+#### Linux
+
+The first Linux settings slice repairs only selected regional variables in the
+existing systemd user manager. It never creates or starts that manager or a user
+bus. The bus ID, manager owner and original caller UID are bound for the entire
+operation; a manager or bus replacement stops the repair. Reads retain only the
+selected regional keys, including known absence, and setters recheck their
+baseline before each direct D-Bus call. Independent reads verify every result.
+The locale must be installed and work in an isolated locale subprocess.
+
+These values affect subsequent user units and applications started by that
+manager. They are not proof of desktop-wide inheritance; the caller and existing
+applications keep their environment. No shell files or persistent login defaults
+are edited. Preview, stale refusal and confirmed no-op do not write HOME or the
+database. Linux clock correction remains independent. System time-zone/NTP and
+desktop language/region settings currently appear as unavailable in this adapter.
+
+GUI CI verifies actual apply, future-unit inheritance, no-op, stale refusal and
+restoration on a disposable runner's existing user manager, with isolated HOME
+and data. The script is guarded against execution outside that explicit CI scope.
 
 #### macOS
 

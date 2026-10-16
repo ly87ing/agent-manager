@@ -59,7 +59,21 @@ fn repair_preview_is_read_only_and_binds_the_selected_targets() {
             .filter(|item| item["id"].as_str().unwrap().starts_with("session."))
             .all(|item| item["status"] == "unavailable"));
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "linux")]
+    {
+        assert!(result.ok, "{:?}", result.errors);
+        assert_eq!(result.data["platform"], "linux");
+        assert!(result.data["session_scope"]
+            .as_str()
+            .unwrap()
+            .contains("systemd user manager"));
+        assert!(result.data["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == "time.timezone" && item["status"] == "unavailable"));
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     assert!(!result.ok);
     assert!(result.mode.offline);
     assert!(!ctx.home_dir.exists());

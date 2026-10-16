@@ -49,6 +49,17 @@ jobs:
       - name: Run cargo tests
         run: cargo test --manifest-path engine-rs/Cargo.toml
 
+      - name: Verify disposable Linux user-manager environment
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          test "$(id -u)" -ne 0
+          sudo systemctl start "user@$(id -u).service"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          systemctl --user start dbus.socket
+          AM_ISOLATED_LINUX_USER_MANAGER=1 node scripts/verify-linux-user-environment.mjs
+
       - name: Run cargo checks
         shell: bash
         run: |
