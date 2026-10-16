@@ -36,8 +36,9 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Use the public policy API and test its real type/method binding. A catch-to-null
   reader can otherwise hide a misspelled native API behind a passing preview.
 - Separate API binding from availability. Native Windows CI loaded the correct
-  type but blocked inside GetPolicyFromPath beyond 30 seconds, including with the
-  official PowerShell invocation. Bound that call in a disposable child, retain
+  type but blocked at the PowerShell method boundary beyond 30 seconds, including
+  metadata reflection and the official invocation. This does not isolate an OS
+  API-internal fault. Bound that call in a disposable child, retain
   unknown policy gates, and prove that a deliberately blocked child cannot erase
   unrelated system evidence. More timeout allowance does not fix a blocked API.
 

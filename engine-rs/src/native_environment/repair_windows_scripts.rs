@@ -163,7 +163,8 @@ $stage='assembly'
 $result=@{type=$type.FullName;assembly=$type.Assembly.GetName().Name;method=$null}
 $stage='method'
 [IO.File]::WriteAllText($marker,$stage)
-$result.method=$type.GetMethod('GetPolicyFromPath').Name
+$null=[Windows.Foundation.Metadata.ApiInformation,Windows.Foundation.Metadata,ContentType=WindowsRuntime]
+$result.method=[Windows.Foundation.Metadata.ApiInformation]::IsMethodPresent('Windows.Management.Policies.NamedPolicy','GetPolicyFromPath',[uint32]2)
 $result | ConvertTo-Json -Compress
 } catch {@{stage=$stage;binding_error=$_.Exception.Message;exception_type=$_.Exception.GetType().FullName;hresult=$_.Exception.HResult} | ConvertTo-Json -Compress}
 [IO.File]::WriteAllText($marker,'complete')
@@ -212,7 +213,7 @@ $result | ConvertTo-Json -Compress
         .unwrap();
         assert!(result["binding_error"].is_null(), "{result}");
         assert_eq!(result["type"], "Windows.Management.Policies.NamedPolicy");
-        assert_eq!(result["method"], "GetPolicyFromPath");
+        assert_eq!(result["method"], true);
         assert!(result["assembly"]
             .as_str()
             .is_some_and(|name| !name.is_empty()));
@@ -243,10 +244,75 @@ $result | ConvertTo-Json -Compress
         let end = start + SYSTEM[start..].find("\n'@").unwrap();
         let mut fixture = SYSTEM.to_string();
         fixture.replace_range(start..end, "Start-Sleep -Seconds 30");
-        let result:serde_json::Value=serde_json::from_str(&super::super::windows::script_timeout(
-            &format!("{fixture} $r=Read-System; @{{zone_known=($null -ne $r.zone);policy_unknown=($null -eq $r.timezone_policy);location_unknown=($null -eq $r.zone_policy.apps -and $null -eq $r.zone_policy.master)}} | ConvertTo-Json -Compress"),
-            std::time::Duration::from_secs(15)
-        ).expect("A blocked policy child must not block the system snapshot")).unwrap();
+        let marker =
+            std::env::temp_dir().join(format!("am-blocked-policy-{}", crate::store::uuid_v4()));
+        for (needle, stage) in [
+            (
+                " $start=[Diagnostics.ProcessStartInfo]::new()",
+                "start-info",
+            ),
+            ("  if (-not $child.Start())", "before-start"),
+            (
+                "  $output=$child.StandardOutput.ReadToEndAsync();",
+                "before-stdout-task",
+            ),
+            (
+                "$errors=$child.StandardError.ReadToEndAsync()",
+                "before-stderr-task",
+            ),
+            ("  if (-not $child.WaitForExit(2000))", "before-wait"),
+            ("$child.Kill();", "before-kill"),
+            ("$null=$child.WaitForExit(250);", "after-kill"),
+            (" $policies=Read-Policies", "read-system-policies"),
+            (
+                " $r.timezone_policy=$policies.values.timezone",
+                "read-system-policy-values",
+            ),
+        ] {
+            fixture = fixture.replace(
+                needle,
+                &format!("[IO.File]::WriteAllText($marker,'{stage}');{needle}"),
+            );
+        }
+        let script=format!("[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$marker={};{fixture} $r=Read-System; @{{zone_known=($null -ne $r.zone);policy_unknown=($null -eq $r.timezone_policy);location_unknown=($null -eq $r.zone_policy.apps -and $null -eq $r.zone_policy.master)}} | ConvertTo-Json -Compress;[IO.File]::WriteAllText($marker,'complete')",quote(marker.to_str().unwrap()));
+        let program = super::super::windows::powershell().unwrap();
+        let mut command = crate::process::launch_command(&program);
+        command
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &script,
+            ])
+            .env("PSModuleAnalysisCachePath", "NUL")
+            .env(
+                "PSModulePath",
+                std::path::Path::new(&program)
+                    .parent()
+                    .unwrap()
+                    .join("Modules"),
+            )
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let output =
+            crate::process::capture_group(&mut command, std::time::Duration::from_secs(15), 8192);
+        let stage = std::fs::read_to_string(&marker).unwrap_or_else(|_| "not-started".into());
+        let _ = std::fs::remove_file(&marker);
+        let output =
+            output.unwrap_or_else(|error| panic!("Blocked policy fixture at {stage}: {error}"));
+        assert!(
+            output.status.success(),
+            "Blocked-child diagnostic: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: serde_json::Value = serde_json::from_str(
+            String::from_utf8_lossy(&output.stdout)
+                .trim_start_matches('\u{feff}')
+                .trim(),
+        )
+        .unwrap();
         assert_eq!(result["zone_known"], true);
         assert_eq!(result["policy_unknown"], true);
         assert_eq!(result["location_unknown"], true);
