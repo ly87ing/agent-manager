@@ -135,6 +135,20 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   `org.gnome.system.locale` uses `/system/locale/`; a similarly named path
   returned the default and failed the retained non-default native assertion.
 
+## 2026-10-16: effective values cannot replace an authorized baseline
+
+- A fresh user snapshot that replaces the adapter's cached state can absorb a
+  raw inheritance/source change even when the projected locale stays equal.
+  Keep the original full context in the ordered batch; advance only independently
+  verified own fields. Complete readback must distinguish an explicit saved
+  preference from the same effective value after an external reset.
+- Read inherited primary locale evidence directly, binding UID and service
+  identity and rechecking the original raw preference. Reusing an aggregate
+  observer that rereads that preference can mix two snapshots.
+- The native fixture holds an isolated audit database transaction after initial
+  base validation, then changes inheritance without changing the effective locale.
+  It must stop as stale and retain the external preference.
+
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
 The focused dialog tests passed before the full suite reached Sources' existing

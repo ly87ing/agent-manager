@@ -1,7 +1,10 @@
 # GUI Platform Status
 
 The current product manages extensions, independent general launch recipes and
-macOS environment inspection with explicitly confirmed settings repair and clock correction.
+native environment inspection with explicitly confirmed settings repair and clock
+correction on macOS, Windows and Linux. Available repair controls are listed by
+platform in [environment checks](subsystems/environment-checks.md); unsupported
+desktop/provider capabilities remain unavailable.
 Account management, login, provider settings, account-bound launch commands,
 shell-file alias management, quota, and assistant lifecycle capabilities described
 in older records below are retired. The Assistants page lists immutable extension-target metadata;
