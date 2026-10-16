@@ -13,6 +13,8 @@ pub(crate) mod profiles;
 mod repair;
 #[cfg(any(target_os = "linux", test))]
 mod repair_linux;
+#[cfg(any(target_os = "linux", test))]
+mod repair_linux_time;
 #[cfg(target_os = "macos")]
 mod repair_macos;
 #[cfg(windows)]

@@ -208,12 +208,26 @@ These values affect subsequent user units and applications started by that
 manager. They are not proof of desktop-wide inheritance; the caller and existing
 applications keep their environment. No shell files or persistent login defaults
 are edited. Preview, stale refusal and confirmed no-op do not write HOME or the
-database. Linux clock correction remains independent. System time-zone/NTP and
-desktop language/region settings currently appear as unavailable in this adapter.
+database. Linux clock correction remains independent.
+
+System time-zone repair uses the original caller's exact Polkit
+`org.freedesktop.timedate1.set-timezone` action with PID, start time and UID.
+Authorization finishes before a fresh comparison of timedated and disk evidence;
+the subsequent setter disables interactive authorization, and the original caller
+independently checks both sources. No root helper is used for this action.
+The current slice requires a UTC hardware clock and a root-owned zoneinfo symlink
+matching timedated. Unknown/local RTC, cache/disk disagreement and a profile that
+also requests automatic-time-zone changes remain unavailable. This preserves the
+hardware clock and avoids applying the fixed zone before an unimplemented switch.
+Automatic time/NTP and desktop language/region settings remain unavailable here.
 
 GUI CI verifies actual apply, future-unit inheritance, no-op, stale refusal and
 restoration on a disposable runner's existing user manager, with isolated HOME
-and data. The script is guarded against execution outside that explicit CI scope.
+and data. Its separate timezone receipt exercises an actual caller-authorized
+timedate1 write, disk readback, no-op, stale refusal and cache/disk disagreement.
+A temporary, exact-user/exact-action Polkit fixture is exclusively created and
+removed; no personal host settings are test targets. Both scripts are guarded
+against execution outside that explicit CI scope.
 
 #### macOS
 

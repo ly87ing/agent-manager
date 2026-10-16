@@ -71,7 +71,9 @@ fn repair_preview_is_read_only_and_binds_the_selected_targets() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|item| item["id"] == "time.timezone" && item["status"] == "unavailable"));
+            .any(|item| item["id"] == "time.timezone"
+                && item["expected"] == "America/Los_Angeles"
+                && item["scope"] == "system"));
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     assert!(!result.ok);
