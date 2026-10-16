@@ -16,7 +16,8 @@ use super::paths::{
 };
 use super::persistence::load_bindings_readonly;
 use super::snapshot::{
-    copy_dir_recursive, discover_repo_skills, hash_skill_dir, verify_skill_version,
+    copy_dir_recursive, discover_repo_skills, hash_skill_dir, snapshot_git_skill,
+    verify_skill_version,
 };
 use super::status::{load_metadata, DomainMetadata};
 use super::CollectionDef;
@@ -177,8 +178,13 @@ pub(crate) fn fork(ctx: &Context, req: &Request) -> Result<Value> {
                 .get(&skill)
                 .cloned()
                 .ok_or_else(|| anyhow!("集合 {coll_name} 里没有技能 {skill}"))?;
-            let version = hash_skill_dir(&path)?;
-            (path, version)
+            if origin.source_path.is_some() {
+                let version = hash_skill_dir(&path)?;
+                (path, version)
+            } else {
+                let (version, snapshot) = snapshot_git_skill(&path, &ctx.data_dir)?;
+                (snapshot, version)
+            }
         }
     };
 
@@ -297,7 +303,16 @@ pub(crate) fn origin_json(
         .and_then(|coll| {
             let root = collection_source_root(ctx, coll);
             let (found, _) = discover_repo_skills(&root, &coll.raw).ok()?;
-            hash_skill_dir(found.get(skill)?).ok()
+            let path = found.get(skill)?;
+            if coll.source_path.is_some() {
+                hash_skill_dir(path).ok()
+            } else {
+                match super::snapshot_v2::source_versions(path) {
+                    Ok(versions) if versions.legacy == version => Some(versions.legacy),
+                    Ok(versions) => Some(versions.current),
+                    Err(_) => hash_skill_dir(path).ok().filter(|legacy| legacy == version),
+                }
+            }
         });
     let mut out = Map::new();
     out.insert("collection".into(), json!(origin));

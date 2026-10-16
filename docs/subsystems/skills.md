@@ -7,6 +7,33 @@ reads actual assistant links. SQLite stores assignments and content versions;
 account registrations are immutable metadata. Local sources remain user-owned;
 Git sources provide verified content snapshots.
 
+New Git additions, explicit updates and unassigned Git forks use typed v2
+SHA-256 IDs. The hash starts with `\0agent-manager-skill-v2\0` and includes sorted
+file, link and directory entries: kind, lossless UTF-8 relative component path,
+content or raw-target digest, and the link's normalized root-relative target,
+separated by NUL bytes. Included empty directories affect v2; excluded directory
+names retain their existing behavior. Included unsupported entry types, reparse
+points other than supported symbolic links, and non-UTF-8 paths or targets cannot
+produce a new typed version.
+Typed link inspection reads the OS target before any comparison helper strips
+Windows namespace prefixes; absolute/drive/namespace targets are refused.
+
+Each typed version has an immutable `snapshot.json` outside `content`, declaring
+exactly schema 2 and its version ID. Verification reads the actual contents;
+the manifest cannot declare replacement entries. A present malformed, oversized,
+unknown-schema, duplicate-field or directory/reparse manifest is refused. Only
+an absent manifest selects the original hash format. Removing a typed manifest
+or adding one to a legacy snapshot does not preserve a valid version.
+
+Existing snapshots and bindings retain their original IDs and are not rewritten.
+Local assignments still follow their actual sources with the legacy hash. Status
+computes both source fingerprints in one normal inventory and compares each
+assistant with its recorded format, so unchanged mixed v1/v2 bindings do not show
+false updates. If typed validation fails, a provably unchanged legacy comparison
+remains known; the current typed comparison is unknown. An explicit Git update
+selects v2. Legacy verification keeps its original limitations, including the
+untyped file/link digest ambiguity; it is not silently repaired by compatibility.
+
 Before publishing a new snapshot, the copied staging contents must match the
 exact version chosen for the assignment. Copy errors or mismatches remove only
 that operation's uniquely created staging directory and leave existing versions
@@ -116,9 +143,19 @@ the explicit original collection/version replacement contract above.
 ```sh
 cargo test --manifest-path engine-rs/Cargo.toml --test native_skills replacing_a_skill
 cargo test --manifest-path engine-rs/Cargo.toml --test native_skills personal_skill
+cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::snapshot_v2
+cargo test --manifest-path engine-rs/Cargo.toml --test native_skills typed
 cd app && pnpm vitest run src/test/SkillsPage.test.tsx src/test/SourcesLifecycle.test.tsx src/test/rollback.test.ts
 ```
 
 The integration case reads actual links and assignments after stale-version,
 missing-source, external-link and injected commit failures, then verifies a
 successful switch and the unchanged second assistant and account definitions.
+Typed snapshot checks cover fixed fingerprints, the legacy file/link ambiguity,
+raw target spelling, empty directories, manifest corruption/deletion, mixed
+bindings, zero-write status, enable/disable, explicit update, offline bound fork
+and unassigned Git fork. Unix path-key tests reject invalid UTF-8 without needing
+the host filesystem to create such names; the real invalid-filename fixture runs
+on Linux. Windows link tests require the native CI runner's existing symlink
+capability; ordinary-file materialization without that capability is a separate
+implementation and is not established by these tests.

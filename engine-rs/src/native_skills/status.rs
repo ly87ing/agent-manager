@@ -345,6 +345,7 @@ fn aggregate_skill_agents(
     skill_name: &str,
     available: bool,
     available_version: Option<&str>,
+    legacy_version: Option<&str>,
     source_missing: bool,
     meta: &DomainMetadata,
     bindings: &BTreeMap<(String, String, String), super::BindingEntry>,
@@ -367,6 +368,14 @@ fn aggregate_skill_agents(
         let assigned = binding.map(|b| b.assigned).unwrap_or(false);
         let binding_enabled = binding.map(|b| b.enabled).unwrap_or(false);
         let version = binding.map(|b| b.version.clone());
+        let available_version = if version
+            .as_deref()
+            .is_some_and(|stored| Some(stored) == legacy_version)
+        {
+            legacy_version
+        } else {
+            available_version
+        };
         if assigned {
             any_assigned = true;
         }
@@ -503,14 +512,28 @@ fn build_skill_element(
     inbox_skills: &mut Vec<String>,
 ) -> Value {
     let available = source_path.is_some();
-    let available_version = source_path.and_then(|p| hash_skill_dir(p).ok());
+    let versions = if is_local_source(coll) {
+        None
+    } else {
+        source_path.and_then(|path| super::snapshot_v2::source_versions(path).ok())
+    };
+    let legacy_version = versions
+        .as_ref()
+        .map(|v| v.legacy.clone())
+        .or_else(|| source_path.and_then(|path| hash_skill_dir(path).ok()));
+    let available_version = if is_local_source(coll) {
+        legacy_version.as_deref()
+    } else {
+        versions.as_ref().map(|v| v.current.as_str())
+    };
     let agg = aggregate_skill_agents(
         ctx,
         coll_name,
         coll,
         skill_name,
         available,
-        available_version.as_deref(),
+        available_version,
+        legacy_version.as_deref(),
         source_known && !available,
         meta,
         bindings,
