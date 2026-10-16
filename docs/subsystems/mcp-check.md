@@ -39,6 +39,9 @@ result remains in the dialog; request failures stay above its action footer.
   follow its [official MCP guide](https://learn.chatgpt.com/docs/extend/mcp).
 - Invalid initialization, tool-list RPC errors, missing results, early exits and timeouts fail at their respective stage. Servers without the [tools capability](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) succeed at initialization without claiming a tool list. Only the first tool-list page is read; no tools are invoked.
 - Results include `base`, `cwd`, `cwd_source`, both effective timeouts and optional `exit_code`. Only exits observed before shutdown are reported; closing stdin or forced termination must not manufacture a failure exit code.
+- If protocol output closes first, the checker waits up to 0.5 s within the
+  remaining protocol deadline for a natural exit, without closing stdin. EOF
+  alone does not prove that the process has finished.
 - Afterwards stdin is closed and the server gets up to 0.5 s to exit. The whole
   process group is then terminated even if the parent already exited, so background
   descendants cannot retain pipes or outlive the check. Natural exit codes are
@@ -73,7 +76,8 @@ The historical real-server check used an isolated HOME with `npx -y @modelcontex
 The native protocol target uses copied native executables and the actual CLI,
 without a shell or an external language runtime for its stdio server. It records
 and independently checks request order, literal arguments, working directory,
-selected-variable isolation, protocol failures, natural exits, timeout outcomes,
+selected-variable isolation, protocol failures, natural exits after output EOF,
+still-running servers with closed output, timeout outcomes,
 serialized-result redaction (including numeric echoes and ten thousand metadata
 records) and unchanged source/database bytes. Windows also
 exercises a real `npx.cmd` behind a stored `cmd /c npx` entry with ordinary space

@@ -403,11 +403,19 @@ impl Running {
                 }
                 Err(RecvTimeoutError::Timeout) => return Err(Waited::Timeout),
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(if self.overflow.load(Ordering::Relaxed) {
-                        Waited::Limit
-                    } else {
-                        Waited::Exited
-                    })
+                    if self.overflow.load(Ordering::Relaxed) {
+                        return Err(Waited::Limit);
+                    }
+                    // EOF may precede process termination, especially on Windows.
+                    // Observe the natural exit before closing stdin or killing the job.
+                    let until = deadline.min(Instant::now() + Duration::from_millis(500));
+                    while Instant::now() < until {
+                        if !matches!(self.child.try_wait(), Ok(None)) {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    return Err(Waited::Exited);
                 }
             }
         }

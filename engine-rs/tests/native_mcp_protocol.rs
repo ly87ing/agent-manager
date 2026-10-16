@@ -218,6 +218,7 @@ fn stdio_case(mode: &str, batch: bool) {
     let config = std::fs::read(env.home.join(".claude.json")).unwrap();
     let secrets = std::fs::read(env.home.join("secrets.env")).unwrap();
     let db = database_bytes(&env.data);
+    let started = Instant::now();
     let result = env.run(&[
         "mcp:check",
         "--only",
@@ -235,7 +236,7 @@ fn stdio_case(mode: &str, batch: bool) {
         data["stage"],
         if success {
             "done"
-        } else if matches!(mode, "invalid" | "exit") {
+        } else if matches!(mode, "invalid" | "exit" | "closed-output") {
             "initialize"
         } else {
             "tools"
@@ -249,7 +250,7 @@ fn stdio_case(mode: &str, batch: bool) {
         .collect();
     assert_eq!(
         requests.len(),
-        if matches!(mode, "invalid" | "exit") {
+        if matches!(mode, "invalid" | "exit" | "closed-output") {
             1
         } else if mode == "no-tools" {
             2
@@ -280,8 +281,9 @@ fn stdio_case(mode: &str, batch: bool) {
     if mode == "exit" {
         assert_eq!(data["exit_code"], 7);
     }
-    if mode == "timeout" {
+    if matches!(mode, "timeout" | "closed-output") {
         assert_eq!(data["exit_code"], Value::Null);
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
     if mode == "echo" {
         assert_eq!(data["server_info"]["nested"][0]["echo"], "***");
@@ -316,7 +318,7 @@ fn stdio_case(mode: &str, batch: bool) {
 }
 
 fn fixture(args: &[String]) {
-    let mode = &args[1];
+    let mode = args[1].as_str();
     let root = PathBuf::from(&args[2]);
     let token = std::env::var("AM_NATIVE_MCP_TOKEN").unwrap();
     std::fs::write(
@@ -340,8 +342,26 @@ fn fixture(args: &[String]) {
     };
     let init = receive();
     assert_eq!(init["method"], "initialize");
-    if mode == "exit" {
+    if matches!(mode, "exit" | "closed-output") {
         eprintln!("fixture failure: {token}");
+        // Make EOF-before-exit deterministic without waiting for manager shutdown.
+        #[cfg(unix)]
+        unsafe {
+            assert_eq!(libc::close(libc::STDOUT_FILENO), 0);
+        }
+        #[cfg(windows)]
+        unsafe {
+            use windows_sys::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE};
+            assert_ne!(
+                windows_sys::Win32::Foundation::CloseHandle(GetStdHandle(STD_OUTPUT_HANDLE)),
+                0
+            );
+        }
+        std::thread::sleep(if mode == "exit" {
+            Duration::from_millis(200)
+        } else {
+            Duration::from_secs(10)
+        });
         std::process::exit(7);
     }
     let capabilities = if mode == "no-tools" {
@@ -412,6 +432,7 @@ fn main() {
         "tools-error",
         "missing-tools",
         "exit",
+        "closed-output",
         "timeout",
         "echo",
     ] {

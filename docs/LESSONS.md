@@ -6,6 +6,15 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: output EOF can precede a natural process exit
+
+- Native Windows MCP acceptance returned no exit code for a server exiting with
+  code 7: its output pipe closed before the process handle became signaled.
+  Wait briefly within the protocol deadline after EOF, before closing stdin or
+  terminating the job; cleanup-induced exits must still remain unreported.
+- Make the native fixture explicitly close stdout before its delayed exit.
+  Ordinary Unix success and cross-compilation did not exercise that timing.
+
 ## 2026-10-16: protocol success data also needs secret redaction
 
 - Sanitizing stderr and error messages does not cover service-provided success
