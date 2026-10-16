@@ -16,6 +16,14 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Keep page refresh distinct from local recovery controls.**
+- MCP's unreadable-target panel and Sources' empty guidance already owned local
+  reread actions. Adding a page action must preserve those recovery paths and
+  give the page-wide control its own accessible name.
+- Exercise populated, empty and unreadable states; verify all page-owned reads
+  refresh without invoking configuration writes or upstream checks.
+- Seen 1× (2026-10-15; explicit resource refresh).
+
 **Exercise navigation shortcuts from modal buttons as well as text fields.**
 - Editable-field guards did not protect an unsaved Launch draft when focus was
   on Preview commands: the Settings shortcut unmounted the editor immediately.

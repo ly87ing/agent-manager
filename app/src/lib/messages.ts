@@ -1,5 +1,7 @@
 /** Application copy only; user content and engine diagnostics are never translation keys. */
 export const messages = {
+  "读取时间：{0}": "Last read: {0}",
+  "重新读取页面": "Read page again",
   "自动修复": "Repair automatically",
   "未设置": "Unset",
   "启动会话：{0}": "Launch session: {0}",

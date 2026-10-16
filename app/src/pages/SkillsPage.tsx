@@ -7,7 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { EmptyState } from "../components/EmptyState";
 import { ErrorPanel } from "../components/ErrorPanel";
-import { PageError, PageLoading } from "../components/PageState";
+import { PageError, PageLoading, ReadAgain } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { AccountCells, AccountHeader, AccountSwitch, ActionMenu, RowActions, TRAILING } from "../components/AccountGrid";
 import { skillChip, skillNeedsUpdate } from "../lib/skillChip";
@@ -287,7 +287,10 @@ export default function SkillsPage({
   return (
     <div className="space-y-3">
       {batchApply.result && <BatchResultPanel batch={batchApply.result} busy={batchApply.executing} onRetry={() => void batchApply.retryFailed(batchApply.result!)} />}
-      <h1 className="text-lg font-semibold tracking-tight">{t("技能")}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold tracking-tight">{t("技能")}</h1>
+        <ReadAgain queries={[query, programsQuery]} disabled={directApply.executing || batchApply.executing || forkBusy} />
+      </div>
       {query.data.errors.length > 0 && <ErrorPanel title={t("技能状态读取失败")} errors={query.data.errors} />}
 
       <div className="flex flex-wrap items-center gap-2">

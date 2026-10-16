@@ -9,7 +9,7 @@ import { COL_ACTION, COL_ICONS, COL_MIDDLE, PILL, ROW, RowIcon, TableHeader } fr
 import { ConfirmModal } from "../components/ConfirmModal";
 import { useRuleSources } from "../components/RuleSources";
 import { ErrorPanel } from "../components/ErrorPanel";
-import { PageError, PageLoading } from "../components/PageState";
+import { PageError, PageLoading, ReadAgain } from "../components/PageState";
 import type { EngineElement, RuleSourceRule, SuggestedSource, RuleTemplate, StatusData } from "../lib/contract";
 import type { RulesObserved, RulesSpec } from "../lib/observed";
 import { useDialogFocus } from "../lib/dialogFocus";
@@ -159,7 +159,10 @@ export default function RulesPage({
 
   return (
     <div className="space-y-3">
-      <h1 className="text-lg font-semibold tracking-tight">{t("规则")}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold tracking-tight">{t("规则")}</h1>
+        <ReadAgain queries={[query]} disabled={directApply.executing} />
+      </div>
       {query.data.errors.length > 0 && <ErrorPanel title={t("规则状态读取失败")} errors={query.data.errors} />}
 
       <section tabIndex={0} className="table-scroll rounded-lg border bg-card" aria-label={t("规则文件")}>

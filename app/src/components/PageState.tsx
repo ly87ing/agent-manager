@@ -48,3 +48,16 @@ export function PageHeader({ title, description }: { title: string; description?
     </div>
   );
 }
+
+export function ReadAgain({ queries, disabled = false }: {
+  queries: Array<{ isFetching: boolean; dataUpdatedAt: number; refetch: () => Promise<unknown> }>;
+  disabled?: boolean;
+}) {
+  const reading = queries.some((query) => query.isFetching);
+  const updatedAt = Math.min(...queries.map((query) => query.dataUpdatedAt));
+  return <div className="flex flex-wrap items-center gap-2 text-xs">
+    {updatedAt > 0 && <span className="text-muted-foreground">{t("读取时间：{0}", new Date(updatedAt).toLocaleTimeString())}</span>}
+    <button type="button" aria-label={t("重新读取页面")} disabled={reading || disabled} onClick={() => void Promise.all(queries.map((query) => query.refetch()))}
+      className="rounded border px-3 py-1.5 hover:bg-accent disabled:opacity-40">{reading ? t("正在读取数据…") : t("重新读取")}</button>
+  </div>;
+}

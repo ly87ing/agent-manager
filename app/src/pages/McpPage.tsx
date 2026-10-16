@@ -13,7 +13,7 @@ import { McpCheckDialog, type McpCheckResult } from "../components/McpCheckDialo
 import { McpMarkerCleanupDialog } from "../components/McpMarkerCleanupDialog";
 import { McpServerCard } from "../components/McpServerCard";
 import { McpServerFormDialog, type McpFilePreview, type McpFormMode, type McpFormPayload } from "../components/McpServerFormDialog";
-import { PageError, PageLoading } from "../components/PageState";
+import { PageError, PageLoading, ReadAgain } from "../components/PageState";
 import { SearchInput, matchesKeyword } from "../components/SearchInput";
 import { SecretValueDialog } from "../components/SecretValueDialog";
 import type { EngineElement, Envelope, McpTarget, StatusData } from "../lib/contract";
@@ -343,7 +343,10 @@ export default function McpPage({
 
   return (
     <div className="space-y-3">
-      <h1 className="text-lg font-semibold tracking-tight">MCP</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold tracking-tight">MCP</h1>
+        <ReadAgain queries={[query, programsQuery]} disabled={busy || filling} />
+      </div>
       <p className="text-xs text-muted-foreground">{t("开关表示配置是否启用；连接结果来自手动检查，不代表助手已经加载。")}</p>
       {query.data.errors.length > 0 && <ErrorPanel title={t("MCP 状态读取失败")} errors={query.data.errors} />}
       {brokenTargets.map((target) => (

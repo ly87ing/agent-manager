@@ -32,6 +32,13 @@ for the measured workload and results.
 
 ## Frontend retention and query work
 
+Skills, MCP, Rules and Sources expose Read again and the oldest completed read
+time among their displayed inventories. The action re-reads that page's queries
+without writing configuration or requesting upstream versions. It stays disabled
+during its reads and conflicting writes. Query failures retain the existing
+page error and retry behavior. External file changes become visible after an
+explicit read; cache expiry alone does not poll the filesystem.
+
 The execution provider retains the newest 50 completed operations and all running
 operations. It keeps at most 50 resource-step summaries and 20 diagnostics, each
 text field limited to 2,048 characters. Full command results are returned to the

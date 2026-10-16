@@ -7,7 +7,7 @@ import { ConfirmModal } from "../components/ConfirmModal";
 import { ActionMenu } from "../components/AccountGrid";
 import { COL_NARROW, DataTable, PILL, ROW } from "../components/DataTable";
 import { EmptyState } from "../components/EmptyState";
-import { PageError, PageLoading } from "../components/PageState";
+import { PageError, PageLoading, ReadAgain } from "../components/PageState";
 import { RemoveCollectionDialog } from "../components/RemoveCollectionDialog";
 import { RuleSourceFormDialog, RemoveSourceDialog, useRuleSources, type UserSource } from "../components/RuleSources";
 import { SkillAdoptDialog } from "../components/SkillAdoptDialog";
@@ -313,7 +313,10 @@ export default function SourcesPage({
   return (
     <div className="space-y-3">
       {batchApply.result && <BatchResultPanel batch={batchApply.result} busy={batchApply.executing} onRetry={() => void batchApply.retryFailed(batchApply.result!)} />}
-      <h1 className="text-lg font-semibold tracking-tight">{t("来源")}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold tracking-tight">{t("来源")}</h1>
+        <ReadAgain queries={[skills, rules, policy]} disabled={busy || userSources.busy} />
+      </div>
       <div className="flex flex-wrap items-center justify-end gap-2">
         {updatable.length > 0 && (
           <button
