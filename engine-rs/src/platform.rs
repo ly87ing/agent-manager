@@ -510,7 +510,7 @@ mod tests {
         assert_eq!(cmd_shim_target(&shim), Some(target));
         let output_file = root.join("args.txt");
         let command = crate::native_launch::windows_program_command(
-            shim.to_str().unwrap(),
+            &shim,
             &[
                 output_file.to_string_lossy().into_owned(),
                 "literal %NO_SUCH_VAR% & ! ^ (x)".into(),
