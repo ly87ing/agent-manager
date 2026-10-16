@@ -235,6 +235,10 @@ authentication agent to exercise the actual daemon's challenge/cache/setter
 protocol, including an external settings change during authorization. That agent
 substitutes the credential verifier; it does not establish PAM, password or
 desktop authentication-dialog acceptance. Cookies are never logged or persisted.
+If the hosted image has globally writable zoneinfo, the fixture first verifies
+the production refusal. It temporarily removes group/world write bits from its
+exact test files, binding root ownership, inode and content, and restores their
+original modes independently during cleanup. Production trust is unchanged.
 No personal host settings are test targets. Both scripts are guarded
 against execution outside that explicit CI scope.
 

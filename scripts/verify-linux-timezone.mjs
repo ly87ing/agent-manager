@@ -1,6 +1,6 @@
 // Changes timezone only on a disposable CI machine; never run on a personal host.
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { existsSync, lstatSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
@@ -45,6 +45,49 @@ function managerTZ() {
   return entries;
 }
 const originalTZ = managerTZ();
+const zoneRoot = realpathSync('/usr/share/zoneinfo');
+const zoneFiles = [...new Set([originalZone, selected, 'Pacific/Honolulu', 'Etc/UTC']
+  .map(zone => realpathSync(`/usr/share/zoneinfo/${zone}`)))].map(path => {
+    assert(path.startsWith(`${zoneRoot}/`));
+    const meta = lstatSync(path);
+    assert(meta.isFile() && meta.uid === 0);
+    return { path, dev: meta.dev, ino: meta.ino, mode: meta.mode & 0o7777,
+      digest: createHash('sha256').update(readFileSync(path)).digest('hex') };
+  });
+// Some hosted images ship globally writable tzdata. Product trust remains strict;
+// the fixture verifies refusal, then temporarily establishes trusted test input.
+const zonePermissions = String.raw`
+import fs from 'node:fs';
+import { createHash } from 'node:crypto';
+const [raw, restore] = process.argv.slice(1);
+const errors = [];
+for (const file of JSON.parse(raw)) {
+  let fd;
+  try {
+    fd = fs.openSync(file.path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    const meta = fs.fstatSync(fd);
+    if (!meta.isFile() || meta.uid !== 0 || meta.dev !== file.dev || meta.ino !== file.ino
+      || createHash('sha256').update(fs.readFileSync(fd)).digest('hex') !== file.digest) {
+      throw Error('Changed CI zoneinfo');
+    }
+    const mode = meta.mode & 0o7777;
+    const trusted = file.mode & ~0o022;
+    // Partial preparation leaves some files unchanged. Restoration accepts only
+    // the original or our exact temporary mode and still tries the other files.
+    if (restore === '1' && mode === file.mode) continue;
+    if (mode !== (restore === '1' ? trusted : file.mode)) {
+      throw Error('Changed CI zoneinfo mode');
+    }
+    fs.fchmodSync(fd, restore === '1' ? file.mode : trusted);
+  } catch (error) {
+    if (restore !== '1') throw error;
+    errors.push(error);
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+if (errors.length) throw new AggregateError(errors, 'CI zoneinfo restoration failed');
+`;
 const rule = `/etc/polkit-1/rules.d/49-agent-manager-ci-${randomUUID()}.rules`;
 const user = run('/usr/bin/id', ['-un']).stdout.trim();
 const policy = `polkit.addRule(function(action, subject) { if (action.id === "org.freedesktop.timedate1.set-timezone" && subject.user === ${JSON.stringify(user)}) return polkit.Result.YES; });\n`;
@@ -66,6 +109,7 @@ function collected(child) {
 let installed = false;
 let installedPolicy = policy;
 let touched = false;
+let preparedZones = false;
 async function authenticate(mode) {
   const preview = cli('environment:repair-preview').data;
   const child = spawn('/bin/sh', ['-c', 'kill -STOP $$; exec "$@"', 'am-owned-cli', binary,
@@ -131,6 +175,14 @@ async function authenticate(mode) {
   }
 }
 try {
+  if (zoneFiles.find(file => file.path === realpathSync(`/usr/share/zoneinfo/${originalZone}`)).mode & 0o022) {
+    const unsafe = cli('environment:repair-preview').data;
+    assert.equal(unsafe.items.find(item => item.id === 'time.timezone').status, 'unavailable');
+    assert(!existsSync(home));
+    assert(!existsSync(data));
+  }
+  preparedZones = true;
+  rootNode(zonePermissions, [JSON.stringify(zoneFiles), '0']);
   rootNode("import fs from 'node:fs'; const [p,t]=process.argv.slice(1); const fd=fs.openSync(p,'wx',0o644); fs.writeFileSync(fd,t); fs.closeSync(fd);", [rule, policy]);
   installed = true;
   const start = readFileSync('/proc/self/stat', 'utf8').split(')').at(-1).trim().split(/\s+/)[19];
@@ -222,6 +274,9 @@ try {
     bus('UnsetAndSetEnvironment', 'asas', '1', 'TZ', String(originalTZ.length), ...originalTZ);
     assert.deepEqual(managerTZ(), originalTZ);
   }
+  } catch (error) { cleanupErrors.push(error); }
+  try {
+    if (preparedZones) rootNode(zonePermissions, [JSON.stringify(zoneFiles), '1']);
   } catch (error) { cleanupErrors.push(error); }
   try {
     if (installed) rootNode("import fs from 'node:fs'; const [p,t]=process.argv.slice(1); if(fs.readFileSync(p,'utf8')!==t) throw Error('Foreign policy'); fs.unlinkSync(p);", [rule, installedPolicy]);

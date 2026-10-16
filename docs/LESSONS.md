@@ -86,6 +86,16 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   Transport timeout does not cancel an already dispatched server request; preserve
   unknown outcomes and stop subsequent changes, even if immediate readback is old.
 
+## 2026-10-16: unsafe CI inputs must not weaken production trust
+
+- The hosted Linux timezone fixture stopped before authorization because its
+  root-owned zoneinfo files were mode 0777. Timedated and disk agreed; the
+  production permission check correctly rejected those writable files.
+- Retain that negative preview, then prepare trusted permissions only on the
+  disposable runner's exact test files. Bind inode and content, restore only our
+  temporary modes, and independently attempt cleanup after partial preparation.
+  This setup does not authorize production normalization of timezone data.
+
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
 The focused dialog tests passed before the full suite reached Sources' existing
