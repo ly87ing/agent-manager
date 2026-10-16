@@ -69,6 +69,22 @@ fn timesync_values(text: &str) -> Option<BTreeMap<String, Vec<String>>> {
     Some(values)
 }
 
+fn timesync_server(values: &BTreeMap<String, Vec<String>>) -> Option<String> {
+    // A nonempty runtime list supersedes the system list, but link servers
+    // still participate. This is configuration evidence, not the current peer.
+    let manual = values
+        .get("RuntimeNTPServers")
+        .filter(|servers| !servers.is_empty())
+        .or_else(|| values.get("SystemNTPServers"));
+    let servers: Vec<_> = manual
+        .into_iter()
+        .chain(values.get("LinkNTPServers"))
+        .flatten()
+        .collect();
+    (servers.len() == 1 && super::time_probe::valid_host(servers[0]))
+        .then(|| servers[0].trim_end_matches('.').to_ascii_lowercase())
+}
+
 #[cfg(target_os = "linux")]
 pub(super) fn gsetting(schema: &str, key: &str) -> Option<String> {
     read("/usr/bin/gsettings", &["get", schema, key])
@@ -186,11 +202,6 @@ pub(super) fn collect() -> Observation {
     )
     .and_then(|value| timesync_values(&value))
     .unwrap_or_default();
-    let servers: Vec<_> = ["RuntimeNTPServers", "SystemNTPServers", "LinkNTPServers"]
-        .iter()
-        .filter_map(|key| ntp.get(*key))
-        .flat_map(|value| value.iter().map(String::as_str))
-        .collect();
     let mut observed = Observation {
         platform: Some("linux"),
         timezone: values
@@ -211,11 +222,7 @@ pub(super) fn collect() -> Observation {
         format_overrides: locale.map(|list| serde_json::json!(list)),
         automatic_time: boolean(values.get("NTP")),
         time_synchronized: boolean(values.get("NTPSynchronized")),
-        ntp_server: if servers.len() == 1 && super::time_probe::valid_host(servers[0]) {
-            Some(servers[0].trim_end_matches('.').to_ascii_lowercase())
-        } else {
-            None
-        },
+        ntp_server: timesync_server(&ntp),
         local_time: read("/bin/date", &["+%Y-%m-%d %H:%M:%S %Z %z"]),
         os_version: std::fs::read_to_string("/etc/os-release")
             .ok()
@@ -253,7 +260,7 @@ pub(super) fn collect() -> Observation {
         ),
         (
             "ntp.server",
-            "timesync1 GetAll configured server lists (no service activation)",
+            "timesync1 runtime-or-system and link server candidates (no service activation; not current peer)",
         ),
         ("ntp.automatic_time", "timedatectl NTP"),
         ("ntp.service", "time daemon service unavailable"),
@@ -270,6 +277,63 @@ pub(super) fn collect() -> Observation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn runtime_servers_supersede_system_servers_without_hiding_link_candidates() {
+        let configured = |runtime: Option<Vec<&str>>, system: Vec<&str>, link: Vec<&str>| {
+            let mut values = BTreeMap::from([
+                (
+                    "SystemNTPServers".into(),
+                    system.into_iter().map(str::to_string).collect(),
+                ),
+                (
+                    "LinkNTPServers".into(),
+                    link.into_iter().map(str::to_string).collect(),
+                ),
+            ]);
+            if let Some(runtime) = runtime {
+                values.insert(
+                    "RuntimeNTPServers".into(),
+                    runtime.into_iter().map(str::to_string).collect(),
+                );
+            }
+            timesync_server(&values)
+        };
+        assert_eq!(
+            configured(Some(vec!["Current.Example."]), vec!["old.example"], vec![]).as_deref(),
+            Some("current.example")
+        );
+        for runtime in [None, Some(vec![])] {
+            assert_eq!(
+                configured(runtime.clone(), vec!["system.example"], vec![]).as_deref(),
+                Some("system.example")
+            );
+            assert_eq!(
+                configured(runtime, vec![], vec!["link.example"]).as_deref(),
+                Some("link.example")
+            );
+        }
+        for (runtime, system, link) in [
+            (
+                Some(vec!["current.example"]),
+                vec!["old.example"],
+                vec!["link.example"],
+            ),
+            (
+                Some(vec!["one.example", "two.example"]),
+                vec!["old.example"],
+                vec![],
+            ),
+            (
+                Some(vec!["https://invalid.example"]),
+                vec!["system.example"],
+                vec![],
+            ),
+            (Some(vec![]), vec!["system.example"], vec!["link.example"]),
+            (None, vec![], vec![]),
+        ] {
+            assert!(configured(runtime, system, link).is_none());
+        }
+    }
     #[test]
     fn timesync_typed_arrays_preserve_v249_support_and_reject_uncertain_shapes() {
         let value = serde_json::json!({"type":"a{sv}","data":[{"SystemNTPServers":{"type":"as","data":["time.example"]},"LinkNTPServers":{"type":"as","data":[]}}]});

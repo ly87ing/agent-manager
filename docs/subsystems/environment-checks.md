@@ -58,13 +58,21 @@ only. `/etc/localtime` supplies a zone fallback and `/etc/os-release` supplies
 the OS version. Configured timesyncd servers use a typed D-Bus `GetAll` call with
 service activation disabled, including on systemd 249. A stopped service remains
 stopped and its server lists remain unknown; `show-timesync` and older `busctl
-get-property` paths must not be used for this read. Missing systemd
-services/properties remain unknown. No daemon or
+get-property` paths must not be used for this read. A nonempty runtime list
+supersedes the loaded system list; link servers still participate. A single
+valid candidate from that effective list supplies `ntp.server`; multiple,
+invalid or absent candidates remain unknown. Loaded system inventory is not
+proof of the current on-disk configuration, and candidate configuration does not
+establish the actual peer or synchronization. This follows timesyncd's
+[server selection](https://github.com/systemd/systemd/blob/v255/src/timesync/timesyncd-manager.c).
+Missing systemd services/properties remain unknown. No daemon or
 locale package is installed during a read. The NTP measurement client is shared
 on all three platforms. GNOME inspection and inherited formats share one bounded
 primary-locale reader: it requires an existing AccountsService unique owner,
 checks the current UID before and after reading `Language`, and rechecks bus and
 owner identity. Calls carry `NoAutoStart`; a missing owner stays unknown.
+The native CLI/private-bus fixture checks runtime precedence, retained link
+candidates, empty lists and unknown peer evidence without changing settings.
 System settings open Windows Settings, GNOME Settings or
 KDE System Settings using fixed destinations; requesting a pane is not readback.
 Only an explicit KDE open-settings action runs a bounded `systemsettings --list`
