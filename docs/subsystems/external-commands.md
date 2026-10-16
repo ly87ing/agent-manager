@@ -17,6 +17,9 @@ The engine starts external commands through `process::command` or `command_with_
 - Explicit command or process proxy variables, including empty values, suppress automatic proxy discovery. Existing `NO_PROXY` / `no_proxy` values are retained.
 - Protocol-specific proxy settings remain protocol-specific. Leading `*.` bypass entries become domain suffixes; unsupported wildcard patterns, Windows `<local>`, macOS simple-hostname exclusions and PAC settings suppress fallback because environment variables cannot express them faithfully.
 - Linux reads GNOME GSettings or KDE `kioslaverc` through bounded native read tools for the current desktop. PAC, reverse bypass, proxy authentication and malformed values suppress fallback; credential fields are not queried and embedded user information is rejected. Explicit proxy environment variables retain precedence. No system settings or registry values are written.
+- GNOME proxy reads share the [environment check's GSettings file-write restriction](environment-checks.md).
+  Missing Landlock ABI 3 support suppresses discovery; there is no unguarded
+  retry or change to a different settings backend.
 - Program installation, Unix shell PATH discovery, and version/upstream capture keep their deadlines active after the parent exits. On timeout they terminate the group/job and poll child/reader cleanup for at most 250 ms; they never block joining an unfinished reader. Capture retains bounded output and drains the rest. Returned output stays capped at 4 MiB per stream for programs, 256 KiB for PATH, and the caller's stdout cap plus 256 stderr bytes for version/upstream probes. A pipe timeout fails the probe; it cannot substitute an empty successful result.
 - npm/curl upstream probes and PyPI installation tool resolution use the detected user PATH and platform command candidates, including Windows PATHEXT and command shims.
 - Timeout handlers terminate the process group, including descendants. Dropping

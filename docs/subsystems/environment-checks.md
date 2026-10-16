@@ -63,6 +63,16 @@ services/properties remain unknown. No daemon or
 locale package is installed during a read. The NTP measurement client is shared
 on all three platforms. System settings open Windows Settings, GNOME Settings or
 KDE System Settings using fixed destinations; requesting a pane is not readback.
+GSettings `get` and `writable` run in a child with a Landlock ABI 3 or newer
+filesystem restriction (Linux 6.2 or newer with Landlock enabled). This blocks
+the verified GLib keyfile/dconf paths for file creation, content writes,
+truncation, links and deletion while retaining the original backend, HOME and
+policy. It is not a general metadata/IPC sandbox: existing writable file
+descriptors, chmod/chown and other unhandled operations are outside this boundary.
+The child inherits no real writable output files; the caller and confirmed
+setters do not enter its restriction domain. A missing/disabled kernel capability
+returns unknown, never an unguarded retry. A missing keyfile directory can make
+`writable` false; this is unavailable write evidence, not proof of a policy lock.
 The native `GetUserDefaultGeoName` API reads the Windows current-user home region
 independently of culture. Automatic settings repair supports macOS and Windows.
 Explicit clock correction is implemented on macOS, Windows and Linux; platform acceptance is

@@ -121,6 +121,17 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   bus fixtures must exercise installer metadata, wrong UID and process-LANG
   fallback refusal, not only string parsers.
 
+## 2026-10-16: native getters can create configuration
+
+- GLib's keyfile constructor creates its settings directory even for `get`.
+  A new native GNOME inspection fixture caught that zero-write violation after
+  macOS tests and Linux cross-compilation passed. Keep the missing-directory
+  assertion; preparing the directory first would conceal the production defect.
+- Constrain the verified backend's file creation/content mutation paths before
+  child execution, retaining actual backend and policy semantics. Unsupported
+  kernels return unknown. Test real non-default dconf values and locks as well as
+  keyfile defaults; replacing the backend with memory would hide user settings.
+
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
 The focused dialog tests passed before the full suite reached Sources' existing

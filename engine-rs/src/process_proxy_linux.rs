@@ -98,6 +98,9 @@ pub(super) fn read() -> SystemProxy {
     let read = |program: &str, args: &[&str]| {
         let remaining = Duration::from_secs(2).checked_sub(started.elapsed())?;
         let mut command = super::launch_command(program);
+        if program == "/usr/bin/gsettings" {
+            super::deny_settings_file_writes(&mut command);
+        }
         command
             .args(args)
             .env("LC_ALL", "C")
@@ -211,6 +214,7 @@ mod tests {
             assert_eq!(proxy.https, proxy.http);
             assert_eq!(proxy.bypass.as_deref(), Some("localhost,.example.invalid"));
             assert!(!std::path::Path::new(&std::env::var("HOME").unwrap()).exists());
+            assert!(!std::path::Path::new(&std::env::var("XDG_CONFIG_HOME").unwrap()).exists());
             return;
         }
         let root = std::env::temp_dir().join(format!("am-proxy-{}", crate::store::uuid_v4()));
@@ -259,7 +263,7 @@ mod tests {
             .unwrap()
             .success());
         let output = std::process::Command::new(std::env::current_exe().unwrap()).args(["--exact", "process::linux_proxy::tests::native_gsettings_reads_isolated_schemas_without_creating_home", "--nocapture"])
-            .env(CHILD, "1").env("GSETTINGS_SCHEMA_DIR", &root).env("GSETTINGS_BACKEND", "memory").env("XDG_CURRENT_DESKTOP", "GNOME").env("HOME", root.join("missing-home")).output().unwrap();
+            .env(CHILD, "1").env("GSETTINGS_SCHEMA_DIR", &root).env("GSETTINGS_BACKEND", "keyfile").env("XDG_CURRENT_DESKTOP", "GNOME").env("HOME", root.join("missing-home")).env("XDG_CONFIG_HOME", root.join("missing-config")).output().unwrap();
         assert!(output.status.success(), "{output:?}");
         std::fs::remove_dir_all(root).unwrap();
     }

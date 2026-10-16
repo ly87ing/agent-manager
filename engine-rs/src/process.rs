@@ -4,6 +4,11 @@
 #[cfg(any(target_os = "linux", test))]
 #[path = "process_proxy_linux.rs"]
 mod linux_proxy;
+#[cfg(target_os = "linux")]
+#[path = "process_settings_linux.rs"]
+mod settings;
+#[cfg(target_os = "linux")]
+pub(crate) use settings::deny_settings_file_writes;
 
 use std::ffi::OsStr;
 use std::process::{Child, Command};
