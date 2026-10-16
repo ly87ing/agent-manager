@@ -22,6 +22,11 @@ error. Content roots must be ordinary directories; reuse holds their original
 handles while hashing and rechecking identities. These checks detect observed
 replacement; they do not lock every source path or every content byte against an
 actively concurrent writer.
+On Windows, retained references open directories by their full file IDs after
+checking ordinary pathname roots, then independently recheck identity and type.
+This avoids pathname-bound descendants blocking ancestor rename while preserving
+the original objects. Filesystems that cannot provide those references are
+refused; there is no numeric-ID-only fallback or permission relaxation.
 
 ## Runtime path and failure behavior
 

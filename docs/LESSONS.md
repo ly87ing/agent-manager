@@ -27,6 +27,12 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   must fail before the fix and preserve both original and external markers after
   it. Preserve replacements and report uncertain cleanup instead of deleting by
   pathname alone.
+- Windows path-bound descendant handles prevented ancestor rename despite
+  `FILE_SHARE_DELETE`, failing six native snapshot tests. A native file-ID
+  reference test established ancestor rename and identity readback without
+  releasing the original object reference. Validate the full ID and ordinary
+  directory metadata before releasing the temporary pathname handle; never
+  replace this with a numeric-ID-only or close-all-handles fallback.
 
 ## 2026-10-16: service activation safety must cover every observation path
 

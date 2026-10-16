@@ -69,11 +69,64 @@ pub(super) fn open_directory(path: &Path) -> Result<(File, DirectoryId)> {
             return Err(std::io::Error::last_os_error().into());
         }
         let info = unsafe { info.assume_init() };
-        Ok((
-            file,
-            DirectoryId(info.VolumeSerialNumber, info.FileId.Identifier),
-        ))
+        let identity = DirectoryId(info.VolumeSerialNumber, info.FileId.Identifier);
+        let reference = windows_identity_reference(&file, identity)?;
+        Ok((reference, identity))
     }
+}
+
+#[cfg(windows)]
+fn windows_identity_reference(original: &File, expected: DirectoryId) -> Result<File> {
+    use std::os::windows::fs::MetadataExt;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+    use windows_sys::Win32::Storage::FileSystem::*;
+    // Path-bound descendant handles prevent Windows directory rename even with
+    // FILE_SHARE_DELETE. Keep the object referenced by its full file ID instead.
+    let descriptor = FILE_ID_DESCRIPTOR {
+        dwSize: std::mem::size_of::<FILE_ID_DESCRIPTOR>() as u32,
+        Type: ExtendedFileIdType,
+        Anonymous: FILE_ID_DESCRIPTOR_0 {
+            ExtendedFileId: FILE_ID_128 {
+                Identifier: expected.1,
+            },
+        },
+    };
+    let handle = unsafe {
+        OpenFileById(
+            original.as_raw_handle(),
+            &descriptor,
+            FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+        )
+    };
+    if handle == windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE {
+        return Err(std::io::Error::last_os_error())
+            .context("Cannot retain snapshot directory by file ID");
+    }
+    let reference = unsafe { File::from_raw_handle(handle) };
+    let metadata = reference.metadata()?;
+    if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        bail!("Snapshot identity reference must be an ordinary directory");
+    }
+    let mut info = std::mem::MaybeUninit::<FILE_ID_INFO>::uninit();
+    if unsafe {
+        GetFileInformationByHandleEx(
+            reference.as_raw_handle(),
+            FileIdInfo,
+            info.as_mut_ptr().cast(),
+            std::mem::size_of::<FILE_ID_INFO>() as u32,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    let info = unsafe { info.assume_init() };
+    if DirectoryId(info.VolumeSerialNumber, info.FileId.Identifier) != expected {
+        bail!("Snapshot identity reference changed; refusing to continue");
+    }
+    Ok(reference)
 }
 
 pub(super) fn unchanged(path: &Path, expected: DirectoryId) -> Result<()> {
