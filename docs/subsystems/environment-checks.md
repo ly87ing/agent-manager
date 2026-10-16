@@ -39,6 +39,9 @@ for compatible applications, not proof of a native Windows application's locale.
 An explicit Windows `TZ` leaves effective process time zone unknown.
 The reader disables PowerShell's module-analysis cache and searches only the
 system PowerShell module directory; caller-provided module paths are not executed.
+The script reapplies that directory after PowerShell startup, which otherwise
+reconstructs the module path and can prepend AllUsers modules. The isolated
+policy child uses the same post-startup restriction.
 
 On Linux, `timedatectl` machine-readable properties supply time settings.
 AccountsService reads only the current UID's language preferences; GNOME's

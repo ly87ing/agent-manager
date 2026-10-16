@@ -3,6 +3,7 @@
 pub(super) const SYSTEM: &str = r#"
 function Read-Policies {
  $source=@'
+$env:PSModulePath=[IO.Path]::Combine($PSHOME,'Modules')
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 $ErrorActionPreference='Stop'
 function Read-Policy($area,$name) {
@@ -165,12 +166,13 @@ $stage='method'
 [IO.File]::WriteAllText($marker,$stage)
 $null=[Windows.Foundation.Metadata.ApiInformation,Windows.Foundation.Metadata,ContentType=WindowsRuntime]
 $result.method=[Windows.Foundation.Metadata.ApiInformation]::IsMethodPresent('Windows.Management.Policies.NamedPolicy','GetPolicyFromPath',[uint32]2)
+[IO.File]::WriteAllText($marker,'method-returned')
 $result | ConvertTo-Json -Compress
 } catch {@{stage=$stage;binding_error=$_.Exception.Message;exception_type=$_.Exception.GetType().FullName;hresult=$_.Exception.HResult} | ConvertTo-Json -Compress}
 [IO.File]::WriteAllText($marker,'complete')
 "#;
         let script = format!(
-            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$marker={};{source}",
+            "$env:PSModulePath=[IO.Path]::Combine($PSHOME,'Modules');[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$marker={};{source}",
             quote(marker.to_str().unwrap())
         );
         let program = super::super::windows::powershell().unwrap();
@@ -218,6 +220,11 @@ $result | ConvertTo-Json -Compress
             .as_str()
             .is_some_and(|name| !name.is_empty()));
         eprintln!("Native policy binding: {result}");
+        assert_eq!(
+            super::super::windows::script("[Console]::Out.WriteLine([String]($env:PSModulePath -ceq [IO.Path]::Combine($PSHOME,'Modules') -and $env:PSModuleAnalysisCachePath -eq 'NUL'))").as_deref(),
+            Some("True"),
+            "The production reader must restrict the effective module path after PowerShell startup"
+        );
         let observed: serde_json::Value = serde_json::from_str(
             &super::super::windows::script_timeout(
                 &format!("{SYSTEM} Read-Policies | ConvertTo-Json -Depth 10 -Compress"),
@@ -264,6 +271,7 @@ $result | ConvertTo-Json -Compress
             ("$child.Kill();", "before-kill"),
             ("$null=$child.WaitForExit(250);", "after-kill"),
             (" $policies=Read-Policies", "read-system-policies"),
+            (" try {$r.zone=(Get-TimeZone", "before-timezone"),
             (
                 " $r.timezone_policy=$policies.values.timezone",
                 "read-system-policy-values",
@@ -274,7 +282,7 @@ $result | ConvertTo-Json -Compress
                 &format!("[IO.File]::WriteAllText($marker,'{stage}');{needle}"),
             );
         }
-        let script=format!("[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$marker={};{fixture} $r=Read-System; @{{zone_known=($null -ne $r.zone);policy_unknown=($null -eq $r.timezone_policy);location_unknown=($null -eq $r.zone_policy.apps -and $null -eq $r.zone_policy.master)}} | ConvertTo-Json -Compress;[IO.File]::WriteAllText($marker,'complete')",quote(marker.to_str().unwrap()));
+        let script=format!("$env:PSModulePath=[IO.Path]::Combine($PSHOME,'Modules');[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$marker={};[IO.File]::WriteAllText($marker,'root-started');{fixture} $r=Read-System; @{{zone_known=($null -ne $r.zone);policy_unknown=($null -eq $r.timezone_policy);location_unknown=($null -eq $r.zone_policy.apps -and $null -eq $r.zone_policy.master)}} | ConvertTo-Json -Compress;[IO.File]::WriteAllText($marker,'complete')",quote(marker.to_str().unwrap()));
         let program = super::super::windows::powershell().unwrap();
         let mut command = crate::process::launch_command(&program);
         command
