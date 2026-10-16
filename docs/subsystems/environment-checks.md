@@ -79,6 +79,9 @@ Explicit clock correction is implemented on macOS, Windows and Linux; platform a
 tracked separately from compilation and source tests.
 
 Language comparison uses the complete ordered list, ignoring tag casing.
+Repair planning and independent readback use that same rule, so OS tag
+canonicalization does not request repeated writes or report a false failure.
+List order, unrelated values and the raw preview baseline remain exact.
 Region uses the Windows home region or the country component of the macOS/Linux
 user locale. Each process locale category
 uses nonempty `LC_ALL`, that category, nonempty `LANG`, then `C`; UTF-8 and UTF8
