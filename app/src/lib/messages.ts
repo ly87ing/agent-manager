@@ -1,5 +1,18 @@
 /** Application copy only; user content and engine diagnostics are never translation keys. */
 export const messages = {
+  "正在读取分享链接关联…": "Reading share-link association…",
+  "AppImage 分享链接": "AppImage share links",
+  "让桌面使用此 AppImage 打开 agentmanager:// 分享链接。链接只打开导入预览。": "Use this AppImage to open agentmanager:// share links from the desktop. Links open an import preview only.",
+  "已关联此应用": "Associated with this application",
+  "预览链接关联": "Preview link association",
+  "关联 AppImage 分享链接": "Associate AppImage share links",
+  "将分享链接的默认打开方式设为此应用。现有应用文件会保留；其他类型的链接不受影响。移动 AppImage 后需要重新检查关联。": "Make this application the default for share links. Existing application files are preserved; other link types are unaffected. Check the association again after moving the AppImage.",
+  "确认关联链接": "Confirm link association",
+  "分享链接关联已验证": "Share-link association verified",
+  "分享链接关联失败": "Share-link association failed",
+  "当前打开方式": "Current handler",
+  "应用路径": "Application path",
+  "将写入的桌面条目": "Desktop entry to write",
   "当前用户": "Current user",
   "在系统的日期与时间设置中，将此项调整为期望值，然后重新检查。": "Adjust this item in the system date and time settings, then check again.",
   "在系统的语言与地区设置中调整此项；部分应用需要重启。完成后重新检查。": "Adjust this item in the system language and region settings. Some applications need to restart; check again afterward.",

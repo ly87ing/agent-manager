@@ -4,6 +4,7 @@ mod autostart;
 mod engine;
 mod import_links;
 mod settings;
+mod share_links;
 mod startup;
 mod theme;
 
@@ -32,6 +33,25 @@ fn autostart_get(app: tauri::AppHandle) -> Result<bool, String> {
 #[tauri::command]
 fn autostart_set(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
     autostart::set(&app, enabled)
+}
+
+#[tauri::command]
+async fn share_links_preview(
+    app: tauri::AppHandle,
+) -> Result<Option<agent_manager_engine::desktop_links::Preview>, String> {
+    tauri::async_runtime::spawn_blocking(move || share_links::preview(&app))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn share_links_register(
+    app: tauri::AppHandle,
+    base: String,
+) -> Result<agent_manager_engine::desktop_links::Preview, String> {
+    tauri::async_runtime::spawn_blocking(move || share_links::register(&app, &base))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 /// Restore geometry, but always open a visible, non-fullscreen window.
@@ -129,6 +149,8 @@ fn main() {
             settings_save,
             autostart_get,
             autostart_set,
+            share_links_preview,
+            share_links_register,
             theme::set_window_theme
         ])
         .build(tauri::generate_context!())

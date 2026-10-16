@@ -19,6 +19,7 @@ import { engineErrorMessage } from "../lib/engine";
 import type { SettingsData, SettingsPreferences } from "../lib/contract";
 import { useSaveSettings, useSettings } from "../lib/settings";
 import { useAutostart, useSetAutostart } from "../lib/autostart";
+import { ShareLinkRegistration } from "../components/ShareLinkRegistration";
 import { useTheme, type Theme } from "../lib/theme";
 import { cn } from "../lib/utils";
 import { ConfigBackupSection } from "../components/ConfigBackupSection";
@@ -336,6 +337,7 @@ export default function SettingsPage({
         <SettingsRow label={t("开机启动")} note={t("登录系统后自动打开 Agent Manager")}>
           <AutostartControl canEnable={!data.runtimeWarning} />
         </SettingsRow>
+        <ShareLinkRegistration />
         <SettingsRow label={t("操作记录保留")} note={t("0 为不自动清理，最多 3650 天")}>
           <div className="flex items-center gap-2">
             <input
