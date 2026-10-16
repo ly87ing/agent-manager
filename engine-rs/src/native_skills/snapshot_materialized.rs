@@ -91,7 +91,6 @@ fn validate_keys(entries: &Entries) -> Result<()> {
     Ok(())
 }
 
-#[cfg(any(windows, test))]
 pub(super) fn plan(entries: &Entries) -> Result<Option<Vec<FileLink>>> {
     let links: Vec<_> = entries
         .iter()
@@ -224,6 +223,11 @@ pub(super) fn copy(
             .create_new(true)
             .open(output)?;
         std::io::copy(&mut input, &mut output).context("Copying materialized skill bytes")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            output.set_permissions(std::fs::Permissions::from_mode(0o444))?;
+        }
     }
     Ok(())
 }

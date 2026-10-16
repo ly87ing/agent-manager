@@ -18,6 +18,47 @@ produce a new typed version.
 Typed link inspection reads the OS target before any comparison helper strips
 Windows namespace prefixes; absolute/drive/namespace targets are refused.
 
+Git sources also interpret ordinary files declared as exact stage-zero `120000`
+entries in the cache's index. This supports Git's `core.symlinks=false` checkout:
+current file bytes supply the raw target, rather than guessing a link from text
+or reading an old blob. Replacing that representation with an OS link having
+the same raw target preserves the logical typed version. The legacy fingerprint
+continues to describe physical entry kinds; immutable snapshot verification never
+reads a Git index.
+
+The in-process [index reader](../../engine-rs/src/native_skills/git_index.rs)
+accepts full v2/v3 indexes up to 4 MiB. It validates unique sorted stage-zero
+paths, modes, flags, lengths, padding, file/directory conflicts and a unique
+SHA-1/SHA-256 layout. Nonzero checksums must match; Git's documented zero footer
+is accepted. Checksums and index object IDs do not authenticate content, HEAD or
+the repository's configured object format. Optional extensions are skipped by
+checked length, without recursive decoding. Missing, malformed, v4, split,
+sparse, unresolved or unknown mandatory layouts remain unknown. Linked `.git`
+files, reparse metadata roots and `commondir` layouts are refused; queries do not
+repair or normalize them.
+
+[Source interpretation](../../engine-rs/src/native_skills/git_source.rs) checks
+native directory-entry spelling for every indexed link and gitlink, including
+other prefixes, before matching a selected skill. A system-resolved alias with
+different spelling is refused without inventing Unicode case-folding rules.
+Directory-name inspection shares a 4 MiB budget, including cached path/name
+storage, and 30-second checkpoints per source construction or selected-root walk.
+These are observed filesystem checks, not atomic traversal or a hard deadline
+for blocking filesystem calls or the whole status operation. Source contents
+still require their normal full-file fingerprints. Selected roots must be
+ordinary directories inside the known repository; retained identities are checked
+before and after inventory. Included subtrees overlapping any gitlink are unknown.
+Missing indexed links, including changed spelling, require explicit correction
+of the source/index before new versions can be created.
+
+Status parses each cached source index once, including comparisons for personal
+fork provenance. Interpretation errors appear in `source_version_error` and the
+collection warning; new assignment/content-update actions are withheld. A safely
+scoped, unchanged legacy comparison can remain known. Existing verified versions
+can still be enabled or disabled when the skill remains discoverable. A missing
+cache is a separate discovery boundary. New Git additions, updates and unassigned
+forks never silently deploy an uninterpreted target-text file.
+
 Each typed version has an immutable `snapshot.json` outside `content`, declaring
 schema 2 and its version ID, or the Windows materialization described below.
 Schema 2 metadata remains limited to 4096 bytes. Verification reads the actual contents.
@@ -27,7 +68,11 @@ an absent manifest selects the original hash format. Removing a typed manifest
 or adding one to a legacy snapshot does not preserve a valid version.
 
 On Windows, new Git snapshots whose links all point directly to included ordinary
-files use schema 3 and ordinary file copies. The dedicated writer copies each
+files use schema 3 and ordinary file copies. Plaintext Git links use this writer
+on every platform. Their target text must be nonempty UTF-8 without NUL and within
+64 KiB; unsupported directory/chained/mixed targets are refused before staging,
+unless the exact version already exists and passes its recorded verifier.
+The dedicated writer copies each
 validated source target, even if its name sorts after the alias; it never attempts
 to create a file symbolic link. Existing directory/mixed-link copying retains
 the schema 2 path and its platform capability requirements.
@@ -46,8 +91,10 @@ the caller's expected typed v2 ID. Receipt text cannot override a fixed ID;
 additional files or empty excluded directories invalidate it.
 
 The new writer creates files exclusively and copies default-stream bytes without
-propagating NTFS alternate streams. Typed identities cover names, kinds, included
-directories, raw link targets and default-stream digests; ACLs, timestamps,
+propagating NTFS alternate streams. On Unix, new copied files use the existing
+snapshot policy of mode `0444`; personal forks make their own copies writable.
+Typed identities cover names, kinds, included directories, raw link targets and
+default-stream digests; ACLs, timestamps,
 hardlink identity and alternate streams are outside that existing content model.
 A personal fork of a materialized snapshot contains editable ordinary files and
 does not inherit the sibling integrity manifest. Schema 2-only readers cannot
@@ -176,6 +223,8 @@ cargo test --manifest-path engine-rs/Cargo.toml --test native_skills replacing_a
 cargo test --manifest-path engine-rs/Cargo.toml --test native_skills personal_skill
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::snapshot_v2
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::snapshot_materialized
+cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::git_index
+cargo test --manifest-path engine-rs/Cargo.toml --test native_skill_git_links
 cargo test --manifest-path engine-rs/Cargo.toml --test native_skills typed
 cargo test --manifest-path engine-rs/Cargo.toml --test native_skills_windows
 cd app && pnpm vitest run src/test/SkillsPage.test.tsx src/test/SourcesLifecycle.test.tsx src/test/rollback.test.ts
@@ -198,3 +247,10 @@ The Windows-only CLI case must execute on a native Windows runner; its zero-test
 result on another host does not establish Windows acceptance. Cross-host verifier
 cases reject forged receipts, duplicate/unknown fields, extra excluded directories,
 physical links, ambiguous Windows paths and alias/target changes.
+The cross-platform Git-link CLI cases prepare real `core.symlinks=false`
+checkouts in SHA-1 and SHA-256 repositories, then remove Git from the CLI's PATH.
+They read back payloads, receipts, assignment isolation, unknown-index behavior
+and Git metadata bytes/timestamps. Case-insensitive filesystem alias challenges
+report whether the host actually exercised them; a case-sensitive host does not
+establish that acceptance. Directory-root aliases, nested gitlinks and unsupported
+plaintext directory links must not publish target-text snapshots.

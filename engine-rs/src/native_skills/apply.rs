@@ -13,7 +13,7 @@ use super::paths::{
 use super::persistence::{
     delete_binding, load_bindings_from_conn, load_bindings_readonly, write_binding,
 };
-use super::snapshot::{discover_repo_skills, hash_skill_dir, snapshot_git_skill};
+use super::snapshot::{discover_repo_skills, hash_skill_dir};
 use super::status::{load_metadata, record_apply_operation, DomainMetadata};
 use super::CollectionDef;
 use crate::native::{Context, Request};
@@ -373,7 +373,8 @@ fn apply_skill_add(
         let path = expected_link_target(ctx, coll, skill, &version)?;
         (version, path)
     } else {
-        snapshot_git_skill(source_dir, &ctx.data_dir)?
+        super::git_source::Source::new(&collection_source_root(ctx, coll))
+            .snapshot(source_dir, &ctx.data_dir)?
     };
 
     let mut rollback_guard = RollbackGuard::new();
@@ -450,7 +451,8 @@ fn apply_skill_update(
         let path = expected_link_target(ctx, coll, skill, &version)?;
         (version, path)
     } else {
-        snapshot_git_skill(source_dir, &ctx.data_dir)?
+        super::git_source::Source::new(&collection_source_root(ctx, coll))
+            .snapshot(source_dir, &ctx.data_dir)?
     };
 
     let mut rollback_guard = RollbackGuard::new();

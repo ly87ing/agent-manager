@@ -510,23 +510,39 @@ fn build_skill_element(
     bindings: &BTreeMap<(String, String, String), super::BindingEntry>,
     bases: &[PathBuf],
     inbox_skills: &mut Vec<String>,
+    sources: &BTreeMap<String, super::git_source::Source>,
 ) -> Value {
     let available = source_path.is_some();
-    let versions = if is_local_source(coll) {
+    let version_result = if is_local_source(coll) {
         None
     } else {
-        source_path.and_then(|path| super::snapshot_v2::source_versions(path).ok())
+        source_path.map(|path| {
+            sources
+                .get(coll_name)
+                .ok_or_else(|| anyhow::anyhow!("Git source metadata is unavailable"))?
+                .versions(path)
+        })
     };
-    let legacy_version = versions
+    let source_error = version_result
         .as_ref()
-        .map(|v| v.legacy.clone())
-        .or_else(|| source_path.and_then(|path| hash_skill_dir(path).ok()));
+        .and_then(|result| result.as_ref().err())
+        .map(ToString::to_string);
+    let versions = version_result.and_then(Result::ok);
+    let legacy_version = versions.as_ref().map(|v| v.legacy.clone()).or_else(|| {
+        source_path.and_then(|path| {
+            if is_local_source(coll) {
+                hash_skill_dir(path).ok()
+            } else {
+                sources.get(coll_name)?.legacy_version(path).ok()
+            }
+        })
+    });
     let available_version = if is_local_source(coll) {
         legacy_version.as_deref()
     } else {
         versions.as_ref().map(|v| v.current.as_str())
     };
-    let agg = aggregate_skill_agents(
+    let mut agg = aggregate_skill_agents(
         ctx,
         coll_name,
         coll,
@@ -539,6 +555,16 @@ fn build_skill_element(
         bindings,
         bases,
     );
+    if !is_local_source(coll) && available && versions.is_none() {
+        for cell in agg.agents_cell_map.values_mut() {
+            if let Some(actions) = cell["actions"].as_array_mut() {
+                actions.retain(|action| action != "add" && action != "update");
+            }
+            if cell["blocked_reason"].is_null() {
+                cell["blocked_reason"] = json!("Git source entry kinds are unknown; new skill assignments and content updates are unavailable.");
+            }
+        }
+    }
 
     let is_inbox = available && !agg.any_assigned;
     if is_inbox {
@@ -574,8 +600,9 @@ fn build_skill_element(
         "observed": {
             "agents": Value::Object(agg.agents_cell_map),
             "discovery_inbox": is_inbox,
+            "source_version_error": source_error,
             // 用户「改成我的版本」时记下的来历：来自哪个集合的哪个版本、上游是否已有新版
-            "forked_from": super::fork::origin_json(ctx, meta, coll, skill_name),
+            "forked_from": super::fork::origin_json(ctx, meta, coll, skill_name, sources),
         },
         "state": skill_state,
         "freshness": {
@@ -709,6 +736,16 @@ pub(super) fn build_status_view(ctx: &Context, collections_only: bool) -> Result
     }
     let probes = crate::native_upstream::load_probe_cache(ctx)?;
     let bases = managed_bases(ctx, &meta.collections);
+    let sources: BTreeMap<_, _> = meta
+        .collections
+        .iter()
+        .filter(|(_, coll)| !is_local_source(coll) && !coll.deleted)
+        .filter_map(|(name, coll)| {
+            let root = collection_source_root(ctx, coll);
+            root.is_dir()
+                .then(|| (name.clone(), super::git_source::Source::new(&root)))
+        })
+        .collect();
     let mut elements = Vec::new();
 
     for (coll_name, coll) in &meta.collections {
@@ -755,8 +792,9 @@ pub(super) fn build_status_view(ctx: &Context, collections_only: bool) -> Result
         }
 
         let mut inbox_skills = Vec::new();
+        let mut source_error = None;
         for skill_name in coll_skills.iter().filter(|_| !collections_only) {
-            elements.push(build_skill_element(
+            let element = build_skill_element(
                 ctx,
                 coll_name,
                 coll,
@@ -768,7 +806,14 @@ pub(super) fn build_status_view(ctx: &Context, collections_only: bool) -> Result
                 &bindings,
                 &bases,
                 &mut inbox_skills,
-            ));
+                &sources,
+            );
+            if source_error.is_none() {
+                source_error = element["observed"]["source_version_error"]
+                    .as_str()
+                    .map(str::to_string);
+            }
+            elements.push(element);
         }
 
         let mut collection_element = build_collection_element(
@@ -789,6 +834,17 @@ pub(super) fn build_status_view(ctx: &Context, collections_only: bool) -> Result
             &inbox_skills,
             &probes,
         );
+        if collection_element["observed"]["blocked_reason"].is_null() {
+            if let Some(error) = sources
+                .get(coll_name)
+                .and_then(|source| source.error())
+                .or(source_error.as_deref())
+            {
+                collection_element["observed"]["blocked_reason"] = json!(format!(
+                    "Git source entry kinds are unknown: {error}. Existing assignments retain their recorded versions."
+                ));
+            }
+        }
         if collections_only {
             collection_element["observed"]
                 .as_object_mut()

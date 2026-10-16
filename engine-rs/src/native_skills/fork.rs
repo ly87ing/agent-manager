@@ -10,14 +10,15 @@ use rusqlite::TransactionBehavior;
 use serde_json::{json, Map, Value};
 use std::path::Path;
 
+use std::collections::BTreeMap;
+
 use super::paths::{
     collection_source_root, expand_home, personal_source_path, resolve_loose,
     validate_path_identifier,
 };
 use super::persistence::load_bindings_readonly;
 use super::snapshot::{
-    copy_dir_recursive, discover_repo_skills, hash_skill_dir, snapshot_git_skill,
-    verify_skill_version,
+    copy_dir_recursive, discover_repo_skills, hash_skill_dir, verify_skill_version,
 };
 use super::status::{load_metadata, DomainMetadata};
 use super::CollectionDef;
@@ -182,7 +183,8 @@ pub(crate) fn fork(ctx: &Context, req: &Request) -> Result<Value> {
                 let version = hash_skill_dir(&path)?;
                 (path, version)
             } else {
-                let (version, snapshot) = snapshot_git_skill(&path, &ctx.data_dir)?;
+                let (version, snapshot) =
+                    super::git_source::Source::new(&root).snapshot(&path, &ctx.data_dir)?;
                 (snapshot, version)
             }
         }
@@ -279,6 +281,7 @@ pub(crate) fn origin_json(
     meta: &DomainMetadata,
     coll: &CollectionDef,
     skill: &str,
+    sources: &BTreeMap<String, super::git_source::Source>,
 ) -> Value {
     let Some(entry) = coll
         .raw
@@ -307,10 +310,14 @@ pub(crate) fn origin_json(
             if coll.source_path.is_some() {
                 hash_skill_dir(path).ok()
             } else {
-                match super::snapshot_v2::source_versions(path) {
+                match sources.get(origin)?.versions(path) {
                     Ok(versions) if versions.legacy == version => Some(versions.legacy),
                     Ok(versions) => Some(versions.current),
-                    Err(_) => hash_skill_dir(path).ok().filter(|legacy| legacy == version),
+                    Err(_) => sources
+                        .get(origin)?
+                        .legacy_version(path)
+                        .ok()
+                        .filter(|legacy| legacy == version),
                 }
             }
         });
