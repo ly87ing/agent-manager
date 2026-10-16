@@ -355,7 +355,7 @@ fn arguments(req: &Request) -> Result<(Target, Option<String>, bool)> {
 
 pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let (target, base, persistent) = arguments(req)?;
-    #[cfg(any(target_os = "macos", windows))]
+    #[cfg(any(target_os = "macos", target_os = "linux", windows))]
     {
         #[cfg(target_os = "macos")]
         super::repair_macos::validate_runtime_locale(&target)?;
@@ -365,6 +365,10 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         let _ = persistent;
         #[cfg(windows)]
         let mut settings = super::repair_windows::WindowsSettings::new(persistent);
+        #[cfg(target_os = "linux")]
+        let mut settings = super::repair_linux::LinuxSettings::default();
+        #[cfg(target_os = "linux")]
+        let _ = persistent;
         if base.is_none() {
             return Ok(serde_json::to_value(plan(
                 &target,
@@ -373,7 +377,7 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         }
         #[cfg(target_os = "macos")]
         let guard = super::repair_macos::mutation_lock()?;
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "linux"))]
         let guard = super::mutation_lock::acquire()?;
         let (status, items, _automatic) = apply(
             &mut settings,
@@ -444,10 +448,10 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             json!({"status":status,"items":items,"report":report,"restart_required":restart_required,"clock_error":clock_error}),
         )
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
         let _ = (ctx, target, base, persistent);
-        bail!("Environment repair currently supports macOS only.");
+        bail!("Environment repair requires a supported desktop.");
     }
 }
 
