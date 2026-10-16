@@ -42,6 +42,7 @@ libc = "0.2"
 # Keep confirmed D-Bus setters in the process that owns Polkit authorization.
 zbus = "=5.19.0"
 async-io = "2.6"
+blocking = "1.6"
 futures-lite = "2.6"
 
 [target.'cfg(windows)'.dependencies]
