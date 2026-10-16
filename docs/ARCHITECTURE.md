@@ -29,6 +29,9 @@ Named comparison collections live in the same database. Local checks remain
 read-only; external time queries and administrator-authorized inspection are
 explicit actions. Opted-in clock correction requires a fresh clear mismatch,
 records its request before authorization and independently verifies its result.
+Confirmed automatic repair uses a fingerprint-bound preview and fresh baseline
+checks to align targeted macOS settings and future-process session variables,
+then independently verifies outcomes.
 No environment action edits shell files or assistant identity. See
 [environment checks](subsystems/environment-checks.md).
 

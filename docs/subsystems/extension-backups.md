@@ -28,7 +28,8 @@ whole-definition import contract. The additive `launch_recipes` and
 older backup preserve local tool data; an explicitly empty selected section
 clears that module. Tool IDs are preserved, environment names remain unique,
 and the normal recipe/profile validators and secret rejection run before writes.
-Restored automatic-correction preferences do not run until a later explicit check.
+Restored automatic-correction flags never trigger correction. Comparisons remain
+read-only; system changes require a separate apply or repair confirmation.
 
 Unknown or empty module selections fail. Validation still rejects credentials
 and changes to immutable account/alias metadata, even in an unselected module.

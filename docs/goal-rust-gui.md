@@ -1761,3 +1761,44 @@ cases belong to GUI CI. Installed desktop business workflows, physical login,
 consumer application environment behavior and signed update-chain acceptance
 remain separate. No installed application, real account, shell file or system
 clock was changed, and no Release or tag was created.
+
+## 2026-10-15: project audit corrections
+
+Runtime corrections through `6825b3a` unify default database selection across the
+CLI, desktop engine and Settings. Explicit nonempty overrides win. New installs
+use the desktop identifier; a lone legacy database remains in place. With both
+databases present, the current directory wins without merging, moving or deleting
+either file. Isolated CLI saves and independent reads verified all four cases,
+including byte-identical database contents after reads and zero state creation on
+a fresh query.
+
+Modal navigation/search shortcuts preserve unsaved editor contents and focus.
+Skills, MCP, Rules and Sources expose page rereads with displayed read times;
+existing local recovery controls remain available. Environment profiles report
+native system-check support before inspection, disabling unsupported actions
+while retaining profile-only management. Missing or invalid capability metadata
+does not initiate a machine check.
+
+Local verification passed: engine 445 tests plus its program lifecycle harness,
+Tauri 27, frontend 674 in 60 files, 23 script tests, production type checking/build,
+Rust formatting and the isolated CLI smoke script. Browser checks exercised modal
+shortcuts and exact resource query sets in English/Chinese at 1000 × 650 and
+760 × 650. Captures were inspected; no page overflow occurred and editor footers
+remained visible. Unsupported-capability fixtures issued only profile reads and
+retained profile management; they do not establish physical Windows/Linux UI use.
+
+One concurrent full-suite lock-release assertion failed. A controlled fork
+demonstrated that a child can retain a CLOEXEC flock after the parent closes its
+handle; the specific child in the original failure was not traced. The lock test
+now runs its unchanged acquisition/collision/drop checks in an isolated process
+and retains acquisition diagnostics. Its focused regression and the full engine
+suite passed. Production locking and authorization logic are unchanged.
+
+The `2d361ad` CI and four-target GUI CI completed successfully. Later audit commits
+were pushed incrementally and their pipelines were still queued/running when this
+receipt was written; no final-source remote CI success is claimed here. Installer
+downloads must match the intended commit and checksums. No local installer was
+built, no installed application was changed, and no tag or Release was created.
+Real privileged settings/time
+writes, consumer-app inheritance, other-platform installed workflows and signed
+update installation remain pending as listed in [platform status](GUI-PLATFORM-STATUS.md).

@@ -1,27 +1,27 @@
 # GUI Platform Status
 
 The current product manages extensions, independent general launch recipes and
-macOS environment inspection with explicit authorized clock correction.
+macOS environment inspection with explicitly confirmed settings repair and clock correction.
 Account management, login, provider settings, account-bound launch commands,
 shell-file alias management, quota, and assistant lifecycle capabilities described
 in older records below are retired. The Assistants page lists immutable extension-target metadata;
 it does not restore account management. See [current architecture](ARCHITECTURE.md)
 and [scope](EXTENSIONS-ONLY.md).
 
-## Current acceptance boundary (2026-10-14)
+## Current acceptance boundary (2026-10-15)
 
-The functional corrections are `4b7e596`, `620850c`, `fd54f17` and release-version
-binding `81f42f7`.
-The [current verification receipt](goal-rust-gui.md#2026-10-14-audit-corrections-and-current-verification)
-separates local execution, desktop interaction and remaining acceptance.
+The latest audit corrections cover shared CLI/desktop database selection, modal
+shortcut protection, explicit resource rereads and native environment capabilities.
+The [current verification receipt](goal-rust-gui.md#2026-10-15-project-audit-corrections)
+separates local execution, browser interaction and remaining acceptance.
 
 | Area | Current evidence | Remaining boundary |
 | --- | --- | --- |
-| Extension and saved-tool source | Engine 424, Tauri 26, frontend 629 and release-script 23 tests; type checking/build and isolated CLI readback passed | These are not consumer acceptance of an installed package |
-| macOS x86_64 desktop | Isolated native backup preview, restore, Launch/Environment readback and authorized time-settings read passed at 1000 × 650 | Current installed-package business workflows still need their own receipt |
-| Environment correction | Request/completion audit and failure gates tested; live `not_needed` returned with unchanged database bytes | Actual excessive-offset adjustment needs an isolated system where changing its clock is safe |
+| Extension and saved-tool source | Engine 445 plus the program lifecycle harness, Tauri 27, frontend 674 and release-script 23 tests; type checking/build, smoke and isolated CLI readback passed | These are not consumer acceptance of an installed package |
+| Desktop interaction | Current browser fixtures verified modal drafts, resource rereads and unsupported-platform controls in both languages at 1000 × 650 and 760 × 650 | Earlier native receipts do not establish installed-package business workflows for these corrections |
+| Environment correction | Read-only preview, no-op, guarded audit and disposable settings verification are covered by the current tests | Actual administrator-authorized settings writes, excessive-offset adjustment and target-app inheritance need a disposable macOS environment |
 | Skill adoption | Local-only CLI preview made no Git call or state write; explicit comparison and failure fallback passed | Real SSH repository access depends on the configured source and network |
-| Platform CI | [CI](https://github.com/ly87ing/agent-manager/actions/runs/38548297434) and [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/38548297906) passed for `fd54f17`; Windows native engine and four installer builds passed | Windows/Linux/arm64 desktop business interaction remains unverified |
+| Platform CI | [CI](https://github.com/ly87ing/agent-manager/actions/runs/38836505099) and [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/38836505316) passed for `2d361ad`, including four installer targets | Later audit commits require their own completed CI receipts; Windows/Linux/arm64 desktop business interaction remains unverified |
 | Distribution and updater | Repository is public; current test installers are available from successful GUI CI artifacts | Only the old preview is published; no stable latest release or real signed update loop is verified |
 
 ### Remaining acceptance checklist
