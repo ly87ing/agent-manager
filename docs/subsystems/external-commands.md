@@ -22,6 +22,13 @@ The engine starts external commands through `process::command` or `command_with_
   retry or change to a different settings backend.
 - Program installation, Unix shell PATH discovery, and version/upstream capture keep their deadlines active after the parent exits. On timeout they terminate the group/job and poll child/reader cleanup for at most 250 ms; they never block joining an unfinished reader. Capture retains bounded output and drains the rest. Returned output stays capped at 4 MiB per stream for programs, 256 KiB for PATH, and the caller's stdout cap plus 256 stderr bytes for version/upstream probes. A pipe timeout fails the probe; it cannot substitute an empty successful result.
 - npm/curl upstream probes and PyPI installation tool resolution use the detected user PATH and platform command candidates, including Windows PATHEXT and command shims.
+- Skill repository clone, fetch, checkout and metadata commands share a 120-second
+  deadline per command, including pipe EOF after the parent exits. Both streams
+  retain at most 4 MiB plus a sentinel; oversized output fails rather than being
+  parsed as a complete result. Clone diagnostics are captured for normal error
+  sanitization. Failed operations do not automatically delete an existing cache.
+  A missing sparse-checkout setting uses Git's explicit default; execution errors
+  and timeouts cannot be treated as an absent setting.
 - Timeout handlers terminate the process group, including descendants. Dropping
   the guard also terminates remaining descendants after normal completion, even
   if they closed the captured pipes. Windows closes its kill-on-close job; Unix
@@ -41,6 +48,7 @@ cargo test --manifest-path engine-rs/Cargo.toml --lib process::linux_proxy
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_programs::apply::capture_tests
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_programs::locate::capture_tests
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_upstream::capture_tests
+cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::versioning::tests
 cargo test --manifest-path engine-rs/Cargo.toml --test native_mcp check_
 cargo check --manifest-path engine-rs/Cargo.toml --target x86_64-pc-windows-gnu --all-targets
 ```
