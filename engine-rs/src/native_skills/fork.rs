@@ -42,7 +42,64 @@ fn make_writable(dir: &Path) -> Result<()> {
             }
         }
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+        for entry in std::fs::read_dir(dir)? {
+            let path = entry?.path();
+            let meta = std::fs::symlink_metadata(&path)?;
+            // Never follow a link or another reparse point into source files.
+            if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                continue;
+            }
+            if meta.is_dir() {
+                make_writable(&path)?;
+            } else if meta.is_file() && meta.permissions().readonly() {
+                let mut permissions = meta.permissions();
+                permissions.set_readonly(false);
+                std::fs::set_permissions(&path, permissions)?;
+            }
+        }
+    }
     Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn making_a_copy_writable_does_not_follow_directory_reparse_points() {
+        let root = std::env::temp_dir().join(format!("am-fork-attributes-{}", store::uuid_v4()));
+        let copy = root.join("copy");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(copy.join("nested")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let own_file = copy.join("nested/file.txt");
+        let outside_file = outside.join("source.txt");
+        for file in [&own_file, &outside_file] {
+            std::fs::write(file, b"original").unwrap();
+            let mut permissions = std::fs::metadata(file).unwrap().permissions();
+            permissions.set_readonly(true);
+            std::fs::set_permissions(file, permissions).unwrap();
+        }
+        let link = copy.join("linked-directory");
+        junction::create(&outside, &link).unwrap();
+        make_writable(&copy).unwrap();
+        std::fs::write(&own_file, b"edited copy").unwrap();
+        assert_eq!(std::fs::read(&own_file).unwrap(), b"edited copy");
+        assert!(std::fs::metadata(&outside_file)
+            .unwrap()
+            .permissions()
+            .readonly());
+        assert_eq!(std::fs::read(&outside_file).unwrap(), b"original");
+        junction::delete(&link).unwrap();
+        let mut permissions = std::fs::metadata(&outside_file).unwrap().permissions();
+        permissions.set_readonly(false);
+        std::fs::set_permissions(&outside_file, permissions).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 fn destination(
