@@ -510,10 +510,25 @@ mod tests {
 
     #[test]
     fn mutation_lock_is_shared_by_separate_open_handles_and_released_by_drop() {
+        const CHILD: &str = "AM_ENVIRONMENT_LOCK_TEST_CHILD";
+        // Other parallel tests must not fork while this lock descriptor is open.
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "native_environment::repair_macos::tests::mutation_lock_is_shared_by_separate_open_handles_and_released_by_drop",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+            return;
+        }
         let first = mutation_lock().unwrap();
         assert!(mutation_lock().is_err());
         drop(first);
-        assert!(mutation_lock().is_ok());
+        mutation_lock().expect("The environment mutation lock must be available after drop");
     }
 
     #[test]

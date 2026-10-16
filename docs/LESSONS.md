@@ -16,6 +16,14 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Isolate drop-based lock assertions from concurrent process-launch tests.**
+- A full-suite environment lock assertion failed after the owning handle closed.
+  A controlled fork reproduced a child retaining a CLOEXEC flock until exec/exit.
+- Run the lock assertion in its own test process, preserving both exclusive
+  acquisition and release-after-drop checks. Retain the actual acquisition error.
+  Production lock and authorization behavior stay unchanged.
+- Seen 1× (2026-10-15; environment lock regression isolation).
+
 **Keep page refresh distinct from local recovery controls.**
 - MCP's unreadable-target panel and Sources' empty guidance already owned local
   reread actions. Adding a page action must preserve those recovery paths and
