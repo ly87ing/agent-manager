@@ -196,7 +196,7 @@ jobs:
       # 普通 CI 制品不调用签名或 Release；正式发布仍由 GUI Release 门禁处理。
       - name: Build app installers
         working-directory: app
-        run: pnpm tauri build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+        run: pnpm tauri build --verbose --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
       - name: Collect installers and checksums
         env:
