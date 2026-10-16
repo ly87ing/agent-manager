@@ -86,15 +86,7 @@ pub(super) fn mutation_lock() -> Result<File> {
 }
 
 fn session_keys(target: &Target) -> Vec<&'static str> {
-    let mut keys = Vec::new();
-    if target.timezone.is_some() {
-        keys.push("TZ");
-    }
-    if target.locale.is_some() {
-        keys.extend(["LANG", "LC_ALL"]);
-        keys.extend(super::LOCALE_CATEGORIES);
-    }
-    keys
+    super::repair::session_keys(target)
 }
 
 fn launchctl(args: &[&str], limit: usize) -> Option<String> {

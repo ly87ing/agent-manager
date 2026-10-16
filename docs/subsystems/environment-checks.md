@@ -18,16 +18,16 @@ The desktop and CLI share `environment:check` in
 before secret-source loading, database access, locks or operation logs. Checks
 never change system time, preferences, shell files or assistant resources.
 
-Sources are `/etc/localtime`, the current user's `AppleLanguages` and `AppleLocale`
+On macOS, sources are `/etc/localtime`, the current user's `AppleLanguages` and `AppleLocale`
 through Foundation preferences, selected regional-format preferences,
 `/etc/ntp.conf`, `systemsetup -getusingnetworktime`, the running `timed` service,
 and the read-only Darwin `ntp_gettime` kernel interface.
-Only `TZ`, `LANG`, `LC_ALL` and the six macOS POSIX locale categories are read from
+Only `TZ`, `LANG`, `LC_ALL` and the six common POSIX locale categories are read from
 the caller's environment. System local time is read without a process `TZ`
 override. Every observation names its source.
 
 On Windows, bounded, profile-free Windows PowerShell reads `Get-TimeZone`,
-`Get-WinUserLanguageList`, `Get-WinHomeLocation`, `Get-Culture`, selected current-user
+`Get-WinUserLanguageList`, `Get-Culture`, selected current-user
 format values and W32Time configuration/service state. System ICU maps IANA names
 to Windows zone IDs; names mapped to the same Windows zone compare equally.
 Domain time mode never presents a manual peer as the active configured server.
@@ -55,12 +55,14 @@ services/properties remain unknown. No daemon or
 locale package is installed during a read. The NTP measurement client is shared
 on all three platforms. System settings open Windows Settings, GNOME Settings or
 KDE System Settings using fixed destinations; requesting a pane is not readback.
-Automatic settings repair is currently a macOS operation. Explicit clock
-correction is implemented on macOS, Windows and Linux; platform acceptance is
+The native `GetUserDefaultGeoName` API reads the Windows current-user home region
+independently of culture. Automatic settings repair supports macOS and Windows.
+Explicit clock correction is implemented on macOS, Windows and Linux; platform acceptance is
 tracked separately from compilation and source tests.
 
 Language comparison uses the complete ordered list, ignoring tag casing.
-Region uses the country component of `AppleLocale`. Each process locale category
+Region uses the Windows home region or the country component of the macOS/Linux
+user locale. Each process locale category
 uses nonempty `LC_ALL`, that category, nonempty `LANG`, then `C`; UTF-8 and UTF8
 spellings compare equally. Unset `TZ` inherits the system zone; empty `TZ` means
 UTC. Time-zone targets use explicit IANA names.
@@ -147,11 +149,46 @@ the action-specific confirmation. The supported targets are:
 
 | Target | Effect |
 | --- | --- |
-| System clock | Measure, correct only a clearly excessive offset with macOS authorization, then independently verify. Requires an explicit server and tolerance. |
+| System clock | Measure, correct only a clearly excessive offset with system authorization, then independently verify. Requires an explicit server and tolerance. |
 | Application launch environment | Prefill an unsaved launch recipe with the profile's time zone and locale; the user chooses an application and explicitly saves or launches it. |
 | Date/time or language/region settings | Open the corresponding system pane for manual adjustment; opening it does not establish that settings were applied. |
 
 ### Automatic repair
+
+#### Windows
+
+Windows repair uses the same preview/confirmation, stale-base rejection, per-user
+mutation lock, audit and independent readback as macOS. Its preview includes the
+native context and a platform field. System-only setters request UAC, reject an
+expired boot-time lease or changed system fingerprint before each write, and
+stop on uncertain outcomes. User APIs and HKCU always run in the original caller,
+even when UAC uses a different administrator. Domain W32Time modes, managed time
+policies and unknown evidence are unavailable; the tool never overrides policy or
+changes privacy. Time-zone policy uses the public Windows
+[NamedPolicy API](https://learn.microsoft.com/en-us/uwp/api/windows.management.policies.namedpolicy).
+Enabling automatic time zone also requires known permitted machine location
+settings; disabling does not require location permission.
+
+Windows region uses [SetUserGeoName](https://learn.microsoft.com/en-us/windows/win32/api/winnls/nf-winnls-setusergeoname), preserving culture and regional formats.
+Language reordering retains existing language objects and their input options.
+New languages use OS defaults. A required format-independence policy change is
+listed separately in the preview; unreadable languages never change that policy.
+Readback must retain the original culture/formats and format-independence protection.
+Replacing a single manual NTP peer retains its existing polling/client flags;
+unknown flags or multiple peers are unavailable.
+
+Windows has no launchd-style temporary login environment. `TZ`, `LANG`, `LC_ALL`
+and the six locale categories are unavailable by default. The separate
+`--allow-persistent-user-env` choice must appear in both preview and confirmation;
+it is bound into the preview fingerprint. The desktop checkbox is off by default
+and requests a new preview. These user variables persist after logout and affect
+future logins and new Explorer-launched processes. Windows sends
+[`WM_SETTINGCHANGE`](https://learn.microsoft.com/en-us/dotnet/api/system.environment.setenvironmentvariable?view=netframework-4.8.1); other applications may refresh their environment. The checker
+process is unchanged. No shell files or login
+entries are edited. Linux settings repair is the next platform adapter; its clock
+correction is already independent of settings repair.
+
+#### macOS
 
 **Repair automatically** is a separate action for the explicitly selected profile.
 `environment:repair-preview --spec JSON` reads the current settings and returns

@@ -35,6 +35,32 @@ async function open() {
 }
 
 describe("Automatic environment repair", () => {
+  it("requires a fresh explicit Windows persistence preview and forwards that choice only on confirm", async () => {
+    const { calls }=renderWithEngine(<EnvironmentRepairDialog profile={profile} onResult={() => {}} onClose={() => {}} />, {
+      "environment:repair-preview": async (args) => makeEnvelope({ ...plan, platform:"windows",base:(args.includes("--allow-persistent-user-env") ? "c" : "a").repeat(64) }),
+      "environment:repair": makeEnvelope(result()),
+    });
+    const checkbox=await screen.findByRole("checkbox",{name:"允许写入 Windows 当前用户的持久环境变量（新进程生效）"});
+    expect(checkbox).not.toBeChecked();
+    expect(calls.find((call)=>call.command==="environment:repair-preview")!.args).not.toContain("--allow-persistent-user-env");
+    await userEvent.click(checkbox);
+    await waitFor(()=>expect(calls.filter((call)=>call.command==="environment:repair-preview")).toHaveLength(2));
+    await waitFor(()=>expect(screen.getByTestId("confirm-modal-confirm")).toBeEnabled());
+    expect(calls.filter((call)=>call.command==="environment:repair")).toHaveLength(0);
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await waitFor(()=>expect(calls.filter((call)=>call.command==="environment:repair")).toHaveLength(1));
+    const request=calls.find((call)=>call.command==="environment:repair")!;
+    expect(request.args).toContain("--allow-persistent-user-env");
+    expect(request.args[request.args.indexOf("--base")+1]).toBe("c".repeat(64));
+    expect(screen.getByRole("dialog")).toHaveTextContent("不会在退出登录时清除");
+  });
+  it("discloses the Linux user-manager lifetime without claiming a whole-desktop environment", async () => {
+    renderWithEngine(<EnvironmentRepairDialog profile={profile} onResult={() => {}} onClose={() => {}} />, {
+      "environment:repair-preview": makeEnvelope({ ...plan, platform:"linux" }),
+    });
+    expect(await screen.findByText("Linux 会话变量仅供用户服务管理器以后启动的进程使用，管理器退出后失效；已有桌面应用不受影响。")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+  });
   it("previews the selected criteria and cancellation performs no repair or correction", async () => {
     const { calls } = setup();
     expect(screen.getByRole("button", { name: "自动修复" })).toBeDisabled();

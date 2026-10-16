@@ -41,6 +41,19 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   control that creates a disposable marker; an unconfigured fixture can otherwise
   pass the zero-activation assertion without testing the boundary.
 
+## 2026-10-16: related native evidence remains a write gate after preview
+
+- Shared repair must respect unavailable capabilities on every fresh read, not
+  only at initial preview. Readable language tags cannot compensate for unknown
+  culture/format protection; loss after a setter must not become `verified`.
+- Never change an associated Windows format policy when the language list itself
+  is unreadable. Show a required policy change explicitly, preserve existing
+  language objects/input options, and recheck protection inside the setter.
+- Preserve a single Windows NTP peer's flags when replacing its hostname. Flags
+  include polling behavior; a fixed `0x8` would silently remove SpecialInterval.
+- Use the public policy API and test its real type/method binding. A catch-to-null
+  reader can otherwise hide a misspelled native API behind a passing preview.
+
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
 The focused dialog tests passed before the full suite reached Sources' existing

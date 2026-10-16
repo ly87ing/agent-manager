@@ -56,6 +56,35 @@ pub(super) fn zone_id(iana: &str) -> Option<String> {
 }
 
 #[cfg(windows)]
+pub(super) fn iana_zone(windows: &str) -> Option<String> {
+    icu_zone(windows, true)
+}
+
+#[cfg(windows)]
+pub(super) fn geo_name() -> Option<String> {
+    let mut buffer = [0u16; 16];
+    let length = unsafe {
+        windows_sys::Win32::Globalization::GetUserDefaultGeoName(
+            buffer.as_mut_ptr(),
+            buffer.len() as i32,
+        )
+    };
+    if length < 2 || length as usize > buffer.len() {
+        return None;
+    }
+    String::from_utf16(&buffer[..length as usize - 1]).ok()
+}
+
+#[cfg(windows)]
+pub(super) fn set_geo_name(region: &str) -> bool {
+    if region.len() != 2 || !region.bytes().all(|value| value.is_ascii_uppercase()) {
+        return false;
+    }
+    let value: Vec<_> = region.encode_utf16().chain(Some(0)).collect();
+    unsafe { windows_sys::Win32::Globalization::SetUserGeoName(value.as_ptr()) != 0 }
+}
+
+#[cfg(windows)]
 fn icu_zone(input: &str, from_windows: bool) -> Option<String> {
     use windows_sys::Win32::Foundation::FreeLibrary;
     use windows_sys::Win32::System::LibraryLoader::{
@@ -119,7 +148,6 @@ $result=@{}
 try { $result.zone=(Get-TimeZone -ErrorAction Stop).Id } catch {}
 try { $result.languages=@((Get-WinUserLanguageList -ErrorAction Stop).LanguageTag) } catch {}
 try { $result.locale=(Get-Culture -ErrorAction Stop).Name } catch {}
-try { $geo=(Get-WinHomeLocation -ErrorAction Stop).GeoId; $result.region=([Globalization.CultureInfo]::GetCultures('SpecificCultures') | ForEach-Object { try { [Globalization.RegionInfo]::new($_.Name) } catch {} } | Where-Object GeoId -eq $geo | Select-Object -First 1).TwoLetterISORegionName } catch {}
 try { $result.formats=Get-ItemProperty 'HKCU:\Control Panel\International' -ErrorAction Stop | Select-Object sShortDate,sLongDate,sTimeFormat,sDecimal,sThousand,sCurrency } catch {}
 try { $service=Get-Service W32Time -ErrorAction Stop; $result.service=($service.Status -eq 'Running') } catch {}
 try { $key=Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\W32Time\Parameters' -ErrorAction Stop; $result.ntp=$key.NtpServer; $result.type=$key.Type } catch {}
@@ -184,7 +212,7 @@ pub(super) fn decode(value: &Value) -> Observation {
             "language.preferred",
             "Get-WinUserLanguageList (current user)",
         ),
-        ("language.region", "Get-WinHomeLocation (current user)"),
+        ("language.region", "GetUserDefaultGeoName (current user)"),
         ("language.locale", "Get-Culture (current user)"),
         ("language.formats", "HKCU Control Panel International"),
         ("ntp.server", "W32Time Parameters (manual NTP only)"),
@@ -203,6 +231,7 @@ pub(super) fn collect() -> Observation {
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())
         .unwrap_or(Value::Null);
     let mut observed = decode(&value);
+    observed.user_region = geo_name();
     observed.timezone = value["zone"].as_str().and_then(|zone| icu_zone(zone, true));
     observed.env = super::command::process_environment();
     observed

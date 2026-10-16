@@ -10,10 +10,15 @@ mod macos;
 #[cfg(any(target_os = "linux", windows))]
 mod mutation_lock;
 pub(crate) mod profiles;
-#[cfg(any(target_os = "macos", test))]
 mod repair;
 #[cfg(target_os = "macos")]
 mod repair_macos;
+#[cfg(windows)]
+mod repair_windows;
+#[cfg(any(windows, test))]
+mod repair_windows_scripts;
+#[cfg(any(windows, test))]
+mod repair_windows_snapshot;
 mod time_probe;
 mod time_repair;
 #[cfg(any(target_os = "linux", windows))]
@@ -647,16 +652,7 @@ pub(crate) fn execute(ctx: &Context, req: &Request) -> Envelope {
         command.as_str(),
         "environment:repair-preview" | "environment:repair"
     ) {
-        #[cfg(any(target_os = "macos", test))]
         return envelope(req, command.ends_with("preview"), repair::handle(ctx, req));
-        #[cfg(all(not(target_os = "macos"), not(test)))]
-        return envelope(
-            req,
-            true,
-            Err(anyhow::anyhow!(
-                "Environment repair currently supports macOS only."
-            )),
-        );
     }
     if command == "environment:open-settings" {
         return envelope(req, true, actions::open_settings(req));
