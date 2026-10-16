@@ -504,14 +504,12 @@ fn valid_initialize(response: &Value) -> bool {
 }
 
 fn tool_names(response: &Value) -> Option<Vec<String>> {
-    Some(
-        response
-            .pointer("/result/tools")?
-            .as_array()?
-            .iter()
-            .filter_map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_string))
-            .collect(),
-    )
+    response
+        .pointer("/result/tools")?
+        .as_array()?
+        .iter()
+        .map(|tool| tool.get("name").and_then(Value::as_str).map(str::to_string))
+        .collect()
 }
 
 /// Resolve programs from absolute PATH entries and known local install folders.
@@ -1116,6 +1114,26 @@ pub fn check(ctx: &Context, req: &Request) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_listing_rejects_malformed_names_without_dropping_entries() {
+        for tool in [
+            json!(null),
+            json!(7),
+            json!("tool"),
+            json!({}),
+            json!({"name":7}),
+        ] {
+            let response = json!({"result":{"tools":[{"name":"valid"},tool]}});
+            assert!(tool_names(&response).is_none(), "{response}");
+            assert!(!tools_outcome(None, &response).ok);
+        }
+        assert_eq!(tool_names(&json!({"result":{"tools":[]}})), Some(vec![]));
+        assert_eq!(
+            tool_names(&json!({"result":{"tools":[{"name":"first"},{"name":"second"}]}})),
+            Some(vec!["first".into(), "second".into()])
+        );
+    }
 
     #[test]
     fn known_redaction_merges_original_overlaps_without_reprocessing_placeholders() {

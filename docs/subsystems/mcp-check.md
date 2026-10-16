@@ -37,7 +37,7 @@ result remains in the dialog; request failures stay above its action footer.
   field as this check's timeout. Tool listing gets a separate `tool_timeout_sec`,
   defaulting to 60 s for Codex and the transport default for others. Codex defaults
   follow its [official MCP guide](https://learn.chatgpt.com/docs/extend/mcp).
-- Invalid initialization, tool-list RPC errors, missing results, early exits and timeouts fail at their respective stage. Servers without the [tools capability](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) succeed at initialization without claiming a tool list. Only the first tool-list page is read; no tools are invoked.
+- Invalid initialization, tool-list RPC errors, missing results, early exits and timeouts fail at their respective stage. Every listed tool must have a string name; a malformed entry fails the list instead of being silently dropped. An empty list remains valid. Servers without the [tools capability](https://modelcontextprotocol.io/specification/2025-06-18/server/tools) succeed at initialization without claiming a tool list. Only the first tool-list page is read; no tools are invoked.
 - Results include `base`, `cwd`, `cwd_source`, both effective timeouts and optional `exit_code`. Only exits observed before shutdown are reported; closing stdin or forced termination must not manufacture a failure exit code.
 - If protocol output closes first, the checker waits up to 0.5 s within the
   remaining protocol deadline for a natural exit, without closing stdin. EOF
@@ -83,3 +83,14 @@ records) and unchanged source/database bytes. Windows also
 exercises a real `npx.cmd` behind a stored `cmd /c npx` entry with ordinary space
 and Unicode arguments; special-character round trips apply to the direct native
 executable case. Compiling the target alone does not establish native acceptance.
+
+The same target uses the actual system `curl` or `curl.exe` against an owned
+loopback listener on all three platforms. It verifies JSON and SSE responses,
+initialize/notification/tools ordering, session and resolved authorization
+headers, HTTP/RPC/missing/malformed results, redacted success data and unchanged
+configuration, secret-source and database bytes. Isolated `.curlrc` and `_curlrc`
+files contain interference that must remain absent from every received request;
+[`--disable`](https://curl.se/docs/manpage.html#-q) suppresses their default loading.
+The listener has a deadline, socket timeouts and joined cleanup even on failure.
+`cargo test --manifest-path engine-rs/Cargo.toml --test native_mcp_protocol -- --http-only`
+runs just these HTTP cases.

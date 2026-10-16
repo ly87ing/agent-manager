@@ -6,6 +6,20 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: transport fixtures must preserve values and total deadlines
+
+- Lowercasing complete HTTP headers also lowercases case-sensitive tokens and
+  can accept corrupted credentials. Normalize names only; compare original
+  authorization and session values exactly, including duplicate rejection.
+- Per-read socket timeouts can be repeatedly extended by slow input. Apply the
+  shared absolute deadline and stop condition to each actual read and write,
+  including accepted connections, before relying on joined fixture cleanup.
+- Accepted sockets can inherit a nonblocking listener's mode on Windows/macOS.
+  Native CI saw connection resets while Linux passed; a controlled client that
+  waits after acceptance reproduced an empty response on macOS. Explicitly set
+  accepted streams to blocking mode before bounded reads; retain that delayed
+  request as a regression instead of relaxing timeouts or retrying failures.
+
 ## 2026-10-16: measure cleanup evidence from descendant readiness
 
 - A delayed-marker assertion measured from capture startup can pass too soon
