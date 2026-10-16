@@ -66,7 +66,6 @@ pub(super) fn installed(zone: &str) -> bool {
 
 #[cfg(target_os = "linux")]
 pub(super) fn read() -> Option<State> {
-    use std::os::unix::fs::MetadataExt;
     let raw = super::command::read(
         "/usr/bin/busctl",
         &[
@@ -82,6 +81,12 @@ pub(super) fn read() -> Option<State> {
         ],
     )?;
     let zone = zone(&serde_json::from_str(&raw).ok()?)?;
+    disk(zone)
+}
+
+#[cfg(target_os = "linux")]
+fn disk(zone: String) -> Option<State> {
+    use std::os::unix::fs::MetadataExt;
     let current = std::path::Path::new("/etc/localtime");
     let meta = std::fs::symlink_metadata(current).ok()?;
     if !meta.file_type().is_symlink() || meta.uid() != 0 {
@@ -164,6 +169,82 @@ fn guarded(
 }
 
 #[cfg(target_os = "linux")]
+#[derive(PartialEq, Eq)]
+enum Dispatch {
+    Written,
+    Refused,
+    Unknown,
+    Stale,
+}
+
+#[cfg(target_os = "linux")]
+fn set_zone(target: &str, before: &State, deadline: Option<u64>) -> Dispatch {
+    use std::time::Duration;
+    zbus::block_on(futures_lite::future::race(
+        async {
+            let Ok(connection) = zbus::Connection::system().await else {
+                return Dispatch::Unknown;
+            };
+            let fresh = async {
+                let reply = connection
+                    .call_method(
+                        Some("org.freedesktop.timedate1"),
+                        "/org/freedesktop/timedate1",
+                        Some("org.freedesktop.DBus.Properties"),
+                        "GetAll",
+                        &("org.freedesktop.timedate1",),
+                    )
+                    .await
+                    .ok()?;
+                let values: std::collections::HashMap<String, zbus::zvariant::OwnedValue> =
+                    reply.body().deserialize().ok()?;
+                if bool::try_from(values.get("LocalRTC")?).ok()? {
+                    return None;
+                }
+                let zone = <&str>::try_from(values.get("Timezone")?).ok()?.to_string();
+                super::Target {
+                    timezone: Some(zone.clone()),
+                    ..Default::default()
+                }
+                .validate()
+                .ok()?;
+                disk(zone)
+            }
+            .await;
+            if fresh.as_ref() != Some(before) || !installed(target) {
+                return Dispatch::Stale;
+            }
+            if !deadline
+                .zip(super::clock_helper::boot_ms())
+                .is_some_and(|(deadline, now)| super::clock_helper::valid_window(now, deadline))
+            {
+                return Dispatch::Stale;
+            }
+            // call_method uses an empty message flag set; the body also forbids
+            // interaction. The sender PID is this same authorized process.
+            match connection
+                .call_method(
+                    Some("org.freedesktop.timedate1"),
+                    "/org/freedesktop/timedate1",
+                    Some("org.freedesktop.timedate1"),
+                    "SetTimezone",
+                    &(target, false),
+                )
+                .await
+            {
+                Ok(_) => Dispatch::Written,
+                Err(zbus::Error::MethodError(..)) => Dispatch::Refused,
+                Err(_) => Dispatch::Unknown,
+            }
+        },
+        async {
+            async_io::Timer::after(Duration::from_secs(8)).await;
+            Dispatch::Unknown
+        },
+    ))
+}
+
+#[cfg(target_os = "linux")]
 pub(super) fn apply(item: &Item, before: &State) -> (String, Item) {
     let mut result = item.clone();
     let Some(target) = item.expected.as_str().filter(|zone| installed(zone)) else {
@@ -176,6 +257,7 @@ pub(super) fn apply(item: &Item, before: &State) -> (String, Item) {
     let fresh = deadline
         .zip(super::clock_helper::boot_ms())
         .is_some_and(|(deadline, now)| super::clock_helper::valid_window(now, deadline));
+    let mut dispatch = Dispatch::Refused;
     let status = guarded(
         authorization,
         fresh,
@@ -184,29 +266,15 @@ pub(super) fn apply(item: &Item, before: &State) -> (String, Item) {
             if !installed(target) {
                 return false;
             }
-            super::command::read(
-                "/usr/bin/busctl",
-                &[
-                    "--system",
-                    "--auto-start=no",
-                    "call",
-                    "org.freedesktop.timedate1",
-                    "/org/freedesktop/timedate1",
-                    "org.freedesktop.timedate1",
-                    "SetTimezone",
-                    "sb",
-                    target,
-                    "false",
-                ],
-            )
-            .is_some()
+            dispatch = set_zone(target, before, deadline);
+            dispatch == Dispatch::Written
         },
     );
     if status == "cancelled" {
         result.status = "not_applied".into();
         return ("cancelled".into(), result);
     }
-    if status == "stale" {
+    if status == "stale" || dispatch == Dispatch::Stale {
         result.status = "stale".into();
         return ("partial".into(), result);
     }
@@ -219,6 +287,7 @@ pub(super) fn apply(item: &Item, before: &State) -> (String, Item) {
             }
         }
         None => "outcome_unknown",
+        _ if dispatch == Dispatch::Unknown => "outcome_unknown",
         _ if status == "written" => "unverified",
         _ => "failed",
     }

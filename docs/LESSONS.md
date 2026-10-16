@@ -74,6 +74,18 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Query limited process information without reading arguments or account data.
   Retain conservative refusal for unreadable matching names and failed enumeration.
 
+## 2026-10-16: preauthorization belongs to the actual D-Bus sender
+
+- Polkit 124 binds temporary authorization to the subject process. Preauthorizing
+  the engine then spawning busctl does not transfer that grant on this version.
+  Send confirmed setters from the same Rust process, avoiding version-specific
+  descendant inheritance, and test authentication. A CI rule returning YES for
+  the whole user can conceal this defect.
+- A false method argument does not clear busctl's default interactive-message
+  flag. Keep both payload and message flags noninteractive after Fresh/CAS.
+  Transport timeout does not cancel an already dispatched server request; preserve
+  unknown outcomes and stop subsequent changes, even if immediate readback is old.
+
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
 The focused dialog tests passed before the full suite reached Sources' existing
