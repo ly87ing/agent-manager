@@ -603,7 +603,7 @@ mod tests {
                 .downcast_ref::<std::io::Error>()
                 .is_some_and(|error| error.kind() == std::io::ErrorKind::TimedOut)));
             assert!(started.elapsed() < std::time::Duration::from_secs(3));
-            fixture::assert_descendant_stopped(&root, started);
+            fixture::assert_descendant_stopped(&root);
         }
     }
 

@@ -6,6 +6,13 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: measure cleanup evidence from descendant readiness
+
+- A delayed-marker assertion measured from capture startup can pass too soon
+  when the descendant starts late. After confirming readiness, observe its full
+  five-second write delay plus margin before accepting cleanup or deleting the
+  fixture. Keep the independent command-deadline and parent-exit assertions.
+
 ## 2026-10-16: output EOF can precede a natural process exit
 
 - Native Windows MCP acceptance returned no exit code for a server exiting with
