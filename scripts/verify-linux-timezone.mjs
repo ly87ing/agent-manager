@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -67,6 +67,14 @@ try {
   }
   const preview = cli('environment:repair-preview').data;
   const item = preview.items.find(item => item.id === 'time.timezone');
+  if (item.before !== originalZone) {
+  const raw = JSON.parse(run('/usr/bin/busctl', ['--system', '--json=short', 'call', 'org.freedesktop.timedate1', '/org/freedesktop/timedate1', 'org.freedesktop.DBus.Properties', 'GetAll', 's', 'org.freedesktop.timedate1']).stdout);
+  const meta = lstatSync('/etc/localtime');
+  console.log(JSON.stringify({ timezone: raw.data?.[0]?.Timezone, rtc: raw.data?.[0]?.LocalRTC,
+    symlink: meta.isSymbolicLink(), owner: meta.uid,
+    link: meta.isSymbolicLink() ? readlinkSync('/etc/localtime') : null,
+    adjtime: existsSync('/etc/adjtime') ? run('/usr/bin/sudo', ['-n', '/usr/bin/cat', '/etc/adjtime']).stdout : null }));
+  }
   assert.equal(item.before, originalZone);
   assert.equal(item.status, 'change');
   assert(!existsSync(home));
@@ -102,10 +110,12 @@ try {
   rootNode("import fs from 'node:fs'; const [p,old,t]=process.argv.slice(1); if(fs.readFileSync(p,'utf8')!==old) throw Error('Foreign policy'); fs.writeFileSync(p,t);", [rule, installedPolicy, deniedPolicy]);
   installedPolicy = deniedPolicy;
   const denyDeadline = Date.now() + 10_000;
-  while (run('/usr/bin/pkcheck', ['--action-id', 'org.freedesktop.timedate1.set-timezone', '--process', subject], process.env, true).status === 0) {
+  let denyCode;
+  while ((denyCode = run('/usr/bin/pkcheck', ['--action-id', 'org.freedesktop.timedate1.set-timezone', '--process', subject], process.env, true).status) === 0) {
     assert(Date.now() < denyDeadline, 'Disposable deny policy was not loaded');
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
   }
+  assert.equal(denyCode, 1, 'Policy denial must be explicit, not an authorization error');
   const deniedPreview = cli('environment:repair-preview').data;
   const denied = cli('environment:repair', ['--base', deniedPreview.base, '--confirm']).data;
   assert.equal(denied.status, 'partial');
@@ -114,6 +124,8 @@ try {
   assert.deepEqual(managerTZ(), ['TZ=Etc/UTC'], 'Denied authorization continued to session writes');
   console.log('Linux timezone: native Polkit caller, apply, disk readback, no-op, stale, cache disagreement and denied authorization passed.');
 } finally {
+  const cleanupErrors = [];
+  try {
   if (touched) {
     // Force a transition first: SetTimezone may otherwise return early on its cache.
     run('/usr/bin/sudo', ['-n', '/usr/bin/timedatectl', 'set-timezone', selected]);
@@ -122,6 +134,10 @@ try {
     bus('UnsetAndSetEnvironment', 'asas', '1', 'TZ', String(originalTZ.length), ...originalTZ);
     assert.deepEqual(managerTZ(), originalTZ);
   }
-  if (installed) rootNode("import fs from 'node:fs'; const [p,t]=process.argv.slice(1); if(fs.readFileSync(p,'utf8')!==t) throw Error('Foreign policy'); fs.unlinkSync(p);", [rule, installedPolicy]);
+  } catch (error) { cleanupErrors.push(error); }
+  try {
+    if (installed) rootNode("import fs from 'node:fs'; const [p,t]=process.argv.slice(1); if(fs.readFileSync(p,'utf8')!==t) throw Error('Foreign policy'); fs.unlinkSync(p);", [rule, installedPolicy]);
+  } catch (error) { cleanupErrors.push(error); }
+  if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Disposable fixture restoration failed');
   rmSync(root, { recursive: true });
 }
