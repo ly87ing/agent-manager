@@ -162,6 +162,40 @@ pub(super) fn recipe(req: &Request) -> Result<Recipe> {
     Ok(spec)
 }
 
+/// The dependency page uses the same literal Windows execution renderer.
+pub(crate) fn windows_program_command(
+    program: &std::path::Path,
+    args: &[String],
+    env: &[(String, String)],
+    cwd: Option<&std::path::Path>,
+) -> Result<String> {
+    let variant = Variant {
+        name: "manual".into(),
+        timezone: String::new(),
+    };
+    let spec = Recipe {
+        platform: "windows".into(),
+        shell: "powershell".into(),
+        kind: "command".into(),
+        target: program.to_string_lossy().into(),
+        args: args.to_vec(),
+        env: env
+            .iter()
+            .map(|(name, value)| EnvironmentVariable {
+                name: name.clone(),
+                value: value.clone(),
+            })
+            .collect(),
+        variants: vec![variant.clone()],
+    };
+    spec.validate()?;
+    let cwd = cwd.map(|path| path.to_string_lossy());
+    if let Some(cwd) = &cwd {
+        text(cwd, 4096)?;
+    }
+    Ok(render::build_with_cwd(&spec, &variant, cwd.as_deref()).command)
+}
+
 fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let command = req.command.replace('.', ":");
     if matches!(command.as_str(), "launch:catalog" | "launch:run") {

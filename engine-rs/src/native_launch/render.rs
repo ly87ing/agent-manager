@@ -59,6 +59,10 @@ fn batch_arg(value: &str) -> String {
 }
 
 pub(super) fn build(spec: &Recipe, variant: &Variant) -> Built {
+    build_with_cwd(spec, variant, None)
+}
+
+pub(super) fn build_with_cwd(spec: &Recipe, variant: &Variant, cwd: Option<&str>) -> Built {
     let environment = spec.environment(variant);
     let timezone = environment
         .iter()
@@ -110,7 +114,10 @@ pub(super) fn build(spec: &Recipe, variant: &Variant) -> Built {
             r#"$batchPath = $p.FileName.Trim().Trim('"').TrimEnd([char[]]' .'); if ($batchPath -match '\.(cmd|bat)$') {{ if ($batchPath -ne $p.FileName -or $batchPath.Contains('"')) {{ throw 'Batch paths must not use quotes or surrounding spaces/dots' }} $p.Arguments = '/e:ON /v:OFF /d /c ""' + $p.FileName.Replace('%', '%%cd:~,%') + '" ' + {} + '"'; $p.FileName = [IO.Path]::Combine([Environment]::SystemDirectory, 'cmd.exe'); if ($p.FileName.Length + $p.Arguments.Length + 3 -gt 8191) {{ throw 'Batch command exceeds the Windows command-line limit' }} }}"#,
             powershell(&batch_args)
         );
-        format!("& {{ $p = New-Object System.Diagnostics.ProcessStartInfo; $p.FileName = {}; $p.UseShellExecute = $false; $p.Arguments = {}; {resolve} {batch} {environment} {completion} }}",
+        let directory = cwd
+            .map(|value| format!("$p.WorkingDirectory = {};", powershell(value)))
+            .unwrap_or_default();
+        format!("& {{ $p = New-Object System.Diagnostics.ProcessStartInfo; $p.FileName = {}; $p.UseShellExecute = $false; {directory} $p.Arguments = {}; {resolve} {batch} {environment} {completion} }}",
             powershell(&spec.target), powershell(&args))
     } else if spec.platform == "macos" && spec.kind == "app" {
         let mut value = String::from("open");

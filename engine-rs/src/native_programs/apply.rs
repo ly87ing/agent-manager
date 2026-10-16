@@ -1460,6 +1460,9 @@ fn sh_quote(text: &str) -> String {
 impl Plan {
     /// 同一件事自己在终端里做的命令（不想让本工具代办、或自动执行失败时用）。
     fn manual(&self, ctx: &Context) -> Vec<String> {
+        if cfg!(windows) {
+            return manual_windows::render(self);
+        }
         let t = |p: &Path| sh_quote(&tilde(p, &ctx.home_dir)).replacen("'~/", "~/'", 1);
         let mut out = Vec::new();
         for step in &self.steps {
@@ -1542,6 +1545,9 @@ impl Plan {
         })
     }
 }
+
+#[path = "manual_windows.rs"]
+mod manual_windows;
 
 // ---------------------------------------------------------------------------
 // 执行

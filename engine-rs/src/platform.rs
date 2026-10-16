@@ -303,6 +303,7 @@ pub fn registry_path_dirs() -> Result<Vec<PathBuf>, String> {
 }
 
 /// 本工具写的命令转发脚本第二行的标记，后面是真正的程序位置。
+const SHIM_HEX_MARK: &str = "rem agent-manager link-utf8-hex: ";
 const SHIM_MARK: &str = "rem agent-manager link: ";
 
 /// 命令入口的文件名：Unix 就是命令名（放符号链接）；Windows 为 `<命令>.cmd`（放转发脚本）。
@@ -317,9 +318,26 @@ pub fn command_link_name(bin: &str) -> String {
 /// 写一个转发脚本：在 cmd / PowerShell 里敲命令名时运行 `target` 并原样传参（Windows 上代替
 /// 指向命令文件的符号链接——npm 的 `.cmd` 按自身所在目录找文件，链接或复制到别处都会失效）。
 pub fn write_cmd_shim(target: &Path, path: &Path) -> std::io::Result<()> {
+    std::fs::write(path, cmd_shim_text(target)?)
+}
+
+pub(crate) fn cmd_shim_text(target: &Path) -> std::io::Result<String> {
     let target = target.to_string_lossy();
-    let text = format!("@echo off\r\n{SHIM_MARK}{target}\r\n\"{target}\" %*\r\n");
-    std::fs::write(path, text)
+    if target.chars().any(char::is_control) || target.contains('"') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Command targets cannot contain quotes or control characters",
+        ));
+    }
+    let encoded = target
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    Ok(format!(
+        "@echo off\r\n{SHIM_HEX_MARK}{encoded}\r\nsetlocal DisableDelayedExpansion\r\n\"{}\" %*\r\n",
+        target.replace('%', "%%")
+    ))
 }
 
 /// 命令转发脚本指向的真实文件：本工具写的（第二行标记），或 npm 生成的 cmd-shim
@@ -332,6 +350,20 @@ pub fn cmd_shim_target(path: &Path) -> Option<PathBuf> {
         return None;
     }
     let text = std::fs::read_to_string(path).ok()?;
+    if let Some(encoded) = text
+        .lines()
+        .find_map(|line| line.strip_prefix(SHIM_HEX_MARK))
+    {
+        if encoded.len() % 2 != 0 || !encoded.bytes().all(|ch| ch.is_ascii_hexdigit()) {
+            return None;
+        }
+        let bytes = (0..encoded.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&encoded[i..i + 2], 16))
+            .collect::<Result<Vec<_>, _>>()
+            .ok()?;
+        return Some(PathBuf::from(String::from_utf8(bytes).ok()?));
+    }
     if let Some(target) = text.lines().find_map(|line| line.strip_prefix(SHIM_MARK)) {
         return Some(PathBuf::from(target.trim()));
     }
@@ -432,6 +464,15 @@ mod tests {
                 r"C:\am\programs\npm\x\current\node_modules\.bin\tool.cmd"
             ))
         );
+        std::fs::write(
+            &ours,
+            format!("@echo off\r\n{SHIM_MARK}C:\\legacy\\tool.cmd\r\n"),
+        )
+        .unwrap();
+        assert_eq!(
+            cmd_shim_target(&ours),
+            Some(PathBuf::from(r"C:\legacy\tool.cmd"))
+        );
         // npm cmd-shim（节选）：目标按脚本所在目录展开
         let npm = root.join("wecom-cli.cmd");
         std::fs::write(&npm, "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@wecom\\cli\\bin\\wecom.js\" %*\r\n").unwrap();
@@ -447,6 +488,46 @@ mod tests {
         );
         assert_eq!(cmd_shim_target(&root.join("missing.cmd")), None);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn native_cmd_shim_preserves_metacharacter_targets_arguments_and_exit_status() {
+        use std::os::windows::process::CommandExt;
+        let root = std::env::temp_dir().join(format!("am-shim-{}", crate::store::uuid_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("probe.rs");
+        std::fs::write(&source, r#"fn main() { let args: Vec<_> = std::env::args().skip(1).collect(); std::fs::write(&args[0], format!("{:?}", &args[1..])).unwrap(); println!("CHILD"); std::process::exit(37); }"#).unwrap();
+        let target = root.join("program %AM_SHIM_HACK% ! ^ (x) & echo INJECTED & rem x.exe");
+        assert!(std::process::Command::new("rustc")
+            .arg(&source)
+            .arg("-o")
+            .arg(&target)
+            .status()
+            .unwrap()
+            .success());
+        let shim = root.join("entry.cmd");
+        write_cmd_shim(&target, &shim).unwrap();
+        assert_eq!(cmd_shim_target(&shim), Some(target));
+        let output_file = root.join("args.txt");
+        let output = std::process::Command::new(
+            Path::new(&std::env::var("SystemRoot").unwrap()).join("System32/cmd.exe"),
+        )
+        .args(["/d", "/v:OFF", "/c"])
+        .raw_arg(r#"""%AM_SHIM%" "%AM_OUTPUT%" "%AM_ARG%" """"#)
+        .env("AM_SHIM", &shim)
+        .env("AM_OUTPUT", &output_file)
+        .env("AM_SHIM_HACK", "wrong")
+        .env("AM_ARG", "literal %NO_SUCH_VAR% & ! ^ (x)")
+        .output()
+        .unwrap();
+        assert_eq!(output.status.code(), Some(37), "{:?}", output);
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("INJECTED"));
+        assert_eq!(
+            std::fs::read_to_string(output_file).unwrap(),
+            format!("{:?}", ["literal %NO_SUCH_VAR% & ! ^ (x)", ""])
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

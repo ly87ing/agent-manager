@@ -37,6 +37,16 @@ unowned. Receipt reads and byte comparisons are bounded; queries never invoke uv
 An absent, empty or relative `SHELL` uses `/bin/bash` on Linux and `/bin/zsh` on
 macOS; an explicit absolute shell retains its own failure diagnostics.
 
+Manual execution and failure-recovery commands use PowerShell on Windows and the
+existing POSIX form on Unix. Windows executable steps reuse the launch renderer
+for literal arguments, batch forwarding, child-only environment, working directory
+and exit-code checks. File moves, command shims and `current` junctions use native
+Windows operations. Existing command-entry hashes and link targets guard manual
+replacement against changes after preview. App metadata and database preferences
+remain application-owned; the manual command list does not claim to reproduce its
+operation audit or completion metadata. Batch shims preserve literal percent signs
+and disable delayed expansion without changing the caller's shell settings.
+
 A managed installation has completed version directories and a `current`
 directory link. Status and individual-version removal share the same resolver:
 the link must resolve to a completed direct child of the program directory.
@@ -101,3 +111,5 @@ operations against isolated HOME/data directories, covers ordinary and scoped np
 layouts, checks byte-for-byte failed-upgrade restoration and adoption undo, and
 creates Windows junctions directly without requiring symlink privileges. These
 fixtures exercise process and filesystem behavior without contacting registries.
+
+Windows command-entry metadata uses ASCII hex-encoded UTF-8 paths; legacy plain-text metadata remains readable. Manual filesystem commands reject linked ancestors, compare existing entry hashes, and stage a literal junction before replacing `current`. A staging failure preserves the previous pointer and foreign staging contents. Recursive manual removal refuses nested reparse points.
