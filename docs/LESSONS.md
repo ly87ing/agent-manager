@@ -26,6 +26,22 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   fixture failed with `Illegal byte sequence` on macOS before exercising the
   checker. Test raw path encoding on Unix and actual invalid filenames on Linux.
 
+## 2026-10-16: new writer policy must not reinterpret verified older snapshots
+
+- The first materialization draft planned the new Windows representation before
+  checking for an existing version. Its stricter traversal parser could refuse
+  reuse of an already valid schema 2 snapshot. Verify existing versions using
+  their recorded format first; apply the new writer policy only to new snapshots.
+- Matching alias and target bytes are insufficient proof by themselves. Change
+  both to the same new bytes in the regression and still require rejection by
+  the fixed logical version. Test each manifest format's actual size boundary,
+  including a valid schema 3 receipt larger than schema 2 permits.
+- Windows source-link fixtures must use native target separators when they read
+  through the link. The first schema 3 fixture used `./z-target`; native CI
+  returned `InvalidFilename` while preparing copied bytes, before verification.
+  Use `.\z-target` there and keep both separator styles in the cross-host parser
+  cases; a fixture-preparation failure is not verifier evidence.
+
 ## 2026-10-16: window-tree enumeration is not an atomic observation
 
 - Native KDE acceptance passed initially, then main CI failed because an X11

@@ -81,6 +81,14 @@ pub(super) fn source_versions(root: &Path) -> Result<SourceVersions> {
 }
 
 pub(super) fn source_entries(root: &Path) -> Result<Entries> {
+    collect_entries(root, false)
+}
+
+pub(super) fn physical_entries(root: &Path) -> Result<Entries> {
+    collect_entries(root, true)
+}
+
+fn collect_entries(root: &Path, materialized: bool) -> Result<Entries> {
     let mut entries = BTreeMap::new();
     let mut stack = vec![root.to_path_buf()];
     let mut buffer = [0u8; 64 * 1024];
@@ -88,7 +96,8 @@ pub(super) fn source_entries(root: &Path) -> Result<Entries> {
         for child in std::fs::read_dir(&directory)? {
             let path = child?.path();
             let metadata = std::fs::symlink_metadata(&path)?;
-            if metadata.is_dir()
+            if !materialized
+                && metadata.is_dir()
                 && super::EXCLUDED_DIRS
                     .contains(&path.file_name().unwrap().to_string_lossy().as_ref())
             {
@@ -108,6 +117,9 @@ pub(super) fn source_entries(root: &Path) -> Result<Entries> {
             let relative = path.strip_prefix(root)?;
             let key = relative_key(relative)?;
             let entry = if metadata.file_type().is_symlink() {
+                if materialized {
+                    bail!("Materialized snapshot contains a physical symbolic link");
+                }
                 let raw = std::fs::read_link(&path)?;
                 validate_symlink_internal(root, &path, &raw)?;
                 let raw_text = raw
@@ -121,7 +133,11 @@ pub(super) fn source_entries(root: &Path) -> Result<Entries> {
                 stack.push(path.clone());
                 Entry::Directory
             } else if metadata.is_file() {
-                let mut file = std::fs::File::open(&path)?;
+                let mut file = if materialized {
+                    super::snapshot_materialized::ordinary_file(&path)?
+                } else {
+                    std::fs::File::open(&path)?
+                };
                 let mut hash = Sha256::new();
                 loop {
                     let count = match file.read(&mut buffer) {
@@ -177,6 +193,21 @@ struct Manifest {
     version: String,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MaterializedManifest {
+    schema: u32,
+    version: String,
+    materialized_file_links: Vec<super::snapshot_materialized::FileLink>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SnapshotManifest {
+    Typed(Manifest),
+    Materialized(MaterializedManifest),
+}
+
 pub(super) fn write_manifest(version_dir: &Path, version: &str) -> Result<()> {
     let bytes = serde_json::to_vec(&Manifest {
         schema: 2,
@@ -190,11 +221,36 @@ pub(super) fn write_manifest(version_dir: &Path, version: &str) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn write_materialized_manifest(
+    version_dir: &Path,
+    version: &str,
+    links: &[super::snapshot_materialized::FileLink],
+) -> Result<()> {
+    let bytes = serde_json::to_vec(&MaterializedManifest {
+        schema: 3,
+        version: version.into(),
+        materialized_file_links: links.to_vec(),
+    })?;
+    if bytes.len() > 64 * 1024 {
+        bail!("Materialized snapshot manifest exceeds 64 KiB");
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(version_dir.join(MANIFEST))?
+        .write_all(&bytes)?;
+    Ok(())
+}
+
 /// Only an absent manifest selects the legacy format; invalid metadata never does.
-pub(super) fn is_typed(version_dir: &Path, version: &str) -> Result<bool> {
+pub(super) fn snapshot_hash(
+    version_dir: &Path,
+    content: &Path,
+    version: &str,
+) -> Result<Option<String>> {
     let path = version_dir.join(MANIFEST);
     match std::fs::symlink_metadata(&path) {
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
         Ok(_) => {}
     }
@@ -222,19 +278,31 @@ pub(super) fn is_typed(version_dir: &Path, version: &str) -> Result<bool> {
             bail!("Snapshot manifest must be an ordinary file");
         }
     }
-    if !metadata.is_file() || metadata.len() > 4096 {
-        bail!("Snapshot manifest must be an ordinary file of at most 4096 bytes");
+    if !metadata.is_file() || metadata.len() > 64 * 1024 {
+        bail!("Snapshot manifest must be an ordinary file of at most 64 KiB");
     }
     let mut bytes = Vec::new();
-    file.take(4097).read_to_end(&mut bytes)?;
-    if bytes.len() > 4096 {
-        bail!("Snapshot manifest exceeds 4096 bytes");
+    file.take(64 * 1024 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > 64 * 1024 {
+        bail!("Snapshot manifest exceeds 64 KiB");
     }
-    let manifest: Manifest = serde_json::from_slice(&bytes)?;
-    if manifest.schema != 2 || manifest.version != version {
-        bail!("Snapshot manifest schema or version does not match");
+    match serde_json::from_slice::<SnapshotManifest>(&bytes)? {
+        SnapshotManifest::Typed(manifest) => {
+            if manifest.schema != 2 || manifest.version != version || bytes.len() > 4096 {
+                bail!("Snapshot manifest schema, version or size does not match");
+            }
+            Ok(Some(source_versions(content)?.current))
+        }
+        SnapshotManifest::Materialized(manifest) => {
+            if manifest.schema != 3 || manifest.version != version {
+                bail!("Materialized snapshot schema or version does not match");
+            }
+            Ok(Some(super::snapshot_materialized::verify(
+                physical_entries(content)?,
+                &manifest.materialized_file_links,
+            )?))
+        }
     }
-    Ok(true)
 }
 
 #[cfg(test)]
@@ -267,6 +335,157 @@ mod tests {
             let _ = super::super::fork::make_writable(&self.0);
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn materialized_snapshot_verifies_typed_links_from_actual_file_bytes() {
+        let root = Root::new();
+        let source = root.source();
+        std::fs::write(source.join("z-target"), b"payload").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("./z-target", source.join("alias")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(r".\z-target", source.join("alias")).unwrap();
+        let raw_target = std::fs::read_link(source.join("alias"))
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let version = source_versions(&source).unwrap().current;
+        let version_dir = root.data().join("skill-versions").join(&version);
+        let content = version_dir.join("content");
+        std::fs::create_dir_all(&content).unwrap();
+        for name in ["SKILL.md", "z-target", "alias"] {
+            std::fs::write(
+                content.join(name),
+                std::fs::read(source.join(name)).unwrap(),
+            )
+            .unwrap();
+        }
+        let manifest = serde_json::json!({
+            "schema": 3, "version": version,
+            "materialized_file_links": [{"path": "alias", "raw_target": raw_target}]
+        });
+        std::fs::write(version_dir.join(MANIFEST), manifest.to_string()).unwrap();
+        assert_eq!(
+            verify_skill_version(&root.data(), &version).unwrap(),
+            content
+        );
+        for name in ["alias", "z-target"] {
+            std::fs::write(content.join(name), b"same new payload").unwrap();
+        }
+        assert!(
+            verify_skill_version(&root.data(), &version).is_err(),
+            "Matching alias/target bytes still require the fixed logical ID"
+        );
+        for name in ["alias", "z-target"] {
+            std::fs::write(content.join(name), b"payload").unwrap();
+        }
+        let padded = format!("{manifest}{}", " ".repeat(4096));
+        assert!(padded.len() > 4096 && padded.len() < 64 * 1024);
+        std::fs::write(version_dir.join(MANIFEST), padded).unwrap();
+        assert_eq!(
+            verify_skill_version(&root.data(), &version).unwrap(),
+            content
+        );
+        for name in ["alias", "z-target"] {
+            std::fs::write(content.join(name), b"changed").unwrap();
+            assert!(verify_skill_version(&root.data(), &version).is_err());
+            std::fs::write(content.join(name), b"payload").unwrap();
+        }
+        for name in super::super::EXCLUDED_DIRS {
+            std::fs::create_dir(content.join(name)).unwrap();
+            assert!(
+                verify_skill_version(&root.data(), &version).is_err(),
+                "{name}"
+            );
+            std::fs::write(content.join(name).join("extra"), b"unbound").unwrap();
+            assert!(
+                verify_skill_version(&root.data(), &version).is_err(),
+                "{name}"
+            );
+            std::fs::remove_file(content.join(name).join("extra")).unwrap();
+            std::fs::remove_dir(content.join(name)).unwrap();
+        }
+        let external = root.0.join("external-directory");
+        std::fs::create_dir(&external).unwrap();
+        std::fs::write(external.join("marker"), b"external").unwrap();
+        crate::platform::link_dir(&external, &content.join(".git")).unwrap();
+        assert!(verify_skill_version(&root.data(), &version).is_err());
+        assert_eq!(std::fs::read(external.join("marker")).unwrap(), b"external");
+        crate::platform::remove_link(content.join(".git")).unwrap();
+        let record = serde_json::json!({"path": "alias", "raw_target": raw_target});
+        let mut invalid = vec![
+            serde_json::json!({"schema": 3, "version": version}).to_string(),
+            serde_json::json!({"schema": 3, "version": version, "materialized_file_links": null}).to_string(),
+            serde_json::json!({"schema": 4, "version": version, "materialized_file_links": [record]}).to_string(),
+            serde_json::json!({"schema": 3, "version": version, "materialized_file_links": [record], "digest": "untrusted"}).to_string(),
+            serde_json::json!({"schema": 3, "version": version, "materialized_file_links": []}).to_string(),
+            serde_json::json!({"schema": 3, "version": version, "materialized_file_links": [record, record]}).to_string(),
+            serde_json::json!({"schema": 3, "version": version, "materialized_file_links": [{"path": "alias", "raw_target": "./z-target", "digest": "untrusted"}]}).to_string(),
+            format!("{{\"schema\":3,\"schema\":3,\"version\":\"{version}\",\"materialized_file_links\":[{record}]}}"),
+            format!("{{\"schema\":3,\"version\":\"{version}\",\"materialized_file_links\":[{{\"path\":\"alias\",\"path\":\"alias\",\"raw_target\":\"./z-target\"}}]}}"),
+            format!("{{\"schema\":2,\"version\":\"{version}\",\"materialized_file_links\":null}}"),
+            " ".repeat(64 * 1024 + 1),
+        ];
+        for raw in [
+            "alias",
+            "missing/../z-target",
+            "z-target/../z-target",
+            "Z-TARGET",
+            "../z-target",
+            "C:z-target",
+            r"\\?\C:\z-target",
+            "NUL.txt",
+            "z-target:stream",
+        ] {
+            invalid.push(serde_json::json!({"schema": 3, "version": version, "materialized_file_links": [{"path": "alias", "raw_target": raw}]}).to_string());
+        }
+        for bytes in invalid {
+            std::fs::write(version_dir.join(MANIFEST), bytes).unwrap();
+            assert!(verify_skill_version(&root.data(), &version).is_err());
+        }
+        std::fs::write(version_dir.join(MANIFEST), manifest.to_string()).unwrap();
+        std::fs::remove_file(content.join("alias")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("z-target", content.join("alias")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file("z-target", content.join("alias")).unwrap();
+        assert!(verify_skill_version(&root.data(), &version).is_err());
+        std::fs::remove_file(content.join("alias")).unwrap();
+        std::fs::write(content.join("alias"), b"payload").unwrap();
+        std::fs::remove_file(source.join("alias")).unwrap();
+        std::fs::write(source.join("alias"), format!("symlink:{raw_target}")).unwrap();
+        let file_version = source_versions(&source).unwrap().current;
+        assert_ne!(version, file_version);
+        let forged = root.data().join("skill-versions").join(&file_version);
+        std::fs::rename(&version_dir, &forged).unwrap();
+        let mut forged_manifest = manifest;
+        forged_manifest["version"] = serde_json::json!(file_version);
+        std::fs::write(forged.join(MANIFEST), forged_manifest.to_string()).unwrap();
+        assert!(verify_skill_version(&root.data(), &file_version).is_err());
+    }
+
+    #[test]
+    fn materialized_writer_policy_does_not_block_verified_schema2_reuse() {
+        let root = Root::new();
+        let source = root.source();
+        std::fs::write(source.join("z-target"), b"payload").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("missing/../z-target", source.join("alias")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file("missing/../z-target", source.join("alias")).unwrap();
+        let entries = source_entries(&source).unwrap();
+        assert!(super::super::snapshot_materialized::plan(&entries).is_err());
+        let version = typed_hash(&entries);
+        let version_dir = root.data().join("skill-versions").join(&version);
+        let content = version_dir.join("content");
+        super::super::snapshot::copy_dir_recursive(&source, &content).unwrap();
+        write_manifest(&version_dir, &version).unwrap();
+        assert_eq!(
+            snapshot_git_skill(&source, &root.data()).unwrap(),
+            (version, content)
+        );
     }
 
     #[test]
@@ -321,6 +540,11 @@ mod tests {
             format!("{{\"schema\":2,\"schema\":2,\"version\":\"{current}\"}}").into_bytes(),
             format!("{{\"schema\":2,\"version\":\"{current}\",\"aliases\":[]}}").into_bytes(),
             format!("{{\"schema\":2,\"version\":\"{old}\"}}").into_bytes(),
+            format!(
+                "{{\"schema\":2,\"version\":\"{current}\"}}{}",
+                " ".repeat(4096)
+            )
+            .into_bytes(),
             vec![b' '; 4097],
         ] {
             std::fs::write(&manifest, invalid).unwrap();
