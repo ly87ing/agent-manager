@@ -48,7 +48,18 @@ fn repair_preview_is_read_only_and_binds_the_selected_targets() {
             .unwrap()
             .contains("launchd"));
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(windows)]
+    {
+        assert!(result.ok, "{:?}", result.errors);
+        assert_eq!(result.data["platform"], "windows");
+        assert!(result.data["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["id"].as_str().unwrap().starts_with("session."))
+            .all(|item| item["status"] == "unavailable"));
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
     assert!(!result.ok);
     assert!(result.mode.offline);
     assert!(!ctx.home_dir.exists());
@@ -108,7 +119,7 @@ fn repair_rejects_missing_confirmation_base_and_unvalidated_targets_without_stat
     assert!(!ctx.data_dir.exists());
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", windows))]
 #[test]
 fn confirmed_noop_uses_real_settings_without_writing_preferences_or_database() {
     let ctx = context();

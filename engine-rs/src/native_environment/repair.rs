@@ -3,7 +3,7 @@ use crate::{Context, Request};
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Item {
@@ -19,6 +19,11 @@ pub(super) struct Snapshot {
     pub values: BTreeMap<String, Option<Value>>,
     pub session_scope: String,
     pub session_available: bool,
+    pub region_is_code: bool,
+    pub unavailable: BTreeSet<String>,
+    pub scope_overrides: BTreeMap<String, String>,
+    pub context: Value,
+    pub extras: Vec<Item>,
 }
 
 #[derive(Serialize)]
@@ -27,6 +32,7 @@ pub(super) struct Plan {
     pub target: Target,
     pub items: Vec<Item>,
     pub session_scope: String,
+    pub platform: &'static str,
 }
 
 fn region_locale(locale: &str, region: &str) -> Option<String> {
@@ -38,7 +44,7 @@ fn region_locale(locale: &str, region: &str) -> Option<String> {
             *index > 0
                 && matches!(prefix.as_bytes()[index - 1], b'_' | b'-')
                 && (index + 2 == prefix.len()
-                    || matches!(prefix.as_bytes()[index + 2], b'_' | b'-'))
+                    || matches!(prefix.as_bytes()[index + 2], b'_' | b'-' | b'.'))
         })?
         .0;
     let mut result = locale.to_string();
@@ -86,12 +92,16 @@ pub(super) fn plan(target: &Target, snapshot: &Snapshot) -> Result<Plan> {
         add("language.preferred", "user", json!(target.languages));
     }
     if let Some(region) = &target.region {
-        let locale = snapshot
-            .values
-            .get("language.region")
-            .and_then(Option::as_ref)
-            .and_then(Value::as_str)
-            .and_then(|locale| region_locale(locale, region));
+        let locale = if snapshot.region_is_code {
+            Some(region.clone())
+        } else {
+            snapshot
+                .values
+                .get("language.region")
+                .and_then(Option::as_ref)
+                .and_then(Value::as_str)
+                .and_then(|locale| region_locale(locale, region))
+        };
         add(
             "language.region",
             "user",
@@ -114,18 +124,45 @@ pub(super) fn plan(target: &Target, snapshot: &Snapshot) -> Result<Plan> {
             add_session(&mut items, snapshot, key, locale);
         }
     }
+    // Related OS policy changes are visible and occur before their dependent item.
+    let index = items
+        .iter()
+        .position(|item| item.id == "language.preferred")
+        .unwrap_or(items.len());
+    items.splice(index..index, snapshot.extras.clone());
+    for item in &mut items {
+        if snapshot.unavailable.contains(&item.id) {
+            item.status = "unavailable".into();
+        }
+        if let Some(scope) = snapshot.scope_overrides.get(&item.id) {
+            item.scope = scope.clone();
+        }
+    }
     if items.is_empty() {
         bail!("This profile has no automatically repairable settings.");
     }
     let base = crate::native_mcp::model::sha256_hex(&serde_json::to_string(
-        &json!({"target":target, "items":items, "session_scope":snapshot.session_scope}),
+        &json!({"target":target, "items":items, "session_scope":snapshot.session_scope,"context":snapshot.context}),
     )?);
     Ok(Plan {
         base,
         target: target.clone(),
         items,
         session_scope: snapshot.session_scope.clone(),
+        platform: std::env::consts::OS,
     })
+}
+
+pub(super) fn session_keys(target: &Target) -> Vec<&'static str> {
+    let mut keys = Vec::new();
+    if target.timezone.is_some() {
+        keys.push("TZ");
+    }
+    if target.locale.is_some() {
+        keys.extend(["LANG", "LC_ALL"]);
+        keys.extend(super::LOCALE_CATEGORIES);
+    }
+    keys
 }
 
 fn add_session(items: &mut Vec<Item>, snapshot: &Snapshot, key: &str, value: &str) {
@@ -209,6 +246,10 @@ pub(super) fn apply(
             item.status = "outcome_unknown".into();
             break;
         };
+        if snapshot.unavailable.contains(&item.id) {
+            item.status = "unavailable".into();
+            break;
+        }
         let actual = snapshot.values.get(&item.id).cloned().flatten();
         if actual.as_ref() == Some(&item.expected) {
             item.status = "unchanged".into();
@@ -223,10 +264,13 @@ pub(super) fn apply(
             continue;
         }
         let command_ok = settings.write_user(item);
-        let after = settings
-            .snapshot(target)
-            .ok()
-            .and_then(|snapshot| snapshot.values.get(&item.id).cloned().flatten());
+        let after = settings.snapshot(target).ok().and_then(|snapshot| {
+            if snapshot.unavailable.contains(&item.id) {
+                None
+            } else {
+                snapshot.values.get(&item.id).cloned().flatten()
+            }
+        });
         item.status = match (command_ok, after) {
             (true, Some(value)) if value == item.expected => "verified",
             (false, Some(value)) if value == item.expected => "verified_after_error",
@@ -261,11 +305,12 @@ pub(super) fn apply(
     Ok((status.into(), items, automatic))
 }
 
-fn arguments(req: &Request) -> Result<(Target, Option<String>)> {
+fn arguments(req: &Request) -> Result<(Target, Option<String>, bool)> {
     let preview = req.command.replace('.', ":") == "environment:repair-preview";
     let mut spec = None;
     let mut base = None;
     let mut confirm = false;
+    let mut persistent = false;
     let mut args = req.args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -283,6 +328,7 @@ fn arguments(req: &Request) -> Result<(Target, Option<String>)> {
                 )
             }
             "--confirm" if !preview && !confirm => confirm = true,
+            "--allow-persistent-user-env" if cfg!(windows) && !persistent => persistent = true,
             _ => bail!("Unsupported or duplicate repair flag."),
         }
     }
@@ -304,22 +350,31 @@ fn arguments(req: &Request) -> Result<(Target, Option<String>)> {
     {
         bail!("Repair requires --confirm and the current --base preview fingerprint.");
     }
-    Ok((target, base))
+    Ok((target, base, persistent))
 }
 
 pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
-    let (target, base) = arguments(req)?;
-    #[cfg(target_os = "macos")]
+    let (target, base, persistent) = arguments(req)?;
+    #[cfg(any(target_os = "macos", windows))]
     {
+        #[cfg(target_os = "macos")]
         super::repair_macos::validate_runtime_locale(&target)?;
+        #[cfg(target_os = "macos")]
         let mut settings = super::repair_macos::MacSettings;
+        #[cfg(target_os = "macos")]
+        let _ = persistent;
+        #[cfg(windows)]
+        let mut settings = super::repair_windows::WindowsSettings::new(persistent);
         if base.is_none() {
             return Ok(serde_json::to_value(plan(
                 &target,
                 &settings.snapshot(&target)?,
             )?)?);
         }
+        #[cfg(target_os = "macos")]
         let guard = super::repair_macos::mutation_lock()?;
+        #[cfg(windows)]
+        let guard = super::mutation_lock::acquire()?;
         let (status, items, _automatic) = apply(
             &mut settings,
             &target,
@@ -331,7 +386,7 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
                     &conn,
                     Some(&req.run_id),
                     "environment:repair",
-                    Some("macos-environment"),
+                    Some(std::env::consts::OS),
                     Some(&detail),
                 )
             },
@@ -389,9 +444,9 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             json!({"status":status,"items":items,"report":report,"restart_required":restart_required,"clock_error":clock_error}),
         )
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", windows)))]
     {
-        let _ = (ctx, target, base);
+        let _ = (ctx, target, base, persistent);
         bail!("Environment repair currently supports macOS only.");
     }
 }
@@ -401,6 +456,10 @@ mod tests {
     use super::*;
     #[test]
     fn region_repair_preserves_language_script_and_extensions() {
+        assert_eq!(
+            region_locale("en_GB.UTF-8", "US").as_deref(),
+            Some("en_US.UTF-8")
+        );
         assert_eq!(
             region_locale("zh_Hant_TW@calendar=chinese", "SG").as_deref(),
             Some("zh_Hant_SG@calendar=chinese")
@@ -458,6 +517,98 @@ mod tests {
             writes: 0,
             cancel: false,
             fails: false,
+        }
+    }
+    #[test]
+    fn native_context_and_explicit_persistence_are_bound_to_the_preview() {
+        let target: Target =
+            serde_json::from_value(json!({"region":"US","timezone":"Europe/London"})).unwrap();
+        let mut fake = fake();
+        fake.snapshot.region_is_code = true;
+        fake.snapshot
+            .values
+            .insert("language.region".into(), Some(json!("GB")));
+        fake.snapshot
+            .scope_overrides
+            .insert("session.TZ".into(), "user".into());
+        let before = plan(&target, &fake.snapshot).unwrap();
+        assert_eq!(
+            before
+                .items
+                .iter()
+                .find(|item| item.id == "language.region")
+                .unwrap()
+                .status,
+            "change"
+        );
+        assert_eq!(
+            before
+                .items
+                .iter()
+                .find(|item| item.id == "language.region")
+                .unwrap()
+                .expected,
+            "US"
+        );
+        assert_eq!(
+            before
+                .items
+                .iter()
+                .find(|item| item.id == "session.TZ")
+                .unwrap()
+                .scope,
+            "user"
+        );
+        fake.snapshot.context = json!({"persistent":true,"policy":"external-change"});
+        assert_ne!(before.base, plan(&target, &fake.snapshot).unwrap().base);
+    }
+    #[test]
+    fn loss_of_related_evidence_before_or_after_a_write_never_reports_verified() {
+        struct Changed {
+            inner: Fake,
+            reads: usize,
+            at: usize,
+        }
+        impl Settings for Changed {
+            fn snapshot(&mut self, target: &Target) -> Result<Snapshot> {
+                self.reads += 1;
+                let mut snapshot = self.inner.snapshot(target)?;
+                if self.reads >= self.at {
+                    snapshot.unavailable.insert("language.preferred".into());
+                }
+                Ok(snapshot)
+            }
+            fn system(&mut self, items: &[Item]) -> Result<(String, Vec<Item>, Option<bool>)> {
+                self.inner.system(items)
+            }
+            fn write_user(&mut self, item: &Item) -> bool {
+                self.inner.write_user(item)
+            }
+        }
+        let target: Target = serde_json::from_value(json!({"languages":["en-US"]})).unwrap();
+        for at in [2, 3] {
+            let mut inner = fake();
+            inner
+                .snapshot
+                .values
+                .insert("language.preferred".into(), Some(json!(["en-GB"])));
+            let base = plan(&target, &inner.snapshot).unwrap().base;
+            let mut changed = Changed {
+                inner,
+                reads: 0,
+                at,
+            };
+            let (status, items, _) = apply(&mut changed, &target, &base, |_, _| Ok(())).unwrap();
+            assert_eq!(status, "partial");
+            assert_eq!(changed.inner.writes, usize::from(at == 3));
+            assert_eq!(
+                items[0].status,
+                if at == 2 {
+                    "unavailable"
+                } else {
+                    "outcome_unknown"
+                }
+            );
         }
     }
     #[test]

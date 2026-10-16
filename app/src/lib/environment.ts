@@ -38,7 +38,7 @@ export type EnvironmentReport = z.infer<typeof reportSchema>;
 export type EnvironmentCheck = z.infer<typeof checkSchema>;
 const repairItemSchema = z.object({ id: z.string(), scope: z.enum(["system", "user", "session"]), before: z.union([z.string(), z.boolean(), z.array(z.string())]).nullable(),
   expected: z.union([z.string(), z.boolean(), z.array(z.string())]).nullable(), status: z.enum(["unchanged", "change", "unavailable", "verified", "verified_after_error", "outcome_unknown", "stale", "not_applied", "unverified", "failed"]) }).strict();
-const repairPlanSchema = z.object({ base: z.string().regex(/^[0-9a-f]{64}$/), target: targetSchema, items: z.array(repairItemSchema), session_scope: z.string() }).strict();
+const repairPlanSchema = z.object({ base: z.string().regex(/^[0-9a-f]{64}$/), target: targetSchema, items: z.array(repairItemSchema), session_scope: z.string(), platform: z.enum(["macos", "windows", "linux"]).optional() }).strict();
 const repairResultSchema = z.object({ status: z.enum(["not_needed", "applied", "partial", "cancelled", "audit_failed"]), items: z.array(repairItemSchema), report: reportSchema.nullable(), restart_required: z.boolean(), clock_error: z.string().nullable() }).strict();
 export type EnvironmentRepairPlan = z.infer<typeof repairPlanSchema>;
 export type EnvironmentRepairResult = z.infer<typeof repairResultSchema>;
@@ -75,12 +75,12 @@ export async function repairEnvironmentTime(target: EnvironmentTarget): Promise<
   return reportSchema.parse(await request("sync-time", ["--spec", JSON.stringify(target), "--confirm"]));
 }
 
-export async function previewEnvironmentRepair(target: EnvironmentTarget): Promise<EnvironmentRepairPlan> {
-  return repairPlanSchema.parse(await request("repair-preview", ["--spec", JSON.stringify(target)]));
+export async function previewEnvironmentRepair(target: EnvironmentTarget, persistent = false): Promise<EnvironmentRepairPlan> {
+  return repairPlanSchema.parse(await request("repair-preview", ["--spec", JSON.stringify(target), ...(persistent ? ["--allow-persistent-user-env"] : [])]));
 }
 
-export async function repairEnvironment(target: EnvironmentTarget, base: string): Promise<EnvironmentRepairResult> {
-  return repairResultSchema.parse(await request("repair", ["--spec", JSON.stringify(target), "--base", base, "--confirm"]));
+export async function repairEnvironment(target: EnvironmentTarget, base: string, persistent = false): Promise<EnvironmentRepairResult> {
+  return repairResultSchema.parse(await request("repair", ["--spec", JSON.stringify(target), "--base", base, "--confirm", ...(persistent ? ["--allow-persistent-user-env"] : [])]));
 }
 
 export async function checkEnvironment(target: EnvironmentTarget = {}, probeTime = false): Promise<EnvironmentReport> {
