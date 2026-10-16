@@ -101,4 +101,17 @@ Tauri import-dialog acceptance.
 
 Tests distinguish real read-only system and writable development mounts, translocated paths, and writable external-volume paths. Frontend tests cover the banner and both update-check paths. Browser layout acceptance uses mock settings at 1000 and 760 px; a controlled native executable path exercises the Tauri warning response without creating an installer.
 
-The Windows registry test is ignored in ordinary runs because it requires an isolated user hive. Run it explicitly with `AM_ISOLATED_WINDOWS_HIVE=1` in a disposable Wine container or test Windows user. Source-module harnesses exercised that test in Wine and file registration plus actual `gio launch` on Linux; these do not prove Windows/Linux Tauri IPC or desktop login. Native macOS acceptance uses a separate identifier and isolated HOME/data, inspects the plist after clicks, and preserves an external edit. A disposable launchd probe confirms the child survives its parent exit.
+The Windows registry test is ignored in ordinary runs. GUI CI explicitly runs
+it on its disposable Windows runner with `AM_ISOLATED_WINDOWS_HIVE=1`, requiring
+the native Windows/GitHub CI markers before opening registry keys. HOME does not
+isolate HKCU; never use a personal user hive as this fixture's target. Unique
+fixture names are checked absent first, cleaned during failure unwinding, and independently
+checked absent afterwards. The fixture verifies quoted registration, enable/disable,
+idempotency, Task Manager's stored override and external Run-value protection;
+unrelated raw registry values must match their original snapshot after cleanup.
+This is native registry behavior, not Windows Tauri IPC or a real desktop login.
+Earlier source-module harnesses used Wine, while Linux exercised file registration
+and actual `gio launch`; those remain separate evidence. Native macOS acceptance
+uses a separate identifier and isolated HOME/data, inspects the plist after clicks,
+and preserves an external edit. A disposable launchd probe confirms the child
+survives its parent exit.

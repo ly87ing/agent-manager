@@ -201,6 +201,19 @@ jobs:
           CARGO_TARGET_DIR=app/src-tauri/target cargo build --manifest-path engine-rs/Cargo.toml --bin agent-manager-engine
           bash scripts/verify-linux-settings.sh app/src-tauri/target/debug/agent-manager-engine
 
+      - name: Verify login entries in the disposable Windows user hive
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        env:
+          AM_ISOLATED_WINDOWS_HIVE: '1'
+        run: |
+          $receipt = & cargo test --manifest-path app/src-tauri/Cargo.toml autostart::windows_tests::quoted_registry_entry_roundtrip_and_task_manager_override -- --ignored --exact --nocapture 2>&1
+          $receipt | ForEach-Object { Write-Host $_ }
+          if ($LASTEXITCODE -ne 0) { throw 'Native registry fixture failed' }
+          if (-not ($receipt -match '^test result: ok\. 1 passed; 0 failed; 0 ignored;')) {
+            throw 'Native registry fixture did not execute exactly one test'
+          }
+
       - name: Configure build identity and path remapping
         shell: bash
         run: |
