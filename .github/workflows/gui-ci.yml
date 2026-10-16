@@ -46,14 +46,14 @@ jobs:
         shell: pwsh
         run: ./scripts/prepare-windows-test-temp.ps1
 
-      - name: Run cargo tests
-        run: cargo test --manifest-path engine-rs/Cargo.toml
-
       - name: Install GNOME preference fixture tools
         if: ${{ runner.os == 'Linux' }}
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libglib2.0-bin gsettings-desktop-schemas
+          sudo apt-get install --no-install-recommends -y libglib2.0-bin gsettings-desktop-schemas dconf-cli dconf-gsettings-backend
+
+      - name: Run cargo tests
+        run: cargo test --manifest-path engine-rs/Cargo.toml
 
       - name: Verify disposable Linux user-manager environment
         if: ${{ runner.os == 'Linux' }}

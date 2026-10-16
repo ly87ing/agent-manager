@@ -110,6 +110,31 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 - Exercise a matching report with an explicit verification limit. A mismatching
   mock report already produces a warning and cannot test the all-clear guard.
 
+## 2026-10-16: desktop language lists are not interchangeable
+
+- GNOME writes its formats locale into AccountsService `Languages` for package
+  installers. Merging that list into UI language order invents fallback behavior.
+  Inspect the current user's typed UID and primary `Language`; preserve other
+  desktop defaults as unknown until their actual configuration is inspected.
+- Dropping POSIX `@latin` loses script identity. Keep an unmapped UI language
+  unknown without discarding a separately known formats locale. Native private
+  bus fixtures must exercise installer metadata, wrong UID and process-LANG
+  fallback refusal, not only string parsers.
+
+## 2026-10-16: native getters can create configuration
+
+- GLib's keyfile constructor creates its settings directory even for `get`.
+  A new native GNOME inspection fixture caught that zero-write violation after
+  macOS tests and Linux cross-compilation passed. Keep the missing-directory
+  assertion; preparing the directory first would conceal the production defect.
+- Constrain the verified backend's file creation/content mutation paths before
+  child execution, retaining actual backend and policy semantics. Unsupported
+  kernels return unknown. Test real non-default dconf values and locks as well as
+  keyfile defaults; replacing the backend with memory would hide user settings.
+- Verify fixture database paths against the schema's declared path, not its ID.
+  `org.gnome.system.locale` uses `/system/locale/`; a similarly named path
+  returned the default and failed the retained non-default native assertion.
+
 ## 2026-10-14: local adoption previews cover every entry and refresh
 
 The focused dialog tests passed before the full suite reached Sources' existing

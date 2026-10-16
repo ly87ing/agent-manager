@@ -10,6 +10,11 @@ pub(super) fn read(program: &str, args: &[&str]) -> Option<String> {
 #[cfg(any(target_os = "linux", windows))]
 pub(super) fn bounded(program: &str, args: &[&str], timeout: Duration) -> Option<String> {
     let mut command = crate::process::launch_command(program);
+    #[cfg(target_os = "linux")]
+    if program == "/usr/bin/gsettings" && matches!(args.first().copied(), Some("get" | "writable"))
+    {
+        crate::process::deny_settings_file_writes(&mut command);
+    }
     #[cfg(windows)]
     if std::path::Path::new(program)
         .file_name()
