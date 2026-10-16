@@ -1,5 +1,8 @@
 #![cfg(target_os = "linux")]
 
+#[path = "support/linux_timesync.rs"]
+mod timesync;
+
 use std::{
     io::{BufRead, BufReader},
     process::{Child, Command, Stdio},
