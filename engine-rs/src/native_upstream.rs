@@ -299,17 +299,18 @@ fn collect_targets(ctx: &Context) -> Result<Vec<ProbeTarget>> {
 // 探测器（有界捕获 + 超时终止进程组，失败 → None，由上层归 unknown+error）
 // ---------------------------------------------------------------------------
 
-/// 以参数数组直接执行（不经 shell），exit 0 → Some(stdout)；超时/非 0/启动
-/// 失败 → None。stdin 关闭，HOME 注入 ctx.home_dir（探测不继承调用方 HOME）。
-fn run_capture(
-    program: &str,
+/// Explicit Git probes share repository-selector isolation and bounded capture.
+fn run_git_capture(
     args: &[&str],
     cwd: Option<&Path>,
     ctx: &Context,
     timeout: Duration,
 ) -> Option<String> {
-    let mut command = crate::process::command(program);
-    command.args(args).env("HOME", &ctx.home_dir);
+    let mut command = crate::platform::git_command();
+    command
+        .args(args)
+        .env("HOME", &ctx.home_dir)
+        .env("GIT_TERMINAL_PROMPT", "0");
     if let Some(dir) = cwd {
         command.current_dir(dir);
     }
@@ -426,8 +427,7 @@ fn git_ls_remote(ctx: &Context, repo: &str, git_ref: &str) -> Option<String> {
     if repo.is_empty() || git_ref.is_empty() || repo.starts_with('-') || git_ref.starts_with('-') {
         return None;
     }
-    let out = run_capture(
-        "git",
+    let out = run_git_capture(
         &["ls-remote", repo, git_ref],
         None,
         ctx,
@@ -477,8 +477,7 @@ fn git_local_head(ctx: &Context, repo_dir: &Path) -> Option<String> {
     if !repo_dir.is_dir() {
         return None;
     }
-    let out = run_capture(
-        "git",
+    let out = run_git_capture(
         &["rev-parse", "HEAD"],
         Some(repo_dir),
         ctx,
@@ -900,6 +899,10 @@ pub(crate) fn handle(ctx: &Context, request: &Request) -> DispatchResult {
     });
     Ok((data, vec![]))
 }
+
+#[cfg(test)]
+#[path = "native_upstream_git_tests.rs"]
+mod git_probe_tests;
 
 #[cfg(test)]
 mod capture_tests {
