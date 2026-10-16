@@ -372,7 +372,7 @@ fn apply_skill_add(
     let content_path = if is_local_source(coll) {
         expected_link_target(ctx, coll, skill, &version)?
     } else {
-        snapshot_skill(source_dir, &ctx.data_dir)?
+        snapshot_skill(source_dir, &ctx.data_dir, &version)?
     };
 
     let mut rollback_guard = RollbackGuard::new();
@@ -448,7 +448,7 @@ fn apply_skill_update(
     let content_path = if is_local_source(coll) {
         expected_link_target(ctx, coll, skill, &version)?
     } else {
-        snapshot_skill(source_dir, &ctx.data_dir)?
+        snapshot_skill(source_dir, &ctx.data_dir, &version)?
     };
 
     let mut rollback_guard = RollbackGuard::new();

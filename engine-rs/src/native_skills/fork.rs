@@ -27,7 +27,7 @@ pub(super) const DEFAULT_COLLECTION: &str = "my-skills";
 
 /// 复制出来的文件要能改：快照里的文件是只读的。
 #[cfg_attr(not(unix), allow(unused_variables))]
-fn make_writable(dir: &Path) -> Result<()> {
+pub(super) fn make_writable(dir: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

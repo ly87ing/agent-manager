@@ -123,9 +123,12 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn snapshot_skill(source_dir: &Path, data_dir: &Path) -> Result<PathBuf> {
-    let version = hash_skill_dir(source_dir)?;
-    let version_dir = data_dir.join("skill-versions").join(&version);
+pub fn snapshot_skill(source_dir: &Path, data_dir: &Path, version: &str) -> Result<PathBuf> {
+    if !is_sha256_hex(version) {
+        bail!("Invalid skill snapshot version.");
+    }
+    // The caller binds this exact version in its assignment transaction.
+    let version_dir = data_dir.join("skill-versions").join(version);
     let content_path = version_dir.join("content");
     if content_path.is_dir() {
         let existing = hash_skill_dir(&content_path)?;
@@ -139,15 +142,35 @@ pub fn snapshot_skill(source_dir: &Path, data_dir: &Path) -> Result<PathBuf> {
             existing
         );
     }
-    let staging = data_dir
-        .join("skill-versions")
-        .join(format!(".staging-{}", version));
-    if staging.exists() {
-        let _ = std::fs::remove_dir_all(&staging);
-    }
-    copy_dir_recursive(source_dir, &staging.join("content"))?;
+    let staging = data_dir.join("skill-versions").join(format!(
+        ".staging-{}-{}",
+        version,
+        crate::store::uuid_v4()
+    ));
     std::fs::create_dir_all(data_dir.join("skill-versions"))?;
-    std::fs::rename(&staging, &version_dir)?;
+    std::fs::create_dir(&staging)?;
+    let copied = (|| -> Result<()> {
+        let content = staging.join("content");
+        copy_dir_recursive(source_dir, &content)?;
+        let actual = hash_skill_dir(&content)?;
+        if actual != version {
+            bail!("Skill snapshot copy does not match the chosen version {version} (actual {actual}); refusing to publish.");
+        }
+        std::fs::rename(&staging, &version_dir)?;
+        Ok(())
+    })();
+    if let Err(error) = copied {
+        let cleanup = (|| -> Result<()> {
+            #[cfg(windows)]
+            super::fork::make_writable(&staging)?;
+            std::fs::remove_dir_all(&staging)?;
+            Ok(())
+        })();
+        if let Err(cleanup) = cleanup {
+            return Err(error.context(format!("Snapshot staging cleanup failed: {cleanup}")));
+        }
+        return Err(error);
+    }
     Ok(content_path)
 }
 
@@ -411,6 +434,78 @@ pub fn discover_repo_skills(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_content_cannot_publish_a_snapshot_or_replace_an_existing_version() {
+        let root =
+            std::env::temp_dir().join(format!("am-snapshot-verify-{}", crate::store::uuid_v4()));
+        let source = root.join("source");
+        let data = root.join("data");
+        std::fs::create_dir_all(&source).unwrap();
+        let file = source.join("SKILL.md");
+        std::fs::write(&file, b"original version").unwrap();
+        let original = hash_skill_dir(&source).unwrap();
+        let original_path = snapshot_skill(&source, &data, &original).unwrap();
+        assert_eq!(
+            verify_skill_version(&data, &original).unwrap(),
+            original_path
+        );
+        let other_staging = data.join("skill-versions/.staging-unrelated");
+        std::fs::create_dir(&other_staging).unwrap();
+        std::fs::write(other_staging.join("marker"), b"keep unrelated staging").unwrap();
+
+        std::fs::write(&file, b"chosen version").unwrap();
+        let chosen = hash_skill_dir(&source).unwrap();
+        // An external source change occurs after the assignment chooses its hash.
+        std::fs::write(&file, b"external version").unwrap();
+        #[cfg(windows)]
+        {
+            let mut permissions = std::fs::metadata(&file).unwrap().permissions();
+            permissions.set_readonly(true);
+            std::fs::set_permissions(&file, permissions).unwrap();
+        }
+        let error = snapshot_skill(&source, &data, &chosen).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("does not match the chosen version"));
+        assert!(!data.join("skill-versions").join(&chosen).exists());
+        let versions: BTreeSet<_> = std::fs::read_dir(data.join("skill-versions"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            versions,
+            [original.clone(), ".staging-unrelated".into()]
+                .into_iter()
+                .collect(),
+            "Failed staging must be removed"
+        );
+        assert_eq!(
+            std::fs::read(other_staging.join("marker")).unwrap(),
+            b"keep unrelated staging"
+        );
+        assert_eq!(
+            std::fs::read(original_path.join("SKILL.md")).unwrap(),
+            b"original version"
+        );
+        assert_eq!(std::fs::read(&file).unwrap(), b"external version");
+        #[cfg(windows)]
+        assert!(std::fs::metadata(&file).unwrap().permissions().readonly());
+        let current = hash_skill_dir(&source).unwrap();
+        let current_path = snapshot_skill(&source, &data, &current).unwrap();
+        assert_eq!(verify_skill_version(&data, &current).unwrap(), current_path);
+        assert_eq!(
+            std::fs::read(current_path.join("SKILL.md")).unwrap(),
+            b"external version"
+        );
+        assert_eq!(
+            verify_skill_version(&data, &original).unwrap(),
+            original_path
+        );
+        #[cfg(windows)]
+        super::super::fork::make_writable(&root).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn chunked_hash_preserves_existing_snapshot_digest() {
