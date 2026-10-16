@@ -70,46 +70,6 @@ fn timesync_values(text: &str) -> Option<BTreeMap<String, Vec<String>>> {
 }
 
 #[cfg(target_os = "linux")]
-pub(super) fn account_user_path() -> Option<String> {
-    let uid = unsafe { libc::geteuid() }.to_string();
-    let output = read(
-        "/usr/bin/busctl",
-        &[
-            "--system",
-            "--json=short",
-            "call",
-            "org.freedesktop.Accounts",
-            "/org/freedesktop/Accounts",
-            "org.freedesktop.Accounts",
-            "FindUserById",
-            "x",
-            &uid,
-        ],
-    )?;
-    let value: serde_json::Value = serde_json::from_str(&output).ok()?;
-    if value["type"] != "o" || value["data"].as_array()?.len() != 1 {
-        return None;
-    }
-    let path = value["data"][0]
-        .as_str()
-        .filter(|path| {
-            path.starts_with("/org/freedesktop/Accounts/User")
-                && path.chars().all(|c| c.is_ascii_alphanumeric() || c == '/')
-        })
-        .map(str::to_string)?;
-    let actual = bus_property(
-        "org.freedesktop.Accounts",
-        &path,
-        "org.freedesktop.Accounts.User",
-        "Uid",
-        false,
-        "t",
-    )?
-    .as_u64()?;
-    (actual == unsafe { libc::geteuid() } as u64).then_some(path)
-}
-
-#[cfg(target_os = "linux")]
 pub(super) fn gsetting(schema: &str, key: &str) -> Option<String> {
     read("/usr/bin/gsettings", &["get", schema, key])
 }
@@ -125,28 +85,9 @@ fn user_locale() -> (Option<Vec<String>>, Option<String>, Option<bool>) {
         return (None, None, None);
     }
     let mut locales = Vec::<String>::new();
-    if let Some(path) = account_user_path() {
-        if let Some(primary) = bus_property(
-            "org.freedesktop.Accounts",
-            &path,
-            "org.freedesktop.Accounts.User",
-            "Language",
-            false,
-            "s",
-        )
-        .and_then(|value| value.as_str().map(str::to_string))
-        .filter(|value| {
-            super::Target {
-                locale: Some(value.clone()),
-                ..Default::default()
-            }
-            .validate()
-            .is_ok()
-        }) {
-            locales.push(primary);
-            // GNOME also puts its formats locale in Languages for installers.
-            // Only Language establishes the primary desktop UI locale.
-        }
+    if let Some(primary) = super::linux_accounts::read() {
+        locales.push(primary.locale);
+        // Languages is installer-interest metadata, not ordered UI fallbacks.
     }
     let region = if gnome {
         gsetting("org.gnome.system.locale", "region")

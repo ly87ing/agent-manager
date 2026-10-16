@@ -61,7 +61,11 @@ stopped and its server lists remain unknown; `show-timesync` and older `busctl
 get-property` paths must not be used for this read. Missing systemd
 services/properties remain unknown. No daemon or
 locale package is installed during a read. The NTP measurement client is shared
-on all three platforms. System settings open Windows Settings, GNOME Settings or
+on all three platforms. GNOME inspection and inherited formats share one bounded
+primary-locale reader: it requires an existing AccountsService unique owner,
+checks the current UID before and after reading `Language`, and rechecks bus and
+owner identity. Calls carry `NoAutoStart`; a missing owner stays unknown.
+System settings open Windows Settings, GNOME Settings or
 KDE System Settings using fixed destinations; requesting a pane is not readback.
 Only an explicit KDE open-settings action runs a bounded `systemsettings --list`
 discovery. It opens the installed `kcm_clock` or merged `kcm_regionandlang`;

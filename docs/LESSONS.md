@@ -6,6 +6,15 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: service activation safety must cover every observation path
+
+- A protected time-property reader does not make language inspection read-only.
+  GNOME's older current-UID lookup could still activate AccountsService. Share
+  the existing unique-owner, typed-UID and NoAutoStart reader with inherited
+  formats; never use an activation-capable convenience property call there.
+- A private activation fixture needs positive controls for each service. Keep
+  absent services unknown and independently prove normal existing-owner reads.
+
 ## 2026-10-16: isolate desktop activation and bind cleanup to process birth
 
 - Changing HOME only for clients leaves a private D-Bus daemon's activation

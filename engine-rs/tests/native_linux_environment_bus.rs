@@ -38,7 +38,7 @@ impl Drop for Fixture {
 }
 
 #[test]
-fn inspection_does_not_activate_a_stopped_time_service() {
+fn inspection_does_not_activate_stopped_time_or_locale_services() {
     let root = Fixture(std::env::temp_dir().join(format!(
         "am-timesync-{}",
         agent_manager_engine::store::uuid_v4()
@@ -52,6 +52,15 @@ fn inspection_does_not_activate_a_stopped_time_service() {
         format!(
             "[D-BUS Service]\nName=org.freedesktop.timesync1\nExec=/usr/bin/touch \"{}\"\n",
             marker.display()
+        ),
+    )
+    .unwrap();
+    let locale_marker = root.path().join("locale-activated");
+    std::fs::write(
+        services.join("org.freedesktop.Accounts.service"),
+        format!(
+            "[D-BUS Service]\nName=org.freedesktop.Accounts\nExec=/usr/bin/touch \"{}\"\n",
+            locale_marker.display()
         ),
     )
     .unwrap();
@@ -102,7 +111,11 @@ fn inspection_does_not_activate_a_stopped_time_service() {
         .env("DBUS_SYSTEM_BUS_ADDRESS", ready.trim())
         .env("HOME", &home)
         .env("AGENT_MANAGER_DATA_DIR", &data)
-        .env("XDG_CURRENT_DESKTOP", "")
+        .env("XDG_CURRENT_DESKTOP", "GNOME")
+        .env("XDG_CONFIG_HOME", root.path().join("missing-settings"))
+        .env("GSETTINGS_BACKEND", "keyfile")
+        .env_remove("GSETTINGS_SCHEMA_DIR")
+        .env("DBUS_SESSION_BUS_ADDRESS", ready.trim())
         .output()
         .unwrap();
     let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -111,6 +124,11 @@ fn inspection_does_not_activate_a_stopped_time_service() {
     assert!(!home.exists());
     assert!(!data.exists());
     assert!(!marker.exists(), "Inspection activated the time service");
+    assert!(
+        !locale_marker.exists(),
+        "Inspection activated AccountsService"
+    );
+    assert!(!root.path().join("missing-settings").exists());
 
     // A positive control prevents a broken activation fixture from passing the
     // negative assertion. Its only action is creating a disposable marker.
@@ -134,6 +152,30 @@ fn inspection_does_not_activate_a_stopped_time_service() {
     assert!(
         marker.exists(),
         "The activation positive control did not run"
+    );
+    // The former inspection used this same activation-capable call. Prove the
+    // locale marker is viable rather than accepting an absent service file.
+    let uid = unsafe { libc::geteuid() }.to_string();
+    let control = Command::new("/usr/bin/busctl")
+        .args([
+            "--system",
+            "--auto-start=yes",
+            "--timeout=1",
+            "call",
+            "org.freedesktop.Accounts",
+            "/org/freedesktop/Accounts",
+            "org.freedesktop.Accounts",
+            "FindUserById",
+            "x",
+            &uid,
+        ])
+        .env("DBUS_SYSTEM_BUS_ADDRESS", ready.trim())
+        .output()
+        .unwrap();
+    assert!(!control.status.success());
+    assert!(
+        locale_marker.exists(),
+        "The locale activation control did not run"
     );
 }
 
@@ -297,6 +339,7 @@ impl Accounts {
 struct User {
     state: std::sync::Arc<std::sync::Mutex<(u64, String)>>,
     extra_reads: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    change_uid_on_language: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 #[zbus::interface(name = "org.freedesktop.Accounts.User")]
 impl User {
@@ -306,7 +349,14 @@ impl User {
     }
     #[zbus(property)]
     fn language(&self) -> String {
-        self.state.lock().unwrap().1.clone()
+        let mut state = self.state.lock().unwrap();
+        if self
+            .change_uid_on_language
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
+        {
+            state.0 += 1;
+        }
+        state.1.clone()
     }
     #[zbus(property)]
     fn languages(&self) -> Vec<String> {
@@ -319,7 +369,7 @@ impl User {
 #[test]
 fn gnome_inspection_and_formats_repair_preserve_user_evidence_and_external_changes() {
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     };
     let root = Fixture(std::env::temp_dir().join(format!(
@@ -357,6 +407,7 @@ fn gnome_inspection_and_formats_repair_preserve_user_evidence_and_external_chang
             .unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let extra_reads = Arc::new(AtomicUsize::new(0));
+    let change_uid_on_language = Arc::new(AtomicBool::new(false));
     let state = Arc::new(Mutex::new((uid as u64, "en_US.UTF-8".to_string())));
     let _connection = zbus::blocking::connection::Builder::address(ready.trim())
         .unwrap()
@@ -376,6 +427,7 @@ fn gnome_inspection_and_formats_repair_preserve_user_evidence_and_external_chang
             User {
                 state: state.clone(),
                 extra_reads: extra_reads.clone(),
+                change_uid_on_language: change_uid_on_language.clone(),
             },
         )
         .unwrap()
@@ -421,6 +473,11 @@ fn gnome_inspection_and_formats_repair_preserve_user_evidence_and_external_chang
         !settings.exists(),
         "A read-only GSettings call created configuration"
     );
+    change_uid_on_language.store(true, Ordering::Relaxed);
+    let raced = inspect("GNOME");
+    assert!(raced["language.preferred"].is_null(), "{raced:?}");
+    assert!(raced["language.region"].is_null(), "{raced:?}");
+    state.lock().unwrap().0 = uid as u64;
     assert_eq!(
         extra_reads.load(Ordering::Relaxed),
         initial_extra_reads,
@@ -450,6 +507,11 @@ fn gnome_inspection_and_formats_repair_preserve_user_evidence_and_external_chang
         initial_extra_reads + 1,
         "Installer metadata positive control did not run"
     );
+    *state.lock().unwrap() = (uid as u64, "en".into());
+    let countryless = inspect("GNOME");
+    assert_eq!(countryless["language.preferred"], "en");
+    assert!(countryless["language.region"].is_null());
+    *state.lock().unwrap() = (uid as u64, "en_US.UTF-8".into());
     state.lock().unwrap().0 = uid as u64 + 1;
     let rows = inspect("GNOME");
     assert!(rows["language.preferred"].is_null());

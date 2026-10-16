@@ -12,7 +12,7 @@ pub(super) struct State {
 }
 
 use super::linux_accounts::Primary;
-pub(super) fn locale(value: &str) -> Option<String> {
+fn locale(value: &str) -> Option<String> {
     super::Target {
         locale: Some(value.into()),
         ..Default::default()
