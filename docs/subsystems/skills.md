@@ -7,6 +7,12 @@ reads actual assistant links. SQLite stores assignments and content versions;
 account registrations are immutable metadata. Local sources remain user-owned;
 Git sources provide verified content snapshots.
 
+Before publishing a new snapshot, the copied staging contents must match the
+exact version chosen for the assignment. Copy errors or mismatches remove only
+that operation's uniquely created staging directory and leave existing versions
+and bindings unchanged. Reusing or enabling a version retains strict content
+verification; a copied replacement for a symbolic link is not the same snapshot.
+
 ## Runtime path and failure behavior
 
 Personal collections default to `~/skills/<collection>/<skill>/SKILL.md`.
