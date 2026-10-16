@@ -74,6 +74,10 @@ export default function App() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return;
       if (isTextEditableTarget(event.target)) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) {
+        if ([",", "k", "f"].includes(event.key.toLowerCase())) event.preventDefault();
+        return;
+      }
       if (event.key === ",") {
         event.preventDefault();
         setActivePage("settings");

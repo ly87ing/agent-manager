@@ -44,6 +44,26 @@ describe("App 顶层导航", () => {
     ]);
   });
 
+  it.each(["metaKey", "ctrlKey"])("keeps global navigation shortcuts inside an open editor (%s)", async (modifier) => {
+    const { calls } = renderWithEngine(<App />, routes());
+    await userEvent.click(await screen.findByRole("button", { name: "新增配置" }));
+    const dialog = screen.getByRole("dialog", { name: "新建配置" });
+    const target = within(dialog).getByRole("textbox", { name: "程序路径或命令" });
+    await userEvent.type(target, "/Applications/Unsaved.app");
+    const preview = within(dialog).getByRole("button", { name: "预览命令" });
+    preview.focus();
+    for (const key of [",", "k", "f"]) {
+      fireEvent.keyDown(preview, { key, [modifier]: true });
+      expect(screen.getAllByRole("dialog")).toEqual([dialog]);
+      expect(target).toHaveValue("/Applications/Unsaved.app");
+      expect(preview).toHaveFocus();
+    }
+    expect(calls.some((call) => ["launch:save", "launch:run"].includes(call.command))).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    fireEvent.keyDown(window, { key: ",", [modifier]: true });
+    expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
+  });
+
   it.each(["remediation", "apply"])("prefills a launch draft from the selected environment without saving or running it (%s)", async (entry) => {
     setSettingsClient({ get: async () => dummySettings, save: async (preferences) => ({ ...dummySettings, preferences }) });
     const target = { timezone: "Europe/Paris", locale: "fr_FR.UTF-8", strict_locale: true };

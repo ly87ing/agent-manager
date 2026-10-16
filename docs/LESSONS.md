@@ -16,6 +16,13 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Exercise navigation shortcuts from modal buttons as well as text fields.**
+- Editable-field guards did not protect an unsaved Launch draft when focus was
+  on Preview commands: the Settings shortcut unmounted the editor immediately.
+- Keep global navigation and search inside the modal boundary. Verify both
+  Meta and Ctrl shortcuts preserve the draft and focus, then resume after close.
+- Seen 1× (2026-10-15; project audit correction).
+
 **Revalidate after administrator authorization, and verify actual postconditions.**
 - A repair preview can remain open while external settings change, and an
   authorization prompt can outlive its clock sample. Re-read settings inside

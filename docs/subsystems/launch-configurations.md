@@ -33,6 +33,10 @@ list. The retained Settings entry routes to this same top-level page.
 Successful saves update the list and close the editor. Failed saves keep the
 editor open with the draft and error details available for correction.
 
+Global Settings, search and page-search shortcuts stay inactive while a modal
+dialog is open. The editor keeps its draft and focus until the user saves or
+cancels it; ordinary navigation shortcuts resume after the dialog closes.
+
 Environment remediation can open a new unsaved draft with the selected
 collection's time zone and locale variables. The application target stays empty
 until the user chooses it. Leaving the editor consumes this one-time handoff;
