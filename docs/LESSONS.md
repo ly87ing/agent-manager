@@ -16,6 +16,16 @@ confirmation back to the verified source plan.
 
 ## Tests that prove something
 
+**Drain delayed notification removals before destroying the browser test context.**
+- Native Linux CI recorded a Sonner callback reading `window` after jsdom teardown.
+  The existing zero-delay barrier covered subscription callbacks but missed the
+  library's 200 ms removal callback, which survives component unmount.
+- Wait for those removals once per test file before destroying jsdom. Keep test
+  assertions and production notification durations unchanged. A separate initial
+  navigation timeout under concurrent checks also requires a focused and complete
+  rerun; do not count a failed full suite as passed.
+- Seen 1× (2026-10-15; cross-platform CI acceptance).
+
 **Treat platform read tools as part of the zero-write boundary.**
 - Windows PowerShell `-NoProfile` still permits a module-analysis cache and user
   module discovery. Disable that cache and restrict module search to system

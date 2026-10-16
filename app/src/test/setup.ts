@@ -4,7 +4,7 @@ process.env.TZ = "UTC";
 
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach, beforeEach } from "vitest";
+import { afterAll, afterEach, beforeEach } from "vitest";
 import { setLanguage } from "../lib/i18n";
 import { toast } from "sonner";
 
@@ -76,4 +76,10 @@ afterEach(async () => {
   setEngineClient(null);
   setSettingsClient(defaultSettingsClient);
   setAutostartClient(defaultAutostartClient);
+});
+
+afterAll(async () => {
+  // Sonner 1.7.4 leaves 200 ms removal callbacks after unmount. Drain them
+  // before jsdom destroys window; the per-test zero-delay barrier is insufficient.
+  await settleTimers(250);
 });
