@@ -62,8 +62,21 @@ fn already_running(target: &Path) -> Result<bool> {
     }
     #[cfg(target_os = "linux")]
     {
-        for entry in std::fs::read_dir("/proc")?.flatten() {
-            if std::fs::read_link(entry.path().join("exe")).is_ok_and(|exe| exe == target) {
+        use std::os::unix::fs::MetadataExt;
+        let selected = std::fs::metadata(target)?;
+        for entry in std::fs::read_dir("/proc")? {
+            let entry = entry?;
+            if entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<u32>().ok())
+                .is_none()
+            {
+                continue;
+            }
+            if std::fs::metadata(entry.path().join("exe"))
+                .is_ok_and(|image| image.dev() == selected.dev() && image.ino() == selected.ino())
+            {
                 return Ok(true);
             }
         }
@@ -77,6 +90,96 @@ fn already_running(target: &Path) -> Result<bool> {
     {
         let _ = target;
         bail!("Unsupported local platform")
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod linux_tests {
+    use super::*;
+
+    #[test]
+    fn owned_image() {
+        let Some(marker) = std::env::var_os("AM_LAUNCH_IMAGE_HELPER") else {
+            return;
+        };
+        let marker = std::path::PathBuf::from(marker);
+        std::fs::write(&marker, b"ready").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        while !marker.with_extension("release").exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
+    #[test]
+    fn native_running_images_use_file_identity_through_aliases_and_exit() {
+        struct Owned {
+            child: Option<std::process::Child>,
+            root: std::path::PathBuf,
+        }
+        impl Drop for Owned {
+            fn drop(&mut self) {
+                if let Some(child) = self.child.as_mut() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+                let _ = std::fs::remove_dir_all(&self.root);
+            }
+        }
+        let root =
+            std::env::temp_dir().join(format!("am-linux-launch-image-{}", crate::store::uuid_v4()));
+        let mut owned = Owned { child: None, root };
+        for directory in ["first", "second", "alias"] {
+            std::fs::create_dir_all(owned.root.join(directory)).unwrap();
+        }
+        let first = owned.root.join("first/image-probe");
+        let second = owned.root.join("second/image-probe");
+        let alias = owned.root.join("alias/other-name");
+        let renamed = owned.root.join("first/renamed-image");
+        std::fs::copy(std::env::current_exe().unwrap(), &first).unwrap();
+        std::fs::copy(&first, &second).unwrap();
+        std::fs::hard_link(&first, &alias).unwrap();
+        let marker = owned.root.join("ready");
+        owned.child = Some(
+            crate::process::launch_command(&first)
+                .args([
+                    "--exact",
+                    "native_launch::runtime::linux_tests::owned_image",
+                    "--nocapture",
+                ])
+                .env("AM_LAUNCH_IMAGE_HELPER", &marker)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !marker.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Owned ELF did not start"
+            );
+            assert!(owned.child.as_mut().unwrap().try_wait().unwrap().is_none());
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(already_running(&first).unwrap());
+        assert!(
+            already_running(&alias).unwrap(),
+            "A hard link identifies the same running file"
+        );
+        assert!(
+            !already_running(&second).unwrap(),
+            "The same name does not identify a different file"
+        );
+        std::fs::rename(&first, &renamed).unwrap();
+        assert!(already_running(&alias).unwrap());
+        assert!(already_running(&renamed).unwrap());
+        std::fs::write(marker.with_extension("release"), b"release").unwrap();
+        assert!(owned.child.as_mut().unwrap().wait().unwrap().success());
+        owned.child = None;
+        assert!(!already_running(&alias).unwrap());
+        assert!(!already_running(&renamed).unwrap());
+        assert!(!already_running(&second).unwrap());
     }
 }
 
