@@ -975,3 +975,15 @@ confirmation back to the verified source plan.
 - Keep engine error matching in its original language. Translating an MCP error
   prefix changed unsupported-target recognition in English despite a passing
   Chinese suite; verify the same target filtering in both languages.
+
+### 2026-10-16: Windows directory observation needs sharing-participating access
+
+- Native Windows refused the metadata reader's rename and reparse-write assertions:
+  `FILE_READ_ATTRIBUTES` handles alone did not enforce their read-only sharing flags.
+  Compilation and successful ordinary reads could not establish path stability.
+  Microsoft's [attribute-access guidance](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/granting-oplocks)
+  distinguishes those handles from data access that participates in sharing.
+- Request `FILE_LIST_DIRECTORY` with attributes on held ordinary directories.
+  Keep native rename/write refusal and released-handle positive controls; exercise
+  the direct reparse setter so a library's earlier existence check cannot pass
+  without reaching the filesystem boundary.

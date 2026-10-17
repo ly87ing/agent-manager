@@ -211,7 +211,8 @@ fn windows_open(path: &Path, directory: bool) -> io::Result<File> {
         .share_mode(FILE_SHARE_READ)
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
     if directory {
-        options.access_mode(FILE_READ_ATTRIBUTES);
+        // Attribute-only handles do not participate in Windows sharing checks.
+        options.access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES);
     }
     let file = options.open(path)?;
     let metadata = file.metadata()?;
