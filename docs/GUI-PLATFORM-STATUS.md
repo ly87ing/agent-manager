@@ -13,6 +13,10 @@ and [scope](EXTENSIONS-ONLY.md).
 
 ## Current acceptance boundary (2026-10-17)
 
+The [remaining-work queue](REMAINING-WORK.md) records the latest `7d4fde7a`
+baseline, native npm receipts and unfinished implementation/acceptance tasks.
+The older detailed snapshot below is retained until its receipts are refreshed.
+
 Verified corrections through `e71cfd6f` add guarded GNOME single-primary-language
 repair and visible preference-readback limits, plus managed PyPI completion/selection
 version and command-entry checks, plus bounded sibling-directory/mixed-link snapshots

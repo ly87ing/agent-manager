@@ -4,6 +4,8 @@ Manage MCP servers, rules, skills, and their extension dependencies for existing
 
 **Agent Manager does not manage accounts.** It cannot create, edit, delete, switch, launch, log in to, or log out of an account; change its credentials, provider, model, or runtime settings; or create account-bound launch commands. Historical target registrations are read-only metadata used to locate extensions. See the [extension-only contract](docs/EXTENSIONS-ONLY.md).
 
+See [remaining work](docs/REMAINING-WORK.md) for implementation gaps, native acceptance tasks and the next continuation step.
+
 ## Features
 
 - **Assistants:** list known assistant extension targets and their registered paths. This view is read-only and does not check installation, login identity, or credentials.
