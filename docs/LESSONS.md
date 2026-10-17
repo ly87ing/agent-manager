@@ -1075,4 +1075,16 @@ confirmation back to the verified source plan.
   instance. Polkit's root-to-service-user startup path can additionally change to
   the account's home, while its packaged systemd unit starts with the service UID.
   Read the installed service identity; do not create or edit an OS account/home to
-  make a fixture pass. Bound and independently own privileged fixture children.
+  make a fixture pass. Read that identity before replacing D-Bus addresses: a
+  subsequent `systemctl` call otherwise tries to activate a manager on the private
+  bus. Bound and independently own privileged fixture children.
+
+### 2026-10-17: use the app test scope and expose verification limits
+
+- Frontend commands run from `app/` or through `pnpm --dir app`; the repository
+  root has no frontend manifest. A root invocation selected a parent workspace
+  and did not exercise the test, despite completing unrelated package resolution.
+- A generic warning summary did not expose the original backend verification
+  limits. Exercise the disclosure itself in both languages and keep its original
+  diagnostics. Service preference readback must not be presented as durable
+  storage or as a complete ordered desktop-language repair.

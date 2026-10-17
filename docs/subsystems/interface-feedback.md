@@ -24,7 +24,7 @@ and publish one final summary while preserving execution and batch records.
 | Area | Feedback ownership |
 | --- | --- |
 | Launch | Transient save/delete/copy/request results; no persistent action rows |
-| Environment | Immediate comparison summary; full report remains on the page |
+| Environment | Immediate comparison and repair-readback summaries; original repair verification limits can expand in the dialog; full report remains on the page |
 | Skills and Sources | Resource execution or one multi-step/batch summary |
 | MCP | Resource execution, one multi-target write summary, explicit connection-test result |
 | Rules | Resource execution with follow/backup details in the same notification |
