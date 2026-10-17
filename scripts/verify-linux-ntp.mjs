@@ -14,6 +14,7 @@ assert.equal(process.env.GITHUB_ACTIONS, 'true');
 assert.equal(process.env.RUNNER_OS, 'Linux');
 assert.equal(process.env.AM_ISOLATED_LINUX_NTP, '1');
 assert.notEqual(process.getuid(), 0);
+assert(lstatSync('/usr/bin/pkexec').isFile(), 'Native NTP acceptance requires the pkexec package');
 const root = mkdtempSync(join(tmpdir(), 'am-linux-ntp-'));
 const home = join(root, 'missing-home');
 const data = join(root, 'data');

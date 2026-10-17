@@ -103,7 +103,8 @@ jobs:
         if: ${{ runner.os == 'Linux' }}
         shell: bash
         run: |
-          sudo apt-get install --no-install-recommends -y systemd-timesyncd libcap2-bin libsystemd-dev
+          if test -x /usr/bin/pkexec; then echo 'Native NTP fixture: pkexec was present'; else echo 'Native NTP fixture: pkexec was absent'; fi
+          sudo apt-get install --no-install-recommends -y pkexec systemd-timesyncd libcap2-bin libsystemd-dev
           AM_ISOLATED_LINUX_NTP=1 node scripts/verify-linux-ntp.mjs
 
   app:
