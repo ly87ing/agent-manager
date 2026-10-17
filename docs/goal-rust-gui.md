@@ -1990,3 +1990,49 @@ execution, installed desktop/client business workflows, translation loading,
 login adoption, remaining Linux preference/provider repair or signed updating.
 No personal OS setting, real assistant file, installed application, Release or
 tag was changed.
+
+## 2026-10-16: native uv runtime boundary and program entry paths
+
+Main `6126cd49` adds `--no-python-downloads` to managed and delegated uv installs
+and upgrades, including independently produced list/dialog copy commands.
+Existing interpreter selection is preserved. Actual uv 0.13.1 on macOS, Windows
+and Linux exercised an unguarded positive download control followed by guarded
+actions against an empty private interpreter directory and a 404-only loopback
+mirror. Guarded actions made no interpreter-download request; failed delegated
+actions restored original package and entry bytes and identities. A local
+uv 0.7.15 before/after control observed one request before and zero after.
+
+Candidate `5ed228f6` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/38999516021)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38999514579).
+The initial Windows fixture failed before executing uv because setup-uv's output
+omitted `.exe`; the workflow now supplies the actual regular executable path.
+The file admission check remains intact. Main subsequently passed post-push
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/39000204776) and all seven
+[GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39000204786).
+This proves the download boundary, not a build-script sandbox or successful
+installed-version verification.
+
+Main `79ee0ac1` accepts absolute and home-relative spellings of the same eligible
+program entry directory without rewriting an equivalent saved preference.
+Protected targets and eligibility checks remain in force. Native CLI fixtures
+on all three platforms verify preview preservation, actual fixture-backed
+installation/readback, refused targets and subsequent no-change previews.
+An initial fixture wrongly expected explicit rejected apply to leave no lock
+directory; corrected coverage distinguishes zero-write preview from apply's
+existing lock bookkeeping and verifies installed file/preference preservation.
+
+Candidate `086c2b2c` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/38999946732)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38999945435)
+without retry. Native Windows passed 263 library cases, Linux 287 and macOS 285,
+with all integration harnesses and the actual uv fixture. The same native jobs
+also exercised Git plaintext file-link materialization and refused unsupported
+directory/nested shapes. Local verification passed the complete engine suite,
+Tauri 27, frontend 695, production build and formatting. Browser fixtures used
+actual CLI payloads to verify copied list/dialog commands, wrapping and reachable
+actions at 1000/760 px in both languages; these are renderer receipts, not native
+desktop execution. Runtime/test/workflow sources match main; main-specific
+documentation and lesson history are preserved.
+
+General program rollback/restore conflicts, remaining Linux preference/provider
+repair, installed-client adoption and signed updating remain open. No personal
+OS setting, real assistant file, installed application, Release or tag changed.
