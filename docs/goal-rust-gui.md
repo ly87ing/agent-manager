@@ -1849,3 +1849,44 @@ the new output writer itself does not call file-link APIs. No personal regional
 setting, real assistant configuration, installed application, Release or tag was
 changed. Older readers need a capable schema 3 verifier to manage new bindings;
 rollback must not remove manifests or rewrite version IDs.
+
+## 2026-10-16: Git source interpretation and native startup receipts
+
+Main `fe217b1` interprets Git plaintext links from the actual bounded index,
+including version 2/3 checksums and physical alias/link safety. Supported direct
+file links materialize as ordinary files with typed schema 3 identity; unknown
+index shapes retain an explicit unavailable result. Source diagnostics remain
+readable at 1000/760 px in English and Chinese. Main `d3f2f24` separately isolates
+read-only Git probes from inherited repository selectors, verified through two
+actual repositories with config/index/HEAD and absent-data readback.
+
+Main `c283947` corrects Linux read-only NTP candidate precedence: a nonempty
+runtime list supersedes the loaded system list while link candidates still
+participate. Typed native private-bus fixtures exercise the actual CLI, including
+absent runtime properties on older interfaces. This is configuration evidence,
+not a selected-peer or synchronization result; no time service is activated.
+
+Main `473fed2` adds guarded native Windows current-user login-entry acceptance.
+The disposable hive case preserves unrelated values, verifies enablement
+idempotency and quoted paths, refuses external startup overrides and independently
+cleans its exact owned entries. The candidate's
+[native Windows job](https://github.com/ly87ing/agent-manager/actions/runs/38973798846/job/117218241291)
+executed the exact normally ignored case: one passed, zero failed, zero ignored.
+HOME isolation alone is not registry isolation; this fixture cannot run against
+a personal hive through the ordinary test command.
+
+The complete local engine suite included 263 library cases and native integration
+harnesses; Tauri 27, frontend 691 and the production build passed. Linux/Windows
+all-target checks, browser layout, formatting and changed-document links passed.
+The combined candidate `80f9b70` passed all seven
+[GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38973798846).
+Main `473fed2` subsequently passed all seven
+[GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38975098717)
+and [regular CI](https://github.com/ly87ing/agent-manager/actions/runs/38975098645).
+Local main, fetched origin/main and the remote branch were independently read
+back at that SHA.
+
+These receipts do not establish directory/mixed-link materialization, every
+Linux desktop/provider repair, real login startup, installed desktop/client
+business workflows or signed updater installation. No personal OS settings,
+real assistant files, installed application, Release or tag were changed.
