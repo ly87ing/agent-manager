@@ -35,6 +35,7 @@ anyhow = "1"
 fs2 = "0.4"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 regex = "1"
+semver = "1"
 pep440_rs = "=0.7.3"
 sha2 = "0.10"
 # Read legacy Git index checksums; skill identities remain SHA-256.

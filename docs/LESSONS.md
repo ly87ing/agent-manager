@@ -53,6 +53,25 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   constructed the shared private plan without its new field. Search all child
   modules for struct initializers and run the library check as well as CLI cases.
 
+## 2026-10-17: npm completion needs actual identity and entry evidence
+
+- A successful installer could write version 9.9.0 for requested 2.0.0 and still
+  complete/select it. A missing entry failed only after selection and ordinary
+  rollback left `current` dangling. Check actual identity and declared targets
+  before both completion and selection; retain unverified candidates and refuse
+  destructive retries of their final or staging directories.
+- The manual renderer and executor both match `Step`. A broad patch matched the
+  renderer first; the compiler caught the invalid execution guard there. Anchor
+  changes to the owning executor and check the library, not only generated copy.
+- Native npm rejects using one file as both user/global npmrc. A custom Cargo
+  target also changes the CLI location. Failures at either setup boundary do not
+  exercise installation. Keep separate private configs and honor the selected
+  build directory. On macOS, retain the no-shebang control's direct `ENOEXEC`;
+  an ordinary entry file does not establish an executable format/interpreter.
+- A worktree disappeared while tests ran, invalidating their source paths.
+  Preserve an external staged patch and check active worktree ownership before
+  cleanup; do not treat missing-source test failures as product evidence.
+
 ## 2026-10-16: preview and explicit execution have different lock effects
 
 - The entry-directory fixture initially expected a rejected Programs `apply` to

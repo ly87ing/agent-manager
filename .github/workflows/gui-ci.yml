@@ -73,6 +73,14 @@ jobs:
           AM_NATIVE_UV: ${{ steps.native-uv.outputs.uv-path }}${{ runner.os == 'Windows' && '.exe' || '' }}
         run: node scripts/verify-native-uv-runtime.mjs
 
+      - name: Verify real private npm version and entry lifecycle
+        shell: bash
+        env:
+          AM_ISOLATED_NATIVE_NPM: "1"
+        run: |
+          export AM_NATIVE_NPM="$(node -p 'require("node:path").join(require("node:path").dirname(process.execPath), process.platform === "win32" ? "npm.cmd" : "npm")')"
+          node scripts/verify-native-npm-versions.mjs
+
       - name: Select an existing interpreter for offline uv acceptance
         shell: bash
         run: |

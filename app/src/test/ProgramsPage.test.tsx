@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
 import ProgramsPage from "../pages/ProgramsPage";
+import { ProgramActionDialog } from "../components/ProgramActionDialog";
 import type { Envelope } from "../lib/contract";
 import type { ProgramElement, ProgramsData } from "../lib/programs";
 import { makeElement, makeEnvelope } from "./fixtures";
@@ -187,14 +188,17 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
   });
 
   it.each([
-    { mode: "delegated", code: "PROGRAM_VERSION_UNVERIFIED" },
-    { mode: "managed", code: "PROGRAM_VERSION_UNVERIFIED" },
-    { mode: "managed", code: "PROGRAM_ENTRY_UNVERIFIED" },
-  ] as const)("$mode $code keeps inspection details visible without promising restoration", async ({ mode, code }) => {
+    { kind: "pypi", mode: "delegated", code: "PROGRAM_VERSION_UNVERIFIED" },
+    { kind: "pypi", mode: "managed", code: "PROGRAM_VERSION_UNVERIFIED" },
+    { kind: "pypi", mode: "managed", code: "PROGRAM_ENTRY_UNVERIFIED" },
+    { kind: "npm", mode: "managed", code: "PROGRAM_VERSION_UNVERIFIED" },
+    { kind: "npm", mode: "managed", code: "PROGRAM_ENTRY_UNVERIFIED" },
+  ] as const)("$kind $mode $code keeps inspection details visible without promising restoration", async ({ kind, mode, code }) => {
     const contents = data();
-    contents.elements = [program({ program: "pypi:tool-a", kind: "pypi", name: "tool-a", mode, owner: mode === "managed" ? "managed" : "uv-tool", version: "1.0.0", freshness: { ...unknown, state: "behind", current: "1.0.0", upstream: "2.0.0" } })];
-    const plan = { ...PLAN, program: "pypi:tool-a", target_version: "2.0.0", notes: ["The unverified install may remain on PATH. Backup retention applies after any successful action."], manual: ["uv --no-python-downloads tool install --force tool-a==2.0.0"] };
-    const diagnostic = code === "PROGRAM_ENTRY_UNVERIFIED"
+    const id = `${kind}:tool-a`;
+    contents.elements = [program({ program: id, kind, name: "tool-a", mode, owner: mode === "managed" ? "managed" : "uv-tool", version: "1.0.0", freshness: { ...unknown, state: "behind", current: "1.0.0", upstream: "2.0.0" } })];
+    const plan = { ...PLAN, program: id, target_version: "2.0.0", notes: ["The unverified candidate is retained for inspection."], manual: [kind === "npm" ? "npm install tool-a@2.0.0" : "uv --no-python-downloads tool install --force tool-a==2.0.0"] };
+    const diagnostic = kind === "npm" ? `Managed npm ${code === "PROGRAM_ENTRY_UNVERIFIED" ? "command" : "identity/version"} verification before completion failed. The candidate is retained for inspection.` : code === "PROGRAM_ENTRY_UNVERIFIED"
       ? "Managed PyPI command verification before completion failed. The candidate at ~/programs/tool-a/2.0.0 is retained. Inspect its bin entries."
       : "uv finished, but the installed version is unknown. No automatic restoration was attempted. Inspect ~/uv/data/tools/tool-a and the backup.";
     const { calls } = renderWithEngine(<ProgramsPage />, {
@@ -202,18 +206,28 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
       "programs:preview": makeEnvelope(plan),
       "programs:apply": makeEnvelope(plan, { ok: false, errors: [{ code, element: null, message: diagnostic }] }),
     });
-    await userEvent.click(await screen.findByTestId("program-upgrade-pypi:tool-a"));
-    await screen.findByText(mode === "managed" ? /自管 PyPI 会在完成标记和当前版本选择前核验版本/ : /uv 版本无法核验时保留现场，不自动恢复/);
+    await userEvent.click(await screen.findByTestId(`program-upgrade-${id}`));
+    await screen.findByText(kind === "npm" ? /自管 npm 会在完成标记和当前版本选择前核验包身份/ : mode === "managed" ? /自管 PyPI 会在完成标记和当前版本选择前核验版本/ : /uv 版本无法核验时保留现场，不自动恢复/);
     await screen.findByText(plan.notes[0]);
     expect(screen.queryByText(/执行失败时尝试恢复/)).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "升级" }));
-    await screen.findAllByText(code === "PROGRAM_ENTRY_UNVERIFIED" ? /Managed PyPI command verification before completion failed/ : /uv finished, but the installed version is unknown/);
+    await screen.findAllByText(kind === "npm" ? /Managed npm.*verification before completion failed/ : code === "PROGRAM_ENTRY_UNVERIFIED" ? /Managed PyPI command verification before completion failed/ : /uv finished, but the installed version is unknown/);
     expect(screen.getByTestId("program-action-dialog")).toBeInTheDocument();
     expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toBeInTheDocument();
     expect(screen.queryByText(/可以复制上面的命令自己执行/)).toBeNull();
     expect(within(screen.getByTestId("confirm-modal-feedback")).getByRole("alert")).toHaveClass("text-warning");
     expect(screen.getByTestId("confirm-modal-feedback")).toHaveAttribute("tabindex", "0");
     expect(calls.filter((call) => call.command === "programs:apply")).toHaveLength(1);
+  });
+
+  it.each(["install", "upgrade", "switch", "adopt"] as const)("npm %s explains retained candidates before confirmation", async action => {
+    const { calls } = renderWithEngine(<ProgramActionDialog
+      program={program({ program: "npm:tool-a", kind: "npm", name: "tool-a", mode: action === "install" ? "missing" : action === "adopt" ? "delegated" : "managed" })}
+      action={action} version="2.0.0" entryCandidates={["~/bin"]} entryDir="~/bin" onClose={vi.fn()}
+    />, { ...routes(), "programs:preview": makeEnvelope({ ...PLAN, program: "npm:tool-a", action, target_version: "2.0.0" }) });
+    await screen.findByText(/自管 npm 会在完成标记和当前版本选择前核验包身份/);
+    expect(screen.queryByText(/执行失败时尝试恢复/)).toBeNull();
+    expect(calls.some(call => call.command === "programs:apply")).toBe(false);
   });
 
   it("安装原本没有的程序：选入口目录（默认 ~/.local/bin），安装脚本默认不执行、勾选后重新算计划", async () => {

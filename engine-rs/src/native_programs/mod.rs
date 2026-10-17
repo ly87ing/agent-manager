@@ -4,6 +4,7 @@
 pub(crate) mod apply;
 pub(crate) mod declare;
 pub(crate) mod locate;
+mod npm_postcondition;
 mod scope;
 pub(crate) mod status;
 #[cfg(unix)]

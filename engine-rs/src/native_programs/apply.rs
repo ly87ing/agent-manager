@@ -27,6 +27,7 @@ const BACKUP_META: &str = "backup.json";
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
 /// Keep this many non-adoption backups after any successful action.
 const KEEP_BACKUPS: usize = 3;
+const MANAGED_NPM_NOTE: &str = "Managed npm package identity/version and declared command targets are freshly checked before completion and current selection. Unverified candidates and existing incomplete staging directories are retained for inspection. Manual commands do not include these application verification gates.";
 
 fn programs_root(ctx: &Context) -> PathBuf {
     ctx.data_dir.join("programs")
@@ -160,6 +161,50 @@ fn npm_latest(npm: &Path, package: &str) -> Result<String> {
         bail!("查不到 {package} 的最新版本：{}", out.tail);
     }
     Ok(version)
+}
+
+fn managed_npm_version(npm: &Path, package: &str, requested: &str) -> Result<String> {
+    if requested == "latest" {
+        return super::npm_postcondition::exact_version(&npm_latest(npm, package)?)
+            .ok_or_else(|| anyhow!("The npm latest response did not identify an exact version."));
+    }
+    if let Some(version) = super::npm_postcondition::exact_version(requested) {
+        return Ok(version);
+    }
+    let mut cmd = crate::process::command(npm);
+    cmd.args([
+        "view",
+        &format!("{package}@{requested}"),
+        "version",
+        "--json",
+    ]);
+    let out = run(cmd, Duration::from_secs(60))?;
+    let versions = serde_json::from_str::<Value>(&out.stdout)
+        .ok()
+        .and_then(|value| {
+            let values = match value {
+                Value::String(one) => vec![Value::String(one)],
+                Value::Array(values) => values,
+                _ => return None,
+            };
+            values
+                .iter()
+                .map(|value| value.as_str()?.parse::<semver::Version>().ok())
+                .collect::<Option<Vec<_>>>()
+        });
+    if out.ok {
+        if let Some(version) = versions
+            .and_then(|versions| versions.into_iter().max_by(semver::Version::cmp_precedence))
+            .map(|version| version.to_string())
+            .filter(|version| valid_version(version))
+        {
+            return Ok(version);
+        }
+    }
+    bail!(
+        "Could not resolve {package}@{requested} to an exact npm version: {}",
+        out.tail
+    )
 }
 
 /// PyPI 上某个包的最新版本（联网）。
@@ -895,10 +940,18 @@ fn managed_install_steps(
     if scheme == "pypi" {
         super::uv_postcondition::managed_target(name, version)?;
     }
+    if scheme == "npm"
+        && super::npm_postcondition::exact_version(version).as_deref() != Some(version)
+    {
+        bail!("Managed npm installation requires a resolved exact version.");
+    }
     if vdir.join(META_FILE).is_file() {
         return Ok((Vec::new(), vdir));
     }
     let mut steps = Vec::new();
+    if scheme == "npm" {
+        super::npm_postcondition::absent(&vdir, &ctx.home_dir)?;
+    }
     if vdir.exists() {
         if scheme == "pypi" {
             return Err(super::uv_postcondition::incomplete_candidate(
@@ -913,6 +966,7 @@ fn managed_install_steps(
         "npm" => {
             let npm = which("npm", user_path).ok_or_else(|| anyhow!("PATH 上没有 npm"))?;
             let tmp = pdir.join(format!(".installing-{version}"));
+            super::npm_postcondition::absent(&tmp, &ctx.home_dir)?;
             let mut npm_args = vec![
                 "install".to_string(),
                 "--prefix".into(),
@@ -931,9 +985,6 @@ fn managed_install_steps(
                 npm_args.push("--ignore-scripts".into());
             }
             npm_args.push(format!("{name}@{version}"));
-            if tmp.exists() {
-                steps.push(Step::RemoveDir { path: tmp.clone() });
-            }
             steps.push(Step::Exec {
                 program: npm,
                 args: npm_args,
@@ -1083,13 +1134,13 @@ fn plan_managed(
         .unwrap_or_default();
     let allow = args.allow_scripts || scripts_allowed(status, id);
     let latest = |args: &Args| -> Result<String> {
+        if scheme == "npm" {
+            let npm = which("npm", user_path).ok_or_else(|| anyhow!("PATH 上没有 npm"))?;
+            return managed_npm_version(&npm, name, args.version.as_deref().unwrap_or("latest"));
+        }
         match args.version.as_deref() {
             Some(v) if v != "latest" => Ok(v.to_string()),
             _ => match scheme {
-                "npm" => npm_latest(
-                    &which("npm", user_path).ok_or_else(|| anyhow!("PATH 上没有 npm"))?,
-                    name,
-                ),
                 "pypi" => pypi_latest(name, user_path),
                 _ => bail!("git 源要给出具体提交（--version <提交>）"),
             },
@@ -1135,6 +1186,9 @@ fn plan_managed(
                 .ok_or_else(|| anyhow!("换版本需要 --version"))?;
             if scheme == "pypi" {
                 super::uv_postcondition::managed_target(name, &version)?;
+            }
+            if scheme == "npm" && super::npm_postcondition::exact_version(&version).is_none() {
+                bail!("The selected npm directory does not identify an exact version.");
             }
             if !installed.contains(&version) {
                 bail!("{id} 没有装过 {version}");
@@ -1227,6 +1281,14 @@ fn plan_managed(
                 .into(),
         );
     }
+    if scheme == "npm"
+        && matches!(
+            args.action,
+            Action::Install | Action::Upgrade | Action::Switch
+        )
+    {
+        notes.push(MANAGED_NPM_NOTE.into());
+    }
     Ok(Plan {
         program: id.clone(),
         action: args.action.clone(),
@@ -1235,7 +1297,11 @@ fn plan_managed(
         verify_bins,
         verify_version: None,
         verify_uv: None,
-        verify_managed_bins: if scheme == "pypi" { bins } else { Vec::new() },
+        verify_managed_bins: if matches!(scheme, "pypi" | "npm") {
+            bins
+        } else {
+            Vec::new()
+        },
         notes,
         scripts_ignored: !allow && scheme == "npm",
         backup_dir: None,
@@ -1328,8 +1394,9 @@ fn plan_adopt(
         verify_bins: verify,
         verify_version: None,
         verify_uv: None,
-        verify_managed_bins: Vec::new(),
+        verify_managed_bins: bins,
         notes: vec![
+            MANAGED_NPM_NOTE.into(),
             format!(
                 "装好托管的同一版本、放好入口链接后，才把 {} 整个移到备份（不执行 npm uninstall）",
                 tilde(&package_dir, &ctx.home_dir)
@@ -1703,6 +1770,14 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
             validate_step_targets(ctx, step)?;
             match step {
                 Step::Move { from, to } => {
+                    if plan.program.starts_with("npm:")
+                        && plan
+                            .steps
+                            .iter()
+                            .any(|step| matches!(step, Step::WriteMeta { dir, .. } if dir == to))
+                    {
+                        super::npm_postcondition::absent(to, &ctx.home_dir)?;
+                    }
                     if let Some(parent) = to.parent() {
                         std::fs::create_dir_all(parent)?;
                     }
@@ -1715,6 +1790,20 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                     env,
                     cwd,
                 } => {
+                    if plan.program.starts_with("npm:") {
+                        for step in &plan.steps {
+                            if let Step::WriteMeta { dir, .. } = step {
+                                super::npm_postcondition::absent(dir, &ctx.home_dir)?;
+                                for step in &plan.steps {
+                                    if let Step::Move { from, to } = step {
+                                        if to == dir {
+                                            super::npm_postcondition::absent(from, &ctx.home_dir)?;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     let mut cmd = crate::process::command_with_env(
                         program,
                         env.iter()
@@ -1769,6 +1858,18 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                     program_dir,
                     version,
                 } => {
+                    if let Some(name) = plan.program.strip_prefix("npm:") {
+                        let target = super::npm_postcondition::exact_version(version)
+                            .ok_or_else(|| anyhow!("Missing exact npm target version"))?;
+                        super::npm_postcondition::check(
+                            &program_dir.join(version),
+                            name,
+                            &target,
+                            &plan.verify_managed_bins,
+                            &ctx.home_dir,
+                            "current selection",
+                        )?;
+                    }
                     if let Some(name) = plan.program.strip_prefix("pypi:") {
                         super::uv_postcondition::check_managed(
                             &program_dir.join(version),
@@ -1793,6 +1894,19 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                     symlink(Path::new(version), &program_dir.join("current"))?;
                 }
                 Step::WriteMeta { dir, meta } => {
+                    if let Some(name) = plan.program.strip_prefix("npm:") {
+                        let target = meta["version"]
+                            .as_str()
+                            .ok_or_else(|| anyhow!("Missing managed npm target version"))?;
+                        super::npm_postcondition::check(
+                            dir,
+                            name,
+                            target,
+                            &plan.verify_managed_bins,
+                            &ctx.home_dir,
+                            "completion",
+                        )?;
+                    }
                     if let Some(name) = plan.program.strip_prefix("pypi:") {
                         let version = meta["version"]
                             .as_str()

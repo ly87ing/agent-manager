@@ -5,6 +5,8 @@
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[path = "support/native_npm_managed.rs"]
+mod managed;
 
 fn executable(path: &Path, contents: impl AsRef<[u8]>) {
     std::fs::write(path, contents).unwrap();
@@ -127,12 +129,54 @@ fn npm_fixture(args: &[String]) {
     if version == "99.0.0" {
         std::process::exit(1);
     }
+    let control = std::env::var_os("AM_NPM_MANAGED_CONTROL").map(PathBuf::from);
+    let mode = control
+        .as_ref()
+        .and_then(|path| std::fs::read_to_string(path).ok());
+    if let Some(path) = &control {
+        std::fs::write(path.with_extension("called"), b"called").unwrap();
+    }
     install_package(
         Path::new(&prefix[1]),
         package,
-        version,
+        if mode.as_deref() == Some("wrong-version") {
+            "9.9.0"
+        } else {
+            version
+        },
         args.iter().any(|a| a == "-g"),
     );
+    let package_dir = if args.iter().any(|a| a == "-g") {
+        global_modules(Path::new(&prefix[1]))
+    } else {
+        Path::new(&prefix[1]).join("node_modules")
+    }
+    .join(package);
+    match mode.as_deref() {
+        Some("wrong-name") => {
+            let path = package_dir.join("package.json");
+            let mut value: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            value["name"] = json!("another-package");
+            std::fs::write(path, value.to_string()).unwrap();
+        }
+        Some("missing-metadata") => std::fs::remove_file(package_dir.join("package.json")).unwrap(),
+        Some("malformed-metadata") => std::fs::write(package_dir.join("package.json"), b"{").unwrap(),
+        Some("duplicate-metadata") => std::fs::write(package_dir.join("package.json"), format!(r#"{{"name":"{package}","version":"{version}","version":"{version}","bin":{{"tool-a":"bin/cli.js"}}}}"#)).unwrap(),
+        Some("missing-entry") => std::fs::remove_file(Path::new(&prefix[1]).join("node_modules/.bin").join(command_name("tool-a"))).unwrap(),
+        Some("directory-target") => {
+            std::fs::remove_file(package_dir.join("bin/cli.js")).unwrap();
+            std::fs::create_dir(package_dir.join("bin/cli.js")).unwrap();
+        }
+        Some("external-target") => {
+            let external = control.as_ref().unwrap().parent().unwrap().join("external-command-target");
+            std::fs::create_dir(&external).unwrap();
+            executable(&external.join("cli.js"), b"#!/bin/sh\necho external\n");
+            std::fs::remove_dir_all(package_dir.join("bin")).unwrap();
+            link_dir(&external, &package_dir.join("bin"));
+        }
+        Some("comment-shim") if cfg!(windows) => std::fs::write(Path::new(&prefix[1]).join("node_modules/.bin/tool-a.cmd"), "REM \"%~dp0..\\tool-a\\bin\\cli.js\" %*\r\n").unwrap(),
+        _ => {}
+    }
     if version == "98.0.0" {
         // npm can fail after it has already replaced the package and .cmd file.
         std::process::exit(1);
@@ -204,6 +248,7 @@ impl Env {
             .env("USERPROFILE", &self.home)
             .env("AGENT_MANAGER_DATA_DIR", &self.data)
             .env("AGENT_MANAGER_USER_PATH", &self.user_path)
+            .env("AM_NPM_MANAGED_CONTROL", self.base.join("npm-control"))
             // Keep the fake tools out of the process PATH: success must use the
             // explicit user PATH, and Windows must append .cmd / .exe.
             .env_remove("AGENT_MANAGER_LOCK_HELD")
@@ -615,6 +660,7 @@ fn main() {
     }
     // Panics retain a nonzero exit status, including when Cargo supplies a test
     // filter. No fixture processes or network calls are required outside here.
+    managed::run();
     upgrade_adopt_and_restore("tool-a");
     upgrade_adopt_and_restore("@scope/tool-a");
     current_pointer_is_protected();

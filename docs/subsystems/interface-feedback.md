@@ -48,6 +48,12 @@ in the description; recognized errors retain their original text. Page reads do
 not announce success on mount. Partial work, unknown checks, cancelled inspection
 and unverified correction cannot show a complete-success notification.
 
+Managed npm install/upgrade/switch/adoption confirmations explain that package
+identity, version and declared entries are checked before completion/selection.
+Unverified candidates remain for inspection without automatic restoration. Their
+original diagnostics stay in the open dialog as warnings; they never offer an
+automatic retry or present the ordinary restoration promise.
+
 Notification expiry never removes a report or changes resources. Failed operations
 do not retry automatically. Existing confirmation, preview, identity-isolation and
 authorization behavior is unchanged. No global language/time-zone defaults are

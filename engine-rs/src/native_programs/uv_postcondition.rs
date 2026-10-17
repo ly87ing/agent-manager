@@ -13,7 +13,7 @@ pub(super) struct Verification {
 }
 
 #[derive(Debug)]
-pub(super) struct UnverifiedVersion(String);
+pub(super) struct UnverifiedVersion(pub(super) String);
 
 impl std::fmt::Display for UnverifiedVersion {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -24,7 +24,7 @@ impl std::fmt::Display for UnverifiedVersion {
 impl std::error::Error for UnverifiedVersion {}
 
 #[derive(Debug)]
-pub(super) struct UnverifiedEntry(String);
+pub(super) struct UnverifiedEntry(pub(super) String);
 
 impl std::fmt::Display for UnverifiedEntry {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

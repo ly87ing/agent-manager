@@ -94,6 +94,37 @@ already exist. Existing target/account guards remain in force. Parent path
 aliases are normalized while the version root and internal metadata components
 retain ordinary-object checks. Git version postconditions and general
 rollback/restore conflicts remain separate work.
+Managed npm installs/adoption verify the actual package identity/version and each
+declared `bin` target before completion metadata and again before `current`.
+Completed-version reuse and switches receive the same fresh check. Exact SemVer
+targets, including a `v` prefix, are normalized before installation; other
+accepted tags/ranges resolve through npm to the highest concrete matching version
+during planning. That concrete version is installed and used as the directory
+identifier. An unresolved target fails before installation. Switches require an
+exact existing version identifier and do not resolve a registry tag.
+
+The reader holds ordinary package-directory/file evidence and bounds package.json
+to 1 MiB. Duplicate identity or `bin` fields, malformed/unreadable identity, wrong
+names/versions and uncertain mappings fail verification. npm's string, object and
+array `bin` forms use root-anchored target normalization, including scoped names
+and native path separators; conflicting normalized command names are refused.
+Declared targets must resolve to ordinary files inside that package, executable
+on Unix. Unix `.bin` entries must resolve to that target. Windows `.cmd` files are
+read within 64 KiB and must contain a recognized npm invocation of that target;
+comments and Agent Manager markers are not invocation evidence. This is bounded
+file/relationship evidence, not batch authenticity, interpreter availability,
+executable-format validation or arbitrary runtime functionality.
+
+An existing incomplete npm version or `.installing-*` object is retained and
+refused during planning and before installation; a destination is checked again
+before the staging move. These checks do not make publication atomic against
+uncoordinated external writers. Failed identity/entry gates retain the candidate
+without automatic cleanup or rollback after that check, preserving the previously
+selected current version. A completion marker can already exist when the later
+selection check fails. This does not promise restoration after every unrelated
+later step failure. General rollback/restore conflicts remain separate work.
+Manual commands do not reproduce these application verification gates.
+
 The `PROGRAM_VERSION_UNVERIFIED` diagnostic identifies this incomplete outcome;
 it also identifies refusal to overwrite an incomplete managed PyPI candidate.
 The dialog keeps its details visible and announces a warning. Ordinary installer
