@@ -238,6 +238,12 @@ changes privacy. Native policy calls run in a separate profile-free process with
 a two-second deadline. A blocked policy API leaves only the dependent policy
 evidence unknown; the remaining system snapshot stays readable. Fresh privileged
 snapshots repeat this bounded read and never treat a timeout as unmanaged.
+Repair and clock correction resolve the mutation lock's user SID directly from
+the current process token through read-only Win32 APIs; acquiring the lock does
+not launch PowerShell. The existing `Global` mutex name and canonical SID notation
+retain exclusion with older binaries and across sessions/data directories.
+Native coverage compares an independent `whoami` SID and an old-format mutex,
+then checks a separate holder/contender process pair, release and reacquisition.
 Time-zone policy uses the public Windows
 [NamedPolicy API](https://learn.microsoft.com/en-us/uwp/api/windows.management.policies.namedpolicy).
 Enabling automatic time zone also requires known permitted machine location
