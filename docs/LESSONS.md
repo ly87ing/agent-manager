@@ -6,6 +6,16 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: mutation-lock acceptance needs a separate contender
+
+- The earlier native lock regression spawned a subprocess, but acquired both
+  handles inside that same child. Keep an actual holder and contender in separate
+  processes, then release and reacquire; retain the same-process assertions too.
+- Native Windows CI failed before `CreateMutexW` because the SID query required
+  PowerShell startup. OS identity for a native lock should use a read-only process
+  token, with independent SID/name compatibility evidence. Other PowerShell
+  fixture timeouts remain separate failures until diagnosed.
+
 ## 2026-10-16: read-only bus tests must cover repair previews
 
 - Environment inspection's no-activation test passed while the separate timezone
