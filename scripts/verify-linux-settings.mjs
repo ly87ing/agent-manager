@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { verifyPreferences } from './verify-linux-kde-preferences.mjs';
 
 assert.equal(process.platform, 'linux');
 assert.equal(process.env.CI, 'true');
@@ -130,6 +131,7 @@ async function stopWindows() {
 }
 
 try {
+  verifyPreferences(engine, env, root);
   assert.equal((await windows()).length, 0, 'The private display must start without settings windows');
   const listed = command('/usr/bin/systemsettings', ['--list']).stdout;
   const modules = new Set(listed.split('\n').map(line => line.split(' - ')[0].trim()));
