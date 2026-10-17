@@ -134,10 +134,13 @@ async function repair(mode, profile = spec) {
     process.kill(child.pid, 'SIGCONT');
     const observed = await output;
     assert.equal(observed.status, 0, observed.stderr);
-    const receipt = await agentResult;
-    assert.equal(receipt.status, 0, receipt.stderr);
     const envelope = JSON.parse(observed.stdout);
     assert.equal(envelope.ok, true, JSON.stringify(envelope.errors));
+    const receipt = await agentResult;
+    const summary = { status: envelope.data.status, items: envelope.data.items.map(({ id, status }) => ({ id, status })),
+      helper_source_bytes: lstatSync(binary).size,
+      canonical_temporary_parent_is_tmp: rootNode("import fs from 'node:fs';console.log(fs.realpathSync('/tmp')==='/tmp');").stdout.trim() === 'true' };
+    assert.equal(receipt.status, 0, `${receipt.stderr}\nCLI repair status: ${JSON.stringify(summary)}`);
     return envelope.data;
   } finally {
     if (child.exitCode === null) child.kill('SIGKILL');

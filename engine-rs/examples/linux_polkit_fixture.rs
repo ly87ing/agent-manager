@@ -65,6 +65,11 @@ mod fixture {
                             == Some(self.uid)
                 })
             {
+                eprintln!("CI authentication rejected: authority={}, subject={}, action={}, self_identity={}",
+                    header.sender().map(|name| name.as_str()) == Some(self.authority.as_str()),
+                    details.get("polkit.subject-pid") == Some(&self.pid.to_string()),
+                    action == if self.ntp_mode.is_some() { "org.freedesktop.policykit.exec" } else { ACTION },
+                    identities.iter().any(|(kind, fields)| kind == "unix-user" && fields.get("uid").and_then(|uid| u32::try_from(uid).ok()) == Some(self.uid)));
                 return Err(
                     zbus::fdo::Error::AccessDenied("Unexpected CI identity/action".into()).into(),
                 );
