@@ -17,7 +17,10 @@ managed by this subsystem. Product scope is in [Program Lifecycle](../PROGRAM-LI
   requests use the same exclusion.
 - [`apply.rs`](../../engine-rs/src/native_programs/apply.rs) builds plans, backs up
   external packages and their launchers, invokes the original package manager,
-  verifies its result, and restores moved files when an upgrade fails.
+  verifies its result, and attempts restoration after command failures.
+- [`uv_postcondition.rs`](../../engine-rs/src/native_programs/uv_postcondition.rs)
+  independently checks delegated uv results and identifies version failures that
+  must retain current files and the moved backup for inspection.
 - [`native_upstream.rs`](../../engine-rs/src/native_upstream.rs) runs npm and PyPI
   version probes through the same user PATH/PATHEXT resolution. Read-only status
   uses cached probe results rather than performing network requests.
@@ -54,7 +57,23 @@ also appears in copyable list and operation-dialog commands. An older uv that
 does not recognize it fails before installation instead of silently ignoring a
 new environment variable.
 This option controls uv's own Python provisioning; it does not isolate arbitrary
-package build code or establish an installed-version postcondition.
+package build code. After a successful delegated uv upgrade/switch command,
+installed metadata must satisfy the requested PEP 440 equality specifier before
+entry checks. Equivalent releases and matching local versions follow PyPA version
+matching semantics. Invalid target versions fail during preview before moves.
+An unreadable, ambiguous or mismatched version reports failure without automatic
+restoration or cleanup after that check. The unverified current install may still
+be on PATH. This retains existing backup files for inspection, not a promise of
+an independent, runnable or immutable backup. Every later successful action for
+that program applies the existing newest-three non-adoption backup retention.
+Managed PyPI/git version postconditions and general rollback/restore conflicts
+remain separate work.
+The `PROGRAM_VERSION_UNVERIFIED` diagnostic identifies this incomplete outcome;
+the dialog keeps its details visible and announces a warning. Ordinary installer
+failures retain `PROGRAM_ERROR` and their existing recovery attempt.
+For installed uv tools, cached upstream versions/timestamps remain available, but
+current versions and ordering come from actual metadata. Unreadable current
+metadata remains unknown instead of inheriting a cached current/latest label.
 An absent, empty or relative `SHELL` uses `/bin/bash` on Linux and `/bin/zsh` on
 macOS; an explicit absolute shell retains its own failure diagnostics.
 The CLI accepts an eligible entry directory in either `~/...` or absolute form.
@@ -108,8 +127,9 @@ status badges do not repeat long version strings. Paths and current versions wra
 - Linking and unlinking derive the same platform-specific entry filename:
   `<command>` on Unix and `<command>.cmd` on Windows. Unlink retains the managed
   installation and entries in other directories.
-- Failed delegated upgrades restore both package directories and regular Windows
-  launcher files, including failures after the installer has replaced them.
+- Failed delegated commands attempt restoration of package directories and owned
+  Windows launcher files. A successful uv command with an unverified installed
+  version instead retains the current files and backup, reporting both locations.
 - Install-time PyPI discovery locates `curl` through user PATH/PATHEXT. Explicit
   executable paths are used for probes; no hard-coded Unix curl path is assumed.
 - Queries and plans do not install software or alter program directories.
@@ -128,6 +148,7 @@ cargo test --manifest-path engine-rs/Cargo.toml --test native_program_lifecycle
 cargo test --manifest-path engine-rs/Cargo.toml --test native_programs
 cargo test --manifest-path engine-rs/Cargo.toml --test native_programs_windows
 cargo test --manifest-path engine-rs/Cargo.toml --test native_uv_metadata
+cargo test --manifest-path engine-rs/Cargo.toml --test native_uv_lifecycle
 cargo test --manifest-path engine-rs/Cargo.toml --test native_upstream
 ```
 
@@ -148,5 +169,13 @@ installs an interpreter or contacts a package registry. GUI CI runs it on all
 three native systems with uv 0.13.1, a pinned setup action and archive checksums.
 Local execution requires `AM_ISOLATED_NATIVE_UV=1` and an absolute real binary in
 `AM_NATIVE_UV`; only a copy is executed in fresh private fixture paths.
+
+The [offline version fixture](../../scripts/verify-native-uv-versions.mjs) selects
+an existing interpreter explicitly with `AM_NATIVE_PYTHON`, generates private
+wheels, then performs real uv upgrades, entry execution and public/local version
+matching without a package registry. It verifies that the selected interpreter
+binary/identity is unchanged and private managed-runtime directories remain empty.
+GUI CI selects a preinstalled runner interpreter; this fixture never bootstraps
+one and adds no interpreter requirement to the Rust engine test suite.
 
 Windows command-entry metadata uses ASCII hex-encoded UTF-8 paths; legacy plain-text metadata remains readable. Manual filesystem commands reject linked ancestors, compare existing entry hashes, and stage a literal junction before replacing `current`. A staging failure preserves the previous pointer and foreign staging contents. Recursive manual removal refuses nested reparse points.

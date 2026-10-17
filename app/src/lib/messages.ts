@@ -1,5 +1,6 @@
 /** Application copy only; user content and engine diagnostics are never translation keys. */
 export const messages = {
+  "{0}未完成": "{0} incomplete",
   "设置当前 timesyncd 实例的运行时 NTP 列表": "Set the current timesyncd instance's runtime NTP list",
   "保存标准主机路径的 NTP 配置文件": "Save the standard-host-path NTP override file",
   "创建 NTP 配置目录": "Create the NTP configuration directory",
@@ -1423,6 +1424,7 @@ export const messages = {
   "确认取消链接": "Confirm unlink",
   "确认后将添加来源、下载仓库，并应用其中的技能。": "Adds the source, downloads the repository and applies its skills after confirmation.",
   "确认后执行下列步骤；执行失败时尝试恢复，并报告需要检查的备份。": "Confirm to run these steps. On failure, restoration is attempted and any backups needing attention are reported.",
+  "确认后执行下列步骤；uv 版本无法核验时保留现场，不自动恢复，并报告需要检查的位置。": "Confirm to run these steps. If the uv version cannot be verified, files stay in place without automatic restoration, and locations needing inspection are reported.",
   "确认后执行，想再用时可以重新添加：": "Confirm to proceed. You can add the source again later:",
   "确认执行": "Confirm",
   "确认扩展定义恢复范围": "Confirm extension restore scope",

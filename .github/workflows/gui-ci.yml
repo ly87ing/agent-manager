@@ -72,6 +72,28 @@ jobs:
           AM_NATIVE_UV: ${{ steps.native-uv.outputs.uv-path }}${{ runner.os == 'Windows' && '.exe' || '' }}
         run: node scripts/verify-native-uv-runtime.mjs
 
+      - name: Select an existing interpreter for offline uv acceptance
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { spawnSync } from 'node:child_process';
+          import { appendFileSync } from 'node:fs';
+          import { isAbsolute } from 'node:path';
+          const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-I', '-B', '-c', 'import sys; print(sys.executable)'], { encoding: 'utf8', timeout: 15000 });
+          assert.ifError(result.error);
+          assert.equal(result.status, 0, result.stderr);
+          const path = result.stdout.trim();
+          assert(isAbsolute(path) && !path.includes('\n') && !path.includes('\r'));
+          appendFileSync(process.env.GITHUB_ENV, `AM_NATIVE_PYTHON=${path}\n`);
+          NODE
+
+      - name: Verify real offline uv version upgrades with an existing interpreter
+        env:
+          AM_ISOLATED_NATIVE_UV: "1"
+          AM_NATIVE_UV: ${{ steps.native-uv.outputs.uv-path }}${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: node scripts/verify-native-uv-versions.mjs
+
       - name: Verify disposable Linux user-manager environment
         if: ${{ runner.os == 'Linux' }}
         shell: bash

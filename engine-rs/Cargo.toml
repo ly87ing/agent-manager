@@ -18,6 +18,11 @@ name = "native_mcp_protocol"
 path = "tests/native_mcp_protocol.rs"
 harness = false
 
+[[test]]
+name = "native_uv_lifecycle"
+path = "tests/native_uv_lifecycle.rs"
+harness = false
+
 [lib]
 name = "agent_manager_engine"
 path = "src/lib.rs"

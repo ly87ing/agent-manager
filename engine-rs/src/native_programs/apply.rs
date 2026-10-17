@@ -3,7 +3,8 @@
 //!
 //! 两种管理方式：
 //! - 代管（npm 全局、uv tool）：程序留在原处，本工具调用原包管理器；改动前把整个包目录与它的
-//!   命令链接**移到**备份目录（同分区改名，零网络），失败或回退时原样移回。
+//!   命令链接**移到**备份目录（同分区改名，零网络）。
+//!   A failed uv version check retains the current files and backup for inspection.
 //! - 托管：装在数据目录 `programs/<类别>/<名>/<版本>/`，`current` 指向当前版本，`programs/bin/<命令>`
 //!   经 `current` 指到真实命令；用户选定的入口目录（已在 PATH 上）里放登记过的链接。
 //!
@@ -17,13 +18,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+use super::uv_postcondition::{UnverifiedVersion, Verification};
 use crate::native::{Context, Request};
 use crate::store;
 
 const META_FILE: &str = ".agent-manager-program.json";
 const BACKUP_META: &str = "backup.json";
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(600);
-/// 同一程序保留的回退备份数；更早的在下一次改动时清掉。
+/// Keep this many non-adoption backups after any successful action.
 const KEEP_BACKUPS: usize = 3;
 
 fn programs_root(ctx: &Context) -> PathBuf {
@@ -378,6 +380,7 @@ pub struct Plan {
     verify_bins: Vec<(String, PathBuf)>,
     /// 代管升级：核对包目录里的版本
     verify_version: Option<(PathBuf, String)>,
+    verify_uv: Option<Verification>,
     /// 失败时要按相反顺序撤回的移动（执行时记录）
     notes: Vec<String>,
     scripts_ignored: bool,
@@ -669,6 +672,7 @@ fn plan_delegated(
                     })
                     .collect(),
                 verify_version: Some((package_dir.join("package.json"), target)),
+                verify_uv: None,
                 steps,
                 notes: vec![format!(
                     "改动前把 {} 整个移到备份，失败或回退时原样移回",
@@ -688,6 +692,7 @@ fn plan_delegated(
                 None | Some("latest") => pypi_latest(name, user_path)?,
                 Some(v) => v.to_string(),
             };
+            let verification = Verification::new(&package_dir, name, &target, &backup)?;
             let tool_parent = package_dir
                 .parent()
                 .ok_or_else(|| anyhow!("uv tool 目录结构认不出来"))?
@@ -748,10 +753,15 @@ fn plan_delegated(
                     })
                     .collect(),
                 verify_version: None,
+                verify_uv: Some(verification),
                 steps,
                 notes: vec![format!(
-                    "改动前把 {} 整个移到备份，失败或回退时原样移回",
-                    tilde(&package_dir, &ctx.home_dir)
+                    "The package and owned entries move to backup before uv runs. \
+                     If installed-version verification fails, the current install \
+                     and moved backup are left for inspection; no automatic \
+                     restoration or cleanup follows this check. The unverified \
+                     install may remain on PATH. Normal retention keeps the newest \
+                     {KEEP_BACKUPS} backups after any successful action for this program."
                 )],
                 scripts_ignored: false,
                 backup_dir: Some(backup),
@@ -858,6 +868,7 @@ fn plan_restore(ctx: &Context, args: &Args) -> Result<Plan> {
             })
             .collect(),
         verify_version: None,
+        verify_uv: None,
         steps,
         notes: vec!["零网络：只在本机移动目录".into()],
         scripts_ignored: false,
@@ -1199,6 +1210,7 @@ fn plan_managed(
         steps,
         verify_bins,
         verify_version: None,
+        verify_uv: None,
         notes,
         scripts_ignored: !allow && scheme == "npm",
         backup_dir: None,
@@ -1290,6 +1302,7 @@ fn plan_adopt(
         steps,
         verify_bins: verify,
         verify_version: None,
+        verify_uv: None,
         notes: vec![
             format!(
                 "装好托管的同一版本、放好入口链接后，才把 {} 整个移到备份（不执行 npm uninstall）",
@@ -1747,6 +1760,9 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
             }
             done.push(step.clone());
         }
+        if let Some(verification) = &plan.verify_uv {
+            verification.check(&ctx.home_dir, KEEP_BACKUPS)?;
+        }
         // 核对：该找到的命令都在，版本对得上
         for (bin, path) in &plan.verify_bins {
             if !path.exists() {
@@ -1768,6 +1784,15 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
         Ok(())
     })();
     if let Err(err) = result {
+        if err.is::<UnverifiedVersion>() {
+            let _ = record(
+                ctx,
+                req,
+                &plan.program,
+                json!({"action": format!("{:?}", plan.action).to_lowercase(), "ok": false}),
+            );
+            return Err(err);
+        }
         let mut rollback_blocked = false;
         // 失败回滚：按相反顺序撤回已做的移动与链接；新装出来的包目录（在备份位置之外）删掉
         for step in done.iter().rev() {

@@ -476,7 +476,14 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
         ("programs", "status" | "preview" | "apply" | "declare") => {
             crate::native_programs::handle(ctx, request)
                 .map(|data| (data, vec![]))
-                .map_err(|err| DispatchError::new("PROGRAM_ERROR", format!("{err:#}")))
+                .map_err(|err| {
+                    let code = if crate::native_programs::has_unverified_version(&err) {
+                        "PROGRAM_VERSION_UNVERIFIED"
+                    } else {
+                        "PROGRAM_ERROR"
+                    };
+                    DispatchError::new(code, format!("{err:#}"))
+                })
         }
         ("policy", "get") => policy_get(ctx),
         ("policy", "set") => policy_set(ctx, request),

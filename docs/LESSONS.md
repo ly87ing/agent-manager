@@ -990,3 +990,17 @@ confirmation back to the verified source plan.
 - A follow-up exclusive `junction::exists` probe conflicted with the correctly
   held read handle. Inspect attributes through a compatible open handle instead;
   keep the actual refused setter and released-handle successful setter unchanged.
+
+### 2026-10-16: isolate unknown uv metadata from known version mismatches
+
+- A wrong directory version can reject an upgrade even when missing, malformed
+  or duplicate metadata is incorrectly ignored. Set those fixtures' directory
+  versions to the requested version and require an unknown result; keep a
+  separate known-mismatch case and a missing-entry case to verify check ordering.
+- Record any fixture installer invocation before validating its arguments so a
+  read-only preview cannot execute an unexpected probe without leaving evidence.
+- Read the post-failure status as well as its error: cached current versions can
+  preserve an obsolete upgrade/latest label even after correct metadata readback.
+- Geometry-only browser checks passed during an unfinished modal animation.
+  Wait for stable opaque dialogs and dismissed notifications; inspect pixels and
+  verify that long retained diagnostics can scroll through their final lines.

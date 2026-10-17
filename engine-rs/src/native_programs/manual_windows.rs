@@ -108,6 +108,7 @@ mod tests {
             steps,
             verify_bins: vec![],
             verify_version: None,
+            verify_uv: None,
             notes: vec![],
             scripts_ignored: false,
             backup_dir: None,
