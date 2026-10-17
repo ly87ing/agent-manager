@@ -76,6 +76,15 @@ fn inspection_does_not_activate_stopped_time_or_locale_services() {
         ),
     )
     .unwrap();
+    let system_locale_marker = root.path().join("system-locale-activated");
+    std::fs::write(
+        services.join("org.freedesktop.locale1.service"),
+        format!(
+            "[D-BUS Service]\nName=org.freedesktop.locale1\nExec=/usr/bin/touch \"{}\"\n",
+            system_locale_marker.display()
+        ),
+    )
+    .unwrap();
     let address = format!(
         "unix:abstract=am-timesync-{}",
         agent_manager_engine::store::uuid_v4()
@@ -141,6 +150,14 @@ fn inspection_does_not_activate_stopped_time_or_locale_services() {
         "Inspection activated AccountsService"
     );
     assert!(!root.path().join("missing-settings").exists());
+    assert!(
+        !timezone_marker.exists(),
+        "Inspection activated the timezone service"
+    );
+    assert!(
+        !system_locale_marker.exists(),
+        "Inspection activated system-localed"
+    );
 
     let preview = Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
         .args([
@@ -240,6 +257,27 @@ fn inspection_does_not_activate_stopped_time_or_locale_services() {
     assert!(
         timezone_marker.exists(),
         "The timezone activation control did not run"
+    );
+    let control = Command::new("/usr/bin/busctl")
+        .args([
+            "--system",
+            "--auto-start=yes",
+            "--timeout=1",
+            "call",
+            "org.freedesktop.locale1",
+            "/org/freedesktop/locale1",
+            "org.freedesktop.DBus.Properties",
+            "GetAll",
+            "s",
+            "org.freedesktop.locale1",
+        ])
+        .env("DBUS_SYSTEM_BUS_ADDRESS", ready.trim())
+        .output()
+        .unwrap();
+    assert!(!control.status.success());
+    assert!(
+        system_locale_marker.exists(),
+        "The system-locale activation control did not run"
     );
 }
 

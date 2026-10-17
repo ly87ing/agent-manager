@@ -12,6 +12,10 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   repair snapshot still allowed bus activation. Exercise actual CLI previews
   against activatable private-bus services, with an explicit activation control;
   an inspection-only test does not cover every read route.
+- Adding an activatable timedated fixture exposed an earlier ordinary-inspection
+  activation through `timedatectl show`; system-localed's get-property had the
+  same gap. Assert each marker immediately after inspection, then after preview,
+  and use typed `Properties.GetAll` calls with NoAutoStart for all system readers.
 
 ## 2026-10-16: pipe readiness must use the same read layer
 

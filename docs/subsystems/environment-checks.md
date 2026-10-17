@@ -43,7 +43,10 @@ The script reapplies that directory after PowerShell startup, which otherwise
 reconstructs the module path and can prepend AllUsers modules. The isolated
 policy child uses the same post-startup restriction.
 
-On Linux, `timedatectl` machine-readable properties supply time settings.
+On Linux, typed timedated D-Bus properties supply time settings without service
+activation. Time, system-locale and timesync readers use bounded
+`Properties.GetAll` calls with `NoAutoStart`; stopped services retain unknown
+dependent evidence instead of being started by inspection or comparison.
 GNOME inspection verifies the returned AccountsService object's typed `Uid`
 against the original caller and reads its primary `Language`. `Languages` is
 installer-interest metadata that may also contain the formats locale, not proof

@@ -9,14 +9,6 @@ pub(super) fn properties(text: &str) -> BTreeMap<&str, &str> {
         .collect()
 }
 
-fn boolean(value: Option<&&str>) -> Option<bool> {
-    match value.copied() {
-        Some("yes" | "true") => Some(true),
-        Some("no" | "false") => Some(false),
-        _ => None,
-    }
-}
-
 fn language_tag(locale: &str) -> Option<String> {
     // POSIX modifiers can select a script; dropping one can change the language.
     if locale.contains('@') {
@@ -31,20 +23,24 @@ fn language_tag(locale: &str) -> Option<String> {
     .then_some(tag)
 }
 
-fn property(text: &str, signature: &str) -> Option<serde_json::Value> {
-    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+fn property(value: &serde_json::Value, signature: &str) -> Option<serde_json::Value> {
     (value["type"] == signature)
         .then(|| value.get("data").cloned())
         .flatten()
 }
 
+fn all_properties(text: &str) -> Option<serde_json::Value> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    (value["type"] == "a{sv}"
+        && value["data"].as_array()?.len() == 1
+        && value["data"][0].is_object())
+    .then(|| value["data"][0].clone())
+}
+
 // GetAll preserves typed arrays. RuntimeNTPServers is absent before systemd 251.
 fn timesync_values(text: &str) -> Option<BTreeMap<String, Vec<String>>> {
-    let value: serde_json::Value = serde_json::from_str(text).ok()?;
-    if value["type"] != "a{sv}" || value["data"].as_array()?.len() != 1 {
-        return None;
-    }
-    let object = value["data"][0].as_object()?;
+    let values = all_properties(text)?;
+    let object = values.as_object()?;
     let mut values = BTreeMap::new();
     for key in ["SystemNTPServers", "LinkNTPServers", "RuntimeNTPServers"] {
         let Some(value) = object.get(key) else {
@@ -146,68 +142,59 @@ fn user_locale() -> (Option<Vec<String>>, Option<String>, Option<bool>) {
 }
 
 #[cfg(target_os = "linux")]
-pub(super) fn bus_property(
-    service: &str,
-    path: &str,
-    interface: &str,
-    key: &str,
-    user: bool,
-    signature: &str,
-) -> Option<serde_json::Value> {
-    let text = read(
-        "/usr/bin/busctl",
-        &[
-            if user { "--user" } else { "--system" },
-            "--json=short",
-            "get-property",
-            service,
-            path,
-            interface,
-            key,
-        ],
-    )?;
-    property(&text, signature)
-}
-
-#[cfg(target_os = "linux")]
-pub(super) fn collect() -> Observation {
-    let time = read("/usr/bin/timedatectl", &["show"]).unwrap_or_default();
-    let values = properties(&time);
-    let locale = bus_property(
-        "org.freedesktop.locale1",
-        "/org/freedesktop/locale1",
-        "org.freedesktop.locale1",
-        "Locale",
-        false,
-        "as",
-    )
-    .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok());
-    let (languages, user_locale, automatic_timezone) = user_locale();
-    // show-timesync/get-property can auto-activate a stopped clock service.
-    // `call` applies --auto-start=no even on systemd 249; get-property does not.
-    let ntp = read(
+fn system_properties(service: &str, path: &str, interface: &str) -> Option<String> {
+    // `call` honors NoAutoStart even on systemd 249; get-property does not.
+    read(
         "/usr/bin/busctl",
         &[
             "--system",
             "--auto-start=no",
             "--json=short",
             "call",
-            "org.freedesktop.timesync1",
-            "/org/freedesktop/timesync1",
+            service,
+            path,
             "org.freedesktop.DBus.Properties",
             "GetAll",
             "s",
-            "org.freedesktop.timesync1.Manager",
+            interface,
         ],
+    )
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn collect() -> Observation {
+    let values = system_properties(
+        "org.freedesktop.timedate1",
+        "/org/freedesktop/timedate1",
+        "org.freedesktop.timedate1",
+    )
+    .and_then(|text| all_properties(&text))
+    .unwrap_or_default();
+    let locale = system_properties(
+        "org.freedesktop.locale1",
+        "/org/freedesktop/locale1",
+        "org.freedesktop.locale1",
+    )
+    .and_then(|text| all_properties(&text))
+    .and_then(|values| property(&values["Locale"], "as"))
+    .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok());
+    let (languages, user_locale, automatic_timezone) = user_locale();
+    let ntp = system_properties(
+        "org.freedesktop.timesync1",
+        "/org/freedesktop/timesync1",
+        "org.freedesktop.timesync1.Manager",
     )
     .and_then(|value| timesync_values(&value))
     .unwrap_or_default();
     let mut observed = Observation {
         platform: Some("linux"),
-        timezone: values
-            .get("Timezone")
-            .filter(|value| !value.is_empty())
-            .map(|value| (*value).into())
+        timezone: property(&values["Timezone"], "s")
+            .and_then(|value| {
+                value
+                    .as_str()
+                    .filter(|zone| !zone.is_empty())
+                    .map(str::to_string)
+            })
             .or_else(|| {
                 std::fs::read_link("/etc/localtime")
                     .ok()?
@@ -220,8 +207,9 @@ pub(super) fn collect() -> Observation {
         languages,
         automatic_timezone,
         format_overrides: locale.map(|list| serde_json::json!(list)),
-        automatic_time: boolean(values.get("NTP")),
-        time_synchronized: boolean(values.get("NTPSynchronized")),
+        automatic_time: property(&values["NTP"], "b").and_then(|value| value.as_bool()),
+        time_synchronized: property(&values["NTPSynchronized"], "b")
+            .and_then(|value| value.as_bool()),
         ntp_server: timesync_server(&ntp),
         local_time: read("/bin/date", &["+%Y-%m-%d %H:%M:%S %Z %z"]),
         os_version: std::fs::read_to_string("/etc/os-release")
@@ -239,7 +227,7 @@ pub(super) fn collect() -> Observation {
         ("os.version", "/etc/os-release"),
         (
             "time.timezone",
-            "timedatectl Timezone; /etc/localtime fallback",
+            "timedate1 Timezone (no service activation); /etc/localtime fallback",
         ),
         (
             "time.automatic_timezone",
@@ -262,11 +250,11 @@ pub(super) fn collect() -> Observation {
             "ntp.server",
             "timesync1 runtime-or-system and link server candidates (no service activation; not current peer)",
         ),
-        ("ntp.automatic_time", "timedatectl NTP"),
+        ("ntp.automatic_time", "timedate1 NTP (no service activation)"),
         ("ntp.service", "time daemon service unavailable"),
         (
             "ntp.synchronized",
-            "timedatectl NTPSynchronized (kernel state)",
+            "timedate1 NTPSynchronized (kernel state; no service activation)",
         ),
         ("ntp.kernel_max_error", "kernel error unavailable"),
         ("ntp.kernel_estimated_error", "kernel error unavailable"),
@@ -361,12 +349,25 @@ mod tests {
     }
     #[test]
     fn missing_properties_are_unknown_and_values_do_not_require_localized_labels() {
-        let values = properties("Timezone=Asia/Singapore\nNTP=yes\nNTPSynchronized=no\nUnknown=\n");
-        assert_eq!(values["Timezone"], "Asia/Singapore");
-        assert_eq!(boolean(values.get("NTP")), Some(true));
-        assert_eq!(boolean(values.get("NTPSynchronized")), Some(false));
-        assert_eq!(boolean(values.get("missing")), None);
-        assert_eq!(boolean(values.get("Unknown")), None);
+        let values = all_properties(r#"{"type":"a{sv}","data":[{"Timezone":{"type":"s","data":"Asia/Singapore"},"NTP":{"type":"b","data":true},"NTPSynchronized":{"type":"b","data":false},"Unknown":{"type":"b","data":"false"}}]}"#).unwrap();
+        assert_eq!(
+            property(&values["Timezone"], "s"),
+            Some(serde_json::json!("Asia/Singapore"))
+        );
+        assert_eq!(
+            property(&values["NTP"], "b").and_then(|value| value.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            property(&values["NTPSynchronized"], "b").and_then(|value| value.as_bool()),
+            Some(false)
+        );
+        assert_eq!(property(&values["missing"], "b"), None);
+        assert_eq!(
+            property(&values["Unknown"], "b").and_then(|value| value.as_bool()),
+            None
+        );
+        assert!(property(&values["Timezone"], "b").is_none());
         assert_eq!(language_tag("en_US.UTF-8").as_deref(), Some("en-US"));
         assert_eq!(
             language_tag("zh_Hant_TW.UTF-8").as_deref(),
@@ -385,6 +386,9 @@ mod tests {
     }
     #[test]
     fn property_signature_preserves_unknown_and_never_coerces_current_user_identity() {
+        let property = |text: &str, signature: &str| {
+            super::property(&serde_json::from_str(text).ok()?, signature)
+        };
         assert_eq!(
             property(r#"{"type":"t","data":1000}"#, "t"),
             Some(serde_json::json!(1000))
