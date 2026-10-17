@@ -367,6 +367,16 @@ unsupported syntax, later-priority overrides and lower same-name files. Existing
 admitted `0600`/`0640`/`0644` modes and groups are preserved; private files an
 ordinary caller cannot read remain unavailable in preview. The first slice
 refuses extended destination/parent metadata instead of dropping ACLs or labels.
+Its file-publication slice requires the opened descriptor's mount ID to resolve
+to the concrete ext4 driver, as well as the ext-family filesystem magic. Other
+or stacked filesystems remain unavailable. `flistxattr` must successfully report
+no attributes; unsupported inspection is not an empty result. Both
+`FS_IOC_GETFLAGS` and `FS_IOC_FSGETXATTR` must succeed on that descriptor. Only
+ext4's extent-layout flag and directory-index flag are admitted; all policy or
+unknown bits, nonzero project IDs and allocation hints are refused. The existing
+target, creation parent, new directory receipt and staged file use this gate.
+Special permission bits, including inherited setgid-directory policy, are refused.
+This finite ext4 admission does not claim to attest arbitrary filesystem policy.
 A retained anonymous memfd's trusted attribute directly proves the helper's
 current initial-namespace inspection privilege. It creates no named file or
 persistent setting. The fixed helper never changes thread credentials or

@@ -104,7 +104,7 @@ jobs:
         shell: bash
         run: |
           if test -x /usr/bin/pkexec; then echo 'Native NTP fixture: pkexec was present'; else echo 'Native NTP fixture: pkexec was absent'; fi
-          sudo apt-get install --no-install-recommends -y pkexec systemd-timesyncd libcap2-bin libsystemd-dev
+          sudo apt-get install --no-install-recommends -y pkexec systemd-timesyncd libcap2-bin libsystemd-dev e2fsprogs
           AM_ISOLATED_LINUX_NTP=1 node scripts/verify-linux-ntp.mjs
 
   app:

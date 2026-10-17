@@ -30,6 +30,8 @@ mod repair_linux_ntp_helper;
 #[cfg(any(target_os = "linux", test))]
 mod repair_linux_ntp_lease;
 #[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
+mod repair_linux_ntp_metadata;
+#[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
 mod repair_linux_ntp_protocol;
 #[cfg(any(target_os = "linux", test))]
 mod repair_linux_region;

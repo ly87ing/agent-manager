@@ -19,6 +19,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
 
 ## 2026-10-16: filesystem rehearsals need platform-specific metadata evidence
 
+- An empty xattr list does not cover inode flags or project quotas. Replacing
+  an existing file with a new inode can discard `nodump` or its project ID.
+  Require successful native policy getters and a reviewed concrete filesystem
+  driver, rejecting policy and unknown results rather than copying them. Shared
+  ext-family magic alone cannot distinguish ext2, ext3 and ext4 implementations.
 - Fresh macOS fixture nodes acquired `com.apple.provenance`, so a Linux
   no-extended-metadata admission rule rejected the filesystem rehearsal. Keep
   production Linux strict; the macOS-only rehearsal admits that observed host
@@ -35,6 +40,8 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   A template literal consumed regex slash escapes; `node --check` on the script
   passed while the resulting policy was invalid. Preserve those escapes and
   compile the exact generated policy before installing the disposable fixture.
+- Outer script syntax also missed a newline escape consumed in an embedded Node
+  program. Parse the actual generated inner program before executing it elevated.
 - Polkit action details are restricted to trusted query callers. A CI readiness
   probe passed details as the ordinary user and failed before the product's
   authorization challenge. Use a root-only, exact-process marker for the probe;

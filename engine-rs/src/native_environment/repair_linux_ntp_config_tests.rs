@@ -280,3 +280,69 @@ fn destination_extended_metadata_is_unavailable_instead_of_silently_dropped() {
     assert!(root.read().is_none());
     assert!(!root.0.join(ROOTS[0]).join(DROPINS).exists());
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn inode_backup_policy_is_refused_even_when_the_xattr_list_is_empty() {
+    use std::os::fd::AsRawFd;
+    let root = Fixture::new();
+    let text = generated("selected.example").unwrap();
+    let path = root.file(&format!("{}/{DROPINS}/{NAME}", ROOTS[0]), &text);
+    assert!(root.read().is_some());
+    let file = File::open(&path).unwrap();
+    let identity = file.metadata().unwrap();
+    let mut original: u32 = 0;
+    assert_eq!(
+        unsafe { libc::ioctl(file.as_raw_fd(), libc::FS_IOC_GETFLAGS, &mut original) },
+        0
+    );
+    let nodump = original | 0x40;
+    assert_eq!(
+        unsafe { libc::ioctl(file.as_raw_fd(), libc::FS_IOC_SETFLAGS, &nodump) },
+        0
+    );
+    // Positive control for the old admission rule: this real policy has no xattr.
+    assert_eq!(
+        unsafe { libc::flistxattr(file.as_raw_fd(), std::ptr::null_mut(), 0) },
+        0
+    );
+    assert!(root.read().is_none());
+    assert!(record_file(&file, unsafe { libc::geteuid() }, &text).is_none());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    assert_eq!(file.metadata().unwrap().ino(), identity.ino());
+    let mut after: u32 = 0;
+    assert_eq!(
+        unsafe { libc::ioctl(file.as_raw_fd(), libc::FS_IOC_GETFLAGS, &mut after) },
+        0
+    );
+    assert_eq!(after, nodump);
+    assert_eq!(
+        unsafe { libc::ioctl(file.as_raw_fd(), libc::FS_IOC_SETFLAGS, &original) },
+        0
+    );
+    assert!(root.read().is_some());
+
+    let root = Fixture::new();
+    let parent = File::open(root.0.join(ROOTS[0])).unwrap();
+    let mut flags: u32 = 0;
+    assert!(root.read().is_some());
+    assert_eq!(
+        unsafe { libc::ioctl(parent.as_raw_fd(), libc::FS_IOC_GETFLAGS, &mut flags) },
+        0
+    );
+    flags |= 0x40;
+    assert_eq!(
+        unsafe { libc::ioctl(parent.as_raw_fd(), libc::FS_IOC_SETFLAGS, &flags) },
+        0
+    );
+    assert!(root.read().is_none());
+    assert!(record_directory(&parent, unsafe { libc::geteuid() }).is_none());
+    assert!(!root.0.join(ROOTS[0]).join(DROPINS).exists());
+
+    let root = Fixture::new();
+    let parent = root.0.join(ROOTS[0]);
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o2755)).unwrap();
+    assert_eq!(std::fs::metadata(&parent).unwrap().mode() & 0o7000, 0o2000);
+    assert!(root.read().is_none());
+    assert!(!parent.join(DROPINS).exists());
+}

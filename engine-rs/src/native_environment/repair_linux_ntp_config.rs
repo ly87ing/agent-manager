@@ -40,45 +40,7 @@ impl Identity {
     }
 }
 
-// Replacing an inode must not silently lose an ACL or security label. The first
-// slice admits ordinary destination metadata only; it never copies opaque policy.
-pub(super) fn plain_metadata(file: &File) -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        let count = unsafe {
-            libc::flistxattr(
-                std::os::fd::AsRawFd::as_raw_fd(file),
-                std::ptr::null_mut(),
-                0,
-            )
-        };
-        count == 0
-            || (count == -1
-                && std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOTSUP))
-    }
-    #[cfg(target_os = "macos")]
-    {
-        // This module is test-only on macOS. Its filesystem rehearsal admits
-        // the provenance attribute added to fresh fixture nodes by this host;
-        // production Linux still admits no attributes and needs native CI.
-        let fd = std::os::fd::AsRawFd::as_raw_fd(file);
-        let count = unsafe { libc::flistxattr(fd, std::ptr::null_mut(), 0, 0) };
-        if count == 0 {
-            return true;
-        }
-        if count < 0 || count > 64 * 1024 {
-            return false;
-        }
-        let mut names = vec![0u8; count as usize];
-        let read = unsafe { libc::flistxattr(fd, names.as_mut_ptr().cast(), names.len(), 0) };
-        read == count
-            && names.last() == Some(&0)
-            && names
-                .split(|byte| *byte == 0)
-                .filter(|name| !name.is_empty())
-                .all(|name| name == b"com.apple.provenance")
-    }
-}
+pub(super) use super::repair_linux_ntp_metadata::plain_metadata;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct Content {
@@ -163,6 +125,9 @@ impl State {
 }
 
 pub(super) fn record_directory(file: &File, uid: u32) -> Option<Identity> {
+    if !plain_metadata(file) {
+        return None;
+    }
     let meta = file.metadata().ok()?;
     meta.is_dir().then_some(())?;
     Identity::read(&meta, uid)
@@ -499,13 +464,15 @@ pub(super) fn read_at(anchor: &Path, uid: u32) -> Option<State> {
     } else {
         ROOTS[0].into()
     };
-    let destination = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
-        .open(anchor.join(destination))
-        .ok()?;
-    if !plain_metadata(&destination) {
-        return None;
+    for relative in [ROOTS[0], destination.as_str()] {
+        let directory = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(anchor.join(relative))
+            .ok()?;
+        if !plain_metadata(&directory) {
+            return None;
+        }
     }
     for (relative, expected) in &names {
         if reader.names(relative)? != *expected {

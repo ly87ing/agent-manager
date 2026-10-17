@@ -42,6 +42,9 @@ function run(program, args, failure = false, caller = process.env) {
   return output;
 }
 function rootNode(source, args = []) {
+  const syntax = spawnSync(process.execPath, ['--input-type=module', '--check'], { input: source, encoding: 'utf8', timeout: 10_000, maxBuffer: 16_384 });
+  assert.ifError(syntax.error);
+  assert.equal(syntax.status, 0, syntax.stderr);
   return run('/usr/bin/sudo', ['-n', process.execPath, '--input-type=module', '-e', source, ...args]);
 }
 function rootBus(method, signature, ...args) {
@@ -207,6 +210,23 @@ try {
   assert.equal(noop.status, 'not_needed');
   assert(noop.verification_limits.some(limit => limit.includes('future instance')));
   assert.deepEqual(readFileSync(join(data, 'native-manager.db')), database);
+
+  // A real inode policy is not an xattr. Preview must refuse it without
+  // replacing the owned file or writing app state; restore only this exact inode.
+  const flagsBefore = run('/usr/bin/lsattr', ['-d', targetFile]).stdout.trim().split(/\s+/)[0];
+  const inodePolicy = flag => rootNode("import fs from 'node:fs';import{execFileSync}from'node:child_process';const[p,dev,ino,text,flag]=process.argv.slice(1);const s=fs.lstatSync(p);if(s.dev!==Number(dev)||s.ino!==Number(ino)||fs.readFileSync(p,'utf8')!==text)throw Error('Changed owned policy fixture');execFileSync('/usr/bin/chattr',[flag,p]);", [targetFile, String(meta.dev), String(meta.ino), generated(selected), flag]);
+  inodePolicy('+d');
+  try {
+    assert(run('/usr/bin/lsattr', ['-d', targetFile]).stdout.trim().split(/\s+/)[0].includes('d'));
+    assert.equal(cli('environment:repair-preview').data.items.find(item => item.id === 'ntp.server').status, 'unavailable');
+    assert.equal(lstatSync(targetFile).ino, meta.ino);
+    assert.equal(readFileSync(targetFile, 'utf8'), generated(selected));
+    assert.deepEqual(readFileSync(join(data, 'native-manager.db')), database);
+  } finally {
+    inodePolicy('-d');
+  }
+  assert.equal(run('/usr/bin/lsattr', ['-d', targetFile]).stdout.trim().split(/\s+/)[0], flagsBefore);
+  assert.equal(cli('environment:repair-preview').data.items.find(item => item.id === 'ntp.server').status, 'unchanged');
 
   rootNode("import fs from 'node:fs'; const [p,text,fixture,fixtureText]=process.argv.slice(1); if(fs.readFileSync(p,'utf8')!==text)throw Error('Changed owned file');fs.unlinkSync(p);fs.writeFileSync(fixture,fixtureText,{flag:'wx',mode:0o644});", [targetFile, generated(selected), fixtureFile, fixtureText]);
   const savedOnlyPreview = cli('environment:repair-preview').data;
