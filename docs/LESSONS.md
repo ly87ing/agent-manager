@@ -6,6 +6,15 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-17: native batch fixtures need cmd argument handling
+
+- Managed PyPI's native Windows tests passed, but the real uv fixture failed
+  before executing its batch entry: Node's default argument quoting escaped the
+  quotes intended for `cmd.exe`. Pass that private, validated batch invocation
+  verbatim, retaining normal argument handling for executables. Use a temporary
+  path containing spaces and require the actual batch entry's expected output;
+  Unix success cannot establish Windows command-line parsing.
+
 ## 2026-10-16: preview and explicit execution have different lock effects
 
 - The entry-directory fixture initially expected a rejected Programs `apply` to
