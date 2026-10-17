@@ -15,6 +15,22 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   path containing spaces and require the actual batch entry's expected output;
   Unix success cannot establish Windows command-line parsing.
 
+## 2026-10-17: directory copies need namespace and format-bound fork proof
+
+- The passing mixed-directory lifecycle did not exercise receipt withdrawal
+  between initial verification and fork. A missing or schema-swapped receipt
+  must prove its actually observed format's fixed ID before generic copying.
+  Re-dispatching a second receipt read can validate schema 4 while selecting a
+  schema 2 fallback. Verify the already parsed format directly instead.
+- Source exclusions must not silently remove a materialized directory alias
+  named `node_modules` from a personal fork. Independently enumerate actual
+  copied paths, empty directories and bytes; a source hash that applies the
+  same exclusions cannot establish complete copying.
+- Resource checks need the actual planned staging parent, which can be on a
+  different volume from the data directory. Check receipt size before staging,
+  then consume byte budgets during actual copying and physical verification.
+  Cross-host namespace rules must not assume full Unicode filesystem equivalence.
+
 ## 2026-10-16: preview and explicit execution have different lock effects
 
 - The entry-directory fixture initially expected a rejected Programs `apply` to

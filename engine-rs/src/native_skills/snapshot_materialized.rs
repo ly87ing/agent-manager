@@ -117,7 +117,7 @@ pub(super) fn ordinary_file(path: &Path) -> Result<std::fs::File> {
     Ok(file)
 }
 
-fn join_key(root: &Path, key: &str) -> PathBuf {
+pub(super) fn join_key(root: &Path, key: &str) -> PathBuf {
     key.split('/')
         .fold(root.to_path_buf(), |path, part| path.join(part))
 }

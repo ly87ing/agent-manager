@@ -15,6 +15,7 @@ pub(super) struct SourceVersions {
     pub(super) current: String,
 }
 
+#[derive(Clone, PartialEq, Eq)]
 pub(super) enum Entry {
     File(String),
     Directory,
@@ -85,14 +86,26 @@ pub(super) fn entry_versions(entries: &Entries) -> SourceVersions {
 }
 
 pub(super) fn source_entries(root: &Path) -> Result<Entries> {
-    collect_entries(root, false)
+    collect_entries(root, false, None)
 }
 
 pub(super) fn physical_entries(root: &Path) -> Result<Entries> {
-    collect_entries(root, true)
+    collect_entries(root, true, None)
 }
 
-fn collect_entries(root: &Path, materialized: bool) -> Result<Entries> {
+pub(super) fn bounded_physical_entries(root: &Path) -> Result<Entries> {
+    collect_entries(
+        root,
+        true,
+        Some(&mut super::snapshot_budget::Budget::default()),
+    )
+}
+
+pub(super) fn collect_entries(
+    root: &Path,
+    materialized: bool,
+    mut budget: Option<&mut super::snapshot_budget::Budget>,
+) -> Result<Entries> {
     let mut entries = BTreeMap::new();
     let mut stack = vec![root.to_path_buf()];
     let mut buffer = [0u8; 64 * 1024];
@@ -120,6 +133,9 @@ fn collect_entries(root: &Path, materialized: bool) -> Result<Entries> {
             }
             let relative = path.strip_prefix(root)?;
             let key = relative_key(relative)?;
+            if let Some(budget) = budget.as_mut() {
+                budget.entry(&key, &key)?;
+            }
             let entry = if metadata.file_type().is_symlink() {
                 if materialized {
                     bail!("Materialized snapshot contains a physical symbolic link");
@@ -150,6 +166,9 @@ fn collect_entries(root: &Path, materialized: bool) -> Result<Entries> {
                     };
                     if count == 0 {
                         break;
+                    }
+                    if let Some(budget) = budget.as_mut() {
+                        budget.bytes(count as u64)?;
                     }
                     hash.update(&buffer[..count]);
                 }
@@ -210,6 +229,7 @@ struct MaterializedManifest {
 enum SnapshotManifest {
     Typed(Manifest),
     Materialized(MaterializedManifest),
+    Directory(super::snapshot_directory::Manifest),
 }
 
 pub(super) fn write_manifest(version_dir: &Path, version: &str) -> Result<()> {
@@ -306,7 +326,86 @@ pub(super) fn snapshot_hash(
                 &manifest.materialized_file_links,
             )?))
         }
+        SnapshotManifest::Directory(manifest) => {
+            if manifest.schema != 4 || manifest.version != version {
+                bail!("Directory snapshot schema or version does not match");
+            }
+            Ok(Some(super::snapshot_directory::verify(
+                bounded_physical_entries(content)?,
+                &manifest,
+            )?))
+        }
     }
+}
+
+pub(super) fn copy_directory_snapshot(
+    content: &Path,
+    destination: &Path,
+    version: &str,
+) -> Result<bool> {
+    let path = content
+        .parent()
+        .context("Missing snapshot parent")?
+        .join(MANIFEST);
+    match std::fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if super::snapshot::hash_skill_dir(content)? != version {
+                bail!("Snapshot manifest disappeared before fork");
+            }
+            return Ok(false);
+        }
+        Err(error) => return Err(error.into()),
+        Ok(_) => {}
+    }
+    let file = super::snapshot_materialized::ordinary_file(&path)?;
+    let mut bytes = Vec::new();
+    file.take(64 * 1024 + 1).read_to_end(&mut bytes)?;
+    if bytes.len() > 64 * 1024 {
+        bail!("Snapshot manifest exceeds 64 KiB");
+    }
+    let manifest = match serde_json::from_slice(&bytes)? {
+        SnapshotManifest::Directory(manifest) => manifest,
+        SnapshotManifest::Typed(manifest)
+            if manifest.schema == 2 && manifest.version == version && bytes.len() <= 4096 =>
+        {
+            if source_versions(content)?.current != version {
+                bail!("Snapshot format changed before fork");
+            }
+            return Ok(false);
+        }
+        SnapshotManifest::Materialized(manifest)
+            if manifest.schema == 3 && manifest.version == version =>
+        {
+            if super::snapshot_materialized::verify(
+                physical_entries(content)?,
+                &manifest.materialized_file_links,
+            )? != version
+            {
+                bail!("Snapshot format changed before fork");
+            }
+            return Ok(false);
+        }
+        _ => bail!("Snapshot schema or version changed before fork"),
+    };
+    if manifest.schema != 4 || manifest.version != version {
+        bail!("Directory snapshot schema or version does not match");
+    }
+    let entries = bounded_physical_entries(content)?;
+    if super::snapshot_directory::verify(entries.clone(), &manifest)? != version {
+        bail!("Directory snapshot changed before fork");
+    }
+    let paths = entries
+        .keys()
+        .map(|path| (path.clone(), path.clone()))
+        .collect();
+    super::snapshot_budget::preflight(content, destination, &paths, &entries)?;
+    super::snapshot_budget::copy(content, destination, &paths, &entries)?;
+    if super::snapshot_directory::verify(bounded_physical_entries(destination)?, &manifest)?
+        != version
+    {
+        bail!("Directory snapshot fork differs from its expected version");
+    }
+    Ok(true)
 }
 
 #[cfg(test)]

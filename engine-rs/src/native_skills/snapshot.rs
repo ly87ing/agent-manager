@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context as _, Result};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use super::paths::{is_path_within, is_sha256_hex, resolve_loose, validate_symlink_internal};
@@ -186,8 +186,33 @@ fn create_snapshot(
     } else {
         None
     };
-    if plaintext_links && links.is_none() {
-        bail!("Git plaintext links require direct included ordinary file targets");
+    let directory = if (cfg!(windows) || plaintext_links) && links.is_none() {
+        let planned = (|| -> Result<_> {
+            let plan = entries
+                .map(super::snapshot_directory::plan)
+                .transpose()?
+                .flatten();
+            if let Some(plan) = &plan {
+                super::snapshot_directory::preflight(
+                    source_dir,
+                    &data_dir.join("skill-versions"),
+                    entries.unwrap(),
+                    plan,
+                )?;
+            }
+            Ok(plan)
+        })();
+        match planned {
+            Ok(plan) => plan,
+            Err(error) if plaintext_links => return Err(error),
+            // Real OS links retain their native schema2 capability requirements.
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+    if plaintext_links && links.is_none() && directory.is_none() {
+        bail!("Git plaintext links require direct included ordinary file or sibling-directory targets");
     }
     let materialized = entries.zip(links.as_deref());
     let parent = data_dir.join("skill-versions");
@@ -195,14 +220,21 @@ fn create_snapshot(
     let staging = super::snapshot_storage::Staging::create(&parent, version)?;
     let copied = (|| -> Result<()> {
         let content = staging.path().join("content");
-        if let Some((entries, links)) = materialized {
+        if let Some(plan) = &directory {
+            super::snapshot_budget::copy(source_dir, &content, &plan.paths, entries.unwrap())?;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(staging.path().join("snapshot.json"))?
+                .write_all(&plan.manifest)?;
+        } else if let Some((entries, links)) = materialized {
             super::snapshot_materialized::copy(source_dir, &content, entries, links)?;
             super::snapshot_v2::write_materialized_manifest(staging.path(), version, links)?;
         } else {
             copy_dir_recursive(source_dir, &content)?;
         }
         let actual = if entries.is_some() {
-            if materialized.is_none() {
+            if materialized.is_none() && directory.is_none() {
                 super::snapshot_v2::write_manifest(staging.path(), version)?;
             }
             super::snapshot_v2::snapshot_hash(staging.path(), &content, version)?

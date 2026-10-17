@@ -5,7 +5,7 @@ mod common;
 mod skill_repo;
 
 use serde_json::Value;
-use std::os::windows::fs::MetadataExt;
+use std::os::windows::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -216,4 +216,108 @@ fn native_cli_materialized_skill_lifecycle_uses_ordinary_files_and_offline_snaps
     std::fs::write(destination.join("alpha/alias"), b"editable personal copy").unwrap();
     assert_ordinary(&content.join("alias"));
     assert_eq!(fixture.version("claude-code"), version);
+}
+
+#[test]
+fn native_windows_directory_symlinks_use_ordinary_mixed_snapshot_copies() {
+    let fixture = Fixture::new();
+    let repo = fixture.0.join("data/repositories/upstream");
+    let source = repo.join("skills/alpha");
+    std::fs::create_dir_all(source.join("assets/empty")).unwrap();
+    std::fs::write(source.join("SKILL.md"), b"# Fixture\n").unwrap();
+    std::fs::write(source.join("assets/payload"), b"default stream payload").unwrap();
+    std::os::windows::fs::symlink_dir("assets", source.join("node_modules")).unwrap();
+    std::os::windows::fs::symlink_file(r"assets\payload", source.join("alias")).unwrap();
+    skill_repo::index(&repo);
+    fixture.run(
+        &[
+            "policy:set",
+            "--layer",
+            "local",
+            "--key",
+            "skills.repositories.upstream",
+            "--value",
+            r#"{"url":"https://example.com/upstream.git","skill_paths":["skills"]}"#,
+        ],
+        true,
+    );
+    fixture.action("add", "codex", true);
+    let version = fixture.version("codex");
+    let snapshot = fixture.0.join("data/skill-versions").join(&version);
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(snapshot.join("snapshot.json")).unwrap()).unwrap();
+    assert_eq!(manifest["schema"], 4);
+    for path in ["alias", "assets/payload", "node_modules/payload"] {
+        assert_ordinary(&snapshot.join("content").join(path));
+    }
+    let directory = snapshot.join("content/node_modules");
+    assert_eq!(
+        std::fs::symlink_metadata(&directory)
+            .unwrap()
+            .file_attributes()
+            & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT,
+        0
+    );
+    assert!(directory.join("empty").is_dir());
+    fixture.action("disable", "codex", true);
+    fixture.action("enable", "codex", true);
+    std::fs::rename(&repo, fixture.0.join("offline-source")).unwrap();
+    let destination = fixture.0.join("personal");
+    fixture.run(
+        &[
+            "skills:fork",
+            "--only",
+            "skill:upstream/alpha",
+            "--dest",
+            destination.to_str().unwrap(),
+        ],
+        true,
+    );
+    assert_ordinary(&destination.join("alpha/node_modules/payload"));
+    assert!(destination.join("alpha/node_modules/empty").is_dir());
+    std::fs::write(destination.join("alpha/node_modules/payload"), b"editable").unwrap();
+    assert_ordinary(&snapshot.join("content/node_modules/payload"));
+}
+
+#[test]
+fn native_windows_non_sibling_directory_links_retain_schema2_capability() {
+    let fixture = Fixture::new();
+    let repo = fixture.0.join("data/repositories/upstream");
+    let source = repo.join("skills/alpha");
+    std::fs::create_dir_all(source.join("nested/assets")).unwrap();
+    std::fs::write(source.join("SKILL.md"), b"# Fixture\n").unwrap();
+    std::fs::write(
+        source.join("nested/assets/payload"),
+        b"default stream payload",
+    )
+    .unwrap();
+    std::os::windows::fs::symlink_dir(r"nested\assets", source.join("alias")).unwrap();
+    skill_repo::index(&repo);
+    fixture.run(
+        &[
+            "policy:set",
+            "--layer",
+            "local",
+            "--key",
+            "skills.repositories.upstream",
+            "--value",
+            r#"{"url":"https://example.com/upstream.git","skill_paths":["skills"]}"#,
+        ],
+        true,
+    );
+    fixture.action("add", "codex", true);
+    let snapshot = fixture
+        .0
+        .join("data/skill-versions")
+        .join(fixture.version("codex"));
+    let manifest: Value =
+        serde_json::from_slice(&std::fs::read(snapshot.join("snapshot.json")).unwrap()).unwrap();
+    assert_eq!(manifest["schema"], 2);
+    assert!(std::fs::symlink_metadata(snapshot.join("content/alias"))
+        .unwrap()
+        .file_type()
+        .is_symlink_dir());
+    assert_ordinary(&snapshot.join("content/alias/payload"));
+    fixture.action("disable", "codex", true);
+    fixture.action("enable", "codex", true);
 }
