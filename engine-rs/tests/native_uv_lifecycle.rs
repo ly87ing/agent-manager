@@ -3,6 +3,9 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "support/native_uv_managed.rs"]
+mod managed;
+
 fn entry_name() -> &'static str {
     if cfg!(windows) {
         "tool-a.exe"
@@ -20,6 +23,7 @@ fn site(package: &Path) -> PathBuf {
 }
 
 fn install(package: &Path, bin: &Path, version: &str, case: &str) {
+    std::fs::create_dir_all(bin).unwrap();
     let distribution = site(package).join(format!("tool_a-{version}.dist-info"));
     let scripts = package.join(if cfg!(windows) { "Scripts" } else { "bin" });
     std::fs::create_dir_all(&distribution).unwrap();
@@ -152,6 +156,10 @@ impl Fixture {
     }
 
     fn run(&self, command: &str, target: Option<&str>) -> Value {
+        self.run_action(command, target, "upgrade")
+    }
+
+    fn run_action(&self, command: &str, target: Option<&str>, action: &str) -> Value {
         let mut process = Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"));
         process.arg(command).arg("--json");
         if let Some(target) = target {
@@ -159,10 +167,13 @@ impl Fixture {
                 "--program",
                 "pypi:tool-a",
                 "--action",
-                "upgrade",
+                action,
                 "--version",
                 target,
             ]);
+            if action == "install" {
+                process.arg("--entry-dir").arg(&self.bin);
+            }
         }
         if command == "system:refresh-upstream" {
             process.args(["--only", "programs:pypi:tool-a"]);
@@ -390,5 +401,6 @@ fn main() {
     command_failure_still_restores_owned_original();
     successful_actions_keep_the_normal_three_backup_limit();
     cached_current_versions_cannot_override_actual_metadata();
+    managed::verify();
     println!("uv lifecycle: command-success version failures retained current/backup files; PEP 440 matching, early refusal, command-failure restoration, normal retention and actual-version freshness passed");
 }

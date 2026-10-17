@@ -8,8 +8,10 @@ import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 assert.equal(process.env.AM_ISOLATED_NATIVE_UV, '1');
-assert(process.argv.slice(2).every(arg => arg === '--custom-root'));
+assert(process.argv.slice(2).every(arg => ['--custom-root', '--managed'].includes(arg)));
 const custom = process.argv.includes('--custom-root');
+const managed = process.argv.includes('--managed');
+assert(!(managed && custom));
 for (const name of ['AM_NATIVE_UV', 'AM_NATIVE_PYTHON']) {
   assert(process.env[name] && isAbsolute(process.env[name]), `Select an existing absolute ${name}`);
   assert(lstatSync(realpathSync(process.env[name])).isFile(), `${name} must name an existing ordinary executable`);
@@ -90,31 +92,59 @@ let complete = false;
 try {
   for (const version of ['1.0.0', '2.0.0']) wheel(version);
   const version = run(uv, ['--version']).trim();
-  run(uv, ['--no-python-downloads', 'tool', 'install', '--force', 'am-uv-version-fixture==1.0.0']);
+  if (!managed) run(uv, ['--no-python-downloads', 'tool', 'install', '--force', 'am-uv-version-fixture==1.0.0']);
   const skill = join(home, '.claude/skills/uv-version'); mkdirSync(skill, { recursive: true });
-  writeFileSync(join(skill, 'SKILL.md'), '---\nname: uv-version\ndescription: private offline fixture\nmetadata:\n  requires:\n    bins: [am-uv-version-fixture]\n---\nPrivate fixture\n');
-  const entry = join(bin, windows ? 'am-uv-version-fixture.exe' : 'am-uv-version-fixture');
+  const declaration = managed
+    ? '  openclaw:\n    requires:\n      bins: [am-uv-version-fixture]\n    install:\n      - kind: uv\n        package: am-uv-version-fixture\n        bins: [am-uv-version-fixture]\n'
+    : '  requires:\n    bins: [am-uv-version-fixture]\n';
+  writeFileSync(join(skill, 'SKILL.md'), `---\nname: uv-version\ndescription: private offline fixture\nmetadata:\n${declaration}---\nPrivate fixture\n`);
+  const entry = join(bin, windows ? `am-uv-version-fixture.${managed ? 'cmd' : 'exe'}` : 'am-uv-version-fixture');
   const id = 'pypi:am-uv-version-fixture';
   const element = () => cli('programs:status').elements.find(item => item.program === id);
-  assert.equal(element().owner, 'uv-tool'); assert.equal(element().version, '1.0.0'); assert(!existsSync(data));
+  const output = () => {
+    if (!managed || !windows) return run(entry, []).trim();
+    assert(!/[\r\n%!"]/.test(entry), 'Private batch fixture path requires literal-safe characters');
+    return run(process.env.ComSpec || 'cmd.exe', ['/d', '/v:off', '/s', '/c', `""${entry}""`]).trim();
+  };
+  if (managed) {
+    const args = ['--program', id, '--action', 'install', '--version', '1.0.0', '--entry-dir', bin];
+    cli('programs:preview', args); assert(!existsSync(data));
+    cli('programs:apply', args);
+    assert.equal(output(), '1.0.0');
+  } else {
+    assert.equal(element().owner, 'uv-tool'); assert.equal(element().version, '1.0.0'); assert(!existsSync(data));
+  }
   wheel('1.0+native');
-  for (const [action, target, expected] of [['upgrade', 'v2.0.0', '2.0.0'], ['switch', '1.0', '1.0+native']]) {
+  const actions = managed
+    ? [['upgrade', 'v2.0.0', '2.0.0'], ['upgrade', '1.0', '1.0+native'], ['switch', 'v2.0.0', '2.0.0'], ['switch', '1.0', '1.0+native']]
+    : [['upgrade', 'v2.0.0', '2.0.0'], ['switch', '1.0', '1.0+native']];
+  for (const [action, target, expected] of actions) {
     const args = ['--program', id, '--action', action, '--version', target];
     const preview = cli('programs:preview', args);
-    assert(preview.notes.join(' ').includes('any successful action'));
+    assert(preview.notes.join(' ').includes(managed ? 'completion and current selection' : 'any successful action'));
     cli('programs:apply', args);
-    assert.equal(element().version, expected);
-    assert.equal(run(entry, []).trim(), expected, 'The installed command did not use the new package');
+    if (managed) {
+      assert.equal(element().managed_current, target);
+      const directory = join(data, 'programs/pypi/am-uv-version-fixture', target);
+      assert.equal(realpathSync(join(directory, '..', 'current')), realpathSync(directory));
+      assert(existsSync(join(directory, '.agent-manager-program.json')));
+      const library = join(directory, 'tools/am-uv-version-fixture', windows ? 'Lib' : 'lib');
+      const site = windows ? join(library, 'site-packages') : join(library, readdirSync(library).find(name => /^(python|pypy)\d/.test(name)), 'site-packages');
+      const distribution = readdirSync(site).find(name => name === `am_uv_version_fixture-${expected}.dist-info`);
+      assert(distribution);
+      assert(readFileSync(join(site, distribution, 'METADATA'), 'utf8').includes(`\nVersion: ${expected}\n`));
+    } else assert.equal(element().version, expected);
+    assert.equal(output(), expected, 'The installed command did not use the new package');
   }
   const backups = cli('programs:status').backups.filter(item => item.program === id);
-  assert.equal(backups.length, 2);
+  assert.equal(backups.length, managed ? 0 : 2);
   assert.deepEqual(readFileSync(originalPython), pythonBefore);
   const pythonAfter = lstatSync(originalPython);
   assert.equal(pythonAfter.ino, pythonIdentity.ino); assert.equal(pythonAfter.mode, pythonIdentity.mode);
   for (const directory of [env.UV_PYTHON_INSTALL_DIR, env.UV_PYTHON_CACHE_DIR]) {
     assert(!existsSync(directory) || readdirSync(directory).length === 0, `Managed runtime provisioning appeared in ${directory}`);
   }
-  console.log(`Native ${process.platform} ${version} (${custom ? 'custom' : 'standard'} root): offline real-package upgrade, entry execution, public/local PEP 440 matching and existing-interpreter preservation passed.`);
+  console.log(`Native ${process.platform} ${version} (${managed ? 'managed' : custom ? 'custom' : 'standard'} root): offline real-package upgrade, entry execution, public/local PEP 440 matching and existing-interpreter preservation passed.`);
   complete = true;
 } finally {
   if (complete) rmSync(root, { recursive: true });

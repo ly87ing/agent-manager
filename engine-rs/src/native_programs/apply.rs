@@ -888,11 +888,20 @@ fn managed_install_steps(
     let (scheme, name) = id.split_once(':').unwrap_or_default();
     let pdir = program_dir(ctx, id)?;
     let vdir = pdir.join(version);
+    if scheme == "pypi" {
+        super::uv_postcondition::managed_target(name, version)?;
+    }
     if vdir.join(META_FILE).is_file() {
         return Ok((Vec::new(), vdir));
     }
     let mut steps = Vec::new();
     if vdir.exists() {
+        if scheme == "pypi" {
+            return Err(super::uv_postcondition::incomplete_candidate(
+                &vdir,
+                &ctx.home_dir,
+            ));
+        }
         // 上次没装完：先清掉
         steps.push(Step::RemoveDir { path: vdir.clone() });
     }
@@ -1120,6 +1129,9 @@ fn plan_managed(
                 .version
                 .clone()
                 .ok_or_else(|| anyhow!("换版本需要 --version"))?;
+            if scheme == "pypi" {
+                super::uv_postcondition::managed_target(name, &version)?;
+            }
             if !installed.contains(&version) {
                 bail!("{id} 没有装过 {version}");
             }
@@ -1196,6 +1208,14 @@ fn plan_managed(
             }
         }
         _ => bail!("这个动作不适用于托管程序"),
+    }
+    if scheme == "pypi"
+        && matches!(
+            args.action,
+            Action::Install | Action::Upgrade | Action::Switch
+        )
+    {
+        notes.push("Managed PyPI metadata is freshly checked before completion and current selection. Unverified candidates remain for inspection; existing incomplete directories are not overwritten automatically. Manual commands do not include these application verification gates.".into());
     }
     if !allow && matches!(args.action, Action::Install | Action::Upgrade) && scheme == "npm" {
         notes.push(
@@ -1742,8 +1762,31 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                 Step::SetCurrent {
                     program_dir,
                     version,
-                } => symlink(Path::new(version), &program_dir.join("current"))?,
+                } => {
+                    if let Some(name) = plan.program.strip_prefix("pypi:") {
+                        super::uv_postcondition::check_managed(
+                            &program_dir.join(version),
+                            name,
+                            version,
+                            &ctx.home_dir,
+                            "current selection",
+                        )?;
+                    }
+                    symlink(Path::new(version), &program_dir.join("current"))?;
+                }
                 Step::WriteMeta { dir, meta } => {
+                    if let Some(name) = plan.program.strip_prefix("pypi:") {
+                        let version = meta["version"]
+                            .as_str()
+                            .ok_or_else(|| anyhow!("Missing managed PyPI target version"))?;
+                        super::uv_postcondition::check_managed(
+                            dir,
+                            name,
+                            version,
+                            &ctx.home_dir,
+                            "completion",
+                        )?;
+                    }
                     std::fs::create_dir_all(dir)?;
                     std::fs::write(dir.join(META_FILE), serde_json::to_vec_pretty(meta)?)?;
                 }

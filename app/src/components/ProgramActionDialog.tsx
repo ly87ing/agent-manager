@@ -75,6 +75,7 @@ export function ProgramActionDialog({
   const queryClient = useQueryClient();
   const withEntry = needsEntryDir(program, action);
   const verifiesUv = program.mode === "delegated" && program.owner === "uv-tool" && ["upgrade", "switch"].includes(action);
+  const verifiesManagedPyPi = program.kind === "pypi" && ["managed", "missing"].includes(program.mode) && ["install", "upgrade", "switch"].includes(action);
   const [chosenEntry, setChosenEntry] = useState<string>(entryDir ?? (entryCandidates.includes("~/.local/bin") ? "~/.local/bin" : entryCandidates[0] ?? ""));
   const [allowScripts, setAllowScripts] = useState(false);
   const [plan, setPlan] = useState<ProgramPlan | null>(null);
@@ -160,6 +161,7 @@ export function ProgramActionDialog({
       title={`${TITLE[action]} ${program.name}${plan?.target_version ? ` ${plan.target_version}` : version ? ` ${version}` : ""}`}
       description={loading ? t("正在生成操作计划") : error ? "" : verifiesUv
         ? t("确认后执行下列步骤；uv 版本无法核验时保留现场，不自动恢复，并报告需要检查的位置。")
+        : verifiesManagedPyPi ? t("确认后执行下列步骤；自管 PyPI 会在完成标记和当前版本选择前核验版本。无法核验时保留候选目录，并报告检查位置。")
         : t("确认后执行下列步骤；执行失败时尝试恢复，并报告需要检查的备份。")}
       risk="write-local"
       riskLabel={t("改动本机程序")}
