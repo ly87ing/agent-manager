@@ -64,10 +64,8 @@ writeFileSync(join(cacheDir, user), '[User]\nLanguage=en_US.UTF-8\nLanguages=en_
 const action = 'org.freedesktop.accounts.change-own-user-data';
 const polkit = ['/usr/lib/polkit-1/polkitd', '/usr/libexec/polkitd'].find(existsSync);
 assert(polkit, 'Distro Polkit executable is unavailable');
-const serviceUser = run('/usr/bin/systemctl', ['show', 'polkit.service', '--property=User', '--value']).stdout.trim();
-assert(serviceUser && serviceUser !== 'root', 'Use the packaged nonroot Polkit service identity');
-const serviceUid = run('/usr/bin/id', ['-u', serviceUser]).stdout.trim();
-const serviceGid = run('/usr/bin/id', ['-g', serviceUser]).stdout.trim();
+const serviceUid = process.env.AM_LANGUAGE_SERVICE_UID ?? '';
+const serviceGid = process.env.AM_LANGUAGE_SERVICE_GID ?? '';
 assert.match(serviceUid, /^[1-9][0-9]*$/); assert.match(serviceGid, /^[1-9][0-9]*$/);
 const rule = `/etc/polkit-1/rules.d/49-agent-manager-language-${process.pid}.rules`;
 const policy = `polkit.addRule(function(action, subject) { if (action.id === "${action}" && subject.user === ${JSON.stringify(user)}) return polkit.Result.YES; });\n`;
