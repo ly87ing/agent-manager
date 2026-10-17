@@ -2036,3 +2036,39 @@ documentation and lesson history are preserved.
 General program rollback/restore conflicts, remaining Linux preference/provider
 repair, installed-client adoption and signed updating remain open. No personal
 OS setting, real assistant file, installed application, Release or tag changed.
+
+## 2026-10-16: native uv metadata readback
+
+Main `0ac697e6` replaces directory-name version inference with bounded native
+`METADATA` identity reads. Names normalize before comparison; PEP 440 versions
+must agree with the distribution directory. Missing, malformed, unreadable or
+duplicate matching evidence returns an unknown version. Ordinary cache hardlinks
+remain readable. Queries execute no uv, interpreter or detected program and
+create no application state. See the [reader contract](subsystems/programs.md).
+
+Candidate `1a122711` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39003823817)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39003826514).
+Native Windows passed 274 library cases, Linux 300 and macOS 298, with all
+integration harnesses, actual CLI hardlink/unknown readback and the actual
+uv 0.13.1 download-boundary fixture. Native Windows verifies held path/parent
+rename refusal, generic-write refusal and direct reparse-setter refusal, then
+successful writes after release. Unix verifies descriptor-scoped replacement
+reads and FIFO refusal. CPython, free-threaded and PyPy paths use native directory
+fixtures; this is not installed-interpreter or package execution acceptance.
+
+The first Windows candidate disproved attribute-only sharing protection. The
+correction requests read-only directory-list access. A subsequent exclusive test
+probe conflicted with that protection; compatible handle metadata replaced the
+probe while the actual refused setter and released-handle positive control stayed
+intact. Both failed native logs were retained. Local verification passed the full
+engine suite, Tauri 27 with `--locked`, frontend 695, production build, Windows
+all-target compilation, formatting, script syntax and lockfile semantic checks.
+Existing lock packages and dependency edges remain unchanged; only the pinned
+parser and its two additional dependencies were added.
+
+Main runtime/test/contract/workflow files match the accepted candidate; its own
+documentation history is preserved. Declared metadata is not authenticity,
+functional execution, freshness-cache authority or an upgrade postcondition.
+General rollback/restore conflicts and installed-client/signed-update acceptance
+remain open. No personal OS setting, real assistant file, installed application,
+Release or tag changed.
