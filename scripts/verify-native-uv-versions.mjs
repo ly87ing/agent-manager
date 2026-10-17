@@ -8,6 +8,8 @@ import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 assert.equal(process.env.AM_ISOLATED_NATIVE_UV, '1');
+assert(process.argv.slice(2).every(arg => arg === '--custom-root'));
+const custom = process.argv.includes('--custom-root');
 for (const name of ['AM_NATIVE_UV', 'AM_NATIVE_PYTHON']) {
   assert(process.env[name] && isAbsolute(process.env[name]), `Select an existing absolute ${name}`);
   assert(lstatSync(realpathSync(process.env[name])).isFile(), `${name} must name an existing ordinary executable`);
@@ -18,7 +20,7 @@ const pythonBefore = readFileSync(originalPython);
 const pythonIdentity = lstatSync(originalPython);
 const root = mkdtempSync(join(tmpdir(), 'am-uv-version-native-'));
 const home = join(root, 'home'), data = join(root, 'data'), bin = join(home, 'bin');
-const tools = join(root, 'tools'), wheels = join(root, 'wheels'), uvTools = join(home, 'uv/data/tools');
+const tools = join(root, 'tools'), wheels = join(root, 'wheels'), uvTools = join(home, custom ? 'custom-extension-tools' : 'uv/data/tools');
 for (const path of [home, bin, tools, wheels]) mkdirSync(path, { recursive: true });
 const uv = join(tools, windows ? 'uv.exe' : 'uv');
 copyFileSync(realpathSync(process.env.AM_NATIVE_UV), uv);
@@ -112,7 +114,7 @@ try {
   for (const directory of [env.UV_PYTHON_INSTALL_DIR, env.UV_PYTHON_CACHE_DIR]) {
     assert(!existsSync(directory) || readdirSync(directory).length === 0, `Managed runtime provisioning appeared in ${directory}`);
   }
-  console.log(`Native ${process.platform} ${version}: offline real-package upgrade, entry execution, public/local PEP 440 matching and existing-interpreter preservation passed.`);
+  console.log(`Native ${process.platform} ${version} (${custom ? 'custom' : 'standard'} root): offline real-package upgrade, entry execution, public/local PEP 440 matching and existing-interpreter preservation passed.`);
   complete = true;
 } finally {
   if (complete) rmSync(root, { recursive: true });

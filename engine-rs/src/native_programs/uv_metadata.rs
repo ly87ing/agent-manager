@@ -9,7 +9,7 @@ use std::path::Path;
 const MAX_ENTRIES: usize = 8192;
 const MAX_HEADERS: u64 = 64 * 1024;
 
-fn normalized_name(name: &str) -> Option<String> {
+pub(super) fn normalized_name(name: &str) -> Option<String> {
     let alphanumeric = |byte: u8| byte.is_ascii_alphanumeric();
     if !name.bytes().next().is_some_and(alphanumeric)
         || !name.bytes().last().is_some_and(alphanumeric)

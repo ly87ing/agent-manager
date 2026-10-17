@@ -297,6 +297,16 @@ pub fn classify(ctx: &Context, path: &Path) -> Located {
             ..base
         };
     }
+    #[cfg(unix)]
+    if let Some((tool, dir)) = super::uv_custom_root::locate(path, &real) {
+        return Located {
+            owner: "uv-tool",
+            program: Some(format!("pypi:{tool}")),
+            version: uv_tool_version(&dir, &tool),
+            package_dir: Some(dir),
+            ..base
+        };
+    }
     if let Some((pos, marker)) = ["/uv/tools/", "/uv/data/tools/"]
         .into_iter()
         .find_map(|marker| text.find(marker).map(|pos| (pos, marker)))

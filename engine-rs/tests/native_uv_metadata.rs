@@ -27,19 +27,39 @@ fn status(home: &Path, data: &Path, bin: &Path, tools: &Path) -> Value {
         .as_array()
         .unwrap()
         .iter()
-        .find(|element| element["program"] == "pypi:tool-a")
+        .find(|element| {
+            !element["installs"].as_array().unwrap().is_empty()
+                && element["bins"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|bin| bin == "tool-a")
+        })
         .unwrap()
         .clone()
 }
 
 #[test]
 fn native_cli_uv_version_uses_metadata_and_preserves_hardlinks_and_entries() {
-    let root = std::env::temp_dir().join(format!("am-uv-status-{}", std::process::id()));
+    verify_metadata(false);
+}
+
+#[test]
+fn native_cli_custom_uv_root_uses_receipt_and_actual_entry() {
+    verify_metadata(true);
+}
+
+fn verify_metadata(custom: bool) {
+    let root = std::env::temp_dir().join(format!("am-uv-status-{}-{custom}", std::process::id()));
     std::fs::create_dir(&root).unwrap();
     let root = std::fs::canonicalize(root).unwrap();
     let home = root.join("home");
     let data = root.join("data");
-    let tools = home.join("uv/data/tools");
+    let tools = home.join(if custom {
+        "custom-extension-tools"
+    } else {
+        "uv/data/tools"
+    });
     let package = tools.join("tool-a");
     let bin = home.join("bin");
     let site = package.join(if cfg!(windows) {
@@ -99,6 +119,7 @@ fn native_cli_uv_version_uses_metadata_and_preserves_hardlinks_and_entries() {
     std::fs::hard_link(&metadata, &cache).unwrap();
     let entry_bytes = std::fs::read(&entry).unwrap();
     let read = || status(&home, &data, &bin, &tools);
+    assert_eq!(read()["program"], "pypi:tool-a");
     assert_eq!(read()["version"], "1.2.3");
     std::fs::write(
         &metadata,
@@ -124,6 +145,76 @@ fn native_cli_uv_version_uses_metadata_and_preserves_hardlinks_and_entries() {
     );
     std::fs::hard_link(&cache, &metadata).unwrap();
     assert_eq!(read()["version"], "1.2.3");
+    #[cfg(unix)]
+    if custom {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let receipt = package.join("uv-receipt.toml");
+        let saved = std::fs::read_to_string(&receipt).unwrap();
+        let config = home.join(".claude.json");
+        std::fs::write(
+            &config,
+            serde_json::json!({"mcpServers":{"fixture":{"command":entry}}}).to_string(),
+        )
+        .unwrap();
+        let unknown = || {
+            let element = read();
+            let id = element["program"].as_str().unwrap();
+            assert!(id == "bin:tool-a" || id.starts_with("path:"), "{element}");
+            assert_eq!(element["owner"], "unknown");
+            assert!(!marker.exists());
+        };
+        for contents in [
+            "invalid TOML".to_string(),
+            saved.replace("name = 'tool-a'", "name = 'other'"),
+            saved.replace("install-path", "other-path"),
+            "#".repeat(64 * 1024 + 1),
+        ] {
+            std::fs::write(&receipt, contents).unwrap();
+            unknown();
+        }
+        std::fs::remove_file(&receipt).unwrap();
+        unknown();
+        let copy = root.join("receipt-copy");
+        std::fs::write(&copy, &saved).unwrap();
+        symlink(&copy, &receipt).unwrap();
+        unknown();
+        std::fs::remove_file(&receipt).unwrap();
+        let cpath = std::ffi::CString::new(receipt.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(cpath.as_ptr(), 0o600) }, 0);
+        unknown();
+        std::fs::remove_file(&receipt).unwrap();
+        std::fs::write(&receipt, &saved).unwrap();
+        for root in [Path::new("relative-tools"), Path::new("")] {
+            assert_eq!(status(&home, &data, &bin, root)["program"], "bin:tool-a");
+        }
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o644)).unwrap();
+        // The absolute MCP path remains inspectable when PATH skips a non-executable source.
+        unknown();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::remove_file(&source).unwrap();
+        std::fs::create_dir(&source).unwrap();
+        unknown();
+        std::fs::remove_dir(&source).unwrap();
+        let other = package.join("bin/other");
+        std::fs::write(&other, &entry_bytes).unwrap();
+        std::fs::set_permissions(&other, std::fs::Permissions::from_mode(0o755)).unwrap();
+        symlink(&other, &source).unwrap();
+        unknown();
+        std::fs::remove_file(&source).unwrap();
+        std::fs::write(&source, &entry_bytes).unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let invalid_package = tools.join("bad;name");
+        std::fs::rename(&package, &invalid_package).unwrap();
+        std::fs::remove_file(&entry).unwrap();
+        symlink(invalid_package.join("bin/tool-a"), &entry).unwrap();
+        unknown();
+        std::fs::rename(&invalid_package, &package).unwrap();
+        std::fs::remove_file(&entry).unwrap();
+        symlink(&source, &entry).unwrap();
+        assert_eq!(read()["program"], "pypi:tool-a");
+        assert_eq!(read()["version"], "1.2.3");
+        std::fs::remove_file(config).unwrap();
+    }
     assert_eq!(std::fs::read(&metadata).unwrap(), contents.as_bytes());
     assert_eq!(std::fs::read(&cache).unwrap(), contents.as_bytes());
     assert_eq!(std::fs::read(&entry).unwrap(), entry_bytes);

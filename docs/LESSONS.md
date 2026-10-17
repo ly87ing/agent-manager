@@ -1004,3 +1004,13 @@ confirmation back to the verified source plan.
 - Geometry-only browser checks passed during an unfinished modal animation.
   Wait for stable opaque dialogs and dismissed notifications; inspect pixels and
   verify that long retained diagnostics can scroll through their final lines.
+
+### 2026-10-16: validate custom uv ownership before exposing package actions
+
+- Unknown versions do not make an unsafe package name safe. Validate custom-root
+  package names before inventory can offer copied commands or lifecycle actions.
+- Absolute MCP commands bypass PATH's executable filter. Exercise ordinary,
+  non-executable, directory and redirected sources through that route as well;
+  inspect the located entry rather than a separate missing-command row.
+- Keep custom-root refusal fixtures free of standard uv path markers, and verify
+  standard-root compatibility separately when preserving the existing fallback.
