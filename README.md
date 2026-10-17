@@ -29,7 +29,7 @@ The app runs in the foreground and exits when its window closes. Search queries 
 
 For current test installers, open [GUI CI](https://github.com/ly87ing/agent-manager/actions/workflows/gui-ci.yml), select a successful `main` run for the intended commit, and download its `agent-manager-<target>-<commit>` artifact. Choose macOS Apple Silicon/Intel, Windows x64 or Linux x64, then verify `SHA256SUMS.txt` and the commit in `build-info.json` before installing.
 
-The historical [October 8 preview](https://github.com/ly87ing/agent-manager/releases/tag/preview-v0.1.0-20261008) predates extension-only behavior and has no configured updater. A new signed release and the actual update chain remain pending; see [platform status](docs/GUI-PLATFORM-STATUS.md#current-acceptance-boundary-2026-10-15).
+The historical [October 8 preview](https://github.com/ly87ing/agent-manager/releases/tag/preview-v0.1.0-20261008) predates extension-only behavior and has no configured updater. A new signed release and the actual update chain remain pending; see [platform status](docs/GUI-PLATFORM-STATUS.md).
 
 A production release does not require purchasing an Apple developer account. By default, macOS uses ad-hoc signing and Windows has no Authenticode signature, so the operating system may require manual installation confirmation. Update packages still require signing; commercial certificates and Apple notarization can be enabled separately. See [platform status](docs/GUI-PLATFORM-STATUS.md) for release and acceptance status.
 

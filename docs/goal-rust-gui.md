@@ -1107,7 +1107,7 @@ Fresh homes, absent optional defaults, unsafe lock ancestors, Windows drive
 prefixes, multiple upgraded readers, and failed acquisition are covered. Upgrades
 still require stopping all old sessions and older binaries; unknown historical
 locations and later old-version starts are outside this protocol. See
-[the migration contract](subsystems/account-context.md#upgrading-from-data-directory-locks).
+[the lock compatibility contract](subsystems/account-context.md#constraints-and-failure-behavior).
 
 Cloud evidence from input tree `786ea2f2`, before the local publication repairs:
 
@@ -1890,3 +1890,53 @@ These receipts do not establish directory/mixed-link materialization, every
 Linux desktop/provider repair, real login startup, installed desktop/client
 business workflows or signed updater installation. No personal OS settings,
 real assistant files, installed application, Release or tag were changed.
+
+## 2026-10-16: Linux manual NTP and native failure receipts
+
+Main `4f8707d` separately previews and applies the existing timesyncd instance's
+runtime manual-server list and the dedicated standard-host-path override. It
+preauthorizes the Settings batch, durably saves the file, dispatches to the pinned
+instance and independently reads narrow projected effects. It does not restart,
+install or enable a service. Native reselection may adjust the clock before the
+separate measured correction stage; the preview discloses that effect.
+
+Destination admission requires the concrete ext4 driver and successful native
+metadata getters. Unknown/opaque flags, project quota identity, allocation hints,
+extended attributes and special mode policy are refused rather than dropped by
+inode replacement. Actual subprocess stdin coverage reproduced and fixed the
+buffered-read/poll timeout that a UnixStream-only test had missed.
+
+Candidate `bb542eec` passed [regular CI](https://github.com/ly87ing/agent-manager/actions/runs/38988141482)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38988137976).
+Its 28 runtime/reference files match main; the existing main lesson history is
+retained. Main `4f8707d` subsequently passed post-push
+[regular CI](https://github.com/ly87ing/agent-manager/actions/runs/38988895959)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38988895987).
+The targeted native
+[Linux job](https://github.com/ly87ing/agent-manager/actions/runs/38987836791/job/117263327365)
+passed 284 library cases and all integration suites, then independently verified:
+
+- Ordinary-user preview with absent HOME/data and actual Polkit challenge/cancel.
+- File/runtime readback, saved-only repair, no-op, stale/auth drift and cross-UID lock.
+- Malformed, expired, oversized, EOF and changed-executable zero-write refusal.
+- Real inode `nodump`, parent policy and special-mode refusal, plus CLI preview
+  preserving inode/content/database bytes.
+- A real vendor setter with its reply suppressed: both channels read back,
+  partial status retained and later user-manager writes stopped.
+- Fixture-only external restart loading, followed by independent restoration of
+  original configuration, runtime lists, service state and unit enablement.
+
+Local macOS verification passed the complete engine suite with 282 library
+cases and native integration harnesses, Tauri 27, frontend 693 and production
+build. Linux/Windows all-target checks passed. Browser preview/result fixtures
+passed at 1000/760 px in both languages with complete paths, clock-effect and
+future-loading disclosures, no overflow and reachable actions. Local main,
+fetched origin/main and the remote branch were read back at `4f8707d`.
+
+This evidence does not establish future file loading on other devices, actual
+peer/synchronization/clock accuracy, non-default native project/allocation
+fixtures, desktop PAM/dialog interaction, installed-client adoption or a signed
+update loop. Every NTP result keeps its future-loading and clock-evidence limits.
+No personal OS setting, real assistant configuration, installed app, Release or
+tag was changed. Code rollback does not undo already confirmed file/runtime
+settings; recovery requires fresh inspection and explicit user-controlled changes.
