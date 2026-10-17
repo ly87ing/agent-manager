@@ -42,6 +42,9 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   compile the exact generated policy before installing the disposable fixture.
 - Outer script syntax also missed a newline escape consumed in an embedded Node
   program. Parse the actual generated inner program before executing it elevated.
+- Suppressing a native sd-bus reply must still return a positive handled result.
+  Returning zero lets dispatch emit `UnknownMethod`, testing an error response
+  instead of a lost reply. Independently read both effects before checking status.
 - Polkit action details are restricted to trusted query callers. A CI readiness
   probe passed details as the ordinary user and failed before the product's
   authorization challenge. Use a root-only, exact-process marker for the probe;

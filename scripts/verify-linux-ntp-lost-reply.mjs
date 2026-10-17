@@ -46,12 +46,12 @@ export async function lostReply({ run, rootNode, cli, repair, native, generated,
     const preview = cli('environment:repair-preview', [], false, profile).data;
     assert(preview.items.filter(item => item.scope === 'session').every(item => item.status === 'change'));
     const result = await repair('ntp-allow', profile);
-    assert.equal(result.status, 'partial', JSON.stringify(result.items));
-    assert.equal(result.items.find(item => item.id === 'ntp.server').status, 'verified_after_error');
-    assert(result.items.filter(item => item.scope === 'session').every(item => item.status === 'not_applied'));
     assert.deepEqual(values().sort(), keys.map(key => `${key}=C`).sort(), 'A partial NTP repair continued into user-manager writes');
     assert.equal(readFileSync(targetFile, 'utf8'), generated(selected));
     assert.deepEqual(native(), { ...before, RuntimeNTPServers: [selected] }, 'Lost-reply repair changed unrelated native state');
+    assert.equal(result.status, 'partial', JSON.stringify(result.items));
+    assert.equal(result.items.find(item => item.id === 'ntp.server').status, 'verified_after_error', JSON.stringify(result.items));
+    assert(result.items.filter(item => item.scope === 'session').every(item => item.status === 'not_applied'));
     console.log('Native vendor NTP lost setter reply: both actual channels read back, partial retained, later session writes stopped.');
   } finally {
     userBus('org.freedesktop.systemd1.Manager', 'UnsetAndSetEnvironment', 'asas', String(keys.length), ...keys, String(originalVariables.length), ...originalVariables);
