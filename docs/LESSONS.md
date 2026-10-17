@@ -24,6 +24,11 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   A template literal consumed regex slash escapes; `node --check` on the script
   passed while the resulting policy was invalid. Preserve those escapes and
   compile the exact generated policy before installing the disposable fixture.
+- Polkit action details are restricted to trusted query callers. A CI readiness
+  probe passed details as the ordinary user and failed before the product's
+  authorization challenge. Use a root-only, exact-process marker for the probe;
+  keep the actual product authorization under the ordinary user's real challenge.
+  A generic challenge response alone cannot prove that the intended rule loaded.
 
 ## 2026-10-16: type evidence must be bound into a snapshot version
 

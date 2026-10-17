@@ -98,12 +98,16 @@ async function repair(mode, profile = spec) {
       assert(Date.now() < stoppedBy);
       await delay(20);
     } while (true);
-    setPolicy(String.raw`polkit.addRule(function(action, subject) { if(action.id === "org.freedesktop.policykit.exec" && subject.user === ${JSON.stringify(user)} && subject.pid === ${child.pid} && /^\/tmp\/agent-manager-clock-[a-f0-9-]+\/clock-helper$/.test(action.lookup("program"))) return polkit.Result.AUTH_SELF; });` + '\n');
+    const probe = randomUUID();
+    setPolicy(String.raw`polkit.addRule(function(action, subject) { if(action.id === "org.freedesktop.policykit.exec" && subject.user === ${JSON.stringify(user)} && subject.pid === ${child.pid} && /^\/tmp\/agent-manager-clock-[a-f0-9-]+\/clock-helper$/.test(action.lookup("program"))) return action.lookup("am-ci-probe") === ${JSON.stringify(probe)} ? polkit.Result.YES : polkit.Result.AUTH_SELF; });` + '\n');
     // Check that this exact-process rule has reached the authority before exec.
     const subject = `${child.pid},${fields[19]},${process.getuid()}`;
     const readyBy = Date.now() + 10_000;
-    while (run('/usr/bin/pkcheck', ['--action-id', 'org.freedesktop.policykit.exec', '--process', subject,
-      '--detail', 'program', '/tmp/agent-manager-clock-00000000-0000-0000-0000-000000000000/clock-helper'], true).status !== 2) {
+    // Details are accepted only from trusted callers. This root-only probe has
+    // an exclusive marker, so default AUTH_ADMIN cannot masquerade as readiness;
+    // the actual ordinary-user pkexec still receives AUTH_SELF and a real agent.
+    while (run('/usr/bin/sudo', ['-n', '/usr/bin/pkcheck', '--action-id', 'org.freedesktop.policykit.exec', '--process', subject,
+      '--detail', 'program', '/tmp/agent-manager-clock-00000000-0000-0000-0000-000000000000/clock-helper', '--detail', 'am-ci-probe', probe], true).status !== 0) {
       assert(Date.now() < readyBy, 'CI NTP authorization policy was not loaded');
       await delay(100);
     }
