@@ -713,6 +713,7 @@ fn plan_delegated(
             steps.push(Step::Exec {
                 program: uv,
                 args: vec![
+                    "--no-python-downloads".into(),
                     "tool".into(),
                     "install".into(),
                     "--force".into(),
@@ -930,7 +931,13 @@ fn managed_install_steps(
             };
             steps.push(Step::Exec {
                 program: uv,
-                args: vec!["tool".into(), "install".into(), "--force".into(), spec],
+                args: vec![
+                    "--no-python-downloads".into(),
+                    "tool".into(),
+                    "install".into(),
+                    "--force".into(),
+                    spec,
+                ],
                 env: vec![
                     (
                         "UV_TOOL_DIR".into(),

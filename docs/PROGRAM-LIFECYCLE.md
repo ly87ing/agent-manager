@@ -112,7 +112,7 @@ Keep programs in place and invoke the original package manager:
 | Action | Global npm | uv tool |
 | --- | --- | --- |
 | Detect updates | `npm view <package> version` (network during checks) | Git probes as for skill sources / PyPI queries |
-| Upgrade / switch version | `npm install -g <package>@<version>` | `uv tool install --force <package>==<version>` |
+| Upgrade / switch version | `npm install -g <package>@<version>` | `uv --no-python-downloads tool install --force <package>==<version>` |
 | Roll back | Before upgrading, **move** the entire package directory and its command links into the tool's backup directory (same-partition rename, no network); restore unchanged on failure or undo | Same (uv tool environment directory) |
 
 Preview shows the full command, package directory/commands being replaced, and npm configuration (registry and related settings follow user `~/.npmrc`, since this is the user's global environment). Delegated management introduces no entry directory or second program copy and is the lowest-risk primary path.

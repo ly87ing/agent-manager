@@ -57,6 +57,21 @@ jobs:
       - name: Run cargo tests
         run: cargo test --manifest-path engine-rs/Cargo.toml
 
+      - name: Set up pinned uv for the private runtime fixture
+        id: native-uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.13.1"
+          enable-cache: false
+          download-from-astral-mirror: false
+          checksum: ${{ runner.os == 'Windows' && '3b2661a463a5baea7f5076ea2b25ab71d77f36a6c0d809e5350651792f80a672' || runner.os == 'Linux' && 'eadd9d27c134ab5ac1ffd4473b97a741407f3ea238288f03121fc4deddf90220' || runner.arch == 'ARM64' && 'cfe454573412ff7380d15fc7dae5997ab53ffce72fce0a78e91ddbc84001acd2' || 'bb7b805bdcf3d0bc8c74ceb94569e6b3e8aa35bd492acdbb9d46bf46d9d4ff6b' }}
+
+      - name: Verify native uv never downloads a Python runtime
+        env:
+          AM_ISOLATED_NATIVE_UV: "1"
+          AM_NATIVE_UV: ${{ steps.native-uv.outputs.uv-path }}
+        run: node scripts/verify-native-uv-runtime.mjs
+
       - name: Verify disposable Linux user-manager environment
         if: ${{ runner.os == 'Linux' }}
         shell: bash
