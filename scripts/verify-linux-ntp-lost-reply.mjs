@@ -39,7 +39,7 @@ export async function lostReply({ run, rootNode, cli, repair, native, generated,
     assert.deepEqual(before.RuntimeNTPServers, []);
     const pid = before.pid;
     // Establish that the actual vendor process loaded only our owned test shim.
-    const maps = rootNode("import fs from 'node:fs';const [pid,lib]=process.argv.slice(1);if(!fs.readFileSync('/proc/'+pid+'/maps','utf8').split('\n').some(line=>line.endsWith(' '+lib)))throw Error('Native daemon did not load CI reply fault');", [String(pid), library]);
+    const maps = rootNode(String.raw`import fs from 'node:fs';const [pid,lib]=process.argv.slice(1);if(!fs.readFileSync('/proc/'+pid+'/maps','utf8').split('\n').some(line=>line.endsWith(' '+lib)))throw Error('Native daemon did not load CI reply fault');`, [String(pid), library]);
     assert.equal(maps.status, 0);
     userBus('org.freedesktop.systemd1.Manager', 'SetEnvironment', 'as', String(keys.length), ...keys.map(key => `${key}=C`));
     const profile = JSON.stringify({ ntp_server: selected, locale: 'C.UTF-8' });
