@@ -247,6 +247,9 @@ impl Settings for LinuxSettings {
             .ntp_server
             .as_ref()
             .and_then(|_| super::repair_linux_ntp::read());
+        let automatic_time = target
+            .automatic_time
+            .and_then(|_| super::linux::automatic_time());
         let zone = target.timezone.as_ref().map(|zone| {
             std::fs::metadata(std::path::Path::new("/usr/share/zoneinfo").join(zone))
                 .is_ok_and(|meta| meta.is_file())
@@ -263,7 +266,7 @@ impl Settings for LinuxSettings {
                     )
                 })
                 .unwrap_or_else(|| "systemd user manager unavailable".into()),
-            context: json!({"manager":self.manager,"locale_installed":locale,"zone_installed":zone,"time":self.time,"gnome":gnome,"desktop_time":self.desktop,"region":self.region,"ntp":self.ntp}),
+            context: json!({"manager":self.manager,"locale_installed":locale,"zone_installed":zone,"time":self.time,"gnome":gnome,"desktop_time":self.desktop,"region":self.region,"ntp":self.ntp,"automatic_time":automatic_time}),
             ..Snapshot::default()
         };
         snapshot.unavailable.extend(
@@ -275,6 +278,15 @@ impl Settings for LinuxSettings {
             ]
             .map(str::to_string),
         );
+        snapshot.values.insert(
+            "ntp.automatic_time".into(),
+            automatic_time.map(|value| json!(value)),
+        );
+        // A matching native switch needs no setter. Its Boolean cannot bind
+        // timedated's cached provider/installation scope for an actual change.
+        if automatic_time.is_some() && automatic_time == target.automatic_time {
+            snapshot.unavailable.remove("ntp.automatic_time");
+        }
         if let Some(server) = target.ntp_server.as_deref() {
             let server = server.trim_end_matches('.').to_ascii_lowercase();
             let available = self

@@ -53,6 +53,8 @@ export const messages = {
   "已修复并验证": "Repaired and verified",
   "偏好已保存并读回": "Preference saved and read back",
   "已保存所选设置，实际效果仍需在目标环境中确认。": "Selected settings were saved. Verify their effect in the target environment.",
+  "所选设置无需修改，实际效果仍需在目标环境中确认。": "Selected settings need no change. Verify their effect in the target environment.",
+  "Linux 自动校时开关目前仅支持读取。已符合目标时无需修改；需要切换时，请使用系统日期与时间设置，再重新预览。服务的开机启用状态及实际同步效果尚未验证。": "Linux can currently read back the automatic-time switch. Matching targets need no change; use system Date & Time settings to switch it, then preview again. Service boot enablement and actual synchronization remain unverified.",
   "GNOME 自动时区仅验证偏好回读；定位与自动切换效果尚未验证。开启需要定位已启用且桌面服务有时区权限。": "GNOME automatic time zone is verified by preference readback only. Geolocation and automatic switching remain unverified. Enabling requires location to be on and the desktop service to have time-zone permission.",
   "已符合，但命令异常": "Matches, but the command reported an error",
   "结果无法确认": "Outcome unknown",

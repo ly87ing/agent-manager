@@ -25,7 +25,7 @@ export function repairSummary(result: EnvironmentRepairResult) {
   if (result.status === "audit_failed") return t("修复结果未能写入操作记录，请查看逐项结果。");
   if (result.report?.time_repair?.audit_recorded === false) return t("校时结果未能写入操作记录，本页保留复测结果。");
   if (result.status === "partial" || result.clock_error) return t("自动修复未全部完成，请查看逐项结果和重新检查。");
-  if (result.verification_limits?.length) return t("已保存所选设置，实际效果仍需在目标环境中确认。");
+  if (result.verification_limits?.length) return result.status === "not_needed" ? t("所选设置无需修改，实际效果仍需在目标环境中确认。") : t("已保存所选设置，实际效果仍需在目标环境中确认。");
   if (result.report?.summary.status === "match" && (!result.report.time_repair || ["not_needed", "verified"].includes(result.report.time_repair.status))) return t("修复后复查：所选目标全部符合。");
   return t("已执行自动修复，仍有项目需要重启或继续确认。");
 }
@@ -86,6 +86,7 @@ export function EnvironmentRepairDialog({ profile, onResult, onClose }: {
         <p className="mt-1 text-muted-foreground">{t("影响范围：{0}", item.scope === "system" ? t("本机系统") : item.scope === "user" ? t("当前用户") : t("后续启动的会话进程"))}</p>
       </div>)}</div>
       {platform === "linux" && profile.target.automatic_timezone != null && <p className="text-xs text-muted-foreground">{t("GNOME 自动时区仅验证偏好回读；定位与自动切换效果尚未验证。开启需要定位已启用且桌面服务有时区权限。")}</p>}
+      {platform === "linux" && profile.target.automatic_time != null && <p className="text-xs text-muted-foreground">{t("Linux 自动校时开关目前仅支持读取。已符合目标时无需修改；需要切换时，请使用系统日期与时间设置，再重新预览。服务的开机启用状态及实际同步效果尚未验证。")}</p>}
       {profile.target.automatic_timezone && profile.target.timezone && <p className="text-xs text-amber-500">{t("自动时区开启后，系统可能根据位置再次改变固定时区。")}</p>}
       <p className="text-xs text-muted-foreground">{t("系统项目可能请求管理员授权。部分失败会停止后续修改，保留已完成结果；不会自动撤销或重试。")}</p>
       {result?.relogin_required ? <p className="text-xs font-medium">{t("请保存工作后自行退出并重新登录，再验证地区格式。应用不会替你退出登录。")}</p> : result?.restart_required && <p className="text-xs font-medium">{t("请保存工作并重新启动相关应用；当前进程的检查结果保留原样。")}</p>}

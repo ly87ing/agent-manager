@@ -35,6 +35,24 @@ async function open() {
 }
 
 describe("Automatic environment repair", () => {
+  it.each(["en", "zh-CN"] as const)("reports a Linux automatic-time no-op without claiming a save or synchronization in %s", async (language) => {
+    setLanguage(language);
+    const configured = { ...profile, target: environmentFixture({ automatic_time: true }).target };
+    const preview = { ...plan, platform: "linux" as const, target: configured.target, items: [
+      { id: "ntp.automatic_time", scope: "system" as const, before: true, expected: true, status: "unchanged" as const },
+    ] };
+    renderWithEngine(<EnvironmentRepairDialog profile={configured} onResult={() => {}} onClose={() => {}} />, {
+      "environment:repair-preview": makeEnvelope(preview),
+      "environment:repair": makeEnvelope({ ...result("not_needed"), items: preview.items, restart_required: false,
+        verification_limits: ["Provider boot enablement and actual synchronization remain unverified."] }),
+    });
+    const guidance = language === "en" ? "use system Date & Time settings to switch it" : "请使用系统日期与时间设置";
+    await screen.findByText((text) => text.includes(guidance));
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    expect(screen.getByRole("status")).toHaveTextContent(language === "en" ? "Selected settings need no change" : "所选设置无需修改");
+    expect(screen.getByRole("status")).not.toHaveTextContent(language === "en" ? "were saved" : "已保存");
+    expect(screen.getByRole("dialog")).toHaveTextContent(language === "en" ? "actual synchronization remain unverified" : "实际同步效果尚未验证");
+  });
   it.each(["en", "zh-CN"] as const)("separates Linux runtime and saved NTP receipts and retains limits in %s", async (language) => {
     setLanguage(language);
     const configured = { ...profile, target: environmentFixture({ ntp_server: "selected.example", max_clock_offset_ms: 2000 }).target };

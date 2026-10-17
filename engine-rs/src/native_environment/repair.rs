@@ -475,6 +475,9 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
             })
         });
         let mut verification_limits = Vec::new();
+        if cfg!(target_os = "linux") && target.automatic_time.is_some() {
+            verification_limits.push("Linux automatic-time evidence covers the native active-service switch only. Provider boot enablement, actual peer, synchronization and clock accuracy remain unverified; switching providers is unavailable.");
+        }
         if cfg!(target_os = "linux") && target.ntp_server.is_some() {
             verification_limits.push("The service was not restarted. Whether a future instance loads the saved standard-host-path override on this device remains unverified. Runtime and file readback do not establish the actual NTP peer, synchronization, or clock accuracy.");
         }
