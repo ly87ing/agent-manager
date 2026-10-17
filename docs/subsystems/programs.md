@@ -37,6 +37,13 @@ Windows uv environments use `uv/data/tools` and `Lib/site-packages`. Copied `.ex
 entries are recognized and backed up only when `uv-receipt.toml` names the actual
 entry and its bytes match the environment's `Scripts` entry. A changed copy stays
 unowned. Receipt reads and byte comparisons are bounded; queries never invoke uv.
+On Unix, an explicit absolute `UV_TOOL_DIR` also supports custom locations.
+[`uv_custom_root.rs`](../../engine-rs/src/native_programs/uv_custom_root.rs)
+requires a valid PyPI package name, an ordinary executable at the resolved
+`<tool>/bin/<command>` location and an ordinary receipt within 64 KiB naming the
+exact entry path and command. Receipt links, special files and uncertain entries
+do not establish custom-root ownership. Standard path-marker recognition is
+unchanged, including its existing fallback when receipt evidence is unavailable.
 Installed uv versions come from the matching distribution's ordinary `METADATA`
 file, not its directory name. Native Windows uses `Lib/site-packages`; Unix uses
 `lib/python<major>.<minor>[t]/site-packages` or `lib/pypy<major>.<minor>/site-packages`,
@@ -175,7 +182,8 @@ an existing interpreter explicitly with `AM_NATIVE_PYTHON`, generates private
 wheels, then performs real uv upgrades, entry execution and public/local version
 matching without a package registry. It verifies that the selected interpreter
 binary/identity is unchanged and private managed-runtime directories remain empty.
-GUI CI selects a preinstalled runner interpreter; this fixture never bootstraps
+GUI CI runs both standard and custom tool roots and selects a preinstalled runner
+interpreter; this fixture never bootstraps
 one and adds no interpreter requirement to the Rust engine test suite.
 
 Windows command-entry metadata uses ASCII hex-encoded UTF-8 paths; legacy plain-text metadata remains readable. Manual filesystem commands reject linked ancestors, compare existing entry hashes, and stage a literal junction before replacing `current`. A staging failure preserves the previous pointer and foreign staging contents. Recursive manual removal refuses nested reparse points.

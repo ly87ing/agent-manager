@@ -61,7 +61,7 @@ Method: isolate HOME and configuration directories; a local fake model service m
 
 **Directories in user PATH (observed):** local `~/.local/bin` is present in `.zshenv`, `.zprofile`, and `.zshrc` and visible in zsh `-c`, `-lc`, `-ic`, and `-lic` modes. For Dock-launched applications, `launchctl getenv PATH` is empty: **desktop application PATH cannot represent user PATH**.
 
-**Unverified:** PATH seen by assistant sessions launched from IDEs (such as VS Code); whether Claude Code sessions reread PATH (determines when new programs become available to existing sessions); actual field usage in [OpenClaw skill format](https://docs.openclaw.ai/clawhub/skill-format) (no local skill uses it); uv behavior with custom `UV_TOOL_DIR` / `UV_TOOL_BIN_DIR`; interaction between `npm ci` and platform subpackages. All are listed for verification in their corresponding phases in section 17.
+**Unverified:** PATH seen by assistant sessions launched from IDEs (such as VS Code); whether Claude Code sessions reread PATH (determines when new programs become available to existing sessions); actual field usage in [OpenClaw skill format](https://docs.openclaw.ai/clawhub/skill-format) (no local skill uses it); interaction between `npm ci` and platform subpackages. Custom uv tool/entry directories now have isolated native fixtures described in the [subsystem reference](subsystems/programs.md); this does not establish assistant consumption. Remaining items are listed in their corresponding phases in section 17.
 
 ## 4. Goal
 

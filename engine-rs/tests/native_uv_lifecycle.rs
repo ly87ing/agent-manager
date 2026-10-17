@@ -116,7 +116,7 @@ impl Fixture {
         let data = root.join("data");
         let tools = root.join("tools");
         let bin = home.join("bin");
-        let package = home.join("uv/data/tools/tool-a");
+        let package = home.join("custom-extension-tools/tool-a");
         std::fs::create_dir_all(&tools).unwrap();
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::copy(

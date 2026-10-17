@@ -92,7 +92,9 @@ jobs:
         env:
           AM_ISOLATED_NATIVE_UV: "1"
           AM_NATIVE_UV: ${{ steps.native-uv.outputs.uv-path }}${{ runner.os == 'Windows' && '.exe' || '' }}
-        run: node scripts/verify-native-uv-versions.mjs
+        run: |
+          node scripts/verify-native-uv-versions.mjs
+          node scripts/verify-native-uv-versions.mjs --custom-root
 
       - name: Verify disposable Linux user-manager environment
         if: ${{ runner.os == 'Linux' }}

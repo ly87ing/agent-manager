@@ -6,6 +6,8 @@ pub(crate) mod declare;
 pub(crate) mod locate;
 mod scope;
 pub(crate) mod status;
+#[cfg(unix)]
+mod uv_custom_root;
 mod uv_metadata;
 mod uv_metadata_files;
 mod uv_postcondition;
