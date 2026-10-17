@@ -773,11 +773,30 @@ fn program_json(
             .unwrap_or_else(|| element_id.clone())
     };
     let runner_current = p.runners.first().and_then(|r| r.version.clone());
-    let freshness = crate::native_upstream::freshness_from_cache(
+    let mut freshness = crate::native_upstream::freshness_from_cache(
         probes,
         &probe_id,
         version.as_deref().or(runner_current.as_deref()),
     );
+    if owner == Some("uv-tool") {
+        // Installed metadata is authoritative; cached current versions can be stale.
+        freshness["current"] = json!(version);
+        freshness["state"] = json!(match (
+            version
+                .as_deref()
+                .and_then(|value| value.parse::<pep440_rs::Version>().ok()),
+            freshness["upstream"]
+                .as_str()
+                .and_then(|value| value.parse::<pep440_rs::Version>().ok()),
+        ) {
+            (Some(current), Some(upstream)) => match current.cmp(&upstream) {
+                std::cmp::Ordering::Less => "behind",
+                std::cmp::Ordering::Equal => "current",
+                std::cmp::Ordering::Greater => "ahead",
+            },
+            _ => "unknown",
+        });
+    }
     json!({
         "id": element_id,
         "program": p.id,

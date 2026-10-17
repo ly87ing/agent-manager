@@ -52,7 +52,7 @@ function stepText(step: ProgramPlanStep): string | null {
 
 /**
  * 程序的一个动作：先向引擎要计划（programs:preview，只算不做），列出会做的每一步与「自己在终端里做」的命令，
- * 用户确认后才执行（programs:apply，引擎取锁、改动前备份、失败原样恢复）。失败时同样给出自己动手的命令。
+ * Explicit confirmation executes the plan; failures retain diagnostics and inspection locations.
  */
 export function ProgramActionDialog({
   program,
@@ -74,13 +74,14 @@ export function ProgramActionDialog({
   const { execute } = useExecutions();
   const queryClient = useQueryClient();
   const withEntry = needsEntryDir(program, action);
+  const verifiesUv = program.mode === "delegated" && program.owner === "uv-tool" && ["upgrade", "switch"].includes(action);
   const [chosenEntry, setChosenEntry] = useState<string>(entryDir ?? (entryCandidates.includes("~/.local/bin") ? "~/.local/bin" : entryCandidates[0] ?? ""));
   const [allowScripts, setAllowScripts] = useState(false);
   const [plan, setPlan] = useState<ProgramPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [executing, setExecuting] = useState(false);
-  const [failed, setFailed] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ message: string; unverified: boolean } | null>(null);
 
   const args = [
     "--program", program.program, "--action", action,
@@ -129,7 +130,13 @@ export function ProgramActionDialog({
           .finally(() => void queryClient.invalidateQueries({ queryKey: engineKeys.all }));
       } else {
         const message = envelope?.errors[0]?.message ?? t("没有完成，详见操作记录");
-        setFailed(message); notifyError(t("{0}失败", TITLE[action]), message);
+        const unverified = envelope?.errors.some((error) => error.code === "PROGRAM_VERSION_UNVERIFIED") ?? false;
+        setFailed({ message, unverified });
+        if (unverified) {
+          toast.warning(t("{0}未完成", TITLE[action]), { description: message });
+        } else {
+          notifyError(t("{0}失败", TITLE[action]), message);
+        }
       }
     } finally {
       setExecuting(false);
@@ -151,13 +158,16 @@ export function ProgramActionDialog({
   return (
     <ConfirmModal
       title={`${TITLE[action]} ${program.name}${plan?.target_version ? ` ${plan.target_version}` : version ? ` ${version}` : ""}`}
-      description={loading ? t("正在生成操作计划") : error ? "" : t("确认后执行下列步骤；执行失败时尝试恢复，并报告需要检查的备份。")}
+      description={loading ? t("正在生成操作计划") : error ? "" : verifiesUv
+        ? t("确认后执行下列步骤；uv 版本无法核验时保留现场，不自动恢复，并报告需要检查的位置。")
+        : t("确认后执行下列步骤；执行失败时尝试恢复，并报告需要检查的备份。")}
       risk="write-local"
       riskLabel={t("改动本机程序")}
       confirmLabel={TITLE[action]}
       confirmDisabled={loading || Boolean(error) || !plan || (withEntry && !chosenEntry)}
       executing={executing}
-      error={failed ? `${t("执行未完成，请核对当前状态：")}${failed}${plan?.manual.length ? `\n${t("可以复制上面的命令自己执行。")}` : ""}` : null}
+      error={failed ? `${t("执行未完成，请核对当前状态：")} ${failed.message}${plan?.manual.length && !failed.unverified ? `\n${t("可以复制上面的命令自己执行。")}` : ""}` : null}
+      errorTone={failed?.unverified ? "warning" : "error"}
       onConfirm={() => void confirm()}
       onClose={() => !executing && onClose()}
     >

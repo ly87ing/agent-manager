@@ -22,6 +22,7 @@ export function ConfirmModal({
   executing,
   resultErrors,
   error,
+  errorTone = "error",
   children,
   secondaryLabel,
   onSecondary,
@@ -38,6 +39,7 @@ export function ConfirmModal({
   executing: boolean;
   resultErrors?: Diagnostic[] | null;
   error?: string | null;
+  errorTone?: "error" | "warning";
   children?: ReactNode;
   secondaryLabel?: string;
   onSecondary?: () => void;
@@ -98,8 +100,8 @@ export function ConfirmModal({
 
         </div>
 
-        <div data-testid="confirm-modal-feedback" className="mt-4 max-h-32 shrink-0 overflow-y-auto break-words">
-          {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+        <div data-testid="confirm-modal-feedback" tabIndex={error || resultErrors?.length ? 0 : undefined} className="mt-4 max-h-32 shrink-0 overflow-y-auto break-words">
+          {error && <p role="alert" className={`text-sm ${errorTone === "warning" ? "text-warning" : "text-destructive"}`}>{error}</p>}
           {resultErrors && resultErrors.length > 0 && <ErrorPanel title={t("执行失败")} errors={resultErrors} />}
         </div>
         <div className="mt-3 flex shrink-0 flex-wrap justify-end gap-2">

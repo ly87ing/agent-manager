@@ -8,11 +8,16 @@ mod scope;
 pub(crate) mod status;
 mod uv_metadata;
 mod uv_metadata_files;
+mod uv_postcondition;
 
 use anyhow::{bail, Result};
 use serde_json::Value;
 
 use crate::native::{Context, Request};
+
+pub(crate) fn has_unverified_version(error: &anyhow::Error) -> bool {
+    error.is::<uv_postcondition::UnverifiedVersion>()
+}
 
 pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let verb = req.command.split([':', '.']).nth(1).unwrap_or_default();
