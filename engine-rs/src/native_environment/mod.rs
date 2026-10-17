@@ -17,6 +17,22 @@ mod repair;
 mod repair_linux;
 #[cfg(any(target_os = "linux", test))]
 mod repair_linux_desktop;
+#[cfg(target_os = "linux")]
+mod repair_linux_ntp;
+#[cfg(target_os = "linux")]
+mod repair_linux_ntp_authorization;
+#[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
+mod repair_linux_ntp_config;
+#[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
+mod repair_linux_ntp_file;
+#[cfg(target_os = "linux")]
+mod repair_linux_ntp_helper;
+#[cfg(any(target_os = "linux", test))]
+mod repair_linux_ntp_lease;
+#[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
+mod repair_linux_ntp_metadata;
+#[cfg(any(target_os = "linux", all(test, target_os = "macos")))]
+mod repair_linux_ntp_protocol;
 #[cfg(any(target_os = "linux", test))]
 mod repair_linux_region;
 #[cfg(any(target_os = "linux", test))]
@@ -720,6 +736,16 @@ mod tests;
 // Runs before either desktop or CLI initialization; malformed helper arguments
 // never inspect HOME, configuration, credentials or application storage.
 pub(crate) fn clock_helper_cli(args: &[String]) -> Option<i32> {
+    if args.first().map(String::as_str) == Some("--environment-ntp-helper") {
+        #[cfg(target_os = "linux")]
+        {
+            return Some(repair_linux_ntp_helper::run(args));
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            return Some(2);
+        }
+    }
     if args.first().map(String::as_str) != Some("--environment-clock-helper") {
         return None;
     }

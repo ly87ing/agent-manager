@@ -11,6 +11,9 @@ export function repairStatus(status: string) {
 }
 function label(id: string, platform?: EnvironmentRepairPlan["platform"]) {
   if (id === "language.region" && platform === "windows") return t("用户所在地区");
+  if (platform === "linux" && id === "ntp.server") return t("设置当前 timesyncd 实例的运行时 NTP 列表");
+  if (id === "ntp.server.persistent") return t("保存标准主机路径的 NTP 配置文件");
+  if (id === "ntp.server.directory") return t("创建 NTP 配置目录");
   return ({ "time.timezone": t("系统时区"), "time.automatic_timezone": t("自动设置时区"), "ntp.server": t("配置的时间服务器"), "ntp.automatic_time": t("自动设置时间"),
     "language.preferred": t("首选语言顺序"), "language.region": t("地区（系统区域格式）"), "language.independent_formats": t("保持区域格式独立于语言") } as Record<string, string>)[id] ?? id.replace("session.", "");
 }
@@ -56,6 +59,10 @@ export function EnvironmentRepairDialog({ profile, onResult, onClose }: {
   const items = result?.items ?? plan?.items ?? [];
   const needsProcessVerification = items.some(item => item.id.startsWith("session.") || item.id.startsWith("language."));
   const gnomeFormats = platform === "linux" && items.some(item => item.id === "language.region");
+  const linuxNtp = platform === "linux" && Boolean(profile.target.ntp_server);
+  const ntpStatus = (id: string, status: string) => status === "verified" && linuxNtp ? ({
+    "ntp.server": t("运行时列表已设置并读回"), "ntp.server.persistent": t("文件已保存并读回"), "ntp.server.directory": t("目录已创建并读回"),
+  } as Record<string, string>)[id] : undefined;
   return <ConfirmModal title={t("自动修复环境")} description={t("所选 Profile：{0}。确认以下变更及影响范围后执行。", profile.name)} risk="write-local" riskLabel={t("修改系统与用户设置")}
     executing={executing} confirmLabel={result ? t("关闭") : t("确认自动修复")} confirmDisabled={!result && (loading || !plan)} onConfirm={() => void apply()} onClose={onClose}
     error={error} secondaryLabel={error || result ? t("重新预览修复") : undefined} onSecondary={() => setReload((value) => value + 1)}>
@@ -69,10 +76,13 @@ export function EnvironmentRepairDialog({ profile, onResult, onClose }: {
       {needsProcessVerification && !gnomeFormats && <p className="text-xs text-muted-foreground">{platform === "windows" ? t("Windows 会通知应用环境变量已改变；当前检查进程保持原样。请在重新启动的目标应用中验证。shell 文件和登录项保持不变。") : t("已有应用和终端不会被退出或改写；请保存工作后重新启动，并在目标应用中验证。shell 文件和登录项保持不变。")}</p>}
       {plan && items.some(item => item.id.startsWith("session.")) && <p className="break-all text-xs text-muted-foreground">{t("环境变量范围：{0}", plan.session_scope)}</p>}
       {profile.target.ntp_server && <p className="break-all text-xs">{t("复查会查询 {0} 的 UDP 123 端口。", profile.target.ntp_server)}</p>}
-      {profile.target.ntp_server && profile.target.max_clock_offset_ms && <p className="text-xs">{t("时间偏差容限：± {0} ms。仅在新测量明确超限时校正时钟，可能再次请求系统授权。", String(profile.target.max_clock_offset_ms))}</p>}
+      {linuxNtp && <><p className="break-all text-xs">{t("标准主机路径：/etc/systemd/timesyncd.conf.d/90-agent-manager.conf。需要时创建目录；先保存文件，再设置运行时列表。")}</p>
+        <p className="text-xs text-amber-500">{t("设置运行时列表可能使原生时间服务立即查询服务器并调整系统时钟，早于本工具另行测量和授权的校时步骤。")}</p>
+        <p className="text-xs text-muted-foreground">{t("不会重启时间服务。以后启动的实例是否加载此主机路径文件仍未验证；文件和运行时列表回读不代表实际 NTP 对端、同步状态或时钟准确度已验证。")}</p></>}
+      {profile.target.ntp_server && profile.target.max_clock_offset_ms && <p className="text-xs">{linuxNtp ? t("额外校时步骤的偏差容限：± {0} ms；需要新的测量和单独系统授权。", String(profile.target.max_clock_offset_ms)) : t("时间偏差容限：± {0} ms。仅在新测量明确超限时校正时钟，可能再次请求系统授权。", String(profile.target.max_clock_offset_ms))}</p>}
       <div className="space-y-2">{items.map((item) => <div key={item.id} className="rounded border p-2 text-xs" data-repair-id={item.id}>
-        <div className="flex flex-wrap justify-between gap-2"><span className="font-medium">{label(item.id, platform)}</span><span>{platform === "linux" && ["time.automatic_timezone", "language.region"].includes(item.id) && item.status === "verified" ? t("偏好已保存并读回") : repairStatus(item.status)}</span></div>
-        <p className="mt-1 break-all font-mono">{value(item.before)} → {value(item.expected)}</p>
+        <div className="flex flex-wrap justify-between gap-2"><span className="font-medium">{label(item.id, platform)}</span><span>{ntpStatus(item.id, item.status) ?? (platform === "linux" && ["time.automatic_timezone", "language.region"].includes(item.id) && item.status === "verified" ? t("偏好已保存并读回") : repairStatus(item.status))}</span></div>
+        <p className="mt-1 break-all font-mono">{item.id === "ntp.server.directory" ? t("不存在 → 创建目录") : <>{value(item.before)} → {value(item.expected)}</>}</p>
         <p className="mt-1 text-muted-foreground">{t("影响范围：{0}", item.scope === "system" ? t("本机系统") : item.scope === "user" ? t("当前用户") : t("后续启动的会话进程"))}</p>
       </div>)}</div>
       {platform === "linux" && profile.target.automatic_timezone != null && <p className="text-xs text-muted-foreground">{t("GNOME 自动时区仅验证偏好回读；定位与自动切换效果尚未验证。开启需要定位已启用且桌面服务有时区权限。")}</p>}

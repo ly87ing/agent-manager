@@ -288,7 +288,7 @@ GNOME has drained an earlier request or that geolocation/automatic switching
 works. A final timezone drift is partial, not an invitation to compete with the
 daemon. CLI `verification_limits` and the dialog retain that distinction;
 auto-only changes do not request an application restart.
-Automatic time/NTP and desktop language repair remain unavailable here.
+Automatic time-service activation/persistence and desktop language repair remain unavailable here.
 GNOME regional-format repair is described below.
 
 GUI CI verifies actual apply, future-unit inheritance, no-op, stale refusal and
@@ -340,6 +340,87 @@ isolated keyfile fixture exercises real preview/confirmation, stale refusal,
 untargeted preference preservation, idempotency and unavailable locales/desktops.
 No personal host settings are test targets. Both scripts are guarded
 against execution outside that explicit CI scope.
+
+Linux manual NTP repair has two separate targets: the original running
+timesyncd instance's `RuntimeNTPServers`, and a dedicated file at the standard
+host path `/etc/systemd/timesyncd.conf.d/90-agent-manager.conf`. Preview names
+both operations, with independent unchanged decisions and directory creation
+when needed. An already-matching runtime list does not hide a missing saved file.
+The runtime list must be empty or already match the selected server in this
+slice. This does not change inspection's effective runtime-or-system plus link
+candidate contract, or establish a currently selected NTP peer.
+
+Repair requires a supported existing native interface and a trusted system-bus
+socket. It binds bus IDs, unique owners, the PID-1 manager, daemon PID/birth/UID,
+canonical loaded-unit identity and invocation, loaded server arrays, poll limits
+and unit enablement. `GetUnitByPIDFD` looks up an existing instance without loading
+a unit; every native service call uses `NoAutoStart`. Typed introspection verifies
+the setter's input signature before any write. Ordinary-user preview does not
+read another UID's `/proc/PID/exe`; that read requires ptrace permission. The
+elevated helper independently pins the root-owned installed executable's identity,
+metadata and digest before READY and requires the same proof before each change.
+Unavailable process, API, configuration or metadata evidence stays unavailable.
+
+The fixed-path reader bounds configuration bytes, names and work checkpoints.
+It rejects symlinks, hardlinked files, unsafe ancestors, foreign target contents,
+unsupported syntax, later-priority overrides and lower same-name files. Existing
+admitted `0600`/`0640`/`0644` modes and groups are preserved; private files an
+ordinary caller cannot read remain unavailable in preview. The first slice
+refuses extended destination/parent metadata instead of dropping ACLs or labels.
+Its file-publication slice requires the opened descriptor's mount ID to resolve
+to the concrete ext4 driver, as well as the ext-family filesystem magic. Other
+or stacked filesystems remain unavailable. `flistxattr` must successfully report
+no attributes; unsupported inspection is not an empty result. Both
+`FS_IOC_GETFLAGS` and `FS_IOC_FSGETXATTR` must succeed on that descriptor. Only
+ext4's extent-layout flag and directory-index flag are admitted; all policy or
+unknown bits, nonzero project IDs and allocation hints are refused. The existing
+target, creation parent, new directory receipt and staged file use this gate.
+Special permission bits, including inherited setgid-directory policy, are refused.
+This finite ext4 admission does not claim to attest arbitrary filesystem policy.
+A retained anonymous memfd's trusted attribute directly proves the helper's
+current initial-namespace inspection privilege. It creates no named file or
+persistent setting. The fixed helper never changes thread credentials or
+namespaces; its workers inherit those privileges. Unsupported probes fail closed.
+
+After confirmation, `pkexec --disable-internal-agent` launches the existing
+GUI-independent helper with a cleared environment. Its fixed NTP entry accepts
+only a server, original PID/birth/UID, at most two minutes of boot-time lease and
+confirmation. It accepts no HOME, database or file paths. The helper checks the
+real parent, `PKEXEC_UID`, caller pidfd and pipe liveness; it takes a cooperative
+host lock on the trusted `/etc/systemd` directory. READY carries the fresh common
+digest and is zero-write. The caller obtains any timezone authorization and
+rechecks its complete original Settings context before COMMIT. NTP completes
+before GNOME and session changes; the existing automatic-timezone ordering is
+retained within the subsequent timezone batch.
+
+The helper rechecks its lease, instance, executable and exact configuration before
+each declared mutation. It writes only the dedicated override using exclusive
+staging, file sync, rename and directory sync; new target publication cannot
+overwrite a concurrently inserted file. Existing replacement uses a fresh
+comparison under the cooperative lock, which does not exclude external editors.
+Only durable file publication permits the native runtime setter. Its authorization
+fast path requires the retained bus connection's authenticated root UID and the
+recognized daemon's non-root real UID. The native setter may query servers,
+reselect a peer and adjust the clock before the separate measurement-gated clock
+stage; preview explicitly discloses this.
+
+DONE contains narrow receipts, not raw configuration or environment values.
+Independent caller readback must match an expected state projected from the
+original baseline with only the owned file/directory receipts and runtime list.
+ACK releases the helper's host lock. Partial publication, drift, deadline expiry,
+lost responses or unsuccessful acknowledgment stop subsequent writes. EOF and
+pidfd/deadline checks gate new writes; a non-root group signal cannot prove an
+elevated operation or an already-dispatched RPC was revoked. No blind rollback,
+retry, service restart/reload, enablement change or provider installation occurs.
+
+Every NTP repair result, including no-op, retains this limit: whether a future
+instance loads the saved standard-host-path override on this device remains
+unverified. Runtime/file readback does not prove actual peer, synchronization or
+clock accuracy. The guarded disposable
+[native NTP fixture](../../scripts/verify-linux-ntp.mjs) checks real vendor APIs,
+ordinary-user authorization, independent readback and external restart loading;
+that runner-specific loading evidence does not remove the user's limit. Native
+dialog/PAM and installed-desktop acceptance remain separate.
 
 #### macOS
 

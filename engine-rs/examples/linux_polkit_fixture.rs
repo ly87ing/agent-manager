@@ -16,11 +16,24 @@ mod fixture {
     const AGENT: &str = "/io/github/agentmanager/CIFixture";
     const ACTION: &str = "org.freedesktop.timedate1.set-timezone";
 
+    #[derive(Debug, zbus::DBusError)]
+    #[zbus(prefix = "org.freedesktop.PolicyKit1.Error")]
+    enum AuthenticationError {
+        Cancelled(String),
+        Failed(String),
+    }
+    impl From<zbus::fdo::Error> for AuthenticationError {
+        fn from(error: zbus::fdo::Error) -> Self {
+            Self::Failed(error.to_string())
+        }
+    }
+
     struct Agent {
         uid: u32,
         pid: u32,
         authority: String,
         external_zone: Option<String>,
+        ntp_mode: Option<String>,
         done: Arc<AtomicBool>,
     }
     #[zbus::interface(name = "org.freedesktop.PolicyKit1.AuthenticationAgent")]
@@ -36,20 +49,49 @@ mod fixture {
             identities: Vec<(String, HashMap<String, OwnedValue>)>,
             #[zbus(connection)] connection: &zbus::Connection,
             #[zbus(header)] header: zbus::message::Header<'_>,
-        ) -> zbus::fdo::Result<()> {
+        ) -> Result<(), AuthenticationError> {
             if header.sender().map(|name| name.as_str()) != Some(self.authority.as_str())
                 || details.get("polkit.subject-pid") != Some(&self.pid.to_string())
                 || self.done.load(Ordering::Acquire)
-                || action != ACTION
+                || action
+                    != if self.ntp_mode.is_some() {
+                        "org.freedesktop.policykit.exec"
+                    } else {
+                        ACTION
+                    }
                 || !identities.iter().any(|(kind, fields)| {
                     kind == "unix-user"
                         && fields.get("uid").and_then(|uid| u32::try_from(uid).ok())
                             == Some(self.uid)
                 })
             {
-                return Err(zbus::fdo::Error::AccessDenied(
-                    "Unexpected CI identity/action".into(),
-                ));
+                eprintln!("CI authentication rejected: authority={}, subject={}, action={}, self_identity={}",
+                    header.sender().map(|name| name.as_str()) == Some(self.authority.as_str()),
+                    details.get("polkit.subject-pid") == Some(&self.pid.to_string()),
+                    action == if self.ntp_mode.is_some() { "org.freedesktop.policykit.exec" } else { ACTION },
+                    identities.iter().any(|(kind, fields)| kind == "unix-user" && fields.get("uid").and_then(|uid| u32::try_from(uid).ok()) == Some(self.uid)));
+                return Err(
+                    zbus::fdo::Error::AccessDenied("Unexpected CI identity/action".into()).into(),
+                );
+            }
+            if let Some(mode) = &self.ntp_mode {
+                if mode == "ntp-cancel" {
+                    self.done.store(true, Ordering::Release);
+                    return Err(AuthenticationError::Cancelled(
+                        "CI authentication dismissed".into(),
+                    ));
+                }
+                if mode == "ntp-change" {
+                    let path = "/etc/systemd/timesyncd.conf.d/80-agent-manager-ci.conf";
+                    let text = "# Agent Manager isolated NTP fixture v1\n[Time]\nFallbackNTP=198.51.100.2\nPollIntervalMinSec=32\nPollIntervalMaxSec=2048\n";
+                    if std::fs::read_to_string(path).ok().as_deref() != Some(text) {
+                        return Err(
+                            zbus::fdo::Error::Failed("Changed CI NTP baseline".into()).into()
+                        );
+                    }
+                    std::fs::write(path, format!("{text}# CI authorization drift\n"))
+                        .map_err(|_| zbus::fdo::Error::Failed("CI NTP drift failed".into()))?;
+                }
             }
             if let Some(zone) = &self.external_zone {
                 connection
@@ -101,10 +143,6 @@ mod fixture {
 
     pub fn run() {
         assert_eq!(std::env::var("CI").as_deref(), Ok("true"));
-        assert_eq!(
-            std::env::var("AM_ISOLATED_LINUX_TIMEZONE").as_deref(),
-            Ok("1")
-        );
         assert_eq!(unsafe { libc::geteuid() }, 0);
         let args: Vec<_> = std::env::args().skip(1).collect();
         assert_eq!(args.len(), 4);
@@ -115,8 +153,19 @@ mod fixture {
         let external_zone = match args[3].as_str() {
             "allow" => None,
             "change" => Some("Pacific/Honolulu".into()),
+            "ntp-allow" | "ntp-cancel" | "ntp-change" => None,
             _ => panic!("Invalid CI authentication mode"),
         };
+        let ntp_mode = args[3].starts_with("ntp-").then(|| args[3].clone());
+        assert_eq!(
+            std::env::var(if ntp_mode.is_some() {
+                "AM_ISOLATED_LINUX_NTP"
+            } else {
+                "AM_ISOLATED_LINUX_TIMEZONE"
+            })
+            .as_deref(),
+            Ok("1")
+        );
         let done = Arc::new(AtomicBool::new(false));
         zbus::block_on(async {
             let connection = zbus::connection::Builder::system()
@@ -147,6 +196,7 @@ mod fixture {
                         pid,
                         authority,
                         external_zone,
+                        ntp_mode,
                         done: done.clone(),
                     },
                 )

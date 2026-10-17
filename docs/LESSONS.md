@@ -6,6 +6,51 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: pipe readiness must use the same read layer
+
+- Native NTP acceptance reached real authorization cancellation after explicitly
+  installing the separately packaged `pkexec`; an available Polkit authority
+  does not prove that executable exists.
+- The positive repair then exhausted its pipe deadline. Rust `Stdin::read`
+  buffers ahead, while `poll` sees only kernel bytes. Read the same descriptor
+  directly, and test actual subprocess stdin with multiple frames and an open
+  writer. The old UnixStream-only tests passed without exercising this buffer;
+  the added stdin regression failed before the fix.
+
+## 2026-10-16: filesystem rehearsals need platform-specific metadata evidence
+
+- An empty xattr list does not cover inode flags or project quotas. Replacing
+  an existing file with a new inode can discard `nodump` or its project ID.
+  Require successful native policy getters and a reviewed concrete filesystem
+  driver, rejecting policy and unknown results rather than copying them. Shared
+  ext-family magic alone cannot distinguish ext2, ext3 and ext4 implementations.
+- Fresh macOS fixture nodes acquired `com.apple.provenance`, so a Linux
+  no-extended-metadata admission rule rejected the filesystem rehearsal. Keep
+  production Linux strict; the macOS-only rehearsal admits that observed host
+  attribute and still rejects an explicitly added unknown attribute.
+- A macOS rename/readback result does not exercise Linux metadata admission or
+  elevated authorization. Require native Linux receipts before accepting those
+  claims; do not infer an ACL or security label is absent from an unprivileged
+  attribute listing. The elevated helper must establish its inspection privilege
+  before any write, then repeat the source checks.
+- A socket-pair test blocked while filling the write buffer before its reader
+  started. Feed oversized input concurrently and assert the actual bounded-read
+  result; a hanging test is not evidence of a product timeout.
+- Parse generated Polkit policy text as well as the containing JavaScript file.
+  A template literal consumed regex slash escapes; `node --check` on the script
+  passed while the resulting policy was invalid. Preserve those escapes and
+  compile the exact generated policy before installing the disposable fixture.
+- Outer script syntax also missed a newline escape consumed in an embedded Node
+  program. Parse the actual generated inner program before executing it elevated.
+- Suppressing a native sd-bus reply must still return a positive handled result.
+  Returning zero lets dispatch emit `UnknownMethod`, testing an error response
+  instead of a lost reply. Independently read both effects before checking status.
+- Polkit action details are restricted to trusted query callers. A CI readiness
+  probe passed details as the ordinary user and failed before the product's
+  authorization challenge. Use a root-only, exact-process marker for the probe;
+  keep the actual product authorization under the ordinary user's real challenge.
+  A generic challenge response alone cannot prove that the intended rule loaded.
+
 ## 2026-10-16: type evidence must be bound into a snapshot version
 
 - The old digest gives a file containing `symlink:target` the same slot as a

@@ -1,5 +1,16 @@
 /** Application copy only; user content and engine diagnostics are never translation keys. */
 export const messages = {
+  "设置当前 timesyncd 实例的运行时 NTP 列表": "Set the current timesyncd instance's runtime NTP list",
+  "保存标准主机路径的 NTP 配置文件": "Save the standard-host-path NTP override file",
+  "创建 NTP 配置目录": "Create the NTP configuration directory",
+  "运行时列表已设置并读回": "Runtime list set and read back",
+  "文件已保存并读回": "File saved and read back",
+  "目录已创建并读回": "Directory created and read back",
+  "不存在 → 创建目录": "Absent → create directory",
+  "标准主机路径：/etc/systemd/timesyncd.conf.d/90-agent-manager.conf。需要时创建目录；先保存文件，再设置运行时列表。": "Standard host path: /etc/systemd/timesyncd.conf.d/90-agent-manager.conf. Create its directory if needed; save the file before setting the runtime list.",
+  "设置运行时列表可能使原生时间服务立即查询服务器并调整系统时钟，早于本工具另行测量和授权的校时步骤。": "Setting the runtime list may make the native time service query servers and adjust the system clock immediately, before this tool's separately measured and authorized clock-correction step.",
+  "不会重启时间服务。以后启动的实例是否加载此主机路径文件仍未验证；文件和运行时列表回读不代表实际 NTP 对端、同步状态或时钟准确度已验证。": "The time service is not restarted. Whether a future instance loads this host-path file remains unverified. File and runtime-list readback do not verify the actual NTP peer, synchronization or clock accuracy.",
+  "额外校时步骤的偏差容限：± {0} ms；需要新的测量和单独系统授权。": "Additional clock-correction tolerance: ± {0} ms; requires a fresh measurement and separate system authorization.",
   "正在读取分享链接关联…": "Reading share-link association…",
   "AppImage 分享链接": "AppImage share links",
   "让桌面使用此 AppImage 打开 agentmanager:// 分享链接。链接只打开导入预览。": "Use this AppImage to open agentmanager:// share links from the desktop. Links open an import preview only.",

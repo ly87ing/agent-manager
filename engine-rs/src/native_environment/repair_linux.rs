@@ -47,6 +47,39 @@ fn bind(bound: &mut Option<(String, String)>, identity: (String, String)) -> boo
     }
 }
 
+fn ntp_extras(
+    server: &str,
+    saved: Option<&str>,
+    directory_missing: Option<bool>,
+    available: bool,
+) -> Vec<super::repair::Item> {
+    let mut items = Vec::new();
+    if directory_missing == Some(true) {
+        items.push(super::repair::Item {
+            id: "ntp.server.directory".into(),
+            scope: "system".into(),
+            before: Some(json!(false)),
+            expected: json!(true),
+            status: if available { "change" } else { "unavailable" }.into(),
+        });
+    }
+    items.push(super::repair::Item {
+        id: "ntp.server.persistent".into(),
+        scope: "system".into(),
+        before: saved.map(|server| json!(server)),
+        expected: json!(server),
+        status: if !available {
+            "unavailable"
+        } else if saved == Some(server) {
+            "unchanged"
+        } else {
+            "change"
+        }
+        .into(),
+    });
+    items
+}
+
 #[cfg(target_os = "linux")]
 #[derive(Clone, PartialEq, Eq, serde::Serialize)]
 struct Manager {
@@ -174,6 +207,7 @@ pub(super) struct LinuxSettings {
     time: Option<super::repair_linux_time::State>,
     desktop: Option<super::repair_linux_desktop::State>,
     region: Option<super::repair_linux_region::State>,
+    ntp: Option<super::repair_linux_ntp::State>,
     context: Value,
 }
 
@@ -209,6 +243,10 @@ impl Settings for LinuxSettings {
             .region
             .as_ref()
             .and_then(|_| super::repair_linux_region::read());
+        self.ntp = target
+            .ntp_server
+            .as_ref()
+            .and_then(|_| super::repair_linux_ntp::read());
         let zone = target.timezone.as_ref().map(|zone| {
             std::fs::metadata(std::path::Path::new("/usr/share/zoneinfo").join(zone))
                 .is_ok_and(|meta| meta.is_file())
@@ -225,7 +263,7 @@ impl Settings for LinuxSettings {
                     )
                 })
                 .unwrap_or_else(|| "systemd user manager unavailable".into()),
-            context: json!({"manager":self.manager,"locale_installed":locale,"zone_installed":zone,"time":self.time,"gnome":gnome,"desktop_time":self.desktop,"region":self.region}),
+            context: json!({"manager":self.manager,"locale_installed":locale,"zone_installed":zone,"time":self.time,"gnome":gnome,"desktop_time":self.desktop,"region":self.region,"ntp":self.ntp}),
             ..Snapshot::default()
         };
         snapshot.unavailable.extend(
@@ -237,6 +275,30 @@ impl Settings for LinuxSettings {
             ]
             .map(str::to_string),
         );
+        if let Some(server) = target.ntp_server.as_deref() {
+            let server = server.trim_end_matches('.').to_ascii_lowercase();
+            let available = self
+                .ntp
+                .as_ref()
+                .is_some_and(|state| state.available(&server));
+            snapshot.values.insert(
+                "ntp.server".into(),
+                self.ntp.as_ref().map(|state| state.runtime_before()),
+            );
+            if available {
+                snapshot.unavailable.remove("ntp.server");
+            }
+            snapshot.extras = ntp_extras(
+                &server,
+                self.ntp
+                    .as_ref()
+                    .and_then(|state| state.configuration.saved.as_deref()),
+                self.ntp
+                    .as_ref()
+                    .map(|state| state.configuration.directory_missing()),
+                available,
+            );
+        }
         snapshot.values.insert(
             "language.region".into(),
             self.region.as_ref().map(|state| json!(state.locale)),
@@ -314,19 +376,118 @@ impl Settings for LinuxSettings {
         if items.iter().any(|item| {
             !matches!(
                 item.id.as_str(),
-                "time.timezone" | "time.automatic_timezone" | "language.region"
+                "time.timezone"
+                    | "time.automatic_timezone"
+                    | "language.region"
+                    | "ntp.server"
+                    | "ntp.server.persistent"
+                    | "ntp.server.directory"
             )
         }) {
             anyhow::bail!("Unsupported Linux system repair batch.");
         }
         let target = self.target.clone();
         let mut baseline = self.context.clone();
+        let ntp_before = self.ntp.clone();
+        let has_ntp = items.iter().any(|item| item.id.starts_with("ntp.server"));
+        // Obtain every new Settings authorization before any system or user
+        // preference write. The NTP helper remains zero-write at READY.
+        let ntp_authorization = if has_ntp {
+            Some(
+                ntp_before
+                    .as_ref()
+                    .zip(target.ntp_server.as_deref())
+                    .ok_or("unavailable")
+                    .and_then(|(before, server)| {
+                        super::repair_linux_ntp_authorization::authorize(before, server)
+                    }),
+            )
+        } else {
+            None
+        };
+        let ntp_failure = ntp_authorization
+            .as_ref()
+            .and_then(|result| result.as_ref().err().copied());
         let authorization = items
             .iter()
             .any(|item| item.id == "time.timezone")
-            .then(super::repair_linux_time::authorize);
+            .then_some(())
+            .filter(|_| ntp_failure.is_none())
+            .map(|_| super::repair_linux_time::authorize());
         let mut results = Vec::new();
-        for item in items {
+        let failure =
+            ntp_failure.or_else(|| authorization.as_ref().and_then(|auth| auth.failure()));
+        if let Some(status) = failure {
+            let mut result = items
+                .iter()
+                .find(|item| {
+                    if ntp_failure.is_some() {
+                        item.id.starts_with("ntp.server")
+                    } else {
+                        item.id == "time.timezone"
+                    }
+                })
+                .unwrap_or(&items[0])
+                .clone();
+            result.status = if status == "cancelled" {
+                "not_applied"
+            } else {
+                status
+            }
+            .into();
+            results.push(result);
+            return Ok((
+                if status == "cancelled" {
+                    "cancelled"
+                } else {
+                    "partial"
+                }
+                .into(),
+                results,
+                None,
+            ));
+        }
+        if let Some(Ok(authorized)) = ntp_authorization {
+            if self.snapshot(&target)?.context != baseline {
+                let mut result = items
+                    .iter()
+                    .find(|item| item.id.starts_with("ntp.server"))
+                    .unwrap()
+                    .clone();
+                result.status = "stale".into();
+                return Ok(("partial".into(), vec![result], None));
+            }
+            let before = ntp_before.as_ref().expect("NTP authorization baseline");
+            let server = target.ntp_server.as_deref().expect("NTP target");
+            let server = server.trim_end_matches('.').to_ascii_lowercase();
+            let outcome = authorized.apply(before, &server, |expected| {
+                let mut projected = baseline.clone();
+                projected["ntp"] = json!(expected);
+                self.snapshot(&target)
+                    .is_ok_and(|snapshot| snapshot.context == projected)
+            });
+            for item in items
+                .iter()
+                .filter(|item| item.id.starts_with("ntp.server"))
+            {
+                let mut result = item.clone();
+                result.status = match item.id.as_str() {
+                    "ntp.server.persistent" => &outcome.saved,
+                    "ntp.server.directory" => &outcome.directory,
+                    _ => &outcome.runtime,
+                }
+                .clone();
+                results.push(result);
+            }
+            if !outcome.complete {
+                return Ok(("partial".into(), results, None));
+            }
+            baseline["ntp"] = json!(outcome.expected.expect("independently verified NTP state"));
+        }
+        for item in items
+            .iter()
+            .filter(|item| !item.id.starts_with("ntp.server"))
+        {
             let mut result = item.clone();
             if let Some(status) = authorization.as_ref().and_then(|auth| auth.failure()) {
                 result.status = if status == "cancelled" {
@@ -507,6 +668,48 @@ impl Settings for LinuxSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn persistent_ntp_preview_is_independent_of_the_runtime_noop() {
+        let target: super::super::Target =
+            serde_json::from_value(json!({"ntp_server":"selected.example"})).unwrap();
+        let mut snapshot = super::super::repair::Snapshot::default();
+        snapshot
+            .values
+            .insert("ntp.server".into(), Some(json!("selected.example")));
+        snapshot.extras = ntp_extras("selected.example", None, Some(true), true);
+        let plan = super::super::repair::plan(&target, &snapshot).unwrap();
+        assert_eq!(
+            plan.items
+                .iter()
+                .find(|item| item.id == "ntp.server")
+                .unwrap()
+                .status,
+            "unchanged"
+        );
+        assert!(plan
+            .items
+            .iter()
+            .filter(|item| item.id != "ntp.server")
+            .all(|item| item.status == "change"));
+        assert!(plan
+            .items
+            .iter()
+            .find(|item| item.id == "ntp.server.persistent")
+            .unwrap()
+            .before
+            .is_none());
+        let saved = ntp_extras(
+            "selected.example",
+            Some("selected.example"),
+            Some(false),
+            true,
+        );
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].status, "unchanged");
+        assert!(ntp_extras("selected.example", None, None, false)
+            .iter()
+            .all(|item| item.status == "unavailable"));
+    }
     #[test]
     fn repair_never_rebinds_to_a_restarted_manager_or_bus() {
         let mut bound = None;
