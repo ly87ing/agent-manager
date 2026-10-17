@@ -2193,3 +2193,32 @@ workflows are pending at this receipt. Real assistant consumption, installed
 Windows/Linux/arm64 desktop workflows, multi-volume low-space acceptance and
 signed updating remain unverified. No personal OS setting, real assistant file,
 installed application, Release or tag changed.
+
+## 2026-10-17: managed PyPI command-entry verification
+
+Main `a3abb7c7` checks every declared managed PyPI command before completion
+metadata and again before current selection. Matching version metadata alone no
+longer permits a missing command to displace the previous current version.
+Targets must resolve to ordinary files inside the candidate, with Unix execute
+bits. Valid internal uv links remain eligible; a Windows outer shim alone does
+not prove its target exists. Entry failures use `PROGRAM_ENTRY_UNVERIFIED`, retain
+the candidate and preserve prior current/entry bytes. Incomplete retries execute
+no installer. Switches and completed-version reuse receive the same checks.
+The [program reference](subsystems/programs.md) records the failure boundary.
+
+Exact candidate `6579e174` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39018479529)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39018478093)
+without retry. Native macOS passed 307 library cases, Windows 283 and Linux 309,
+all integration targets and four installer builds. Real uv standard/custom/managed
+offline upgrades and entry execution passed on all three systems. Local Tauri 27,
+frontend 698, production build and Windows all-target compilation passed. Actual
+CLI payload renderer checks covered confirmation, failure, retained inspection
+and retry at 1000/760 px in both languages, with final diagnostics reachable.
+
+Main runtime/tests were compared with that candidate before push; local, origin
+and remote main SHA readbacks matched. Post-push workflows are pending at this
+receipt. Command-file evidence is not interpreter/shebang availability, arbitrary
+runtime functionality or atomic protection against external writers. Installed
+client consumption, other-manager postconditions and general rollback conflicts
+remain unverified. No personal OS setting, real assistant file, installed
+application, Release or tag changed.
