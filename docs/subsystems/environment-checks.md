@@ -318,7 +318,16 @@ GNOME has drained an earlier request or that geolocation/automatic switching
 works. A final timezone drift is partial, not an invitation to compete with the
 daemon. CLI `verification_limits` and the dialog retain that distinction;
 auto-only changes do not request an application restart.
-Automatic time-service activation/persistence and desktop language repair remain unavailable here.
+Automatic time-service activation/persistence and desktop language repair remain
+unavailable here. A known timedated `NTP` value matching the selected
+`automatic_time` target is an unchanged item, so an otherwise empty confirmed
+repair is a zero-write no-op. A different or unknown value remains unavailable;
+the preview binds the observation so subsequent drift refuses the old preview.
+This Boolean reports the native active-service switch, not provider boot
+enablement or synchronization. Results retain that limit. `SetNTP` is not used:
+its cached provider list and installation effects are not exposed by this
+Boolean, and its force-enable/disable operations can reach other units and
+aliases. Merely checking the Boolean before and after would miss those changes.
 GNOME regional-format repair is described below.
 
 GUI CI verifies actual apply, future-unit inheritance, no-op, stale refusal and

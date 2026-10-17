@@ -29,6 +29,26 @@ impl Drop for PendingRepair {
 }
 
 struct Fixture(std::path::PathBuf);
+
+struct Timedated {
+    automatic: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    writes: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+#[zbus::interface(name = "org.freedesktop.timedate1")]
+impl Timedated {
+    #[zbus(property, name = "NTP")]
+    fn ntp(&self) -> bool {
+        self.automatic.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    #[zbus(name = "SetNTP")]
+    fn set_ntp(&self, automatic: bool, _interactive: bool) {
+        self.writes
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.automatic
+            .store(automatic, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 impl Fixture {
     fn path(&self) -> &std::path::Path {
         &self.0
@@ -163,7 +183,7 @@ fn inspection_does_not_activate_stopped_time_or_locale_services() {
         .args([
             "environment:repair-preview",
             "--spec",
-            r#"{"timezone":"Etc/UTC"}"#,
+            r#"{"timezone":"Etc/UTC","automatic_time":true}"#,
             "--json",
         ])
         .env("DBUS_SYSTEM_BUS_ADDRESS", ready.trim())
@@ -183,6 +203,14 @@ fn inspection_does_not_activate_stopped_time_or_locale_services() {
         .find(|item| item["id"] == "time.timezone")
         .unwrap();
     assert_eq!(timezone["status"], "unavailable", "{result}");
+    let automatic_time = result["data"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == "ntp.automatic_time")
+        .unwrap();
+    assert_eq!(automatic_time["before"], serde_json::Value::Null);
+    assert_eq!(automatic_time["status"], "unavailable");
     assert!(
         !timezone_marker.exists(),
         "Repair preview activated the timezone service"
@@ -279,6 +307,85 @@ fn inspection_does_not_activate_stopped_time_or_locale_services() {
         system_locale_marker.exists(),
         "The system-locale activation control did not run"
     );
+
+    let automatic = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let writes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let daemon = zbus::blocking::connection::Builder::address(ready.trim())
+        .unwrap()
+        .name("org.freedesktop.timedate1")
+        .unwrap()
+        .serve_at(
+            "/org/freedesktop/timedate1",
+            Timedated {
+                automatic: automatic.clone(),
+                writes: writes.clone(),
+            },
+        )
+        .unwrap()
+        .build()
+        .unwrap();
+    let cli = |verb: &str, requested: bool, flags: &[&str]| {
+        let spec = format!("{{\"automatic_time\":{requested}}}");
+        let output = Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
+            .args([verb, "--spec", &spec, "--json"])
+            .args(flags)
+            .env("DBUS_SYSTEM_BUS_ADDRESS", ready.trim())
+            .env("DBUS_SESSION_BUS_ADDRESS", ready.trim())
+            .env("HOME", &home)
+            .env("AGENT_MANAGER_DATA_DIR", &data)
+            .env("XDG_CURRENT_DESKTOP", "")
+            .output()
+            .unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(!home.exists());
+        assert!(!data.exists());
+        assert_eq!(writes.load(std::sync::atomic::Ordering::SeqCst), 0);
+        result
+    };
+    for actual in [false, true] {
+        automatic.store(actual, std::sync::atomic::Ordering::SeqCst);
+        let preview = cli("environment:repair-preview", actual, &[]);
+        assert_eq!(preview["ok"], true, "{preview}");
+        assert_eq!(preview["data"]["items"][0]["before"], actual);
+        assert_eq!(preview["data"]["items"][0]["status"], "unchanged");
+        let base = preview["data"]["base"].as_str().unwrap();
+        let result = cli("environment:repair", actual, &["--base", base, "--confirm"]);
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["data"]["status"], "not_needed");
+        assert!(!result["data"]["verification_limits"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+
+        let different = cli("environment:repair-preview", !actual, &[]);
+        assert_eq!(different["data"]["items"][0]["before"], actual);
+        assert_eq!(different["data"]["items"][0]["status"], "unavailable");
+        let base = different["data"]["base"].as_str().unwrap();
+        let result = cli(
+            "environment:repair",
+            !actual,
+            &["--base", base, "--confirm"],
+        );
+        assert_eq!(result["data"]["status"], "partial");
+    }
+    let preview = cli("environment:repair-preview", true, &[]);
+    let base = preview["data"]["base"].as_str().unwrap();
+    automatic.store(false, std::sync::atomic::Ordering::SeqCst);
+    let stale = cli("environment:repair", true, &["--base", base, "--confirm"]);
+    assert_eq!(stale["ok"], false, "{stale}");
+    assert!(stale["errors"].as_array().unwrap().iter().any(|error| {
+        error["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("changed after preview"))
+    }));
+    assert!(daemon.release_name("org.freedesktop.timedate1").unwrap());
+    drop(daemon);
+    let missing = cli("environment:repair-preview", true, &[]);
+    assert_eq!(
+        missing["data"]["items"][0]["before"],
+        serde_json::Value::Null
+    );
+    assert_eq!(missing["data"]["items"][0]["status"], "unavailable");
 }
 
 struct Accounts {

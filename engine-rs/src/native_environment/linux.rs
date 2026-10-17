@@ -162,6 +162,17 @@ fn system_properties(service: &str, path: &str, interface: &str) -> Option<Strin
 }
 
 #[cfg(target_os = "linux")]
+pub(super) fn automatic_time() -> Option<bool> {
+    let raw = system_properties(
+        "org.freedesktop.timedate1",
+        "/org/freedesktop/timedate1",
+        "org.freedesktop.timedate1",
+    )?;
+    let values = all_properties(&raw)?;
+    property(values.get("NTP")?, "b")?.as_bool()
+}
+
+#[cfg(target_os = "linux")]
 pub(super) fn collect() -> Observation {
     let kde = super::linux_kde::kde(&std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default());
     let values = system_properties(
