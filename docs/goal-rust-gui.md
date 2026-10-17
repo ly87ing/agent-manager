@@ -1940,3 +1940,53 @@ update loop. Every NTP result keeps its future-loading and clock-evidence limits
 No personal OS setting, real assistant configuration, installed app, Release or
 tag was changed. Code rollback does not undo already confirmed file/runtime
 settings; recovery requires fresh inspection and explicit user-controlled changes.
+
+
+## 2026-10-16: KDE preferences and native mutation lock
+
+Main `a45bc562` closes read-only activation routes in Linux inspection and repair
+preview. Typed `Properties.GetAll` calls use NoAutoStart, and the real CLI fixture
+checks timedated, localed, timesyncd and AccountsService activation markers after
+both entry points, with positive activation controls. Main passed post-push
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/38992691388) and all seven
+[GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38992691376).
+
+Main `56752961` reads KDE's saved language order and regional formats through
+KConfig FullConfig, retaining global/cascaded defaults and immutable policy.
+Two complete bounded snapshots must agree. Missing preferences never inherit
+the checker process or GNOME account defaults. The read-only child disables
+KConfig's writable-home probe and retains filesystem data-write restrictions.
+
+Candidate `01f406f7` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/38991817508)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38991814607).
+The actual Qt 5 / KConfig 5.115 fixture checks saved order, independent formats,
+global immutable/default precedence, missing user/global sources and exact
+file/tree preservation. English/Chinese report layout with saved/unknown values
+passed browser checks at 1000/760 px. Local full verification passed the engine
+suite with 284 library cases and integration harnesses, Tauri 27, frontend 693
+and production build. Native Linux passed 286 library cases and all integrations.
+
+Main `f4bfd2ce` obtains the Windows mutation-lock SID from the current process
+token with TOKEN_QUERY and standard Win32 formatting. It retains the canonical
+Global mutex name, performs no privilege enablement and avoids PowerShell
+startup. Native Windows compares an independent `whoami` SID and old-format
+mutex, then tests a separate holder/contender pair, exact held-lock refusal,
+release and reacquisition under unrelated HOME/profile overrides. The same
+cross-process exclusion regression executes on Linux.
+
+Candidate `560de253` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/38992940349)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38992937490).
+Native Windows passed 262 library cases and all integrations; native Linux
+passed 286 and all integrations, including KDE and NTP acceptance. Main runtime
+sources match the accepted candidates; main-specific documentation history is
+preserved. Local main, fetched origin/main and the remote branch were read back
+at `f4bfd2ce`. Its post-push CI is pending at this receipt.
+
+The KDE candidate's first Windows test failure and Intel DMG Resource busy
+failure were retained; same-commit retries passed. They do not prove a general
+PowerShell timeout or packaging reliability fix. The lock candidate passed its
+full native workflow without retry. These receipts do not establish Qt 6 native
+execution, installed desktop/client business workflows, translation loading,
+login adoption, remaining Linux preference/provider repair or signed updating.
+No personal OS setting, real assistant file, installed application, Release or
+tag was changed.

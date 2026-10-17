@@ -13,8 +13,10 @@ and [scope](EXTENSIONS-ONLY.md).
 
 ## Current acceptance boundary (2026-10-16)
 
-Verified corrections through `4f8707d` add confirmed Linux manual NTP repair to
-the earlier Git source, read-only probe and native login-entry corrections. The
+Verified corrections through `f4bfd2ce` add saved KDE preference inspection,
+non-activating Linux repair reads and native Windows mutation-lock identity to
+the earlier manual NTP, Git source and native login-entry corrections. The
+[reader and lock receipt](goal-rust-gui.md#2026-10-16-kde-preferences-and-native-mutation-lock),
 [manual NTP receipt](goal-rust-gui.md#2026-10-16-linux-manual-ntp-and-native-failure-receipts),
 [previous receipt](goal-rust-gui.md#2026-10-16-git-source-interpretation-and-native-startup-receipts)
 and [snapshot receipt](goal-rust-gui.md#2026-10-16-cross-platform-snapshot-integrity)
@@ -23,13 +25,14 @@ modal and reread checks remain in the [previous receipt](goal-rust-gui.md#2026-1
 
 | Area | Current evidence | Remaining boundary |
 | --- | --- | --- |
-| Extension and saved-tool source | Complete macOS engine suite including 282 library cases and native program/MCP harnesses, Tauri 27, frontend 693, type checking/build and Windows/Linux all-target checks passed for the latest candidate | These are not consumer acceptance of an installed package |
+| Extension and saved-tool source | Complete macOS engine suite including 284 library cases and native program/MCP harnesses, Tauri 27, frontend 693, type checking/build and Windows/Linux all-target checks passed for the KDE candidate; native Windows/Linux suites also passed the subsequent lock candidate | These are not consumer acceptance of an installed package |
 | Desktop interaction | Current browser fixtures verified modal drafts, resource rereads and unsupported-platform controls in both languages at 1000 × 650 and 760 × 650 | Earlier native receipts do not establish installed-package business workflows for these corrections |
+| KDE inspection | Actual Qt 5 / KConfig 5.115 reads verify saved language order, independent formats, global immutable/default priority and absent sources without file or directory writes | Qt 6 execution, translation installation and current/new-login desktop adoption remain unverified; KDE preference repair remains unavailable |
 | Environment correction | Disposable native Linux verifies manual NTP runtime lists and the saved host-path file, actual Polkit cancellation/challenge, durable readback, no-op, stale refusal, metadata policy and a lost reply that stops later session writes | This slice requires admitted ext4 metadata and the existing timesyncd interface; other desktop/provider repair, real PAM/dialog interaction, target-app inheritance and actual peer/clock accuracy remain unverified; see the subsystem reference |
 | Skill adoption | Local-only CLI preview made no Git call or state write; explicit comparison and failure fallback passed | Real SSH repository access depends on the configured source and network |
 | Skill snapshots | Native CLI fixtures verify Git plaintext links with the actual index, typed ordinary-file materialization, immutable reuse, disable/enable, tamper refusal, assistant isolation and offline editable forks; probes ignore inherited repository selectors | Directory/mixed-link materialization and unsupported index shapes remain explicit boundaries; real assistant consumption remains unverified |
 | OS login entries | Native Windows CI directly verifies the disposable current-user registry adapter, including idempotency, quoted paths, external overrides and unrelated-value preservation | This does not establish desktop IPC, Task Manager interaction or launching the app at a real login |
-| Platform CI | Main `4f8707d` passed post-push [CI](https://github.com/ly87ing/agent-manager/actions/runs/38988895959) and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38988895987), including four installer targets | Windows/Linux/arm64 installed desktop business interaction remains unverified |
+| Platform CI | Candidate `560de253` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/38992940349) and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/38992937490), including four installer targets; its runtime sources match main `f4bfd2ce`. Main post-push runs are pending in this receipt | Windows/Linux/arm64 installed desktop business interaction remains unverified |
 | Distribution and updater | Repository is public; current test installers are available from successful GUI CI artifacts | Only the old preview is published; no stable latest release or real signed update loop is verified |
 
 ### Remaining acceptance checklist
