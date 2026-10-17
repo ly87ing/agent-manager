@@ -34,6 +34,8 @@ mod fixture {
         authority: String,
         external_zone: Option<String>,
         ntp_mode: Option<String>,
+        language_mode: Option<String>,
+        action: &'static str,
         done: Arc<AtomicBool>,
     }
     #[zbus::interface(name = "org.freedesktop.PolicyKit1.AuthenticationAgent")]
@@ -50,15 +52,14 @@ mod fixture {
             #[zbus(connection)] connection: &zbus::Connection,
             #[zbus(header)] header: zbus::message::Header<'_>,
         ) -> Result<(), AuthenticationError> {
+            eprintln!(
+                "CI authentication callback: mode={:?}, action={action}",
+                self.language_mode
+            );
             if header.sender().map(|name| name.as_str()) != Some(self.authority.as_str())
                 || details.get("polkit.subject-pid") != Some(&self.pid.to_string())
                 || self.done.load(Ordering::Acquire)
-                || action
-                    != if self.ntp_mode.is_some() {
-                        "org.freedesktop.policykit.exec"
-                    } else {
-                        ACTION
-                    }
+                || action != self.action
                 || !identities.iter().any(|(kind, fields)| {
                     kind == "unix-user"
                         && fields.get("uid").and_then(|uid| u32::try_from(uid).ok())
@@ -68,19 +69,85 @@ mod fixture {
                 eprintln!("CI authentication rejected: authority={}, subject={}, action={}, self_identity={}",
                     header.sender().map(|name| name.as_str()) == Some(self.authority.as_str()),
                     details.get("polkit.subject-pid") == Some(&self.pid.to_string()),
-                    action == if self.ntp_mode.is_some() { "org.freedesktop.policykit.exec" } else { ACTION },
+                    action == self.action,
                     identities.iter().any(|(kind, fields)| kind == "unix-user" && fields.get("uid").and_then(|uid| u32::try_from(uid).ok()) == Some(self.uid)));
                 return Err(
                     zbus::fdo::Error::AccessDenied("Unexpected CI identity/action".into()).into(),
                 );
             }
-            if let Some(mode) = &self.ntp_mode {
-                if mode == "ntp-cancel" {
-                    self.done.store(true, Ordering::Release);
-                    return Err(AuthenticationError::Cancelled(
-                        "CI authentication dismissed".into(),
+            if self.ntp_mode.as_deref() == Some("ntp-cancel")
+                || self.language_mode.as_deref() == Some("language-cancel")
+            {
+                self.done.store(true, Ordering::Release);
+                return Err(AuthenticationError::Cancelled(
+                    "CI authentication dismissed".into(),
+                ));
+            }
+            if self.language_mode.as_deref() == Some("language-change") {
+                let path = format!("/org/freedesktop/Accounts/User{}", self.uid);
+                let user = zbus::Proxy::new(
+                    connection,
+                    "org.freedesktop.Accounts",
+                    path.as_str(),
+                    "org.freedesktop.Accounts.User",
+                )
+                .await
+                .map_err(|error| {
+                    eprintln!("CI language proxy failed: {error}");
+                    zbus::fdo::Error::Failed("Private user proxy failed".into())
+                })?;
+                let languages = user
+                    .get_property::<Vec<String>>("Languages")
+                    .await
+                    .map_err(|error| {
+                        eprintln!("CI language read failed: {error}");
+                        zbus::fdo::Error::Failed("Private language read failed".into())
+                    })?;
+                if languages != vec!["en_US.UTF-8", "de_DE.UTF-8"] {
+                    eprintln!("CI language baseline changed: {languages:?}");
+                    return Err(AuthenticationError::Failed(
+                        "Changed private language baseline".into(),
                     ));
                 }
+                // The private non-root provider may authorize only same-UID subjects.
+                let writer = std::process::Command::new("/usr/bin/sudo")
+                    .args(["-n", "-u", &format!("#{}", self.uid), "/usr/bin/env"])
+                    .arg(format!(
+                        "DBUS_SYSTEM_BUS_ADDRESS={}",
+                        std::env::var("AM_LANGUAGE_PRIVATE_BUS").unwrap()
+                    ))
+                    .args([
+                        "/usr/bin/busctl",
+                        "--system",
+                        "--auto-start=no",
+                        "--allow-interactive-authorization=no",
+                        "--timeout=8s",
+                        "call",
+                        "org.freedesktop.Accounts",
+                        path.as_str(),
+                        "org.freedesktop.Accounts.User",
+                        "SetLanguages",
+                        "as",
+                        "2",
+                        "en_US.UTF-8",
+                        "fr_FR.UTF-8",
+                    ])
+                    .output()
+                    .map_err(|error| {
+                        eprintln!("CI language writer failed: {error}");
+                        zbus::fdo::Error::Failed("Private language writer failed".into())
+                    })?;
+                if !writer.status.success() {
+                    eprintln!(
+                        "CI language drift failed: {}",
+                        String::from_utf8_lossy(&writer.stderr)
+                    );
+                    return Err(AuthenticationError::Failed(
+                        "Private language drift failed".into(),
+                    ));
+                }
+            }
+            if let Some(mode) = &self.ntp_mode {
                 if mode == "ntp-change" {
                     let path = "/etc/systemd/timesyncd.conf.d/80-agent-manager-ci.conf";
                     let text = "# Agent Manager isolated NTP fixture v1\n[Time]\nFallbackNTP=198.51.100.2\nPollIntervalMinSec=32\nPollIntervalMaxSec=2048\n";
@@ -120,7 +187,8 @@ mod fixture {
                     &(0u32, cookie, identity),
                 )
                 .await
-                .map_err(|_| {
+                .map_err(|error| {
+                    eprintln!("CI authentication response failed: {error}");
                     zbus::fdo::Error::Failed("CI authentication response failed".into())
                 })?;
             self.done.store(true, Ordering::Release);
@@ -153,12 +221,23 @@ mod fixture {
         let external_zone = match args[3].as_str() {
             "allow" => None,
             "change" => Some("Pacific/Honolulu".into()),
-            "ntp-allow" | "ntp-cancel" | "ntp-change" => None,
+            "ntp-allow" | "ntp-cancel" | "ntp-change" | "language-allow" | "language-cancel"
+            | "language-change" => None,
             _ => panic!("Invalid CI authentication mode"),
         };
         let ntp_mode = args[3].starts_with("ntp-").then(|| args[3].clone());
+        let language_mode = args[3].starts_with("language-").then(|| args[3].clone());
+        if language_mode.is_some() {
+            assert_eq!(
+                std::env::var("DBUS_SYSTEM_BUS_ADDRESS").ok(),
+                std::env::var("AM_LANGUAGE_PRIVATE_BUS").ok()
+            );
+            assert!(std::env::var("AM_LANGUAGE_PRIVATE_BUS").is_ok());
+        }
         assert_eq!(
-            std::env::var(if ntp_mode.is_some() {
+            std::env::var(if language_mode.is_some() {
+                "AM_ISOLATED_LINUX_LANGUAGE"
+            } else if ntp_mode.is_some() {
                 "AM_ISOLATED_LINUX_NTP"
             } else {
                 "AM_ISOLATED_LINUX_TIMEZONE"
@@ -197,6 +276,14 @@ mod fixture {
                         authority,
                         external_zone,
                         ntp_mode,
+                        action: if language_mode.is_some() {
+                            "org.freedesktop.accounts.change-own-user-data"
+                        } else if args[3].starts_with("ntp-") {
+                            "org.freedesktop.policykit.exec"
+                        } else {
+                            ACTION
+                        },
+                        language_mode,
                         done: done.clone(),
                     },
                 )
@@ -240,7 +327,7 @@ mod fixture {
             }
             assert!(
                 done.load(Ordering::Acquire),
-                "CI agent never received an authentication request"
+                "CI agent did not complete authentication"
             );
             async_io::Timer::after(Duration::from_millis(300)).await;
             let _ = connection

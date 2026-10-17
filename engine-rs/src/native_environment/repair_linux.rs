@@ -207,6 +207,8 @@ pub(super) struct LinuxSettings {
     time: Option<super::repair_linux_time::State>,
     desktop: Option<super::repair_linux_desktop::State>,
     region: Option<super::repair_linux_region::State>,
+    language: Option<super::repair_linux_language::State>,
+    language_locale: Option<String>,
     ntp: Option<super::repair_linux_ntp::State>,
     context: Value,
 }
@@ -239,10 +241,25 @@ impl Settings for LinuxSettings {
         } else {
             None
         };
-        self.region = target
+        self.region = if target.region.is_some() || !target.languages.is_empty() {
+            super::repair_linux_region::read()
+        } else {
+            None
+        };
+        self.language = if gnome && !target.languages.is_empty() {
+            super::repair_linux_language::read()
+        } else {
+            None
+        };
+        self.language_locale = if self
             .region
             .as_ref()
-            .and_then(|_| super::repair_linux_region::read());
+            .is_some_and(|state| state.is_explicit())
+        {
+            super::repair_linux_language::installed(&target.languages)
+        } else {
+            None
+        };
         self.ntp = target
             .ntp_server
             .as_ref()
@@ -266,7 +283,7 @@ impl Settings for LinuxSettings {
                     )
                 })
                 .unwrap_or_else(|| "systemd user manager unavailable".into()),
-            context: json!({"manager":self.manager,"locale_installed":locale,"zone_installed":zone,"time":self.time,"gnome":gnome,"desktop_time":self.desktop,"region":self.region,"ntp":self.ntp,"automatic_time":automatic_time}),
+            context: json!({"manager":self.manager,"locale_installed":locale,"zone_installed":zone,"time":self.time,"gnome":gnome,"desktop_time":self.desktop,"region":self.region,"language":self.language,"language_locale":self.language_locale,"ntp":self.ntp,"automatic_time":automatic_time}),
             ..Snapshot::default()
         };
         snapshot.unavailable.extend(
@@ -310,6 +327,15 @@ impl Settings for LinuxSettings {
                     .map(|state| state.configuration.directory_missing()),
                 available,
             );
+        }
+        snapshot.values.insert(
+            "language.preferred".into(),
+            self.language.as_ref().and_then(|state| {
+                super::linux::language_tag(&state.primary.locale).map(|tag| json!([tag]))
+            }),
+        );
+        if self.language.is_some() && self.language_locale.is_some() {
+            snapshot.unavailable.remove("language.preferred");
         }
         snapshot.values.insert(
             "language.region".into(),
@@ -381,7 +407,7 @@ impl Settings for LinuxSettings {
         item.scope == "system"
             || matches!(
                 item.id.as_str(),
-                "time.automatic_timezone" | "language.region"
+                "time.automatic_timezone" | "language.preferred" | "language.region"
             )
     }
     fn system(&mut self, items: &[Item]) -> Result<(String, Vec<Item>, Option<bool>)> {
@@ -391,6 +417,7 @@ impl Settings for LinuxSettings {
                 "time.timezone"
                     | "time.automatic_timezone"
                     | "language.region"
+                    | "language.preferred"
                     | "ntp.server"
                     | "ntp.server.persistent"
                     | "ntp.server.directory"
@@ -420,21 +447,35 @@ impl Settings for LinuxSettings {
         let ntp_failure = ntp_authorization
             .as_ref()
             .and_then(|result| result.as_ref().err().copied());
+        let language_authorization = items
+            .iter()
+            .any(|item| item.id == "language.preferred")
+            .then_some(())
+            .filter(|_| ntp_failure.is_none())
+            .map(|_| {
+                super::repair_linux_time::authorize("org.freedesktop.accounts.change-own-user-data")
+            });
+        let language_failure = language_authorization
+            .as_ref()
+            .and_then(|auth| auth.failure());
         let authorization = items
             .iter()
             .any(|item| item.id == "time.timezone")
             .then_some(())
-            .filter(|_| ntp_failure.is_none())
-            .map(|_| super::repair_linux_time::authorize());
+            .filter(|_| ntp_failure.is_none() && language_failure.is_none())
+            .map(|_| super::repair_linux_time::authorize("org.freedesktop.timedate1.set-timezone"));
         let mut results = Vec::new();
-        let failure =
-            ntp_failure.or_else(|| authorization.as_ref().and_then(|auth| auth.failure()));
+        let failure = ntp_failure
+            .or(language_failure)
+            .or_else(|| authorization.as_ref().and_then(|auth| auth.failure()));
         if let Some(status) = failure {
             let mut result = items
                 .iter()
                 .find(|item| {
                     if ntp_failure.is_some() {
                         item.id.starts_with("ntp.server")
+                    } else if language_failure.is_some() {
+                        item.id == "language.preferred"
                     } else {
                         item.id == "time.timezone"
                     }
@@ -526,7 +567,44 @@ impl Settings for LinuxSettings {
                 results.push(result);
                 return Ok(("partial".into(), results, None));
             }
-            if item.id == "language.region" {
+            if item.id == "language.preferred" {
+                let before = self
+                    .language
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("GNOME primary language is unavailable."))?;
+                let locale = self
+                    .language_locale
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("GNOME language locale is unavailable."))?;
+                let expected = before.selected(locale);
+                let written = super::repair_linux_language::write(
+                    &before,
+                    &expected,
+                    language_authorization
+                        .as_ref()
+                        .expect("language authorization"),
+                    || {
+                        self.snapshot(&target)
+                            .is_ok_and(|snapshot| snapshot.context == baseline)
+                    },
+                );
+                result.status = if written == "written" {
+                    match super::repair_linux_language::read() {
+                        Some(after) if after == expected => "verified",
+                        Some(_) => "unverified",
+                        None => "outcome_unknown",
+                    }
+                } else {
+                    written
+                }
+                .into();
+                let verified = result.status == "verified";
+                results.push(result);
+                if !verified {
+                    return Ok(("partial".into(), results, None));
+                }
+                baseline["language"] = json!(expected);
+            } else if item.id == "language.region" {
                 let expected = item
                     .expected
                     .as_str()
@@ -623,6 +701,17 @@ impl Settings for LinuxSettings {
             }
             let snapshot = self.snapshot(&target)?;
             if snapshot.context != baseline {
+                if let Some(result) = results
+                    .last_mut()
+                    .filter(|item| item.id == "language.preferred")
+                {
+                    result.status = if self.language.is_some() {
+                        "unverified"
+                    } else {
+                        "outcome_unknown"
+                    }
+                    .into();
+                }
                 if snapshot.context["region"] != baseline["region"] {
                     for result in &mut results {
                         if result.id == "language.region" && result.status == "verified" {

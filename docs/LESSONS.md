@@ -15,6 +15,18 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   path containing spaces and require the actual batch entry's expected output;
   Unix success cannot establish Windows command-line parsing.
 
+## 2026-10-17: authentication completion is not callback receipt
+
+- The language drift fixture reported that no authentication request arrived,
+  but its flag tracked completion, leaving callback errors indistinguishable
+  from no request. Preserve the original error at each callback failure and
+  describe the deadline as incomplete authentication. Keep the native protocol
+  assertion; an entered callback alone cannot establish authorization success.
+- The real non-root private AccountsService cannot ask Polkit to authorize a
+  root external writer. Emit the competing write as the original disposable
+  user, with interaction disabled, while the exact CLI PID still receives its
+  genuine challenge. Independent stale/tail/formats assertions remain required.
+
 ## 2026-10-17: directory copies need namespace and format-bound fork proof
 
 - The passing mixed-directory lifecycle did not exercise receipt withdrawal
@@ -1065,3 +1077,20 @@ confirmation back to the verified source plan.
 - Separate the completion and selection diagnostics: a second check can fail
   after the first already wrote a marker. Fresh reads are not atomic publication
   or proof of entry usability against uncoordinated external writers.
+
+### 2026-10-17: native daemon fixtures need their installed startup contract
+
+- A Linux CLI reply-loss fixture passed while the separate real-provider fixture
+  failed before Polkit became ready. That result did not exercise real provider
+  language writes. Keep the failed receipt and startup diagnostics visible.
+- Follow the packaged daemon's existing service identity when starting a private
+  instance. Polkit's root-to-service-user startup path can additionally change to
+  the account's home, while its packaged systemd unit starts with the service UID.
+  Read the installed service identity; do not create or edit an OS account/home to
+  make a fixture pass. Read that identity before replacing D-Bus addresses: a
+  subsequent `systemctl` call otherwise tries to activate a manager on the private
+  bus. Bound and independently own privileged fixture children.
+- A standard session bus admits only its daemon owner's UID. A private fixture
+  that includes real system-service identities needs an explicit, isolated bus
+  policy for those UIDs; never widen the host bus or add anonymous authentication.
+  Keep an unselected-UID refusal control as well as native service connection proof.

@@ -3,6 +3,9 @@
 #[path = "support/linux_timesync.rs"]
 mod timesync;
 
+#[path = "support/linux_language_reply.rs"]
+mod language_reply;
+
 use std::{
     io::{BufRead, BufReader},
     process::{Child, Command, Stdio},

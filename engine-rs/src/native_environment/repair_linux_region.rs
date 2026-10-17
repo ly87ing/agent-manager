@@ -84,6 +84,11 @@ pub(super) fn read() -> Option<State> {
 }
 
 impl State {
+    #[cfg(target_os = "linux")]
+    pub(super) fn is_explicit(&self) -> bool {
+        !self.raw.is_empty() && self.inherited.is_none()
+    }
+
     pub(super) fn explicit(&self, expected: &str) -> Self {
         Self {
             locale: expected.into(),

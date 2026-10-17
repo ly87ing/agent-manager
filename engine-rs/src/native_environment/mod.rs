@@ -19,6 +19,8 @@ mod repair;
 mod repair_linux;
 #[cfg(any(target_os = "linux", test))]
 mod repair_linux_desktop;
+#[cfg(any(target_os = "linux", test))]
+mod repair_linux_language;
 #[cfg(target_os = "linux")]
 mod repair_linux_ntp;
 #[cfg(target_os = "linux")]
