@@ -73,10 +73,23 @@ restoration or cleanup after that check. The unverified current install may stil
 be on PATH. This retains existing backup files for inspection, not a promise of
 an independent, runnable or immutable backup. Every later successful action for
 that program applies the existing newest-three non-adoption backup retention.
-Managed PyPI/git version postconditions and general rollback/restore conflicts
-remain separate work.
+Managed PyPI installs validate their name/target during preview and freshly read
+native metadata before writing a completion marker and before selecting `current`.
+Reused completed versions and explicit switches receive the selection check too.
+Each check requires a matching PEP 440 equality result; it does not make filesystem
+publication atomic against uncoordinated external changes after or between reads.
+An incomplete existing PyPI version directory is refused, including on a later
+retry, so retained candidates are not automatically deleted or overwritten.
+Failures retain their candidate and report which completion/selection step was
+not performed; an earlier completion marker or previously active contents may
+already exist. Existing target/account guards remain in force. Parent path
+aliases are normalized while the version root and internal metadata components
+retain ordinary-object checks. Git version postconditions, managed entry
+availability before selection and general rollback/restore conflicts remain
+separate work.
 The `PROGRAM_VERSION_UNVERIFIED` diagnostic identifies this incomplete outcome;
-the dialog keeps its details visible and announces a warning. Ordinary installer
+it also identifies refusal to overwrite an incomplete managed PyPI candidate.
+The dialog keeps its details visible and announces a warning. Ordinary installer
 failures retain `PROGRAM_ERROR` and their existing recovery attempt.
 For installed uv tools, cached upstream versions/timestamps remain available, but
 current versions and ordering come from actual metadata. Unreadable current
@@ -95,7 +108,7 @@ and exit-code checks. File moves, command shims and `current` junctions use nati
 Windows operations. Existing command-entry hashes and link targets guard manual
 replacement against changes after preview. App metadata and database preferences
 remain application-owned; the manual command list does not claim to reproduce its
-operation audit or completion metadata. Batch shims preserve literal percent signs
+operation audit, completion metadata or native version-verification gates. Batch shims preserve literal percent signs
 and disable delayed expansion without changing the caller's shell settings.
 
 A managed installation has completed version directories and a `current`
@@ -182,8 +195,9 @@ an existing interpreter explicitly with `AM_NATIVE_PYTHON`, generates private
 wheels, then performs real uv upgrades, entry execution and public/local version
 matching without a package registry. It verifies that the selected interpreter
 binary/identity is unchanged and private managed-runtime directories remain empty.
-GUI CI runs both standard and custom tool roots and selects a preinstalled runner
-interpreter; this fixture never bootstraps
+GUI CI runs standard/custom delegated roots and managed install/upgrade/switch
+cases, reading back actual metadata, completion markers, selected pointers and
+entry output. It selects a preinstalled runner interpreter; this fixture never bootstraps
 one and adds no interpreter requirement to the Rust engine test suite.
 
 Windows command-entry metadata uses ASCII hex-encoded UTF-8 paths; legacy plain-text metadata remains readable. Manual filesystem commands reject linked ancestors, compare existing entry hashes, and stage a literal junction before replacing `current`. A staging failure preserves the previous pointer and foreign staging contents. Recursive manual removal refuses nested reparse points.

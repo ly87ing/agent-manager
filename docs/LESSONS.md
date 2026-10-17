@@ -1014,3 +1014,19 @@ confirmation back to the verified source plan.
   inspect the located entry rather than a separate missing-command row.
 - Keep custom-root refusal fixtures free of standard uv path markers, and verify
   standard-root compatibility separately when preserving the existing fallback.
+
+### 2026-10-16: verify managed PyPI publication and retained retries
+
+- A failing fixture that never created uv's entry directory did not reach the
+  version check. Correct the fixture and inspect the existing envelope's actual
+  error fields; the pre-change build then accepted the wrong version as expected.
+- Real macOS temporary paths exposed the common `/var` parent alias that a
+  canonical-only fixture missed. Normalize the known parent while keeping the
+  version root and internal metadata links subject to native ordinary-file checks;
+  prove both the accepted parent alias and refused linked version root.
+- Retaining an incomplete candidate on failure is insufficient if the next
+  same-version plan automatically removes it. Verify a second preview/apply with
+  unchanged candidate bytes and no installer invocation.
+- Separate the completion and selection diagnostics: a second check can fail
+  after the first already wrote a marker. Fresh reads are not atomic publication
+  or proof of entry usability against uncoordinated external writers.

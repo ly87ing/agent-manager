@@ -186,9 +186,9 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     expect(calls.find((call) => call.command === "programs:apply")!.args).toEqual(["--program", "npm:@wecom/cli", "--action", "upgrade", "--version", "1.3.5"]);
   });
 
-  it("uv version failure keeps inspection details visible without promising restoration", async () => {
+  it.each(["delegated", "managed"] as const)("%s uv version failure keeps inspection details visible without promising restoration", async (mode) => {
     const contents = data();
-    contents.elements = [program({ program: "pypi:tool-a", kind: "pypi", name: "tool-a", owner: "uv-tool", version: "1.0.0", freshness: { ...unknown, state: "behind", current: "1.0.0", upstream: "2.0.0" } })];
+    contents.elements = [program({ program: "pypi:tool-a", kind: "pypi", name: "tool-a", mode, owner: mode === "managed" ? "managed" : "uv-tool", version: "1.0.0", freshness: { ...unknown, state: "behind", current: "1.0.0", upstream: "2.0.0" } })];
     const plan = { ...PLAN, program: "pypi:tool-a", target_version: "2.0.0", notes: ["The unverified install may remain on PATH. Backup retention applies after any successful action."], manual: ["uv --no-python-downloads tool install --force tool-a==2.0.0"] };
     const diagnostic = "uv finished, but the installed version is unknown. No automatic restoration was attempted. Inspect ~/uv/data/tools/tool-a and the backup.";
     const { calls } = renderWithEngine(<ProgramsPage />, {
@@ -197,7 +197,7 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
       "programs:apply": makeEnvelope(plan, { ok: false, errors: [{ code: "PROGRAM_VERSION_UNVERIFIED", element: null, message: diagnostic }] }),
     });
     await userEvent.click(await screen.findByTestId("program-upgrade-pypi:tool-a"));
-    await screen.findByText(/uv 版本无法核验时保留现场，不自动恢复/);
+    await screen.findByText(mode === "managed" ? /自管 PyPI 会在完成标记和当前版本选择前核验版本/ : /uv 版本无法核验时保留现场，不自动恢复/);
     await screen.findByText(plan.notes[0]);
     expect(screen.queryByText(/执行失败时尝试恢复/)).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "升级" }));
