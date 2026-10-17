@@ -35,6 +35,30 @@ async function open() {
 }
 
 describe("Automatic environment repair", () => {
+  it.each(["en", "zh-CN"] as const)("distinguishes GNOME primary preference readback from persistence and fallback order in %s", async (language) => {
+    setLanguage(language);
+    const configured = { ...profile, target: environmentFixture({ languages: ["fr-FR"], region: "US" }).target };
+    const preview: EnvironmentRepairPlan = { ...plan, platform: "linux", target: configured.target, items: [
+      { id: "language.preferred", scope: "user", before: ["en-US"], expected: ["fr-FR"], status: "change" },
+      { id: "language.region", scope: "user", before: "en_GB.UTF-8", expected: "en_US.UTF-8", status: "change" },
+    ] };
+    renderWithEngine(<EnvironmentRepairDialog profile={configured} onResult={() => {}} onClose={() => {}} />, {
+      "environment:repair-preview": makeEnvelope(preview),
+      "environment:repair": makeEnvelope({ ...result(), items: preview.items.map(item => ({ ...item, status: "verified" })),
+        relogin_required: true, verification_limits: ["GNOME primary-language verification covers the existing service preference only."] }),
+    });
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText(language === "en" ? "GNOME primary language preference" : "GNOME 主语言偏好");
+    expect(dialog).toHaveTextContent(language === "en" ? "Multiple fallback languages and inherited formats cannot be repaired yet" : "多语言回退与继承格式暂不可修复");
+    expect(dialog).not.toHaveTextContent(language === "en" ? "preserving your language preference" : "语言偏好保持原样");
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await within(dialog).findByText(language === "en" ? "Primary language preference read back" : "主语言偏好已读回");
+    expect(dialog).toHaveTextContent(language === "en" ? "Selected settings were read back" : "所选设置已回读");
+    expect(dialog).toHaveTextContent(language === "en" ? "verify the display language and regional formats" : "再验证显示语言和地区格式");
+    expect(dialog).not.toHaveTextContent(language === "en" ? "Repaired and verified" : "已修复并验证");
+    await userEvent.click(within(dialog).getByText(language === "en" ? "Verification scope and limits" : "验证范围与限制"));
+    expect(within(dialog).getByText("GNOME primary-language verification covers the existing service preference only.")).toBeVisible();
+  });
   it.each(["en", "zh-CN"] as const)("reports a Linux automatic-time no-op without claiming a save or synchronization in %s", async (language) => {
     setLanguage(language);
     const configured = { ...profile, target: environmentFixture({ automatic_time: true }).target };
@@ -227,7 +251,7 @@ describe("Automatic environment repair", () => {
     setup(repaired);
     const dialog = await open();
     await userEvent.click(within(dialog).getByRole("button", { name: "确认自动修复" }));
-    await within(dialog).findByText("已保存所选设置，实际效果仍需在目标环境中确认。");
+    await within(dialog).findByText("所选设置已回读，实际效果仍需在目标环境中确认。");
     expect(document.querySelector('[data-sonner-toast][data-type="success"]')).toBeNull();
     expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toHaveTextContent("实际效果仍需在目标环境中确认");
   });

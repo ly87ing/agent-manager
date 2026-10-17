@@ -1094,3 +1094,16 @@ confirmation back to the verified source plan.
   that includes real system-service identities needs an explicit, isolated bus
   policy for those UIDs; never widen the host bus or add anonymous authentication.
   Keep an unselected-UID refusal control as well as native service connection proof.
+
+### 2026-10-17: use the app test scope and expose verification limits
+
+- Frontend commands run from `app/` or through `pnpm --dir app`; the repository
+  root has no frontend manifest. A root invocation selected a parent workspace
+  and did not exercise the test, despite completing unrelated package resolution.
+- A generic warning summary did not expose the original backend verification
+  limits. Exercise the disclosure itself in both languages and keep its original
+  diagnostics. Service preference readback must not be presented as durable
+  storage or as a complete ordered desktop-language repair.
+- A candidate and main can already contain independent documentation fixes.
+  Inspect their actual differences before transferring a whole tracked document;
+  apply the owned section so accepted main history remains intact.
