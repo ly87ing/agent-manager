@@ -447,6 +447,99 @@ fn current_pointer_is_protected() {
     }
 }
 
+fn entry_directory_spellings_preserve_eligibility() {
+    let mut env = Env::new("entry-spelling");
+    env.skill("tool-a");
+    let entry = env.home.join("bin");
+    let unlisted = env.home.join("not-on-path");
+    let account = env.home.join(".claude/bin");
+    std::fs::create_dir_all(&unlisted).unwrap();
+    std::fs::create_dir_all(&account).unwrap();
+    env.user_path =
+        std::env::join_paths([entry.clone(), account.clone(), env.tools.clone()]).unwrap();
+    let request = |command: &str, action: &str, version: &str, chosen: &str| {
+        env.run(
+            command,
+            &[
+                "--program",
+                "npm:tool-a",
+                "--action",
+                action,
+                "--version",
+                version,
+                "--entry-dir",
+                chosen,
+            ],
+        )
+    };
+    let original = tree(&env.home);
+    for chosen in [entry.to_str().unwrap(), "~/bin"] {
+        let preview = request("programs:preview", "install", "1.2.0", chosen);
+        assert_eq!(preview["ok"], true, "{chosen}: {preview}");
+        assert!(!env.data.exists(), "preview created manager state");
+        assert_eq!(tree(&env.home), original, "preview changed home files");
+    }
+    let rejected_paths = [unlisted.to_str().unwrap(), account.to_str().unwrap(), "bin"];
+    for chosen in rejected_paths {
+        let rejected = request("programs:preview", "install", "1.2.0", chosen);
+        assert_eq!(rejected["ok"], false, "{chosen}: {rejected}");
+        assert!(!env.data.exists(), "rejected preview created manager state");
+        assert_eq!(
+            tree(&env.home),
+            original,
+            "rejected preview changed home files"
+        );
+    }
+    let installed = request(
+        "programs:apply",
+        "install",
+        "1.2.0",
+        entry.to_str().unwrap(),
+    );
+    assert_eq!(installed["ok"], true, "{installed}");
+    assert!(entry.join(command_name("tool-a")).is_file());
+    let status = env.run("programs:status", &[]);
+    assert_eq!(status["data"]["entry_dir"], "~/bin");
+    let installed_home = tree(&env.home);
+    let installed_data = tree(&env.data);
+    for chosen in rejected_paths {
+        let rejected = request("programs:apply", "upgrade", "2.0.0", chosen);
+        assert_eq!(rejected["ok"], false, "{chosen}: {rejected}");
+        assert_eq!(
+            tree(&env.home),
+            installed_home,
+            "ineligible entry changed home files"
+        );
+        assert_eq!(
+            tree(&env.data),
+            installed_data,
+            "ineligible entry changed program state"
+        );
+    }
+    for chosen in [entry.to_str().unwrap(), "~/bin"] {
+        let preview = request("programs:preview", "upgrade", "2.0.0", chosen);
+        assert_eq!(preview["ok"], true, "{preview}");
+        assert!(
+            !preview["data"]["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|step| step["kind"] == "entry-dir"),
+            "equivalent path would rewrite the preference: {preview}"
+        );
+        assert_eq!(
+            tree(&env.home),
+            installed_home,
+            "upgrade preview changed home files"
+        );
+        assert_eq!(
+            tree(&env.data),
+            installed_data,
+            "upgrade preview changed program state"
+        );
+    }
+}
+
 fn probes_use_user_path() {
     let env = Env::new("probes");
     env.skill("tool-a");
@@ -525,6 +618,7 @@ fn main() {
     upgrade_adopt_and_restore("tool-a");
     upgrade_adopt_and_restore("@scope/tool-a");
     current_pointer_is_protected();
+    entry_directory_spellings_preserve_eligibility();
     probes_use_user_path();
-    println!("program lifecycle: ordinary/scoped npm, rollback, adoption, current pointer, and tool probes passed");
+    println!("program lifecycle: ordinary/scoped npm, rollback, adoption, current pointer, entry spellings and tool probes passed");
 }

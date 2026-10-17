@@ -45,6 +45,10 @@ This option controls uv's own Python provisioning; it does not isolate arbitrary
 package build code or establish an installed-version postcondition.
 An absent, empty or relative `SHELL` uses `/bin/bash` on Linux and `/bin/zsh` on
 macOS; an explicit absolute shell retains its own failure diagnostics.
+The CLI accepts an eligible entry directory in either `~/...` or absolute form.
+It compares expanded paths without adopting additional filesystem aliases;
+existing stable-PATH, writable-directory and protected-target checks still apply.
+Equivalent spellings of an already saved directory do not rewrite its preference.
 
 Manual execution and failure-recovery commands use PowerShell on Windows and the
 existing POSIX form on Unix. Windows executable steps reuse the launch renderer
