@@ -34,6 +34,18 @@ Windows uv environments use `uv/data/tools` and `Lib/site-packages`. Copied `.ex
 entries are recognized and backed up only when `uv-receipt.toml` names the actual
 entry and its bytes match the environment's `Scripts` entry. A changed copy stays
 unowned. Receipt reads and byte comparisons are bounded; queries never invoke uv.
+Installed uv versions come from the matching distribution's ordinary `METADATA`
+file, not its directory name. Native Windows uses `Lib/site-packages`; Unix uses
+`lib/python<major>.<minor>[t]/site-packages` or `lib/pypy<major>.<minor>/site-packages`,
+including free-threaded CPython and PyPy's native layout.
+Identity headers are read within 64 KiB,
+before the description body, with normalized names and PEP 440 versions.
+Directory/version disagreement, missing or malformed headers, unreadable matching
+candidates and multiple matches produce an unknown version. Enumeration is
+bounded to 64 library entries, 16 Python roots and 8192 entries per package root.
+Reads retain directory handles, refuse linked path components and special files,
+and permit ordinary hardlinked cache metadata. This is declared-version evidence,
+not package authenticity, successful execution or an upgrade postcondition.
 Managed PyPI/git installs and delegated uv upgrades explicitly pass
 `--no-python-downloads`. Existing interpreter selection is retained; a missing
 interpreter fails rather than letting uv provide a runtime. This implements the
@@ -115,6 +127,7 @@ cargo test --manifest-path engine-rs/Cargo.toml --test native_extension_program_
 cargo test --manifest-path engine-rs/Cargo.toml --test native_program_lifecycle
 cargo test --manifest-path engine-rs/Cargo.toml --test native_programs
 cargo test --manifest-path engine-rs/Cargo.toml --test native_programs_windows
+cargo test --manifest-path engine-rs/Cargo.toml --test native_uv_metadata
 cargo test --manifest-path engine-rs/Cargo.toml --test native_upstream
 ```
 
