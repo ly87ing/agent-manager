@@ -23,6 +23,68 @@ impl std::fmt::Display for UnverifiedVersion {
 
 impl std::error::Error for UnverifiedVersion {}
 
+#[derive(Debug)]
+pub(super) struct UnverifiedEntry(String);
+
+impl std::fmt::Display for UnverifiedEntry {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for UnverifiedEntry {}
+
+pub(super) fn check_entries(
+    directory: &Path,
+    entries: &[PathBuf],
+    home: &Path,
+    stage: &str,
+) -> Result<()> {
+    use super::uv_metadata_files::Directory;
+    let verified = (|| -> Option<()> {
+        if entries.is_empty() {
+            return None;
+        }
+        let root = directory
+            .parent()?
+            .canon()
+            .ok()?
+            .join(directory.file_name()?);
+        let _root_guard = Directory::open(&root).ok()?;
+        let root = root.canon().ok()?;
+        for entry in entries {
+            let actual = entry.canon().ok()?;
+            if !actual.starts_with(&root) {
+                return None;
+            }
+            let parent = Directory::open(actual.parent()?).ok()?;
+            let file = parent.file(actual.file_name()?).ok()?;
+            let metadata = file.metadata().ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if metadata.permissions().mode() & 0o111 == 0 {
+                    return None;
+                }
+            }
+        }
+        Some(())
+    })()
+    .is_some();
+    if verified {
+        return Ok(());
+    }
+    Err(UnverifiedEntry(format!(
+        "Managed PyPI command verification before {stage} failed. Declared entries must resolve to ordinary command files inside this candidate, with executable permissions on Unix. \
+         This {stage} step was not performed. Earlier completion metadata or previously active contents may still exist. \
+         The candidate at {} is retained without automatic restoration or cleanup after this check. Inspect its bin entries and actual files before any further action.",
+        display(directory, home),
+    )).into())
+}
+
 fn display(path: &Path, home: &Path) -> String {
     path.strip_prefix(home)
         .map(|rest| format!("~/{}", crate::platform::slash(rest)))
@@ -117,6 +179,72 @@ impl Verification {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_entries_require_internal_ordinary_executable_targets() {
+        let root =
+            std::env::temp_dir().join(format!("am-managed-entries-{}", crate::store::uuid_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let root = root.canon().unwrap();
+        let version = root.join("programs/1.0");
+        let scripts = version.join("tools/tool-a");
+        let bin = version.join("bin");
+        std::fs::create_dir_all(&scripts).unwrap();
+        std::fs::create_dir(&bin).unwrap();
+        let target = scripts.join("tool-a");
+        std::fs::write(&target, b"private fixture bytes").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let entry = bin.join(if cfg!(windows) {
+            "tool-a.exe"
+        } else {
+            "tool-a"
+        });
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &entry).unwrap();
+        #[cfg(windows)]
+        std::fs::copy(&target, &entry).unwrap();
+        check_entries(&version, &[entry.clone()], &root, "completion").unwrap();
+        assert!(check_entries(&version, &[], &root, "completion")
+            .unwrap_err()
+            .is::<UnverifiedEntry>());
+        let alias = root.join("parent-alias");
+        crate::platform::link_dir(&root.join("programs"), &alias).unwrap();
+        check_entries(
+            &alias.join("1.0"),
+            &[alias.join("1.0/bin").join(entry.file_name().unwrap())],
+            &root,
+            "selection",
+        )
+        .unwrap();
+        crate::platform::remove_link(&alias).unwrap();
+        std::fs::remove_file(&entry).unwrap();
+        assert!(
+            check_entries(&version, &[entry.clone()], &root, "selection")
+                .unwrap_err()
+                .is::<UnverifiedEntry>()
+        );
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(std::env::current_exe().unwrap(), &entry).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(std::env::current_exe().unwrap(), &entry).unwrap();
+        assert!(check_entries(&version, &[entry.clone()], &root, "selection").is_err());
+        std::fs::remove_file(&entry).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::copy(&target, &entry).unwrap();
+            std::fs::set_permissions(&entry, std::fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(check_entries(&version, &[entry.clone()], &root, "selection").is_err());
+            std::fs::remove_file(&entry).unwrap();
+        }
+        std::fs::create_dir(&entry).unwrap();
+        assert!(check_entries(&version, &[entry], &root, "selection").is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn managed_evidence_accepts_parent_aliases_but_refuses_a_linked_version_root() {

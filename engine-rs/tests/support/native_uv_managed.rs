@@ -158,10 +158,99 @@ fn equivalents_and_early_refusal() {
 }
 
 pub(super) fn verify() {
+    missing_entry_install_is_retained();
+    missing_entry_preserves_current();
     for case in ["valid", "missing", "duplicate", "malformed"] {
         first_failure(case);
     }
     current_is_preserved();
     equivalents_and_early_refusal();
-    println!("Managed PyPI: fresh completion/selection version evidence, retained candidates and no-execution retry refusal, unchanged prior current/entries, legacy reuse refusal, PEP 440 matching and invalid-target zero-write preview passed");
+    println!("Managed PyPI: fresh completion/selection version and entry evidence, retained candidates and no-execution retry refusal, unchanged prior current/entries, legacy reuse refusal, PEP 440 matching and invalid-target zero-write preview passed");
+}
+
+fn missing_entry_install_is_retained() {
+    let fixture = fixture("managed-missing-entry-install");
+    fixture.control("2.0.0", "missing-bin");
+    assert_eq!(
+        fixture.run_action("programs:preview", Some("2.0.0"), "install")["ok"],
+        true
+    );
+    assert!(!fixture.data.exists() && !fixture.marker.exists());
+    let result = fixture.run_action("programs:apply", Some("2.0.0"), "install");
+    assert_eq!(result["ok"], false, "{result}");
+    assert_eq!(
+        result["errors"][0]["code"], "PROGRAM_ENTRY_UNVERIFIED",
+        "{result}"
+    );
+    assert!(program(&fixture).join("2.0.0/tools/tool-a").is_dir());
+    assert!(!program(&fixture).join("2.0.0").join(META).exists());
+    assert!(std::fs::symlink_metadata(program(&fixture).join("current")).is_err());
+    assert!(std::fs::symlink_metadata(entry(&fixture)).is_err());
+    assert!(fixture.run("programs:status", None)["data"]["entry_dir"].is_null());
+}
+
+fn missing_entry_preserves_current() {
+    let fixture = fixture("managed-missing-entry");
+    fixture.control("1.0.0", "valid");
+    let installed = fixture.run_action("programs:apply", Some("1.0.0"), "install");
+    assert_eq!(installed["ok"], true, "{installed}");
+    let current = program(&fixture).join("current");
+    let original = std::fs::canonicalize(&current).unwrap();
+    let original_entry = std::fs::read(entry(&fixture)).unwrap();
+    fixture.control("2.0.0", "missing-bin");
+    let result = fixture.run_action("programs:apply", Some("2.0.0"), "upgrade");
+    assert_eq!(
+        result["ok"], false,
+        "A matching package version cannot establish a usable command: {result}"
+    );
+    assert_eq!(
+        result["errors"][0]["code"], "PROGRAM_ENTRY_UNVERIFIED",
+        "{result}"
+    );
+    assert!(result["errors"][0]["message"]
+        .as_str()
+        .unwrap()
+        .contains("before completion"));
+    assert_eq!(
+        std::fs::canonicalize(&current).unwrap(),
+        original,
+        "Missing entry must not replace the previous current"
+    );
+    assert_eq!(std::fs::read(entry(&fixture)).unwrap(), original_entry);
+    assert!(!program(&fixture).join("2.0.0").join(META).exists());
+    let retained = program(&fixture).join("2.0.0/external-notes");
+    std::fs::write(&retained, b"Keep failed entry candidates").unwrap();
+    std::fs::remove_file(&fixture.marker).unwrap();
+    let retry = fixture.run_action("programs:apply", Some("2.0.0"), "upgrade");
+    unverified(&retry, "Incomplete PyPI candidate");
+    assert!(!fixture.marker.exists());
+    assert_eq!(
+        std::fs::read(&retained).unwrap(),
+        b"Keep failed entry candidates"
+    );
+    let alternate = program(&fixture).join("3.0.0");
+    install(
+        &alternate.join("tools/tool-a"),
+        &alternate.join("bin"),
+        "3.0.0",
+        "missing-bin",
+    );
+    let completion = br#"{"program":"pypi:tool-a","version":"3.0.0"}"#;
+    std::fs::write(alternate.join(META), completion).unwrap();
+    for action in ["switch", "upgrade"] {
+        let failed = fixture.run_action("programs:apply", Some("3.0.0"), action);
+        assert_eq!(failed["ok"], false, "{failed}");
+        assert_eq!(
+            failed["errors"][0]["code"], "PROGRAM_ENTRY_UNVERIFIED",
+            "{failed}"
+        );
+        assert!(failed["errors"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("before current selection"));
+        assert!(!fixture.marker.exists());
+        assert_eq!(std::fs::read(alternate.join(META)).unwrap(), completion);
+        assert_eq!(std::fs::canonicalize(&current).unwrap(), original);
+        assert_eq!(std::fs::read(entry(&fixture)).unwrap(), original_entry);
+    }
 }

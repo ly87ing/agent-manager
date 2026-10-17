@@ -31,6 +31,16 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   then consume byte budgets during actual copying and physical verification.
   Cross-host namespace rules must not assume full Unicode filesystem equivalence.
 
+## 2026-10-17: completion needs entry evidence before selecting a version
+
+- Matching PyPI metadata passed both version gates while a missing command was
+  detected only after `current` changed. The failed upgrade left that new current
+  selected. Verify declared candidate command targets before completion and
+  selection; an outer Windows shim existing does not establish its target.
+- The CLI integration passed while a library-only manual-command fixture still
+  constructed the shared private plan without its new field. Search all child
+  modules for struct initializers and run the library check as well as CLI cases.
+
 ## 2026-10-16: preview and explicit execution have different lock effects
 
 - The entry-directory fixture initially expected a rejected Programs `apply` to

@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use super::uv_postcondition::{UnverifiedVersion, Verification};
+use super::uv_postcondition::{UnverifiedEntry, UnverifiedVersion, Verification};
 use crate::native::{Context, Request};
 use crate::store;
 
@@ -381,6 +381,7 @@ pub struct Plan {
     /// 代管升级：核对包目录里的版本
     verify_version: Option<(PathBuf, String)>,
     verify_uv: Option<Verification>,
+    verify_managed_bins: Vec<String>,
     /// 失败时要按相反顺序撤回的移动（执行时记录）
     notes: Vec<String>,
     scripts_ignored: bool,
@@ -673,6 +674,7 @@ fn plan_delegated(
                     .collect(),
                 verify_version: Some((package_dir.join("package.json"), target)),
                 verify_uv: None,
+                verify_managed_bins: Vec::new(),
                 steps,
                 notes: vec![format!(
                     "改动前把 {} 整个移到备份，失败或回退时原样移回",
@@ -754,6 +756,7 @@ fn plan_delegated(
                     .collect(),
                 verify_version: None,
                 verify_uv: Some(verification),
+                verify_managed_bins: Vec::new(),
                 steps,
                 notes: vec![format!(
                     "The package and owned entries move to backup before uv runs. \
@@ -869,6 +872,7 @@ fn plan_restore(ctx: &Context, args: &Args) -> Result<Plan> {
             .collect(),
         verify_version: None,
         verify_uv: None,
+        verify_managed_bins: Vec::new(),
         steps,
         notes: vec!["零网络：只在本机移动目录".into()],
         scripts_ignored: false,
@@ -1215,7 +1219,7 @@ fn plan_managed(
             Action::Install | Action::Upgrade | Action::Switch
         )
     {
-        notes.push("Managed PyPI metadata is freshly checked before completion and current selection. Unverified candidates remain for inspection; existing incomplete directories are not overwritten automatically. Manual commands do not include these application verification gates.".into());
+        notes.push("Managed PyPI metadata and declared command entries are freshly checked before completion and current selection. Unverified candidates remain for inspection; existing incomplete directories are not overwritten automatically. Manual commands do not include these application verification gates.".into());
     }
     if !allow && matches!(args.action, Action::Install | Action::Upgrade) && scheme == "npm" {
         notes.push(
@@ -1231,6 +1235,7 @@ fn plan_managed(
         verify_bins,
         verify_version: None,
         verify_uv: None,
+        verify_managed_bins: if scheme == "pypi" { bins } else { Vec::new() },
         notes,
         scripts_ignored: !allow && scheme == "npm",
         backup_dir: None,
@@ -1323,6 +1328,7 @@ fn plan_adopt(
         verify_bins: verify,
         verify_version: None,
         verify_uv: None,
+        verify_managed_bins: Vec::new(),
         notes: vec![
             format!(
                 "装好托管的同一版本、放好入口链接后，才把 {} 整个移到备份（不执行 npm uninstall）",
@@ -1771,6 +1777,18 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                             &ctx.home_dir,
                             "current selection",
                         )?;
+                        super::uv_postcondition::check_entries(
+                            &program_dir.join(version),
+                            &plan
+                                .verify_managed_bins
+                                .iter()
+                                .map(|bin| {
+                                    managed_bin_target(&program_dir.join(version), "pypi", bin)
+                                })
+                                .collect::<Vec<_>>(),
+                            &ctx.home_dir,
+                            "current selection",
+                        )?;
                     }
                     symlink(Path::new(version), &program_dir.join("current"))?;
                 }
@@ -1783,6 +1801,16 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                             dir,
                             name,
                             version,
+                            &ctx.home_dir,
+                            "completion",
+                        )?;
+                        super::uv_postcondition::check_entries(
+                            dir,
+                            &plan
+                                .verify_managed_bins
+                                .iter()
+                                .map(|bin| managed_bin_target(dir, "pypi", bin))
+                                .collect::<Vec<_>>(),
                             &ctx.home_dir,
                             "completion",
                         )?;
@@ -1827,7 +1855,7 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
         Ok(())
     })();
     if let Err(err) = result {
-        if err.is::<UnverifiedVersion>() {
+        if err.is::<UnverifiedVersion>() || err.is::<UnverifiedEntry>() {
             let _ = record(
                 ctx,
                 req,

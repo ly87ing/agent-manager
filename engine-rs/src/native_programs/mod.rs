@@ -21,6 +21,10 @@ pub(crate) fn has_unverified_version(error: &anyhow::Error) -> bool {
     error.is::<uv_postcondition::UnverifiedVersion>()
 }
 
+pub(crate) fn has_unverified_entry(error: &anyhow::Error) -> bool {
+    error.is::<uv_postcondition::UnverifiedEntry>()
+}
+
 pub(crate) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
     let verb = req.command.split([':', '.']).nth(1).unwrap_or_default();
     match verb {

@@ -479,6 +479,8 @@ fn dispatch(ctx: &Context, request: &Request) -> DispatchResult {
                 .map_err(|err| {
                     let code = if crate::native_programs::has_unverified_version(&err) {
                         "PROGRAM_VERSION_UNVERIFIED"
+                    } else if crate::native_programs::has_unverified_entry(&err) {
+                        "PROGRAM_ENTRY_UNVERIFIED"
                     } else {
                         "PROGRAM_ERROR"
                     };

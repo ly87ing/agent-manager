@@ -74,9 +74,17 @@ be on PATH. This retains existing backup files for inspection, not a promise of
 an independent, runnable or immutable backup. Every later successful action for
 that program applies the existing newest-three non-adoption backup retention.
 Managed PyPI installs validate their name/target during preview and freshly read
-native metadata before writing a completion marker and before selecting `current`.
+native metadata and declared command entries before writing a completion marker
+and before selecting `current`.
 Reused completed versions and explicit switches receive the selection check too.
-Each check requires a matching PEP 440 equality result; it does not make filesystem
+Each check requires a matching PEP 440 equality result and declared entry targets
+that resolve to ordinary files inside the selected version, with execute bits
+on Unix. Internal entry links remain valid; missing/unreadable entries, directories,
+external targets and absent declarations do not establish entry availability.
+The plan carries its own declared commands into both gates; a Windows outer shim
+existing by itself is insufficient. Checks execute no command and do not prove
+interpreter/shebang availability, authenticity or arbitrary program functionality.
+This does not make filesystem
 publication atomic against uncoordinated external changes after or between reads.
 An incomplete existing PyPI version directory is refused, including on a later
 retry, so retained candidates are not automatically deleted or overwritten.
@@ -84,13 +92,16 @@ Failures retain their candidate and report which completion/selection step was
 not performed; an earlier completion marker or previously active contents may
 already exist. Existing target/account guards remain in force. Parent path
 aliases are normalized while the version root and internal metadata components
-retain ordinary-object checks. Git version postconditions, managed entry
-availability before selection and general rollback/restore conflicts remain
-separate work.
+retain ordinary-object checks. Git version postconditions and general
+rollback/restore conflicts remain separate work.
 The `PROGRAM_VERSION_UNVERIFIED` diagnostic identifies this incomplete outcome;
 it also identifies refusal to overwrite an incomplete managed PyPI candidate.
 The dialog keeps its details visible and announces a warning. Ordinary installer
 failures retain `PROGRAM_ERROR` and their existing recovery attempt.
+`PROGRAM_ENTRY_UNVERIFIED` identifies failed managed entry evidence before
+completion/selection and retains the same inspection warning without automatic
+rollback/cleanup after that check. An earlier completion marker can still exist;
+later retries refuse incomplete candidates through the existing version diagnostic.
 For installed uv tools, cached upstream versions/timestamps remain available, but
 current versions and ordering come from actual metadata. Unreadable current
 metadata remains unknown instead of inheriting a cached current/latest label.
