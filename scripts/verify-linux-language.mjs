@@ -147,9 +147,12 @@ async function authenticate(mode) {
     process.kill(child.pid, 'SIGCONT');
     const result = await childResult;
     assert.equal(result.status, 0, `Authenticated CLI failed: ${result.stderr}`);
+    const envelope = JSON.parse(result.stdout);
+    console.log('LANGUAGE_AUTH_CLI ' + JSON.stringify({ mode, ok: envelope.ok, status: envelope.data?.status, items: envelope.data?.items, errors: envelope.errors }));
+    assert.equal(envelope.ok, true, JSON.stringify(envelope.errors));
     const receipt = await agentResult;
-    assert.equal(receipt.status, 0, `CI authentication protocol failed: ${receipt.stderr}`);
-    return JSON.parse(result.stdout).data;
+    assert.equal(receipt.status, 0, `CI authentication protocol failed (${mode}): ${receipt.stderr}`);
+    return envelope.data;
   } finally {
     // Only these two explicitly owned fixture processes can be terminated.
     if (child.exitCode === null) { try { child.kill('SIGKILL'); } catch {} }
