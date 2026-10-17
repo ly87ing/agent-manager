@@ -257,6 +257,8 @@ database. Linux clock correction remains independent.
 
 System time-zone repair uses the original caller's exact Polkit
 `org.freedesktop.timedate1.set-timezone` action with PID, start time and UID.
+Read-only time-zone snapshots, including repair preview and independent readback,
+forbid D-Bus activation; a stopped timedated service leaves that evidence unavailable.
 Authorization finishes before a fresh comparison of timedated and disk evidence;
 the subsequent native Rust D-Bus setter uses the same process that owns the
 authorization, with both payload and message flags noninteractive. The original caller

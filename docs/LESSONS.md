@@ -6,6 +6,13 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: read-only bus tests must cover repair previews
+
+- Environment inspection's no-activation test passed while the separate timezone
+  repair snapshot still allowed bus activation. Exercise actual CLI previews
+  against activatable private-bus services, with an explicit activation control;
+  an inspection-only test does not cover every read route.
+
 ## 2026-10-16: pipe readiness must use the same read layer
 
 - Native NTP acceptance reached real authorization cancellation after explicitly
