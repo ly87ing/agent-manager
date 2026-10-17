@@ -52,6 +52,10 @@ mod fixture {
             #[zbus(connection)] connection: &zbus::Connection,
             #[zbus(header)] header: zbus::message::Header<'_>,
         ) -> Result<(), AuthenticationError> {
+            eprintln!(
+                "CI authentication callback: mode={:?}, action={action}",
+                self.language_mode
+            );
             if header.sender().map(|name| name.as_str()) != Some(self.authority.as_str())
                 || details.get("polkit.subject-pid") != Some(&self.pid.to_string())
                 || self.done.load(Ordering::Acquire)
@@ -88,20 +92,27 @@ mod fixture {
                     "org.freedesktop.Accounts.User",
                 )
                 .await
-                .map_err(|_| zbus::fdo::Error::Failed("Private user proxy failed".into()))?;
-                if user
+                .map_err(|error| {
+                    eprintln!("CI language proxy failed: {error}");
+                    zbus::fdo::Error::Failed("Private user proxy failed".into())
+                })?;
+                let languages = user
                     .get_property::<Vec<String>>("Languages")
                     .await
-                    .map_err(|_| zbus::fdo::Error::Failed("Private language read failed".into()))?
-                    != vec!["en_US.UTF-8", "de_DE.UTF-8"]
-                {
+                    .map_err(|error| {
+                        eprintln!("CI language read failed: {error}");
+                        zbus::fdo::Error::Failed("Private language read failed".into())
+                    })?;
+                if languages != vec!["en_US.UTF-8", "de_DE.UTF-8"] {
+                    eprintln!("CI language baseline changed: {languages:?}");
                     return Err(AuthenticationError::Failed(
                         "Changed private language baseline".into(),
                     ));
                 }
                 user.call::<_, _, ()>("SetLanguages", &(vec!["en_US.UTF-8", "fr_FR.UTF-8"],))
                     .await
-                    .map_err(|_| {
+                    .map_err(|error| {
+                        eprintln!("CI language drift failed: {error}");
                         zbus::fdo::Error::Failed("Private language drift failed".into())
                     })?;
             }
@@ -145,7 +156,8 @@ mod fixture {
                     &(0u32, cookie, identity),
                 )
                 .await
-                .map_err(|_| {
+                .map_err(|error| {
+                    eprintln!("CI authentication response failed: {error}");
                     zbus::fdo::Error::Failed("CI authentication response failed".into())
                 })?;
             self.done.store(true, Ordering::Release);
@@ -284,7 +296,7 @@ mod fixture {
             }
             assert!(
                 done.load(Ordering::Acquire),
-                "CI agent never received an authentication request"
+                "CI agent did not complete authentication"
             );
             async_io::Timer::after(Duration::from_millis(300)).await;
             let _ = connection

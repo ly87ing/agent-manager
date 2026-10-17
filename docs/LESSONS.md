@@ -15,6 +15,14 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   path containing spaces and require the actual batch entry's expected output;
   Unix success cannot establish Windows command-line parsing.
 
+## 2026-10-17: authentication completion is not callback receipt
+
+- The language drift fixture reported that no authentication request arrived,
+  but its flag tracked completion, leaving callback errors indistinguishable
+  from no request. Preserve the original error at each callback failure and
+  describe the deadline as incomplete authentication. Keep the native protocol
+  assertion; an entered callback alone cannot establish authorization success.
+
 ## 2026-10-17: directory copies need namespace and format-bound fork proof
 
 - The passing mixed-directory lifecycle did not exercise receipt withdrawal
