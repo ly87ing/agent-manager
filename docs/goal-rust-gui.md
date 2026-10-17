@@ -2072,3 +2072,53 @@ functional execution, freshness-cache authority or an upgrade postcondition.
 General rollback/restore conflicts and installed-client/signed-update acceptance
 remain open. No personal OS setting, real assistant file, installed application,
 Release or tag changed.
+
+## 2026-10-17: delegated uv results and custom roots
+
+Main `855a0774` independently reads installed native metadata after successful
+uv upgrade/switch commands and applies PEP 440 equality matching before entry
+checks. Missing, ambiguous, malformed or mismatched results return
+`PROGRAM_VERSION_UNVERIFIED`, retaining current and moved backup files without
+automatic restoration or cleanup after that check. The unverified install can
+remain on PATH. Normal newest-three retention still applies after any later
+successful action; four failed actions followed by a successful one exercise
+that boundary. Existing backups are not independent, immutable or guaranteed
+runnable. General command-failure rollback and restore conflicts are unchanged.
+Installed uv freshness now uses actual metadata rather than stale cached current
+versions. The confirmation dialog retains inspection details and announces a
+warning without recommending an automatic retry through copied commands.
+
+Candidate `b472be82` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39009245413)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39009248429),
+including native Windows/Linux/macOS failure controls and real uv 0.13.1 offline
+upgrades with a preinstalled interpreter. Intel DMG initially failed to eject a
+busy volume; a same-revision job rerun passed. This is not a packaging reliability
+fix. Main passed post-push [CI](https://github.com/ly87ing/agent-manager/actions/runs/39010549570)
+and [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39010549528).
+Actual CLI payload browser receipts cover stable opaque dialogs, reachable
+controls, warning details and keyboard scrolling at 1000/760 px in both languages;
+these are renderer receipts, not native installed-desktop interaction.
+
+Main `30e23164` recognizes Unix uv tools under an explicitly selected absolute
+custom root using native ordinary source/receipt evidence. Invalid package names,
+wrong or missing receipt entries, linked/FIFO/oversized receipts, relative roots
+and unproved absolute MCP sources do not establish custom-root ownership.
+Standard path-marker compatibility and Windows copy/receipt checks remain in
+place. The [owning reference](subsystems/programs.md) defines the boundaries.
+
+Candidate `1b982708` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39010709130)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39010712286).
+Native logs confirm real uv 0.13.1 standard/custom root upgrades and entry
+execution on Windows/Linux/macOS, including public/local version matching and
+unchanged selected interpreter binaries/identities. Actual CLI metadata and
+retained-failure fixtures also cover custom roots. Local verification passed the
+complete engine suite with 298 library cases and all integrations, Tauri 27,
+frontend 696, production build, Windows all-target compilation, formatting,
+workflow/script checks and documentation links. Runtime/tests/workflow/reference
+sources match main; main-specific history is preserved. Main `30e23164` post-push
+workflows are pending at this receipt.
+
+Managed PyPI/git postconditions, general rollback/restore conflicts, remaining
+Linux preference/provider repair, installed-client adoption and signed updating
+remain open. No personal OS setting, real assistant file, installed application,
+Release or tag changed.
