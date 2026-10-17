@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use super::snapshot_materialized_path::{key, target, validate_keys};
 use super::snapshot_v2::{typed_hash, Entries, Entry};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -11,84 +12,6 @@ use super::snapshot_v2::{typed_hash, Entries, Entry};
 pub(super) struct FileLink {
     pub(super) path: String,
     pub(super) raw_target: String,
-}
-
-fn component(name: &str) -> Result<()> {
-    if name.is_empty()
-        || matches!(name, "." | "..")
-        || name.ends_with(['.', ' '])
-        || name
-            .chars()
-            .any(|c| c <= '\u{1f}' || "\\/:<>\"|?*".contains(c))
-    {
-        bail!("Ambiguous Windows snapshot path component");
-    }
-    let stem = name
-        .split('.')
-        .next()
-        .unwrap()
-        .trim_end_matches(' ')
-        .to_ascii_uppercase();
-    if matches!(
-        stem.as_str(),
-        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
-    ) || ["COM", "LPT"].iter().any(|prefix| {
-        stem.strip_prefix(prefix).is_some_and(|suffix| {
-            matches!(
-                suffix,
-                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
-            )
-        })
-    }) {
-        bail!("Reserved Windows device name in snapshot");
-    }
-    Ok(())
-}
-
-fn key(path: &str) -> Result<()> {
-    for part in path.split('/') {
-        component(part)?;
-    }
-    Ok(())
-}
-
-fn directory(parts: &[String], entries: &Entries) -> Result<()> {
-    if !parts.is_empty() && !matches!(entries.get(&parts.join("/")), Some(Entry::Directory)) {
-        bail!("Materialized link traversal requires an included ordinary directory");
-    }
-    Ok(())
-}
-
-fn target(path: &str, raw: &str, entries: &Entries, aliases: &BTreeSet<&str>) -> Result<String> {
-    key(path)?;
-    let mut parts: Vec<String> = path.split('/').map(str::to_string).collect();
-    parts.pop();
-    for step in raw.split(['/', '\\']) {
-        directory(&parts, entries)?;
-        match step {
-            "." => {}
-            ".." if parts.pop().is_some() => {}
-            ".." => bail!("Materialized file link escapes its root"),
-            _ => {
-                component(step)?;
-                parts.push(step.into());
-            }
-        }
-    }
-    let resolved = parts.join("/");
-    if aliases.contains(resolved.as_str())
-        || !matches!(entries.get(&resolved), Some(Entry::File(_)))
-    {
-        bail!("Materialized link target must be an included ordinary non-alias file");
-    }
-    Ok(resolved)
-}
-
-fn validate_keys(entries: &Entries) -> Result<()> {
-    for path in entries.keys() {
-        key(path)?;
-    }
-    Ok(())
 }
 
 pub(super) fn plan(entries: &Entries) -> Result<Option<Vec<FileLink>>> {
