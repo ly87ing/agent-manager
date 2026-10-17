@@ -17,7 +17,11 @@ assert.notEqual(process.getuid(), 0);
 const root = mkdtempSync(join(tmpdir(), 'am-linux-ntp-'));
 const home = join(root, 'missing-home');
 const data = join(root, 'data');
-const env = { ...process.env, HOME: home, AGENT_MANAGER_DATA_DIR: data, XDG_CURRENT_DESKTOP: '' };
+// The earlier workflow step starts this disposable manager; shell exports do
+// not cross step boundaries. Bind the same current-UID bus for mixed-batch cases.
+const runtimeDirectory = `/run/user/${process.getuid()}`;
+const env = { ...process.env, HOME: home, AGENT_MANAGER_DATA_DIR: data, XDG_CURRENT_DESKTOP: '',
+  XDG_RUNTIME_DIR: runtimeDirectory, DBUS_SESSION_BUS_ADDRESS: `unix:path=${runtimeDirectory}/bus` };
 const binary = resolve('engine-rs/target/release/agent-manager-engine');
 const agentBinary = resolve('engine-rs/target/debug/examples/linux_polkit_fixture');
 const directory = '/etc/systemd/timesyncd.conf.d';
