@@ -487,9 +487,12 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         if cfg!(target_os = "linux") && target.region.is_some() {
             verification_limits.push("GNOME formats verification covers preference readback only; the desktop and a new login remain unverified.");
         }
+        if cfg!(target_os = "linux") && !target.languages.is_empty() {
+            verification_limits.push("GNOME primary-language verification covers the existing AccountsService preference only. Persistent storage, desktop adoption, future login and overriding LANGUAGE/LC_* values remain unverified. The metadata tail is not an ordered UI fallback list.");
+        }
         let relogin_required = cfg!(target_os = "linux")
             && items.iter().any(|item| {
-                item.id == "language.region"
+                matches!(item.id.as_str(), "language.region" | "language.preferred")
                     && matches!(item.status.as_str(), "verified" | "verified_after_error")
             });
         Ok(

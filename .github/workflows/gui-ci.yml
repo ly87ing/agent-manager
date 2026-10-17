@@ -52,7 +52,8 @@ jobs:
         if: ${{ runner.os == 'Linux' }}
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y libglib2.0-bin gsettings-desktop-schemas dconf-cli dconf-gsettings-backend
+          sudo apt-get install --no-install-recommends -y libglib2.0-bin gsettings-desktop-schemas dconf-cli dconf-gsettings-backend accountsservice policykit-1 locales
+          sudo locale-gen en_US.UTF-8 en_GB.UTF-8 fr_FR.UTF-8 de_DE.UTF-8
 
       - name: Run cargo tests
         run: cargo test --manifest-path engine-rs/Cargo.toml
@@ -112,6 +113,13 @@ jobs:
           cargo build --manifest-path engine-rs/Cargo.toml --example linux_polkit_fixture
           cargo build --manifest-path engine-rs/Cargo.toml --example linux_gnome_fixture
           AM_ISOLATED_LINUX_TIMEZONE=1 node scripts/verify-linux-timezone.mjs
+
+      - name: Verify private native GNOME language preferences
+        if: ${{ runner.os == 'Linux' }}
+        shell: bash
+        run: |
+          cargo test --manifest-path engine-rs/Cargo.toml --test native_linux_environment_bus language_reply::language_reply_loss_stops_formats_even_when_primary_readback_matches -- --ignored --exact --nocapture
+          bash scripts/verify-linux-language.sh
 
       - name: Run cargo checks
         shell: bash

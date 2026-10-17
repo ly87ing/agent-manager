@@ -130,7 +130,7 @@ fn disk(zone: String) -> Option<State> {
 }
 
 #[cfg(target_os = "linux")]
-fn authorization_code() -> Option<i32> {
+fn authorization_code(action: &str) -> Option<i32> {
     use std::{process::Stdio, time::Duration};
     let start = start_time(&std::fs::read_to_string("/proc/self/stat").ok()?)?;
     let subject = format!("{},{},{}", std::process::id(), start, unsafe {
@@ -140,7 +140,7 @@ fn authorization_code() -> Option<i32> {
     command
         .args([
             "--action-id",
-            "org.freedesktop.timedate1.set-timezone",
+            action,
             "--process",
             &subject,
             "--allow-user-interaction",
@@ -177,10 +177,10 @@ impl Authorization {
 }
 
 #[cfg(target_os = "linux")]
-pub(super) fn authorize() -> Authorization {
+pub(super) fn authorize(action: &str) -> Authorization {
     let deadline = super::clock_helper::boot_ms().and_then(|now| now.checked_add(120_000));
     Authorization {
-        code: authorization_code(),
+        code: authorization_code(action),
         deadline,
     }
 }
