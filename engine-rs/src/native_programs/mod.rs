@@ -6,6 +6,8 @@ pub(crate) mod declare;
 pub(crate) mod locate;
 mod scope;
 pub(crate) mod status;
+mod uv_metadata;
+mod uv_metadata_files;
 
 use anyhow::{bail, Result};
 use serde_json::Value;

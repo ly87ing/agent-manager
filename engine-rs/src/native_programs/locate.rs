@@ -360,32 +360,8 @@ pub fn classify(ctx: &Context, path: &Path) -> Located {
     base
 }
 
-/// uv tool 环境里这个包的版本：site-packages 下 `<名>-<版本>.dist-info`。
 fn uv_tool_version(dir: &Path, tool: &str) -> Option<String> {
-    let normalized = tool.replace('-', "_").to_lowercase();
-    let mut roots = vec![dir.join("Lib/site-packages")];
-    if let Ok(lib) = std::fs::read_dir(dir.join("lib")) {
-        roots.extend(
-            lib.filter_map(|entry| entry.ok())
-                .map(|entry| entry.path().join("site-packages")),
-        );
-    }
-    for root in roots {
-        let Ok(entries) = std::fs::read_dir(root) else {
-            continue;
-        };
-        for entry in entries.filter_map(|e| e.ok()) {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if let Some(stem) = name.strip_suffix(".dist-info") {
-                if let Some((pkg, version)) = stem.rsplit_once('-') {
-                    if pkg.to_lowercase() == normalized {
-                        return Some(version.to_string());
-                    }
-                }
-            }
-        }
-    }
-    None
+    super::uv_metadata::version(dir, tool).ok()
 }
 
 /// Windows uv copies entry points. A receipt path alone does not prove ownership.
@@ -600,7 +576,17 @@ mod uv_tests {
         let installed = root.join("bin/tool-a.exe");
         std::fs::create_dir_all(source.parent().unwrap()).unwrap();
         std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
-        std::fs::create_dir_all(dir.join("Lib/site-packages/tool_a-1.2.3.dist-info")).unwrap();
+        let site = dir.join(if cfg!(windows) {
+            "Lib/site-packages"
+        } else {
+            "lib/python3.13/site-packages"
+        });
+        std::fs::create_dir_all(site.join("tool_a-1.2.3.dist-info")).unwrap();
+        std::fs::write(
+            site.join("tool_a-1.2.3.dist-info/METADATA"),
+            "Metadata-Version: 2.4\nName: tool-a\nVersion: 1.2.3\n\n",
+        )
+        .unwrap();
         std::fs::write(&source, b"original entry").unwrap();
         std::fs::copy(&source, &installed).unwrap();
         assert!(!uv_owned_copy(&dir, &installed));
@@ -613,7 +599,10 @@ mod uv_tests {
         )
         .unwrap();
         assert!(uv_owned_copy(&dir, &installed));
-        assert_eq!(uv_tool_version(&dir, "tool-a").as_deref(), Some("1.2.3"));
+        assert_eq!(
+            uv_tool_version(&dir.canon().unwrap(), "tool-a").as_deref(),
+            Some("1.2.3")
+        );
         std::fs::write(&installed, b"modified entry").unwrap();
         assert!(!uv_owned_copy(&dir, &installed));
         std::fs::remove_dir_all(root).unwrap();

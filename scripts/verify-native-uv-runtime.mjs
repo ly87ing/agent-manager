@@ -97,6 +97,7 @@ try {
       const scripts = join(packageDir, windows ? 'Scripts' : 'bin');
       const metadata = join(packageDir, windows ? 'Lib/site-packages' : 'lib/python3.13/site-packages', 'am_uv_fixture-1.0.0.dist-info');
       mkdirSync(scripts, { recursive: true }); mkdirSync(metadata, { recursive: true });
+      writeFileSync(join(metadata, 'METADATA'), 'Metadata-Version: 2.4\nName: am-uv-fixture\nVersion: 1.0.0\n\n');
       const name = windows ? 'am-uv-fixture.exe' : 'am-uv-fixture';
       const source = join(scripts, name), entry = join(fixture.bin, name);
       copyFileSync(copied, source);

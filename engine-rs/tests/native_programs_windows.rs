@@ -24,6 +24,11 @@ fn uv_copied_entry_is_read_from_receipt_and_preserved_in_upgrade_preview() {
         std::fs::create_dir_all(path).unwrap();
     }
     std::fs::write(package.join("Scripts/tool-a.exe"), b"copied uv executable").unwrap();
+    std::fs::write(
+        package.join("Lib/site-packages/tool_a-1.2.3.dist-info/METADATA"),
+        "Metadata-Version: 2.4\nName: tool-a\nVersion: 1.2.3\n\n",
+    )
+    .unwrap();
     std::fs::copy(package.join("Scripts/tool-a.exe"), bin.join("tool-a.exe")).unwrap();
     std::fs::write(bin.join("uv.exe"), b"preview-only executable").unwrap();
     std::fs::write(
