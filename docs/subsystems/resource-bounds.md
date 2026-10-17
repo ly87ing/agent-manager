@@ -19,6 +19,16 @@ contents no longer require an allocation proportional to file size. Directory
 paths and fingerprint entries still grow with the number of files; this is not a
 fixed bound on the whole process or desktop footprint.
 
+New schema 4 [directory-materialized skill snapshots](skills.md) separately cap
+expanded nodes at 65,536, combined path accounting at 4 MiB, and default-stream
+payload bytes at 512 MiB. The receipt must fit 64 KiB before staging. Planning,
+actual copying and physical verification each enforce their applicable budgets;
+metadata lengths alone do not admit growing files. Available space at the actual
+planned destination must cover the payload and 64 MiB headroom, without claiming
+a reservation. Source fingerprint inventory and existing snapshot formats retain
+their earlier contracts. Native OS-link sources may use their existing schema 2
+path when the new materialization is ineligible; plaintext links cannot.
+
 ## Verification
 
 ```sh

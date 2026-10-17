@@ -70,12 +70,14 @@ or adding one to a legacy snapshot does not preserve a valid version.
 On Windows, new Git snapshots whose links all point directly to included ordinary
 files use schema 3 and ordinary file copies. Plaintext Git links use this writer
 on every platform. Their target text must be nonempty UTF-8 without NUL and within
-64 KiB; unsupported directory/chained/mixed targets are refused before staging,
+64 KiB; unsupported plaintext directory/chained targets are refused before staging,
 unless the exact version already exists and passes its recorded verifier.
 The dedicated writer copies each
 validated source target, even if its name sorts after the alias; it never attempts
-to create a file symbolic link. Existing directory/mixed-link copying retains
-the schema 2 path and its platform capability requirements.
+to create a file symbolic link. Eligible directory/mixed-link sources use schema 4
+below. Other actual OS-link sources retain schema 2 and its native capability
+requirements, including refusal when the copied link kind/meaning cannot preserve
+the fixed version. Plaintext checkouts never use that native-link fallback.
 Existing versions are verified with their recorded format before new writer
 eligibility is considered; stricter creation rules do not reinterpret them.
 
@@ -90,6 +92,43 @@ Replacing only those file entries with their recorded logical links must produce
 the caller's expected typed v2 ID. Receipt text cannot override a fixed ID;
 additional files or empty excluded directories invalidate it.
 
+Schema 4 adds required `materialized_directory_links` alongside the required file
+array; directory records must be nonempty, file records may be empty. Both contain
+only `path` and `raw_target`. The serialized receipt must fit 64 KiB before staging.
+Both arrays share unique, nonoverlapping alias paths and the same strict traversal
+policy. Directory targets must resolve to an included ordinary sibling directory,
+with no links anywhere in its included subtree. Creation copies only that logical
+inventory, including empty directories; source exclusions still apply to ordinary
+source directories. File-only snapshots continue to use schema 3.
+
+The schema 4 verifier inventories all physical entries, compares each directory
+alias's exact relative paths, kinds and file digests with its target, then removes
+only proved virtual descendants and restores the recorded logical links. The
+result must match the original fixed typed v2 ID. Matching changes to both copies
+still fail. ASCII case-colliding names are refused. Non-ASCII names with case
+transformations remain unavailable for this materialization rather than assuming
+Rust's Unicode mapping equals Windows filesystem mapping; uncased names such as
+Chinese remain eligible. This policy does not reinterpret schema 2/3.
+It is not a complete Unicode filesystem model: normalization equivalence and
+component-length limits still depend on the destination filesystem. Failure to
+create or verify the exact namespace refuses publication; it never merges names.
+
+Directory materialization promises read-only default-stream subtree contents.
+It does not preserve `readlink`, `realpath`, physical working-directory identity,
+inode/hardlink identity or write coupling between copies. Non-sibling targets,
+alias traversal, chained or cyclic aliases are outside this new representation.
+On Unix, actual OS-link sources continue to use their native schema 2 path.
+
+Each schema 4 expansion is limited to 65,536 nodes, 4 MiB of combined output/input
+path accounting (and doubled physical-key accounting), and 512 MiB of total
+default-stream bytes. Planning checks lengths through ordinary handles; actual
+copy and physical hashing consume fresh budgets, including growing files. Before
+staging, filesystem availability at the planned `skill-versions` parent must cover
+the payload plus 64 MiB headroom. This is advisory, without space reservation;
+copy failures retain the existing owned-stage cleanup and no-publication rules.
+These limits do not bound the earlier source fingerprint, old formats or the
+whole process footprint. See [Resource bounds](resource-bounds.md).
+
 The new writer creates files exclusively and copies default-stream bytes without
 propagating NTFS alternate streams. On Unix, new copied files use the existing
 snapshot policy of mode `0444`; personal forks make their own copies writable.
@@ -99,7 +138,12 @@ hardlink identity and alternate streams are outside that existing content model.
 A personal fork of a materialized snapshot contains editable ordinary files and
 does not inherit the sibling integrity manifest. Schema 2-only readers cannot
 manage schema 3 bindings: rollback must retain a capable verifier or restore a
-capable build, never remove manifests or rewrite IDs/bindings.
+capable build, never remove manifests or rewrite IDs/bindings. Schema 4 likewise
+requires a capable reader. Its offline personal fork copies the complete verified
+ordinary namespace, including directory aliases named `node_modules`, instead of
+reapplying source exclusions. The copy is independently verified before
+registration. Receipt removal or format changes before fork require the actually
+observed format's fixed-ID proof, never a field-only fallback to generic copying.
 
 Existing snapshots and bindings retain their original IDs and are not rewritten.
 Local assignments still follow their actual sources with the legacy hash. Status
@@ -223,6 +267,8 @@ cargo test --manifest-path engine-rs/Cargo.toml --test native_skills replacing_a
 cargo test --manifest-path engine-rs/Cargo.toml --test native_skills personal_skill
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::snapshot_v2
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::snapshot_materialized
+cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::snapshot_directory
+cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::snapshot_budget
 cargo test --manifest-path engine-rs/Cargo.toml --lib native_skills::git_index
 cargo test --manifest-path engine-rs/Cargo.toml --test native_skill_git_links
 cargo test --manifest-path engine-rs/Cargo.toml --test native_skills typed

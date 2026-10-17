@@ -195,7 +195,11 @@ pub(crate) fn fork(ctx: &Context, req: &Request) -> Result<Value> {
     std::fs::create_dir(&dest)
         .with_context(|| format!("无法创建技能目录 {}（不覆盖已有目录）", dest.display()))?;
     let registered = (|| -> Result<()> {
-        copy_dir_recursive(&source, &dest)?;
+        if origin.source_path.is_some()
+            || !super::snapshot_v2::copy_directory_snapshot(&source, &dest, &version)?
+        {
+            copy_dir_recursive(&source, &dest)?;
+        }
         make_writable(&dest)?;
         let mut conn = store::open_write(ctx)?;
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;

@@ -17,6 +17,8 @@ mod persistence;
 mod preflight;
 mod recommend;
 mod snapshot;
+mod snapshot_budget;
+mod snapshot_directory;
 mod snapshot_materialized;
 mod snapshot_materialized_path;
 mod snapshot_storage;

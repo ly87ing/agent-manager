@@ -43,8 +43,11 @@ pub(super) fn key(path: &str) -> Result<()> {
     Ok(())
 }
 
-fn directory(parts: &[String], entries: &Entries) -> Result<()> {
-    if !parts.is_empty() && !matches!(entries.get(&parts.join("/")), Some(Entry::Directory)) {
+fn directory(parts: &[String], entries: &Entries, aliases: &BTreeSet<&str>) -> Result<()> {
+    let key = parts.join("/");
+    if !parts.is_empty()
+        && (aliases.contains(key.as_str()) || !matches!(entries.get(&key), Some(Entry::Directory)))
+    {
         bail!("Materialized link traversal requires an included ordinary directory");
     }
     Ok(())
@@ -56,11 +59,24 @@ pub(super) fn target(
     entries: &Entries,
     aliases: &BTreeSet<&str>,
 ) -> Result<String> {
+    let resolved = resolve(path, raw, entries, aliases)?;
+    if !matches!(entries.get(&resolved), Some(Entry::File(_))) {
+        bail!("Materialized link target must be an included ordinary non-alias file");
+    }
+    Ok(resolved)
+}
+
+pub(super) fn resolve(
+    path: &str,
+    raw: &str,
+    entries: &Entries,
+    aliases: &BTreeSet<&str>,
+) -> Result<String> {
     key(path)?;
     let mut parts: Vec<String> = path.split('/').map(str::to_string).collect();
     parts.pop();
     for step in raw.split(['/', '\\']) {
-        directory(&parts, entries)?;
+        directory(&parts, entries, aliases)?;
         match step {
             "." => {}
             ".." if parts.pop().is_some() => {}
@@ -73,7 +89,10 @@ pub(super) fn target(
     }
     let resolved = parts.join("/");
     if aliases.contains(resolved.as_str())
-        || !matches!(entries.get(&resolved), Some(Entry::File(_)))
+        || !matches!(
+            entries.get(&resolved),
+            Some(Entry::File(_) | Entry::Directory)
+        )
     {
         bail!("Materialized link target must be an included ordinary non-alias file");
     }

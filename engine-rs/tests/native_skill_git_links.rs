@@ -1,6 +1,8 @@
 //! Actual CLI and Git checkout, without Git on the CLI process's PATH.
 #[cfg(windows)]
 mod common;
+#[path = "support/native_skill_directories.rs"]
+mod directory_materialization;
 #[path = "common/skill_repo.rs"]
 mod skill_repo;
 
@@ -326,11 +328,15 @@ fn native_cli_git_plaintext_links_are_verified_materialized_and_reusable_offline
 }
 
 #[test]
-fn plaintext_directory_links_and_nested_gitlinks_do_not_publish_raw_text_snapshots() {
+fn unsupported_plaintext_directory_links_and_nested_gitlinks_do_not_publish_raw_text_snapshots() {
     let fixture = Fixture::new("sha1");
-    std::fs::create_dir(fixture.source().join("directory")).unwrap();
-    std::fs::write(fixture.source().join("directory/payload"), b"fixture").unwrap();
-    std::fs::write(fixture.source().join("alias"), b"directory").unwrap();
+    std::fs::create_dir_all(fixture.source().join("nested/directory")).unwrap();
+    std::fs::write(
+        fixture.source().join("nested/directory/payload"),
+        b"fixture",
+    )
+    .unwrap();
+    std::fs::write(fixture.source().join("alias"), b"nested/directory").unwrap();
     let metadata = git_metadata(&fixture.repo().join(".git"));
     fixture.action("add", "codex", false);
     assert!(!fixture.0.join("data/skill-versions").exists());
