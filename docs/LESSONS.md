@@ -987,3 +987,6 @@ confirmation back to the verified source plan.
   Keep native rename/write refusal and released-handle positive controls; exercise
   the direct reparse setter so a library's earlier existence check cannot pass
   without reaching the filesystem boundary.
+- A follow-up exclusive `junction::exists` probe conflicted with the correctly
+  held read handle. Inspect attributes through a compatible open handle instead;
+  keep the actual refused setter and released-handle successful setter unchanged.

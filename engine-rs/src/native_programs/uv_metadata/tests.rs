@@ -241,7 +241,10 @@ fn held_directories_cannot_redirect_metadata_to_a_replacement() {
 #[cfg(windows)]
 #[test]
 fn held_ordinary_directory_refuses_native_junction_conversion_until_released() {
-    use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+    use std::os::windows::{
+        fs::{MetadataExt, OpenOptionsExt},
+        io::AsRawHandle,
+    };
     use windows_sys::Win32::Storage::FileSystem::*;
     use windows_sys::Win32::System::Ioctl::{FSCTL_GET_REPARSE_POINT, FSCTL_SET_REPARSE_POINT};
     use windows_sys::Win32::System::IO::DeviceIoControl;
@@ -297,8 +300,11 @@ fn held_ordinary_directory_refuses_native_junction_conversion_until_released() {
         0,
         "Attribute-only handle converted a held directory"
     );
+    assert_eq!(
+        attributes.metadata().unwrap().file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT,
+        0
+    );
     drop(attributes);
-    assert!(!junction::exists(&empty).unwrap());
     assert!(directory.entries(1).unwrap().is_empty());
     drop(directory);
     let writer = open(&empty, windows_sys::Win32::Foundation::GENERIC_WRITE).unwrap();
