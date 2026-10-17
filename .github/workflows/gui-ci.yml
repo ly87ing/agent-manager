@@ -69,7 +69,7 @@ jobs:
       - name: Verify native uv never downloads a Python runtime
         env:
           AM_ISOLATED_NATIVE_UV: "1"
-          AM_NATIVE_UV: ${{ steps.native-uv.outputs.uv-path }}
+          AM_NATIVE_UV: ${{ steps.native-uv.outputs.uv-path }}${{ runner.os == 'Windows' && '.exe' || '' }}
         run: node scripts/verify-native-uv-runtime.mjs
 
       - name: Verify disposable Linux user-manager environment

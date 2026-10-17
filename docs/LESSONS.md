@@ -13,6 +13,10 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   commands. Inspect every producer and exercise the list's copied install command
   too; a guarded execution plan does not establish the same runtime boundary for
   commands copied elsewhere.
+- The pinned setup action returns an extensionless `uv-path` on Windows. Its
+  successful installation did not make that literal path a file, so the native
+  fixture stopped before executing uv. Append the native `.exe` suffix in the
+  workflow; keep the fixture's explicit absolute regular-file admission strict.
 
 ## 2026-10-16: mutation-lock acceptance needs a separate contender
 
