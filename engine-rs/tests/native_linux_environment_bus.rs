@@ -67,6 +67,24 @@ fn inspection_does_not_activate_stopped_time_or_locale_services() {
         ),
     )
     .unwrap();
+    let timezone_marker = root.path().join("timezone-activated");
+    std::fs::write(
+        services.join("org.freedesktop.timedate1.service"),
+        format!(
+            "[D-BUS Service]\nName=org.freedesktop.timedate1\nExec=/usr/bin/touch \"{}\"\n",
+            timezone_marker.display()
+        ),
+    )
+    .unwrap();
+    let system_locale_marker = root.path().join("system-locale-activated");
+    std::fs::write(
+        services.join("org.freedesktop.locale1.service"),
+        format!(
+            "[D-BUS Service]\nName=org.freedesktop.locale1\nExec=/usr/bin/touch \"{}\"\n",
+            system_locale_marker.display()
+        ),
+    )
+    .unwrap();
     let address = format!(
         "unix:abstract=am-timesync-{}",
         agent_manager_engine::store::uuid_v4()
@@ -132,6 +150,45 @@ fn inspection_does_not_activate_stopped_time_or_locale_services() {
         "Inspection activated AccountsService"
     );
     assert!(!root.path().join("missing-settings").exists());
+    assert!(
+        !timezone_marker.exists(),
+        "Inspection activated the timezone service"
+    );
+    assert!(
+        !system_locale_marker.exists(),
+        "Inspection activated system-localed"
+    );
+
+    let preview = Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"))
+        .args([
+            "environment:repair-preview",
+            "--spec",
+            r#"{"timezone":"Etc/UTC"}"#,
+            "--json",
+        ])
+        .env("DBUS_SYSTEM_BUS_ADDRESS", ready.trim())
+        .env("DBUS_SESSION_BUS_ADDRESS", ready.trim())
+        .env("HOME", &home)
+        .env("AGENT_MANAGER_DATA_DIR", &data)
+        .env("XDG_CURRENT_DESKTOP", "")
+        .output()
+        .unwrap();
+    let result: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+    assert!(preview.status.success(), "{result}");
+    assert_eq!(result["ok"], true, "{result}");
+    let timezone = result["data"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == "time.timezone")
+        .unwrap();
+    assert_eq!(timezone["status"], "unavailable", "{result}");
+    assert!(
+        !timezone_marker.exists(),
+        "Repair preview activated the timezone service"
+    );
+    assert!(!home.exists());
+    assert!(!data.exists());
 
     // A positive control prevents a broken activation fixture from passing the
     // negative assertion. Its only action is creating a disposable marker.
@@ -179,6 +236,48 @@ fn inspection_does_not_activate_stopped_time_or_locale_services() {
     assert!(
         locale_marker.exists(),
         "The locale activation control did not run"
+    );
+    let control = Command::new("/usr/bin/busctl")
+        .args([
+            "--system",
+            "--auto-start=yes",
+            "--timeout=1",
+            "call",
+            "org.freedesktop.timedate1",
+            "/org/freedesktop/timedate1",
+            "org.freedesktop.DBus.Properties",
+            "GetAll",
+            "s",
+            "org.freedesktop.timedate1",
+        ])
+        .env("DBUS_SYSTEM_BUS_ADDRESS", ready.trim())
+        .output()
+        .unwrap();
+    assert!(!control.status.success());
+    assert!(
+        timezone_marker.exists(),
+        "The timezone activation control did not run"
+    );
+    let control = Command::new("/usr/bin/busctl")
+        .args([
+            "--system",
+            "--auto-start=yes",
+            "--timeout=1",
+            "call",
+            "org.freedesktop.locale1",
+            "/org/freedesktop/locale1",
+            "org.freedesktop.DBus.Properties",
+            "GetAll",
+            "s",
+            "org.freedesktop.locale1",
+        ])
+        .env("DBUS_SYSTEM_BUS_ADDRESS", ready.trim())
+        .output()
+        .unwrap();
+    assert!(!control.status.success());
+    assert!(
+        system_locale_marker.exists(),
+        "The system-locale activation control did not run"
     );
 }
 

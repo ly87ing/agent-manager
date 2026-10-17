@@ -70,6 +70,7 @@ pub(super) fn read() -> Option<State> {
         "/usr/bin/busctl",
         &[
             "--system",
+            "--auto-start=no",
             "--json=short",
             "call",
             "org.freedesktop.timedate1",
