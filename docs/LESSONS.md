@@ -1078,6 +1078,10 @@ confirmation back to the verified source plan.
   make a fixture pass. Read that identity before replacing D-Bus addresses: a
   subsequent `systemctl` call otherwise tries to activate a manager on the private
   bus. Bound and independently own privileged fixture children.
+- A standard session bus admits only its daemon owner's UID. A private fixture
+  that includes real system-service identities needs an explicit, isolated bus
+  policy for those UIDs; never widen the host bus or add anonymous authentication.
+  Keep an unselected-UID refusal control as well as native service connection proof.
 
 ### 2026-10-17: use the app test scope and expose verification limits
 

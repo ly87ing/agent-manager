@@ -182,6 +182,11 @@ try {
     await delay(50);
   }
   authorityIdentity = ownerIdentity();
+  assert(![process.getuid(), Number(serviceUid)].includes(65534));
+  const outsider = run('/usr/bin/sudo', ['-n', '/usr/bin/setpriv', '--reuid', '65534', '--regid', '65534', '--clear-groups',
+    '/usr/bin/busctl', `--address=${process.env.DBUS_SYSTEM_BUS_ADDRESS}`, '--auto-start=no', 'call',
+    'org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus', 'GetId'], true);
+  assert.notEqual(outsider.status, 0, 'Private bus admitted an unselected UID');
   await start();
   assert.equal(property('Language'), 'en_US.UTF-8');
   gsettings('set', 'org.gnome.system.locale', 'region', "'en_GB.UTF-8'");
