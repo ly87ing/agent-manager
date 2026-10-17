@@ -6,6 +6,18 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: copyable commands have more than one producer
+
+- The native uv fixture initially covered execution plans and their copied
+  commands, while the Programs list generated separate installation and upgrade
+  commands. Inspect every producer and exercise the list's copied install command
+  too; a guarded execution plan does not establish the same runtime boundary for
+  commands copied elsewhere.
+- The pinned setup action returns an extensionless `uv-path` on Windows. Its
+  successful installation did not make that literal path a file, so the native
+  fixture stopped before executing uv. Append the native `.exe` suffix in the
+  workflow; keep the fixture's explicit absolute regular-file admission strict.
+
 ## 2026-10-16: mutation-lock acceptance needs a separate contender
 
 - The earlier native lock regression spawned a subprocess, but acquired both

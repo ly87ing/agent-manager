@@ -817,8 +817,14 @@ fn manual_commands(id: &str, owner: Option<&str>, install: &[InstallSpec]) -> Va
             );
         }
         (Some("uv-tool"), _) | (None, "pypi") => {
-            out.insert("install".into(), json!(format!("uv tool install {name}")));
-            out.insert("upgrade".into(), json!(format!("uv tool upgrade {name}")));
+            out.insert(
+                "install".into(),
+                json!(format!("uv --no-python-downloads tool install {name}")),
+            );
+            out.insert(
+                "upgrade".into(),
+                json!(format!("uv --no-python-downloads tool upgrade {name}")),
+            );
             out.insert(
                 "uninstall".into(),
                 json!(format!("uv tool uninstall {name}")),
@@ -839,7 +845,7 @@ fn manual_commands(id: &str, owner: Option<&str>, install: &[InstallSpec]) -> Va
         if let Some(spec) = install.first() {
             let cmd = match spec.kind.as_str() {
                 "node" => format!("npm install -g {}", spec.package),
-                "uv" => format!("uv tool install {}", spec.package),
+                "uv" => format!("uv --no-python-downloads tool install {}", spec.package),
                 "brew" => format!("brew install {}", spec.package),
                 "go" => format!("go install {}@latest", spec.package),
                 _ => String::new(),
@@ -855,6 +861,35 @@ fn manual_commands(id: &str, owner: Option<&str>, install: &[InstallSpec]) -> Va
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copied_uv_commands_disable_runtime_downloads_in_every_status_mode() {
+        for owner in [None, Some("uv-tool")] {
+            let commands = manual_commands("pypi:example", owner, &[]);
+            assert_eq!(
+                commands["install"],
+                "uv --no-python-downloads tool install example"
+            );
+            assert_eq!(
+                commands["upgrade"],
+                "uv --no-python-downloads tool upgrade example"
+            );
+            assert_eq!(commands["uninstall"], "uv tool uninstall example");
+        }
+        let commands = manual_commands(
+            "bin:example",
+            None,
+            &[InstallSpec {
+                kind: "uv".into(),
+                package: "declared-package".into(),
+                bins: vec!["example".into()],
+            }],
+        );
+        assert_eq!(
+            commands["install"],
+            "uv --no-python-downloads tool install declared-package"
+        );
+    }
 
     #[test]
     fn managed_current_resolves_absolute_directory_links_and_rejects_external_targets() {

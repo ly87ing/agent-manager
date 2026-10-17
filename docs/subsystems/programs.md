@@ -34,6 +34,15 @@ Windows uv environments use `uv/data/tools` and `Lib/site-packages`. Copied `.ex
 entries are recognized and backed up only when `uv-receipt.toml` names the actual
 entry and its bytes match the environment's `Scripts` entry. A changed copy stays
 unowned. Receipt reads and byte comparisons are bounded; queries never invoke uv.
+Managed PyPI/git installs and delegated uv upgrades explicitly pass
+`--no-python-downloads`. Existing interpreter selection is retained; a missing
+interpreter fails rather than letting uv provide a runtime. This implements the
+[observe-only runtime boundary](../PROGRAM-LIFECYCLE.md#5-object-model). The option
+also appears in copyable list and operation-dialog commands. An older uv that
+does not recognize it fails before installation instead of silently ignoring a
+new environment variable.
+This option controls uv's own Python provisioning; it does not isolate arbitrary
+package build code or establish an installed-version postcondition.
 An absent, empty or relative `SHELL` uses `/bin/bash` on Linux and `/bin/zsh` on
 macOS; an explicit absolute shell retains its own failure diagnostics.
 
@@ -111,5 +120,16 @@ operations against isolated HOME/data directories, covers ordinary and scoped np
 layouts, checks byte-for-byte failed-upgrade restoration and adoption undo, and
 creates Windows junctions directly without requiring symlink privileges. These
 fixtures exercise process and filesystem behavior without contacting registries.
+
+The [native uv fixture](../../scripts/verify-native-uv-runtime.mjs) uses an empty
+private runtime directory and a loopback mirror that serves only 404 responses.
+An unguarded positive control must request a supported Python archive; managed
+and delegated CLI operations and their copied list/dialog install commands must
+not, even with inherited automatic downloads enabled. It verifies the original delegated
+package/entry identities and bytes after missing-interpreter failure. It never
+installs an interpreter or contacts a package registry. GUI CI runs it on all
+three native systems with uv 0.13.1, a pinned setup action and archive checksums.
+Local execution requires `AM_ISOLATED_NATIVE_UV=1` and an absolute real binary in
+`AM_NATIVE_UV`; only a copy is executed in fresh private fixture paths.
 
 Windows command-entry metadata uses ASCII hex-encoded UTF-8 paths; legacy plain-text metadata remains readable. Manual filesystem commands reject linked ancestors, compare existing entry hashes, and stage a literal junction before replacing `current`. A staging failure preserves the previous pointer and foreign staging contents. Recursive manual removal refuses nested reparse points.
