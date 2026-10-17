@@ -6,6 +6,15 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
 
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
+## 2026-10-16: preview and explicit execution have different lock effects
+
+- The entry-directory fixture initially expected a rejected Programs `apply` to
+  leave its data directory absent, but explicit execution creates its mutation
+  lock before planning. Keep zero-state-creation assertions on valid and rejected
+  previews, and separately verify that rejected execution preserves installed
+  package, entry and preference bytes. Do not let a lock-file assertion stop the
+  fixture before it exercises those protection checks.
+
 ## 2026-10-16: copyable commands have more than one producer
 
 - The native uv fixture initially covered execution plans and their copied

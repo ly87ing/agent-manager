@@ -1019,10 +1019,14 @@ fn resolve_entry_dir(ctx: &Context, status: &Value, args: &Args) -> Result<(Path
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default();
-    if !candidates.contains(&chosen) {
+    if !candidates
+        .iter()
+        .any(|candidate| expand(candidate, &ctx.home_dir) == path)
+    {
         bail!("{chosen} 不在三种 shell 启动方式的 PATH 上都能看到，或不可写，不能做入口目录");
     }
-    Ok((path, saved != Some(chosen)))
+    let save = saved.is_none_or(|saved| expand(saved, &ctx.home_dir) != path);
+    Ok((path, save))
 }
 
 fn plan_managed(
