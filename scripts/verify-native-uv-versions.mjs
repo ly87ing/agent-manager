@@ -20,7 +20,7 @@ const windows = process.platform === 'win32';
 const originalPython = realpathSync(process.env.AM_NATIVE_PYTHON);
 const pythonBefore = readFileSync(originalPython);
 const pythonIdentity = lstatSync(originalPython);
-const root = mkdtempSync(join(tmpdir(), 'am-uv-version-native-'));
+const root = mkdtempSync(join(tmpdir(), 'am uv-version-native-'));
 const home = join(root, 'home'), data = join(root, 'data'), bin = join(home, 'bin');
 const tools = join(root, 'tools'), wheels = join(root, 'wheels'), uvTools = join(home, custom ? 'custom-extension-tools' : 'uv/data/tools');
 for (const path of [home, bin, tools, wheels]) mkdirSync(path, { recursive: true });
@@ -42,8 +42,8 @@ const env = { ...inherited, HOME: home, USERPROFILE: home,
   UV_PYTHON_BIN_DIR: join(root, 'python-bin'), UV_PYTHON_INSTALL_BIN: '0',
   UV_PYTHON_INSTALL_REGISTRY: '0', UV_PYTHON_NO_REGISTRY: '1', PYTHONDONTWRITEBYTECODE: '1' };
 
-function run(program, args) {
-  const result = spawnSync(program, args, { env, cwd: root, encoding: 'utf8', timeout: 45_000, maxBuffer: 1_048_576 });
+function run(program, args, windowsVerbatimArguments = false) {
+  const result = spawnSync(program, args, { env, cwd: root, encoding: 'utf8', timeout: 45_000, maxBuffer: 1_048_576, windowsVerbatimArguments });
   assert.ifError(result.error);
   assert.equal(result.status, 0, `${program}: ${result.stdout}\n${result.stderr}`);
   return result.stdout;
@@ -104,7 +104,7 @@ try {
   const output = () => {
     if (!managed || !windows) return run(entry, []).trim();
     assert(!/[\r\n%!"]/.test(entry), 'Private batch fixture path requires literal-safe characters');
-    return run(process.env.ComSpec || 'cmd.exe', ['/d', '/v:off', '/s', '/c', `""${entry}""`]).trim();
+    return run(process.env.ComSpec || 'cmd.exe', ['/d', '/v:off', '/s', '/c', `""${entry}""`], true).trim();
   };
   if (managed) {
     const args = ['--program', id, '--action', 'install', '--version', '1.0.0', '--entry-dir', bin];
