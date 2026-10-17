@@ -2222,3 +2222,42 @@ runtime functionality or atomic protection against external writers. Installed
 client consumption, other-manager postconditions and general rollback conflicts
 remain unverified. No personal OS setting, real assistant file, installed
 application, Release or tag changed.
+
+## 2026-10-17: GNOME primary-language preference
+
+Main `f18111c3` adds explicitly confirmed, current-user GNOME primary-language
+repair. It requires one exact installed UTF-8 locale, coherent existing
+AccountsService Language/Languages and explicit formats. It preserves the raw
+metadata tail and regional formats. Polkit authorization completes in the caller
+before a full fresh baseline check; SetLanguages addresses the bound unique owner
+with NoAutoStart and no interactive flag. Cancellation, stale evidence, refusal
+or an uncertain reply stops subsequent writes. The API provides no atomic CAS
+against independent external writers. See [environment checks](subsystems/environment-checks.md).
+
+Main `e71cfd6f` labels the native primary preference separately and exposes the
+original verification limits in both interface languages. It reports preference
+readback without claiming durable storage, current display adoption or a future
+login's effects. Existing language overrides remain meaningful. No PAM/shell
+rewrite, translation install, logout or application restart is performed.
+
+Exact candidate `b3266f91` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39022249773)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39022250057)
+without retry. Native macOS passed 308 library cases, Windows 284 and Linux 310,
+all integration targets and four installer builds. The private real distro
+AccountsService/Polkit fixture passed normal/restart/no-op, actual authorization
+cancel, external-change stale refusal and successful dispatch. The separately
+invoked reply-loss case executed one passing test with a continuation control.
+Earlier fixture failures were diagnosed as startup/bus policy and competing-writer
+identity issues; their protocol and independent readback assertions remain strict.
+Existing native Linux timezone/NTP and real uv regressions passed.
+
+Local Tauri 27, frontend 700, production build and Windows all-target compilation
+passed. Browser checks exercised synthetic and actual native CLI payloads at
+1000/760 px in both languages, including the expandable original limits. These
+are renderer receipts, not installed-desktop acceptance. Runtime, tests and owning
+references were compared with the candidate; main-specific history was preserved.
+Local, origin and remote main SHA readbacks matched. Post-push workflows are
+pending at this receipt. Multiple target languages, inherited formats, KDE repair,
+installed client/session adoption and signed updating remain separate work.
+No personal OS setting, real assistant file, installed application, Release or
+tag changed.

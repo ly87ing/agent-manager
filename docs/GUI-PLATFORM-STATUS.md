@@ -13,9 +13,11 @@ and [scope](EXTENSIONS-ONLY.md).
 
 ## Current acceptance boundary (2026-10-17)
 
-Verified corrections through `a3abb7c7` add managed PyPI completion/selection
+Verified corrections through `e71cfd6f` add guarded GNOME single-primary-language
+repair and visible preference-readback limits, plus managed PyPI completion/selection
 version and command-entry checks, plus bounded sibling-directory/mixed-link snapshots
 with complete offline personal forks. The
+[language receipt](goal-rust-gui.md#2026-10-17-gnome-primary-language-preference),
 [entry receipt](goal-rust-gui.md#2026-10-17-managed-pypi-command-entry-verification),
 [managed receipt](goal-rust-gui.md#2026-10-17-managed-pypi-completion-and-selection)
 and [directory receipt](goal-rust-gui.md#2026-10-17-bounded-directory-skill-snapshots)
@@ -35,9 +37,10 @@ modal and reread checks remain in the [previous receipt](goal-rust-gui.md#2026-1
 
 | Area | Current evidence | Remaining boundary |
 | --- | --- | --- |
-| Extension and saved-tool source | Latest native candidate passed macOS 307, Windows 283 and Linux 309 library cases with native integration harnesses; local Tauri 27, frontend 698 and production build passed | These are not consumer acceptance of an installed package |
+| Extension and saved-tool source | Latest native candidate passed macOS 308, Windows 284 and Linux 310 library cases with native integration harnesses; local Tauri 27, frontend 700 and production build passed | These are not consumer acceptance of an installed package |
 | Desktop interaction | Current browser fixtures verified modal drafts, resource rereads and unsupported-platform controls in both languages at 1000 × 650 and 760 × 650 | Earlier native receipts do not establish installed-package business workflows for these corrections |
 | KDE inspection | Actual Qt 5 / KConfig 5.115 reads verify saved language order, independent formats, global immutable/default priority and absent sources without file or directory writes | Qt 6 execution, translation installation and current/new-login desktop adoption remain unverified; KDE preference repair remains unavailable |
+| GNOME primary language | Private real distro AccountsService and Polkit verify one installed exact UTF-8 language, preserved raw tail/formats, restart readback, no-op, genuine cancellation, authorization drift refusal and same-process dispatch; reply-loss stops later formats writes | Explicit formats are required. Raw tail is metadata, not ordered fallbacks. Durable storage, display/new-session adoption, inherited formats, multiple target languages and other desktops remain unverified or unavailable |
 | Environment correction | Disposable native Linux verifies manual NTP runtime lists and the saved host-path file, actual Polkit cancellation/challenge, durable readback, no-op, stale refusal, metadata policy and a lost reply that stops later session writes | This slice requires admitted ext4 metadata and the existing timesyncd interface; other desktop/provider repair, real PAM/dialog interaction, target-app inheritance and actual peer/clock accuracy remain unverified; see the subsystem reference |
 | Automatic time | Known matching Linux automatic-time targets are verified without invoking a setter; stale and unknown evidence refuse confirmation | Switching Linux automatic-time providers remains unavailable; an active setting does not prove boot persistence, peer synchronization or clock accuracy |
 | Programs | Actual uv 0.13.1 on macOS, Windows and Linux verifies guarded runtime behavior, offline managed installs/upgrades/switches and standard/custom delegated upgrades, including entry execution and existing-interpreter preservation; managed PyPI metadata and declared command files are freshly checked before completion/current selection | Git postconditions and general rollback/restore conflicts remain open; file evidence does not establish interpreter/shebang availability, arbitrary runtime behavior, package authenticity or a build-script sandbox |
@@ -46,7 +49,7 @@ modal and reread checks remain in the [previous receipt](goal-rust-gui.md#2026-1
 | Skill adoption | Local-only CLI preview made no Git call or state write; explicit comparison and failure fallback passed | Real SSH repository access depends on the configured source and network |
 | Skill snapshots | Native actual-Git SHA1/SHA256 fixtures verify bounded sibling-directory/mixed-link ordinary snapshots, fixed typed IDs, empty/excluded-name aliases, both-side tamper refusal, receipt-withdrawal refusal and complete offline editable forks; Windows also executes actual OS directory-link and native schema2 fallback cases | Unsupported plaintext chains/non-sibling targets, index shapes, Unicode/filesystem limits and real assistant consumption remain boundaries; ordinary copies do not preserve link identity or write coupling |
 | OS login entries | Native Windows CI directly verifies the disposable current-user registry adapter, including idempotency, quoted paths, external overrides and unrelated-value preservation | This does not establish desktop IPC, Task Manager interaction or launching the app at a real login |
-| Platform CI | Candidate `6579e174` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39018479529) and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39018478093) without retry, including four installer targets; runtime and tests match main `a3abb7c7`. Main post-push workflows are pending at this receipt | Windows/Linux/arm64 installed desktop business interaction remains unverified |
+| Platform CI | Candidate `b3266f91` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39022249773) and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39022250057) without retry, including four installer targets; runtime, tests and owning references match main `e71cfd6f`. Main post-push workflows are pending at this receipt | Windows/Linux/arm64 installed desktop business interaction remains unverified |
 | Distribution and updater | Repository is public; current test installers are available from successful GUI CI artifacts | Only the old preview is published; no stable latest release or real signed update loop is verified |
 
 ### Remaining acceptance checklist
