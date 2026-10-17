@@ -64,6 +64,11 @@ writeFileSync(join(cacheDir, user), '[User]\nLanguage=en_US.UTF-8\nLanguages=en_
 const action = 'org.freedesktop.accounts.change-own-user-data';
 const polkit = ['/usr/lib/polkit-1/polkitd', '/usr/libexec/polkitd'].find(existsSync);
 assert(polkit, 'Distro Polkit executable is unavailable');
+const serviceUser = run('/usr/bin/systemctl', ['show', 'polkit.service', '--property=User', '--value']).stdout.trim();
+assert(serviceUser && serviceUser !== 'root', 'Use the packaged nonroot Polkit service identity');
+const serviceUid = run('/usr/bin/id', ['-u', serviceUser]).stdout.trim();
+const serviceGid = run('/usr/bin/id', ['-g', serviceUser]).stdout.trim();
+assert.match(serviceUid, /^[1-9][0-9]*$/); assert.match(serviceGid, /^[1-9][0-9]*$/);
 const rule = `/etc/polkit-1/rules.d/49-agent-manager-language-${process.pid}.rules`;
 const policy = `polkit.addRule(function(action, subject) { if (action.id === "${action}" && subject.user === ${JSON.stringify(user)}) return polkit.Result.YES; });\n`;
 function rootNode(source, args) { return run('/usr/bin/sudo', ['-n', process.execPath, '--input-type=module', '-e', source, ...args]); }
@@ -75,14 +80,16 @@ function replacePolicy(next) {
 }
 // An owned root supervisor kills only its child on EOF or deadline, including failed startup.
 const supervisor = `import {spawn} from 'node:child_process';
-const child=spawn(process.argv[1],['--no-debug'],{stdio:['ignore','pipe','pipe']});
+const child=spawn('/usr/bin/setpriv',['--reuid',process.argv[2],'--regid',process.argv[3],'--init-groups',process.argv[1]],{cwd:'/',stdio:['ignore','pipe','pipe']});
 child.stdout.pipe(process.stdout);child.stderr.pipe(process.stderr);
 const stop=()=>{if(child.exitCode===null)child.kill('SIGTERM');};
 const timer=setTimeout(stop,180000);process.stdin.resume();process.stdin.on('end',stop);
 child.on('error',error=>{console.error(error);process.exit(1);});
 child.on('exit',code=>{clearTimeout(timer);process.exit(code??0);});`;
-const authority = spawn('/usr/bin/sudo', ['-n', '/usr/bin/env', `DBUS_SYSTEM_BUS_ADDRESS=${process.env.DBUS_SYSTEM_BUS_ADDRESS}`, process.execPath, '--input-type=module', '-e', supervisor, polkit], { stdio: ['pipe', 'pipe', 'pipe'] });
+const authority = spawn('/usr/bin/sudo', ['-n', '/usr/bin/env', `DBUS_SYSTEM_BUS_ADDRESS=${process.env.DBUS_SYSTEM_BUS_ADDRESS}`, process.execPath, '--input-type=module', '-e', supervisor, polkit, serviceUid, serviceGid], { stdio: ['pipe', 'pipe', 'pipe'] });
 const authorityResult = collected(authority);
+let authorityStartup = '';
+for (const stream of [authority.stdout, authority.stderr]) stream.on('data', data => { authorityStartup = (authorityStartup + data).slice(-16_384); });
 let authorityIdentity;
 function ownerIdentity() {
   const owner = JSON.parse(run('/usr/bin/busctl', ['--system', '--auto-start=no', '--json=short', 'call', 'org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus', 'GetNameOwner', 's', 'org.freedesktop.PolicyKit1']).stdout).data[0];
@@ -171,9 +178,9 @@ async function start() {
 try {
   const authorityBy = Date.now() + 10_000;
   while (true) {
-    const ready = run('/usr/bin/busctl', ['--system', '--auto-start=no', 'status', 'org.freedesktop.PolicyKit1'], true);
+    const ready = run('/usr/bin/busctl', ['--system', '--auto-start=no', 'call', 'org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus', 'GetNameOwner', 's', 'org.freedesktop.PolicyKit1'], true);
     if (ready.status === 0) break;
-    assert(Date.now() < authorityBy, 'Private Polkit did not become ready');
+    assert(Date.now() < authorityBy, 'Private Polkit did not become ready: ' + authorityStartup);
     await delay(50);
   }
   authorityIdentity = ownerIdentity();

@@ -1065,3 +1065,14 @@ confirmation back to the verified source plan.
 - Separate the completion and selection diagnostics: a second check can fail
   after the first already wrote a marker. Fresh reads are not atomic publication
   or proof of entry usability against uncoordinated external writers.
+
+### 2026-10-17: native daemon fixtures need their installed startup contract
+
+- A Linux CLI reply-loss fixture passed while the separate real-provider fixture
+  failed before Polkit became ready. That result did not exercise real provider
+  language writes. Keep the failed receipt and startup diagnostics visible.
+- Follow the packaged daemon's existing service identity when starting a private
+  instance. Polkit's root-to-service-user startup path can additionally change to
+  the account's home, while its packaged systemd unit starts with the service UID.
+  Read the installed service identity; do not create or edit an OS account/home to
+  make a fixture pass. Bound and independently own privileged fixture children.
