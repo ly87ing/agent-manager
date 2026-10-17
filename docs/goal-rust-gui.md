@@ -2122,3 +2122,74 @@ Managed PyPI/git postconditions, general rollback/restore conflicts, remaining
 Linux preference/provider repair, installed-client adoption and signed updating
 remain open. No personal OS setting, real assistant file, installed application,
 Release or tag changed.
+
+## 2026-10-17: managed PyPI completion and selection
+
+Main `08f5ec2f` validates PyPI names/PEP 440 targets during preview and freshly
+reads native metadata immediately before writing completion metadata and before
+selecting `current`, including completed alternatives and reuse. Unknown or
+mismatched evidence retains the candidate without automatic restoration/cleanup
+after that check. Existing incomplete candidates refuse later preview/apply
+without executing uv or discarding added external bytes. Earlier completion
+metadata or previously active contents may exist; reads are not atomic publication
+against external writers. Managed entry availability before selection, Git
+postconditions and general rollback/restore conflicts remain separate work.
+
+Candidate `523a1624` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39013907467)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39013764462).
+Native Windows/Linux/macOS logs confirm real uv 0.13.1 managed and standard/custom
+offline versions, actual entry execution, public/local matching and unchanged
+selected interpreter binaries/identities. Main `0a572106` separately fixes the
+private Windows fixture's cmd quoting and exercises spaced temporary paths.
+An earlier unchanged launch test failed once; its same-source retry passed Rust
+cases and exposed the fixture quoting error. Final corrected candidate jobs passed
+without retry; this is not a launch reliability fix. Main passed post-push
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/39014504254) and
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39014504258).
+
+Local complete engine verification passed 299 library cases and all integrations,
+Tauri 27, frontend 697, production build and Windows all-target compilation.
+Actual CLI payload browser receipts checked preview, retained failure, inspection
+scrolling and refused retry at 1000/760 px in both languages. These are renderer
+receipts, not installed-desktop business interaction. No personal OS setting,
+real assistant file, installed application, Release or tag changed.
+
+## 2026-10-17: bounded directory skill snapshots
+
+Main `620b14c9` extracts the existing path interpreter without changing behavior.
+Main `1f6bd7bd` adds strict schema 4 ordinary copies for eligible sibling-directory
+aliases and independent file aliases, preserving the original typed-v2 ID. Full
+physical inventories verify exact relative paths, empty directories, file digests
+and one nonoverlapping alias namespace before inverse mapping. Changing both
+copies to the same bytes still fails the fixed ID. File-only schema 3 and existing
+version verification retain their contracts. Actual OS-link sources may retain
+native schema 2 when materialization is ineligible; plaintext checkouts cannot.
+
+New expansion is limited to 65,536 nodes, 4 MiB path accounting, 512 MiB actual
+content bytes and a 64 KiB receipt checked before staging. Planned-volume headroom
+is advisory. Copying and physical hashing consume fresh budgets. Personal forks
+copy and verify the complete ordinary namespace, including aliases named
+`node_modules`, before registration. Removed or reinterpreted receipts must prove
+their actually parsed format's fixed ID before a generic-copy fallback. The
+[owning reference](subsystems/skills.md) describes the content-only semantics,
+Unicode/filesystem limits, source fingerprint and external-writer boundaries.
+Older readers cannot manage schema 4; rollback must retain a capable verifier,
+never strip receipts or rewrite bindings.
+
+Candidate `33c69e53` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39015722498)
+and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39015721056)
+without retry. Native Windows passed 282 library cases, Linux 308 and macOS 306,
+with all integration targets and four installer builds. Windows logs confirm
+actual OS directory-link materialization and non-sibling schema 2 fallback.
+Actual Git SHA1/SHA256 CLI fixtures verify mixed content, immutable reuse,
+disable/enable, assistant isolation, tamper refusal and independent offline fork
+path/byte readback with no Git on the CLI PATH. Cross-host tests cover receipt
+withdrawal, format reinterpretation, namespace attacks and actual byte budgets.
+
+Local complete engine tests, Tauri 27, frontend 697, production build, Windows
+all-target compilation, formatting and reference links passed. Runtime/tests and
+workflow sources match main; main-specific history is preserved. Main post-push
+workflows are pending at this receipt. Real assistant consumption, installed
+Windows/Linux/arm64 desktop workflows, multi-volume low-space acceptance and
+signed updating remain unverified. No personal OS setting, real assistant file,
+installed application, Release or tag changed.

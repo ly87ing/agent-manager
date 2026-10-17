@@ -13,13 +13,15 @@ and [scope](EXTENSIONS-ONLY.md).
 
 ## Current acceptance boundary (2026-10-17)
 
-Verified corrections through `30e23164` add delegated uv installed-version
-postconditions, actual-version freshness and receipt-proven custom Unix roots
-to native uv metadata readback,
-uv's no-Python-download boundary,
-equivalent eligible program entry paths and matching Linux automatic-time
-no-ops to saved KDE inspection, non-activating Linux reads and native Windows
-mutation-lock identity. The
+Verified corrections through `1f6bd7bd` add managed PyPI completion/selection
+version checks and bounded sibling-directory/mixed-link snapshots with complete
+offline personal forks. The
+[managed receipt](goal-rust-gui.md#2026-10-17-managed-pypi-completion-and-selection)
+and [directory receipt](goal-rust-gui.md#2026-10-17-bounded-directory-skill-snapshots)
+extend earlier corrections for delegated uv versions/freshness, receipt-proven
+custom Unix roots, native metadata readback, uv's no-Python-download boundary,
+eligible program entry paths, matching Linux automatic-time no-ops, saved KDE
+inspection, non-activating Linux reads and native Windows mutation-lock identity. The
 [program receipt](goal-rust-gui.md#2026-10-16-native-uv-runtime-boundary-and-program-entry-paths),
 [metadata receipt](goal-rust-gui.md#2026-10-16-native-uv-metadata-readback),
 [result and custom-root receipt](goal-rust-gui.md#2026-10-17-delegated-uv-results-and-custom-roots),
@@ -32,18 +34,18 @@ modal and reread checks remain in the [previous receipt](goal-rust-gui.md#2026-1
 
 | Area | Current evidence | Remaining boundary |
 | --- | --- | --- |
-| Extension and saved-tool source | The latest candidate passed macOS 298, Windows 274 and Linux 300 library cases with native integration harnesses; local Tauri 27, frontend 696 and production build passed | These are not consumer acceptance of an installed package |
+| Extension and saved-tool source | Latest native candidate passed macOS 306, Windows 282 and Linux 308 library cases with native integration harnesses; local Tauri 27, frontend 697 and production build passed | These are not consumer acceptance of an installed package |
 | Desktop interaction | Current browser fixtures verified modal drafts, resource rereads and unsupported-platform controls in both languages at 1000 × 650 and 760 × 650 | Earlier native receipts do not establish installed-package business workflows for these corrections |
 | KDE inspection | Actual Qt 5 / KConfig 5.115 reads verify saved language order, independent formats, global immutable/default priority and absent sources without file or directory writes | Qt 6 execution, translation installation and current/new-login desktop adoption remain unverified; KDE preference repair remains unavailable |
 | Environment correction | Disposable native Linux verifies manual NTP runtime lists and the saved host-path file, actual Polkit cancellation/challenge, durable readback, no-op, stale refusal, metadata policy and a lost reply that stops later session writes | This slice requires admitted ext4 metadata and the existing timesyncd interface; other desktop/provider repair, real PAM/dialog interaction, target-app inheritance and actual peer/clock accuracy remain unverified; see the subsystem reference |
 | Automatic time | Known matching Linux automatic-time targets are verified without invoking a setter; stale and unknown evidence refuse confirmation | Switching Linux automatic-time providers remains unavailable; an active setting does not prove boot persistence, peer synchronization or clock accuracy |
-| Programs | Actual uv 0.13.1 runs on macOS, Windows and Linux verify guarded runtime behavior and real offline delegated upgrades/switches in standard/custom roots, including entry execution, public/local version matching and selected existing-interpreter preservation; actual CLI fixtures verify eligible entry paths | Managed PyPI/git postconditions and general rollback/restore conflicts remain open; version evidence is not package authenticity or a build-script sandbox |
+| Programs | Actual uv 0.13.1 on macOS, Windows and Linux verifies guarded runtime behavior, offline managed installs/upgrades/switches and standard/custom delegated upgrades, including entry execution and existing-interpreter preservation; managed PyPI metadata is freshly checked before completion/current selection | Managed entry availability before selection, Git postconditions and general rollback/restore conflicts remain open; version evidence is not package authenticity or a build-script sandbox |
 | Delegated uv outcomes | Native actual-CLI controls reject command-success unknown/malformed/duplicate/mismatched versions before entry checks, retain current/backup files, preserve diagnostics and derive freshness from actual metadata; later successful actions apply ordinary newest-three retention | Unverified current files can remain on PATH; moved backups are not independent, immutable or guaranteed runnable. General restore conflicts remain separate work |
 | Installed uv versions | Native CLI reads actual distribution identity headers with zero app-state writes; native fixtures cover hardlinks, missing/contradictory/duplicate metadata, bounded reads, Unix FIFO refusal and Windows rename/reparse refusal with released-handle positive controls | This is declared-version evidence; package authenticity and arbitrary package functionality remain unproven. Delegated version postconditions/freshness are covered separately above |
 | Skill adoption | Local-only CLI preview made no Git call or state write; explicit comparison and failure fallback passed | Real SSH repository access depends on the configured source and network |
-| Skill snapshots | Native CLI fixtures verify Git plaintext links with the actual index, typed ordinary-file materialization, immutable reuse, disable/enable, tamper refusal, assistant isolation and offline editable forks; probes ignore inherited repository selectors | Directory/mixed-link materialization and unsupported index shapes remain explicit boundaries; real assistant consumption remains unverified |
+| Skill snapshots | Native actual-Git SHA1/SHA256 fixtures verify bounded sibling-directory/mixed-link ordinary snapshots, fixed typed IDs, empty/excluded-name aliases, both-side tamper refusal, receipt-withdrawal refusal and complete offline editable forks; Windows also executes actual OS directory-link and native schema2 fallback cases | Unsupported plaintext chains/non-sibling targets, index shapes, Unicode/filesystem limits and real assistant consumption remain boundaries; ordinary copies do not preserve link identity or write coupling |
 | OS login entries | Native Windows CI directly verifies the disposable current-user registry adapter, including idempotency, quoted paths, external overrides and unrelated-value preservation | This does not establish desktop IPC, Task Manager interaction or launching the app at a real login |
-| Platform CI | Candidate `1b982708` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39010709130) and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39010712286), including four installer targets; its runtime/test/workflow sources match main `30e23164`. Main `855a0774` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39010549570) and [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39010549528); main `30e23164` post-push workflows are pending at this receipt | Windows/Linux/arm64 installed desktop business interaction remains unverified |
+| Platform CI | Candidate `33c69e53` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39015722498) and all seven [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39015721056) without retry, including four installer targets; runtime/test/workflow sources match main `1f6bd7bd`. Main `0a572106` passed [CI](https://github.com/ly87ing/agent-manager/actions/runs/39014504254) and [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39014504258); main `1f6bd7bd` post-push workflows are pending at this receipt | Windows/Linux/arm64 installed desktop business interaction remains unverified |
 | Distribution and updater | Repository is public; current test installers are available from successful GUI CI artifacts | Only the old preview is published; no stable latest release or real signed update loop is verified |
 
 ### Remaining acceptance checklist
