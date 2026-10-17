@@ -9,7 +9,7 @@ pub(super) fn properties(text: &str) -> BTreeMap<&str, &str> {
         .collect()
 }
 
-fn language_tag(locale: &str) -> Option<String> {
+pub(super) fn language_tag(locale: &str) -> Option<String> {
     // POSIX modifiers can select a script; dropping one can change the language.
     if locale.contains('@') {
         return None;
@@ -163,6 +163,7 @@ fn system_properties(service: &str, path: &str, interface: &str) -> Option<Strin
 
 #[cfg(target_os = "linux")]
 pub(super) fn collect() -> Observation {
+    let kde = super::linux_kde::kde(&std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default());
     let values = system_properties(
         "org.freedesktop.timedate1",
         "/org/freedesktop/timedate1",
@@ -178,7 +179,16 @@ pub(super) fn collect() -> Observation {
     .and_then(|text| all_properties(&text))
     .and_then(|values| property(&values["Locale"], "as"))
     .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok());
-    let (languages, user_locale, automatic_timezone) = user_locale();
+    let (mut languages, mut user_locale, automatic_timezone) = if kde {
+        (None, None, None)
+    } else {
+        user_locale()
+    };
+    let kde_preferences = kde.then(super::linux_kde::read).flatten();
+    if let Some(preferences) = &kde_preferences {
+        languages = preferences.languages.clone();
+        user_locale = preferences.locale.clone();
+    }
     let ntp = system_properties(
         "org.freedesktop.timesync1",
         "/org/freedesktop/timesync1",
@@ -206,7 +216,11 @@ pub(super) fn collect() -> Observation {
         apple_locale: user_locale,
         languages,
         automatic_timezone,
-        format_overrides: locale.map(|list| serde_json::json!(list)),
+        format_overrides: if kde {
+            kde_preferences.and_then(|preferences| preferences.formats)
+        } else {
+            locale.map(|list| serde_json::json!(list))
+        },
         automatic_time: property(&values["NTP"], "b").and_then(|value| value.as_bool()),
         time_synchronized: property(&values["NTPSynchronized"], "b")
             .and_then(|value| value.as_bool()),
@@ -259,6 +273,14 @@ pub(super) fn collect() -> Observation {
         ("ntp.kernel_max_error", "kernel error unavailable"),
         ("ntp.kernel_estimated_error", "kernel error unavailable"),
     ]);
+    if kde {
+        observed.sources.extend([
+            ("language.preferred", "KDE plasma-localerc Translations LANGUAGE (KConfig defaults; saved order, session adoption unverified)"),
+            ("language.region", "KDE plasma-localerc Formats LANG (KConfig defaults; saved base region)"),
+            ("language.locale", "KDE plasma-localerc Formats LANG (saved preference; session adoption unverified)"),
+            ("language.formats", "KDE plasma-localerc Formats LC_* (KConfig defaults; saved overrides)"),
+        ]);
+    }
     observed
 }
 

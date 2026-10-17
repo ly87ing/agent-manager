@@ -57,7 +57,26 @@ do not inherit GNOME account defaults. GNOME's
 inheriting the known current-user language. GNOME's automatic-time-zone preference
 is a requested switch, not proof of location behavior. Missing user evidence stays
 unknown. systemd-localed's D-Bus `Locale` supplies untargeted system-default inventory
-only. `/etc/localtime` supplies a zone fallback and `/etc/os-release` supplies
+only outside KDE. On KDE, the [native reader](../../engine-rs/src/native_environment/linux_kde.rs)
+uses `kreadconfig6` or `kreadconfig5` to read
+saved Plasma language order, base locale and `LC_*` format overrides. It retains
+KConfig's global/cascaded defaults and immutable policy; `--file` is deliberately
+avoided because it selects `NoGlobals`. Qt's fixed `plasma-locale` application
+name selects `plasma-localerc` in [FullConfig](https://github.com/KDE/kconfig/blob/v6.7.0/src/core/kconfig.cpp), matching Plasma's
+[startup reader](https://github.com/KDE/plasma-workspace/blob/Plasma/6.2/startkde/startplasma.cpp).
+Both complete reads share an eight-second deadline and must agree. The child
+keeps the caller's locale inputs, disables KConfig's writable-home probe and
+runs with filesystem data-write restrictions. Missing tool/kernel support or
+unstable evidence stays unknown. Empty preferences do not inherit the checker
+process or GNOME account defaults. Unmapped language modifiers retain unknown
+language order while independently known regional formats remain visible.
+These are saved preferences, not proof of installed translations or adoption by
+the current desktop or a future login. Inspection never runs Plasma startup,
+generates locales or writes configuration. The disposable
+[native fixture](../../scripts/verify-linux-kde-preferences.mjs) checks global
+immutable/default inheritance, saved language order, independent formats and
+absent HOME/config/data without writes; its GUI CI step installs the actual KDE
+tools. `/etc/localtime` supplies a zone fallback and `/etc/os-release` supplies
 the OS version. Configured timesyncd servers use a typed D-Bus `GetAll` call with
 service activation disabled, including on systemd 249. A stopped service remains
 stopped and its server lists remain unknown; `show-timesync` and older `busctl

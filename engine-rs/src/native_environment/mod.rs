@@ -7,6 +7,8 @@ mod command;
 mod linux;
 #[cfg(any(target_os = "linux", test))]
 mod linux_accounts;
+#[cfg(any(target_os = "linux", test))]
+mod linux_kde;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(any(target_os = "linux", windows))]
