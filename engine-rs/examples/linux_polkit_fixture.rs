@@ -109,12 +109,43 @@ mod fixture {
                         "Changed private language baseline".into(),
                     ));
                 }
-                user.call::<_, _, ()>("SetLanguages", &(vec!["en_US.UTF-8", "fr_FR.UTF-8"],))
-                    .await
+                // The private non-root provider may authorize only same-UID subjects.
+                let writer = std::process::Command::new("/usr/bin/sudo")
+                    .args(["-n", "-u", &format!("#{}", self.uid), "/usr/bin/env"])
+                    .arg(format!(
+                        "DBUS_SYSTEM_BUS_ADDRESS={}",
+                        std::env::var("AM_LANGUAGE_PRIVATE_BUS").unwrap()
+                    ))
+                    .args([
+                        "/usr/bin/busctl",
+                        "--system",
+                        "--auto-start=no",
+                        "--allow-interactive-authorization=no",
+                        "--timeout=8s",
+                        "call",
+                        "org.freedesktop.Accounts",
+                        path.as_str(),
+                        "org.freedesktop.Accounts.User",
+                        "SetLanguages",
+                        "as",
+                        "2",
+                        "en_US.UTF-8",
+                        "fr_FR.UTF-8",
+                    ])
+                    .output()
                     .map_err(|error| {
-                        eprintln!("CI language drift failed: {error}");
-                        zbus::fdo::Error::Failed("Private language drift failed".into())
+                        eprintln!("CI language writer failed: {error}");
+                        zbus::fdo::Error::Failed("Private language writer failed".into())
                     })?;
+                if !writer.status.success() {
+                    eprintln!(
+                        "CI language drift failed: {}",
+                        String::from_utf8_lossy(&writer.stderr)
+                    );
+                    return Err(AuthenticationError::Failed(
+                        "Private language drift failed".into(),
+                    ));
+                }
             }
             if let Some(mode) = &self.ntp_mode {
                 if mode == "ntp-change" {

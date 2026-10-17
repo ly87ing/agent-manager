@@ -22,6 +22,10 @@ Add a lesson when a fix had to be redone, a check passed without exercising the 
   from no request. Preserve the original error at each callback failure and
   describe the deadline as incomplete authentication. Keep the native protocol
   assertion; an entered callback alone cannot establish authorization success.
+- The real non-root private AccountsService cannot ask Polkit to authorize a
+  root external writer. Emit the competing write as the original disposable
+  user, with interaction disabled, while the exact CLI PID still receives its
+  genuine challenge. Independent stale/tail/formats assertions remain required.
 
 ## 2026-10-17: directory copies need namespace and format-bound fork proof
 
