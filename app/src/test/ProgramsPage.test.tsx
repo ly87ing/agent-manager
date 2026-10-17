@@ -186,22 +186,28 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     expect(calls.find((call) => call.command === "programs:apply")!.args).toEqual(["--program", "npm:@wecom/cli", "--action", "upgrade", "--version", "1.3.5"]);
   });
 
-  it.each(["delegated", "managed"] as const)("%s uv version failure keeps inspection details visible without promising restoration", async (mode) => {
+  it.each([
+    { mode: "delegated", code: "PROGRAM_VERSION_UNVERIFIED" },
+    { mode: "managed", code: "PROGRAM_VERSION_UNVERIFIED" },
+    { mode: "managed", code: "PROGRAM_ENTRY_UNVERIFIED" },
+  ] as const)("$mode $code keeps inspection details visible without promising restoration", async ({ mode, code }) => {
     const contents = data();
     contents.elements = [program({ program: "pypi:tool-a", kind: "pypi", name: "tool-a", mode, owner: mode === "managed" ? "managed" : "uv-tool", version: "1.0.0", freshness: { ...unknown, state: "behind", current: "1.0.0", upstream: "2.0.0" } })];
     const plan = { ...PLAN, program: "pypi:tool-a", target_version: "2.0.0", notes: ["The unverified install may remain on PATH. Backup retention applies after any successful action."], manual: ["uv --no-python-downloads tool install --force tool-a==2.0.0"] };
-    const diagnostic = "uv finished, but the installed version is unknown. No automatic restoration was attempted. Inspect ~/uv/data/tools/tool-a and the backup.";
+    const diagnostic = code === "PROGRAM_ENTRY_UNVERIFIED"
+      ? "Managed PyPI command verification before completion failed. The candidate at ~/programs/tool-a/2.0.0 is retained. Inspect its bin entries."
+      : "uv finished, but the installed version is unknown. No automatic restoration was attempted. Inspect ~/uv/data/tools/tool-a and the backup.";
     const { calls } = renderWithEngine(<ProgramsPage />, {
       ...routes(), "programs:status": makeEnvelope(contents),
       "programs:preview": makeEnvelope(plan),
-      "programs:apply": makeEnvelope(plan, { ok: false, errors: [{ code: "PROGRAM_VERSION_UNVERIFIED", element: null, message: diagnostic }] }),
+      "programs:apply": makeEnvelope(plan, { ok: false, errors: [{ code, element: null, message: diagnostic }] }),
     });
     await userEvent.click(await screen.findByTestId("program-upgrade-pypi:tool-a"));
     await screen.findByText(mode === "managed" ? /自管 PyPI 会在完成标记和当前版本选择前核验版本/ : /uv 版本无法核验时保留现场，不自动恢复/);
     await screen.findByText(plan.notes[0]);
     expect(screen.queryByText(/执行失败时尝试恢复/)).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "升级" }));
-    await screen.findAllByText(new RegExp("uv finished, but the installed version is unknown"));
+    await screen.findAllByText(code === "PROGRAM_ENTRY_UNVERIFIED" ? /Managed PyPI command verification before completion failed/ : /uv finished, but the installed version is unknown/);
     expect(screen.getByTestId("program-action-dialog")).toBeInTheDocument();
     expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toBeInTheDocument();
     expect(screen.queryByText(/可以复制上面的命令自己执行/)).toBeNull();

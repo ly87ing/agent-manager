@@ -131,7 +131,7 @@ export function ProgramActionDialog({
           .finally(() => void queryClient.invalidateQueries({ queryKey: engineKeys.all }));
       } else {
         const message = envelope?.errors[0]?.message ?? t("没有完成，详见操作记录");
-        const unverified = envelope?.errors.some((error) => error.code === "PROGRAM_VERSION_UNVERIFIED") ?? false;
+        const unverified = envelope?.errors.some((error) => ["PROGRAM_VERSION_UNVERIFIED", "PROGRAM_ENTRY_UNVERIFIED"].includes(error.code)) ?? false;
         setFailed({ message, unverified });
         if (unverified) {
           toast.warning(t("{0}未完成", TITLE[action]), { description: message });
@@ -161,7 +161,7 @@ export function ProgramActionDialog({
       title={`${TITLE[action]} ${program.name}${plan?.target_version ? ` ${plan.target_version}` : version ? ` ${version}` : ""}`}
       description={loading ? t("正在生成操作计划") : error ? "" : verifiesUv
         ? t("确认后执行下列步骤；uv 版本无法核验时保留现场，不自动恢复，并报告需要检查的位置。")
-        : verifiesManagedPyPi ? t("确认后执行下列步骤；自管 PyPI 会在完成标记和当前版本选择前核验版本。无法核验时保留候选目录，并报告检查位置。")
+        : verifiesManagedPyPi ? t("确认后执行下列步骤；自管 PyPI 会在完成标记和当前版本选择前核验版本及声明命令入口。无法核验时保留候选目录，并报告检查位置。")
         : t("确认后执行下列步骤；执行失败时尝试恢复，并报告需要检查的备份。")}
       risk="write-local"
       riskLabel={t("改动本机程序")}

@@ -109,6 +109,7 @@ mod tests {
             verify_bins: vec![],
             verify_version: None,
             verify_uv: None,
+            verify_managed_bins: Vec::new(),
             notes: vec![],
             scripts_ignored: false,
             backup_dir: None,
