@@ -5,6 +5,8 @@ pub(crate) mod apply;
 pub(crate) mod declare;
 pub(crate) mod locate;
 mod npm_postcondition;
+mod recovery;
+mod recovery_snapshot;
 mod scope;
 pub(crate) mod status;
 #[cfg(unix)]

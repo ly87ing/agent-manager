@@ -307,7 +307,7 @@ fn invalid_target_is_zero_write() {
     );
 }
 
-fn command_failure_still_restores_owned_original() {
+fn command_failure_retains_the_recreated_package_and_original_backup() {
     let fixture = Fixture::new("command-failure");
     fixture.control("9.9.0", "command-failure");
     let result = fixture.run("programs:apply", Some("2.0.0"));
@@ -316,13 +316,14 @@ fn command_failure_still_restores_owned_original() {
         .to_string()
         .contains("Controlled installer failure"));
     assert_eq!(result["errors"][0]["code"], "PROGRAM_ERROR");
-    assert_eq!(
-        std::fs::read(fixture.package.join("original")).unwrap(),
-        fixture.sentinel
+    assert!(
+        result["errors"].to_string().contains("Recovery incomplete"),
+        "{result}"
     );
+    fixture.original_retained();
     assert_eq!(
         std::fs::read_to_string(fixture.package.join("declared-version")).unwrap(),
-        "1.0.0"
+        "9.9.0"
     );
     assert!(fixture.bin.join(entry_name()).exists());
 }
@@ -398,9 +399,9 @@ fn main() {
     }
     equivalent_versions();
     invalid_target_is_zero_write();
-    command_failure_still_restores_owned_original();
+    command_failure_retains_the_recreated_package_and_original_backup();
     successful_actions_keep_the_normal_three_backup_limit();
     cached_current_versions_cannot_override_actual_metadata();
     managed::verify();
-    println!("uv lifecycle: command-success version failures retained current/backup files; PEP 440 matching, early refusal, command-failure restoration, normal retention and actual-version freshness passed");
+    println!("uv lifecycle: command-success version failures retained current/backup files; PEP 440 matching, early refusal, command-failure conflict retention, normal retention and actual-version freshness passed");
 }

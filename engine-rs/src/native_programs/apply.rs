@@ -829,6 +829,14 @@ fn scripts_allowed(status: &Value, id: &str) -> bool {
 
 /// 读一个备份的说明。
 fn read_backup(ctx: &Context, backup: &str) -> Result<(PathBuf, Value)> {
+    if Path::new(backup).components().count() != 1
+        || !matches!(
+            Path::new(backup).components().next(),
+            Some(std::path::Component::Normal(_))
+        )
+    {
+        bail!("Invalid program backup identifier");
+    }
     let dir = backup_root(ctx).join(backup);
     validate_program_metadata(ctx, &dir.join(BACKUP_META))?;
     let meta: Value = serde_json::from_str(
@@ -853,20 +861,81 @@ fn plan_restore(ctx: &Context, args: &Args) -> Result<Plan> {
             .and_then(Value::as_str)
             .ok_or_else(|| anyhow!("备份说明不完整"))?,
     );
+    validate_program_path(ctx, &package_dir)?;
     let links: Vec<(PathBuf, PathBuf)> = meta
         .get("links")
         .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .filter_map(|l| {
-                    Some((
-                        PathBuf::from(l.get("from")?.as_str()?),
-                        PathBuf::from(l.get("to")?.as_str()?),
-                    ))
-                })
-                .collect()
+        .ok_or_else(|| anyhow!("Incomplete program backup links"))?
+        .iter()
+        .map(|link| {
+            Ok((
+                PathBuf::from(
+                    link["from"]
+                        .as_str()
+                        .ok_or_else(|| anyhow!("Invalid backup entry destination"))?,
+                ),
+                PathBuf::from(
+                    link["to"]
+                        .as_str()
+                        .ok_or_else(|| anyhow!("Invalid backup entry source"))?,
+                ),
+            ))
         })
-        .unwrap_or_default();
+        .collect::<Result<_>>()?;
+    let package_meta = std::fs::symlink_metadata(dir.join("package"))
+        .context("Program backup package is missing or unreadable; no files were moved")?;
+    if !package_meta.is_dir() || package_meta.file_type().is_symlink() {
+        bail!("Program backup package is not an ordinary directory");
+    }
+    if meta["package_fingerprint"].as_str()
+        != Some(super::recovery_snapshot::text(&dir.join("package"))?.as_str())
+    {
+        bail!("Program backup contents changed or lack recovery evidence; retained for manual inspection");
+    }
+    let mut destinations = std::collections::BTreeSet::new();
+    let mut sources = std::collections::BTreeSet::new();
+    for (index, (from, to)) in links.iter().enumerate() {
+        validate_program_path(ctx, from)?;
+        validate_program_path(ctx, to)?;
+        if to.parent() != Some(dir.join("bin").as_path())
+            || !sources.insert(to.clone())
+            || !destinations.insert(from.clone())
+        {
+            bail!("Program backup has conflicting or out-of-scope entries");
+        }
+        std::fs::symlink_metadata(to)
+            .context("Program backup entry is missing or unreadable; no files were moved")?;
+        if meta["links"][index]["fingerprint"].as_str()
+            != Some(super::recovery_snapshot::text(to)?.as_str())
+        {
+            bail!("Program backup entry changed or lacks recovery evidence; no files were moved");
+        }
+        match std::fs::symlink_metadata(from) {
+            Ok(_) => {
+                let bin = if cfg!(windows) {
+                    from.file_stem()
+                } else {
+                    from.file_name()
+                }
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| anyhow!("Invalid command entry name"))?;
+                if !bin_links_into(
+                    from.parent().unwrap_or(Path::new("")),
+                    &package_dir,
+                    &[bin.into()],
+                )
+                .contains(from)
+                {
+                    bail!(
+                        "Changed command entry retained at {}; no files were moved",
+                        from.display()
+                    );
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
     let mut steps = Vec::new();
     let aside = new_backup_dir(ctx, &args.program);
     if package_dir.exists() {
@@ -895,7 +964,7 @@ fn plan_restore(ctx: &Context, args: &Args) -> Result<Plan> {
             to: from.clone(),
         });
     }
-    steps.push(Step::RemoveDir { path: dir.clone() });
+    // Keep the consumed backup description until the whole restore is verified.
     Ok(Plan {
         program: args.program.clone(),
         action: Action::Restore,
@@ -1672,8 +1741,10 @@ mod manual_windows;
 
 /// 入口链接只能放在「不存在」或「本工具登记过、仍指向本工具目录」的位置。
 fn check_link_slot(ctx: &Context, path: &Path, registered: &[(String, String)]) -> Result<()> {
-    if path.symlink_metadata().is_err() {
-        return Ok(());
+    match path.symlink_metadata() {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+        Ok(_) => {}
     }
     let key = tilde(path, &ctx.home_dir);
     let ours = link_target(path).is_some_and(|t| t.starts_with(programs_root(ctx)))
@@ -1681,26 +1752,6 @@ fn check_link_slot(ctx: &Context, path: &Path, registered: &[(String, String)]) 
     if !ours {
         bail!("{key} 已经有别的文件，没有覆盖（换一个入口目录，或自己处理这个文件）");
     }
-    Ok(())
-}
-
-fn symlink(target: &Path, path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let tmp = path.with_file_name(format!(
-        ".{}.am-tmp",
-        path.file_name().unwrap_or_default().to_string_lossy()
-    ));
-    let _ = crate::platform::remove_link(&tmp);
-    // 相对目标（`current` → 版本号）按链接所在目录解析，判断是目录还是文件
-    let resolved = path.parent().unwrap_or(Path::new(".")).join(target);
-    if resolved.is_dir() {
-        crate::platform::link_dir(target, &tmp)?;
-    } else {
-        crate::platform::link_file(target, &tmp)?;
-    }
-    crate::platform::replace_link(&tmp, path)?;
     Ok(())
 }
 
@@ -1762,7 +1813,7 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
             check_link_slot(ctx, path, &registered)?;
         }
     }
-    let mut done: Vec<Step> = Vec::new();
+    let mut recovery = super::recovery::Journal::default();
     let mut new_links: Vec<(String, String)> = Vec::new();
     let mut removed_links: Vec<String> = Vec::new();
     let result = (|| -> Result<()> {
@@ -1781,8 +1832,7 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                     if let Some(parent) = to.parent() {
                         std::fs::create_dir_all(parent)?;
                     }
-                    std::fs::rename(from, to)
-                        .with_context(|| format!("移动 {} 失败", tilde(from, &ctx.home_dir)))?;
+                    recovery.move_entry(from, to)?;
                 }
                 Step::Exec {
                     program,
@@ -1823,15 +1873,8 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                     target,
                     register,
                 } => {
-                    // 指向命令文件的入口：Windows 上写转发脚本（npm 的 .cmd 不能链接到别处）
-                    if cfg!(windows) && !path.ends_with("current") {
-                        if let Some(parent) = path.parent() {
-                            std::fs::create_dir_all(parent)?;
-                        }
-                        crate::platform::write_cmd_shim(target, path)?;
-                    } else {
-                        symlink(target, path)?;
-                    }
+                    check_link_slot(ctx, path, &registered)?;
+                    recovery.replace(path, target, cfg!(windows))?;
                     if *register {
                         new_links.push((tilde(path, &ctx.home_dir), tilde(target, &ctx.home_dir)));
                     }
@@ -1891,7 +1934,7 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                             "current selection",
                         )?;
                     }
-                    symlink(Path::new(version), &program_dir.join("current"))?;
+                    recovery.replace(&program_dir.join("current"), Path::new(version), false)?;
                 }
                 Step::WriteMeta { dir, meta } => {
                     if let Some(name) = plan.program.strip_prefix("npm:") {
@@ -1933,8 +1976,22 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                     std::fs::write(dir.join(META_FILE), serde_json::to_vec_pretty(meta)?)?;
                 }
                 Step::WriteBackupMeta { dir, meta } => {
+                    let mut meta = meta.clone();
+                    meta["package_fingerprint"] =
+                        json!(super::recovery_snapshot::text(&dir.join("package"))?);
+                    for link in meta["links"]
+                        .as_array_mut()
+                        .ok_or_else(|| anyhow!("Missing backup links"))?
+                    {
+                        let path = PathBuf::from(
+                            link["to"]
+                                .as_str()
+                                .ok_or_else(|| anyhow!("Missing backup entry path"))?,
+                        );
+                        link["fingerprint"] = json!(super::recovery_snapshot::text(&path)?);
+                    }
                     std::fs::create_dir_all(dir)?;
-                    std::fs::write(dir.join(BACKUP_META), serde_json::to_vec_pretty(meta)?)?;
+                    std::fs::write(dir.join(BACKUP_META), serde_json::to_vec_pretty(&meta)?)?;
                 }
                 Step::SaveEntryDir { dir } => {
                     let dir = dir.clone();
@@ -1943,7 +2000,6 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                     })?;
                 }
             }
-            done.push(step.clone());
         }
         if let Some(verification) = &plan.verify_uv {
             verification.check(&ctx.home_dir, KEEP_BACKUPS)?;
@@ -1978,45 +2034,10 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
             );
             return Err(err);
         }
-        let mut rollback_blocked = false;
-        // 失败回滚：按相反顺序撤回已做的移动与链接；新装出来的包目录（在备份位置之外）删掉
-        for step in done.iter().rev() {
-            if validate_step_targets(ctx, step).is_err() {
-                rollback_blocked = true;
-                continue;
-            }
-            match step {
-                Step::Move { from, to } => {
-                    if from.exists() {
-                        // 原位置上已经有了新装的：先删掉（只在本工具备份流程里发生，原内容在 to）
-                        if from
-                            .symlink_metadata()
-                            .map(|m| m.file_type().is_symlink())
-                            .unwrap_or(false)
-                        {
-                            let _ = crate::platform::remove_link(from);
-                        } else if from.is_dir() {
-                            let _ = std::fs::remove_dir_all(from);
-                        } else {
-                            let _ = std::fs::remove_file(from);
-                        }
-                    }
-                    let _ = std::fs::rename(to, from);
-                }
-                Step::Link { path, .. } => {
-                    let _ = crate::platform::remove_link(path);
-                }
-                _ => {}
-            }
-        }
-        // 已经原样移回：这次的备份记录没有内容了，删掉
-        if let Some(backup) = &plan.backup_dir {
-            if backup.exists() && !backup.join("package").exists() {
-                if validate_program_path(ctx, backup).is_ok() {
-                    let _ = std::fs::remove_dir_all(backup);
-                } else {
-                    rollback_blocked = true;
-                }
+        let failures = recovery.rollback(|path| validate_program_path(ctx, path));
+        if failures.is_empty() {
+            if let Some(backup) = &plan.backup_dir {
+                let _ = cleanup_consumed_backup(ctx, backup);
             }
         }
         let _ = record(
@@ -2025,8 +2046,8 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
             &plan.program,
             json!({"action": format!("{:?}", plan.action).to_lowercase(), "ok": false}),
         );
-        return Err(if rollback_blocked {
-            anyhow!("{err:#}；路径保护阻止了部分回滚或清理，已跳过不安全目标，请检查保留的备份")
+        return Err(if !failures.is_empty() {
+            anyhow!("{err:#}\nRecovery incomplete; current files and backups were retained for inspection:\n{}", failures.join("\n"))
         } else {
             err
         });
@@ -2052,27 +2073,45 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
             for (path, target) in &new_links {
                 map.insert(path.clone(), json!(target));
             }
-        })?;
+        }).context("Program files were applied, but entry registration failed. No restoration or backup pruning was performed; inspect current files and retained backups.")?;
     }
     if plan.scripts_ignored {
         // 装好后列出被跳过脚本的包
     }
-    prune_backups(ctx, &plan.program);
     let skipped = match plan.target_version.as_deref() {
         Some(v) if plan.scripts_ignored => program_dir(ctx, &plan.program)
             .map(|d| packages_with_scripts(&d.join(v)))
             .unwrap_or_default(),
         _ => Vec::new(),
     };
+    recovery.finish().context("Program files were applied, but previous-pointer cleanup failed. No restoration or backup pruning was performed.")?;
     record(
         ctx,
         req,
         &plan.program,
         json!({"action": format!("{:?}", plan.action).to_lowercase(), "ok": true, "version": plan.target_version}),
-    )?;
+    ).context("Program files were applied, but recording success failed. No restoration or backup pruning was performed; inspect current files and retained backups.")?;
+    if matches!(plan.action, Action::Restore | Action::Unadopt) {
+        if let Some(backup) = req.value("--backup") {
+            cleanup_consumed_backup(ctx, &backup_root(ctx).join(backup))?;
+        }
+    }
+    prune_backups(ctx, &plan.program);
     let mut out = plan.to_json(ctx);
     out["scripts_skipped"] = json!(skipped);
     Ok(out)
+}
+
+fn cleanup_consumed_backup(ctx: &Context, dir: &Path) -> Result<()> {
+    validate_program_metadata(ctx, &dir.join(BACKUP_META))?;
+    // Remove only empty consumed directories. Unexpected contents stay intact.
+    let _ = std::fs::remove_dir(dir.join("bin"));
+    let entries = std::fs::read_dir(dir)?.collect::<std::io::Result<Vec<_>>>()?;
+    if entries.len() == 1 && entries[0].file_name() == BACKUP_META {
+        std::fs::remove_file(dir.join(BACKUP_META))?;
+        let _ = std::fs::remove_dir(dir);
+    }
+    Ok(())
 }
 
 /// 同一程序只留最近几份备份；纳入时的备份（撤回要用）不清。
@@ -2087,6 +2126,12 @@ fn prune_backups(ctx: &Context, id: &str) {
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             validate_program_metadata(ctx, &e.path().join(BACKUP_META)).ok()?;
+            // A consumed or partially recovered backup may hold unrelated retained files.
+            if !std::fs::symlink_metadata(e.path().join("package"))
+                .is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink())
+            {
+                return None;
+            }
             let meta: Value =
                 serde_json::from_str(&std::fs::read_to_string(e.path().join(BACKUP_META)).ok()?)
                     .ok()?;

@@ -2261,3 +2261,28 @@ pending at this receipt. Multiple target languages, inherited formats, KDE repai
 installed client/session adoption and signed updating remain separate work.
 No personal OS setting, real assistant file, installed application, Release or
 tag changed.
+
+## 2026-10-23: conflict-preserving program recovery
+
+Ordinary Programs failures now retain occupied installations and changed backups,
+stop uncertain recovery with affected paths, and conditionally restore command
+pointers and `current`. Native no-replace moves close destination-overwrite races.
+Bounded package/entry fingerprints are persisted with new backups and checked
+before restore; legacy backups without evidence require manual inspection.
+Restore rejects changed entries before moving current files, and consumed backups
+with extra contents are excluded from recursive retention. Post-apply registration
+or audit failures explicitly report the applied files and retained backups.
+
+On macOS x86_64 with Rust 1.92.0 and pnpm 10, the complete engine suite passed,
+including 313 library cases, the portable lifecycle harnesses and protected-account
+integration cases. Tauri 27, frontend 706/61 files, production frontend build,
+script 23 and formatting checks passed. The new failed-installer regression failed
+against the original recovery behavior, then passed with both new contents and
+original backup bytes preserved. Real isolated npm ordinary/scoped/string/array/
+direct-entry, adoption, switch/reuse and entry execution checks also passed.
+
+Independent source review found and rechecked changed-backup, wrong-entry and
+consumed-backup pruning defects. These local results do not establish native
+Windows/Linux execution, installed-client adoption or signed updating. Dependency
+advisory triage remains open. No personal OS setting, real assistant file, installed
+application, Release or tag changed.

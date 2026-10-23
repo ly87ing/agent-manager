@@ -11,10 +11,12 @@ in older records below are retired. The Assistants page lists immutable extensio
 it does not restore account management. See [current architecture](ARCHITECTURE.md)
 and [scope](EXTENSIONS-ONLY.md).
 
-## Current acceptance boundary (2026-10-17)
+## Current acceptance boundary (2026-10-23)
 
-The [remaining-work queue](REMAINING-WORK.md) records the latest `7d4fde7a`
-baseline, native npm receipts and unfinished implementation/acceptance tasks.
+The [remaining-work queue](REMAINING-WORK.md) records the verified `3ddd9b43`
+baseline and current recovery hardening. Production readiness is not yet accepted:
+Git dependency postconditions, installed cross-platform/consumer workflows and
+signed updating remain open. Current source tests do not update an installed app.
 The older detailed snapshot below is retained until its receipts are refreshed.
 
 Verified corrections through `e71cfd6f` add guarded GNOME single-primary-language

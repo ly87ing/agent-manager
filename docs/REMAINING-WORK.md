@@ -1,9 +1,11 @@
 # Remaining Work
 
-Start with **R1: conflict-safe program recovery**, then R2: Git dependency
-verification.
+Continue with **R2: Git dependency verification**. R1 has a local implementation;
+native CI and installed-client evidence remain separate acceptance steps.
 
-Snapshot: 2026-10-17 10:48 UTC, baseline `7d4fde7a`. All items are open.
+Snapshot: 2026-10-23. Historical baseline: `3ddd9b43`; its final main
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/39026462902) and
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39026462915) passed.
 The lead reviewer owns implementation and acceptance.
 The repository owner owns release authorization in R9.
 
@@ -11,7 +13,7 @@ The repository owner owns release authorization in R9.
 
 | ID | Phase | Work and current state | Completion criterion |
 | --- | --- | --- | --- |
-| R1 | First | Protect ordinary rollback/restore against external changes. | Retain conflicts; verify current, entries, backups and partial recovery. |
+| R1 | Native CI pending | Implemented conflict-preserving recovery, bounded backup evidence and guarded pointer restoration. | Retain conflicts; verify current, entries, backups and partial recovery on each native platform. |
 | R2 | First | Add actual source/commit verification for Git dependencies. | Verify identity and entries before completion/selection, including reuse. |
 | R3 | Then | Audit standalone Windows links with missing underlying targets. | Reproduce the case; require fresh target evidence and valid-link controls. |
 | R4 | Then | Implement KDE language and regional-format repair. | Preview scope; preserve settings; reject stale evidence; read back natively. |

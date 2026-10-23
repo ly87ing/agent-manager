@@ -338,7 +338,7 @@ fn upgrade_adopt_and_restore(package: &str) {
         original,
         "preview changed the original installation"
     );
-    for version in ["99.0.0", "98.0.0"] {
+    for version in ["99.0.0"] {
         let failed = env.run(
             "programs:apply",
             &[
@@ -420,6 +420,211 @@ fn upgrade_adopt_and_restore(package: &str) {
     assert_eq!(tree(&env.prefix), original);
     assert!(!env.home.join("bin").join(command_name("tool-a")).exists());
     assert_eq!(env.run("programs:status", &[])["data"]["links"], json!({}));
+}
+
+fn failed_installer_retains_conflicting_files() {
+    let env = Env::new("recovery-conflict");
+    env.skill("tool-a");
+    install_package(&env.prefix, "tool-a", "1.2.0", true);
+    let package = global_modules(&env.prefix).join("tool-a");
+    let original = tree(&package);
+    let failed = env.run(
+        "programs:apply",
+        &[
+            "--program",
+            "npm:tool-a",
+            "--action",
+            "upgrade",
+            "--version",
+            "98.0.0",
+        ],
+    );
+    assert_eq!(failed["ok"], false, "{failed}");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&std::fs::read(package.join("package.json")).unwrap())
+            .unwrap()["version"],
+        "98.0.0",
+        "recovery deleted the installer's conflicting package: {failed}"
+    );
+    assert!(
+        failed.to_string().contains("Recovery incomplete"),
+        "{failed}"
+    );
+    let status = env.run("programs:status", &[]);
+    let backup = status["data"]["backups"][0]["id"].as_str().unwrap();
+    assert_eq!(
+        tree(
+            &env.data
+                .join("programs/backups")
+                .join(backup)
+                .join("package")
+        ),
+        original
+    );
+}
+
+fn late_entry_failure_restores_current_and_retains_external_entry() {
+    let env = Env::new("late-entry-failure");
+    env.skill("tool-a");
+    let args = [
+        "--program",
+        "npm:tool-a",
+        "--action",
+        "install",
+        "--version",
+        "1.2.0",
+        "--entry-dir",
+        "~/bin",
+    ];
+    let installed = env.run("programs:apply", &args);
+    assert_eq!(installed["ok"], true, "{installed}");
+    let entry = env.data.join("programs/bin").join(command_name("tool-a"));
+    std::fs::remove_file(&entry).unwrap();
+    std::fs::write(&entry, b"external entry").unwrap();
+    let failed = env.run(
+        "programs:apply",
+        &[
+            "--program",
+            "npm:tool-a",
+            "--action",
+            "upgrade",
+            "--version",
+            "2.0.0",
+        ],
+    );
+    assert_eq!(failed["ok"], false, "{failed}");
+    let program = env.data.join("programs/npm/tool-a");
+    assert_eq!(
+        program.join("current").canonicalize().unwrap(),
+        program.join("1.2.0").canonicalize().unwrap()
+    );
+    assert_eq!(std::fs::read(entry).unwrap(), b"external entry");
+    assert!(program.join("2.0.0/.agent-manager-program.json").is_file());
+}
+
+fn restore_rejects_missing_backup_entries_and_changed_destinations_before_writes() {
+    for mode in [
+        "missing-entry",
+        "external-entry",
+        "outside-source",
+        "malformed-entry",
+        "directory-entry",
+        "changed-package",
+        "legacy-evidence",
+    ] {
+        let env = Env::new(mode);
+        env.skill("tool-a");
+        install_package(&env.prefix, "tool-a", "1.2.0", true);
+        let upgraded = env.run(
+            "programs:apply",
+            &[
+                "--program",
+                "npm:tool-a",
+                "--action",
+                "upgrade",
+                "--version",
+                "2.0.0",
+            ],
+        );
+        assert_eq!(upgraded["ok"], true, "{upgraded}");
+        let backup = upgraded["data"]["backup"].as_str().unwrap();
+        let dir = env.data.join("programs/backups").join(backup);
+        let metadata_path = dir.join("backup.json");
+        let mut metadata: Value =
+            serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
+        match mode {
+            "missing-entry" => {
+                std::fs::remove_file(metadata["links"][0]["to"].as_str().unwrap()).unwrap()
+            }
+            "external-entry" => {
+                let path = Path::new(metadata["links"][0]["from"].as_str().unwrap());
+                std::fs::remove_file(path).unwrap();
+                std::fs::write(path, b"external entry").unwrap();
+            }
+            "outside-source" => metadata["links"][0]["to"] = json!(env.home.join("outside")),
+            "malformed-entry" => metadata["links"][0] = json!({"from": "missing source"}),
+            "directory-entry" => {
+                let path = Path::new(metadata["links"][0]["to"].as_str().unwrap());
+                std::fs::remove_file(path).unwrap();
+                std::fs::create_dir(path).unwrap();
+            }
+            "changed-package" => std::fs::write(
+                dir.join("package/externally-added"),
+                b"external backup edit",
+            )
+            .unwrap(),
+            "legacy-evidence" => {
+                metadata
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("package_fingerprint");
+            }
+            _ => unreachable!(),
+        }
+        std::fs::write(&metadata_path, metadata.to_string()).unwrap();
+        let actual = tree(&env.prefix);
+        let saved = tree(&dir);
+        for command in ["programs:preview", "programs:apply"] {
+            let refused = env.run(
+                command,
+                &[
+                    "--program",
+                    "npm:tool-a",
+                    "--action",
+                    "restore",
+                    "--backup",
+                    backup,
+                ],
+            );
+            assert_eq!(refused["ok"], false, "{mode}: {refused}");
+            assert_eq!(tree(&env.prefix), actual, "{mode}: {refused}");
+            assert_eq!(tree(&dir), saved, "{mode}: {refused}");
+        }
+    }
+}
+
+fn consumed_backup_keeps_unexpected_files_when_restoring_an_old_version() {
+    let env = Env::new("restore-retained-backup");
+    env.skill("tool-a");
+    install_package(&env.prefix, "tool-a", "1.0.0", true);
+    let mut oldest = None;
+    for version in ["2.0.0", "3.0.0", "4.0.0"] {
+        let result = env.run(
+            "programs:apply",
+            &[
+                "--program",
+                "npm:tool-a",
+                "--action",
+                "upgrade",
+                "--version",
+                version,
+            ],
+        );
+        assert_eq!(result["ok"], true, "{result}");
+        if oldest.is_none() {
+            oldest = Some(result["data"]["backup"].as_str().unwrap().to_string());
+        }
+    }
+    let oldest = oldest.unwrap();
+    let retained = env
+        .data
+        .join("programs/backups")
+        .join(&oldest)
+        .join("external-notes");
+    std::fs::write(&retained, b"keep these notes").unwrap();
+    let result = env.run(
+        "programs:apply",
+        &[
+            "--program",
+            "npm:tool-a",
+            "--action",
+            "restore",
+            "--backup",
+            &oldest,
+        ],
+    );
+    assert_eq!(result["ok"], true, "{result}");
+    assert_eq!(std::fs::read(retained).unwrap(), b"keep these notes");
 }
 
 fn current_pointer_is_protected() {
@@ -663,6 +868,10 @@ fn main() {
     managed::run();
     upgrade_adopt_and_restore("tool-a");
     upgrade_adopt_and_restore("@scope/tool-a");
+    failed_installer_retains_conflicting_files();
+    late_entry_failure_restores_current_and_retains_external_entry();
+    restore_rejects_missing_backup_entries_and_changed_destinations_before_writes();
+    consumed_backup_keeps_unexpected_files_when_restoring_an_old_version();
     current_pointer_is_protected();
     entry_directory_spellings_preserve_eligibility();
     probes_use_user_path();

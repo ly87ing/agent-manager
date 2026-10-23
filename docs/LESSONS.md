@@ -4,6 +4,21 @@ What recent work got wrong, and the rule that would have caught it. Read this be
 
 Each lesson is a rule, then why, then the evidence (commit, test, or observation). "Seen" counts the separate days a review found it. A lesson seen on three or more days moves into [AGENTS.md](../AGENTS.md), [UI rules](UI-RULES.md), or a guard test, and its entry here shrinks to a pointer.
 
+## 2026-10-23: failure recovery must preserve conflicts and follow actual moves
+
+- A lifecycle assertion treated deletion of an installer's recreated package as
+  successful recovery. The regression now verifies the new bytes and old backup
+  together, with an explicit incomplete-recovery error. A separate early failure
+  still proves normal recovery. Never infer ownership from a failed command.
+- Candidate retention does not imply one fixed location. A first late-entry
+  regression assumed an npm staging move would leave it at the final path;
+  stronger fingerprints now retain completed candidates there when their metadata
+  differs from the original staging tree. Read actual files and `current`, and stop
+  earlier undo steps after a conflict so they cannot move a changed pointer's files.
+- Source review found that retaining an old consumed backup was undone by the
+  subsequent retention pass. Exercise an old restore with three newer backups
+  and an extra file; exclude consumed/partial backups from recursive pruning.
+
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
 ## 2026-10-17: native batch fixtures need cmd argument handling

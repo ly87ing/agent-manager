@@ -92,8 +92,7 @@ Failures retain their candidate and report which completion/selection step was
 not performed; an earlier completion marker or previously active contents may
 already exist. Existing target/account guards remain in force. Parent path
 aliases are normalized while the version root and internal metadata components
-retain ordinary-object checks. Git version postconditions and general
-rollback/restore conflicts remain separate work.
+retain ordinary-object checks. Git version postconditions remain separate work.
 Managed npm installs/adoption verify the actual package identity/version and each
 declared `bin` target before completion metadata and again before `current`.
 Completed-version reuse and switches receive the same fresh check. Exact SemVer
@@ -122,7 +121,7 @@ uncoordinated external writers. Failed identity/entry gates retain the candidate
 without automatic cleanup or rollback after that check, preserving the previously
 selected current version. A completion marker can already exist when the later
 selection check fails. This does not promise restoration after every unrelated
-later step failure. General rollback/restore conflicts remain separate work.
+later step failure.
 Manual commands do not reproduce these application verification gates.
 
 The `PROGRAM_VERSION_UNVERIFIED` diagnostic identifies this incomplete outcome;
@@ -192,6 +191,28 @@ status badges do not repeat long version strings. Paths and current versions wra
 - Failed delegated commands attempt restoration of package directories and owned
   Windows launcher files. A successful uv command with an unverified installed
   version instead retains the current files and backup, reporting both locations.
+- Ordinary recovery uses native moves that refuse existing destinations, including
+  dangling links. A recreated package or changed entry is retained alongside its
+  backup; recovery stops at the first uncertain step and reports `Recovery incomplete`
+  with the affected paths. It never deletes an occupied installation to restore one.
+  Moved objects carry bounded fingerprints of ordinary file bytes, names, empty
+  directories, link targets and native metadata. Evidence is checked before/after
+  moves and again before recovery; unknown or changed evidence stops recovery.
+  Each tree is limited to 32768 entries, 256 MiB of file bytes and depth 64.
+  Pointer replacement stages a unique link/shim and retains the previous pointer
+  before publication. Later failure restores `current` and entries only while
+  their observed contents still match this operation. Recovery artifacts may remain
+  beside pointers after failure. These checks do not freeze a tree or provide an
+  atomic transaction against independent writers changing ancestors or file contents.
+- Restore refuses missing/malformed backup entries, sources outside the selected
+  backup and destinations no longer owned by the current package before moving
+  files. New backups retain package/entry fingerprints; older backups without this
+  evidence require manual inspection instead of automatic restore. Consumed backup
+  directories are removed only after successful verification,
+  and only when empty apart from their description; unexpected contents stay.
+  Registration/audit failure after applying files explicitly reports that the files
+  remain applied and backups have not been pruned. A failed operation does not prune
+  backups; later successful actions retain the existing newest-three policy.
 - Install-time PyPI discovery locates `curl` through user PATH/PATHEXT. Explicit
   executable paths are used for probes; no hard-coded Unix curl path is assumed.
 - Queries and plans do not install software or alter program directories.
@@ -220,6 +241,10 @@ operations against isolated HOME/data directories, covers ordinary and scoped np
 layouts, checks byte-for-byte failed-upgrade restoration and adoption undo, and
 creates Windows junctions directly without requiring symlink privileges. These
 fixtures exercise process and filesystem behavior without contacting registries.
+They also read back failed-installer conflicts and original backup bytes, a late
+entry failure after selecting `current`, and zero-move refusal for missing,
+malformed, out-of-scope or externally replaced restore entries. A failure before
+the installer writes retains ordinary successful-recovery coverage.
 
 The [native uv fixture](../../scripts/verify-native-uv-runtime.mjs) uses an empty
 private runtime directory and a loopback mirror that serves only 404 responses.

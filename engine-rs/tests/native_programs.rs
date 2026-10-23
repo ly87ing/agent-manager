@@ -756,7 +756,7 @@ fn failed_upgrade_cannot_roll_back_through_an_account_directory_alias() {
     );
     assert_eq!(result["ok"], false, "{result}");
     assert!(
-        result["errors"].to_string().contains("回滚或清理"),
+        result["errors"].to_string().contains("Recovery incomplete"),
         "{result}"
     );
     assert_eq!(original, tree_digest(&account));
