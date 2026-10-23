@@ -1,11 +1,13 @@
 # Remaining Work
 
 Continue with **R7-R9: installed clients, receiving applications and signed updating**.
-Source `e5cfb74f` passed all six native engine targets, including the new GNOME
-inherited-formats cases on Linux x64 and ARM64. Its complete
-[CI](https://github.com/ly87ing/agent-manager/actions/runs/39993041883) and
-[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39993041632)
-remain in progress. The preceding `45d44a3b` baseline passed both complete workflows.
+Source `7b559512` adds guarded Ubuntu CI archive preparation to the verified GNOME
+inherited-formats slice. Actual native downloads confirm the official HTTPS
+archive on x64 and retained ports sources on ARM64. Its main
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/40013020860) and
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/40013021196)
+passed completely: two regular jobs, six native engine targets and six installer
+targets. The preceding `45d44a3b` baseline remains recorded.
 Native source/package evidence does not establish full production acceptance.
 Local macOS x86_64 source `e5cfb74f` was built, installed in Applications and run;
 the Launch all control and saved interface language were read back. Database bytes,
@@ -31,11 +33,11 @@ The repository owner owns release authorization in R9.
 | R7 | Partial | macOS x86_64 local install/runtime readback and isolated launch/Git cases passed. Installed cross-platform and actual consumers remain open. | Verify UI failures, restart/restore, login/share links and extension loading. |
 | R8 | Acceptance | Verify settings in receiving sessions/apps and clock behavior. | Read actual effects independently, including cancellation/failure cases. |
 | R9 | Release | Verify signed installed-app updating after separate authorization. | Verify signature, download, install, restart and exact build identity. |
-| R10 | Current | `e5cfb74f` native engine and local installed-app receipts recorded; complete source/installer workflows remain in progress. | Retain final workflow conclusions separately from native preference and desktop acceptance. |
+| R10 | Recorded | `7b559512` passed complete main CI/GUI CI; native archive downloads and `e5cfb74f` installed-app receipts are recorded separately. | Retain final workflow conclusions separately from native preference and desktop acceptance. |
 | R11 | Portability | Resolve skill snapshot support decisions and native evidence gaps. | Verify filesystem/volume limits and explicit refusal of unsupported shapes. |
 | R12 | Investigation | Diagnose earlier intermittent macOS DMG busy-eject failures. | Reproduce and verify the cause; a passing retry alone cannot close it. |
 | R13 | Native tests passed | TLS/ZIP corrections, GLib backport, optimized Linux iterator and extracted bundle notices passed. Maintenance notices remain recorded. | Maintain source provenance and the [security review](subsystems/dependency-security.md). |
-| R14 | Native tests passed | `45d44a3b` passed all six engine and installer targets, including Windows/Linux ARM64 and helper architecture gates. ARM64 release/update routing is prepared; signed and installed-desktop acceptance remains open. | Retain native evidence, payload/target binding and explicit desktop/signed-update limits. |
+| R14 | Native tests passed | `7b559512` passed all six engine and installer targets, including Windows/Linux ARM64 and helper architecture gates. ARM64 release/update routing is prepared; signed and installed-desktop acceptance remains open. | Retain native evidence, payload/target binding and explicit desktop/signed-update limits. |
 
 R4-R6 expand currently unavailable controls; preserve those explicit capability
 limits while completing acceptance of the supported operations.

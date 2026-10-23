@@ -13,29 +13,28 @@ and [scope](EXTENSIONS-ONLY.md).
 
 ## Current acceptance boundary (2026-10-23)
 
-The [remaining-work queue](REMAINING-WORK.md) records source hardening through
-`947ef1ac`: conflict-preserving recovery, installed Git and standalone-entry
-verification, updater dependency fixes, the GLib backport and removal of manual
-bypass commands after verification failure. Native ARM64 and update-routing
-preparation through `45d44a3b` passed complete
-[CI](https://github.com/ly87ing/agent-manager/actions/runs/39983028071) and
-[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39983028252),
+The [remaining-work queue](REMAINING-WORK.md) records conflict-preserving recovery,
+installed Git/entry verification, updater dependency fixes, the GLib backport and
+guarded GNOME language/country repair with inherited formats. Source `7b559512` adds native Ubuntu
+archive preparation and passed complete main
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/40013020860) and
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/40013021196),
 including six native engine jobs and six installer builds. An isolated macOS
 native instance verified refusal, corrected-origin switching, actual entry output
 and saved language/selection after restart. It used a separate identifier and
 was not an installed release. Full production acceptance remains open for
 installed cross-platform/consumer workflows, receiving settings and signed
 updating. Maintenance notices remain documented. A later local macOS x86_64
-[installation receipt](goal-rust-gui.md#2026-10-23-local-macos-installation-and-runtime-readback)
-records source `fac8ed83` installed and running, including the Launch all control.
+[installation receipt](goal-rust-gui.md#2026-10-23-gnome-inherited-formats-and-local-runtime)
+records source `e5cfb74f` installed and running, including the Launch all control.
 It does not close the other platform or signed-updater boundaries.
 The older detailed snapshot below is retained until its receipts are refreshed.
 
 ## Native architecture pipeline
 
 GUI CI now declares native engine and package jobs for six operating-system and
-CPU combinations. Source `45d44a3b` passed all six engine and six installer jobs
-in [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39983028252).
+CPU combinations. Source `7b559512` passed all six engine and six installer jobs
+in [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/40013021196).
 These native test/package receipts do not establish installed desktop or signed
 update acceptance.
 
@@ -76,6 +75,8 @@ separate acceptance gates. KDE repair also remains unavailable: the native
 `kwriteconfig` resolver uses `NoGlobals`, so it cannot replace the full-policy
 reader with equivalent immutable-global guarantees.
 
+## Earlier native detail (through e71cfd6f)
+
 Verified corrections through `e71cfd6f` add guarded GNOME single-primary-language
 repair and visible preference-readback limits, plus managed PyPI completion/selection
 version and command-entry checks, plus bounded sibling-directory/mixed-link snapshots
@@ -100,7 +101,7 @@ modal and reread checks remain in the [previous receipt](goal-rust-gui.md#2026-1
 
 | Area | Current evidence | Remaining boundary |
 | --- | --- | --- |
-| Extension and saved-tool source | Latest native candidate passed macOS 308, Windows 284 and Linux 310 library cases with native integration harnesses; local Tauri 27, frontend 700 and production build passed | These are not consumer acceptance of an installed package |
+| Extension and saved-tool source | Earlier native candidate passed macOS 308, Windows 284 and Linux 310 library cases with native integration harnesses; local Tauri 27, frontend 700 and production build passed | These are not consumer acceptance of an installed package |
 | Desktop interaction | Current browser fixtures verified modal drafts, resource rereads and unsupported-platform controls in both languages at 1000 × 650 and 760 × 650 | Earlier native receipts do not establish installed-package business workflows for these corrections |
 | KDE inspection | Actual Qt 5 / KConfig 5.115 reads verify saved language order, independent formats, global immutable/default priority and absent sources without file or directory writes | Qt 6 execution, translation installation and current/new-login desktop adoption remain unverified; KDE preference repair remains unavailable |
 | GNOME primary language | Private real distro AccountsService and Polkit verify one installed exact UTF-8 language, preserved raw tail/formats, restart readback, no-op, genuine cancellation, authorization drift refusal and same-process dispatch; reply-loss stops later formats writes | Explicit formats are required. Raw tail is metadata, not ordered fallbacks. Durable storage, display/new-session adoption, inherited formats, multiple target languages and other desktops remain unverified or unavailable |

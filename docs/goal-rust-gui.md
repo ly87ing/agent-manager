@@ -2595,8 +2595,47 @@ and interface language were preserved. No real saved application was batch-launc
 as a test, and no personal native preference repair was executed.
 
 All six engine targets passed in the [main GUI workflow](https://github.com/ly87ing/agent-manager/actions/runs/39993041632).
-The complete installer workflow and [regular CI](https://github.com/ly87ing/agent-manager/actions/runs/39993041883)
-remain in progress. The earlier complete six-platform baseline is retained above;
-an incomplete workflow is not counted as fully passed. Developer ID/notarization,
-signed update installation and actual Windows/Linux desktop adoption remain open.
-No tag, Release or release-signing operation was created.
+Its [regular CI](https://github.com/ly87ing/agent-manager/actions/runs/39993041883)
+passed. The first GUI attempt passed eleven jobs but reached the 90-minute limit
+while APT still downloaded KDE dependencies from Azure; it did not reach that
+fixture or build the Linux x64 installer. Only that job was retried. After the
+superseding `7b559512` main workflows passed completely, the unfinished retry
+was canceled. The failed attempt is retained. The earlier
+complete six-platform baseline is recorded above.
+
+## 2026-10-23: hosted Ubuntu archive bootstrap
+
+Source `7b559512` prepares the existing Ubuntu archive sources before regular and
+GUI CI dependency installation. The [dependency reference](subsystems/dependency-security.md#verification)
+records the fixed paths, supported source formats and unchanged APT trust policy.
+Native ARM ports, third-party sources and every existing test/installer target
+remain unchanged. Release bootstrap is separate.
+
+The first candidate `8f01097d` passed pure direct-URI tests, but its native x64
+log showed unchanged source files followed by `mirror+file` and Azure downloads.
+Those tests had not exercised the hosted runner's actual mirror list. The revision
+handles that existing list, preserving URI-token boundaries, priority metadata,
+fallback entries and source-file pointers. Review also caught a legacy parser
+editing example text in a non-URI deb822 continuation; format-specific parsing
+and a retained CRLF counterexample correct that boundary.
+
+- Five focused cases and all 57 script tests passed, with Node syntax, actionlint
+  and changed-link checks. Runtime suites were not repeated locally for these
+  CI-only changes; the complete workflows retain them.
+- The revised [candidate CI](https://github.com/ly87ing/agent-manager/actions/runs/40011963938)
+  passed both jobs. Its Ubuntu dependency step completed in 52 seconds.
+  Completed x64 engine/regular logs show the mirror-file write/readback and actual
+  `Get` requests to `https://archive.ubuntu.com/ubuntu`, with no Azure downloads.
+  ARM64 engine logs retain actual `ports.ubuntu.com/ubuntu-ports` requests.
+- Main [CI](https://github.com/ly87ing/agent-manager/actions/runs/40013020860) and
+  [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/40013021196)
+  passed both regular jobs and all six engine/six installer jobs for source `7b559512`.
+  Ubuntu 22.04 package logs also confirm official HTTPS archive downloads on x64
+  and retained ARM ports, with no Azure downloads. Native architecture, KDE,
+  package-startup and bundled-notice checks remain included.
+
+Application, engine and dependency-lock source remains identical to `e5cfb74f`.
+The installed macOS application continues running with the same executable digest
+recorded above; this CI-only change does not require another installation.
+Developer ID/notarization, signed update installation and actual Windows/Linux
+desktop adoption remain open. No tag, Release or release-signing operation was created.
