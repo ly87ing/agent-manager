@@ -2,6 +2,13 @@
 
 What recent work got wrong, and the rule that would have caught it. Read this before changing code.
 
+## 2026-10-23: workflow evidence needs the run identity
+
+- One source commit can have manual and push runs of the same workflow. A private
+  checker keyed only by commit/name overwrote the push receipt with the earlier
+  manual receipt. Key saved evidence by run ID, assert its source SHA and retain
+  each run's own conclusion; a completed focused run cannot close a full workflow.
+
 ## 2026-10-23: prerequisite writes must retain every visible completed effect
 
 - A formats-independence dependency can satisfy the later region row before the

@@ -2543,3 +2543,60 @@ retained and the newer source superseded them; the delayed Linux step's retained
 log showed Ubuntu package downloads still in progress. No incomplete run is
 counted as a complete workflow success. This documentation-only receipt preserves
 the verified runtime, build scripts and test source.
+
+## 2026-10-23: GNOME inherited formats and local runtime
+
+Source `e5cfb74f` supports one explicitly selected GNOME primary language together
+with a selected country when formats currently inherit the primary locale.
+The preview lists `language.independent_formats` before the language change and
+shows the full selected formats locale in the region row. The dependency saves
+that locale even when the current country already matches. Language-only
+inheritance, unknown language tags and ordered fallback languages remain unavailable.
+
+Every authorization completes before the dependency writes. Fresh caller/backend
+and service-identity checks surround the native setters. A language failure retains
+both independently verified formats results, including a matching country row;
+an external reset or unreadable evidence invalidates both. The raw language
+metadata tail is preserved. There is no automatic rollback, PAM/shell edit,
+translation installation, logout or application restart.
+
+- Local checks passed: engine 314 library cases and all applicable integrations,
+  Tauri 27, frontend 724 across 62 files, production frontend build and Linux GNU
+  all-target cross-compilation. The focused dialog suite passed 26 cases.
+- The [focused native Linux run](https://github.com/ly87ing/agent-manager/actions/runs/39991247853)
+  passed before main promotion. The same source's Linux x64 and ARM64 engine
+  jobs passed real distro AccountsService/Polkit and real GSettings keyfile cases:
+  changed/matching countries, no-op, metadata preservation, genuine authorization
+  cancellation and drift. The separately invoked protocol fixture passed its
+  explicit/inherited lost-reply controls and changed/matching-country reset cases.
+  Its owned provider is a test double; the normal preference fixture uses the
+  distro service. Neither establishes installed-desktop or future-login adoption.
+- English and Chinese browser previews at 1000 × 650 and 760 × 650 had reachable
+  controls and no horizontal overflow. Cancellation issued no repair request;
+  partial results retained saved formats. A malformed private browser response
+  initially omitted required `clock_error`; the fixture was corrected without
+  weakening the production schema, and the actual partial view was then checked.
+- The production macOS bundle was checked at the committed 1000 × 650 geometry
+  with isolated HOME/data: empty Launch/Environment and a saved inactive profile
+  rendered. A plist-only test identifier did not change the compiled single-instance
+  socket, so the first isolated attempt exited without rendering; after temporarily
+  closing the installed app, the isolated instance ran and its own data was read back.
+  This proves macOS rendering, not native Linux desktop interaction.
+
+The local x86_64 application was built with source marker `e5cfb74f` and build date
+`2026-10-23T16:58:43Z`, installed in `/Applications/Agent Manager.app` and left running
+on Launch. Its executable SHA256 is
+`cb37305718031485316cd5779c84dec6c1a8f66cfdd9f65079205aef70be8c3f`.
+Strict deep ad-hoc signature verification passed. Installed bytes matched the
+built bundle, database bytes and eight protected assistant/shell/login paths stayed
+unchanged, the consistent SQLite backup passed `quick_check`, and all retained
+previous applications matched their preflight manifests. Saved launch configurations
+and interface language were preserved. No real saved application was batch-launched
+as a test, and no personal native preference repair was executed.
+
+All six engine targets passed in the [main GUI workflow](https://github.com/ly87ing/agent-manager/actions/runs/39993041632).
+The complete installer workflow and [regular CI](https://github.com/ly87ing/agent-manager/actions/runs/39993041883)
+remain in progress. The earlier complete six-platform baseline is retained above;
+an incomplete workflow is not counted as fully passed. Developer ID/notarization,
+signed update installation and actual Windows/Linux desktop adoption remain open.
+No tag, Release or release-signing operation was created.
