@@ -11,6 +11,7 @@ assert.equal(process.platform, 'linux');
 assert.equal(process.env.CI, 'true');
 assert.equal(process.env.AM_ISOLATED_LINUX_TIMEZONE, '1');
 assert.notEqual(process.getuid(), 0);
+assert(existsSync('/etc/polkit-1/rules.d'), 'Native authorization acceptance requires an existing Polkit JavaScript rules directory');
 function run(command, args, env = process.env, failure = false) {
   const result = spawnSync(command, args, { env, encoding: 'utf8', timeout: 30_000, maxBuffer: 1_048_576 });
   assert.ifError(result.error);

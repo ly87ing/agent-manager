@@ -36,7 +36,7 @@ GUI CI now declares native engine and package jobs for six operating-system and
 CPU combinations. New ARM64 jobs remain candidates until their actual workflow
 receipts pass; adding a target is not native acceptance.
 
-| Platform | Native runner | CI installer formats |
+| Platform | Native installer runner | CI installer formats |
 | --- | --- | --- |
 | macOS ARM64 | `macos-15` | DMG |
 | macOS x64 | `macos-15-intel` | DMG |
@@ -54,6 +54,14 @@ existing isolated package-startup checks. Windows ARM64's NSIS wrapper runs unde
 x86 emulation; the application itself must pass the ARM64 PE check, as described
 in the [Tauri Windows installer guidance](https://v2.tauri.app/distribute/windows-installer/#building-for-32-bit-or-arm).
 Hosted labels follow the [GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+Native Linux engine fixtures use `ubuntu-latest` on x64 and `ubuntu-24.04-arm` on
+ARM64. The authorization scenarios require Polkit's JavaScript rules support.
+An initial Ubuntu 22.04 ARM64 run passed the complete engine suite and user-manager
+repair, then stopped at the authorization fixture's missing rules directory under
+Polkit 0.105. No authorization case is skipped on the newer engine runners.
+The older package baseline remains covered by native Tauri/KDE/package-startup
+checks; its privileged repair acceptance is still open.
 
 This changes test/build capability only. The separately authorized signed release
 pipeline and updater manifest still cover their previous four targets. Native

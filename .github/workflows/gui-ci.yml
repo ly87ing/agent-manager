@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.native_linux_only && '["ubuntu-latest"]' || '["ubuntu-latest","ubuntu-22.04-arm","macos-15","macos-15-intel","windows-latest","windows-11-arm"]') }}
+        os: ${{ fromJSON(inputs.native_linux_only && '["ubuntu-latest"]' || '["ubuntu-latest","ubuntu-24.04-arm","macos-15","macos-15-intel","windows-latest","windows-11-arm"]') }}
 
     steps:
       - name: Checkout

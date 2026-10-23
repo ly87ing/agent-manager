@@ -9,6 +9,12 @@ What recent work got wrong, and the rule that would have caught it. Read this be
   `xdg-utils` implicitly; the fixture dependency list did not. Install the package
   explicitly on every Linux engine host. Keep the real registration, literal-URI
   launch and unrelated-association assertions; a new runner must not skip them.
+- The next run passed the complete engine suite and user-manager repair, then
+  failed before its authorization rule could be installed: Ubuntu 22.04 shipped
+  Polkit 0.105 without the fixture's JavaScript rules directory. Use the existing
+  newer authorization-fixture baseline on ARM too, retain Ubuntu 22.04 installer
+  builds, and reject a missing fixture prerequisite before changing zone inputs.
+  This does not establish privileged repair acceptance on the older system.
 
 Each lesson is a rule, then why, then the evidence (commit, test, or observation). "Seen" counts the separate days a review found it. A lesson seen on three or more days moves into [AGENTS.md](../AGENTS.md), [UI rules](UI-RULES.md), or a guard test, and its entry here shrinks to a pointer.
 
