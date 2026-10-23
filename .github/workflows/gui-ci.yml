@@ -63,6 +63,7 @@ jobs:
       - name: Install GNOME preference fixture tools
         if: ${{ runner.os == 'Linux' }}
         run: |
+          node scripts/ci-ubuntu-archive.mjs
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libglib2.0-bin gsettings-desktop-schemas dconf-cli dconf-gsettings-backend accountsservice policykit-1 locales xdg-utils
           sudo locale-gen en_US.UTF-8 en_GB.UTF-8 fr_FR.UTF-8 de_DE.UTF-8
@@ -220,18 +221,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       # Tauri 2 Linux system dependencies per official docs
       # (https://v2.tauri.app/start/prerequisites/#linux)
       - name: Install Tauri system dependencies (Linux)
         if: ${{ runner.os == 'Linux' }}
         run: |
+          node scripts/ci-ubuntu-archive.mjs
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf xdg-utils xvfb dbus-x11
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4

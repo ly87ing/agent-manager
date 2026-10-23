@@ -45,6 +45,21 @@ endpoint, tag, Release or published installer is changed by these source fixes.
 
 ## Verification
 
+The regular and GUI CI workflows prepare Ubuntu package sources with
+[`ci-ubuntu-archive.mjs`](../../scripts/ci-ubuntu-archive.mjs) before APT runs.
+Only exact Azure Ubuntu archive URI tokens in the two standard source files are
+replaced with the official HTTPS archive. The `security.ubuntu.com` host, ARM ports,
+third-party sources, suites, components and signing fields remain unchanged. The helper
+refuses execution outside GitHub-hosted Linux CI and rereads changed files.
+This transport change preserves [APT's existing signed archive verification](https://documentation.ubuntu.com/security/software-integrity/archive-verification/);
+it does not add trust keys or disable authentication. Release workflows retain
+their existing bootstrap and need separate acceptance before adopting this helper.
+
+Check the pure rewrite and refusal cases with
+`node --test scripts/ci-ubuntu-archive.test.mjs`. Native CI must also show actual
+APT downloads from the selected archive; a rewritten file alone does not prove
+download availability or speed.
+
 Run the existing Tauri tests, frontend checks and release-script tests. Compare
 the actual resolved graph before and after changes:
 

@@ -6,8 +6,17 @@ What recent work got wrong, and the rule that would have caught it. Read this be
 
 - One source commit can have manual and push runs of the same workflow. A private
   checker keyed only by commit/name overwrote the push receipt with the earlier
-  manual receipt. Key saved evidence by run ID, assert its source SHA and retain
-  each run's own conclusion; a completed focused run cannot close a full workflow.
+  manual receipt. Key saved evidence by run ID and attempt, assert its source SHA
+  and retain failed attempts; a focused run cannot close a full workflow.
+- A Linux installer job reached its 90-minute limit while APT still downloaded
+  KDE dependencies. Read the download trace and step timestamps before attributing
+  a timeout to native tests. Keep the same test matrix when correcting bootstrap.
+- The first archive-helper refusal fixture passed a file URL as Node's script
+  argument, so it never reached the guard. Convert it to a filesystem path and
+  require the exact refusal diagnostic, rather than accepting any nonzero exit.
+- Review found that detecting legacy source lines inside deb822 continuations
+  could edit an unrelated field's example text. Select the parser from the actual
+  file format and retain a non-URI continuation counterexample.
 
 ## 2026-10-23: prerequisite writes must retain every visible completed effect
 
