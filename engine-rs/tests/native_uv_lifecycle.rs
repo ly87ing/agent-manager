@@ -3,6 +3,8 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "support/native_git_managed.rs"]
+mod git_managed;
 #[path = "support/native_uv_managed.rs"]
 mod managed;
 
@@ -75,7 +77,8 @@ fn uv_fixture(args: &[String]) {
         &args[..4],
         ["--no-python-downloads", "tool", "install", "--force"]
     );
-    assert!(args[4].starts_with("tool-a=="));
+    let git_commit = args[4].strip_prefix("git+https://example.invalid/owner/tool-a@");
+    assert!(args[4].starts_with("tool-a==") || git_commit.is_some());
     let control: Value = serde_json::from_slice(
         &std::fs::read(std::env::var_os("AM_TEST_UV_CONTROL").unwrap()).unwrap(),
     )
@@ -92,6 +95,14 @@ fn uv_fixture(args: &[String]) {
         control["version"].as_str().unwrap(),
         control["case"].as_str().unwrap(),
     );
+    if let Some(commit) = git_commit {
+        git_managed::evidence(
+            &package,
+            commit,
+            control["version"].as_str().unwrap(),
+            control["case"].as_str().unwrap(),
+        );
+    }
     if control["case"] == "command-failure" {
         eprintln!("Controlled installer failure after writing the new package");
         std::process::exit(7);
@@ -160,24 +171,39 @@ impl Fixture {
     }
 
     fn run_action(&self, command: &str, target: Option<&str>, action: &str) -> Value {
-        let mut process = Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"));
-        process.arg(command).arg("--json");
+        self.run_action_for(command, target, action, "pypi:tool-a")
+    }
+
+    fn run_action_for(
+        &self,
+        command: &str,
+        target: Option<&str>,
+        action: &str,
+        program: &str,
+    ) -> Value {
+        let mut args = Vec::new();
         if let Some(target) = target {
-            process.args([
+            args.extend([
                 "--program",
-                "pypi:tool-a",
+                program,
                 "--action",
                 action,
                 "--version",
                 target,
             ]);
             if action == "install" {
-                process.arg("--entry-dir").arg(&self.bin);
+                args.extend(["--entry-dir", self.bin.to_str().unwrap()]);
             }
         }
         if command == "system:refresh-upstream" {
-            process.args(["--only", "programs:pypi:tool-a"]);
+            args.extend(["--only", "programs:pypi:tool-a"]);
         }
+        self.cli(command, &args)
+    }
+
+    fn cli(&self, command: &str, args: &[&str]) -> Value {
+        let mut process = Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"));
+        process.arg(command).arg("--json").args(args);
         let output = process
             .env("HOME", &self.home)
             .env("USERPROFILE", &self.home)
@@ -403,5 +429,6 @@ fn main() {
     successful_actions_keep_the_normal_three_backup_limit();
     cached_current_versions_cannot_override_actual_metadata();
     managed::verify();
+    git_managed::verify();
     println!("uv lifecycle: command-success version failures retained current/backup files; PEP 440 matching, early refusal, command-failure conflict retention, normal retention and actual-version freshness passed");
 }

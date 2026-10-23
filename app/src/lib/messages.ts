@@ -1433,6 +1433,7 @@ export const messages = {
   "确认后执行下列步骤；uv 版本无法核验时保留现场，不自动恢复，并报告需要检查的位置。": "Confirm to run these steps. If the uv version cannot be verified, files stay in place without automatic restoration, and locations needing inspection are reported.",
   "确认后执行下列步骤；自管 PyPI 会在完成标记和当前版本选择前核验版本及声明命令入口。无法核验时保留候选目录，并报告检查位置。": "Confirm to run these steps. Managed PyPI versions and declared command entries are checked before completion and current selection. Unverified candidates stay in place, and locations needing inspection are reported.",
   "确认后执行下列步骤；自管 npm 会在完成标记和当前版本选择前核验包身份、版本及声明命令入口。无法核验时保留候选目录，不自动恢复，并报告检查位置。": "Confirm to run these steps. Managed npm package identity, version and declared command entries are checked before completion and current selection. Unverified candidates stay in place without automatic restoration, and locations needing inspection are reported.",
+  "确认后执行下列步骤；Git 依赖会核对来源、完整提交与声明命令入口。无法核验时保留候选目录，不自动恢复。": "Confirm to run these steps. Git dependencies are checked for source, full commit and declared commands. Unverified candidates stay in place without automatic restoration.",
   "确认后执行，想再用时可以重新添加：": "Confirm to proceed. You can add the source again later:",
   "确认执行": "Confirm",
   "确认扩展定义恢复范围": "Confirm extension restore scope",

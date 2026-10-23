@@ -14,9 +14,10 @@ and [scope](EXTENSIONS-ONLY.md).
 ## Current acceptance boundary (2026-10-23)
 
 The [remaining-work queue](REMAINING-WORK.md) records the verified `3ddd9b43`
-baseline and current recovery hardening. Production readiness is not yet accepted:
-Git dependency postconditions, installed cross-platform/consumer workflows and
-signed updating remain open. Current source tests do not update an installed app.
+baseline, recovery hardening, Git dependency postconditions and updater dependency
+corrections. Production readiness is not yet accepted: standalone entry verification,
+remaining dependency notices, installed cross-platform/consumer workflows and signed
+updating remain open. Current source tests do not update an installed app.
 The older detailed snapshot below is retained until its receipts are refreshed.
 
 Verified corrections through `e71cfd6f` add guarded GNOME single-primary-language

@@ -3,6 +3,7 @@
 
 pub(crate) mod apply;
 pub(crate) mod declare;
+mod git_postcondition;
 pub(crate) mod locate;
 mod npm_postcondition;
 mod recovery;

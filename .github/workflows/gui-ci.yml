@@ -107,6 +107,7 @@ jobs:
           node scripts/verify-native-uv-versions.mjs
           node scripts/verify-native-uv-versions.mjs --custom-root
           node scripts/verify-native-uv-versions.mjs --managed
+          node scripts/verify-native-git-versions.mjs
 
       - name: Verify disposable Linux user-manager environment
         if: ${{ runner.os == 'Linux' }}

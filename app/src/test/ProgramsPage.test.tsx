@@ -193,12 +193,15 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     { kind: "pypi", mode: "managed", code: "PROGRAM_ENTRY_UNVERIFIED" },
     { kind: "npm", mode: "managed", code: "PROGRAM_VERSION_UNVERIFIED" },
     { kind: "npm", mode: "managed", code: "PROGRAM_ENTRY_UNVERIFIED" },
+    { kind: "git", mode: "managed", code: "PROGRAM_VERSION_UNVERIFIED" },
+    { kind: "git", mode: "managed", code: "PROGRAM_ENTRY_UNVERIFIED" },
   ] as const)("$kind $mode $code keeps inspection details visible without promising restoration", async ({ kind, mode, code }) => {
     const contents = data();
-    const id = `${kind}:tool-a`;
-    contents.elements = [program({ program: id, kind, name: "tool-a", mode, owner: mode === "managed" ? "managed" : "uv-tool", version: "1.0.0", freshness: { ...unknown, state: "behind", current: "1.0.0", upstream: "2.0.0" } })];
-    const plan = { ...PLAN, program: id, target_version: "2.0.0", notes: ["The unverified candidate is retained for inspection."], manual: [kind === "npm" ? "npm install tool-a@2.0.0" : "uv --no-python-downloads tool install --force tool-a==2.0.0"] };
-    const diagnostic = kind === "npm" ? `Managed npm ${code === "PROGRAM_ENTRY_UNVERIFIED" ? "command" : "identity/version"} verification before completion failed. The candidate is retained for inspection.` : code === "PROGRAM_ENTRY_UNVERIFIED"
+    const id = kind === "git" ? "git:example.invalid/owner/tool-a" : `${kind}:tool-a`;
+    const current = kind === "git" ? "a".repeat(40) : "1.0.0", target = kind === "git" ? "b".repeat(40) : "2.0.0";
+    contents.elements = [program({ program: id, kind, name: "tool-a", mode, owner: mode === "managed" ? "managed" : "uv-tool", version: current, freshness: { ...unknown, state: "behind", current, upstream: target } })];
+    const plan = { ...PLAN, program: id, target_version: target, notes: ["The unverified candidate is retained for inspection."], manual: [kind === "git" ? `uv --no-python-downloads tool install --force git+https://example.invalid/owner/tool-a@${target}` : kind === "npm" ? "npm install tool-a@2.0.0" : "uv --no-python-downloads tool install --force tool-a==2.0.0"] };
+    const diagnostic = kind === "git" ? `Managed Git ${code === "PROGRAM_ENTRY_UNVERIFIED" ? "command" : "source/commit"} verification before completion failed. The candidate is retained for inspection.` : kind === "npm" ? `Managed npm ${code === "PROGRAM_ENTRY_UNVERIFIED" ? "command" : "identity/version"} verification before completion failed. The candidate is retained for inspection.` : code === "PROGRAM_ENTRY_UNVERIFIED"
       ? "Managed PyPI command verification before completion failed. The candidate at ~/programs/tool-a/2.0.0 is retained. Inspect its bin entries."
       : "uv finished, but the installed version is unknown. No automatic restoration was attempted. Inspect ~/uv/data/tools/tool-a and the backup.";
     const { calls } = renderWithEngine(<ProgramsPage />, {
@@ -207,11 +210,11 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
       "programs:apply": makeEnvelope(plan, { ok: false, errors: [{ code, element: null, message: diagnostic }] }),
     });
     await userEvent.click(await screen.findByTestId(`program-upgrade-${id}`));
-    await screen.findByText(kind === "npm" ? /自管 npm 会在完成标记和当前版本选择前核验包身份/ : mode === "managed" ? /自管 PyPI 会在完成标记和当前版本选择前核验版本/ : /uv 版本无法核验时保留现场，不自动恢复/);
+    await screen.findByText(kind === "git" ? /Git 依赖会核对来源、完整提交/ : kind === "npm" ? /自管 npm 会在完成标记和当前版本选择前核验包身份/ : mode === "managed" ? /自管 PyPI 会在完成标记和当前版本选择前核验版本/ : /uv 版本无法核验时保留现场，不自动恢复/);
     await screen.findByText(plan.notes[0]);
     expect(screen.queryByText(/执行失败时尝试恢复/)).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "升级" }));
-    await screen.findAllByText(kind === "npm" ? /Managed npm.*verification before completion failed/ : code === "PROGRAM_ENTRY_UNVERIFIED" ? /Managed PyPI command verification before completion failed/ : /uv finished, but the installed version is unknown/);
+    await screen.findAllByText(kind === "git" ? /Managed Git.*verification before completion failed/ : kind === "npm" ? /Managed npm.*verification before completion failed/ : code === "PROGRAM_ENTRY_UNVERIFIED" ? /Managed PyPI command verification before completion failed/ : /uv finished, but the installed version is unknown/);
     expect(screen.getByTestId("program-action-dialog")).toBeInTheDocument();
     expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toBeInTheDocument();
     expect(screen.queryByText(/可以复制上面的命令自己执行/)).toBeNull();

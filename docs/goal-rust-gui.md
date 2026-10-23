@@ -2305,3 +2305,33 @@ complete engine run belongs to the unchanged shared-engine source at `156849bc`;
 it was not rerun for these desktop-only dependency changes. Native builds and a
 signed installed update remain separate evidence. No release/signing configuration,
 actual installation, tag or published installer was changed.
+
+## 2026-10-23: installed Git source and command verification
+
+Managed Git installation, upgrade, completed reuse and switching now verify the
+actual HTTPS origin and full commit from installed distribution metadata, the
+main-tool receipt and each declared command before completion and selection.
+Incomplete or unverifiable candidates are retained without automatic cleanup or
+restoration; prior selection stays intact when verification fails. Parser errors
+omit raw metadata values. The confirmation and retained-inspection warning describe
+this boundary in both languages. See [Programs](subsystems/programs.md).
+
+On macOS x86_64, the complete engine suite passed, including 313 library cases;
+Tauri 27, frontend 708/61 files, production frontend build, script 23 and formatting
+checks passed. The wrong-origin regression failed against the original behavior.
+Portable cases cover source/commit mismatch, linked/ambiguous/malformed metadata,
+invalid receipts and commands, privacy, retained retries and fresh reuse/switch
+checks. Actual isolated uv 0.7.15 with the explicitly selected existing Python 3.14
+installed two local Git commits offline, executed their commands, switched/reused
+versions and refused tampered commit evidence while preserving current and the
+interpreter's bytes. CI adds this real fixture to its pinned uv 0.13.1 native jobs.
+
+Renderer checks used actual native preview/refusal payloads at 1000/760 px in
+English and Simplified Chinese. Confirmation controls and full commit/error
+details remained reachable with no page overflow or browser errors. They do not
+establish installed-desktop acceptance. Native Git CI is pending for this slice.
+The preceding recovery and updater commits passed their complete
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/39945202994) and
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39945202970), including
+all native engine jobs and four installer builds. No personal OS setting, real
+assistant file, installed application, Release or tag changed.

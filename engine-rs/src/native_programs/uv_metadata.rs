@@ -1,6 +1,6 @@
 //! Native installed-distribution evidence; metadata does not prove package authenticity.
 use super::uv_metadata_files::Directory;
-use anyhow::{bail, Context as _, Result};
+use anyhow::{anyhow, bail, Context as _, Result};
 use pep440_rs::Version;
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Read};
@@ -118,6 +118,26 @@ fn headers(file: std::fs::File) -> Result<(String, Version)> {
 }
 
 pub(super) fn version(path: &Path, tool: &str) -> Result<String> {
+    Ok(distribution(path, tool)?.0)
+}
+
+pub(super) fn origin<T: serde::de::DeserializeOwned>(path: &Path, tool: &str) -> Result<T> {
+    let (_, directory) = distribution(path, tool).map_err(|_| {
+        anyhow!("Installed distribution identity metadata is unavailable, malformed or ambiguous")
+    })?;
+    let mut bytes = Vec::new();
+    directory
+        .file(OsStr::new("direct_url.json"))?
+        .take(MAX_HEADERS + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_HEADERS {
+        bail!("Installed origin exceeds the read limit");
+    }
+    serde_json::from_slice(&bytes)
+        .map_err(|_| anyhow!("Installed origin metadata is malformed, duplicated or unsupported"))
+}
+
+fn distribution(path: &Path, tool: &str) -> Result<(String, Directory)> {
     let expected = normalized_name(tool).context("Invalid tool name")?;
     let environment = Directory::open(path)?;
     #[cfg(windows)]
@@ -187,12 +207,13 @@ pub(super) fn version(path: &Path, tool: &str) -> Result<String> {
                 bail!("Ambiguous installed distribution metadata");
             }
             let directory_version: Version = directory_version.parse()?;
-            let metadata = root.child(&entry)?.file(OsStr::new("METADATA"))?;
+            let directory = root.child(&entry)?;
+            let metadata = directory.file(OsStr::new("METADATA"))?;
             let (actual_name, actual_version) = headers(metadata)?;
             if actual_name != expected || actual_version != directory_version {
                 bail!("Installed distribution identity disagrees with its directory");
             }
-            found = Some(actual_version.to_string());
+            found = Some((actual_version.to_string(), directory));
         }
     }
     found.context("Installed distribution metadata is unavailable")

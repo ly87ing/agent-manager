@@ -1,7 +1,8 @@
 # Remaining Work
 
-Continue with **R2: Git dependency verification**. R1 has a local implementation;
-native CI and installed-client evidence remain separate acceptance steps.
+Continue with **R3: standalone command-entry verification**. R1 passed native
+engine jobs and R2 has a local implementation; installed-client evidence remains
+a separate acceptance step.
 
 Snapshot: 2026-10-23. Historical baseline: `3ddd9b43`; its final main
 [CI](https://github.com/ly87ing/agent-manager/actions/runs/39026462902) and
@@ -14,7 +15,7 @@ The repository owner owns release authorization in R9.
 | ID | Phase | Work and current state | Completion criterion |
 | --- | --- | --- | --- |
 | R1 | Native tests passed | `156849bc` passed native macOS/Windows/Linux engine jobs; installed-client evidence remains separate. | Retain conflicts; verify current, entries, backups and partial recovery on each native platform. |
-| R2 | First | Add actual source/commit verification for Git dependencies. | Verify identity and entries before completion/selection, including reuse. |
+| R2 | Native CI pending | Implemented actual origin/commit, receipt and entry verification with retained candidates. | Verify identity and entries before completion/selection, including reuse, on all native platforms. |
 | R3 | Then | Audit standalone Windows links with missing underlying targets. | Reproduce the case; require fresh target evidence and valid-link controls. |
 | R4 | Then | Implement KDE language and regional-format repair. | Preview scope; preserve settings; reject stale evidence; read back natively. |
 | R5 | Then | Implement Linux automatic-time switching beyond matching no-ops. | Verify provider, boot effects, cancellation and partial failure. |

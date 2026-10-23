@@ -26,6 +26,19 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
   the actual Windows graph with `cargo metadata --locked`; a package-version list
   alone misses an unrelated change in which native dependency is selected.
 
+## 2026-10-23: installed Git evidence needs real formats and private diagnostics
+
+- A malformed JSON value was echoed by the parser into the failure envelope.
+  Replace raw origin/identity/receipt parser chains with content-free diagnostics;
+  assert that synthetic sensitive values never enter the returned error.
+- A positive fixture appended a second `requirements` field and was correctly
+  rejected. Replace fixture fields instead of weakening duplicate-field checks.
+  A genuine CLI refusal exits 1; parse its envelope and check that expected status
+  separately from successful helper commands.
+- Real uv metadata adds a typed `git_lfs` flag and newer receipts record command
+  providers. Read the actual format, reject explicit provider contradictions and
+  state the weaker environment-only evidence when an older receipt lacks one.
+
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
 ## 2026-10-17: native batch fixtures need cmd argument handling

@@ -1009,6 +1009,9 @@ fn managed_install_steps(
     if scheme == "pypi" {
         super::uv_postcondition::managed_target(name, version)?;
     }
+    if scheme == "git" {
+        super::git_postcondition::target(name, version)?;
+    }
     if scheme == "npm"
         && super::npm_postcondition::exact_version(version).as_deref() != Some(version)
     {
@@ -1020,6 +1023,9 @@ fn managed_install_steps(
     let mut steps = Vec::new();
     if scheme == "npm" {
         super::npm_postcondition::absent(&vdir, &ctx.home_dir)?;
+    }
+    if scheme == "git" {
+        super::git_postcondition::absent(&vdir)?;
     }
     if vdir.exists() {
         if scheme == "pypi" {
@@ -1256,6 +1262,9 @@ fn plan_managed(
             if scheme == "pypi" {
                 super::uv_postcondition::managed_target(name, &version)?;
             }
+            if scheme == "git" {
+                super::git_postcondition::target(name, &version)?;
+            }
             if scheme == "npm" && super::npm_postcondition::exact_version(&version).is_none() {
                 bail!("The selected npm directory does not identify an exact version.");
             }
@@ -1358,6 +1367,14 @@ fn plan_managed(
     {
         notes.push(MANAGED_NPM_NOTE.into());
     }
+    if scheme == "git"
+        && matches!(
+            args.action,
+            Action::Install | Action::Upgrade | Action::Switch
+        )
+    {
+        notes.push("Git source/commit and command entries are checked before completion and selection. Unverified candidates are retained for inspection. Copied manual commands do not include these application verification gates.".into());
+    }
     Ok(Plan {
         program: id.clone(),
         action: args.action.clone(),
@@ -1366,7 +1383,7 @@ fn plan_managed(
         verify_bins,
         verify_version: None,
         verify_uv: None,
-        verify_managed_bins: if matches!(scheme, "pypi" | "npm") {
+        verify_managed_bins: if matches!(scheme, "pypi" | "npm" | "git") {
             bins
         } else {
             Vec::new()
@@ -1840,6 +1857,13 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                     env,
                     cwd,
                 } => {
+                    if plan.program.starts_with("git:") {
+                        for step in &plan.steps {
+                            if let Step::WriteMeta { dir, .. } = step {
+                                super::git_postcondition::absent(dir)?;
+                            }
+                        }
+                    }
                     if plan.program.starts_with("npm:") {
                         for step in &plan.steps {
                             if let Step::WriteMeta { dir, .. } = step {
@@ -1934,6 +1958,16 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                             "current selection",
                         )?;
                     }
+                    if let Some(source) = plan.program.strip_prefix("git:") {
+                        super::git_postcondition::check(
+                            ctx,
+                            &program_dir.join(version),
+                            source,
+                            version,
+                            &plan.verify_managed_bins,
+                            "current selection",
+                        )?;
+                    }
                     recovery.replace(&program_dir.join("current"), Path::new(version), false)?;
                 }
                 Step::WriteMeta { dir, meta } => {
@@ -1969,6 +2003,19 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
                                 .map(|bin| managed_bin_target(dir, "pypi", bin))
                                 .collect::<Vec<_>>(),
                             &ctx.home_dir,
+                            "completion",
+                        )?;
+                    }
+                    if let Some(source) = plan.program.strip_prefix("git:") {
+                        let version = meta["version"]
+                            .as_str()
+                            .ok_or_else(|| anyhow!("Missing managed Git commit"))?;
+                        super::git_postcondition::check(
+                            ctx,
+                            dir,
+                            source,
+                            version,
+                            &plan.verify_managed_bins,
                             "completion",
                         )?;
                     }

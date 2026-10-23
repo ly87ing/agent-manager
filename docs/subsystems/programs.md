@@ -21,6 +21,9 @@ managed by this subsystem. Product scope is in [Program Lifecycle](../PROGRAM-LI
 - [`uv_postcondition.rs`](../../engine-rs/src/native_programs/uv_postcondition.rs)
   independently checks delegated uv results and identifies version failures that
   must retain current files and the moved backup for inspection.
+- [`git_postcondition.rs`](../../engine-rs/src/native_programs/git_postcondition.rs)
+  reads Git origin, main-tool receipts and declared command relationships before
+  completing or selecting a managed Git candidate.
 - [`native_upstream.rs`](../../engine-rs/src/native_upstream.rs) runs npm and PyPI
   version probes through the same user PATH/PATHEXT resolution. Read-only status
   uses cached probe results rather than performing network requests.
@@ -92,7 +95,7 @@ Failures retain their candidate and report which completion/selection step was
 not performed; an earlier completion marker or previously active contents may
 already exist. Existing target/account guards remain in force. Parent path
 aliases are normalized while the version root and internal metadata components
-retain ordinary-object checks. Git version postconditions remain separate work.
+retain ordinary-object checks.
 Managed npm installs/adoption verify the actual package identity/version and each
 declared `bin` target before completion metadata and again before `current`.
 Completed-version reuse and switches receive the same fresh check. Exact SemVer
@@ -124,8 +127,35 @@ selection check fails. This does not promise restoration after every unrelated
 later step failure.
 Manual commands do not reproduce these application verification gates.
 
+Managed Git installs require a credential-free HTTPS repository identity and a
+full 40-hex commit ID. Before completion and before `current` selection, including
+switches and completed-version reuse, the reader requires one ordinary tool
+environment, its main Git requirement, matching distribution identity and a
+[direct URL origin](https://packaging.python.org/en/latest/specifications/direct-url-data-structure/)
+with that repository and commit. Duplicate/malformed fields, unknown origin shapes,
+ambiguous environments and linked metadata fail closed. The bounded reader accepts
+uv's typed optional `git_lfs` metadata; this is not verification of LFS object bytes.
+Malformed metadata diagnostics omit parser values to avoid echoing private contents.
+
+Each declared command must match its receipt's install path and resolve to an
+ordinary file in the candidate, executable on Unix. Unix links select the corresponding
+main-environment command; Windows copied entries must match that command's bytes,
+within 64 MiB. A recorded provider must match the main distribution. Older uv
+receipts without provider information establish the environment relationship only;
+they do not establish distribution-level command ownership. Receipt/origin reads
+are limited to 64 KiB and tool-root enumeration to 32 entries. Distribution lookup
+retains the Python-root and package-entry limits above. These checks execute no
+candidate, prove no package authenticity or interpreter functionality, and do not
+provide an atomic transaction against independent filesystem writers.
+
+Incomplete Git candidates, including dangling objects, are retained and refused
+during planning and freshly before installation. Failed origin/entry gates retain
+the candidate without automatic recovery or cleanup. A completion marker can
+already exist when the later selection gate fails. The interface explains this
+boundary before confirmation and retains the inspection warning after failure.
+
 The `PROGRAM_VERSION_UNVERIFIED` diagnostic identifies this incomplete outcome;
-it also identifies refusal to overwrite an incomplete managed PyPI candidate.
+it also identifies refusal to overwrite incomplete managed PyPI/Git candidates.
 The dialog keeps its details visible and announces a warning. Ordinary installer
 failures retain `PROGRAM_ERROR` and their existing recovery attempt.
 `PROGRAM_ENTRY_UNVERIFIED` identifies failed managed entry evidence before
@@ -266,5 +296,15 @@ GUI CI runs standard/custom delegated roots and managed install/upgrade/switch
 cases, reading back actual metadata, completion markers, selected pointers and
 entry output. It selects a preinstalled runner interpreter; this fixture never bootstraps
 one and adds no interpreter requirement to the Rust engine test suite.
+
+The [native Git fixture](../../scripts/verify-native-git-versions.mjs) uses the same
+explicit uv/interpreter inputs, a private Git repository and a standard-library-only
+wheel backend. A private Git URL rewrite supplies the local repository while the
+installed origin retains its HTTPS identity. Index access is disabled and network
+proxies refuse non-local fetches. It verifies real commit installation, command
+output, upgrade/switch/reuse, stale-commit refusal, current preservation and the
+existing interpreter's bytes. GUI CI runs this on all three native operating
+systems. Run locally only with `AM_ISOLATED_NATIVE_UV=1`, `AM_NATIVE_UV` and
+`AM_NATIVE_PYTHON` naming explicitly selected existing executables.
 
 Windows command-entry metadata uses ASCII hex-encoded UTF-8 paths; legacy plain-text metadata remains readable. Manual filesystem commands reject linked ancestors, compare existing entry hashes, and stage a literal junction before replacing `current`. A staging failure preserves the previous pointer and foreign staging contents. Recursive manual removal refuses nested reparse points.
