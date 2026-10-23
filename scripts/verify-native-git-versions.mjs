@@ -128,9 +128,18 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
   }
   writeFileSync(file, original);
   action('programs:apply', 'upgrade', second); check(second, '2.0.0');
+  for (const operation of ['unlink', 'link', 'unlink']) action('programs:apply', operation, second);
+  writeFileSync(file, JSON.stringify(changed));
+  const refusedLink = action('programs:apply', 'link', second, false);
+  assert.equal(refusedLink.errors[0].code, 'PROGRAM_VERSION_UNVERIFIED');
+  assert.equal(realpathSync(join(program, 'current')), realpathSync(join(program, second)));
+  assert(!existsSync(join(bin, windows ? 'am-git-fixture.cmd' : 'am-git-fixture')));
+  assert.deepEqual(readFileSync(file), Buffer.from(JSON.stringify(changed)));
+  writeFileSync(file, original);
+  action('programs:apply', 'link', second); check(second, '2.0.0');
   assert.equal(createHash('sha256').update(readFileSync(python)).digest('hex'), pythonHash);
   assert(!existsSync(env.UV_PYTHON_INSTALL_DIR) || readdirSync(env.UV_PYTHON_INSTALL_DIR).length === 0);
-  console.log('Real Git/uv: offline commit installation, actual origin/entry execution, upgrade/switch/reuse and stale commit refusal passed; existing interpreter bytes preserved.');
+  console.log('Real Git/uv: offline commit installation, actual origin/entry execution, upgrade/switch/reuse, linking and stale commit refusal passed; existing interpreter bytes preserved.');
   rmSync(root, { recursive: true });
 } catch (error) {
   console.error(`Retained private Git fixture: ${root}`);

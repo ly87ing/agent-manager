@@ -246,6 +246,7 @@ fn current_selection_and_reuse() {
 }
 
 pub(super) fn verify() {
+    standalone_links_recheck_current();
     origin_failures();
     entry_failures();
     current_selection_and_reuse();
@@ -260,4 +261,62 @@ pub(super) fn verify() {
         assert!(!program(&fixture).exists());
     }
     println!("Managed Git: installed source/commit and entry gates, uncertain candidate/retry retention, stale completed reuse/switch refusal, valid controls and full-commit previews passed");
+}
+
+fn standalone_links_recheck_current() {
+    for case in ["wrong-commit", "missing-entry"] {
+        let fixture = fixture("valid");
+        let installed = fixture.run_action_for("programs:apply", Some(COMMIT), "install", PROGRAM);
+        assert_eq!(installed["ok"], true, "{installed}");
+        for action in ["unlink", "link", "unlink"] {
+            let valid = fixture.run_action_for("programs:apply", Some(COMMIT), action, PROGRAM);
+            assert_eq!(valid["ok"], true, "{valid}");
+        }
+        let candidate = program(&fixture).join(COMMIT);
+        let shim = fixture.data.join("programs/bin").join(if cfg!(windows) {
+            "tool-a.cmd"
+        } else {
+            "tool-a"
+        });
+        std::fs::remove_file(&shim).unwrap();
+        let package = candidate.join("tools/tool-a");
+        if case == "wrong-commit" {
+            evidence(&package, COMMIT, "1.0.0", "wrong-commit");
+        } else {
+            std::fs::remove_file(
+                package
+                    .join(if cfg!(windows) { "Scripts" } else { "bin" })
+                    .join(entry_name()),
+            )
+            .unwrap();
+        }
+        let metadata = site(&package).join("tool_a-1.0.0.dist-info/direct_url.json");
+        let bytes = std::fs::read(&metadata).unwrap();
+        let current = program(&fixture).join("current").canonicalize().unwrap();
+        let failed = fixture.run_action_for("programs:apply", Some(COMMIT), "link", PROGRAM);
+        assert_eq!(failed["ok"], false, "{failed}");
+        assert_eq!(
+            failed["errors"][0]["code"],
+            if case == "wrong-commit" {
+                "PROGRAM_VERSION_UNVERIFIED"
+            } else {
+                "PROGRAM_ENTRY_UNVERIFIED"
+            },
+            "{failed}"
+        );
+        assert!(std::fs::symlink_metadata(&shim).is_err());
+        assert!(
+            std::fs::symlink_metadata(fixture.bin.join(if cfg!(windows) {
+                "tool-a.cmd"
+            } else {
+                "tool-a"
+            }))
+            .is_err()
+        );
+        assert_eq!(
+            program(&fixture).join("current").canonicalize().unwrap(),
+            current
+        );
+        assert_eq!(std::fs::read(metadata).unwrap(), bytes);
+    }
 }

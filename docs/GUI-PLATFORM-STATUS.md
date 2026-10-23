@@ -15,8 +15,9 @@ and [scope](EXTENSIONS-ONLY.md).
 
 The [remaining-work queue](REMAINING-WORK.md) records the verified `3ddd9b43`
 baseline, recovery hardening, Git dependency postconditions and updater dependency
-corrections. Production readiness is not yet accepted: standalone entry verification,
-remaining dependency notices, installed cross-platform/consumer workflows and signed
+corrections. Standalone entry verification now has local regression evidence.
+Production readiness is not yet accepted: remaining dependency notices,
+installed cross-platform/consumer workflows and signed
 updating remain open. Current source tests do not update an installed app.
 The older detailed snapshot below is retained until its receipts are refreshed.
 

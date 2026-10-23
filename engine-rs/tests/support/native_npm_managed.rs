@@ -35,6 +35,82 @@ pub(super) fn run() {
     #[cfg(windows)]
     failure("comment-shim");
     completed_reuse_and_staging_are_not_overwritten();
+    standalone_links_recheck_current();
+}
+
+fn standalone_links_recheck_current() {
+    for case in ["wrong-version", "missing-target", "missing-entry"] {
+        let mut env = Env::new("npm-standalone-link");
+        env.skill("tool-a");
+        let installed = action(&env, "programs:apply", "install", "1.0.0");
+        assert_eq!(installed["ok"], true, "{installed}");
+        for operation in ["unlink", "link", "unlink"] {
+            let control = action(&env, "programs:apply", operation, "1.0.0");
+            assert_eq!(control["ok"], true, "{control}");
+        }
+        let pdir = env.data.join("programs/npm/tool-a");
+        let candidate = pdir.join("1.0.0");
+        let shim = env.data.join("programs/bin").join(command_name("tool-a"));
+        std::fs::remove_file(&shim).unwrap();
+        let package = candidate.join("node_modules/tool-a");
+        match case {
+            "wrong-version" => {
+                let file = package.join("package.json");
+                let mut metadata: Value =
+                    serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+                metadata["version"] = json!("9.9.0");
+                std::fs::write(file, metadata.to_string()).unwrap();
+            }
+            "missing-target" => std::fs::remove_file(package.join("bin/cli.js")).unwrap(),
+            "missing-entry" => std::fs::remove_file(
+                candidate
+                    .join("node_modules/.bin")
+                    .join(command_name("tool-a")),
+            )
+            .unwrap(),
+            _ => unreachable!(),
+        }
+        let current = pdir.join("current").canonicalize().unwrap();
+        let retained = tree(&candidate);
+        let alternate = env.home.join("alternate-bin");
+        std::fs::create_dir(&alternate).unwrap();
+        let mut paths = std::env::split_paths(&env.user_path).collect::<Vec<_>>();
+        paths.push(alternate.clone());
+        env.user_path = std::env::join_paths(paths).unwrap();
+        let failed = env.run(
+            "programs:apply",
+            &[
+                "--program",
+                "npm:tool-a",
+                "--action",
+                "link",
+                "--entry-dir",
+                alternate.to_str().unwrap(),
+            ],
+        );
+        assert_eq!(
+            failed["ok"], false,
+            "Standalone {case} link was accepted: {failed}"
+        );
+        assert_eq!(
+            failed["errors"][0]["code"],
+            if case == "wrong-version" {
+                "PROGRAM_VERSION_UNVERIFIED"
+            } else {
+                "PROGRAM_ENTRY_UNVERIFIED"
+            },
+            "{failed}"
+        );
+        assert!(std::fs::symlink_metadata(&shim).is_err());
+        assert_eq!(std::fs::read_dir(&alternate).unwrap().count(), 0);
+        assert_eq!(pdir.join("current").canonicalize().unwrap(), current);
+        assert_eq!(tree(&candidate), retained);
+        let status = env.run("programs:status", &[]);
+        assert_eq!(
+            status["data"]["entry_dir"], "~/bin",
+            "Failed link saved its directory: {status}"
+        );
+    }
 }
 
 fn failure(case: &str) {

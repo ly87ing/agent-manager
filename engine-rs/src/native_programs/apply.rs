@@ -1124,6 +1124,53 @@ fn managed_bin_target(vdir_or_current: &Path, scheme: &str, bin: &str) -> PathBu
     }
 }
 
+fn verify_link_candidate(ctx: &Context, plan: &Plan) -> Result<()> {
+    let (scheme, name) = plan.program.split_once(':').unwrap_or_default();
+    let pdir = program_dir(ctx, &plan.program)?;
+    let version = super::status::managed_current(&pdir)?
+        .ok_or_else(|| anyhow!("No completed current version is available for command linking"))?;
+    let directory = pdir.join(&version);
+    let stage = "command linking";
+    match scheme {
+        "npm" => super::npm_postcondition::check(
+            &directory,
+            name,
+            &version,
+            &plan.verify_managed_bins,
+            &ctx.home_dir,
+            stage,
+        ),
+        "pypi" => {
+            super::uv_postcondition::check_managed(
+                &directory,
+                name,
+                &version,
+                &ctx.home_dir,
+                stage,
+            )?;
+            super::uv_postcondition::check_entries(
+                &directory,
+                &plan
+                    .verify_managed_bins
+                    .iter()
+                    .map(|bin| managed_bin_target(&directory, scheme, bin))
+                    .collect::<Vec<_>>(),
+                &ctx.home_dir,
+                stage,
+            )
+        }
+        "git" => super::git_postcondition::check(
+            ctx,
+            &directory,
+            name,
+            &version,
+            &plan.verify_managed_bins,
+            stage,
+        ),
+        _ => bail!("Unsupported managed command source"),
+    }
+}
+
 /// 入口指向哪里：符号链接，或 Windows 的转发脚本。
 fn link_target(path: &Path) -> Option<PathBuf> {
     crate::platform::command_link_target(path)
@@ -1829,6 +1876,9 @@ pub fn execute(ctx: &Context, req: &Request) -> Result<Value> {
         {
             check_link_slot(ctx, path, &registered)?;
         }
+    }
+    if plan.action == Action::Link {
+        verify_link_candidate(ctx, &plan)?;
     }
     let mut recovery = super::recovery::Journal::default();
     let mut new_links: Vec<(String, String)> = Vec::new();

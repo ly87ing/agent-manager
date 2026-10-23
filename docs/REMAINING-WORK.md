@@ -1,8 +1,9 @@
 # Remaining Work
 
-Continue with **R3: standalone command-entry verification**. R1 passed native
-engine jobs and R2 has a local implementation; installed-client evidence remains
-a separate acceptance step.
+Continue with **R7: installed-client and actual-consumer acceptance**, with R13's
+remaining dependency decisions. R1 passed native engine jobs; R2/R3 implementations
+and local verification are recorded below. Native CI and installation remain
+separate acceptance steps.
 
 Snapshot: 2026-10-23. Historical baseline: `3ddd9b43`; its final main
 [CI](https://github.com/ly87ing/agent-manager/actions/runs/39026462902) and
@@ -16,7 +17,7 @@ The repository owner owns release authorization in R9.
 | --- | --- | --- | --- |
 | R1 | Native tests passed | `156849bc` passed native macOS/Windows/Linux engine jobs; installed-client evidence remains separate. | Retain conflicts; verify current, entries, backups and partial recovery on each native platform. |
 | R2 | Native CI pending | Implemented actual origin/commit, receipt and entry verification with retained candidates. | Verify identity and entries before completion/selection, including reuse, on all native platforms. |
-| R3 | Then | Audit standalone Windows links with missing underlying targets. | Reproduce the case; require fresh target evidence and valid-link controls. |
+| R3 | Native CI pending | Standalone linking now rechecks the completed current candidate before saving preferences or writing entries. | Require fresh identity/target evidence and valid-link controls on each native platform. |
 | R4 | Then | Implement KDE language and regional-format repair. | Preview scope; preserve settings; reject stale evidence; read back natively. |
 | R5 | Then | Implement Linux automatic-time switching beyond matching no-ops. | Verify provider, boot effects, cancellation and partial failure. |
 | R6 | Then | Extend GNOME beyond one primary language with explicit formats. | Verify fallback order/inherited formats without PAM/shell edits or logout. |
@@ -46,9 +47,10 @@ The repository owner owns release authorization in R9.
   Cover wrong/unknown source, commit mismatch, missing entries, incomplete retry,
   completed reuse and switch. Retain uncertain candidates without automatic
   deletion. See [Programs](subsystems/programs.md).
-- R3 is an investigation lead, not a reproduced runtime defect. Exercise the
-  standalone Link action with a missing or changed underlying command on native
-  Windows. Creating a forwarding file alone cannot prove its target works.
+- R3's old source accepted a changed npm package during standalone Link on macOS.
+  Portable native cases now cover changed npm/PyPI/Git identity, missing commands,
+  preserved current/files/preferences and valid linking. Native Windows execution
+  must establish its forwarding-file boundary; a file alone cannot prove its target.
 
 ### R4-R6: Linux capability gaps
 

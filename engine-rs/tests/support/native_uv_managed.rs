@@ -158,6 +158,7 @@ fn equivalents_and_early_refusal() {
 }
 
 pub(super) fn verify() {
+    standalone_links_recheck_current();
     missing_entry_install_is_retained();
     missing_entry_preserves_current();
     for case in ["valid", "missing", "duplicate", "malformed"] {
@@ -166,6 +167,55 @@ pub(super) fn verify() {
     current_is_preserved();
     equivalents_and_early_refusal();
     println!("Managed PyPI: fresh completion/selection version and entry evidence, retained candidates and no-execution retry refusal, unchanged prior current/entries, legacy reuse refusal, PEP 440 matching and invalid-target zero-write preview passed");
+}
+
+fn standalone_links_recheck_current() {
+    for case in ["wrong-version", "missing-entry"] {
+        let fixture = fixture("pypi-standalone-link");
+        fixture.control("1.0.0", "valid");
+        let installed = fixture.run_action("programs:apply", Some("1.0.0"), "install");
+        assert_eq!(installed["ok"], true, "{installed}");
+        for action in ["unlink", "link", "unlink"] {
+            let valid = fixture.run_action("programs:apply", Some("1.0.0"), action);
+            assert_eq!(valid["ok"], true, "{valid}");
+        }
+        let pdir = program(&fixture);
+        let candidate = pdir.join("1.0.0");
+        let shim = fixture.data.join("programs/bin").join(if cfg!(windows) {
+            "tool-a.cmd"
+        } else {
+            "tool-a"
+        });
+        std::fs::remove_file(&shim).unwrap();
+        let metadata =
+            site(&candidate.join("tools/tool-a")).join("tool_a-1.0.0.dist-info/METADATA");
+        if case == "wrong-version" {
+            std::fs::write(
+                &metadata,
+                "Metadata-Version: 2.4\nName: tool-a\nVersion: 9.9.0\n\n",
+            )
+            .unwrap();
+        } else {
+            std::fs::remove_file(candidate.join("bin").join(entry_name())).unwrap();
+        }
+        let bytes = std::fs::read(&metadata).unwrap();
+        let current = pdir.join("current").canonicalize().unwrap();
+        let failed = fixture.run_action("programs:apply", Some("1.0.0"), "link");
+        assert_eq!(failed["ok"], false, "{failed}");
+        assert_eq!(
+            failed["errors"][0]["code"],
+            if case == "wrong-version" {
+                "PROGRAM_VERSION_UNVERIFIED"
+            } else {
+                "PROGRAM_ENTRY_UNVERIFIED"
+            },
+            "{failed}"
+        );
+        assert!(std::fs::symlink_metadata(&shim).is_err());
+        assert!(std::fs::symlink_metadata(entry(&fixture)).is_err());
+        assert_eq!(pdir.join("current").canonicalize().unwrap(), current);
+        assert_eq!(std::fs::read(&metadata).unwrap(), bytes);
+    }
 }
 
 fn missing_entry_install_is_retained() {

@@ -154,6 +154,13 @@ the candidate without automatic recovery or cleanup. A completion marker can
 already exist when the later selection gate fails. The interface explains this
 boundary before confirmation and retains the inspection warning after failure.
 
+Standalone managed command linking freshly resolves the completed `current`
+candidate and applies the same npm/PyPI/Git identity and entry checks before any
+entry-directory preference or command pointer is written. A Windows forwarding
+file alone does not establish its target. Refusal preserves existing candidate
+files, selection and entries; unlinking remains available for removing an entry.
+This read-before-write gate does not provide atomic exclusion of external writers.
+
 The `PROGRAM_VERSION_UNVERIFIED` diagnostic identifies this incomplete outcome;
 it also identifies refusal to overwrite incomplete managed PyPI/Git candidates.
 The dialog keeps its details visible and announces a warning. Ordinary installer
@@ -303,8 +310,9 @@ wheel backend. A private Git URL rewrite supplies the local repository while the
 installed origin retains its HTTPS identity. Index access is disabled and network
 proxies refuse non-local fetches. It verifies real commit installation, command
 output, upgrade/switch/reuse, stale-commit refusal, current preservation and the
-existing interpreter's bytes. GUI CI runs this on all three native operating
-systems. Run locally only with `AM_ISOLATED_NATIVE_UV=1`, `AM_NATIVE_UV` and
+existing interpreter's bytes. It also exercises standalone linking and refuses
+linking the current candidate after its origin changes. GUI CI runs this on all
+three native operating systems. Run locally only with `AM_ISOLATED_NATIVE_UV=1`, `AM_NATIVE_UV` and
 `AM_NATIVE_PYTHON` naming explicitly selected existing executables.
 
 Windows command-entry metadata uses ASCII hex-encoded UTF-8 paths; legacy plain-text metadata remains readable. Manual filesystem commands reject linked ancestors, compare existing entry hashes, and stage a literal junction before replacing `current`. A staging failure preserves the previous pointer and foreign staging contents. Recursive manual removal refuses nested reparse points.

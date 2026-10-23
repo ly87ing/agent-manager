@@ -87,7 +87,30 @@ impl Fixture {
         } else {
             bin.into()
         };
-        std::fs::write(bins.join(name), "extension-fixture\n").unwrap();
+        let package_dir = version.join("node_modules").join(package);
+        std::fs::create_dir_all(&package_dir).unwrap();
+        std::fs::write(
+            package_dir.join("package.json"),
+            json!({"name":package,"version":"1.0.0","bin":{bin:"bin.js"}}).to_string(),
+        )
+        .unwrap();
+        let target = package_dir.join("bin.js");
+        std::fs::write(&target, "#!/bin/sh\necho fixture\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::os::unix::fs::symlink(&target, bins.join(name)).unwrap();
+        }
+        #[cfg(windows)]
+        std::fs::write(
+            bins.join(name),
+            format!(
+                "@echo off\r\n\"%~dp0..\\{}\\bin.js\" %*\r\n",
+                package.replace('/', "\\")
+            ),
+        )
+        .unwrap();
         link_dir(&version, &dir.join("current"));
         dir
     }

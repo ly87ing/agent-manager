@@ -2335,3 +2335,25 @@ The preceding recovery and updater commits passed their complete
 [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39945202970), including
 all native engine jobs and four installer builds. No personal OS setting, real
 assistant file, installed application, Release or tag changed.
+
+## 2026-10-23: standalone command linking uses fresh candidate evidence
+
+Standalone Link now verifies the completed current npm/PyPI/Git candidate before
+saving its entry directory or writing either forwarding pointer. The existing
+identity/version/origin and underlying command readers are reused; Unlink remains
+available. A missing target cannot be certified by creating a Windows shim.
+The source-level gate is read-before-write, without atomic protection from external
+writers. See [Programs](subsystems/programs.md).
+
+The regression failed on pre-change `1390e264`: a package changed to version 9.9.0
+was accepted as the completed 1.0.0 candidate and new pointers/preferences were
+written. The corrected portable harnesses cover changed npm/PyPI/Git identity,
+missing commands, unchanged current/candidate/preferences, absent new pointers and
+valid Link/Unlink controls. Full macOS engine tests including 313 library cases,
+Tauri 27, frontend 708/61 files, frontend build, script 23, formatting and local
+documentation links passed. Real isolated uv/Git installation also passed valid
+Link/Unlink and a refused Link after current-origin tampering, with actual command
+execution and unchanged interpreter bytes. Native CI is pending for this slice.
+No interface layout changed; the preceding actual-payload renderer checks do not
+establish installed-client acceptance. No personal OS setting, real assistant file,
+installed application, Release or tag changed.
