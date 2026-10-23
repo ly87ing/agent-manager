@@ -33,8 +33,10 @@ The older detailed snapshot below is retained until its receipts are refreshed.
 ## Native architecture pipeline
 
 GUI CI now declares native engine and package jobs for six operating-system and
-CPU combinations. New ARM64 jobs remain candidates until their actual workflow
-receipts pass; adding a target is not native acceptance.
+CPU combinations. Source `3dade3b1` passed the Windows/Linux ARM64 engine and
+installer jobs in [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39978400319).
+These native test/package receipts do not establish installed desktop or signed
+update acceptance.
 
 | Platform | Native installer runner | CI installer formats |
 | --- | --- | --- |
@@ -46,7 +48,8 @@ receipts pass; adding a target is not native acceptance.
 | Windows ARM64 | `windows-11-arm` | NSIS |
 
 Before tests, the pipeline checks that runner, Node and Rust agree on the native
-architecture. It checks the engine, uv fixture and final app's PE/ELF/Mach-O
+architecture. It checks the engine, uv fixture, final app and Windows/Linux clock
+helper's PE/ELF/Mach-O
 machine headers before executing tools or collecting installers. uv 0.13.1 uses
 the upstream checksum for each OS/architecture; engine caches cannot restore
 another CPU's artifacts. Linux packages retain the Ubuntu 22.04 baseline and the
@@ -63,8 +66,10 @@ Polkit 0.105. No authorization case is skipped on the newer engine runners.
 The older package baseline remains covered by native Tauri/KDE/package-startup
 checks; its privileged repair acceptance is still open.
 
-This changes test/build capability only. The separately authorized signed release
-pipeline and updater manifest still cover their previous four targets. Native
+The separately authorized release pipeline now prepares these same six targets,
+and the updater manifest distinguishes Linux ARM64 AppImage/DEB and Windows ARM64
+NSIS while retaining every existing x64 entry. This source support does not
+establish signed release or installed-update acceptance. Native
 desktop business interaction, real client consumption and signed updating remain
 separate acceptance gates. KDE repair also remains unavailable: the native
 `kwriteconfig` resolver uses `NoGlobals`, so it cannot replace the full-policy

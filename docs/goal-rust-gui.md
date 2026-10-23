@@ -2484,3 +2484,39 @@ unchanged after startup and settings inspection. The backup passed SQLite
 documentation-only commits do not change this installed runtime source. Full
 cross-platform installed workflows, receiving applications and signed updating
 remain open in [Remaining work](REMAINING-WORK.md).
+
+## 2026-10-23: native ARM64 coverage and update routing
+
+`9fc8427d` added native Windows/Linux ARM64 jobs alongside both macOS CPU targets
+and existing x64 targets. The pipeline verifies runner/Node/Rust agreement,
+executable machine headers, per-CPU caches and architecture-specific upstream uv
+0.13.1 hashes. `fc7f79e5` declared the missing Linux `xdg-utils` fixture dependency.
+`3dade3b1` aligned ARM authorization fixtures with the existing newer Linux engine
+baseline while retaining Ubuntu 22.04 package builds. Its Windows/Linux ARM64
+engine and installer jobs passed in [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39978400319),
+including actual native tools, authorization and Linux extracted-package startup.
+
+The earlier `9fc8427d` Windows ARM64 NSIS artifact was independently downloaded,
+checksum-verified and extracted. Both application and clock-helper payloads have
+ARM64 PE headers. The application's embedded source marker matched the artifact;
+its SHA256 is `3216bb3c6669de9e46dd4756348717858c2b50ac78375227edd0f7554519ecd0`.
+The NSIS wrapper itself uses x86, as expected. No installer was run on the personal
+machine. Product Rust/frontend source remains identical to installed `fac8ed83`.
+
+Release preparation now includes the same six native targets, with required
+ARM64 AppImage/DEB/NSIS assets and 15 explicit updater keys. Each Linux architecture
+keeps its own AppImage fallback and DEB entry; Windows x64 retains MSI and ARM64
+uses NSIS. All 52 script cases, actionlint, syntax and local-link checks passed.
+A direct old/new assembler comparison preserved every URL/signature object of
+the original ten keys. Negative cases retain fail-closed handling of missing,
+unsigned, empty, duplicate and unclassified bundles, including real MSI language
+suffixes. Release and CI guards also check the clock helper's CPU target.
+
+No tag, Release or signing operation was triggered; ordinary CI test artifacts
+were built and retained. Actual signed
+install/update/restart, Windows/Linux desktop business interaction, old-Polkit
+privileged repair and broader Linux repair remain open. Earlier failures remain
+recorded: the first ARM runner lacked a declared XDG tool; the older Polkit fixture
+could not install its JavaScript rule; Intel macOS DMG construction also repeated
+the pre-existing busy-eject failure in the earlier `58787c14` run. A passing retry
+does not close that independent packaging investigation.

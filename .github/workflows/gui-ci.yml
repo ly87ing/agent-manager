@@ -339,6 +339,10 @@ jobs:
       - name: Verify application executable architecture
         run: node scripts/verify-native-architecture.mjs binary ${{ matrix.target }} app/src-tauri/target/${{ matrix.target }}/release/agent-manager-app${{ runner.os == 'Windows' && '.exe' || '' }}
 
+      - name: Verify clock helper executable architecture
+        if: ${{ runner.os != 'macOS' }}
+        run: node scripts/verify-native-architecture.mjs binary ${{ matrix.target }} app/src-tauri/clock-helper/agent-manager-clock-helper${{ runner.os == 'Windows' && '.exe' || '' }}
+
       - name: Collect installers and checksums
         env:
           BUILD_TARGET: ${{ matrix.target }}

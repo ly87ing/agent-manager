@@ -32,7 +32,7 @@ The repository owner owns release authorization in R9.
 | R11 | Portability | Resolve skill snapshot support decisions and native evidence gaps. | Verify filesystem/volume limits and explicit refusal of unsupported shapes. |
 | R12 | Investigation | Diagnose earlier intermittent macOS DMG busy-eject failures. | Reproduce and verify the cause; a passing retry alone cannot close it. |
 | R13 | Native tests passed | TLS/ZIP corrections, GLib backport, optimized Linux iterator and extracted bundle notices passed. Maintenance notices remain recorded. | Maintain source provenance and the [security review](subsystems/dependency-security.md). |
-| R14 | Candidate | Native ARM64 Windows/Linux engine and installer jobs, architecture checks and CPU-specific tool/cache selection are configured; actual ARM64 receipts are pending. | Pass native tests and package checks; read actual artifact architecture; retain desktop/signed-update limits. |
+| R14 | Native tests passed | `3dade3b1` passed Windows/Linux ARM64 engine and installer jobs. ARM64 release/update routing is prepared; signed and installed-desktop acceptance remains open. | Retain native evidence, payload/target binding and explicit desktop/signed-update limits. |
 
 R4-R6 expand currently unavailable controls; preserve those explicit capability
 limits while completing acceptance of the supported operations.
