@@ -13,12 +13,14 @@ function uriTokens(text) {
 }
 
 export function rewriteUbuntuArchive(text, format) {
-  if (format !== 'list' && format !== 'sources') throw new Error('Expected an APT list or sources format');
+  if (!['list', 'sources', 'mirrors'].includes(format)) throw new Error('Expected an APT list, sources or mirrors format');
   let uris = false;
   return text.split('\n').map(line => {
     if (/^[ \t]*#/.test(line)) return line;
-    if (format === 'list') {
-      const legacy = line.match(/^([ \t]*deb(?:-src)?[ \t]+(?:\[[^\]\r\n]*\][ \t]+)?)(\S+)/);
+    if (format !== 'sources') {
+      const legacy = format === 'list'
+        ? line.match(/^([ \t]*deb(?:-src)?[ \t]+(?:\[[^\]\r\n]*\][ \t]+)?)(\S+)/)
+        : line.match(/^([ \t]*)(\S+)/);
       return legacy ? legacy[1] + archiveUri(legacy[2]) + line.slice(legacy[0].length) : line;
     }
     if (/^[ \t]*\r?$/.test(line)) uris = false;
@@ -39,7 +41,11 @@ function main() {
     throw new Error('Ubuntu archive preparation requires a GitHub-hosted Linux CI runner');
   }
   let found = false;
-  for (const file of ['/etc/apt/sources.list', '/etc/apt/sources.list.d/ubuntu.sources']) {
+  for (const [file, format] of [
+    ['/etc/apt/sources.list', 'list'],
+    ['/etc/apt/sources.list.d/ubuntu.sources', 'sources'],
+    ['/etc/apt/apt-mirrors.txt', 'mirrors'],
+  ]) {
     let before;
     try {
       if (!lstatSync(file).isFile()) throw new Error(`Expected an ordinary APT source file: ${file}`);
@@ -50,7 +56,7 @@ function main() {
       continue;
     }
     found = true;
-    const after = rewriteUbuntuArchive(before, file.endsWith('.sources') ? 'sources' : 'list');
+    const after = rewriteUbuntuArchive(before, format);
     if (after === before) {
       console.log(`APT source unchanged: ${file}`);
       continue;

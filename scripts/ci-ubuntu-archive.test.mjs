@@ -51,8 +51,27 @@ test('lookalikes, subpaths, ports, ARM archives and third-party sources remain u
   for (const uri of uris) {
     assert.equal(rewriteUbuntuArchive(`deb ${uri} jammy main\n`, 'list'), `deb ${uri} jammy main\n`);
     assert.equal(rewriteUbuntuArchive(`URIs: ${uri}\nSuites: noble\n`, 'sources'), `URIs: ${uri}\nSuites: noble\n`);
+    assert.equal(rewriteUbuntuArchive(`${uri}\tpriority:1\n`, 'mirrors'), `${uri}\tpriority:1\n`);
   }
-  for (const format of ['list', 'sources']) assert.equal(rewriteUbuntuArchive('', format), '');
+  for (const format of ['list', 'sources', 'mirrors']) assert.equal(rewriteUbuntuArchive('', format), '');
+});
+
+test('hosted runner mirror lists preserve priorities, fallbacks and source-file pointers', () => {
+  const before = '# http://azure.archive.ubuntu.com/ubuntu/\n'
+    + 'http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\n'
+    + 'https://archive.ubuntu.com/ubuntu/\tpriority:2\n'
+    + 'https://security.ubuntu.com/ubuntu/\tpriority:3\n'
+    + ' http://ports.ubuntu.com/ubuntu-ports/\tpriority:4\n';
+  const expected = '# http://azure.archive.ubuntu.com/ubuntu/\n'
+    + 'https://archive.ubuntu.com/ubuntu/\tpriority:1\n'
+    + 'https://archive.ubuntu.com/ubuntu/\tpriority:2\n'
+    + 'https://security.ubuntu.com/ubuntu/\tpriority:3\n'
+    + ' http://ports.ubuntu.com/ubuntu-ports/\tpriority:4\n';
+  assert.equal(rewriteUbuntuArchive(before, 'mirrors'), expected);
+  assert.equal(rewriteUbuntuArchive(expected, 'mirrors'), expected);
+  const pointer = 'mirror+file:/etc/apt/apt-mirrors.txt';
+  assert.equal(rewriteUbuntuArchive(`URIs: ${pointer}\n`, 'sources'), `URIs: ${pointer}\n`);
+  assert.equal(rewriteUbuntuArchive(`deb ${pointer} jammy main\n`, 'list'), `deb ${pointer} jammy main\n`);
 });
 
 test('direct use outside hosted Linux CI refuses before privileged preparation', () => {

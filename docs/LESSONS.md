@@ -17,6 +17,10 @@ What recent work got wrong, and the rule that would have caught it. Read this be
 - Review found that detecting legacy source lines inside deb822 continuations
   could edit an unrelated field's example text. Select the parser from the actual
   file format and retain a non-URI continuation counterexample.
+- The first native archive-helper candidate left source files unchanged while
+  APT still used Azure through `mirror+file`. Read the actual `Get` hosts and the
+  runner image's source configuration; add the existing mirror-list format and
+  preserve its priorities/fallbacks. Passing pure tests did not exercise that path.
 
 ## 2026-10-23: prerequisite writes must retain every visible completed effect
 

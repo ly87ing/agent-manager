@@ -47,9 +47,12 @@ endpoint, tag, Release or published installer is changed by these source fixes.
 
 The regular and GUI CI workflows prepare Ubuntu package sources with
 [`ci-ubuntu-archive.mjs`](../../scripts/ci-ubuntu-archive.mjs) before APT runs.
-Only exact Azure Ubuntu archive URI tokens in the two standard source files are
-replaced with the official HTTPS archive. The `security.ubuntu.com` host, ARM ports,
-third-party sources, suites, components and signing fields remain unchanged. The helper
+Only exact Azure Ubuntu archive URI tokens in the two standard source files and
+the runner's `/etc/apt/apt-mirrors.txt` are replaced with the official HTTPS archive.
+The runner's [native configuration](https://github.com/actions/runner-images/blob/main/images/ubuntu/scripts/build/configure-apt-sources.sh)
+uses `mirror+file` pointers; these pointers, mirror priorities and fallback entries
+are preserved. The `security.ubuntu.com` host, ARM ports, third-party sources,
+suites, components and signing fields remain unchanged. The helper
 refuses execution outside GitHub-hosted Linux CI and rereads changed files.
 This transport change preserves [APT's existing signed archive verification](https://documentation.ubuntu.com/security/software-integrity/archive-verification/);
 it does not add trust keys or disable authentication. Release workflows retain
