@@ -34,9 +34,11 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [error, setError] = useState<{ message: string; location: "editor" | "delete" } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
   const [revision, setRevision] = useState(0);
   const [confirmation, setConfirmation] = useState<SavedLaunch | null>(null);
   const generation = useRef(initialRecipe ? 1 : 0);
+  const launchOperation = useRef<symbol | null>(null);
   const local = catalog?.platform === recipe.platform;
   const dirty = !selected || JSON.stringify(recipe) !== JSON.stringify(selected.recipe);
   const { dialogRef, onDialogKeyDown } = useDialogFocus<HTMLDivElement>({
@@ -45,7 +47,11 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
   });
 
   useEffect(() => { if (initialRecipe) onInitialConsumed?.(); }, [initialRecipe, onInitialConsumed]);
-  useEffect(() => () => { toast.dismiss("launch-feedback"); }, []);
+  useEffect(() => () => { launchOperation.current = null; toast.dismiss("launch-feedback"); }, []);
+
+  const launchTargets = (saved ?? []).filter((item) => item.recipe.kind === "app" && item.recipe.platform === catalog?.platform && item.entries.length > 0)
+    .filter((item, index, items) => items.findIndex((other) => other.recipe.target === item.recipe.target) === index);
+  const canLaunchAll = Boolean(catalog && saved && !catalogError && !readError && launchTargets.length && !editing && !confirmation);
 
   useEffect(() => {
     let cancelled = false;
@@ -139,15 +145,57 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
     finally { setBusy(false); }
   }
   async function run(spec: LaunchRecipe, entry: LaunchEntry) {
+    if (busy || launchOperation.current) return;
+    const token = Symbol();
+    launchOperation.current = token;
     setBusy(true); clearFeedback();
     try {
       const result = await launchRequest<{ audit_recorded?: boolean }>("run", ["--spec", JSON.stringify(spec), "--name", entry.name, "--confirm"]);
+      if (launchOperation.current !== token) return;
       if (result.audit_recorded === false) toast.warning(t("启动请求已发送，但记录失败"), {
         id: "launch-feedback", description: t("请先确认应用状态，再决定是否重试。"),
       });
       else toast.success(t("已发送启动请求。请在应用中确认时间和环境。"), { id: "launch-feedback" });
-    } catch (err) { fail(err, t("启动失败"), null); }
-    finally { setBusy(false); }
+    } catch (err) { if (launchOperation.current === token) fail(err, t("启动失败"), null); }
+    finally { if (launchOperation.current === token) { launchOperation.current = null; setBusy(false); } }
+  }
+  async function runAll() {
+    if (busy || launchOperation.current || !canLaunchAll) return;
+    const token = Symbol();
+    launchOperation.current = token;
+    const targets = launchTargets.map((item) => ({ spec: JSON.stringify(item.recipe), name: item.entries[0].name, target: item.recipe.target }));
+    setBusy(true); setBatchProgress({ done: 0, total: targets.length }); clearFeedback();
+    let sent = 0;
+    let warnings = false;
+    const details: string[] = [];
+    try {
+      for (let index = 0; index < targets.length; index++) {
+        if (launchOperation.current !== token) return;
+        const item = targets[index];
+        const label = `${item.target} · ${item.name}`;
+        try {
+          const result = await launchRequest<{ audit_recorded?: boolean }>("run", ["--spec", item.spec, "--name", item.name, "--confirm"]);
+          if (launchOperation.current !== token) return;
+          sent++;
+          warnings ||= result.audit_recorded === false;
+          details.push(`${label} — ${result.audit_recorded === false ? t("启动请求已发送，但记录失败") : t("已发送")}`);
+        } catch (err) {
+          if (launchOperation.current !== token) return;
+          warnings = true;
+          details.push(`${label} — ${engineErrorMessage(err)}`);
+        }
+        setBatchProgress({ done: index + 1, total: targets.length });
+      }
+      if (launchOperation.current !== token) return;
+      (warnings ? toast.warning : toast.success)(t("一键启动：已发送 {0}/{1} 个启动请求", String(sent), String(targets.length)), {
+        id: "launch-feedback", duration: 10000,
+        description: [...details, t("请先确认应用状态，再决定是否重试。")].join("\n"),
+      });
+    } finally {
+      if (launchOperation.current === token) {
+        launchOperation.current = null; setBatchProgress(null); setBusy(false);
+      }
+    }
   }
   async function confirm() {
     if (!confirmation) return;
@@ -177,7 +225,16 @@ export default function LaunchPage({ initialRecipe, onInitialConsumed }: { initi
     </div>
     <section className="space-y-2" aria-label={t("已保存配置")}>
       <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-medium">{t("已保存配置")}</h2>
-        <button type="button" className={button} disabled={busy} onClick={() => setRevision((value) => value + 1)}>{t("重新读取")}</button></div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" data-testid="launch-all" className={`${button} bg-primary text-primary-foreground hover:bg-primary/90`}
+            disabled={busy || !canLaunchAll} onClick={() => void runAll()}>{batchProgress
+              ? t("启动中（{0}/{1}）", String(batchProgress.done), String(batchProgress.total))
+              : t("一键启动（{0}）", String(launchTargets.length))}</button>
+          <button type="button" className={button} disabled={busy} onClick={() => setRevision((value) => value + 1)}>{t("重新读取")}</button>
+        </div></div>
+      <p className="text-xs text-muted-foreground" role={batchProgress ? "status" : undefined}>{batchProgress
+        ? t("离开此页会停止尚未发出的启动请求。")
+        : t("启动本机图形应用；同一程序路径使用当前列表中的第一项。")}</p>
       {catalogError && <p role="alert" className="break-words text-xs text-destructive">{catalogError}</p>}
       {readError && <p role="alert" className="break-words text-xs text-destructive">{readError}</p>}
       {saved?.length === 0 && <p className="text-xs text-muted-foreground">{t("尚未保存配置。点击“新增配置”创建常用应用或命令。")}</p>}

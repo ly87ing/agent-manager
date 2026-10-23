@@ -2429,3 +2429,29 @@ Windows/Linux/ARM desktop workflows and signed installed update/restart/readback
 remain open. No personal OS preference, real assistant file, Release or tag changed.
 Creating signed release candidates remains a separately authorized step under
 AGENTS.md. A documentation-only follow-up preserves this exact runtime source.
+
+## 2026-10-23: one-click saved application launching
+
+Launch all uses the first displayed entry for each exact local application path.
+It snapshots each selected recipe and sends the existing confirmed requests
+sequentially, continuing after individual refusals. The page locks conflicting
+controls and reports one summary with counts and original diagnostics. Commands
+and other platforms remain copy-only. Leaving the page stops unissued requests;
+it never closes applications or retries another variant automatically.
+
+Verification: focused Launch tests 35 passed; full frontend 722 cases across 62
+files, frontend build, engine full suite and Tauri 27 cases passed. Browser checks
+covered English and Chinese at 1000/760 by 650 px, progress and partial-failure
+summaries without horizontal overflow. The native macOS x86_64 candidate used
+embedded assets, a separate identifier and isolated HOME/data at the committed
+1000-by-650 geometry. A click launched two private test bundles despite a missing
+third path. Independent readback verified first-listed path selection, distinct
+time zones, child variables, literal arguments, unchanged saved recipes and both
+accepted audits. A repeated click reported 0/3 with already-running and missing
+path diagnostics. Both children survived manager exit and then exited through
+their private release files. No personal saved application was launched.
+
+This establishes the macOS batch operation with test applications. Receiving
+applications' interpretation of variables and native Windows/Linux desktop batch
+interaction remain separate acceptance work. Source checks and a local candidate
+do not establish full production or signed-update acceptance.

@@ -93,6 +93,22 @@ direct Launch action. That click supplies the explicit `--confirm` marker to
 `launch:run --spec <JSON> --name <variant> --confirm`; no second dialog is needed.
 Row controls use concise labels: Launch, Edit, Copy command, Copy alias/function,
 and Delete. The complete alias/function definition is still copied.
+
+Launch all starts saved local graphical applications sequentially through the same
+confirmed `launch:run` operation. It uses the first entry in the currently displayed
+list for each exact program path, including that entry's arguments, environment and
+variant. Command recipes and other platforms are excluded before path comparison.
+Different spellings of a path are not treated as the same application by this UI
+filter; native runtime checks still apply to each request. Saving or rereading can
+change list order, and each click takes a fixed snapshot of the displayed entries.
+Loading or failed reads, an open editor or delete dialog, and an active launch
+disable the action. Repeated clicks cannot issue overlapping requests on this page.
+A refusal does not stop later entries or try another variant. One completion
+summary reports requests sent and per-entry diagnostics; partial results and audit
+warnings remain warnings. Leaving the page stops requests not yet issued, without
+stopping applications or canceling requests already issued. No application is
+started by opening or rereading the page.
+
 The operation refuses an already-running target and never quits or restarts it.
 Windows compares the volume and 128-bit file identity of queryable process images,
 including hard-link aliases. Different files with the same name remain independent.
@@ -156,6 +172,7 @@ cargo test --manifest-path engine-rs/Cargo.toml --lib native_launch
 cargo test --manifest-path engine-rs/Cargo.toml --test native_launch_runtime
 cargo test --manifest-path engine-rs/Cargo.toml --test native_launch_saved
 pnpm --dir app test:unit --run src/test/LaunchPage.test.tsx
+pnpm --dir app test:unit --run src/test/LaunchAll.test.tsx
 ```
 
 The literal-argument regression executes generated aliases through Bash and zsh
@@ -170,6 +187,9 @@ It reads back native executable and batch-shim arguments, child environment and
 nonzero exit status, including PATH lookup and special characters in file paths.
 Runtime cases read back failed system requests and accepted requests whose
 completion audit failed. Frontend cases cover either asynchronous read ordering,
-full retry recovery and the accepted-request audit warning.
+full retry recovery and the accepted-request audit warning. Launch-all cases cover
+all three local platforms, first-entry selection, exact-path duplicates, sequential
+execution, overlapping-click refusal, partial/all failures, audit warnings, pending
+or failed reads, and page exit while a request is pending.
 
 Linux entries with a nonempty `Path` working directory are omitted because launch recipes do not currently represent a working directory. Desktop string escaping is decoded before Exec quoting; discovery never executes desktop entries.
