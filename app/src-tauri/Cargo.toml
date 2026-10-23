@@ -29,5 +29,15 @@ plist = "1.10"
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+glib = "0.18.5"
+
+[patch.crates-io]
+glib = { path = "vendor/glib" }
+
 [profile.dev]
 incremental = true
+
+# The upstream string-iterator defect appears when the dependency is optimized.
+[profile.test.package.glib]
+opt-level = 3

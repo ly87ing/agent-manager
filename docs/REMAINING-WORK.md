@@ -27,7 +27,7 @@ The repository owner owns release authorization in R9.
 | R10 | Documentation | Refresh acceptance records and final main CI readback. | Add npm/native receipts; distinguish builds from installed acceptance. |
 | R11 | Portability | Resolve skill snapshot support decisions and native evidence gaps. | Verify filesystem/volume limits and explicit refusal of unsupported shapes. |
 | R12 | Investigation | Diagnose earlier intermittent macOS DMG busy-eject failures. | Reproduce and verify the cause; a passing retry alone cannot close it. |
-| R13 | Security | Patch updater TLS/certificate dependencies and remove legacy archive extraction; retain remaining advisory decisions. | Verify resolved dependencies, native builds and the [security review](subsystems/dependency-security.md), including Linux glib and unmaintained dependencies. |
+| R13 | Native CI pending | TLS/certificate patches and legacy ZIP removal passed CI. GLib's upstream fix is backported with optimized old/new evidence; maintenance notices remain recorded. | Verify resolved source, native optimized iterator and bundled notices in the [security review](subsystems/dependency-security.md). |
 
 <details>
 <summary>Acceptance cases, source entry points and verified baseline</summary>

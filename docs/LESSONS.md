@@ -48,6 +48,14 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
   pointers. Valid fixtures need actual package manifests and command relationships,
   rather than marker files that accidentally satisfy existence checks.
 
+## 2026-10-23: dependency tests need an executable target and optimization
+
+- `cargo test -p glib` refused the registry dependency's unavailable development
+  dependencies; it exercised no iterator. A minimal consumer with glib optimized
+  at level 3 reproduced the original null-pointer abort and passed after the
+  exact upstream two-line fix. Keep the native Linux API regression in the Tauri
+  suite with that dependency optimization; a macOS zero-case run cannot close it.
+
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
 ## 2026-10-17: native batch fixtures need cmd argument handling

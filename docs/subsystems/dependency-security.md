@@ -16,6 +16,7 @@ following findings against RustSec and the actual updater dependency/call paths.
 | rustls-webpki 0.103.15 | Resolve 0.103.16 | Reject distrusted intermediate keys: [0382](https://rustsec.org/advisories/RUSTSEC-2026-0382.html) |
 | webpki-root-certs 1.0.9 | Resolve 1.0.10 | Remove the affected bundled root: [0383](https://rustsec.org/advisories/RUSTSEC-2026-0383.html) |
 | zip 4.6.1 | Remove the optional updater archive feature and dependency | The Windows updater called `ZipArchive::extract`; remove the dependency rather than relying on platform-specific reachability of [0367](https://rustsec.org/advisories/RUSTSEC-2026-0367.html), [0368](https://rustsec.org/advisories/RUSTSEC-2026-0368.html), [0369](https://rustsec.org/advisories/RUSTSEC-2026-0369.html) |
+| glib 0.18.5 | Backport the two-line upstream out-parameter fix | [Upstream PR 1343](https://github.com/gtk-rs/gtk-rs-core/pull/1343), the checksum-verified [source and license record](../../app/src-tauri/vendor/README.md), optimized iterator old/new execution and native Linux verification |
 
 The updater retains TLS and system-proxy support and this repository's current
 signed formats. See [updater formats](updater-manifest.md). No signer key, updater
@@ -23,13 +24,17 @@ endpoint, tag, Release or published installer is changed by these source fixes.
 
 ## Remaining notices
 
-- Linux's Tauri/GTK dependency chain still resolves glib 0.18.5. RustSec reports
+- Linux's Tauri/GTK dependency chain retains the glib 0.18 API. RustSec reports
   [VariantStrIter unsoundness](https://rustsec.org/advisories/RUSTSEC-2024-0429.html),
   fixed in glib 0.20. A direct upgrade cannot satisfy GTK's 0.18 dependency range.
-  The reviewed application, Tauri, Wry, GTK, GIO, GDK and WebKit source paths do not
-  call `array_iter_str`; that search is not proof of absence in all runtime paths.
-  Keep Linux production acceptance open pending an upstream-compatible fix or a
-  reviewed backport with native verification.
+  The Cargo patch selects a complete local copy of the published 0.18.5 crate,
+  with only the upstream fix's two lines changed. Its original version is retained;
+  version-only scanners will still report this advisory. Source provenance and
+  optimized native iterator evidence establish the backport separately. The
+  [Linux regression](../../app/src-tauri/tests/glib_variant.rs) exercises all affected
+  iterator methods; the test profile optimizes glib itself. Linux bundles include
+  original license/copyright notices, independently compared after extraction in
+  GUI CI. Native Linux test/package results are pending for this change.
 - zbus_names, zvariant, zvariant_derive, proc-macro-error and the resolved UNIC
   crates have unmaintained-package notices. These have no patched version in the
   queried advisories. Record replacement decisions separately from vulnerability
@@ -44,6 +49,7 @@ the actual resolved graph before and after changes:
 
 ```sh
 cargo tree --manifest-path app/src-tauri/Cargo.toml --target all -e normal,build
+cargo test --manifest-path app/src-tauri/Cargo.toml --test glib_variant
 node --test scripts/assemble-updater.test.mjs scripts/tauri-plugin-versions.test.mjs
 pnpm --dir app audit --prod --registry=https://registry.npmjs.org
 ```
@@ -52,3 +58,9 @@ Re-query advisories for the actual locked package/version pairs and distinguish
 aliases from separate findings. Native Windows/Linux builds and signed installed
 update verification remain separate requirements; a resolved graph is not runtime
 acceptance. Never run an update against a user's active installation as a test.
+
+The iterator case executes only on native Linux; zero cases on macOS/Windows do
+not establish it. Confirm `cargo tree` resolves glib to the recorded local path.
+For backport review, unpack the published archive after verifying its recorded
+SHA256 and compare all files: only the pointer binding and out-reference in
+`src/variant_iter.rs` may differ.

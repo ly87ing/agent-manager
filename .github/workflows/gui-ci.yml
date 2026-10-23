@@ -333,6 +333,13 @@ jobs:
           chmod +x "${images[0]}"
           (cd "$test_root" && "${images[0]}" --appimage-extract >/dev/null)
           dpkg-deb --extract "${debs[0]}" "$test_root/deb"
+          for package_root in "$test_root/squashfs-root" "$test_root/deb"; do
+            for notice in LICENSE COPYRIGHT; do
+              mapfile -t notices < <(find "$package_root" -type f -path "*/licenses/glib/$notice")
+              [[ "${#notices[@]}" == 1 ]]
+              cmp "app/src-tauri/vendor/glib/$notice" "${notices[0]}"
+            done
+          done
           for executable in "$test_root/squashfs-root/AppRun" "$test_root/deb/usr/bin/agent-manager-app"; do
             [[ -x "$executable" ]]
             runtime="$(mktemp -d "$test_root/runtime.XXXXXX")"
