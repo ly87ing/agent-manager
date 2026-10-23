@@ -2450,8 +2450,37 @@ time zones, child variables, literal arguments, unchanged saved recipes and both
 accepted audits. A repeated click reported 0/3 with already-running and missing
 path diagnostics. Both children survived manager exit and then exited through
 their private release files. No personal saved application was launched.
+An additional empty native HOME/data check showed the disabled Launch all (0)
+control at the same geometry without creating a database; its process was closed.
 
 This establishes the macOS batch operation with test applications. Receiving
 applications' interpretation of variables and native Windows/Linux desktop batch
 interaction remain separate acceptance work. Source checks and a local candidate
 do not establish full production or signed-update acceptance.
+
+## 2026-10-23: local macOS installation and runtime readback
+
+Source `fac8ed837eb97e6f2bc3a77d0e82b6ee2849bf80` was compiled with the Tauri
+production asset build and installed at `/Applications/Agent Manager.app` under
+the normal application identifier. The embedded build date is
+`2026-10-23T14:45:19Z`; the x86_64 executable SHA256 is
+`6ee6994690623d25e1dd43dae3313a9ec6b4cf9bb1d9cf7ebb686b31245a7780`.
+Build, staging and installed manifests matched, and strict deep signature
+verification passed. This local build uses an ad-hoc signature; it is not a
+Developer ID/notarized release or signed-updater acceptance.
+
+After closing the previous application normally, installation retained it and a
+consistent SQLite backup in the user's application-support backup directory.
+The earlier pre-upgrade application backup also remained unchanged. Independent
+readback verified the actual running executable path, build identity and digest.
+The installed Launch page showed the enabled one-click control for the saved
+applications. Settings displayed version 0.1.0, the existing database directory
+and resources inside the installed bundle; returning to Launch preserved the
+saved entries. No real saved application was launched during verification.
+
+Database bytes and eight protected assistant/shell/login-entry paths remained
+unchanged after startup and settings inspection. The backup passed SQLite
+`quick_check`. The updated application was left running on Launch. Subsequent
+documentation-only commits do not change this installed runtime source. Full
+cross-platform installed workflows, receiving applications and signed updating
+remain open in [Remaining work](REMAINING-WORK.md).

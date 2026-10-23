@@ -5,6 +5,9 @@ Source hardening through `947ef1ac` passed complete
 [CI](https://github.com/ly87ing/agent-manager/actions/runs/39959737632) and
 [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39959737728).
 Native source/package evidence does not establish full production acceptance.
+Local macOS x86_64 source `fac8ed83` was built, installed in Applications and run;
+the Launch all control and settings paths were read back from the installed app.
+See the [installation receipt](goal-rust-gui.md#2026-10-23-local-macos-installation-and-runtime-readback).
 
 Snapshot: 2026-10-23. Historical baseline: `3ddd9b43`; its final main
 [CI](https://github.com/ly87ing/agent-manager/actions/runs/39026462902) and
@@ -22,7 +25,7 @@ The repository owner owns release authorization in R9.
 | R4 | Then | Implement KDE language and regional-format repair. | Preview scope; preserve settings; reject stale evidence; read back natively. |
 | R5 | Then | Implement Linux automatic-time switching beyond matching no-ops. | Verify provider, boot effects, cancellation and partial failure. |
 | R6 | Then | Extend GNOME beyond one primary language with explicit formats. | Verify fallback order/inherited formats without PAM/shell edits or logout. |
-| R7 | Partial | Isolated macOS native Git refusal/success and language/selection restart readback passed. Installed cross-platform and actual consumers remain open. | Verify UI failures, restart/restore, login/share links and extension loading. |
+| R7 | Partial | macOS x86_64 local install/runtime readback and isolated launch/Git cases passed. Installed cross-platform and actual consumers remain open. | Verify UI failures, restart/restore, login/share links and extension loading. |
 | R8 | Acceptance | Verify settings in receiving sessions/apps and clock behavior. | Read actual effects independently, including cancellation/failure cases. |
 | R9 | Release | Verify signed installed-app updating after separate authorization. | Verify signature, download, install, restart and exact build identity. |
 | R10 | Current | Source CI and native receipts through `947ef1ac` recorded; installed acceptance remains separate. | Refresh after each new acceptance milestone. |
