@@ -50,7 +50,7 @@ pnpm --dir app install --frozen-lockfile
 pnpm --dir app run build:macos
 ```
 
-Outputs are in `app/src-tauri/target/release/bundle/dmg/`. Verify the standalone package with `pnpm --dir app run verify:macos`. Linux and Windows installers are built by [.github/workflows/gui-release.yml](.github/workflows/gui-release.yml); the local build script currently targets macOS only. Historical launch scripts are left untouched and their controlled launcher now refuses execution. See [Windows support](docs/GUI-PLATFORM-STATUS.md#windows-support-2026-09-30) for scope and verification.
+Outputs are in `app/src-tauri/target/release/bundle/dmg/`. Verify the standalone package with `pnpm --dir app run verify:macos`. Native CI builds macOS x64/ARM64 DMGs, Linux x64/ARM64 AppImage/DEB packages, Windows x64 NSIS/MSI and Windows ARM64 NSIS. Test artifacts include checksums and build identity; see [native architecture coverage](docs/GUI-PLATFORM-STATUS.md#native-architecture-pipeline) for their acceptance limits. Authorized signed releases use [.github/workflows/gui-release.yml](.github/workflows/gui-release.yml); the local build script targets macOS only. Historical launch scripts are left untouched and their controlled launcher now refuses execution.
 
 ## Quick start
 

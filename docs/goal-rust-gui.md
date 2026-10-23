@@ -2503,6 +2503,18 @@ its SHA256 is `3216bb3c6669de9e46dd4756348717858c2b50ac78375227edd0f7554519ecd0`
 The NSIS wrapper itself uses x86, as expected. No installer was run on the personal
 machine. Product Rust/frontend source remains identical to installed `fac8ed83`.
 
+The same source's Linux ARM64 artifacts were independently checksum-verified.
+The DEB declares `arm64`; its application and clock helper have ARM64 ELF headers,
+and the application carries the expected source marker. The AppImage runtime
+header is also ARM64. These are static package checks on the personal Intel Mac;
+actual extracted-package execution was performed on the native ARM CI runner.
+
+| Artifact from `9fc8427d` | SHA256 |
+| --- | --- |
+| Windows ARM64 NSIS | `54ec22f23d8d0ab3245254dc30f4ad1a9b7a8168ba1ab048b9231354673304cf` |
+| Linux ARM64 AppImage | `352aee70e12afc3a971977ebe0aefbaa7dc35a76f7cba36bdc73e9f67f2d50d0` |
+| Linux ARM64 DEB | `09ae0a021a4631d488b7c649a53f645d506779c24797309369c994a42ecad255` |
+
 Release preparation now includes the same six native targets, with required
 ARM64 AppImage/DEB/NSIS assets and 15 explicit updater keys. Each Linux architecture
 keeps its own AppImage fallback and DEB entry; Windows x64 retains MSI and ARM64
@@ -2520,3 +2532,14 @@ recorded: the first ARM runner lacked a declared XDG tool; the older Polkit fixt
 could not install its JavaScript rule; Intel macOS DMG construction also repeated
 the pre-existing busy-eject failure in the earlier `58787c14` run. A passing retry
 does not close that independent packaging investigation.
+
+Final source `45d44a3b` passed complete [CI](https://github.com/ly87ing/agent-manager/actions/runs/39983028071)
+and all twelve [GUI CI jobs](https://github.com/ly87ing/agent-manager/actions/runs/39983028252):
+six native engine targets, six installer targets, all application architecture
+checks and the four Windows/Linux helper checks. Both regular CI jobs passed the
+complete Rust/Tauri, script and frontend checks. The earlier `9fc8427d` and
+`3dade3b1` workflow runs were canceled after their completed ARM receipts were
+retained and the newer source superseded them; the delayed Linux step's retained
+log showed Ubuntu package downloads still in progress. No incomplete run is
+counted as a complete workflow success. This documentation-only receipt preserves
+the verified runtime, build scripts and test source.

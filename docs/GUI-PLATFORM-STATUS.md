@@ -16,10 +16,11 @@ and [scope](EXTENSIONS-ONLY.md).
 The [remaining-work queue](REMAINING-WORK.md) records source hardening through
 `947ef1ac`: conflict-preserving recovery, installed Git and standalone-entry
 verification, updater dependency fixes, the GLib backport and removal of manual
-bypass commands after verification failure. Complete
-[CI](https://github.com/ly87ing/agent-manager/actions/runs/39959737632) and
-[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39959737728) passed,
-including three native engine jobs and four installer builds. An isolated macOS
+bypass commands after verification failure. Native ARM64 and update-routing
+preparation through `45d44a3b` passed complete
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/39983028071) and
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39983028252),
+including six native engine jobs and six installer builds. An isolated macOS
 native instance verified refusal, corrected-origin switching, actual entry output
 and saved language/selection after restart. It used a separate identifier and
 was not an installed release. Full production acceptance remains open for
@@ -33,8 +34,8 @@ The older detailed snapshot below is retained until its receipts are refreshed.
 ## Native architecture pipeline
 
 GUI CI now declares native engine and package jobs for six operating-system and
-CPU combinations. Source `3dade3b1` passed the Windows/Linux ARM64 engine and
-installer jobs in [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39978400319).
+CPU combinations. Source `45d44a3b` passed all six engine and six installer jobs
+in [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39983028252).
 These native test/package receipts do not establish installed desktop or signed
 update acceptance.
 

@@ -1,9 +1,10 @@
 # Remaining Work
 
 Continue with **R7-R9: installed clients, receiving applications and signed updating**.
-Source hardening through `947ef1ac` passed complete
-[CI](https://github.com/ly87ing/agent-manager/actions/runs/39959737632) and
-[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39959737728).
+Source through `45d44a3b` passed complete
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/39983028071) and
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39983028252),
+including six native engine targets and six installer targets.
 Native source/package evidence does not establish full production acceptance.
 Local macOS x86_64 source `fac8ed83` was built, installed in Applications and run;
 the Launch all control and settings paths were read back from the installed app.
@@ -28,11 +29,11 @@ The repository owner owns release authorization in R9.
 | R7 | Partial | macOS x86_64 local install/runtime readback and isolated launch/Git cases passed. Installed cross-platform and actual consumers remain open. | Verify UI failures, restart/restore, login/share links and extension loading. |
 | R8 | Acceptance | Verify settings in receiving sessions/apps and clock behavior. | Read actual effects independently, including cancellation/failure cases. |
 | R9 | Release | Verify signed installed-app updating after separate authorization. | Verify signature, download, install, restart and exact build identity. |
-| R10 | Current | Source CI and native receipts through `947ef1ac` recorded; installed acceptance remains separate. | Refresh after each new acceptance milestone. |
+| R10 | Current | Complete source CI and six-target native receipts through `45d44a3b` recorded; installed acceptance remains separate. | Refresh after each new acceptance milestone. |
 | R11 | Portability | Resolve skill snapshot support decisions and native evidence gaps. | Verify filesystem/volume limits and explicit refusal of unsupported shapes. |
 | R12 | Investigation | Diagnose earlier intermittent macOS DMG busy-eject failures. | Reproduce and verify the cause; a passing retry alone cannot close it. |
 | R13 | Native tests passed | TLS/ZIP corrections, GLib backport, optimized Linux iterator and extracted bundle notices passed. Maintenance notices remain recorded. | Maintain source provenance and the [security review](subsystems/dependency-security.md). |
-| R14 | Native tests passed | `3dade3b1` passed Windows/Linux ARM64 engine and installer jobs. ARM64 release/update routing is prepared; signed and installed-desktop acceptance remains open. | Retain native evidence, payload/target binding and explicit desktop/signed-update limits. |
+| R14 | Native tests passed | `45d44a3b` passed all six engine and installer targets, including Windows/Linux ARM64 and helper architecture gates. ARM64 release/update routing is prepared; signed and installed-desktop acceptance remains open. | Retain native evidence, payload/target binding and explicit desktop/signed-update limits. |
 
 R4-R6 expand currently unavailable controls; preserve those explicit capability
 limits while completing acceptance of the supported operations.
