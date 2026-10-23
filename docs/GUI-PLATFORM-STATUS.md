@@ -24,9 +24,43 @@ native instance verified refusal, corrected-origin switching, actual entry outpu
 and saved language/selection after restart. It used a separate identifier and
 was not an installed release. Full production acceptance remains open for
 installed cross-platform/consumer workflows, receiving settings and signed
-updating. Maintenance notices remain documented. The active installed app was
-neither replaced nor stopped; source tests do not update it.
+updating. Maintenance notices remain documented. A later local macOS x86_64
+[installation receipt](goal-rust-gui.md#2026-10-23-local-macos-installation-and-runtime-readback)
+records source `fac8ed83` installed and running, including the Launch all control.
+It does not close the other platform or signed-updater boundaries.
 The older detailed snapshot below is retained until its receipts are refreshed.
+
+## Native architecture pipeline
+
+GUI CI now declares native engine and package jobs for six operating-system and
+CPU combinations. New ARM64 jobs remain candidates until their actual workflow
+receipts pass; adding a target is not native acceptance.
+
+| Platform | Native runner | CI installer formats |
+| --- | --- | --- |
+| macOS ARM64 | `macos-15` | DMG |
+| macOS x64 | `macos-15-intel` | DMG |
+| Linux x64 | `ubuntu-22.04` | AppImage, DEB |
+| Linux ARM64 | `ubuntu-22.04-arm` | AppImage, DEB |
+| Windows x64 | `windows-latest` | NSIS, MSI |
+| Windows ARM64 | `windows-11-arm` | NSIS |
+
+Before tests, the pipeline checks that runner, Node and Rust agree on the native
+architecture. It checks the engine, uv fixture and final app's PE/ELF/Mach-O
+machine headers before executing tools or collecting installers. uv 0.13.1 uses
+the upstream checksum for each OS/architecture; engine caches cannot restore
+another CPU's artifacts. Linux packages retain the Ubuntu 22.04 baseline and the
+existing isolated package-startup checks. Windows ARM64's NSIS wrapper runs under
+x86 emulation; the application itself must pass the ARM64 PE check, as described
+in the [Tauri Windows installer guidance](https://v2.tauri.app/distribute/windows-installer/#building-for-32-bit-or-arm).
+Hosted labels follow the [GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners).
+
+This changes test/build capability only. The separately authorized signed release
+pipeline and updater manifest still cover their previous four targets. Native
+desktop business interaction, real client consumption and signed updating remain
+separate acceptance gates. KDE repair also remains unavailable: the native
+`kwriteconfig` resolver uses `NoGlobals`, so it cannot replace the full-policy
+reader with equivalent immutable-global guarantees.
 
 Verified corrections through `e71cfd6f` add guarded GNOME single-primary-language
 repair and visible preference-readback limits, plus managed PyPI completion/selection
