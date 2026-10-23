@@ -13,12 +13,19 @@ and [scope](EXTENSIONS-ONLY.md).
 
 ## Current acceptance boundary (2026-10-23)
 
-The [remaining-work queue](REMAINING-WORK.md) records the verified `3ddd9b43`
-baseline, recovery hardening, Git dependency postconditions and updater dependency
-corrections. Standalone entry verification now has local regression evidence.
-Production readiness is not yet accepted: remaining dependency notices,
-installed cross-platform/consumer workflows and signed
-updating remain open. Current source tests do not update an installed app.
+The [remaining-work queue](REMAINING-WORK.md) records source hardening through
+`947ef1ac`: conflict-preserving recovery, installed Git and standalone-entry
+verification, updater dependency fixes, the GLib backport and removal of manual
+bypass commands after verification failure. Complete
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/39959737632) and
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39959737728) passed,
+including three native engine jobs and four installer builds. An isolated macOS
+native instance verified refusal, corrected-origin switching, actual entry output
+and saved language/selection after restart. It used a separate identifier and
+was not an installed release. Full production acceptance remains open for
+installed cross-platform/consumer workflows, receiving settings and signed
+updating. Maintenance notices remain documented. The active installed app was
+neither replaced nor stopped; source tests do not update it.
 The older detailed snapshot below is retained until its receipts are refreshed.
 
 Verified corrections through `e71cfd6f` add guarded GNOME single-primary-language

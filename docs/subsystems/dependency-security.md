@@ -34,7 +34,8 @@ endpoint, tag, Release or published installer is changed by these source fixes.
   [Linux regression](../../app/src-tauri/tests/glib_variant.rs) exercises all affected
   iterator methods; the test profile optimizes glib itself. Linux bundles include
   original license/copyright notices, independently compared after extraction in
-  GUI CI. Native Linux test/package results are pending for this change.
+  GUI CI. Source `947ef1ac` passed [native Linux test/package verification](https://github.com/ly87ing/agent-manager/actions/runs/39959737728),
+  including the optimized iterator case and both extracted notice comparisons.
 - zbus_names, zvariant, zvariant_derive, proc-macro-error and the resolved UNIC
   crates have unmaintained-package notices. These have no patched version in the
   queried advisories. Record replacement decisions separately from vulnerability

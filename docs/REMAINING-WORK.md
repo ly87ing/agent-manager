@@ -1,9 +1,10 @@
 # Remaining Work
 
-Continue with **R7: installed-client and actual-consumer acceptance**, with R13's
-remaining dependency decisions. R1 passed native engine jobs; R2/R3 implementations
-and local verification are recorded below. Native CI and installation remain
-separate acceptance steps.
+Continue with **R7-R9: installed clients, receiving applications and signed updating**.
+Source hardening through `947ef1ac` passed complete
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/39959737632) and
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39959737728).
+Native source/package evidence does not establish full production acceptance.
 
 Snapshot: 2026-10-23. Historical baseline: `3ddd9b43`; its final main
 [CI](https://github.com/ly87ing/agent-manager/actions/runs/39026462902) and
@@ -16,18 +17,21 @@ The repository owner owns release authorization in R9.
 | ID | Phase | Work and current state | Completion criterion |
 | --- | --- | --- | --- |
 | R1 | Native tests passed | `156849bc` passed native macOS/Windows/Linux engine jobs; installed-client evidence remains separate. | Retain conflicts; verify current, entries, backups and partial recovery on each native platform. |
-| R2 | Native CI pending | Implemented actual origin/commit, receipt and entry verification with retained candidates. | Verify identity and entries before completion/selection, including reuse, on all native platforms. |
-| R3 | Native CI pending | Standalone linking now rechecks the completed current candidate before saving preferences or writing entries. | Require fresh identity/target evidence and valid-link controls on each native platform. |
+| R2 | Native tests passed | Origin/commit, receipt, entries and retained retries passed all three native jobs, including actual uv/Git. | Keep fresh gates before completion/selection and reuse. |
+| R3 | Native tests passed | Standalone linking verifies current identity/commands before preference or pointer writes on all native platforms. | Preserve valid controls and unchanged files on refusal. |
 | R4 | Then | Implement KDE language and regional-format repair. | Preview scope; preserve settings; reject stale evidence; read back natively. |
 | R5 | Then | Implement Linux automatic-time switching beyond matching no-ops. | Verify provider, boot effects, cancellation and partial failure. |
 | R6 | Then | Extend GNOME beyond one primary language with explicit formats. | Verify fallback order/inherited formats without PAM/shell edits or logout. |
-| R7 | Acceptance | Exercise installed Windows/Linux/ARM macOS and real consumers. | Verify UI failures, restart/restore, login/share links and extension loading. |
+| R7 | Partial | Isolated macOS native Git refusal/success and language/selection restart readback passed. Installed cross-platform and actual consumers remain open. | Verify UI failures, restart/restore, login/share links and extension loading. |
 | R8 | Acceptance | Verify settings in receiving sessions/apps and clock behavior. | Read actual effects independently, including cancellation/failure cases. |
 | R9 | Release | Verify signed installed-app updating after separate authorization. | Verify signature, download, install, restart and exact build identity. |
-| R10 | Documentation | Refresh acceptance records and final main CI readback. | Add npm/native receipts; distinguish builds from installed acceptance. |
+| R10 | Current | Source CI and native receipts through `947ef1ac` recorded; installed acceptance remains separate. | Refresh after each new acceptance milestone. |
 | R11 | Portability | Resolve skill snapshot support decisions and native evidence gaps. | Verify filesystem/volume limits and explicit refusal of unsupported shapes. |
 | R12 | Investigation | Diagnose earlier intermittent macOS DMG busy-eject failures. | Reproduce and verify the cause; a passing retry alone cannot close it. |
-| R13 | Native CI pending | TLS/certificate patches and legacy ZIP removal passed CI. GLib's upstream fix is backported with optimized old/new evidence; maintenance notices remain recorded. | Verify resolved source, native optimized iterator and bundled notices in the [security review](subsystems/dependency-security.md). |
+| R13 | Native tests passed | TLS/ZIP corrections, GLib backport, optimized Linux iterator and extracted bundle notices passed. Maintenance notices remain recorded. | Maintain source provenance and the [security review](subsystems/dependency-security.md). |
+
+R4-R6 expand currently unavailable controls; preserve those explicit capability
+limits while completing acceptance of the supported operations.
 
 <details>
 <summary>Acceptance cases, source entry points and verified baseline</summary>
@@ -50,7 +54,7 @@ The repository owner owns release authorization in R9.
 - R3's old source accepted a changed npm package during standalone Link on macOS.
   Portable native cases now cover changed npm/PyPI/Git identity, missing commands,
   preserved current/files/preferences and valid linking. Native Windows execution
-  must establish its forwarding-file boundary; a file alone cannot prove its target.
+  established its forwarding-file boundary; a file alone cannot prove its target.
 
 ### R4-R6: Linux capability gaps
 

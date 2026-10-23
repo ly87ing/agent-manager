@@ -2399,3 +2399,33 @@ Backend source is unchanged from `ba92f0a7`, which passed complete
 the optimized native Linux GLib regression, package notices, three native engine
 jobs and four installer builds. Rust checks were not repeated for this renderer-only
 correction. Installed-client/consumer and signed-updater acceptance remain open.
+
+## 2026-10-23: native source acceptance and remaining release gate
+
+Source `947ef1ac` passed complete [CI](https://github.com/ly87ing/agent-manager/actions/runs/39959737632)
+and [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39959737728), including
+three native engine jobs, four installer builds, real npm/uv/Git fixtures, the
+optimized Linux GLib iterator and extracted AppImage/DEB license comparisons.
+Local engine 313 library cases and all integrations, Tauri 27, frontend 709/61
+files, frontend build and scripts 23 passed during their owning slices.
+
+A native macOS x86_64 test executable used production embedded assets, a separate
+identifier/deep-link scheme, isolated HOME/data and actual private Git candidates.
+Its marker was `947ef1ac167690fc274622a3b2bffbf982fe0faf-dirty`, explicitly
+reflecting the test configuration override. Actual Tauri interaction at the
+committed 1000-by-650 window refused wrong-origin switching, kept all 65 candidate
+and entry objects unchanged, and hid the manual command/copy controls. Correcting
+only the private fixture origin allowed the same confirmation to switch; independent
+file comparison found only that explicit correction and the intended current
+pointer change. The public fixture entry actually printed 2.0.0. Saving Chinese,
+closing normally and restarting read back both language and selected commit.
+The owned test process exited and its matching probe executable was removed;
+the pre-existing installed application's process and SHA256 remained unchanged.
+Both-language browser renderer checks covered the corrected warning at 1000/760 px.
+
+These receipts establish source/native test operation, not an installed release or
+actual assistant consumption. Receiving-session environment effects, installed
+Windows/Linux/ARM desktop workflows and signed installed update/restart/readback
+remain open. No personal OS preference, real assistant file, Release or tag changed.
+Creating signed release candidates remains a separately authorized step under
+AGENTS.md. A documentation-only follow-up preserves this exact runtime source.
