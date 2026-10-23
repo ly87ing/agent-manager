@@ -2,6 +2,14 @@
 
 What recent work got wrong, and the rule that would have caught it. Read this before changing code.
 
+## 2026-10-23: native runner images need explicit fixture dependencies
+
+- The first Ubuntu 22.04 ARM64 engine job reached actual share-link registration
+  and failed with `ENOENT` at the `xdg-mime` call. The older Linux image supplied
+  `xdg-utils` implicitly; the fixture dependency list did not. Install the package
+  explicitly on every Linux engine host. Keep the real registration, literal-URI
+  launch and unrelated-association assertions; a new runner must not skip them.
+
 Each lesson is a rule, then why, then the evidence (commit, test, or observation). "Seen" counts the separate days a review found it. A lesson seen on three or more days moves into [AGENTS.md](../AGENTS.md), [UI rules](UI-RULES.md), or a guard test, and its entry here shrinks to a pointer.
 
 ## 2026-10-23: failure recovery must preserve conflicts and follow actual moves
