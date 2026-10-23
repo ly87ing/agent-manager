@@ -84,6 +84,20 @@ pub(super) fn read() -> Option<State> {
 }
 
 impl State {
+    // A language change can otherwise change the effective inherited formats.
+    // Only an explicitly selected country may make that preference independent.
+    pub(super) fn inherited_target(
+        &self,
+        primary: &Primary,
+        region: Option<&str>,
+    ) -> Option<String> {
+        if !self.raw.is_empty() || self.inherited.as_ref() != Some(primary) {
+            return None;
+        }
+        super::linux::language_tag(&primary.locale)?;
+        super::repair::region_locale(&self.locale, region?)
+    }
+
     #[cfg(target_os = "linux")]
     pub(super) fn is_explicit(&self) -> bool {
         !self.raw.is_empty() && self.inherited.is_none()
@@ -109,19 +123,20 @@ impl State {
 }
 
 #[cfg(target_os = "linux")]
-pub(super) fn write(before: &State, expected: &str) -> bool {
+pub(super) fn write(before: &State, expected: &str, ready: impl FnOnce() -> bool) -> bool {
     before.available(expected)
         && guarded(before, read().as_ref(), || {
-            super::command::read(
-                "/usr/bin/gsettings",
-                &[
-                    "set",
-                    "org.gnome.system.locale",
-                    "region",
-                    &format!("'{expected}'"),
-                ],
-            )
-            .is_some()
+            ready()
+                && super::command::read(
+                    "/usr/bin/gsettings",
+                    &[
+                        "set",
+                        "org.gnome.system.locale",
+                        "region",
+                        &format!("'{expected}'"),
+                    ],
+                )
+                .is_some()
         })
 }
 
@@ -172,6 +187,29 @@ mod tests {
         }
         assert!(!guarded(&before, None, || panic!("No unknown write")));
         assert!(guarded(&before, Some(&before), || true));
+        let primary = before.inherited.as_ref().unwrap();
+        assert_eq!(
+            before.inherited_target(primary, Some("US")).as_deref(),
+            Some("en_US.UTF-8")
+        );
+        assert_eq!(
+            before.inherited_target(primary, Some("GB")).as_deref(),
+            Some("en_GB.UTF-8")
+        );
+        assert!(before.inherited_target(primary, None).is_none());
+        let mut changed = primary.clone();
+        changed.owner = ":1.3".into();
+        assert!(before.inherited_target(&changed, Some("US")).is_none());
+        assert!(before
+            .explicit("en_GB.UTF-8")
+            .inherited_target(primary, Some("US"))
+            .is_none());
+        let mut modifier = before.clone();
+        modifier.locale = "sr_RS@latin".into();
+        modifier.inherited.as_mut().unwrap().locale = modifier.locale.clone();
+        assert!(modifier
+            .inherited_target(modifier.inherited.as_ref().unwrap(), Some("RS"))
+            .is_none());
     }
     #[test]
     fn effective_match_does_not_verify_reset_inheritance_or_a_different_source() {

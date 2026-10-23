@@ -80,6 +80,31 @@ fn ntp_extras(
     items
 }
 
+fn verify_region_results(
+    results: &mut [super::repair::Item],
+    actual: Option<&super::repair_linux_region::State>,
+    expected: &Value,
+) {
+    if json!(actual) != *expected {
+        for result in results.iter_mut().filter(|item| {
+            matches!(
+                item.id.as_str(),
+                "language.region" | "language.independent_formats"
+            ) && matches!(
+                item.status.as_str(),
+                "verified" | "verified_after_error" | "unchanged"
+            )
+        }) {
+            result.status = if actual.is_some() {
+                "unverified"
+            } else {
+                "outcome_unknown"
+            }
+            .into();
+        }
+    }
+}
+
 #[cfg(target_os = "linux")]
 #[derive(Clone, PartialEq, Eq, serde::Serialize)]
 struct Manager {
@@ -251,11 +276,15 @@ impl Settings for LinuxSettings {
         } else {
             None
         };
-        self.language_locale = if self
-            .region
-            .as_ref()
-            .is_some_and(|state| state.is_explicit())
-        {
+        let inherited_formats = self.region.as_ref().and_then(|region| {
+            region.inherited_target(&self.language.as_ref()?.primary, target.region.as_deref())
+        });
+        self.language_locale = if self.region.as_ref().is_some_and(|state| {
+            state.is_explicit()
+                || inherited_formats
+                    .as_deref()
+                    .is_some_and(|locale| state.available(locale))
+        }) {
             super::repair_linux_language::installed(&target.languages)
         } else {
             None
@@ -336,6 +365,21 @@ impl Settings for LinuxSettings {
         );
         if self.language.is_some() && self.language_locale.is_some() {
             snapshot.unavailable.remove("language.preferred");
+            if inherited_formats.is_some()
+                && snapshot.values["language.preferred"]
+                    .as_ref()
+                    .and_then(|value| value[0].as_str())
+                    .zip(target.languages.first())
+                    .is_some_and(|(before, expected)| !before.eq_ignore_ascii_case(expected))
+            {
+                snapshot.extras.push(Item {
+                    id: "language.independent_formats".into(),
+                    scope: "user".into(),
+                    before: Some(json!(false)),
+                    expected: json!(true),
+                    status: "change".into(),
+                });
+            }
         }
         snapshot.values.insert(
             "language.region".into(),
@@ -407,7 +451,10 @@ impl Settings for LinuxSettings {
         item.scope == "system"
             || matches!(
                 item.id.as_str(),
-                "time.automatic_timezone" | "language.preferred" | "language.region"
+                "time.automatic_timezone"
+                    | "language.preferred"
+                    | "language.region"
+                    | "language.independent_formats"
             )
     }
     fn system(&mut self, items: &[Item]) -> Result<(String, Vec<Item>, Option<bool>)> {
@@ -417,6 +464,7 @@ impl Settings for LinuxSettings {
                 "time.timezone"
                     | "time.automatic_timezone"
                     | "language.region"
+                    | "language.independent_formats"
                     | "language.preferred"
                     | "ntp.server"
                     | "ntp.server.persistent"
@@ -541,8 +589,15 @@ impl Settings for LinuxSettings {
             .iter()
             .filter(|item| !item.id.starts_with("ntp.server"))
         {
+            if results.iter().any(|result| result.id == item.id) {
+                continue;
+            }
             let mut result = item.clone();
-            if let Some(status) = authorization.as_ref().and_then(|auth| auth.failure()) {
+            if let Some(status) = language_authorization
+                .as_ref()
+                .and_then(|auth| auth.failure())
+                .or_else(|| authorization.as_ref().and_then(|auth| auth.failure()))
+            {
                 result.status = if status == "cancelled" {
                     "not_applied"
                 } else {
@@ -563,6 +618,7 @@ impl Settings for LinuxSettings {
             }
             let snapshot = self.snapshot(&target)?;
             if snapshot.context != baseline || snapshot.unavailable.contains(&item.id) {
+                verify_region_results(&mut results, self.region.as_ref(), &baseline["region"]);
                 result.status = "stale".into();
                 results.push(result);
                 return Ok(("partial".into(), results, None));
@@ -601,20 +657,48 @@ impl Settings for LinuxSettings {
                 let verified = result.status == "verified";
                 results.push(result);
                 if !verified {
+                    verify_region_results(
+                        &mut results,
+                        super::repair_linux_region::read().as_ref(),
+                        &baseline["region"],
+                    );
                     return Ok(("partial".into(), results, None));
                 }
                 baseline["language"] = json!(expected);
-            } else if item.id == "language.region" {
-                let expected = item
-                    .expected
-                    .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("Invalid GNOME formats locale."))?;
+            } else if matches!(
+                item.id.as_str(),
+                "language.region" | "language.independent_formats"
+            ) {
                 let before = self
                     .region
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("GNOME formats are unavailable."))?;
-                let expected_after = before.explicit(expected);
-                let written = super::repair_linux_region::write(before, expected);
+                let expected = if item.id == "language.independent_formats" {
+                    before.inherited_target(
+                        &self
+                            .language
+                            .as_ref()
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("GNOME primary language is unavailable.")
+                            })?
+                            .primary,
+                        target.region.as_deref(),
+                    )
+                } else {
+                    item.expected.as_str().map(str::to_string)
+                }
+                .ok_or_else(|| anyhow::anyhow!("Invalid GNOME formats locale."))?;
+                let expected_after = before.explicit(&expected);
+                // The visible independence dependency may already have saved it.
+                let written = before == &expected_after
+                    || super::repair_linux_region::write(before, &expected, || {
+                        language_authorization
+                            .as_ref()
+                            .is_none_or(|auth| auth.failure().is_none())
+                            && authorization
+                                .as_ref()
+                                .is_none_or(|auth| auth.failure().is_none())
+                    });
                 result.status = match super::repair_linux_region::read() {
                     Some(after) if after == expected_after => {
                         if written {
@@ -629,7 +713,27 @@ impl Settings for LinuxSettings {
                 }
                 .into();
                 let verified = result.status == "verified";
+                let format_status = result.status.clone();
                 results.push(result);
+                if item.id == "language.independent_formats"
+                    && matches!(format_status.as_str(), "verified" | "verified_after_error")
+                {
+                    let mut region = items
+                        .iter()
+                        .find(|item| item.id == "language.region")
+                        .cloned()
+                        .unwrap_or_else(|| Item {
+                            id: "language.region".into(),
+                            scope: "user".into(),
+                            before: Some(json!(before.locale)),
+                            expected: json!(expected),
+                            status: "unchanged".into(),
+                        });
+                    if region.status == "change" {
+                        region.status = format_status;
+                    }
+                    results.push(region);
+                }
                 if !verified {
                     return Ok(("partial".into(), results, None));
                 }
@@ -712,18 +816,7 @@ impl Settings for LinuxSettings {
                     }
                     .into();
                 }
-                if snapshot.context["region"] != baseline["region"] {
-                    for result in &mut results {
-                        if result.id == "language.region" && result.status == "verified" {
-                            result.status = if self.region.is_some() {
-                                "unverified"
-                            } else {
-                                "outcome_unknown"
-                            }
-                            .into();
-                        }
-                    }
-                }
+                verify_region_results(&mut results, self.region.as_ref(), &baseline["region"]);
                 if snapshot.context["time"] != baseline["time"] {
                     for result in &mut results {
                         if result.id == "time.timezone" && result.status == "verified" {
@@ -769,6 +862,30 @@ impl Settings for LinuxSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unknown_region_readback_invalidates_both_completed_format_results() {
+        let mut results: Vec<_> = [
+            "language.independent_formats",
+            "language.region",
+            "language.preferred",
+        ]
+        .into_iter()
+        .map(|id| super::super::repair::Item {
+            id: id.into(),
+            scope: "user".into(),
+            before: None,
+            expected: json!(true),
+            status: "verified".into(),
+        })
+        .collect();
+        verify_region_results(&mut results, None, &json!(null));
+        assert!(results.iter().all(|item| item.status == "verified"));
+        results[1].status = "unchanged".into();
+        verify_region_results(&mut results, None, &json!({"raw":"en_GB.UTF-8"}));
+        assert_eq!(results[0].status, "outcome_unknown");
+        assert_eq!(results[1].status, "outcome_unknown");
+        assert_eq!(results[2].status, "verified");
+    }
     #[test]
     fn persistent_ntp_preview_is_independent_of_the_runtime_noop() {
         let target: super::super::Target =

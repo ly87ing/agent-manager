@@ -356,8 +356,13 @@ AccountsService object's `SetLanguages` method. The current `Language` must matc
 the first element of a nonempty typed `Languages` array. An installed UTF-8 locale
 must map to the exact requested language tag. The raw metadata tail stays in its
 original order; it is not treated as an ordered UI fallback list. Multiple target
-languages, unknown evidence and inherited/empty GNOME formats remain unavailable.
-An explicit formats preference is required and remains unchanged by this setter.
+languages and unknown evidence remain unavailable. Existing explicit formats stay
+unchanged by the language setter. Inherited/empty formats require a simultaneously
+selected target country, coherent primary-language identity and an installed,
+writable formats locale for that country. A visible `language.independent_formats`
+dependency saves that full formats locale before changing language, including when
+the effective country already matches. The normal region row still shows the full
+before/expected locale. Language-only profiles never freeze inherited formats.
 
 The preview binds the native primary locale, raw array, bus/owner/object/UID,
 selected installed locale and the original formats/backend context. Confirmation
@@ -366,6 +371,13 @@ baseline check. The setter addresses the bound unique owner with `NoAutoStart`
 and no interactive-authorization flag. Its own authorization still applies;
 preauthorization does not replace the service's decision. Cancellation, refusal,
 changed evidence, an unknown reply or mismatched readback stops later writes.
+All authorizations complete before the formats dependency writes. Its complete
+native readback advances only the formats baseline; subsequent language readback
+advances only language evidence. A failed language step retains independently
+verified saved formats in both result rows, requests user-controlled relogin and
+does not automatically restore them. An external formats reset or unreadable
+readback invalidates both formats results. Repeating a completed repair performs
+no dependency write.
 The API has no compare-and-swap guarantee against an uncoordinated external writer.
 
 Verification covers the existing service's primary preference only. AccountsService
@@ -376,9 +388,12 @@ The tool does not rewrite PAM/shell files, install translations, log out or rest
 applications. See the upstream [setter](https://sources.debian.org/src/accountsservice/23.13.9-8/src/user.c/),
 [authorization](https://sources.debian.org/src/accountsservice/23.13.9-8/src/daemon.c/)
 and [GNOME consumer](https://sources.debian.org/src/gnome-control-center/1%3A48.4-1~deb13u1/panels/system/region/cc-region-page.c/).
-Native Linux acceptance is required before promoting this implementation; the
+Native Linux acceptance is required before promoting a change to this writer; the
 private provider fixture uses the distro AccountsService and Polkit daemons; the
 existing CI authentication agent exercises cancellation and authorization drift.
+The inherited-formats cases cover selected changed/matching countries and zero
+formats writes on cancellation or authorization drift. The separate lost-reply
+fixture covers retained partial formats, service reply loss and an external reset.
 That fixture does not establish installed-desktop adoption.
 
 GNOME regional-format repair writes only the original user's

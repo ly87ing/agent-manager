@@ -95,11 +95,11 @@ function ownerIdentity() {
   const start = readFileSync(`/proc/${pid}/stat`, 'utf8').split(')').at(-1).trim().split(/\s+/)[19];
   return { owner, pid, start };
 }
-async function authenticate(mode) {
-  const preview = cli('environment:repair-preview').data;
+async function authenticate(mode, profile = spec) {
+  const preview = cli('environment:repair-preview', [], false, profile).data;
   console.log('LANGUAGE_PREVIEW_RECEIPT ' + JSON.stringify(preview));
   const child = spawn('/bin/sh', ['-c', 'kill -STOP $$; exec "$@"', 'am-owned-cli', binary,
-    'environment:repair', '--spec', spec, '--base', preview.base, '--confirm', '--json'],
+    'environment:repair', '--spec', profile, '--base', preview.base, '--confirm', '--json'],
     { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
   const childResult = collected(child);
   let agent, agentResult, ready;
@@ -233,9 +233,46 @@ try {
   }
   gsettings('reset', 'org.gnome.system.locale', 'region');
   assert.equal(cli('environment:repair-preview').data.items[0].status, 'unavailable');
+  const inheritedProfile = JSON.stringify({ languages: ['fr-FR'], region: 'GB' });
+  for (const mode of ['cancel', 'change']) {
+    const before = readFileSync(join(cacheDir, user));
+    const result = await authenticate(`language-${mode}`, inheritedProfile);
+    assert.equal(result.status, mode === 'cancel' ? 'cancelled' : 'partial', JSON.stringify(result));
+    assert.equal(result.items.find(item => item.id === 'language.independent_formats').status, mode === 'cancel' ? 'not_applied' : 'stale');
+    assert.equal(gsettings('get', 'org.gnome.system.locale', 'region'), "''", 'Authorization must precede the formats write');
+    if (mode === 'cancel') assert.deepEqual(readFileSync(join(cacheDir, user)), before);
+    assert.equal(property('Language'), 'en_US.UTF-8');
+    replacePolicy(policy);
+    set(['en_US.UTF-8', 'de_DE.UTF-8']);
+  }
+  for (const region of ['GB', 'US']) {
+    const profile = JSON.stringify({ languages: ['fr-FR'], region });
+    const before = readFileSync(join(cacheDir, user));
+    const preview = cli('environment:repair-preview', [], false, profile).data;
+    assert.deepEqual(preview.items.map(item => item.id), ['language.independent_formats', 'language.preferred', 'language.region']);
+    assert.equal(preview.items[0].status, 'change');
+    assert.equal(preview.items[0].before, false);
+    assert.equal(preview.items[0].expected, true);
+    assert.equal(preview.items[2].status, region === 'US' ? 'unchanged' : 'change');
+    assert.equal(gsettings('get', 'org.gnome.system.locale', 'region'), "''");
+    assert.deepEqual(readFileSync(join(cacheDir, user)), before, 'Preview must not write provider preferences');
+    const applied = cli('environment:repair', ['--base', preview.base, '--confirm'], false, profile).data;
+    console.log('LANGUAGE_INHERITED_RECEIPT ' + JSON.stringify({ region, applied }));
+    assert.equal(applied.status, 'applied', JSON.stringify(applied));
+    assert.deepEqual(applied.items.map(item => item.status), ['verified', 'verified', region === 'US' ? 'unchanged' : 'verified']);
+    assert.equal(applied.relogin_required, true);
+    assert.equal(gsettings('get', 'org.gnome.system.locale', 'region'), `'en_${region}.UTF-8'`);
+    assert.equal(property('Language').replace('utf8', 'UTF-8'), 'fr_FR.UTF-8');
+    assert.deepEqual(property('Languages').slice(1), ['de_DE.UTF-8']);
+    const again = cli('environment:repair-preview', [], false, profile).data;
+    assert(!again.items.some(item => item.id === 'language.independent_formats'));
+    assert.equal(cli('environment:repair', ['--base', again.base, '--confirm'], false, profile).data.status, 'not_needed');
+    gsettings('reset', 'org.gnome.system.locale', 'region');
+    set(['en_US.UTF-8', 'de_DE.UTF-8']);
+  }
   assert(!existsSync(process.env.HOME));
   assert.deepEqual(existsSync(pam) ? readFileSync(pam) : null, originalPam, 'Provider changed caller PAM overrides');
-  console.log('Private native AccountsService and Polkit: primary preference, metadata/formats preservation, restart persistence, no-op, genuine authorization cancellation/change/same-process dispatch and unavailable targets passed; desktop adoption remains unverified.');
+  console.log('Private native AccountsService and Polkit: primary preference, metadata/formats preservation, explicit selected inherited formats (changed/matched country), restart persistence, no-op, genuine authorization cancellation/change/same-process dispatch and unavailable targets passed; desktop adoption remains unverified.');
 } finally {
   if (service && service.exitCode === null) { service.kill('SIGTERM'); await serviceResult; }
   if (authorityIdentity) assert.deepEqual(ownerIdentity(), authorityIdentity, 'Private authority identity changed');

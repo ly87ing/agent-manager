@@ -25,7 +25,7 @@ The repository owner owns release authorization in R9.
 | R3 | Native tests passed | Standalone linking verifies current identity/commands before preference or pointer writes on all native platforms. | Preserve valid controls and unchanged files on refusal. |
 | R4 | Then | Implement KDE language and regional-format repair. | Preview scope; preserve settings; reject stale evidence; read back natively. |
 | R5 | Then | Implement Linux automatic-time switching beyond matching no-ops. | Verify provider, boot effects, cancellation and partial failure. |
-| R6 | Then | Extend GNOME beyond one primary language with explicit formats. | Verify fallback order/inherited formats without PAM/shell edits or logout. |
+| R6 | Then | Extend GNOME beyond one primary language and explicitly selected regional formats. | Verify fallback order and language-only inherited formats without PAM/shell edits or logout. |
 | R7 | Partial | macOS x86_64 local install/runtime readback and isolated launch/Git cases passed. Installed cross-platform and actual consumers remain open. | Verify UI failures, restart/restore, login/share links and extension loading. |
 | R8 | Acceptance | Verify settings in receiving sessions/apps and clock behavior. | Read actual effects independently, including cancellation/failure cases. |
 | R9 | Release | Verify signed installed-app updating after separate authorization. | Verify signature, download, install, restart and exact build identity. |
@@ -76,6 +76,9 @@ limits while completing acceptance of the supported operations.
 - GNOME's preserved raw `Languages` tail is metadata, not proof of ordered UI
   fallback behavior. Existing `LANGUAGE`, `LC_MESSAGES` and `LC_ALL` overrides
   must stay visible. Verify new-session effects separately from setter readback.
+  Simultaneously selected language/country now has a visible formats-independence
+  dependency; its new native changed/matching-country and failure cases require
+  current-source acceptance before treating that slice as verified.
 
 ### R7-R9: native installation and consumer acceptance
 

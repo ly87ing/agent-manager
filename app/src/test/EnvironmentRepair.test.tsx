@@ -35,6 +35,30 @@ async function open() {
 }
 
 describe("Automatic environment repair", () => {
+  it.each(["en", "zh-CN"] as const)("exposes inherited formats before language repair and retains a partial save in %s", async (language) => {
+    setLanguage(language);
+    const configured = { ...profile, target: environmentFixture({ languages: ["fr-FR"], region: "GB" }).target };
+    const preview: EnvironmentRepairPlan = { ...plan, platform: "linux", target: configured.target, items: [
+      { id: "language.independent_formats", scope: "user", before: false, expected: true, status: "change" },
+      { id: "language.preferred", scope: "user", before: ["en-US"], expected: ["fr-FR"], status: "change" },
+      { id: "language.region", scope: "user", before: "en_US.UTF-8", expected: "en_GB.UTF-8", status: "change" },
+    ] };
+    const { calls } = renderWithEngine(<EnvironmentRepairDialog profile={configured} onResult={() => {}} onClose={() => {}} />, {
+      "environment:repair-preview": makeEnvelope(preview),
+      "environment:repair": makeEnvelope({ ...result("partial"), items: preview.items.map(item => ({ ...item, status: item.id === "language.preferred" ? "failed" : "verified" })), relogin_required: true }),
+    });
+    const dialog = await screen.findByRole("dialog");
+    await within(dialog).findByText(language === "en" ? "Keep regional formats independent of language" : "保持区域格式独立于语言");
+    expect([...dialog.querySelectorAll("[data-repair-id]")].map(row => row.getAttribute("data-repair-id"))).toEqual(preview.items.map(item => item.id));
+    expect(dialog).toHaveTextContent(language === "en" ? "even when the current region already matches" : "即使当前地区已符合");
+    expect(dialog).toHaveTextContent("en_US.UTF-8 → en_GB.UTF-8");
+    expect(calls.filter(call => call.command === "environment:repair")).toHaveLength(0);
+    await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
+    await within(dialog).findByText(language === "en" ? "Automatic repair is incomplete. Review the individual results and check again." : "自动修复未全部完成，请查看逐项结果和重新检查。");
+    expect(within(dialog).getAllByText(language === "en" ? "Preference saved and read back" : "偏好已保存并读回")).toHaveLength(2);
+    expect(dialog).toHaveTextContent(language === "en" ? "Saved formats remain if a later step fails" : "若后续失败，已保存的格式会保留");
+    expect(dialog).toHaveTextContent(language === "en" ? "verify the display language and regional formats" : "再验证显示语言和地区格式");
+  });
   it.each(["en", "zh-CN"] as const)("distinguishes GNOME primary preference readback from persistence and fallback order in %s", async (language) => {
     setLanguage(language);
     const configured = { ...profile, target: environmentFixture({ languages: ["fr-FR"], region: "US" }).target };
@@ -49,7 +73,7 @@ describe("Automatic environment repair", () => {
     });
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findByText(language === "en" ? "GNOME primary language preference" : "GNOME 主语言偏好");
-    expect(dialog).toHaveTextContent(language === "en" ? "Multiple fallback languages and inherited formats cannot be repaired yet" : "多语言回退与继承格式暂不可修复");
+    expect(dialog).toHaveTextContent(language === "en" ? "Inherited formats also require a selected target region" : "继承的地区格式需要同时选择目标地区");
     expect(dialog).not.toHaveTextContent(language === "en" ? "preserving your language preference" : "语言偏好保持原样");
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
     await within(dialog).findByText(language === "en" ? "Primary language preference read back" : "主语言偏好已读回");

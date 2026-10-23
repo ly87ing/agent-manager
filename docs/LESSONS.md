@@ -2,6 +2,16 @@
 
 What recent work got wrong, and the rule that would have caught it. Read this before changing code.
 
+## 2026-10-23: prerequisite writes must retain every visible completed effect
+
+- A formats-independence dependency can satisfy the later region row before the
+  language setter runs. Review caught that an early language failure would mark
+  that region row not applied. Record its independently verified result with the
+  dependency, retain it on failure, and invalidate both rows if formats drift.
+- Recheck the dependent action's authorization before its prerequisite writes,
+  including after earlier batch operations; authorization acquisition alone does
+  not establish that a bounded authorization is still fresh.
+
 ## 2026-10-23: native runner images need explicit fixture dependencies
 
 - The first Ubuntu 22.04 ARM64 engine job reached actual share-link registration

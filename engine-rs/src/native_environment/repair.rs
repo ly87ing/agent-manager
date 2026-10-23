@@ -492,8 +492,10 @@ pub(super) fn handle(ctx: &Context, req: &Request) -> Result<Value> {
         }
         let relogin_required = cfg!(target_os = "linux")
             && items.iter().any(|item| {
-                matches!(item.id.as_str(), "language.region" | "language.preferred")
-                    && matches!(item.status.as_str(), "verified" | "verified_after_error")
+                matches!(
+                    item.id.as_str(),
+                    "language.region" | "language.preferred" | "language.independent_formats"
+                ) && matches!(item.status.as_str(), "verified" | "verified_after_error")
             });
         Ok(
             json!({"status":status,"items":items,"report":report,"restart_required":restart_required,"relogin_required":relogin_required,"clock_error":clock_error,"verification_limits":verification_limits}),

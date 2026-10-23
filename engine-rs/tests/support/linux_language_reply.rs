@@ -38,6 +38,7 @@ struct State {
     languages: Vec<String>,
     lose_reply: bool,
     writes: usize,
+    reset_formats: Option<std::path::PathBuf>,
 }
 struct User {
     uid: u32,
@@ -68,6 +69,15 @@ impl User {
         let mut state = self.state.lock().unwrap();
         state.languages = languages;
         state.writes += 1;
+        if let Some(settings) = &state.reset_formats {
+            assert!(Command::new("/usr/bin/gsettings")
+                .env("GSETTINGS_BACKEND", "keyfile")
+                .env("XDG_CONFIG_HOME", settings)
+                .args(["reset", "org.gnome.system.locale", "region"])
+                .status()
+                .unwrap()
+                .success());
+        }
         if state.lose_reply {
             Err(zbus::fdo::Error::NoReply(
                 "Private lost-reply control".into(),
@@ -126,6 +136,7 @@ fn language_reply_loss_stops_formats_even_when_primary_readback_matches() {
         languages: vec!["en_US.UTF-8".into(), "de_DE.UTF-8".into()],
         lose_reply: true,
         writes: 0,
+        reset_formats: None,
     }));
     let connection = zbus::blocking::connection::Builder::address(ready.trim())
         .unwrap()
@@ -174,16 +185,12 @@ fn language_reply_loss_stops_formats_even_when_primary_readback_matches() {
         String::from_utf8(output.stdout).unwrap().trim().to_string()
     };
     formats(&["set", "org.gnome.system.locale", "region", "'en_GB.UTF-8'"]);
-    let cli = |action: &str, flags: &[&str]| {
+    let cli = |action: &str, flags: &[&str], country: &str| {
         let mut command = Command::new(env!("CARGO_BIN_EXE_agent-manager-engine"));
         env(&mut command);
+        let profile = serde_json::json!({"languages":["fr-FR"],"region":country}).to_string();
         let output = command
-            .args([
-                action,
-                "--spec",
-                r#"{"languages":["fr-FR"],"region":"US"}"#,
-                "--json",
-            ])
+            .args([action, "--spec", &profile, "--json"])
             .args(flags)
             .output()
             .unwrap();
@@ -192,37 +199,81 @@ fn language_reply_loss_stops_formats_even_when_primary_readback_matches() {
         assert_eq!(value["ok"], true, "{value}");
         value["data"].clone()
     };
-    for lost in [true, false] {
+    for (inherited, lost, reset, country) in [
+        (false, true, false, "US"),
+        (false, false, false, "US"),
+        (true, true, false, "GB"),
+        (true, false, false, "GB"),
+        (true, false, true, "GB"),
+        (true, false, true, "US"),
+    ] {
         {
             let mut state = state.lock().unwrap();
             state.languages[0] = "en_US.UTF-8".into();
             state.lose_reply = lost;
+            state.reset_formats = reset.then(|| settings.clone());
         }
-        let preview = cli("environment:repair-preview", &[]);
+        if inherited {
+            formats(&["reset", "org.gnome.system.locale", "region"]);
+        } else {
+            formats(&["set", "org.gnome.system.locale", "region", "'en_GB.UTF-8'"]);
+        }
+        let preview = cli("environment:repair-preview", &[], country);
         assert_eq!(preview["items"][0]["status"], "change", "{preview}");
         assert!(!home.exists());
         let applied = cli(
             "environment:repair",
             &["--base", preview["base"].as_str().unwrap(), "--confirm"],
+            country,
         );
         assert_eq!(
             applied["status"],
-            if lost { "partial" } else { "applied" },
+            if lost || reset { "partial" } else { "applied" },
+            "{applied}"
+        );
+        let items = applied["items"].as_array().unwrap();
+        let status = |id: &str| {
+            items.iter().find(|item| item["id"] == id).unwrap()["status"]
+                .as_str()
+                .unwrap()
+        };
+        assert_eq!(
+            status("language.preferred"),
+            if lost {
+                "outcome_unknown"
+            } else if reset {
+                "unverified"
+            } else {
+                "verified"
+            },
             "{applied}"
         );
         assert_eq!(
-            applied["items"][0]["status"],
-            if lost { "outcome_unknown" } else { "verified" },
+            status("language.region"),
+            if reset {
+                "unverified"
+            } else if lost && !inherited {
+                "not_applied"
+            } else {
+                "verified"
+            },
             "{applied}"
         );
-        assert_eq!(
-            applied["items"][1]["status"],
-            if lost { "not_applied" } else { "verified" },
-            "{applied}"
-        );
+        if inherited {
+            assert_eq!(
+                status("language.independent_formats"),
+                if reset { "unverified" } else { "verified" },
+                "{applied}"
+            );
+            if !reset {
+                assert_eq!(applied["relogin_required"], true);
+            }
+        }
         assert_eq!(
             formats(&["get", "org.gnome.system.locale", "region"]),
-            if lost {
+            if reset {
+                "''"
+            } else if inherited || lost {
                 "'en_GB.UTF-8'"
             } else {
                 "'en_US.UTF-8'"
@@ -232,5 +283,5 @@ fn language_reply_loss_stops_formats_even_when_primary_readback_matches() {
         assert!(state.languages[0].starts_with("fr_FR."));
         assert_eq!(state.languages[1], "de_DE.UTF-8");
     }
-    assert_eq!(state.lock().unwrap().writes, 2);
+    assert_eq!(state.lock().unwrap().writes, 6);
 }
