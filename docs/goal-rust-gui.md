@@ -2194,28 +2194,6 @@ Windows/Linux/arm64 desktop workflows, multi-volume low-space acceptance and
 signed updating remain unverified. No personal OS setting, real assistant file,
 installed application, Release or tag changed.
 
-## 2026-10-23: GLib string-iterator backport
-
-The desktop now selects a local glib 0.18.5 source with upstream PR 1343's two-line
-mutable out-parameter correction. All 121 published crate files were compared
-against the checksum-verified original archive; only those lines differ. The
-Linux dependency graph selects this source and preserves existing versions and
-unrelated dependency edges. Original license/copyright notices are copied into
-Linux bundles, with independent AppImage/DEB extraction comparisons in GUI CI.
-The original version remains visible to advisory scanners. See the
-[dependency review](subsystems/dependency-security.md).
-
-A minimal actual consumer on macOS x86_64 with glib optimized at level 3 aborted
-on the pristine source's null pointer, then passed the identical iterator case
-with the backport. Tauri 27, frontend 708/61 files, production frontend build,
-script 23, formatting and local links passed. The new native Linux integration
-case executes affected iterator methods with the dependency optimized; its zero
-cases on macOS do not establish Linux execution. Native Linux test/package checks
-are pending main CI. The complete shared-engine suite previously passed at
-unchanged engine source `7e319d22`; it was not repeated for this desktop dependency
-change. No personal OS setting, real assistant file, installed application,
-Release or tag changed.
-
 ## 2026-10-17: managed PyPI command-entry verification
 
 Main `a3abb7c7` checks every declared managed PyPI command before completion
@@ -2379,3 +2357,45 @@ execution and unchanged interpreter bytes. Native CI is pending for this slice.
 No interface layout changed; the preceding actual-payload renderer checks do not
 establish installed-client acceptance. No personal OS setting, real assistant file,
 installed application, Release or tag changed.
+
+## 2026-10-23: GLib string-iterator backport
+
+The desktop now selects a local glib 0.18.5 source with upstream PR 1343's two-line
+mutable out-parameter correction. All 121 published crate files were compared
+against the checksum-verified original archive; only those lines differ. The
+Linux dependency graph selects this source and preserves existing versions and
+unrelated dependency edges. Original license/copyright notices are copied into
+Linux bundles, with independent AppImage/DEB extraction comparisons in GUI CI.
+The original version remains visible to advisory scanners. See the
+[dependency review](subsystems/dependency-security.md).
+
+A minimal actual consumer on macOS x86_64 with glib optimized at level 3 aborted
+on the pristine source's null pointer, then passed the identical iterator case
+with the backport. Tauri 27, frontend 708/61 files, production frontend build,
+script 23, formatting and local links passed. The new native Linux integration
+case executes affected iterator methods with the dependency optimized; its zero
+cases on macOS do not establish Linux execution. Native Linux test/package checks
+are pending main CI. The complete shared-engine suite previously passed at
+unchanged engine source `7e319d22`; it was not repeated for this desktop dependency
+change. No personal OS setting, real assistant file, installed application,
+Release or tag changed.
+
+## 2026-10-23: unverified outcomes hide bypass commands
+
+Native interaction with an isolated identifier and actual Tauri backend exposed
+a remaining copyable manual command after a Git-origin refusal. The dialog now
+hides that block and its copy button for unverified-version/entry outcomes.
+Ordinary execution errors retain their manual alternative. The seven refusal
+renderer cases failed before this correction; all 25 Programs cases and the
+complete 709-case/61-file frontend suite and production build passed afterwards.
+Actual native refusal preserved all 65 candidate/entry objects, including current.
+Both-language renderer checks at 1000/760 px used actual native payloads, with
+reachable controls, preserved diagnostics and no manual-command bypass or page
+overflow. Recompiled native confirmation remains separate evidence.
+
+Backend source is unchanged from `ba92f0a7`, which passed complete
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/39956923508) and
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39956923462), including
+the optimized native Linux GLib regression, package notices, three native engine
+jobs and four installer builds. Rust checks were not repeated for this renderer-only
+correction. Installed-client/consumer and signed-updater acceptance remain open.

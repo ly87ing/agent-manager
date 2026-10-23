@@ -218,9 +218,28 @@ describe("程序页：谁需要、装在哪、什么版本；动作先看计划�
     expect(screen.getByTestId("program-action-dialog")).toBeInTheDocument();
     expect(document.querySelector('[data-sonner-toast][data-type="warning"]')).toBeInTheDocument();
     expect(screen.queryByText(/可以复制上面的命令自己执行/)).toBeNull();
+    expect(screen.queryByTestId("program-manual")).toBeNull();
+    expect(screen.queryByTestId("program-copy-manual")).toBeNull();
     expect(within(screen.getByTestId("confirm-modal-feedback")).getByRole("alert")).toHaveClass("text-warning");
     expect(screen.getByTestId("confirm-modal-feedback")).toHaveAttribute("tabindex", "0");
     expect(calls.filter((call) => call.command === "programs:apply")).toHaveLength(1);
+  });
+
+  it("ordinary execution errors retain the manual command", async () => {
+    const plan = { ...PLAN, program: "npm:tool-a" };
+    renderWithEngine(<ProgramActionDialog
+      program={program({ program: "npm:tool-a", kind: "npm", name: "tool-a", mode: "managed" })}
+      action="upgrade" version="2.0.0" entryCandidates={["~/bin"]} entryDir="~/bin" onClose={vi.fn()}
+    />, {
+      ...routes(),
+      "programs:preview": makeEnvelope(plan),
+      "programs:apply": makeEnvelope(plan, { ok: false, errors: [{ code: "PROGRAM_ERROR", element: null, message: "Installer failed" }] }),
+    });
+    await screen.findByTestId("program-manual");
+    await userEvent.click(screen.getByRole("button", { name: "升级" }));
+    await screen.findAllByText(/Installer failed/);
+    expect(screen.getByTestId("program-manual")).toHaveTextContent(plan.manual[0]);
+    expect(screen.getByTestId("program-copy-manual")).toBeInTheDocument();
   });
 
   it.each(["install", "upgrade", "switch", "adopt"] as const)("npm %s explains retained candidates before confirmation", async action => {

@@ -219,7 +219,7 @@ export function ProgramActionDialog({
                 ))}
               </ol>
             </details>
-            {plan.manual.length > 0 && (
+            {plan.manual.length > 0 && !failed?.unverified && (
               <div className="space-y-1">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>{t("不想让本工具代办，也可以自己在终端里执行：")}</span>

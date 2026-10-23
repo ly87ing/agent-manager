@@ -165,6 +165,9 @@ The `PROGRAM_VERSION_UNVERIFIED` diagnostic identifies this incomplete outcome;
 it also identifies refusal to overwrite incomplete managed PyPI/Git candidates.
 The dialog keeps its details visible and announces a warning. Ordinary installer
 failures retain `PROGRAM_ERROR` and their existing recovery attempt.
+After an unverified-version/entry failure, the dialog also hides the manual
+command and its copy control; those commands omit the failed verification gate.
+Ordinary execution errors retain the manual alternative.
 `PROGRAM_ENTRY_UNVERIFIED` identifies failed managed entry evidence before
 completion/selection and retains the same inspection warning without automatic
 rollback/cleanup after that check. An earlier completion marker can still exist;

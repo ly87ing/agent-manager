@@ -56,6 +56,16 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
   exact upstream two-line fix. Keep the native Linux API regression in the Tauri
   suite with that dependency optimization; a macOS zero-case run cannot close it.
 
+## 2026-10-23: native interaction must inspect every bypass surface
+
+- The warning test removed a retry sentence but left the separate command/copy
+  block visible. Native interaction exposed a direct `current` switch command
+  after source verification refused it. Assert that both controls disappear for
+  every unverified diagnostic, with an ordinary-error control retaining them.
+- A plain Cargo release build still used Tauri's development URL and showed a
+  blank window. Compile native asset checks with `--features tauri/custom-protocol`;
+  a live process or white window is not rendered-interface evidence.
+
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
 ## 2026-10-17: native batch fixtures need cmd argument handling
