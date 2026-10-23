@@ -14,6 +14,7 @@ Each page describes how one subsystem works now: what it is responsible for, whe
 | Extension target paths and protected assistant data | [Account path isolation](account-path-isolation.md) |
 | Retired account operations and extension safety boundary | [Account context](account-context.md) |
 | Signed updater artifacts and platform selection | [Updater manifest](updater-manifest.md) |
+| Locked dependencies and security advisory evidence | [Dependency security](dependency-security.md) |
 | Managed program versions, npm layouts and executable discovery | [Programs](programs.md) |
 | On-demand queries and memory constraints | [Resource bounds](resource-bounds.md) |
 | Saved launch recipes and copyable commands | [Launch configurations](launch-configurations.md) |

@@ -2286,3 +2286,22 @@ consumed-backup pruning defects. These local results do not establish native
 Windows/Linux execution, installed-client adoption or signed updating. Dependency
 advisory triage remains open. No personal OS setting, real assistant file, installed
 application, Release or tag changed.
+
+## 2026-10-23: updater dependency hardening
+
+The updater lockfile now resolves rustls 0.23.46, rustls-webpki 0.103.16 and
+webpki-root-certs 1.0.10. Explicit TLS/system-proxy features exclude legacy archive
+compatibility, removing zip and its unused dependencies. Current direct Windows
+EXE/MSI, Linux AppImage/DEB and native macOS application tarballs remain the
+supported formats. The resolved graph was inspected for all targets; the ZIP
+extractor is absent. See the [dependency review](subsystems/dependency-security.md)
+for primary advisories and remaining Linux/maintenance notices.
+
+The patched Tauri suite passed 27 tests, frontend 706/61 files and production
+build passed, and all 23 script cases passed. OSV re-query covered 555 distinct
+locked crate/version pairs and no longer reported the corrected TLS/certificate
+or ZIP findings. Remaining notices are recorded without suppressions. The earlier
+complete engine run belongs to the unchanged shared-engine source at `156849bc`;
+it was not rerun for these desktop-only dependency changes. Native builds and a
+signed installed update remain separate evidence. No release/signing configuration,
+actual installation, tag or published installer was changed.

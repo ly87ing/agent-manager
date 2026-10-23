@@ -13,7 +13,7 @@ The repository owner owns release authorization in R9.
 
 | ID | Phase | Work and current state | Completion criterion |
 | --- | --- | --- | --- |
-| R1 | Native CI pending | Implemented conflict-preserving recovery, bounded backup evidence and guarded pointer restoration. | Retain conflicts; verify current, entries, backups and partial recovery on each native platform. |
+| R1 | Native tests passed | `156849bc` passed native macOS/Windows/Linux engine jobs; installed-client evidence remains separate. | Retain conflicts; verify current, entries, backups and partial recovery on each native platform. |
 | R2 | First | Add actual source/commit verification for Git dependencies. | Verify identity and entries before completion/selection, including reuse. |
 | R3 | Then | Audit standalone Windows links with missing underlying targets. | Reproduce the case; require fresh target evidence and valid-link controls. |
 | R4 | Then | Implement KDE language and regional-format repair. | Preview scope; preserve settings; reject stale evidence; read back natively. |
@@ -25,6 +25,7 @@ The repository owner owns release authorization in R9.
 | R10 | Documentation | Refresh acceptance records and final main CI readback. | Add npm/native receipts; distinguish builds from installed acceptance. |
 | R11 | Portability | Resolve skill snapshot support decisions and native evidence gaps. | Verify filesystem/volume limits and explicit refusal of unsupported shapes. |
 | R12 | Investigation | Diagnose earlier intermittent macOS DMG busy-eject failures. | Reproduce and verify the cause; a passing retry alone cannot close it. |
+| R13 | Security | Patch updater TLS/certificate dependencies and remove legacy archive extraction; retain remaining advisory decisions. | Verify resolved dependencies, native builds and the [security review](subsystems/dependency-security.md), including Linux glib and unmaintained dependencies. |
 
 <details>
 <summary>Acceptance cases, source entry points and verified baseline</summary>

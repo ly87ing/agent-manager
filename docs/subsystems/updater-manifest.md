@@ -29,6 +29,14 @@ after building.
 
 ## Constraints and failure behavior
 
+The runtime enables TLS and system-proxy support explicitly, with the updater's
+legacy archive feature disabled. Windows receives signed EXE/MSI bytes and Linux
+receives direct AppImage/DEB bytes; legacy Windows ZIP and Linux compressed
+AppImage updates are unsupported. macOS application tarballs use the plugin's
+native macOS extraction path and remain supported. This matches this repository's
+manifest assembler and removes the ZIP dependency listed in
+[RustSec's archive traversal advisories](https://rustsec.org/advisories/RUSTSEC-2026-0368.html).
+
 A missing, duplicate, empty or unsigned DEB bundle must fail assembly rather
 than let an installed DEB fall back to an AppImage. All other supported formats
 retain the same validation. Fixture signatures test the manifest bindings only;

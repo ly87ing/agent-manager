@@ -19,6 +19,13 @@ Each lesson is a rule, then why, then the evidence (commit, test, or observation
   subsequent retention pass. Exercise an old restore with three newer backups
   and an extra file; exclude consumed/partial backups from recursive pruning.
 
+## 2026-10-23: targeted lockfile updates need dependency-edge review
+
+- A TLS patch update also reselected existing Windows dependency edges, although
+  no other package version changed. Preserve unchanged package blocks, then resolve
+  the actual Windows graph with `cargo metadata --locked`; a package-version list
+  alone misses an unrelated change in which native dependency is selected.
+
 Add a lesson when a fix had to be redone, a check passed without exercising the change, or an acceptance step was skipped and later mattered. Review the day's commits for these before writing the day's record in [goal-rust-gui.md](goal-rust-gui.md).
 
 ## 2026-10-17: native batch fixtures need cmd argument handling
