@@ -37,6 +37,9 @@ Claude local-data maintenance is a separate destructive exception. Its
 on six native targets and private macOS Keychain cases are recorded. Native
 desktop cleanup click-through remains unverified because of focus/accessibility
 limitations. Personal data has not been used for acceptance.
+The [64-source coverage map](subsystems/claude-cleanup-coverage.md) retains every
+reference catalog ID and distinguishes the implemented default scope from sources
+that still need adapters; it is not a host-residue inspection.
 
 | ID | Phase | Work and current state | Completion criterion |
 | --- | --- | --- | --- |
