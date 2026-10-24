@@ -169,9 +169,17 @@ impl Snapshot {
                 }
                 pids
             }
-            Err(_) => {
+            Err(error) => {
+                let timed_out = error
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|error| error.kind() == std::io::ErrorKind::TimedOut);
                 blockers.push(
-                    "Running Claude processes could not be checked; cleanup is unavailable.".into(),
+                    if timed_out {
+                        "Running Claude process inspection timed out; cleanup is unavailable."
+                    } else {
+                        "Running Claude processes could not be checked; cleanup is unavailable."
+                    }
+                    .into(),
                 );
                 vec![]
             }

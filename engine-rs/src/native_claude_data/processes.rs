@@ -33,8 +33,13 @@ fn output(mut command: std::process::Command) -> Result<String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let value = crate::process::capture_group(&mut command, Duration::from_secs(10), LIMIT)
-        .map_err(|_| anyhow::anyhow!("Running Claude processes could not be checked."))?;
+    let timeout = Duration::from_secs(if cfg!(windows) { 30 } else { 10 });
+    let value = crate::process::capture_group(&mut command, timeout, LIMIT).map_err(|error| {
+        std::io::Error::new(
+            error.kind(),
+            "Running Claude processes could not be checked.",
+        )
+    })?;
     if !value.status.success() || value.stdout.len() >= LIMIT {
         bail!("Running Claude processes could not be checked.");
     }

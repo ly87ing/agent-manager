@@ -52,6 +52,10 @@ before external secret-source loading, preflight, or general database access.
 
 ## Constraints and failure behavior
 
+- Native process inspection remains bounded. Windows PowerShell/CIM has a
+  thirty-second deadline; macOS process commands have ten seconds. Timeout is
+  reported without command lines and always blocks cleanup.
+
 - The default production namespace is the first supported scope. Custom config,
   secure-storage or OAuth namespace variables block macOS credential inspection;
   files-only cleanup remains explicitly available. Historical usernames, custom

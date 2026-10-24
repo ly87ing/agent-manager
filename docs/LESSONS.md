@@ -28,6 +28,10 @@ What recent work got wrong, and the rule that would have caught it. Read this be
   Assert either the observed move or the exact native sharing refusal, then read
   back the protected bytes in their actual location. Do not weaken preservation
   or count an injection that never happened as exercised.
+- Preserve a content-free timeout category from process inspection. A Windows ARM
+  parallel run refused a positive cleanup at the ten-second boundary, but the old
+  generic message hid its cause. Allow Windows PowerShell/CIM up to thirty seconds;
+  retain bounded execution and refuse cleanup on any missing evidence.
 
 ## 2026-10-23: workflow evidence needs the run identity
 
