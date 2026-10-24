@@ -85,6 +85,9 @@ log_info "期望构建身份: commit=${EXPECTED_COMMIT} date=${EXPECTED_DATE}"
 
 # 5. 隔离工作区与清理 Trap 设置
 TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/am-verify.XXXXXX")"
+# Tauri deliberately refuses a macOS executable path containing symlinks.
+# Canonicalize only this owned fixture, including the system /var alias.
+TEMP_DIR="$(cd "$TEMP_DIR" && pwd -P)"
 MOUNT_DIR="${TEMP_DIR}/mount"
 APPS_DIR="${TEMP_DIR}/Applications"
 ISOLATED_HOME="${TEMP_DIR}/home"
@@ -348,6 +351,10 @@ for ((i = 1; i <= SURVIVAL_SECONDS; i++)); do
   log_info "存活健康检测正常 (${i}/${SURVIVAL_SECONDS}s)..."
 done
 
+if grep -Fq 'Read-only source inspection is unavailable: resource location was refused.' "$APP_LOG"; then
+  fail "Canonical package startup could not resolve its inspection resource directory."
+fi
+
 if command -v lsof >/dev/null 2>&1; then
   log_info "运行隔离检查通过: 进程 cwd 与打开文件未引用源码仓库"
 fi
@@ -370,6 +377,33 @@ if kill -0 "$APP_PID" 2>/dev/null; then
 fi
 wait "$APP_PID" 2>/dev/null || true
 APP_PID=""
+
+# Keep the framework's symlink refusal while the optional component is unavailable.
+ln -s "$APPS_DIR" "$TEMP_DIR/linked-apps"
+ALIAS_LOG="$TEMP_DIR/alias_exec.log"
+env -i HOME="$ISOLATED_HOME" AGENT_MANAGER_DATA_DIR="$ISOLATED_DATA" PATH="/usr/bin:/bin" \
+  "$TEMP_DIR/linked-apps/${PRODUCT_NAME}.app/Contents/MacOS/${BUNDLE_EXEC}" >"$ALIAS_LOG" 2>&1 &
+APP_PID=$!
+for ((i = 1; i <= SURVIVAL_SECONDS; i++)); do
+  sleep 1
+  if ! kill -0 "$APP_PID" 2>/dev/null; then
+    fail "Optional inspection resource refusal aborted alias-path startup: $(head -n 20 "$ALIAS_LOG")"
+  fi
+done
+if ! grep -Fq 'Read-only source inspection is unavailable: resource location was refused.' "$ALIAS_LOG"; then
+  fail "Alias-path fixture did not exercise the framework resource refusal."
+fi
+kill -TERM "$APP_PID"
+for _ in {1..15}; do
+  if ! kill -0 "$APP_PID" 2>/dev/null; then break; fi
+  sleep 0.2
+done
+if kill -0 "$APP_PID" 2>/dev/null; then
+  fail "Alias-path fixture did not exit after termination."
+fi
+wait "$APP_PID" 2>/dev/null || true
+APP_PID=""
+log_info "Alias-path startup retained resource refusal without aborting the application."
 
 if [[ "$KILLED_BY_SIGKILL" -eq 1 ]]; then
   log_info "验收进程已终止并清理。"

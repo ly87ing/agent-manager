@@ -8,6 +8,7 @@ mod share_links;
 mod startup;
 mod theme;
 
+use std::io::Write;
 use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_window_state::StateFlags;
@@ -102,15 +103,19 @@ fn main() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            agent_manager_engine::configure_claude_data_inspection_helper(
-                app.path()
-                    .resource_dir()?
-                    .join("claude-data-helper")
-                    .join(format!(
+            let inspector = match app.path().resource_dir() {
+                Ok(path) => Some(
+                    path.join("claude-data-helper").join(format!(
                         "agent-manager-claude-data-helper{}",
                         std::env::consts::EXE_SUFFIX
                     )),
-            );
+                ),
+                Err(_) => {
+                    let _ = writeln!(std::io::stderr(), "Read-only source inspection is unavailable: resource location was refused.");
+                    None
+                }
+            };
+            agent_manager_engine::configure_claude_data_inspection_helper(inspector);
             #[cfg(any(windows, target_os = "linux"))]
             {
                 let helper = app

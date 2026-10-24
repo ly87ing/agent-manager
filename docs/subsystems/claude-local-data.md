@@ -114,6 +114,10 @@ process group/Job with a twenty-second deadline, and accepts less
 than 4 KiB of strictly typed/versioned count output. Missing, redirected,
 incompatible, malformed or timed-out components leave inspection unavailable;
 there is no in-process fallback. Opening the page still starts no inspection.
+Inspector initialization treats an uncertain resource directory as unavailable
+inspection and disables the CLI adjacency fallback for that desktop process.
+On macOS this preserves startup under the framework's executable-path refusal.
+Windows/Linux clock-helper initialization has its separate existing contract.
 
 Inside the helper, SQLite only receives a bounded memory copy, never the source
 pathname. The adapter holds ordinary ancestor directories, refuses aliases, hard links and any

@@ -59,7 +59,7 @@ pub fn claude_data_inspection_helper_cli(args: &[std::ffi::OsString]) -> i32 {
     native_claude_data::inspection_helper_cli(args)
 }
 
-/// Use the bundled inspector instead of the CLI's adjacent executable.
-pub fn configure_claude_data_inspection_helper(path: std::path::PathBuf) {
+/// Use the bundled inspector; None preserves a refused resource location.
+pub fn configure_claude_data_inspection_helper(path: Option<std::path::PathBuf>) {
     native_claude_data::configure_inspection_helper(path);
 }

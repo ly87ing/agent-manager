@@ -3,11 +3,11 @@ use super::{fs, open, writer_is_blocked, Fixture};
 use agent_manager_engine::{execute, Context, Request};
 
 pub(super) fn run(fixture: &Fixture) {
-    agent_manager_engine::configure_claude_data_inspection_helper(
+    agent_manager_engine::configure_claude_data_inspection_helper(Some(
         std::env::var_os("AM_TEST_INSPECTION_HELPER")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| env!("CARGO_BIN_EXE_agent-manager-claude-data-helper").into()),
-    );
+    ));
     let path = fixture.database("inspection-lock-owner.sqlite");
     let before = fs::read(&path).unwrap();
     let dir = fixture.0.join("ai-vault");

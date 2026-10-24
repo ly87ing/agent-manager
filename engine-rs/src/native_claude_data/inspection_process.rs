@@ -11,7 +11,7 @@ use std::time::Duration;
 const PROTOCOL: &str = "orca-search-inspection-v1";
 const FLAG: &str = "--inspect-orca-search";
 const LIMIT: usize = 4096;
-static HELPER: OnceLock<PathBuf> = OnceLock::new();
+static HELPER: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -34,22 +34,26 @@ struct Reply {
     counts: Option<Counts>,
 }
 
-pub(crate) fn configure(path: PathBuf) {
+pub(crate) fn configure(path: Option<PathBuf>) {
     let _ = HELPER.set(path);
 }
 
 pub(super) fn inspect(path: &Path) -> Result<Option<Value>> {
-    let helper = match HELPER.get() {
-        Some(path) => path.clone(),
-        None => std::env::current_exe()?
+    inspect_with_helper(path, &helper_path(HELPER.get())?)
+}
+
+fn helper_path(configured: Option<&Option<PathBuf>>) -> Result<PathBuf> {
+    match configured {
+        Some(Some(path)) => Ok(path.clone()),
+        Some(None) => bail!("Inspection component location is unavailable"),
+        None => Ok(std::env::current_exe()?
             .parent()
             .ok_or_else(|| anyhow::anyhow!("Missing executable directory"))?
             .join(format!(
                 "agent-manager-claude-data-helper{}",
                 std::env::consts::EXE_SUFFIX
-            )),
-    };
-    inspect_with_helper(path, &helper)
+            ))),
+    }
 }
 
 fn inspect_with_helper(path: &Path, helper: &Path) -> Result<Option<Value>> {
@@ -138,6 +142,13 @@ pub(crate) fn helper_main(args: &[OsString]) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refused_desktop_resource_path_never_uses_the_cli_fallback() {
+        assert!(helper_path(Some(&None)).is_err());
+        let path = Some(std::env::temp_dir().join("SYNTHETIC_COMPONENT"));
+        assert_eq!(helper_path(Some(&path)).unwrap(), path.unwrap());
+    }
 
     #[test]
     fn response_requires_exact_protocol_and_count_shape() {

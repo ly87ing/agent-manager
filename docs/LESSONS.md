@@ -82,6 +82,11 @@ What recent work got wrong, and the rule that would have caught it. Read this be
   library comparison reproduced that loss during a held parent transaction.
   Move source opens to a separate inspector, retain the real second-writer
   assertion, and never fall back in-process when its component is unavailable.
+- Both macOS package components passed while app startup aborted at optional
+  resource lookup. Tauri intentionally rejects symlinked executable paths; CI's
+  `/var` fixture alias exercised that guard. Preserve refusal as unavailable
+  inspection rather than a fatal setup error. Test canonical and alias startup
+  separately; never relax the framework's path protection to obtain a pass.
 - An initial FTS cleanup test checked uppercase body bytes but missed the index's
   case-folded tokens, and its retained-row filter could conceal a leftover target
   message. Check a unique lowercase token in actual FTS blocks, retain a

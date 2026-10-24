@@ -2942,3 +2942,21 @@ macOS producer helper passed architecture, signature, build-path/diagnostic-flag
 checks and the release-profile positive/isolation fixture. Native matrix and
 packaged-component results remain pending. Copied components do not establish
 desktop resource lookup or IPC click-through; that acceptance remains separate.
+
+## 2026-10-24: Optional inspector resource lookup and macOS startup
+
+Run `40092929749` at `2dba651d` passed copied-component acceptance on both Macs,
+then both applications aborted during setup with `unknown path`. The new
+inspector had propagated its optional resource lookup error. The pinned Tauri
+implementation refuses executable paths containing macOS symlinks; the owned CI
+copy was launched through the system `/var` alias. Its resource directory existed
+and its component had already passed the independent fixture.
+
+The correction configures an explicit unavailable inspector when that lookup is
+refused. It preserves the framework guard and prevents CLI adjacency fallback in
+the desktop process. Other app setup continues; Windows/Linux clock-helper
+initialization retains its existing behavior. CI resolves only its owned
+temporary root, then separately checks canonical startup and an owned directory
+alias. The former must resolve the resource directory; the latter must log the
+refusal and remain alive. Native results for that correction remain pending.
+The failed `2dba651d` candidate was not installed over the running local app.
