@@ -10,6 +10,8 @@ before deleting sessions, memory, account files, recognized configuration backup
 and recognized local credentials.
 It deletes telemetry settings in the selected local scope too; shared caller file
 dependencies remain protected.
+Orca search-index inspection is separately opt-in and read-only. Cleanup across
+all sources remains incomplete.
 Project source, external link targets, shared SDK credentials and cloud data are
 outside this scope. See the [exact scope and verification](docs/subsystems/claude-local-data.md).
 

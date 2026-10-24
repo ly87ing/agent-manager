@@ -4,6 +4,7 @@ mod clear;
 mod credentials;
 mod dependencies;
 mod files;
+mod orca_search;
 mod preview;
 mod processes;
 mod retention;
@@ -15,6 +16,14 @@ use serde_json::json;
 pub(crate) fn execute(ctx: &Context, request: &Request) -> Envelope {
     let command = request.command.replace('.', ":");
     let result = match command.as_str() {
+        "claude-data:orca-search-preview"
+            if request
+                .args
+                .iter()
+                .all(|v| matches!(v.as_str(), "--json" | "--offline")) =>
+        {
+            orca_search::preview(ctx)
+        }
         "claude-data:preview"
             if request
                 .args

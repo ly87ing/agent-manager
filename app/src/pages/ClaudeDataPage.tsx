@@ -5,6 +5,7 @@ import { clearClaudeData, previewClaudeData, type ClaudeDataPreview, type Claude
 import { engineErrorMessage } from "../lib/engine";
 import { t } from "../lib/i18n";
 import { toast } from "../lib/notifications";
+import { ClaudeOrcaSearch } from "./ClaudeOrcaSearch";
 
 function groupLabel(id: string): string {
   const labels: Record<string, string> = {
@@ -36,7 +37,7 @@ export default function ClaudeDataPage() {
   const [includeCredentials, setIncludeCredentials] = useState(true);
   const [preview, setPreview] = useState<ClaudeDataPreview | null>(null);
   const [result, setResult] = useState<ClaudeDataResult | null>(null);
-  const [busy, setBusy] = useState<"preview" | "clear" | null>(null);
+  const [busy, setBusy] = useState<"preview" | "clear" | "orca-preview" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
 
@@ -65,6 +66,7 @@ export default function ClaudeDataPage() {
       <div>
         <h1 className="flex items-center gap-2 text-lg font-semibold"><Trash2 className="h-5 w-5" aria-hidden />{t("Claude 本地数据维护")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{t("清理 Claude Code 默认用户目录中的会话、账号、记忆、配置与缓存，包括遥测配置。")}</p>
+        <p className="mt-2 text-sm text-warning">{t("全来源清理尚未完成。以下结果仅覆盖列明的范围，未检查的位置不能视为已清理。")}</p>
       </div>
       <div className="rounded-lg border bg-card p-4 text-sm">
         <p>{t("不会删除项目源文件、外部技能仓库、共享 SDK 认证或云端数据；不会撤销远端令牌。")}</p>
@@ -111,6 +113,7 @@ export default function ClaudeDataPage() {
         <RetainedContent items={result.retained} verified={result.retained_verified} />
         <p className="text-muted-foreground">{t("再次操作前，请重新检查清理范围。")}</p>
       </section>}
+      <ClaudeOrcaSearch disabled={busy !== null} onBusy={(checking) => setBusy(checking ? "orca-preview" : null)} />
       {confirm && preview && <ConfirmModal title={t("清理 Claude 本地数据")} description={t("将永久删除预览中的数据，包括会话、账号、记忆、恢复记录及遥测配置。请确认已关闭 Claude 及其集成。")}
         risk="install-remove" riskLabel={t("永久删除")} requireText="DELETE" confirmLabel={t("永久清理所选范围")} executing={busy === "clear"} error={error}
         onConfirm={() => void clear()} onClose={() => {setConfirm(false);setError(null);}} />}

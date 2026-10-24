@@ -1,11 +1,38 @@
 import { describe, expect, it } from "vitest";
 import ClaudeDataPage from "../pages/ClaudeDataPage";
-import { claudeDataResultSchema } from "../lib/claude-data";
+import { claudeDataResultSchema, orcaSearchPreviewSchema } from "../lib/claude-data";
 import { renderWithEngine, screen, userEvent } from "./render-with-engine";
 import { makeEnvelope } from "./fixtures";
-import { makeClaudeDataPreview, makeClaudeDataResult } from "./claude-data-fixture";
+import { makeClaudeDataPreview, makeClaudeDataResult, makeOrcaSearchPreview } from "./claude-data-fixture";
 
 describe("Claude local data maintenance", () => {
+  it("checks Orca only after an explicit click and never presents it as cleaned", async () => {
+    const preview = makeOrcaSearchPreview();
+    const { calls } = renderWithEngine(<ClaudeDataPage />, { "claude-data:orca-search-preview": makeEnvelope(preview) });
+    expect(calls).toHaveLength(0);
+    expect(screen.getByText("全来源清理尚未完成。以下结果仅覆盖列明的范围，未检查的位置不能视为已清理。")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "检查 Orca 搜索索引" }));
+    expect(await screen.findByText(preview.path)).toBeInTheDocument();
+    expect(screen.getByText("归属未确认的搜索记录")).toBeInTheDocument();
+    expect(screen.getByText("尚未清理 Orca 数据。其他会话存储、自定义目录和旧索引残留仍未检查。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "清理所选范围" })).toBeNull();
+    expect(calls.map((call) => call.command)).toEqual(["claude-data:orca-search-preview"]);
+  });
+  it.each(["not_found", "unavailable"] as const)("keeps %s Orca evidence separate from zero counts", async (status) => {
+    const preview = { ...makeOrcaSearchPreview(), status, counts: null, schema_version: null };
+    renderWithEngine(<ClaudeDataPage />, { "claude-data:orca-search-preview": makeEnvelope(preview) });
+    await userEvent.click(screen.getByRole("button", { name: "检查 Orca 搜索索引" }));
+    expect(await screen.findByText(preview.path)).toBeInTheDocument();
+    expect(screen.queryByText("Claude 会话")).toBeNull();
+    expect(screen.getByText(status === "not_found" ? "此位置未发现索引，其他位置仍未检查。" : "未能安全检查索引。请关闭 Orca 后重试；不支持的格式或路径仍需核对。")).toBeInTheDocument();
+  });
+  it("rejects Orca cleanup authority and counts for unchecked stores", () => {
+    const preview = makeOrcaSearchPreview();
+    expect(orcaSearchPreviewSchema.safeParse({ ...preview, cleanup_supported: true }).success).toBe(false);
+    expect(orcaSearchPreviewSchema.safeParse({ ...preview, scope_complete: true }).success).toBe(false);
+    expect(orcaSearchPreviewSchema.safeParse({ ...preview, status: "unavailable" }).success).toBe(false);
+    expect(orcaSearchPreviewSchema.safeParse({ ...preview, counts: null }).success).toBe(false);
+  });
   it("does not inspect on entry and cancellation never sends a clear request", async () => {
     const { calls } = renderWithEngine(<ClaudeDataPage />, { "claude-data:preview": makeEnvelope(makeClaudeDataPreview()) });
     expect(calls).toEqual([]);

@@ -21,6 +21,8 @@ documents, worktrees and shared resources. That target is not an implemented
 state. The current executable scope remains the default directory, recognized configuration
 backups and credentials;
 the reference catalog's other sources need explicit discovery and safe adapters.
+Orca's search index now has a separate opt-in read-only inspection; it cannot yet
+be cleaned. The page explicitly keeps the all-source goal incomplete.
 
 | Constraint | Source | Implementation consequence |
 | --- | --- | --- |
@@ -79,6 +81,47 @@ before external secret-source loading, preflight, or general database access.
    partial execution. Complete results require both flags and no unclassified
    content. Preview and result require `telemetry_policy:"remove"`; the v4 base
    binds the added backup scope and rejects older previews.
+
+## Orca search-index inspection
+
+`claude-data:orca-search-preview` inspects only the selected current-user search
+database. It accepts no path or confirmation argument. The default path is
+`Library/Application Support/orca/ai-vault/session-search.sqlite` below HOME on
+macOS, `orca/ai-vault/session-search.sqlite` below APPDATA on Windows, and below
+XDG_CONFIG_HOME (or HOME/.config) on Linux. An absolute `ORCA_USER_DATA_PATH`
+selects the caller's override instead; the preview identifies that origin.
+Default absence or an override never establishes other-profile absence.
+
+The adapter's layout and exact `agent='claude'` identifier were read from Orca
+1.4.237's installed scanner and SQLite support modules. Only the schema-6 column
+layout and supported ownership keys are counted. Integer session-row references
+join messages and file cursors; shared session IDs and keyword matches are not
+ownership evidence. Dangling, NULL and non-integer references remain unattributed.
+Output contains counts and the database path, never session IDs or content.
+
+SQLite only receives a bounded memory copy, never the source pathname. The
+adapter holds ordinary ancestor directories, refuses aliases, hard links and any
+WAL/SHM/journal entry, and rechecks file evidence and ancestor identities. A
+256 MiB image bound and three-second SQL progress deadline refuse oversized or
+expensive input. These are inspection limits, not a transactional writer lock.
+The snapshot is an observed standalone main-file copy; active writers can make
+it unavailable or stale. No application is terminated.
+
+For a closed WAL-format main file without sidecars, only bytes 18/19 of the
+memory copy change from 2/2 to 1/1, as documented by
+[SQLite deserialize](https://www.sqlite.org/c3ref/deserialize.html). The allocation
+includes its recommended 20-byte padding, transfers ownership with FREEONCLOSE,
+and uses READONLY. Temporary storage stays in memory. Source bytes, journal mode,
+credentials, the Agent Manager database and audit remain unchanged.
+
+Inspection always returns `cleanup_supported:false` and `scope_complete:false`.
+Unchecked results contain NULL counts, never inferred zeros. Neither zero owned
+rows nor successful inspection establishes removal: ordinary FTS5 deletes can
+leave old index content, as documented by
+[SQLite FTS5](https://www.sqlite.org/fts5.html#the_secure_delete_configuration_option).
+Confirmed deletion still requires writer checks, exact schema validation,
+FTS-content removal and independent preservation/readback. Other Orca stores,
+custom profiles and the remaining catalog sources are not covered by this probe.
 
 ## Constraints and failure behavior
 

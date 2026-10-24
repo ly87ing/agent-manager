@@ -2,7 +2,7 @@ import type { Envelope, RunEntry } from "../lib/contract";
 import { EngineBridgeError, type EngineClient } from "../lib/engine";
 import { createLaunchMock } from "./launch-mock";
 import { createEnvironmentMock } from "./environment-mock";
-import { makeClaudeDataPreview, makeClaudeDataResult } from "./claude-data-fixture";
+import { makeClaudeDataPreview, makeClaudeDataResult, makeOrcaSearchPreview } from "./claude-data-fixture";
 import { makeAuditData, makeElement, makeEnvelope, makeFreshness, makeRunEntry } from "./fixtures";
 
 /**
@@ -818,6 +818,7 @@ export function createMockEngineClient(options: { fresh?: boolean } = {}): Engin
   return {
     async run(command, args = [], runOptions = {}) {
       if (command === "claude-data:preview") return makeEnvelope({ ...makeClaudeDataPreview(), files_only: args.includes("--files-only"), credential_items: args.includes("--files-only") ? null : 2 });
+      if (command === "claude-data:orca-search-preview") return makeEnvelope(makeOrcaSearchPreview());
       if (command === "claude-data:clear") return makeEnvelope({ ...makeClaudeDataResult(), files_only: args.includes("--files-only"), deleted_credentials: args.includes("--files-only") ? 0 : 2 });
       // 模拟进程耗时，让加载/进行中的 UI 状态可见
       await new Promise((resolve) => setTimeout(resolve, 120));

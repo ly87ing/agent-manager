@@ -2785,7 +2785,44 @@ preview then removed its selected backup. English/Chinese mock previews were
 read at 1000 and 760 px without overflow.
 
 The non-UTF-8 filename fixture could not be created on APFS; that failure did not
-exercise inspection. Its negative case is Linux-only and awaits native CI.
+exercise inspection. Its negative case subsequently passed native Linux CI.
 Large display-budget limits were statically reviewed; local fixtures do not
-establish every boundary. This increment's native cross-platform and installed
-desktop acceptance remain separate, and the all-source R15 goal remains open.
+establish every boundary.
+
+Source `85f32cc7` passed [main CI](https://github.com/ly87ing/agent-manager/actions/runs/40068730195)
+and all twelve [GUI CI targets](https://github.com/ly87ing/agent-manager/actions/runs/40068730177).
+The macOS x86_64 app embeds this source and `2026-10-24T06:06:52Z`;
+its installed running executable SHA256 is
+`6becb622b2a07de6c434bad79ad41cf2b2732648608875de7334f30aa4733092`.
+Strict signature, exact process, unchanged database bytes and eight protected
+paths, consistent database backup and retained previous applications passed
+independent readback. No personal cleanup was run. Native GUI cleanup
+click-through and the all-source R15 goal remain open.
+
+## 2026-10-24: Orca search-index inspection
+
+Advanced maintenance now offers a separate read-only Orca search check. It
+counts schema-6 records by exact assistant and integer session-row ownership,
+and reports unattributed messages, cursors and FTS rows. It never displays
+conversation content or offers deletion. Unavailable and missing sources retain
+NULL counts and explicit incomplete status.
+
+SQLite receives only a bounded memory image with READONLY ownership and padded
+allocation; it never opens the source pathname. Closed WAL-format headers change
+only in memory. Initial/final sidecar checks, no-follow ancestor walks, source
+readback and strict virtual-table/layout checks protect the observation boundary.
+
+Local full engine 345 unit cases plus integration targets, Tauri 28, frontend
+741, production build and Windows/Linux all-target cross-checks passed. Seven
+actual CLI cases use isolated HOME/data and synthetic mixed stores, including
+same-session-ID separation, closed WAL images, default/override locations,
+malformed and redirected stores, non-integer references and fake FTS/generated
+columns. Two unit injections cover late WAL creation and a Unix alias pointing
+back to the original directory. Source bytes and absent app data were read back.
+English/Chinese browser-mock layouts were inspected at 1000 and 760 px.
+
+The Windows held-directory rename test is cross-compiled but awaits native CI;
+macOS cannot exercise it. Image/time limits and simultaneous content mutation
+have not been exhaustively exercised. This is read-only main-file snapshot
+evidence, not a writer lock, cleanup, full-source discovery or native desktop UI
+acceptance. Confirmed Orca deletion and removal of old FTS content remain open.

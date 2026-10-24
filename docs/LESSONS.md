@@ -60,6 +60,15 @@ What recent work got wrong, and the rule that would have caught it. Read this be
 
 ## 2026-10-23: workflow evidence needs the run identity
 
+- A new real-CLI fixture initially passed unsupported HOME/data flags, so it
+  reached usage rejection rather than the inspection command. Set isolated
+  locations through the CLI's actual environment contract and require its
+  specific command and result before counting a negative case as exercised.
+- A final pathname reopen can follow a new alias back to the original inode.
+  Rewalk ancestors with no-follow opens, then check sidecars after the last image
+  read. A matching digest alone misses a newly committed WAL. Validate actual
+  virtual-table type and definition; SQL comments can spoof a substring check.
+
 - One source commit can have manual and push runs of the same workflow. A private
   checker keyed only by commit/name overwrote the push receipt with the earlier
   manual receipt. Key saved evidence by run ID and attempt, assert its source SHA

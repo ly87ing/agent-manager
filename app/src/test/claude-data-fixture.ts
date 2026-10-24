@@ -1,4 +1,12 @@
-import type { ClaudeDataPreview, ClaudeDataResult } from "../lib/claude-data";
+import type { ClaudeDataPreview, ClaudeDataResult, OrcaSearchPreview } from "../lib/claude-data";
+
+export function makeOrcaSearchPreview(): OrcaSearchPreview {
+  return { source: "orca_search", path: "/YOUR_HOME/Library/Application Support/orca/ai-vault/session-search.sqlite",
+    location_origin: "default", status: "inspected", schema_version: 6,
+    counts: { claude_sessions: 4, claude_messages: 32, claude_file_cursors: 4,
+      non_claude_sessions: 6, unattributed_messages: 2, unattributed_file_cursors: 1, unattributed_fts_rows: 3 },
+    cleanup_supported: false, scope_complete: false, message: "Synthetic read-only main-file snapshot; no data was cleaned." };
+}
 
 export function makeClaudeDataPreview(): ClaudeDataPreview {
   return {

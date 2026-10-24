@@ -51,7 +51,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
             | "open-settings",
         ) => true,
         ("launch", "build" | "catalog" | "run" | "list" | "save" | "delete") => true,
-        ("claude-data", "preview" | "clear") => true,
+        ("claude-data", "preview" | "clear" | "orca-search-preview") => true,
         ("resources", "targets") => true,
         ("system", "audit" | "discover" | "refresh-upstream") => true,
         ("secrets", "status" | "set" | "source") => true,
@@ -709,6 +709,14 @@ mod tests {
     fn claude_maintenance_does_not_reopen_account_or_arbitrary_path_surfaces() {
         assert!(validate_command("claude-data:preview").is_ok());
         assert!(validate_command("claude-data:clear").is_ok());
+        assert!(validate_command("claude-data:orca-search-preview").is_ok());
+        assert!(validate_args("claude-data:orca-search-preview", &[]).is_ok());
+        assert!(validate_args("claude-data:orca-search-preview", &["--confirm".into()]).is_err());
+        assert!(validate_args(
+            "claude-data:orca-search-preview",
+            &["--path".into(), "/YOUR_HOME".into()]
+        )
+        .is_err());
         assert!(validate_command("claude-data:logout").is_err());
         assert!(validate_command("accounts:delete").is_err());
         assert!(validate_args("claude-data:preview", &["--confirm".into()]).is_err());
