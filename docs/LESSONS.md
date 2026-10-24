@@ -11,6 +11,10 @@ What recent work got wrong, and the rule that would have caught it. Read this be
   A fixture that removes its temporary tree while retaining that snapshot fails
   teardown with sharing violation 32. Release fixture handles after assertions;
   do not weaken the product's held-handle protection to make teardown succeed.
+- When replacing a write path with deletion, inventory the old path's validation
+  effects before removing it. Windows hard-link validation had lived in the
+  replacement helper; whole-file deletion must recheck link count on its held
+  deletion handle too. Test the deletion path itself, not a now-unused writer.
 - The first cleanup fixtures kept project source outside the default data root.
   A real worktree inside that root, including uncommitted work, was deleted while
   the operation reported complete. The fixture had not exercised the preservation

@@ -41,6 +41,9 @@ pub(super) fn remove(parent: &Dir, name: &Path, expected: &Entry) -> Result<()> 
         if expected.kind != Kind::Directory && tree::stamp(&metadata)? != expected.stamp {
             bail!("A file was replaced before removal; cleanup stopped.");
         }
+        if expected.kind == Kind::File {
+            validate_link_count(&file)?;
+        }
         let info = FILE_DISPOSITION_INFO_EX {
             Flags: FILE_DISPOSITION_FLAG_DELETE
                 | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS
@@ -88,17 +91,21 @@ pub(super) fn validate_replacement(parent: &Dir, name: &Path) -> Result<()> {
 
 #[cfg(windows)]
 pub(super) fn validate_single_link(parent: &Dir, name: &Path) -> Result<()> {
+    validate_link_count(&parent.open(name)?)
+}
+
+#[cfg(windows)]
+fn validate_link_count(file: &cap_std::fs::File) -> Result<()> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
         GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
     };
-    let file = parent.open(name)?.into_std();
     let mut info = std::mem::MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
     if unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, info.as_mut_ptr()) } == 0 {
-        bail!("A settings file link count could not be verified.");
+        bail!("A selected file link count could not be verified.");
     }
     if unsafe { info.assume_init() }.nNumberOfLinks != 1 {
-        bail!("A settings file has unverified or hard-link aliases; cleanup is unavailable.");
+        bail!("A selected file has unverified or hard-link aliases; cleanup is unavailable.");
     }
     Ok(())
 }
@@ -246,6 +253,21 @@ fn replace_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn a_new_hard_link_before_deletion_preserves_the_original_and_its_alias() {
+        let (path, dir, entry) = fixture();
+        std::fs::hard_link(path.join("settings.json"), path.join("retained-alias.json")).unwrap();
+        assert!(remove(&dir, Path::new("settings.json"), &entry).is_err());
+        assert_eq!(dir.read("settings.json").unwrap(), b"ORIGINAL_TELEMETRY");
+        assert_eq!(
+            dir.read("retained-alias.json").unwrap(),
+            b"ORIGINAL_TELEMETRY"
+        );
+        drop(dir);
+        std::fs::remove_dir_all(path).unwrap();
+    }
 
     #[cfg(windows)]
     #[test]

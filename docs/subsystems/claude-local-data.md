@@ -121,6 +121,8 @@ before external secret-source loading, preflight, or general database access.
   replacement metadata are refused. Linux uses held-handle mount IDs, including
   bind mounts. Windows uses native deletion handles. No configuration replacement
   or sensitive backup is created by the whole-file deletion path.
+  Windows rechecks ordinary-file link counts on the held deletion handle before
+  disposition; a late hard-link alias stops deletion without removing either name.
 - Known active Claude processes block execution and are checked again at phase
   and directory boundaries. Other writers cannot be locked transactionally by
   Agent Manager. New/changed observed entries stop cleanup; unknown final results
