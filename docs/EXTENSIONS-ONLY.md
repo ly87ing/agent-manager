@@ -49,7 +49,8 @@ The 2026-10-23 request adds **Settings → Advanced → Claude local data mainte
 Its dedicated `claude-data` domain is a narrow exception to the preservation rule:
 a fresh preview and explicit confirmation may delete default Claude Code local
 data, including sessions, memory, account files and recognized local credentials.
-Explicit telemetry settings remain, without enabling or disabling reporting.
+The latest user clarification includes telemetry configuration in deletion. No
+replacement opt-in or opt-out setting is written.
 No old account API is re-enabled. Project source, external link targets, shared SDK
 credentials, Agent Manager's database and remote data remain outside that scope.
 See [Claude local data](subsystems/claude-local-data.md) for exact boundaries and

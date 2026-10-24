@@ -9,9 +9,11 @@ describe("Claude local data maintenance", () => {
   it("does not inspect on entry and cancellation never sends a clear request", async () => {
     const { calls } = renderWithEngine(<ClaudeDataPage />, { "claude-data:preview": makeEnvelope(makeClaudeDataPreview()) });
     expect(calls).toEqual([]);
+    expect(screen.getByText("清理 Claude Code 默认用户目录中的会话、账号、记忆、配置与缓存，包括遥测配置。")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "检查清理范围" }));
     await userEvent.click(await screen.findByRole("button", { name: "清理所选范围" }));
     expect(screen.getByTestId("confirm-modal-confirm")).toBeDisabled();
+    expect(screen.getByText("将永久删除预览中的数据，包括会话、账号、记忆、恢复记录及遥测配置。请确认已关闭 Claude 及其集成。")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("confirm-modal-cancel"));
     expect(calls.map((call) => call.command)).toEqual(["claude-data:preview"]);
   });
@@ -61,8 +63,9 @@ describe("Claude local data maintenance", () => {
     await userEvent.click(screen.getByRole("button", { name: "检查清理范围" }));
     expect(calls[1].args).toEqual(["--files-only"]);
   });
-  it("refuses a complete result without independent telemetry readback", () => {
-    expect(claudeDataResultSchema.safeParse({ ...makeClaudeDataResult(), telemetry_verified: false }).success).toBe(false);
+  it("refuses a complete result without independent scope readback", () => {
+    expect(claudeDataResultSchema.safeParse({ ...makeClaudeDataResult(), scope_verified: false }).success).toBe(false);
+    expect(claudeDataResultSchema.safeParse({ ...makeClaudeDataResult(), telemetry_policy: "preserve" }).success).toBe(false);
     expect(claudeDataResultSchema.safeParse({ ...makeClaudeDataResult(), retained_verified: false }).success).toBe(false);
   });
   it("shows protected projects and does not describe unknown content as cleaned", async () => {

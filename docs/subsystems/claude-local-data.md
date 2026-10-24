@@ -7,9 +7,10 @@ The Advanced section starts collapsed. Opening the page performs no inspection.
 It targets only the current user's default `.claude` directory and `.claude.json`
 file. It does not discover accounts or restore the retired account APIs.
 
-The user authorized local session and account-data cleanup on 2026-10-23, while
-requiring telemetry configuration to remain. A developer must never exercise this
-feature against personal data as acceptance. The live filesystem and native
+The user authorized local session and account-data cleanup on 2026-10-23 and
+subsequently included telemetry configuration in deletion. This supersedes the
+earlier preservation request. A developer must never exercise this feature
+against personal data as acceptance. The live filesystem and native
 credential metadata are authoritative; previews are not persisted.
 
 The user subsequently expanded the target to all local Claude-related session
@@ -22,7 +23,8 @@ the reference catalog's other sources need explicit discovery and safe adapters.
 | --- | --- | --- |
 | Remove local Claude sessions and account remnants | User request, 2026-10-23 | Discover each source, require a fresh preview and independently read back selected cleanup |
 | Preserve project code, documents and worktrees | User request and reference C07 | Never infer ownership from an absent VCS marker; retain unknown content |
-| Keep telemetry configuration and dependencies | User request | Retain values, reject uncertain dependencies; broader adapters need a deletion-target union check |
+| Delete Claude telemetry configuration too | Latest user clarification | Remove exact local configuration files, without following or executing their external references |
+| Preserve shared caller dependencies | Project/shared-resource preservation constraint | Compare generic runtime certificate/key dependencies with the actual deletion-target union |
 | Keep shared and other-assistant data | Reference C35–C46 | Use exact source identities and supported schemas, not keyword deletion or whole mixed stores |
 | Use Agent Manager as the entry point | User request | Show per-source results and remaining work in the app; no external cleanup-script prerequisite |
 | Keep development isolated | Repository contract | No real-session deletion, credential probing, app termination or permission changes for tests |
@@ -51,24 +53,27 @@ before external secret-source loading, preflight, or general database access.
 
 1. `claude-data:preview [--files-only]` reads bounded no-follow evidence and hashes
    file contents/identities. It returns category counts, paths, credential counts,
-   preserved-field counts, blockers and a SHA-256 base, never credential or session
+   telemetry policy, blockers and a SHA-256 base, never credential or session
    values. Preview and cancellation create neither a database nor an audit record.
    Retained project and unclassified paths have explicit reasons and are excluded
    from deletion counts; unknown ownership remains visible in the result.
 2. `claude-data:clear --base SHA256 --confirm [--files-only]` re-reads the same
    scope, requires an unchanged base and no blockers, acquires the existing apply
    lock, and revalidates before creating a nonsecret intent audit.
-3. It removes previewed credentials, projects telemetry-bearing configuration,
+3. It removes previewed credentials, exact configuration files including telemetry,
    then unlinks previewed leaves and empty directories through held capabilities.
    Every file is re-read; parent identities and directory emptiness are checked.
    There is no recursive pathname removal and no automatic sensitive backup.
 4. Phase records and returned verified counts retain partial progress on failure.
-   Independent final inspection must find only retained telemetry configuration
-   and no selected credentials before reporting complete. Any attempt requires a
+   Independent final inspection must find no selected data or credentials before
+   reporting complete. Any attempt requires a
    fresh preview before retrying.
    Returned retained paths come from independent final inspection. The
    `retained_verified` flag is false when only preview evidence remains available;
-   complete results require verified retained paths and no unclassified content.
+   `scope_verified` comes from that same independent inspection, even after a
+   partial execution. Complete results require both flags and no unclassified
+   content. Preview and result require `telemetry_policy:"remove"`; a new v3 base
+   invalidates previews created under the previous preservation policy.
 
 ## Constraints and failure behavior
 
@@ -90,29 +95,32 @@ before external secret-source loading, preflight, or general database access.
   readback, deletion and final readback; the OS search list is never changed.
 - Windows and Linux credentials are ordinary files in the selected directory;
   no Windows Credential Manager sweep runs.
-- Preserved JSON fields include reporting/privacy switches, OTel variables,
-  tracing controls, feedback configuration and transport dependencies. Mixed
-  objects lose other fields; retained values remain unchanged. Already retained
-  files remain byte-identical. Headers and other telemetry secrets never enter
-  preview, result or audit output. No new opt-out/opt-in variable is written.
-  Shared telemetry TLS authentication, CA-store selection and compression controls
-  remain too. Unknown Claude-owned runtime controls or Node options in saved
-  settings block cleanup until their telemetry role is classified; known OAuth,
-  setup-token and provider selectors remain removable account/runtime data.
-- Ambiguous JSON, unknown telemetry controls, opaque headers helpers, or known
-  file dependencies inside the cleanup root block deletion. Caller environment
-  dependencies are checked without changing them. A cached organization policy
-  with telemetry settings blocks cleanup rather than rewriting that policy.
+- The five exact default-root configuration carriers (`settings.json`,
+  `settings.local.json`, `managed-settings.json`, `.claude.json` and
+  `remote-settings.json`) and global `~/.claude.json` are deleted whole after
+  ordinary-file, single-link and unchanged-byte checks. Unknown fields, duplicate
+  JSON keys and damaged JSON do not require interpretation for whole-file removal.
+  Values never enter preview, result or audit output. Helpers are never executed;
+  referenced external certificates, keys and scripts are never followed for deletion.
+- Shared caller file dependencies from `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`,
+  `SSL_CERT_DIR` and generic OTel certificate/key variables are compared with the
+  selected deletion targets, including resolved aliases. Certificate-directory
+  lists use native separators and protect all selected descendants. A match,
+  unresolved alias, empty directory entry or uncertain relative dependency refuses
+  cleanup. The directory-list semantics follow the
+  [OpenSSL environment reference](https://docs.openssl.org/3.0/man7/openssl-env/). This protects shared resources without
+  retaining Claude's own saved telemetry configuration. The caller environment
+  and shell files remain unchanged; no claim is made that organization reporting
+  or every possible future launcher has been disabled.
 - The tool preserves project files, shell configuration, external symlink targets,
   external repositories, managed system policy and Agent Manager data. It does not
   inspect every external policy, project or arbitrary launcher dependency; the
-  guarantee covers the explicit configuration in the selected local scope and
-  the caller's observable telemetry environment, not every possible future launch.
+  guarantee covers the selected local scope and observable shared caller file
+  dependencies, not every possible future launch.
 - Redirected roots/settings, unsupported objects, nested mounts and unsupported
   replacement metadata are refused. Linux uses held-handle mount IDs, including
-  bind mounts. macOS replacement copies native metadata; Linux refuses telemetry
-  replacement when extended metadata cannot be preserved. Windows uses native
-  deletion handles and replacement that retains the destination ACL.
+  bind mounts. Windows uses native deletion handles. No configuration replacement
+  or sensitive backup is created by the whole-file deletion path.
 - Known active Claude processes block execution and are checked again at phase
   and directory boundaries. Other writers cannot be locked transactionally by
   Agent Manager. New/changed observed entries stop cleanup; unknown final results
@@ -145,7 +153,7 @@ pnpm --dir app build
 ```
 
 Filesystem fixtures use synthetic HOME/data locations and files-only mode.
-They exercise actual deletion/readback, telemetry projection, external link
+They exercise actual deletion/readback, whole-file telemetry removal, external link
 preservation, stale previews, changed staging files and new files mid-cleanup.
 Frontend tests exercise cancellation, typed confirmation, scope invalidation,
 partial results and fresh-preview requirements. Mock UI checks do not establish

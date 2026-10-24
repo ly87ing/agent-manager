@@ -7,7 +7,7 @@ export const claudeDataPreviewSchema = z.object({
   scope: z.literal("default_claude_code"), platform: z.string(), root: z.string(), config_path: z.string(),
   base: z.string().regex(/^[a-f0-9]{64}$/), can_clear: z.boolean(), has_changes: z.boolean(),
   groups: z.array(z.object({ id: z.string(), files: count, directories: count, bytes: count }).strict()),
-  preserved: z.array(z.object({ file: z.string(), fields: count, changed: z.boolean() }).strict()),
+  telemetry_policy: z.literal("remove"),
   retained: z.array(retainedItem),
   credential_items: count.nullable(), files_only: z.boolean(), blockers: z.array(z.string()),
 }).strict().refine((value) => !value.can_clear || (value.has_changes && value.blockers.length === 0), "Blocked previews cannot clear");
@@ -17,11 +17,11 @@ export const claudeDataResultSchema = z.object({
   scope: z.literal("default_claude_code"),
   status: z.enum(["complete", "partial", "not_applied"]),
   deleted_files: count, deleted_directories: count, deleted_credentials: count,
-  preserved_fields: count, files_only: z.boolean(),
-  telemetry_verified: z.boolean(), message: z.string(),
+  telemetry_policy: z.literal("remove"), files_only: z.boolean(),
+  scope_verified: z.boolean(), message: z.string(),
   retained: z.array(retainedItem),
   retained_verified: z.boolean(),
-}).strict().refine((value) => value.status !== "complete" || (value.telemetry_verified && value.retained_verified && !value.retained.some((item) => item.reason === "unclassified")), "Complete cleanup requires telemetry and remaining-content readback");
+}).strict().refine((value) => value.status !== "complete" || (value.scope_verified && value.retained_verified && !value.retained.some((item) => item.reason === "unclassified")), "Complete cleanup requires independent scope and remaining-content readback");
 export type ClaudeDataResult = z.infer<typeof claudeDataResultSchema>;
 
 export async function previewClaudeData(filesOnly: boolean): Promise<ClaudeDataPreview> {

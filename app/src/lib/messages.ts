@@ -1,6 +1,12 @@
 /** Application copy only; user content and engine diagnostics are never translation keys. */
 export const messages = {
   "高级": "Advanced",
+  "预览并清理本地数据，包括遥测配置": "Preview and clear local data, including telemetry settings",
+  "清理 Claude Code 默认用户目录中的会话、账号、记忆、配置与缓存，包括遥测配置。": "Clear sessions, accounts, memory, configuration and caches in the default Claude Code user directory, including telemetry settings.",
+  "本次不修改 Shell 文件和现有进程环境，也不删除配置引用的外部证书、脚本和共享认证。": "This scope does not modify shell files or existing process environments, or delete external certificates, scripts and shared authentication referenced by configuration.",
+  "将永久删除预览中的数据，包括会话、账号、记忆、恢复记录及遥测配置。请确认已关闭 Claude 及其集成。": "Permanently delete the previewed data, including sessions, account data, memory, recovery records and telemetry settings. Close Claude and its integrations before continuing.",
+  "所选范围内的遥测配置也将删除。": "Telemetry settings in the selected scope will also be deleted.",
+  "未能独立确认清理后的范围，请先检查结果。": "The remaining scope could not be independently verified. Inspect the result before continuing.",
   "已保留的内容": "Retained content",
   "预览中的保留内容，当前状态未确认": "Retained paths from the preview; current state is unverified",
   "项目或工作树，保留代码和文档": "Project or worktree; source and documents retained",

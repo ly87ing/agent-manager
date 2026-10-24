@@ -1,4 +1,4 @@
-use super::{credentials, processes, telemetry, tree};
+use super::{credentials, dependencies, processes, tree};
 use crate::Context;
 use anyhow::{bail, Result};
 use cap_std::fs::Dir;
@@ -11,8 +11,6 @@ pub(super) struct Configuration {
     pub in_root: bool,
     pub name: String,
     pub entry: tree::Entry,
-    pub retained: telemetry::Retained,
-    pub changed: bool,
 }
 
 pub(super) struct Snapshot {
@@ -54,7 +52,7 @@ fn category(path: &Path) -> &'static str {
     }
 }
 
-fn configuration(parent: &Dir, in_root: bool, name: &str, root: &str) -> Result<Configuration> {
+fn configuration(parent: &Dir, in_root: bool, name: &str) -> Result<Configuration> {
     let entry = tree::entry(parent, Path::new(name), PathBuf::from(name))?;
     if entry.kind != tree::Kind::File {
         bail!("A settings file is redirected or is not an ordinary file; no data was changed.");
@@ -68,26 +66,10 @@ fn configuration(parent: &Dir, in_root: bool, name: &str, root: &str) -> Result<
     }
     #[cfg(windows)]
     super::files::validate_single_link(parent, Path::new(name))?;
-    use std::io::Read;
-    let mut bytes = Vec::new();
-    parent
-        .open(name)?
-        .take(8 * 1024 * 1024 + 1)
-        .read_to_end(&mut bytes)?;
-    let retained = telemetry::retain(&bytes, root)?;
-    let changed = retained.bytes.as_deref() != Some(bytes.as_slice());
-    if changed && retained.bytes.is_some() {
-        super::files::validate_replacement(parent, Path::new(name))?;
-    }
-    if tree::entry(parent, Path::new(name), PathBuf::from(name))?.hash != entry.hash {
-        bail!("A settings file changed; request a new preview.");
-    }
     Ok(Configuration {
         in_root,
         name: name.into(),
         entry,
-        retained,
-        changed,
     })
 }
 
@@ -115,7 +97,6 @@ impl Snapshot {
             bail!("The user HOME must have a displayable path.");
         }
         let root_path = home_path.join(".claude");
-        let caller_evidence = telemetry::caller_evidence(&root_path.to_string_lossy())?;
         let data_path = crate::native_profiles::paths::resolved(&ctx.data_dir)?;
         if root_path.starts_with(&data_path) || data_path.starts_with(&root_path) {
             bail!("Claude and Agent Manager data locations overlap; cleanup is unavailable.");
@@ -181,24 +162,32 @@ impl Snapshot {
                 "remote-settings.json",
             ] {
                 if entries.iter().any(|entry| entry.path == Path::new(name)) {
-                    let config = configuration(dir, true, name, &root_path.to_string_lossy())?;
-                    if name == "remote-settings.json" && config.retained.bytes.is_some() {
-                        bail!("Cached organization policy contains telemetry settings; cleanup is unavailable without changing that policy.");
-                    }
-                    configurations.push(config);
+                    configurations.push(configuration(dir, true, name)?);
                 }
             }
         }
         match home.symlink_metadata(".claude.json") {
-            Ok(_) => configurations.push(configuration(
-                &home,
-                false,
-                ".claude.json",
-                &root_path.to_string_lossy(),
-            )?),
+            Ok(_) => configurations.push(configuration(&home, false, ".claude.json")?),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => bail!("The global Claude config could not be inspected."),
         }
+        let targets: Vec<_> = entries
+            .iter()
+            .filter(|entry| entry.retained.is_none())
+            .map(|entry| {
+                (
+                    root_path.join(&entry.path),
+                    entry.kind == tree::Kind::Directory,
+                )
+            })
+            .chain(
+                configurations
+                    .iter()
+                    .filter(|config| !config.in_root)
+                    .map(|config| (home_path.join(&config.name), false)),
+            )
+            .collect();
+        let caller_evidence = dependencies::caller_evidence(&targets)?;
         let mut blockers = Vec::new();
         let active = match processes::active() {
             Ok(pids) => {
@@ -230,7 +219,7 @@ impl Snapshot {
             }
         };
         let mut hash = Sha256::new();
-        hash.update(b"claude-default-data-v2");
+        hash.update(b"claude-default-data-v3-remove-telemetry");
         hash.update(caller_evidence);
         hash.update(home_path.as_os_str().as_encoded_bytes());
         hash.update(tree::identity(&home)?);
@@ -272,11 +261,6 @@ impl Snapshot {
             if entry.retained.is_some() {
                 continue;
             }
-            if self.configurations.iter().any(|c| {
-                c.in_root && c.name == entry.path.to_string_lossy() && c.retained.bytes.is_some()
-            }) {
-                continue;
-            }
             let group = groups.entry(category(&entry.path)).or_default();
             if entry.kind == tree::Kind::Directory {
                 group.1 += 1;
@@ -285,26 +269,19 @@ impl Snapshot {
                 group.2 += entry.bytes;
             }
         }
-        if let Some(config) = self
-            .configurations
-            .iter()
-            .find(|c| !c.in_root && c.retained.bytes.is_none())
-        {
+        if let Some(config) = self.configurations.iter().find(|c| !c.in_root) {
             let group = groups.entry("account").or_default();
             group.0 += 1;
             group.2 += config.entry.bytes;
         }
         let groups: Vec<_> = groups.into_iter().map(|(id,(files,directories,bytes))|json!({"id":id,"files":files,"directories":directories,"bytes":bytes})).collect();
-        let preserved: Vec<_> = self.configurations.iter().filter(|c|c.retained.bytes.is_some()).map(|c|json!({"file":if c.in_root {format!(".claude/{}",c.name)} else {c.name.clone()},"fields":c.retained.fields,"changed":c.changed})).collect();
-        let changes = self.entries.iter().any(|e| {
-            e.retained.is_none()
-                && !self
-                    .configurations
-                    .iter()
-                    .any(|c| c.in_root && c.entry.path == e.path && !c.changed)
-        }) || self.configurations.iter().any(|c| c.changed)
-            || self.credentials.as_ref().is_some_and(|c| c.count() > 0);
-        json!({"scope":"default_claude_code","platform":std::env::consts::OS,"root":self.root_path,"config_path":self.root_path.parent().unwrap().join(".claude.json"),"base":self.base,"can_clear":self.blockers.is_empty() && changes,"groups":groups,"preserved":preserved,"retained":self.retained_data(),"credential_items":self.credentials.as_ref().filter(|c|!c.skipped).map(|c|c.count()),"files_only":self.files_only,"blockers":self.blockers,"has_changes":changes})
+        let changes = self.entries.iter().any(|entry| entry.retained.is_none())
+            || !self.configurations.is_empty()
+            || self
+                .credentials
+                .as_ref()
+                .is_some_and(|credentials| credentials.count() > 0);
+        json!({"scope":"default_claude_code","platform":std::env::consts::OS,"root":self.root_path,"config_path":self.root_path.parent().unwrap().join(".claude.json"),"base":self.base,"can_clear":self.blockers.is_empty() && changes,"groups":groups,"telemetry_policy":"remove","retained":self.retained_data(),"credential_items":self.credentials.as_ref().filter(|c|!c.skipped).map(|c|c.count()),"files_only":self.files_only,"blockers":self.blockers,"has_changes":changes})
     }
 }
 
@@ -360,8 +337,12 @@ mod tests {
         std::fs::write(ctx.home_dir.join(".claude.json"), global).unwrap();
         let preview = Snapshot::capture(&ctx, true).unwrap();
         let data = preview.data();
-        assert_eq!(data["preserved"][0]["fields"], 2);
-        assert_eq!(data["preserved"][0]["changed"], true);
+        assert_eq!(data["telemetry_policy"], "remove");
+        assert!(data["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|group| group["id"] == "configuration" && group["files"] == 1));
         let account = data["groups"]
             .as_array()
             .unwrap()

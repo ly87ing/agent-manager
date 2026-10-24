@@ -428,7 +428,7 @@ export default function SettingsPage({
       <details className="rounded-lg border bg-card">
         <summary className="cursor-pointer px-4 py-3 text-sm font-medium">{t("高级")}</summary>
         <button type="button" data-testid="advanced-entry-claude-data" onClick={() => setActiveAdvanced("claude-data")} className="flex w-full items-center justify-between gap-3 border-t px-4 py-3 text-left text-sm hover:bg-accent/40">
-          <span>{t("Claude 本地数据维护")}<span className="mt-1 block text-xs text-muted-foreground">{t("预览并清理本地数据，保留遥测配置")}</span></span><ChevronRight className="h-4 w-4 shrink-0" aria-hidden />
+          <span>{t("Claude 本地数据维护")}<span className="mt-1 block text-xs text-muted-foreground">{t("预览并清理本地数据，包括遥测配置")}</span></span><ChevronRight className="h-4 w-4 shrink-0" aria-hidden />
         </button>
       </details>
 

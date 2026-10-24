@@ -25,8 +25,8 @@ impl Progress {
     ) -> Value {
         json!({"scope":"default_claude_code","status":status,"deleted_files":self.files,
             "deleted_directories":self.directories,"deleted_credentials":self.credentials,
-            "preserved_fields":snapshot.configurations.iter().map(|c|c.retained.fields).sum::<usize>(),
-            "files_only":snapshot.files_only,"telemetry_verified":verified,"retained":retained,"retained_verified":retained_verified,"message":message})
+            "telemetry_policy":"remove",
+            "files_only":snapshot.files_only,"scope_verified":verified,"retained":retained,"retained_verified":retained_verified,"message":message})
     }
 }
 
@@ -173,52 +173,6 @@ fn inspect_directory(
     Ok(())
 }
 
-fn telemetry_verified(snapshot: &Snapshot) -> bool {
-    if bindings(snapshot).is_err() {
-        return false;
-    }
-    use std::io::Read;
-    snapshot.configurations.iter().all(|config| {
-        let dir = if config.in_root {
-            snapshot.root.as_ref().unwrap()
-        } else {
-            &snapshot.home
-        };
-        let Some(expected) = &config.retained.bytes else {
-            return true;
-        };
-        let Ok(entry) = tree::entry(dir, Path::new(&config.name), config.name.clone().into())
-        else {
-            return false;
-        };
-        if entry.kind != tree::Kind::File {
-            return false;
-        }
-        let Ok(mut file) = dir.open(&config.name) else {
-            return false;
-        };
-        let mut actual = Vec::new();
-        if file
-            .by_ref()
-            .take(8 * 1024 * 1024 + 1)
-            .read_to_end(&mut actual)
-            .is_err()
-        {
-            return false;
-        }
-        let Ok(retained) = super::telemetry::retain(&actual, &snapshot.root_path.to_string_lossy())
-        else {
-            return false;
-        };
-        retained
-            .bytes
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-            == serde_json::from_slice::<Value>(expected).ok()
-            && tree::entry(dir, Path::new(&config.name), config.name.clone().into())
-                .is_ok_and(|after| after.hash == entry.hash)
-    })
-}
-
 fn apply(
     snapshot: &Snapshot,
     progress: &mut Progress,
@@ -243,28 +197,16 @@ fn apply(
     audit("configurations", progress)?;
     for config in &snapshot.configurations {
         check()?;
-        if !config.changed {
-            continue;
+        if let Some(root) = &snapshot.root {
+            inspect_directory(root, Path::new(""), &mut observed)?;
         }
         let dir = if config.in_root {
             snapshot.root.as_ref().unwrap()
         } else {
             &snapshot.home
         };
-        if config.in_root {
-            inspect_directory(dir, Path::new(""), &mut observed)?;
-        }
-        if let Some(bytes) = &config.retained.bytes {
-            let absolute = if config.in_root {
-                snapshot.root_path.as_path()
-            } else {
-                snapshot.root_path.parent().unwrap()
-            };
-            files::replace(dir, absolute, Path::new(&config.name), &config.entry, bytes)?;
-        } else {
-            files::remove(dir, Path::new(&config.name), &config.entry)?;
-            progress.files += 1;
-        }
+        files::remove(dir, Path::new(&config.name), &config.entry)?;
+        progress.files += 1;
         if config.in_root {
             observed.insert(
                 std::path::PathBuf::new(),
@@ -348,15 +290,11 @@ pub(super) fn execute(ctx: &Context, base: &str, files_only: bool, run_id: &str)
         || guard(&snapshot),
         |phase, p| journal(&conn, run_id, phase, p),
     );
-    let verified = telemetry_verified(&snapshot);
-    let (final_issue, retained, retained_verified) = if verified {
-        match readback(ctx, &snapshot) {
-            Ok(after) => (after.issue, after.retained, true),
-            Err(error) => (Some(error.to_string()), snapshot.retained_data(), false),
-        }
-    } else {
-        (None, snapshot.retained_data(), false)
+    let (final_issue, retained, verified) = match readback(ctx, &snapshot) {
+        Ok(after) => (after.issue, after.retained, true),
+        Err(error) => (Some(error.to_string()), snapshot.retained_data(), false),
     };
+    let retained_verified = verified;
     let failure = result.err().map(|error| error.to_string()).or(final_issue);
     let phase = if failure.is_none() && verified && retained_verified {
         "complete"
@@ -371,7 +309,7 @@ pub(super) fn execute(ctx: &Context, base: &str, files_only: bool, run_id: &str)
     };
     let message = failure.or_else(||audit_error.map(|e|e.to_string())).unwrap_or_else(||
         if verified {"The selected local scope was independently checked. Remote tokens and shared SDK credentials were not revoked.".into()}
-        else {"Telemetry readback is uncertain; inspect the remaining files before requesting a new preview.".into()});
+        else {"Final scope inspection is uncertain; inspect the remaining files before requesting a new preview.".into()});
     Ok(progress.data(
         &snapshot,
         status,
@@ -417,23 +355,16 @@ mod tests {
         (path, ctx)
     }
     #[test]
-    fn confirmed_cleanup_deletes_sessions_accounts_and_memory_and_reads_back_retained_telemetry() {
+    fn confirmed_cleanup_deletes_sessions_accounts_memory_and_telemetry_and_reads_back() {
         let (path, ctx) = fixture();
         let snapshot = Snapshot::capture(&ctx, true).unwrap();
         assert!(snapshot.blockers.is_empty(), "{:?}", snapshot.blockers);
         let result = execute(&ctx, &snapshot.base, true, "fixture").unwrap();
         assert_eq!(result["status"], "complete", "{result}");
-        assert_eq!(result["deleted_files"], 4);
+        assert_eq!(result["deleted_files"], 5);
         assert_eq!(result["deleted_directories"], 3);
-        assert_eq!(result["telemetry_verified"], true);
-        let retained: Value = serde_json::from_slice(
-            &std::fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            retained,
-            json!({"env":{"DISABLE_TELEMETRY":"0","OTEL_EXPORTER_OTLP_HEADERS":"PRIVATE_TELEMETRY"}})
-        );
+        assert_eq!(result["scope_verified"], true);
+        assert!(!ctx.home_dir.join(".claude/settings.json").exists());
         assert_eq!(
             std::fs::read_to_string(ctx.home_dir.join("project/.claude/settings.json")).unwrap(),
             "PROJECT_SOURCE"
@@ -501,7 +432,7 @@ mod tests {
             "NEW_WRITER"
         );
         assert!(progress.files >= 1);
-        assert!(telemetry_verified(&snapshot));
+        assert!(readback(&ctx, &snapshot).unwrap().issue.is_some());
         drop(snapshot);
         std::fs::remove_dir_all(path).unwrap();
     }

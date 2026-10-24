@@ -1,10 +1,12 @@
 //! Explicitly confirmed Claude Code local-data maintenance, separate from account APIs.
 mod clear;
 mod credentials;
+mod dependencies;
 mod files;
 mod preview;
 mod processes;
 mod retention;
+#[cfg(test)]
 mod telemetry;
 mod tree;
 

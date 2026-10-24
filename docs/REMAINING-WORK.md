@@ -6,8 +6,8 @@ The default-root preservation correction now protects real worktrees, project
 markers and unclassified content. Fresh result inspection reports retained paths;
 unclassified content prevents a complete result. Isolated Git worktree acceptance
 passed locally; native cross-platform CI and installed-app acceptance for this
-correction are still pending. The user's latest request also includes telemetry
-configuration removal; that policy change has not been implemented in this slice.
+correction are still pending. The current source also removes telemetry configuration in the default scope, as
+required by the latest user clarification. The all-source goal is still open.
 Source `12f6358e` adds explicit Claude local-data maintenance with preserved
 telemetry configuration. Its main
 [CI](https://github.com/ly87ing/agent-manager/actions/runs/40054526868)

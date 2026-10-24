@@ -3,6 +3,89 @@ use super::tests::fixture;
 use super::*;
 
 #[test]
+fn confirmed_cleanup_removes_all_default_configuration_including_telemetry() {
+    let (path, ctx) = fixture();
+    let root = ctx.home_dir.join(".claude");
+    let names = [
+        "settings.json",
+        "settings.local.json",
+        "managed-settings.json",
+        ".claude.json",
+        "remote-settings.json",
+    ];
+    let external = path.join("external");
+    std::fs::create_dir(&external).unwrap();
+    std::fs::write(
+        external.join("certificate.pem"),
+        b"PRIVATE_EXTERNAL_CERTIFICATE",
+    )
+    .unwrap();
+    std::fs::write(external.join("helper.sh"), b"PRIVATE_EXTERNAL_HELPER").unwrap();
+    for (index, name) in names.iter().enumerate() {
+        let bytes = match index {
+            1 => "INVALID_PRIVATE_JSON".to_owned(),
+            2 => r#"{"env":{},"env":{"OTEL_UNKNOWN":"PRIVATE_VALUE"}}"#.to_owned(),
+            _ => json!({"env":{"DISABLE_TELEMETRY":"1","OTEL_UNKNOWN":"PRIVATE_VALUE","OTEL_EXPORTER_OTLP_CERTIFICATE":external.join("certificate.pem")},"otelHeadersHelper":external.join("helper.sh"),"unknownTelemetry":true}).to_string(),
+        };
+        std::fs::write(root.join(name), bytes).unwrap();
+    }
+    std::fs::write(ctx.home_dir.join(".claude.json"), b"INVALID_PRIVATE_JSON").unwrap();
+    let snapshot = Snapshot::capture(&ctx, true).unwrap();
+    let result = execute(&ctx, &snapshot.base, true, "remove-telemetry-fixture").unwrap();
+    assert_eq!(result["status"], "complete", "{result}");
+    assert_eq!(result["telemetry_policy"], "remove");
+    assert_eq!(result["scope_verified"], true);
+    for name in names {
+        assert!(!root.join(name).exists(), "{name}");
+    }
+    assert!(!ctx.home_dir.join(".claude.json").exists());
+    assert!(!result.to_string().contains("PRIVATE_"));
+    assert_eq!(
+        std::fs::read(ctx.home_dir.join("project/.claude/settings.json")).unwrap(),
+        b"PROJECT_SOURCE"
+    );
+    assert_eq!(
+        std::fs::read(external.join("certificate.pem")).unwrap(),
+        b"PRIVATE_EXTERNAL_CERTIFICATE"
+    );
+    assert_eq!(
+        std::fs::read(external.join("helper.sh")).unwrap(),
+        b"PRIVATE_EXTERNAL_HELPER"
+    );
+    drop(snapshot);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
+fn new_project_or_unknown_root_content_stops_before_configuration_deletion() {
+    for name in [".git", "PERSONAL.md"] {
+        let (path, ctx) = fixture();
+        let snapshot = Snapshot::capture(&ctx, true).unwrap();
+        let mut progress = Progress::default();
+        let result = apply(
+            &snapshot,
+            &mut progress,
+            || Ok(()),
+            |phase, _| {
+                if phase == "configurations" {
+                    std::fs::write(
+                        ctx.home_dir.join(".claude").join(name),
+                        b"PERSONAL_PROJECT_DATA",
+                    )?;
+                }
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(progress.files, 0);
+        assert!(ctx.home_dir.join(".claude/settings.json").exists());
+        assert!(ctx.home_dir.join(".claude.json").exists());
+        drop(snapshot);
+        std::fs::remove_dir_all(path).unwrap();
+    }
+}
+
+#[test]
 fn cleanup_retains_projects_worktrees_and_unclassified_sources() {
     let (path, ctx) = fixture();
     let root = ctx.home_dir.join(".claude");
@@ -39,6 +122,7 @@ fn cleanup_retains_projects_worktrees_and_unclassified_sources() {
         result["status"], "complete",
         "Unknown ownership must remain visible"
     );
+    drop(snapshot);
     std::fs::remove_dir_all(path).unwrap();
 }
 
@@ -112,6 +196,7 @@ fn retained_readback_reflects_new_and_removed_unknown_content() {
             data["retained"].as_array().unwrap().is_empty(),
             initially_present
         );
+        drop(snapshot);
         std::fs::remove_dir_all(path).unwrap();
     }
 }

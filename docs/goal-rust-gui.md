@@ -2718,3 +2718,32 @@ native desktop click-through. Personal data was not used for acceptance.
 The user expanded the target to all local Claude sessions and related data,
 including telemetry configuration in the latest clarification. That broader goal
 is tracked as R15; the preservation correction alone does not implement it.
+
+## 2026-10-23: Include local telemetry configuration in cleanup
+
+The latest user clarification supersedes telemetry preservation. The default-root
+tool now deletes all six exact configuration carriers whole, including unknown
+telemetry fields and damaged JSON, without executing helpers or following their
+external references. Preview and result require `telemetry_policy:"remove"`; the
+v3 base rejects previews produced by the older preservation policy. Independent
+final inspection supplies `scope_verified` and retained-path evidence.
+
+The local red-to-green configuration regression, shared file/directory and alias
+guards, full engine suite (341 unit cases and integration targets), Tauri 28,
+frontend 734, production build, Windows/Linux all-target cross-checks and real
+isolated CLI passed. A separate old-v2/new-v3 executable check refused the old
+base before creating a database, then removed telemetry under a fresh preview.
+Project/worktree bytes and external resources remained. Changed copy and typed
+confirmation were checked in the mock browser at 1000 and 760 px.
+
+The earlier `cf739234` native CI exposed two Windows fixture teardown failures:
+the assertions completed, but temporary-tree removal ran while the test retained
+its snapshot's directory handles (sharing violation 32). The fixtures now drop
+those handles after assertions. Product handle protection stays intact; the next
+native CI run must verify Windows teardown. That run also had a macOS installer
+artifact-service timeout after packaging; it is not a successful installer-upload
+receipt. Failed logs remain evidence rather than being replaced by a retry.
+
+All-source session copies, third-party mixed stores and protected system sources
+remain R15 work. No personal cleanup, cloud revocation or reporting shutdown was
+performed or established by these synthetic tests.

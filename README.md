@@ -7,7 +7,8 @@ Manage MCP servers, rules, skills, and their extension dependencies for existing
 **Explicit local-data maintenance exception:** Settings → Advanced → Claude local
 data maintenance previews default Claude Code data and requires typed confirmation
 before deleting sessions, memory, account files and recognized local credentials.
-It preserves explicit telemetry settings and refuses uncertain dependencies.
+It deletes telemetry settings in the selected local scope too; shared caller file
+dependencies remain protected.
 Project source, external link targets, shared SDK credentials and cloud data are
 outside this scope. See the [exact scope and verification](docs/subsystems/claude-local-data.md).
 

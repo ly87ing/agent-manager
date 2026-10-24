@@ -64,11 +64,11 @@ export default function ClaudeDataPage() {
     <div className="space-y-4" data-testid="claude-data-page">
       <div>
         <h1 className="flex items-center gap-2 text-lg font-semibold"><Trash2 className="h-5 w-5" aria-hidden />{t("Claude 本地数据维护")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t("清理 Claude Code 默认用户目录中的会话、账号、记忆、配置与缓存，保留遥测相关配置。")}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{t("清理 Claude Code 默认用户目录中的会话、账号、记忆、配置与缓存，包括遥测配置。")}</p>
       </div>
       <div className="rounded-lg border bg-card p-4 text-sm">
         <p>{t("不会删除项目源文件、外部技能仓库、共享 SDK 认证或云端数据；不会撤销远端令牌。")}</p>
-        <p className="mt-2 text-muted-foreground">{t("Shell 文件、现有进程环境和外部认证来源不在本次范围内。用于遥测的认证配置也会保留。")}</p>
+        <p className="mt-2 text-muted-foreground">{t("本次不修改 Shell 文件和现有进程环境，也不删除配置引用的外部证书、脚本和共享认证。")}</p>
         <p className="mt-2 text-muted-foreground">{t("归属未确认的内容会保留，并列为未完成项。")}</p>
         <p className="mt-2 text-muted-foreground">{t("删除后无法恢复。账号可能需要重新登录，设备认证可能需要重新绑定。不会自动备份敏感数据。")}</p>
         <label className="mt-3 flex items-start gap-2">
@@ -91,10 +91,7 @@ export default function ClaudeDataPage() {
           </div>)}
           {preview.platform === "macos" && <p className="py-2 text-sm">{preview.credential_items === null ? t("系统凭据未检查、不会清理") : t("可识别的系统凭据：{0} 项", preview.credential_items)}</p>}
         </div>
-        {preview.preserved.length > 0 && <div className="rounded-md bg-muted p-3 text-sm">
-          <p className="font-medium">{t("保留遥测相关配置")}</p>
-          <ul className="mt-1 space-y-1 text-xs">{preview.preserved.map((file) => <li key={file.file} className="break-all">{file.file} · {t("保留 {0} 项设置", file.fields)} · {file.changed ? t("其他设置将清除") : t("文件保持原样")}</li>)}</ul>
-        </div>}
+        <p className="text-sm text-muted-foreground">{t("所选范围内的遥测配置也将删除。")}</p>
         {preview.blockers.length > 0 && <div role="alert" className="space-y-1 rounded-md bg-warning/10 p-3 text-sm text-warning"><p>{t("暂不能安全清理，请处理以下问题后重新检查。")}</p>{preview.blockers.map((message) => <p key={message} className="break-words text-xs">{message}</p>)}</div>}
         <RetainedContent items={preview.retained} />
         {!preview.has_changes && <p role="status" className="text-sm text-muted-foreground">{preview.retained.some((item) => item.reason === "unclassified") ? t("仍有归属未确认的内容，请先核对保留路径。") : t("所选范围没有需要清理的数据。")}</p>}
@@ -104,14 +101,13 @@ export default function ClaudeDataPage() {
         <h2 className="font-semibold">{result.status === "complete" ? t("所选范围清理完成") : t("清理未全部完成")}</h2>
         <p>{t("已移除 {0} 个文件、{1} 个目录和 {2} 项系统凭据。", result.deleted_files, result.deleted_directories, result.deleted_credentials)}</p>
         {result.status === "partial" && <p className="text-warning">{t("以上仅统计已确认的删除；未确认的项目可能已发生变化，请检查后再操作。")}</p>}
-        <p>{result.telemetry_verified ? t("保留 {0} 项遥测相关设置。", result.preserved_fields) : t("预览要求保留 {0} 项遥测相关设置。", result.preserved_fields)}</p>
-        {!result.telemetry_verified && <p className="text-warning">{t("遥测配置未能独立确认，请先检查结果。")}</p>}
+        {!result.scope_verified && <p className="text-warning">{t("未能独立确认清理后的范围，请先检查结果。")}</p>}
         {result.files_only && <p className="text-muted-foreground">{t("本次仅处理文件，系统凭据未清理。")}</p>}
         <p className="whitespace-pre-wrap break-words text-xs text-muted-foreground">{result.message}</p>
         <RetainedContent items={result.retained} verified={result.retained_verified} />
         <p className="text-muted-foreground">{t("再次操作前，请重新检查清理范围。")}</p>
       </section>}
-      {confirm && preview && <ConfirmModal title={t("清理 Claude 本地数据")} description={t("将永久删除预览中的数据，包括会话、账号、记忆及恢复记录。遥测相关配置会保留。请确认已关闭 Claude 及其集成。")}
+      {confirm && preview && <ConfirmModal title={t("清理 Claude 本地数据")} description={t("将永久删除预览中的数据，包括会话、账号、记忆、恢复记录及遥测配置。请确认已关闭 Claude 及其集成。")}
         risk="install-remove" riskLabel={t("永久删除")} requireText="DELETE" confirmLabel={t("永久清理所选范围")} executing={busy === "clear"} error={error}
         onConfirm={() => void clear()} onClose={() => {setConfirm(false);setError(null);}} />}
     </div>

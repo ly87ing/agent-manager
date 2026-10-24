@@ -4,6 +4,13 @@ What recent work got wrong, and the rule that would have caught it. Read this be
 
 ## 2026-10-23: destructive maintenance needs platform and dependency evidence
 
+- A shared certificate directory is a set of files, not a single file path.
+  Check deletion leaves below retained dependency directories and every entry in
+  `SSL_CERT_DIR` lists; unresolved aliases and uncertain empty entries must block.
+- Windows keeps the cleanup snapshot's root handles open until it is dropped.
+  A fixture that removes its temporary tree while retaining that snapshot fails
+  teardown with sharing violation 32. Release fixture handles after assertions;
+  do not weaken the product's held-handle protection to make teardown succeed.
 - The first cleanup fixtures kept project source outside the default data root.
   A real worktree inside that root, including uncommitted work, was deleted while
   the operation reported complete. The fixture had not exercised the preservation

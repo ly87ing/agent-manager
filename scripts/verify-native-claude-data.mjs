@@ -78,8 +78,10 @@ try {
   write(".claude/.credentials.json","CHANGED_PRIVATE_ACCOUNT");
   assert.equal(run("clear",["--base",preview.data.base,"--confirm","--files-only"]).ok,false);
   assert(!fs.existsSync(data)); assert(fs.existsSync(path.join(root,"projects/project/11111111-1111-4111-8111-111111111111.jsonl")));
-  const dependency=run("preview",["--files-only"],{OTEL_EXPORTER_OTLP_CERTIFICATE:path.join(root,"certificate.pem")});
+  const dependency=run("preview",["--files-only"],{SSL_CERT_FILE:path.join(root,"history.jsonl")});
   assert(!dependency.ok); assert(!fs.existsSync(data));
+  const sharedDirectory=run("preview",["--files-only"],{SSL_CERT_DIR:[path.join(work,"external"),root].join(path.delimiter)});
+  assert(!sharedDirectory.ok); assert(!fs.existsSync(data));
 
   // A real process with a synthetic Claude executable name must block the real process probe.
   const executable=path.join(work,process.platform==="win32"?"claude.exe":"claude");
@@ -94,11 +96,11 @@ try {
   const stopped=new Promise(resolve=>writer.once("exit",resolve)); writer.kill(); await stopped; writer=undefined;
   const fresh=run("preview",["--files-only"]); assert(fresh.ok && fresh.data.can_clear);
   const cleared=run("clear",["--base",fresh.data.base,"--confirm","--files-only"]);
-  assert(cleared.ok,JSON.stringify(cleared.errors)); assert.equal(cleared.data.status,"complete"); assert.equal(cleared.data.telemetry_verified,true); assert.equal(cleared.data.retained_verified,true);
-  assert.equal(cleared.data.deleted_credentials,0); assert.equal(cleared.data.deleted_files,6);
-  assert.deepEqual(fs.readdirSync(root),["settings.json","skills","worktrees"]);
-  const retained=JSON.parse(fs.readFileSync(path.join(root,"settings.json"),"utf8"));
-  assert.deepEqual(retained,{feedbackDrafts:"off",env:{DISABLE_TELEMETRY:"0",OTEL_EXPORTER_OTLP_HEADERS:"PRIVATE_TELEMETRY"}});
+  assert(cleared.ok,JSON.stringify(cleared.errors)); assert.equal(cleared.data.status,"complete"); assert.equal(cleared.data.scope_verified,true); assert.equal(cleared.data.retained_verified,true);
+  assert.equal(cleared.data.deleted_credentials,0); assert.equal(cleared.data.deleted_files,7);
+  assert.deepEqual(fs.readdirSync(root),["skills","worktrees"]);
+  assert(!fs.existsSync(path.join(root,"settings.json")));
+  assert.equal(cleared.data.telemetry_policy,"remove");
   assert(!fs.existsSync(path.join(home,".claude.json")));
   assert.equal(fs.readFileSync(path.join(home,"project/.claude/settings.json"),"utf8"),"PROJECT_SOURCE");
   assert.equal(fs.readFileSync(path.join(work,"external/source"),"utf8"),"EXTERNAL_SOURCE");
@@ -112,7 +114,7 @@ try {
   assert.equal(fs.readFileSync(path.join(root,"personal-source/main.rs"),"utf8"),"UNCLASSIFIED_SOURCE");assert.equal(fs.readFileSync(path.join(root,"personal-source/README.md"),"utf8"),"UNCLASSIFIED_DOC");
   const after=run("preview",["--files-only"]); assert.equal(after.data.has_changes,false);
   const noOp=run("clear",["--base",after.data.base,"--confirm","--files-only"]); assert.equal(noOp.data.status,"not_applied");
-  console.log(JSON.stringify({platform:process.platform,architecture:process.arch,scope:"synthetic_files_only",previewZeroWrite:true,staleRefused:true,writerBlocked:true,telemetryPreserved:true,externalSourcePreserved:true,worktreesPreserved:true,unclassifiedPreserved:true,status:"passed"}));
+  console.log(JSON.stringify({platform:process.platform,architecture:process.arch,scope:"synthetic_files_only",previewZeroWrite:true,staleRefused:true,writerBlocked:true,telemetryRemoved:true,externalSourcePreserved:true,worktreesPreserved:true,unclassifiedPreserved:true,status:"passed"}));
 } finally {
   if(writer) {const stopped=new Promise(resolve=>writer.once("exit",resolve));writer.kill();await stopped;}
   unmount();
