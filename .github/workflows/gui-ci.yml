@@ -71,6 +71,15 @@ jobs:
       - name: Run cargo tests
         run: cargo test --manifest-path engine-rs/Cargo.toml
 
+      - name: Verify disposable Claude local-data cleanup
+        env:
+          AM_TEST_CLAUDE_BIND_MOUNT: ${{ runner.os == 'Linux' && '1' || '0' }}
+        run: node scripts/verify-native-claude-data.mjs
+
+      - name: Verify scoped deletion in a disposable private Keychain
+        if: ${{ runner.os == 'macOS' }}
+        run: cargo test --manifest-path engine-rs/Cargo.toml native_claude_data::credentials::keychain::tests::private_keychain_persistent_reference_deletes_only_the_previewed_item --lib -- --ignored --exact
+
       - name: Verify engine executable architecture
         run: node scripts/verify-native-architecture.mjs binary ${{ steps.native-host.outputs.target }} engine-rs/target/debug/agent-manager-engine${{ runner.os == 'Windows' && '.exe' || '' }}
 

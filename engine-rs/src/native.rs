@@ -156,6 +156,13 @@ pub fn execute(ctx: &Context, request: &Request) -> Envelope {
     if request.command.replace('.', ":").starts_with("launch:") {
         return crate::native_launch::execute(ctx, request);
     }
+    if request
+        .command
+        .replace('.', ":")
+        .starts_with("claude-data:")
+    {
+        return crate::native_claude_data::execute(ctx, request);
+    }
     // Retired entry points must stop before loading secrets, preflight or locks.
     let command = request.command.replace('.', ":");
     let domain = command.split(':').next().unwrap_or("");

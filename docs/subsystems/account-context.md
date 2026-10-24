@@ -7,6 +7,10 @@ Actual MCP files, rule files and skill links determine active extension state.
 The engine does not create accounts, inspect login state, generate account-bound
 commands, change provider settings, or launch account-bound assistant sessions.
 
+The dedicated [Claude local-data maintenance](claude-local-data.md) domain is the
+2026-10-23 exception for explicitly confirmed default local session/account-data
+deletion. It does not loosen these extension helpers or restore account APIs.
+
 The retained helpers have extension responsibilities:
 
 | Part | Source |

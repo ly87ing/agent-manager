@@ -1,6 +1,6 @@
 # Extensions Only
 
-The 2026-10-11 user requirement supersedes earlier account designs: Agent Manager manages MCP, rules, skills, their sources, and their extension dependencies. It must never manage accounts.
+The 2026-10-11 user requirement supersedes earlier account designs: Agent Manager manages MCP, rules, skills, their sources, and their extension dependencies. Account management remains retired; the later, explicitly confirmed local-data maintenance exception is defined below.
 
 The 2026-10-12 user request adds an independent general launch tool: configurable
 applications or executables, environment variables, arguments, optional time zones,
@@ -44,6 +44,16 @@ untouched. Session variables expire at logout; application-specific overrides
 remain outside this guarantee. Partial/unknown outcomes never count as alignment.
 
 Account creation, registration edits, removal, switching, login/logout, account-bound launch commands, credentials, provider/model/runtime settings, and assistant installation/upgrades are retired. Existing account directories, authentication files, sessions, configuration, shell files, and historical launch scripts are preserved. Official assistant tools remain responsible for them.
+
+The 2026-10-23 request adds **Settings → Advanced → Claude local data maintenance**.
+Its dedicated `claude-data` domain is a narrow exception to the preservation rule:
+a fresh preview and explicit confirmation may delete default Claude Code local
+data, including sessions, memory, account files and recognized local credentials.
+Explicit telemetry settings remain, without enabling or disabling reporting.
+No old account API is re-enabled. Project source, external link targets, shared SDK
+credentials, Agent Manager's database and remote data remain outside that scope.
+See [Claude local data](subsystems/claude-local-data.md) for exact boundaries and
+failure behavior. Development and acceptance use synthetic data only.
 
 Historical registrations are immutable location metadata for existing extension targets. Reading a target label does not inspect authentication, account settings, or assistant executables. New account registration is unavailable. The default assistant resource locations remain available.
 

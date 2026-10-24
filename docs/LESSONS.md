@@ -2,6 +2,18 @@
 
 What recent work got wrong, and the rule that would have caught it. Read this before changing code.
 
+## 2026-10-23: destructive maintenance needs platform and dependency evidence
+
+- A first Keychain candidate used the iOS persistent-reference query key on
+  macOS. The installed SDK specifies a different match-list contract. Compilation
+  exercised neither matching nor deletion; retain a disposable native fixture.
+- A directory device number does not identify a Linux mount. Same-filesystem bind
+  mounts can expose external data, so compare mount IDs from held handles too.
+- Keeping a telemetry key is insufficient if cleanup deletes its certificate or
+  headers helper. Inspect known dependencies and refuse opaque ones before writes.
+- Validate the replacement candidate as well as the original immediately before
+  publication; a final readback detects damage after it has already happened.
+
 ## 2026-10-23: workflow evidence needs the run identity
 
 - One source commit can have manual and push runs of the same workflow. A private

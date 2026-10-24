@@ -22,6 +22,11 @@ The repository owner owns release authorization in R9.
 
 ## Work queue
 
+Claude local-data maintenance is being verified as a separate destructive
+exception. Its [scope and safeguards](subsystems/claude-local-data.md) do not
+establish installed-client or native Keychain acceptance until those receipts
+are recorded. Personal data has not been used for acceptance.
+
 | ID | Phase | Work and current state | Completion criterion |
 | --- | --- | --- | --- |
 | R1 | Native tests passed | `156849bc` passed native macOS/Windows/Linux engine jobs; installed-client evidence remains separate. | Retain conflicts; verify current, entries, backups and partial recovery on each native platform. |

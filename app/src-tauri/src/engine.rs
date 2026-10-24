@@ -51,6 +51,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
             | "open-settings",
         ) => true,
         ("launch", "build" | "catalog" | "run" | "list" | "save" | "delete") => true,
+        ("claude-data", "preview" | "clear") => true,
         ("resources", "targets") => true,
         ("system", "audit" | "discover" | "refresh-upstream") => true,
         ("secrets", "status" | "set" | "source") => true,
@@ -129,6 +130,12 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
     let (domain, verb) = command.split_once(':').unwrap_or(("", ""));
     let mut specs: Vec<(&'static str, ArgValueKind)> = Vec::new();
     match (domain, verb) {
+        ("claude-data", "preview") => specs.push(("--files-only", ArgValueKind::Flag)),
+        ("claude-data", "clear") => {
+            specs.push(("--files-only", ArgValueKind::Flag));
+            specs.push(("--base", ArgValueKind::Digest));
+            specs.push(("--confirm", ArgValueKind::Flag));
+        }
         ("environment", "check") => {
             specs.push(("--spec", ArgValueKind::JsonValue));
             specs.push(("--probe-time", ArgValueKind::Flag));
@@ -697,6 +704,28 @@ pub async fn engine_invoke(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_maintenance_does_not_reopen_account_or_arbitrary_path_surfaces() {
+        assert!(validate_command("claude-data:preview").is_ok());
+        assert!(validate_command("claude-data:clear").is_ok());
+        assert!(validate_command("claude-data:logout").is_err());
+        assert!(validate_command("accounts:delete").is_err());
+        assert!(validate_args("claude-data:preview", &["--confirm".into()]).is_err());
+        assert!(
+            validate_args("claude-data:clear", &["--path".into(), "/YOUR_HOME".into()]).is_err()
+        );
+        assert!(validate_args(
+            "claude-data:clear",
+            &[
+                "--base".into(),
+                "a".repeat(64),
+                "--confirm".into(),
+                "--files-only".into()
+            ]
+        )
+        .is_ok());
+    }
 
     #[test]
     fn environment_check_exposes_only_read_and_explicit_time_query() {

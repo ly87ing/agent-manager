@@ -26,6 +26,7 @@ import { ConfigBackupSection } from "../components/ConfigBackupSection";
 import SecretsPage from "./SecretsPage";
 import TipsPage from "./TipsPage";
 import LaunchPage from "./LaunchPage";
+import ClaudeDataPage from "./ClaudeDataPage";
 import { Select } from "../components/Select";
 import { t, useLanguage } from "../lib/i18n";
 
@@ -298,7 +299,7 @@ export default function SettingsPage({
   };
 
   if (activeAdvanced !== null) {
-    const currentEntry = ADVANCED_ENTRIES.find((entry) => entry.key === activeAdvanced);
+    const currentEntry = activeAdvanced === "claude-data" ? { title: t("Claude 本地数据维护") } : ADVANCED_ENTRIES.find((entry) => entry.key === activeAdvanced);
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-3 border-b pb-3">
@@ -309,11 +310,12 @@ export default function SettingsPage({
             className="inline-flex items-center gap-1.5 rounded-md border bg-card px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
           >
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden />{t("返回设置")}</button>
-          <span className="text-xs text-muted-foreground">{(t("/ 工具 /") + " ")}{currentEntry?.title}</span>
+          <span className="text-xs text-muted-foreground">{(t(activeAdvanced === "claude-data" ? "/ 高级 /" : "/ 工具 /") + " ")}{currentEntry?.title}</span>
         </div>
         {activeAdvanced === "secrets" && <SecretsPage />}
         {activeAdvanced === "tips" && <TipsPage />}
         {activeAdvanced === "launch" && <LaunchPage />}
+        {activeAdvanced === "claude-data" && <ClaudeDataPage />}
       </div>
     );
   }
@@ -422,6 +424,13 @@ export default function SettingsPage({
           );
         })}
       </SettingsGroup>
+
+      <details className="rounded-lg border bg-card">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium">{t("高级")}</summary>
+        <button type="button" data-testid="advanced-entry-claude-data" onClick={() => setActiveAdvanced("claude-data")} className="flex w-full items-center justify-between gap-3 border-t px-4 py-3 text-left text-sm hover:bg-accent/40">
+          <span>{t("Claude 本地数据维护")}<span className="mt-1 block text-xs text-muted-foreground">{t("预览并清理本地数据，保留遥测配置")}</span></span><ChevronRight className="h-4 w-4 shrink-0" aria-hidden />
+        </button>
+      </details>
 
       <ConfigBackupSection />
 

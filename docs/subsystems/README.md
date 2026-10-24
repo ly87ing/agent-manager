@@ -13,6 +13,7 @@ Each page describes how one subsystem works now: what it is responsible for, whe
 | Desktop installation warning and OS login entries | [Desktop startup](desktop-startup.md) |
 | Extension target paths and protected assistant data | [Account path isolation](account-path-isolation.md) |
 | Retired account operations and extension safety boundary | [Account context](account-context.md) |
+| Explicitly confirmed Claude Code local-data deletion | [Claude local data](claude-local-data.md) |
 | Signed updater artifacts and platform selection | [Updater manifest](updater-manifest.md) |
 | Locked dependencies and security advisory evidence | [Dependency security](dependency-security.md) |
 | Managed program versions, npm layouts and executable discovery | [Programs](programs.md) |

@@ -19,6 +19,7 @@ pub mod native_account_context;
 mod native_account_locks;
 pub(crate) mod native_agent_adapters;
 pub mod native_agents;
+pub(crate) mod native_claude_data;
 pub(crate) mod native_config;
 pub(crate) mod native_discover;
 pub(crate) mod native_environment;

@@ -38,6 +38,8 @@ regex = "1"
 semver = "1"
 pep440_rs = "=0.7.3"
 sha2 = "0.10"
+# Scope destructive local-data operations to held directory capabilities.
+cap-std = "=4.0.3"
 # Read legacy Git index checksums; skill identities remain SHA-256.
 sha1 = "0.10"
 toml = "0.8"
