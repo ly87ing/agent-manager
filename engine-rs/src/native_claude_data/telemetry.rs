@@ -56,6 +56,8 @@ fn environment_key(name: &str) -> bool {
                 | "CLAUDE_CODE_SEND_FEEDBACK"
                 | "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"
                 | "CLAUDE_CODE_GZIP_REQUEST_BODIES"
+                | "CLAUDE_CODE_GZIP_DATADOG_LOGS"
+                | "CLAUDE_CODE_CERT_STORE"
                 | "HTTP_PROXY"
                 | "HTTPS_PROXY"
                 | "ALL_PROXY"
@@ -99,6 +101,15 @@ pub(super) struct Retained {
     pub fields: usize,
 }
 
+fn normalized_path(value: &str) -> String {
+    let value = value.replace('\\', "/").to_lowercase();
+    if let Some(path) = value.strip_prefix("//?/unc/") {
+        format!("//{path}")
+    } else {
+        value.strip_prefix("//?/").unwrap_or(&value).to_owned()
+    }
+}
+
 pub(super) fn caller_evidence(root: &str) -> Result<Vec<u8>> {
     use sha2::{Digest, Sha256};
     let mut env = BTreeMap::new();
@@ -138,19 +149,33 @@ pub(super) fn retain(bytes: &[u8], root: &str) -> Result<Retained> {
             let mut keep = BTreeMap::new();
             for (key, value) in env {
                 if !environment_key(&key) {
-                    if key.contains("TELEMETRY") || key.contains("OTEL") || key.contains("TRACING")
+                    let known_non_telemetry = matches!(
+                        key.as_str(),
+                        "CLAUDE_CODE_OAUTH_TOKEN"
+                            | "CLAUDE_CODE_SETUP_TOKEN"
+                            | "CLAUDE_CODE_USE_BEDROCK"
+                            | "CLAUDE_CODE_USE_VERTEX"
+                            | "CLAUDE_CODE_USE_FOUNDRY"
+                    );
+                    if key.contains("TELEMETRY")
+                        || key.contains("OTEL")
+                        || key.contains("TRACING")
+                        || key.contains("DATADOG")
+                        || (!known_non_telemetry
+                            && (key.starts_with("CLAUDE_CODE_") || key.starts_with("NODE_")))
                     {
-                        bail!("An unrecognized telemetry variable prevents safe cleanup.");
+                        bail!(
+                            "An unclassified runtime or telemetry variable prevents safe cleanup."
+                        );
                     }
                     continue;
                 }
                 let plain: String = serde_json::from_str(value.get()).map_err(|_| {
                     anyhow::anyhow!("A telemetry variable has an unsupported value type; cleanup is unavailable.")
                 })?;
-                let normalized = plain.replace('\\', "/").to_lowercase();
-                if normalized.contains(&root.replace('\\', "/").to_lowercase())
-                    || normalized.contains("~/.claude")
-                {
+                let normalized = normalized_path(&plain);
+                let normalized_root = normalized_path(root);
+                if normalized.contains(&normalized_root) || normalized.contains("~/.claude") {
                     bail!("A telemetry setting may depend on files in the cleanup directory; cleanup is unavailable.");
                 }
                 if !plain.is_empty()
@@ -167,7 +192,12 @@ pub(super) fn retain(bytes: &[u8], root: &str) -> Result<Retained> {
                 {
                     let path = std::path::Path::new(&plain);
                     let resolved = dunce::canonicalize(path).ok();
-                    if !path.is_absolute() || resolved.as_ref().is_none_or(|p| p.starts_with(root))
+                    if !path.is_absolute()
+                        || resolved.as_ref().is_none_or(|p| {
+                            let path = normalized_path(&p.to_string_lossy());
+                            path == normalized_root
+                                || path.starts_with(&format!("{normalized_root}/"))
+                        })
                     {
                         bail!("A telemetry file dependency cannot be verified outside the cleanup directory; cleanup is unavailable.");
                     }
@@ -198,6 +228,51 @@ pub(super) fn retain(bytes: &[u8], root: &str) -> Result<Retained> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn certificate_aliases_with_different_root_casing_are_preserved_by_refusing_cleanup() {
+        let path =
+            std::env::temp_dir().join(format!("am-claude-certificate-{}", crate::store::uuid_v4()));
+        std::fs::create_dir_all(path.join(".CLAUDE")).unwrap();
+        let path = dunce::canonicalize(&path).unwrap();
+        std::fs::write(
+            path.join(".CLAUDE/certificate.pem"),
+            b"SYNTHETIC_CERTIFICATE",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(path.join(".CLAUDE/certificate.pem"), path.join("alias.pem"))
+            .unwrap();
+        let settings = serde_json::to_vec(
+            &serde_json::json!({"env":{"NODE_EXTRA_CA_CERTS":path.join("alias.pem")}}),
+        )
+        .unwrap();
+        assert!(retain(&settings, path.join(".claude").to_str().unwrap()).is_err());
+        assert_eq!(
+            std::fs::read(path.join(".CLAUDE/certificate.pem")).unwrap(),
+            b"SYNTHETIC_CERTIFICATE"
+        );
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn shared_transport_controls_remain_and_unclassified_runtime_controls_block_cleanup() {
+        let before=br#"{"env":{"CLAUDE_CODE_CERT_STORE":"system","CLAUDE_CODE_GZIP_DATADOG_LOGS":"0","CLAUDE_CODE_CLIENT_KEY_PASSPHRASE":"PRIVATE_SHARED_TELEMETRY"}}"#;
+        let result = retain(before, "/YOUR_HOME/.claude").unwrap();
+        assert_eq!(result.fields, 3);
+        assert_eq!(result.bytes.unwrap(), before);
+        assert!(retain(
+            br#"{"env":{"CLAUDE_CODE_FUTURE_TRANSPORT":"private"}}"#,
+            "/YOUR_HOME/.claude"
+        )
+        .is_err());
+        assert!(retain(
+            br#"{"env":{"NODE_OPTIONS":"--require private"}}"#,
+            "/YOUR_HOME/.claude"
+        )
+        .is_err());
+        assert!(retain(br#"{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"PRIVATE_TOKEN","CLAUDE_CODE_SETUP_TOKEN":"PRIVATE_TOKEN","CLAUDE_CODE_USE_BEDROCK":"1"}}"#,"/YOUR_HOME/.claude").unwrap().bytes.is_none());
+    }
 
     #[test]
     fn tracing_and_feedback_switches_retain_explicit_off_values() {

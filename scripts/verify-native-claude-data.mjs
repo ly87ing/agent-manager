@@ -51,6 +51,7 @@ try {
     mountRefusal(path.join(work,"external"),directory);fs.rmdirSync(directory);
     const file=path.join(root,"mounted-file");fs.writeFileSync(file,"");
     mountRefusal(path.join(work,"external/source"),file);fs.unlinkSync(file);
+    mountRefusal(path.join(work,"external"),root);
   }
   const before=fs.readFileSync(path.join(root,"settings.json"));
   const preview=run("preview",["--files-only"]);
@@ -69,6 +70,10 @@ try {
   fs.copyFileSync(process.execPath,executable); fs.chmodSync(executable,0o700);
   writer=spawn(executable,["-e","process.stdout.write('READY'); setInterval(()=>{},1000)"],{cwd:work,env,stdio:["ignore","pipe","ignore"]});
   await Promise.race([new Promise((resolve,reject)=>{writer.stdout.once("data",resolve);writer.once("error",reject);writer.once("exit",()=>reject(Error("Synthetic writer exited early")));}),new Promise((_,reject)=>setTimeout(()=>reject(Error("Writer start timed out")),10000).unref())]);
+  if(process.platform==="linux") {
+    const argumentsBytes=fs.readFileSync(`/proc/${writer.pid}/cmdline`);
+    assert.equal(argumentsBytes.subarray(0,argumentsBytes.indexOf(0)).toString(),executable,"Synthetic writer executable argument changed");
+  }
   const blocked=run("preview",["--files-only"]); assert(blocked.ok); assert.equal(blocked.data.can_clear,false); assert(blocked.data.blockers.length>0);
   const stopped=new Promise(resolve=>writer.once("exit",resolve)); writer.kill(); await stopped; writer=undefined;
   const fresh=run("preview",["--files-only"]); assert(fresh.ok && fresh.data.can_clear);

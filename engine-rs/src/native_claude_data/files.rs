@@ -67,6 +67,8 @@ pub(super) fn remove(parent: &Dir, name: &Path, expected: &Entry) -> Result<()> 
 }
 
 pub(super) fn validate_replacement(parent: &Dir, name: &Path) -> Result<()> {
+    #[cfg(windows)]
+    validate_single_link(parent, name)?;
     #[cfg(target_os = "linux")]
     {
         use std::os::fd::AsRawFd;
@@ -81,6 +83,23 @@ pub(super) fn validate_replacement(parent: &Dir, name: &Path) -> Result<()> {
         bail!("A read-only telemetry configuration cannot be replaced safely.");
     }
     let _ = (parent, name);
+    Ok(())
+}
+
+#[cfg(windows)]
+pub(super) fn validate_single_link(parent: &Dir, name: &Path) -> Result<()> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+    let file = parent.open(name)?.into_std();
+    let mut info = std::mem::MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, info.as_mut_ptr()) } == 0 {
+        bail!("A settings file link count could not be verified.");
+    }
+    if unsafe { info.assume_init() }.nNumberOfLinks != 1 {
+        bail!("A settings file has unverified or hard-link aliases; cleanup is unavailable.");
+    }
     Ok(())
 }
 
@@ -151,6 +170,7 @@ fn replace_with(
         if tree::entry(parent, name, expected.path.clone())?.hash != expected.hash {
             bail!("A telemetry configuration changed before replacement; cleanup stopped.");
         }
+        validate_replacement(parent, name)?;
         let staged = tree::entry(parent, Path::new(&temporary), temporary.clone().into())?;
         if staged.identity != candidate.identity
             || staged.kind != Kind::File
@@ -226,6 +246,31 @@ fn replace_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn a_new_hard_link_before_publication_preserves_the_original_and_its_alias() {
+        let (path, dir, entry) = fixture();
+        let result = replace_with(
+            &dir,
+            &path,
+            Path::new("settings.json"),
+            &entry,
+            b"RETAINED",
+            |_, _| {
+                std::fs::hard_link(path.join("settings.json"), path.join("retained-alias.json"))?;
+                Ok(())
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(dir.read("settings.json").unwrap(), b"ORIGINAL_TELEMETRY");
+        assert_eq!(
+            dir.read("retained-alias.json").unwrap(),
+            b"ORIGINAL_TELEMETRY"
+        );
+        drop(dir);
+        std::fs::remove_dir_all(path).unwrap();
+    }
     fn fixture() -> (std::path::PathBuf, Dir, Entry) {
         let path =
             std::env::temp_dir().join(format!("am-claude-files-{}", crate::store::uuid_v4()));

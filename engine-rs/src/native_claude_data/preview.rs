@@ -66,6 +66,8 @@ fn configuration(parent: &Dir, in_root: bool, name: &str, root: &str) -> Result<
             bail!("A settings file has hard-link aliases; no data was changed.");
         }
     }
+    #[cfg(windows)]
+    super::files::validate_single_link(parent, Path::new(name))?;
     use std::io::Read;
     let mut bytes = Vec::new();
     parent
@@ -234,12 +236,14 @@ impl Snapshot {
                 group.2 += entry.bytes;
             }
         }
-        if self
+        if let Some(config) = self
             .configurations
             .iter()
-            .any(|c| !c.in_root && c.retained.bytes.is_none())
+            .find(|c| !c.in_root && c.retained.bytes.is_none())
         {
-            groups.entry("account").or_default().0 += 1;
+            let group = groups.entry("account").or_default();
+            group.0 += 1;
+            group.2 += config.entry.bytes;
         }
         let groups: Vec<_> = groups.into_iter().map(|(id,(files,directories,bytes))|json!({"id":id,"files":files,"directories":directories,"bytes":bytes})).collect();
         let preserved: Vec<_> = self.configurations.iter().filter(|c|c.retained.bytes.is_some()).map(|c|json!({"file":if c.in_root {format!(".claude/{}",c.name)} else {c.name.clone()},"fields":c.retained.fields,"changed":c.changed})).collect();
@@ -257,6 +261,34 @@ impl Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn settings_with_hard_link_aliases_are_refused_without_writing() {
+        let path = std::env::temp_dir().join(format!(
+            "am-claude-linked-settings-{}",
+            crate::store::uuid_v4()
+        ));
+        let ctx = Context {
+            home_dir: path.join("home"),
+            data_dir: path.join("manager"),
+        };
+        std::fs::create_dir_all(ctx.home_dir.join(".claude")).unwrap();
+        let file = ctx.home_dir.join(".claude/settings.json");
+        let bytes =
+            br#"{"env":{"DISABLE_TELEMETRY":"1"},"oauthAccount":{"token":"PRIVATE_ACCOUNT"}}"#;
+        std::fs::write(&file, bytes).unwrap();
+        std::fs::hard_link(&file, ctx.home_dir.join("retained-settings.json")).unwrap();
+        let error = Snapshot::capture(&ctx, true).err().unwrap().to_string();
+        assert!(error.contains("link"));
+        assert_eq!(std::fs::read(&file).unwrap(), bytes);
+        assert_eq!(
+            std::fs::read(ctx.home_dir.join("retained-settings.json")).unwrap(),
+            bytes
+        );
+        assert!(!ctx.data_dir.exists());
+        std::fs::remove_dir_all(path).unwrap();
+    }
     #[test]
     fn preview_is_zero_write_and_never_serializes_account_or_telemetry_secrets() {
         let path =
@@ -273,10 +305,20 @@ mod tests {
             b"PRIVATE_SESSION_SENTINEL",
         )
         .unwrap();
+        let global = br#"{"oauthAccount":{"id":"PRIVATE_ACCOUNT"}}"#;
+        std::fs::write(ctx.home_dir.join(".claude.json"), global).unwrap();
         let preview = Snapshot::capture(&ctx, true).unwrap();
         let data = preview.data();
         assert_eq!(data["preserved"][0]["fields"], 2);
         assert_eq!(data["preserved"][0]["changed"], true);
+        let account = data["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|g| g["id"] == "account")
+            .unwrap();
+        assert_eq!(account["files"], 1);
+        assert_eq!(account["bytes"], global.len() as u64);
         assert!(!data.to_string().contains("PRIVATE_"));
         assert_eq!(
             std::fs::read(ctx.home_dir.join(".claude/settings.json")).unwrap(),

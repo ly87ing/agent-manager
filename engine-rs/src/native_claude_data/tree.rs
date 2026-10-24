@@ -84,6 +84,9 @@ pub(super) fn identity(dir: &Dir) -> Result<Vec<u8>> {
 }
 
 pub(super) fn same_mount(parent: &Dir, child: &Dir) -> Result<()> {
+    if !same_device(&parent.dir_metadata()?, &child.dir_metadata()?) {
+        bail!("A mounted directory is outside the cleanup scope.");
+    }
     #[cfg(target_os = "linux")]
     if mount_id(&parent.try_clone()?.into_std_file())?
         != mount_id(&child.try_clone()?.into_std_file())?
@@ -297,6 +300,24 @@ pub(super) fn digest(entries: &[Entry]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn different_native_filesystems_cannot_be_used_as_the_cleanup_root() {
+        let path =
+            std::env::temp_dir().join(format!("am-claude-mount-{}", crate::store::uuid_v4()));
+        std::fs::create_dir(&path).unwrap();
+        let parent = Dir::open_ambient_dir(&path, cap_std::ambient_authority()).unwrap();
+        let device_fs = Dir::open_ambient_dir("/dev", cap_std::ambient_authority()).unwrap();
+        assert!(!same_device(
+            &parent.dir_metadata().unwrap(),
+            &device_fs.dir_metadata().unwrap()
+        ));
+        assert!(same_mount(&parent, &device_fs).is_err());
+        drop(parent);
+        drop(device_fs);
+        std::fs::remove_dir(path).unwrap();
+    }
 
     #[test]
     fn nested_files_are_read_before_their_directories_and_mutation_changes_the_digest() {

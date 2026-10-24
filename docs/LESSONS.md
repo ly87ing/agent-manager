@@ -16,8 +16,14 @@ What recent work got wrong, and the rule that would have caught it. Read this be
 - Native CI found that an explicit Keychain synchronizable attribute cannot be
   combined with match-list search keys. Omitting it retains Apple's default
   non-synchronizable scope; independently reject synchronized metadata too.
-- Linux runtimes can change `comm` to a thread name. Inspect the current user's
-  executable link as well as that display name, and keep the real writer fixture.
+- A persistent-reference list filters a Keychain search; it does not replace its
+  search scope. The private-store fixture exposed a lost search list on readback.
+  Retain that opaque list for the original query, re-read, deletion and readback;
+  never change the global search list to make a fixture pass.
+- Linux runtimes can change `comm` to a thread name. Inspect the NUL-delimited
+  executable argument too, and keep the real writer fixture. Requiring every
+  unrelated process's protected executable link made normal inspection unavailable;
+  retain strict reads of the actual classification inputs instead.
 - Windows held directory handles can refuse the root-replacement injection itself.
   Assert either the observed move or the exact native sharing refusal, then read
   back the protected bytes in their actual location. Do not weaken preservation

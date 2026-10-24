@@ -12,6 +12,7 @@ const SERVICES: [&str; 3] = [
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
     fn CFRelease(value: Ref);
+    fn CFRetain(value: Ref) -> Ref;
     fn CFGetTypeID(value: Ref) -> usize;
     fn CFStringCreateWithCString(allocator: Ref, text: *const c_char, encoding: u32) -> Ref;
     fn CFDictionaryCreate(
@@ -43,6 +44,7 @@ extern "C" {
 extern "C" {
     fn SecItemCopyMatching(query: Ref, result: *mut Ref) -> i32;
     fn SecItemDelete(query: Ref) -> i32;
+    fn SecKeychainCopySearchList(list: *mut Ref) -> i32;
     static kSecClass: Ref;
     static kSecClassGenericPassword: Ref;
     static kSecAttrService: Ref;
@@ -56,6 +58,7 @@ extern "C" {
     static kSecMatchLimit: Ref;
     static kSecMatchLimitAll: Ref;
     static kSecMatchItemList: Ref;
+    static kSecMatchSearchList: Ref;
     static kSecUseAuthenticationUI: Ref;
     static kSecUseAuthenticationUIFail: Ref;
 }
@@ -71,6 +74,9 @@ impl Drop for Owned {
     }
 }
 impl Owned {
+    fn retained(&self) -> Result<Self> {
+        Self::checked(unsafe { CFRetain(self.0) })
+    }
     fn string(value: &str) -> Result<Self> {
         let text = CString::new(value)?;
         let result =
@@ -121,6 +127,7 @@ pub(super) struct Item {
     reference: Vec<u8>,
     stamp: Vec<u8>,
     service: usize,
+    search_list: Owned,
 }
 impl Item {
     pub fn fingerprint(&self) -> Vec<u8> {
@@ -134,7 +141,7 @@ impl Item {
     }
 }
 
-unsafe fn item(dict: Ref, service: usize) -> Result<Item> {
+unsafe fn item(dict: Ref, service: usize, search_list: &Owned) -> Result<Item> {
     if dict.is_null() || CFGetTypeID(dict) != CFDictionaryGetTypeID() {
         bail!("Keychain metadata is unavailable.");
     }
@@ -165,11 +172,14 @@ unsafe fn item(dict: Ref, service: usize) -> Result<Item> {
             .to_vec(),
         stamp,
         service,
+        search_list: search_list.retained()?,
     })
 }
 
-fn query(pairs: &[(Ref, Ref)], service: usize) -> Result<Vec<Item>> {
-    let dictionary = Owned::dictionary(pairs)?;
+fn query(pairs: &[(Ref, Ref)], service: usize, search_list: &Owned) -> Result<Vec<Item>> {
+    let mut scoped = pairs.to_vec();
+    scoped.push(unsafe { (kSecMatchSearchList, search_list.0) });
+    let dictionary = Owned::dictionary(&scoped)?;
     let mut raw = std::ptr::null();
     let status = unsafe { SecItemCopyMatching(dictionary.0, &mut raw) };
     let result = Owned(raw);
@@ -187,10 +197,14 @@ fn query(pairs: &[(Ref, Ref)], service: usize) -> Result<Vec<Item>> {
                 bail!("Too many matching Keychain items; cleanup is unavailable.");
             }
             for index in 0..length {
-                items.push(item(CFArrayGetValueAtIndex(result.0, index), service)?);
+                items.push(item(
+                    CFArrayGetValueAtIndex(result.0, index),
+                    service,
+                    search_list,
+                )?);
             }
         } else {
-            items.push(item(result.0, service)?);
+            items.push(item(result.0, service, search_list)?);
         }
     }
     items.sort_by(|a, b| a.reference.cmp(&b.reference));
@@ -199,6 +213,15 @@ fn query(pairs: &[(Ref, Ref)], service: usize) -> Result<Vec<Item>> {
 
 pub(super) fn inspect(account: &str) -> Result<Vec<Item>> {
     let account = Owned::string(account)?;
+    let mut raw = std::ptr::null();
+    let status = unsafe { SecKeychainCopySearchList(&mut raw) };
+    let search_list = Owned(raw);
+    if status != 0
+        || search_list.0.is_null()
+        || unsafe { CFGetTypeID(search_list.0) != CFArrayGetTypeID() }
+    {
+        bail!("The native Keychain search scope could not be verified.");
+    }
     let mut items = Vec::new();
     for (index, service) in SERVICES.iter().enumerate() {
         let service = Owned::string(service)?;
@@ -213,7 +236,7 @@ pub(super) fn inspect(account: &str) -> Result<Vec<Item>> {
                 (kSecUseAuthenticationUI, kSecUseAuthenticationUIFail),
             ]
         };
-        items.extend(query(&pairs, index)?);
+        items.extend(query(&pairs, index, &search_list)?);
     }
     let mut references = std::collections::BTreeSet::new();
     if items
@@ -239,7 +262,7 @@ fn inspect_reference(item: &Item) -> Result<Vec<Item>> {
             (kSecUseAuthenticationUI, kSecUseAuthenticationUIFail),
         ]
     };
-    query(&pairs, item.service)
+    query(&pairs, item.service, &item.search_list)
 }
 
 pub(super) fn remove(item: &Item) -> Result<()> {
@@ -253,6 +276,7 @@ pub(super) fn remove(item: &Item) -> Result<()> {
         [
             (kSecClass, kSecClassGenericPassword),
             (kSecMatchItemList, list.0),
+            (kSecMatchSearchList, item.search_list.0),
             (kSecUseAuthenticationUI, kSecUseAuthenticationUIFail),
         ]
     })?;
@@ -278,10 +302,8 @@ mod tests {
             keychain: *mut Ref,
         ) -> i32;
         fn SecKeychainDelete(keychain: Ref) -> i32;
-        fn SecKeychainCopySearchList(list: *mut Ref) -> i32;
         fn SecItemAdd(attributes: Ref, result: *mut Ref) -> i32;
         static kSecUseKeychain: Ref;
-        static kSecMatchSearchList: Ref;
         static kSecValueData: Ref;
     }
     #[link(name = "CoreFoundation", kind = "framework")]
@@ -330,7 +352,6 @@ mod tests {
                     (kSecClass, kSecClassGenericPassword),
                     (kSecAttrService, service.0),
                     (kSecAttrAccount, account.0),
-                    (kSecMatchSearchList, list.0),
                     (kSecMatchLimit, kSecMatchLimitAll),
                     (kSecReturnAttributes, kCFBooleanTrue),
                     (kSecReturnPersistentRef, kCFBooleanTrue),
@@ -338,6 +359,7 @@ mod tests {
                 ]
             },
             0,
+            &list,
         )
         .unwrap()
     }
@@ -377,10 +399,13 @@ mod tests {
         add(&keychain, "YOUR_OTHER_SERVICE", "YOUR_TEST_ACCOUNT");
         let expected = inspect_private(&keychain, SERVICES[1], "YOUR_TEST_ACCOUNT");
         assert_eq!(expected.len(), 1);
+        let reread = inspect_reference(&expected[0]).unwrap();
         assert_eq!(
-            inspect_reference(&expected[0]).unwrap()[0].fingerprint(),
-            expected[0].fingerprint()
+            reread.len(),
+            1,
+            "The original private Keychain search scope must survive reference readback"
         );
+        assert_eq!(reread[0].fingerprint(), expected[0].fingerprint());
         let other = inspect_private(&keychain, SERVICES[1], "YOUR_OTHER_ACCOUNT")[0].fingerprint();
         let unrelated =
             inspect_private(&keychain, "YOUR_OTHER_SERVICE", "YOUR_TEST_ACCOUNT")[0].fingerprint();
@@ -395,6 +420,8 @@ mod tests {
             inspect_private(&keychain, "YOUR_OTHER_SERVICE", "YOUR_TEST_ACCOUNT")[0].fingerprint(),
             unrelated
         );
+        drop(reread);
+        drop(expected);
         drop(keychain);
         let after = search_list();
         assert!(

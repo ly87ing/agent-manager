@@ -96,19 +96,12 @@ pub(super) fn active() -> Result<Vec<u32>> {
             if arguments.len() > 64 * 1024 {
                 bail!("A process command line exceeds the inspection limit.");
             }
-            let image = match std::fs::read_link(entry.path().join("exe")) {
-                Ok(path) => path,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(_) => bail!("A current-user process executable could not be checked."),
-            };
-            let image = image.to_string_lossy();
+            // argv[0] is NUL-delimited, so spaces in an executable path stay intact.
+            // Runtime thread names can replace comm without replacing this argument.
+            let image =
+                String::from_utf8_lossy(arguments.split(|b| *b == 0).next().unwrap_or_default());
             let arguments = String::from_utf8_lossy(&arguments).replace('\0', " ");
-            if is_claude(comm.trim(), &arguments)
-                || is_claude(
-                    image.strip_suffix(" (deleted)").unwrap_or(&image),
-                    &arguments,
-                )
-            {
+            if is_claude(comm.trim(), &arguments) || is_claude(&image, &arguments) {
                 pids.push(pid);
             }
         }

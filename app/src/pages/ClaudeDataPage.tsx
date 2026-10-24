@@ -57,6 +57,7 @@ export default function ClaudeDataPage() {
       </div>
       <div className="rounded-lg border bg-card p-4 text-sm">
         <p>{t("不会删除项目源文件、外部技能仓库、共享 SDK 认证或云端数据；不会撤销远端令牌。")}</p>
+        <p className="mt-2 text-muted-foreground">{t("Shell 文件、现有进程环境和外部认证来源不在本次范围内。用于遥测的认证配置也会保留。")}</p>
         <p className="mt-2 text-muted-foreground">{t("删除后无法恢复。账号可能需要重新登录，设备认证可能需要重新绑定。不会自动备份敏感数据。")}</p>
         <label className="mt-3 flex items-start gap-2">
           <input type="checkbox" checked={includeCredentials} disabled={busy !== null}

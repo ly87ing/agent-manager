@@ -13,6 +13,7 @@ export const messages = {
   "清理未全部完成": "Cleanup incomplete",
   "清理 Claude Code 默认用户目录中的会话、账号、记忆、配置与缓存，保留遥测相关配置。": "Clear sessions, accounts, memory, configuration and caches in the default Claude Code user directory while preserving telemetry settings.",
   "不会删除项目源文件、外部技能仓库、共享 SDK 认证或云端数据；不会撤销远端令牌。": "Project source files, external skill repositories, shared SDK authentication and cloud data are outside this scope. Remote tokens are not revoked.",
+  "Shell 文件、现有进程环境和外部认证来源不在本次范围内。用于遥测的认证配置也会保留。": "Shell files, existing process environments and external authentication sources are outside this scope. Authentication configuration used by telemetry is retained.",
   "删除后无法恢复。账号可能需要重新登录，设备认证可能需要重新绑定。不会自动备份敏感数据。": "Deletion cannot be undone. You may need to sign in and enroll device authentication again. Sensitive data is not automatically backed up.",
   "同时清理可识别的系统凭据": "Also clear recognized system credentials",
   "macOS 会包含当前默认凭据及共享设备认证。其他配置目录和历史凭据名称可能不在本次范围内。": "On macOS this includes current default credentials and shared device authentication. Other configuration directories and historical credential names may be outside this scope.",

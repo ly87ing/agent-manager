@@ -62,6 +62,8 @@ before external secret-source loading, preflight, or general database access.
   Cowork. Matching is non-synchronizable and deletion uses individual persistent
   references after metadata freshness checks. Locked/denied/unknown inspection
   blocks credential cleanup. An isolated HOME cannot inspect the real Keychain.
+  The original opaque Keychain search list remains bound through reference
+  readback, deletion and final readback; the OS search list is never changed.
 - Windows and Linux credentials are ordinary files in the selected directory;
   no Windows Credential Manager sweep runs.
 - Preserved JSON fields include reporting/privacy switches, OTel variables,
@@ -69,6 +71,10 @@ before external secret-source loading, preflight, or general database access.
   objects lose other fields; retained values remain unchanged. Already retained
   files remain byte-identical. Headers and other telemetry secrets never enter
   preview, result or audit output. No new opt-out/opt-in variable is written.
+  Shared telemetry TLS authentication, CA-store selection and compression controls
+  remain too. Unknown Claude-owned runtime controls or Node options in saved
+  settings block cleanup until their telemetry role is classified; known OAuth,
+  setup-token and provider selectors remain removable account/runtime data.
 - Ambiguous JSON, unknown telemetry controls, opaque headers helpers, or known
   file dependencies inside the cleanup root block deletion. Caller environment
   dependencies are checked without changing them. A cached organization policy
