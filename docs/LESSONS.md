@@ -73,6 +73,10 @@ What recent work got wrong, and the rule that would have caught it. Read this be
   FDs alive until SQLite closes; test exclusion again after identity reads,
   commit, VACUUM and checkpoint. A pathname's HAS_MOVED flag is not comparison
   with a held baseline file; test actual connection identity against a swap.
+- The same lock loss occurs when default VFS `xClose` rejects a sidecar that
+  aliases the main database. Restoring a single-link identity does not restore
+  locks. Exercise the actual callback with a legal WAL filename, verify the
+  opened native handle, and keep a real second-writer control after restoration.
 - An initial FTS cleanup test checked uppercase body bytes but missed the index's
   case-folded tokens, and its retained-row filter could conceal a leftover target
   message. Check a unique lowercase token in actual FTS blocks, retain a

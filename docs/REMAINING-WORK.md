@@ -2,23 +2,25 @@
 
 Prioritize **R15: expanded Claude local-data maintenance**, then continue with
 **R7-R9: installed clients, receiving applications and signed updating**.
-Source `4757579e` includes project/unknown preservation, telemetry-inclusive
-configuration deletion and deletion-time Windows hard-link checks. Its main
-[CI](https://github.com/ly87ing/agent-manager/actions/runs/40065351053) passed both
-jobs; [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/40065351052)
-passed all six native engine and six installer targets. The six isolated cleanup
-cases and both private macOS Keychain cases passed. This does not establish the
-all-source cleanup goal or installed Windows/Linux desktop acceptance.
+Source `8232a343` includes project/unknown preservation, telemetry-inclusive
+configuration and recognized-backup deletion, deletion-time Windows hard-link
+checks and opt-in read-only Orca inspection. Its main
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/40083771370) and
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/40083771359) passed,
+including all six native engine and six installer targets. This does not establish
+all-source cleanup or installed Windows/Linux desktop acceptance.
 
-Local macOS x86_64 source `5b3bb9c1` (the same runtime plus coverage documentation)
-was built, installed in Applications and run. Its exact process/build identity,
-database bytes, eight protected paths and retained previous applications were
-independently checked. The configuration-backup increment is under verification;
-its native CI and installed-app evidence remain separate. Native desktop cleanup
-click-through remains unverified after the accessibility provider refused reads.
-See the [current receipts](goal-rust-gui.md#2026-10-23-telemetry-inclusive-installed-runtime).
+That source was built, installed in Applications and run on local macOS x86_64.
+Exact process/build identity, database bytes, eight protected paths, database
+backup and retained previous applications were independently checked. Native
+desktop cleanup click-through remains unverified after the accessibility provider
+refused reads. See the [current receipts](goal-rust-gui.md#2026-10-24-installed-parent-binding-correction-and-native-follow-up).
 
-Snapshot: 2026-10-23. Historical baseline: `3ddd9b43`; its final main
+Synthetic FTS maintenance and preservation tests are recorded at `5b77ffa2`.
+They do not enable Orca deletion; its sidecar/pathname write protocol and the
+other catalog adapters remain open.
+
+Snapshot: 2026-10-24. Historical baseline: `3ddd9b43`; its final main
 [CI](https://github.com/ly87ing/agent-manager/actions/runs/39026462902) and
 [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/39026462915) passed.
 The lead reviewer owns implementation and acceptance.
@@ -46,12 +48,12 @@ that still need adapters; it is not a host-residue inspection.
 | R7 | Partial | macOS x86_64 local install/runtime readback and isolated launch/Git cases passed. Installed cross-platform and actual consumers remain open. | Verify UI failures, restart/restore, login/share links and extension loading. |
 | R8 | Acceptance | Verify settings in receiving sessions/apps and clock behavior. | Read actual effects independently, including cancellation/failure cases. |
 | R9 | Release | Verify signed installed-app updating after separate authorization. | Verify signature, download, install, restart and exact build identity. |
-| R10 | Recorded | `4bcc1371` passed complete main CI/GUI CI and local installed-app process/package readback. Native fixtures and desktop click-through remain separate evidence. | Retain final workflow conclusions separately from native preference and desktop acceptance. |
+| R10 | Recorded | `8232a343` passed complete main CI/GUI CI and local installed-app process/package readback. Native fixtures and desktop click-through remain separate evidence. | Retain final workflow conclusions separately from native preference and desktop acceptance. |
 | R11 | Portability | Resolve skill snapshot support decisions and native evidence gaps. | Verify filesystem/volume limits and explicit refusal of unsupported shapes. |
 | R12 | Investigation | Diagnose earlier intermittent macOS DMG busy-eject failures. | Reproduce and verify the cause; a passing retry alone cannot close it. |
 | R13 | Native tests passed | TLS/ZIP corrections, GLib backport, optimized Linux iterator and extracted bundle notices passed. Maintenance notices remain recorded. | Maintain source provenance and the [security review](subsystems/dependency-security.md). |
-| R14 | Native tests passed | `4bcc1371` passed all six engine and installer targets, including Windows/Linux ARM64 and helper architecture gates. ARM64 release/update routing is prepared; signed and installed-desktop acceptance remains open. | Retain native evidence, payload/target binding and explicit desktop/signed-update limits. |
-| R15 | In progress | Default-directory telemetry and recognized backups passed native CI and installed macOS package/process readback at `85f32cc7`. Orca search has opt-in read-only inspection; cleanup is still unsupported. | Complete exact-source cleanup adapters, including mixed-store/FTS residual handling; preserve project/shared data and keep unchecked sources explicit. |
+| R14 | Native tests passed | `8232a343` passed all six engine and installer targets, including Windows/Linux ARM64 and helper architecture gates. ARM64 release/update routing is prepared; signed and installed-desktop acceptance remains open. | Retain native evidence, payload/target binding and explicit desktop/signed-update limits. |
+| R15 | In progress | Default-directory telemetry, recognized backups and read-only Orca inspection passed native CI and installed macOS package/process readback at `8232a343`. Synthetic FTS erasure/preservation tests are recorded; Orca cleanup is still unsupported. | Complete exact-source cleanup adapters, including mixed-store/FTS residual handling; preserve project/shared data and keep unchecked sources explicit. |
 
 R4-R6 expand currently unavailable controls; preserve those explicit capability
 limits while completing acceptance of the supported operations.

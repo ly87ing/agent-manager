@@ -14,6 +14,9 @@ type Identity = Vec<u64>;
 
 #[path = "support/sqlite_fts_maintenance.rs"]
 mod fts_maintenance;
+#[cfg(unix)]
+#[path = "support/sqlite_wal_alias.rs"]
+mod wal_alias;
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -371,6 +374,8 @@ fn main() {
         std::env::var("AGENT_MANAGER_SQLITE_PROBE_MODE").unwrap_or_else(|_| "baseline".into());
     if mode == "enabled" {
         enabled(&fixture);
+        #[cfg(unix)]
+        wal_alias::run(&fixture);
     } else {
         assert_eq!(mode, "baseline");
         let path = fixture.database("baseline.sqlite");

@@ -142,6 +142,14 @@ POSIX locks and permits the second writer. The safe path keeps raw FDs alive
 until after SQLite closes. The dependency is pinned to SQLite 3.53.2 for this
 capability experiment; an upgrade requires a new protocol review.
 
+The Unix diagnostic variant also reproduces that loss through the actual
+default VFS: a synthetic WAL pathname is replaced with a hard link to the main
+file, its opened native identity is verified, then `xClose` releases the main
+connection's locks. The original WAL and single-link main binding are restored;
+the connection identity still matches, while a second-process writer can enter.
+This is a fault control, not a safe rejection protocol. It does not implement
+process isolation or prevent later writes after such a failure.
+
 A second [synthetic schema-6 fixture](../../engine-rs/tests/support/sqlite_fts_maintenance.rs)
 exercises exact-agent deletion and FTS
 rebuild in one transaction, followed by VACUUM and TRUNCATE checkpoint. It checks

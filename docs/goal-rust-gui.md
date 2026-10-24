@@ -2903,3 +2903,15 @@ all-target cross-checks and actionlint passed locally. New native diagnostic
 matrix results remain pending. No application flag, cleanup entry point or
 personal-data operation was introduced; sidecar/pathname write safety still
 requires a separate protocol.
+
+## 2026-10-24: Actual default-VFS alias-close fault control
+
+The Unix diagnostic probe now replaces its own WAL pathname with a hard link to
+its synthetic main file. The actual default-VFS handle is checked for the main
+device/inode, ordinary type and two links. A second writer is blocked before
+`xClose`. After that callback, the original WAL and single-link main binding are
+restored and the source connection identity still matches, but the real second
+writer succeeds. The parent attempts no further SQL write. The local macOS
+diagnostic passed; native Linux/ARM results remain pending. The normal build
+continues to reject diagnostic capabilities. This fixture proves the alias-close
+hazard, not a safe VFS, isolated cleanup worker or confirmed Orca deletion.
