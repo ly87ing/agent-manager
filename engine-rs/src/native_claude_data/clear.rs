@@ -495,3 +495,7 @@ mod tests {
 #[cfg(test)]
 #[path = "clear_retention_tests.rs"]
 mod retention_tests;
+
+#[cfg(test)]
+#[path = "clear_backup_tests.rs"]
+mod backup_tests;

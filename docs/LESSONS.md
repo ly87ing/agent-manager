@@ -4,6 +4,12 @@ What recent work got wrong, and the rule that would have caught it. Read this be
 
 ## 2026-10-23: destructive maintenance needs platform and dependency evidence
 
+- A non-UTF-8 filename fixture failed during creation on APFS, before inspection.
+  Exercise those names on native Linux, reject undisplayable candidates explicitly,
+  and do not report a fixture-construction failure as a product regression result.
+- Sample a selected backup before its single-link validation, so its recorded
+  evidence cannot already include a newly introduced alias accepted by an earlier
+  check. Keep deletion-time link checks and the external-writer limitation too.
 - A shared certificate directory is a set of files, not a single file path.
   Check deletion leaves below retained dependency directories and every entry in
   `SSL_CERT_DIR` lists; unresolved aliases and uncertain empty entries must block.

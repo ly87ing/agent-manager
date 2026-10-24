@@ -45,6 +45,9 @@ try {
   write(".claude/projects/project/11111111-1111-4111-8111-111111111111.jsonl","PRIVATE_SESSION");
   write(".claude/projects/project/memory/MEMORY.md","PRIVATE_MEMORY");
   write(".claude.json",JSON.stringify({oauthAccount:{id:"PRIVATE_ACCOUNT_ID"}}));
+  const configurationBackups=[".claude/backups/.claude.json.backup.1770000000000",".claude/backups/.claude.json.corrupted.1770000000001",".claude.json.backup.1770000000002",".claude.json.backup.1770000000003"];
+  for(const name of configurationBackups)write(name,"PRIVATE_CONFIGURATION_BACKUP");
+  write("PERSONAL_DOCUMENT.md","PERSONAL_DOCUMENT");
   write("project/.claude/settings.json","PROJECT_SOURCE");
   fs.mkdirSync(path.join(work,"external")); fs.writeFileSync(path.join(work,"external/source"),"EXTERNAL_SOURCE");
   fs.mkdirSync(path.join(root,"skills"));
@@ -72,6 +75,7 @@ try {
   const preview=run("preview",["--files-only"]);
   assert(preview.ok); assert(preview.data.can_clear); assert(!fs.existsSync(data));
   assert.equal(preview.data.retained.filter(item=>item.reason==="project").length,2);
+  for(const name of configurationBackups)assert(preview.data.configuration_paths.includes(fs.realpathSync(path.join(home,name))));
   assert.deepEqual(fs.readFileSync(path.join(root,"settings.json")),before);
   assert.equal(run("clear",["--base",preview.data.base,"--files-only"]).ok,false);
   assert(!fs.existsSync(data));
@@ -97,24 +101,33 @@ try {
   const fresh=run("preview",["--files-only"]); assert(fresh.ok && fresh.data.can_clear);
   const cleared=run("clear",["--base",fresh.data.base,"--confirm","--files-only"]);
   assert(cleared.ok,JSON.stringify(cleared.errors)); assert.equal(cleared.data.status,"complete"); assert.equal(cleared.data.scope_verified,true); assert.equal(cleared.data.retained_verified,true);
-  assert.equal(cleared.data.deleted_credentials,0); assert.equal(cleared.data.deleted_files,7);
+  assert.equal(cleared.data.deleted_credentials,0); assert.equal(cleared.data.deleted_files,11);
   assert.deepEqual(fs.readdirSync(root),["skills","worktrees"]);
   assert(!fs.existsSync(path.join(root,"settings.json")));
+  for(const name of configurationBackups)assert(!fs.existsSync(path.join(home,name)));
+  assert.equal(fs.readFileSync(path.join(home,"PERSONAL_DOCUMENT.md"),"utf8"),"PERSONAL_DOCUMENT");
   assert.equal(cleared.data.telemetry_policy,"remove");
   assert(!fs.existsSync(path.join(home,".claude.json")));
   assert.equal(fs.readFileSync(path.join(home,"project/.claude/settings.json"),"utf8"),"PROJECT_SOURCE");
   assert.equal(fs.readFileSync(path.join(work,"external/source"),"utf8"),"EXTERNAL_SOURCE");
   for(const [name,bytes] of [["worktrees/source/SOURCE.txt","UNCOMMITTED_PROJECT_SOURCE"],["worktrees/source/UNTRACKED.txt","UNTRACKED_PROJECT_SOURCE"],["worktrees/without-vcs/main.py","PROJECT_WITHOUT_VCS"],["skills/personal/SOURCE.txt","UNCOMMITTED_PERSONAL_SOURCE"]])assert.equal(fs.readFileSync(path.join(root,name),"utf8"),bytes);
   assert.equal(fs.readFileSync(path.join(repository,"SOURCE.txt"),"utf8"),"ORIGINAL_PROJECT_SOURCE");
+  write(".claude.json.backup.notes.md","PERSONAL_DOCUMENT");
+  write(".claude/backups/.claude.json.backup.1770000000004","PRIVATE_MIXED_BACKUP");
+  write(".claude/backups/README.md","PERSONAL_DOCUMENT");
   write(".claude/personal-source/main.rs","UNCLASSIFIED_SOURCE");
   write(".claude/personal-source/README.md","UNCLASSIFIED_DOC");
   write(".claude/history.jsonl","PRIVATE_NEW_HISTORY");
   const unknown=run("preview",["--files-only"]);assert(unknown.ok&&unknown.data.can_clear);assert(unknown.data.retained.some(item=>item.reason==="unclassified"));
   const partial=run("clear",["--base",unknown.data.base,"--confirm","--files-only"]);assert(!partial.ok);assert.equal(partial.data.status,"partial");assert.equal(partial.data.retained_verified,true);assert(!fs.existsSync(path.join(root,"history.jsonl")));
   assert.equal(fs.readFileSync(path.join(root,"personal-source/main.rs"),"utf8"),"UNCLASSIFIED_SOURCE");assert.equal(fs.readFileSync(path.join(root,"personal-source/README.md"),"utf8"),"UNCLASSIFIED_DOC");
+  assert.equal(fs.readFileSync(path.join(home,".claude.json.backup.notes.md"),"utf8"),"PERSONAL_DOCUMENT");
+  assert(partial.data.retained.some(item=>item.path===fs.realpathSync(path.join(home,".claude.json.backup.notes.md"))&&item.reason==="unclassified"));
+  assert.equal(fs.readFileSync(path.join(root,"backups/README.md"),"utf8"),"PERSONAL_DOCUMENT");
+  assert.equal(fs.readFileSync(path.join(root,"backups/.claude.json.backup.1770000000004"),"utf8"),"PRIVATE_MIXED_BACKUP");
   const after=run("preview",["--files-only"]); assert.equal(after.data.has_changes,false);
   const noOp=run("clear",["--base",after.data.base,"--confirm","--files-only"]); assert.equal(noOp.data.status,"not_applied");
-  console.log(JSON.stringify({platform:process.platform,architecture:process.arch,scope:"synthetic_files_only",previewZeroWrite:true,staleRefused:true,writerBlocked:true,telemetryRemoved:true,externalSourcePreserved:true,worktreesPreserved:true,unclassifiedPreserved:true,status:"passed"}));
+  console.log(JSON.stringify({platform:process.platform,architecture:process.arch,scope:"synthetic_files_only",previewZeroWrite:true,staleRefused:true,writerBlocked:true,telemetryRemoved:true,recognizedBackupsRemoved:true,externalSourcePreserved:true,worktreesPreserved:true,unclassifiedPreserved:true,status:"passed"}));
 } finally {
   if(writer) {const stopped=new Promise(resolve=>writer.once("exit",resolve));writer.kill();await stopped;}
   unmount();

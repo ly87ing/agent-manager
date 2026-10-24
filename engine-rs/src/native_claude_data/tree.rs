@@ -269,8 +269,15 @@ pub(super) fn scan(dir: &Dir) -> Result<Vec<Entry>> {
             if result.len() >= 100_000 {
                 bail!("File count exceeds the maintenance limit.");
             }
+            if name.to_str().is_none() {
+                bail!("An item name cannot be displayed safely; cleanup is unavailable.");
+            }
             let path = Path::new(&name);
-            let mut value = entry(dir, path, prefix.join(path))?;
+            let relative = prefix.join(path);
+            let mut value = entry(dir, path, relative)?;
+            if value.kind == Kind::File && super::backups::nested(&value.path) {
+                super::files::validate_single_link(dir, path)?;
+            }
             if value.kind == Kind::Directory {
                 let metadata = dir.symlink_metadata(path)?;
                 if !same_device(root, &metadata) {

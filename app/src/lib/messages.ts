@@ -1,6 +1,7 @@
 /** Application copy only; user content and engine diagnostics are never translation keys. */
 export const messages = {
   "高级": "Advanced",
+  "将清理的配置与备份": "Configuration and backups to clear",
   "预览并清理本地数据，包括遥测配置": "Preview and clear local data, including telemetry settings",
   "清理 Claude Code 默认用户目录中的会话、账号、记忆、配置与缓存，包括遥测配置。": "Clear sessions, accounts, memory, configuration and caches in the default Claude Code user directory, including telemetry settings.",
   "本次不修改 Shell 文件和现有进程环境，也不删除配置引用的外部证书、脚本和共享认证。": "This scope does not modify shell files or existing process environments, or delete external certificates, scripts and shared authentication referenced by configuration.",

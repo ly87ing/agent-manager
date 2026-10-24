@@ -75,6 +75,15 @@ pub(super) fn validate_single_link(parent: &Dir, name: &Path) -> Result<()> {
     validate_link_count(&parent.open(name)?)
 }
 
+#[cfg(unix)]
+pub(super) fn validate_single_link(parent: &Dir, name: &Path) -> Result<()> {
+    use cap_std::fs::MetadataExt;
+    if parent.symlink_metadata(name)?.nlink() != 1 {
+        bail!("A selected file has hard-link aliases; cleanup is unavailable.");
+    }
+    Ok(())
+}
+
 #[cfg(windows)]
 fn validate_link_count(file: &cap_std::fs::File) -> Result<()> {
     use std::os::windows::io::AsRawHandle;

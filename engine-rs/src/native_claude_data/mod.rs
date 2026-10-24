@@ -1,4 +1,5 @@
 //! Explicitly confirmed Claude Code local-data maintenance, separate from account APIs.
+mod backups;
 mod clear;
 mod credentials;
 mod dependencies;

@@ -4,8 +4,10 @@
 
 Settings → Advanced → Claude local data maintenance is an opt-in destructive tool.
 The Advanced section starts collapsed. Opening the page performs no inspection.
-It targets only the current user's default `.claude` directory and `.claude.json`
-file. It does not discover accounts or restore the retired account APIs.
+It inspects the current user's default `.claude` directory, `.claude.json` and
+adjacent `.claude.json.*` names. Only recognized automatic backups join deletion;
+other copies remain visible for review. It does not discover accounts or restore
+the retired account APIs.
 
 The user authorized local session and account-data cleanup on 2026-10-23 and
 subsequently included telemetry configuration in deletion. This supersedes the
@@ -16,7 +18,8 @@ credential metadata are authoritative; previews are not persisted.
 The user subsequently expanded the target to all local Claude-related session
 copies and account remnants through Agent Manager, while retaining project code,
 documents, worktrees and shared resources. That target is not an implemented
-state. The current executable scope remains the default directory and credentials;
+state. The current executable scope remains the default directory, recognized configuration
+backups and credentials;
 the reference catalog's other sources need explicit discovery and safe adapters.
 
 | Constraint | Source | Implementation consequence |
@@ -52,9 +55,11 @@ The desktop and CLI enter [native_claude_data](../../engine-rs/src/native_claude
 before external secret-source loading, preflight, or general database access.
 
 1. `claude-data:preview [--files-only]` reads bounded no-follow evidence and hashes
-   file contents/identities. It returns category counts, paths, credential counts,
+   selected file contents/identities. It returns category counts, paths, credential counts,
    telemetry policy, blockers and a SHA-256 base, never credential or session
    values. Preview and cancellation create neither a database nor an audit record.
+   `configuration_paths` lists each selected configuration and backup, bounded to
+   1,024 paths and 256 KiB of path bytes.
    Retained project and unclassified paths have explicit reasons and are excluded
    from deletion counts; unknown ownership remains visible in the result.
 2. `claude-data:clear --base SHA256 --confirm [--files-only]` re-reads the same
@@ -72,8 +77,8 @@ before external secret-source loading, preflight, or general database access.
    `retained_verified` flag is false when only preview evidence remains available;
    `scope_verified` comes from that same independent inspection, even after a
    partial execution. Complete results require both flags and no unclassified
-   content. Preview and result require `telemetry_policy:"remove"`; a new v3 base
-   invalidates previews created under the previous preservation policy.
+   content. Preview and result require `telemetry_policy:"remove"`; the v4 base
+   binds the added backup scope and rejects older previews.
 
 ## Constraints and failure behavior
 
@@ -102,6 +107,21 @@ before external secret-source loading, preflight, or general database access.
   JSON keys and damaged JSON do not require interpretation for whole-file removal.
   Values never enter preview, result or audit output. Helpers are never executed;
   referenced external certificates, keys and scripts are never followed for deletion.
+- Automatic backup recognition accepts nonempty decimal timestamp suffixes for
+  `~/.claude/backups/.claude.json.backup.<timestamp>`,
+  `~/.claude/backups/.claude.json.corrupted.<timestamp>` and HOME-adjacent
+  `.claude.json.backup.<timestamp>`. Decimal matching is a conservative tool
+  policy, not a claim that every historical backup uses that format. The
+  [official recovery instructions](https://code.claude.com/docs/en/settings#fix-a-broken-settings-file)
+  describe the default backup directory; the
+  [official sensitive-file example](https://github.com/anthropics/claude-code/blob/main/examples/settings/settings-hipaa.json)
+  also lists HOME-adjacent backup copies.
+  Root backups stay on the ordinary held-ancestor deletion path; HOME backups use
+  the held HOME configuration path. Both locations check single-link evidence.
+  A mixed backup directory with unknown source/documents stays protected as a
+  whole. Adjacent unclassified copies remain listed and prevent complete status.
+  HOME enumeration is sorted and bounded to 100,000 entries. Undisplayable
+  candidates refuse inspection rather than being silently skipped or serialized.
 - Shared caller file dependencies from `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`,
   `SSL_CERT_DIR` and generic OTel certificate/key variables are compared with the
   selected deletion targets, including resolved aliases. Certificate-directory
@@ -117,8 +137,7 @@ before external secret-source loading, preflight, or general database access.
   inspect every external policy, project or arbitrary launcher dependency; the
   guarantee covers the selected local scope and observable shared caller file
   dependencies, not every possible future launch.
-- Redirected roots/settings, unsupported objects, nested mounts and unsupported
-  replacement metadata are refused. Linux uses held-handle mount IDs, including
+- Redirected roots/settings, unsupported objects and nested mounts are refused. Linux uses held-handle mount IDs, including
   bind mounts. Windows uses native deletion handles. No configuration replacement
   or sensitive backup is created by the whole-file deletion path.
   Windows rechecks ordinary-file link counts on the held deletion handle before
@@ -156,10 +175,13 @@ pnpm --dir app build
 
 Filesystem fixtures use synthetic HOME/data locations and files-only mode.
 They exercise actual deletion/readback, whole-file telemetry removal, external link
-preservation, stale previews, changed staging files and new files mid-cleanup.
+preservation, stale previews, changed selected files, initial/late backup aliases
+and new files mid-cleanup.
 Frontend tests exercise cancellation, typed confirmation, scope invalidation,
 partial results and fresh-preview requirements. Mock UI checks do not establish
-native credential behavior.
+native credential behavior. Linux native fixtures exercise undisplayable file
+names; APFS rejects those names during construction, so macOS cannot establish
+that case.
 
 The former telemetry projector and configuration-replacement helpers are retired.
 Their projection-only assertions do not describe the current policy. Applicable

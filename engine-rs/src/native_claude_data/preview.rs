@@ -18,7 +18,9 @@ pub(super) struct Snapshot {
     pub root: Option<Dir>,
     pub root_id: Vec<u8>,
     pub entries: Vec<tree::Entry>,
+    pub retained_home: Vec<PathBuf>,
     pub configurations: Vec<Configuration>,
+    pub configuration_paths: Vec<PathBuf>,
     pub credentials: Option<credentials::Snapshot>,
     pub files_only: bool,
     pub blockers: Vec<String>,
@@ -33,7 +35,7 @@ fn category(path: &Path) -> &'static str {
         .and_then(|v| v.as_os_str().to_str())
         .unwrap_or("")
     {
-        ".credentials.json" | ".device-keys.json" | ".claude.json" => "account",
+        ".credentials.json" | ".device-keys.json" | ".claude.json" | "backups" => "account",
         "projects" | "history.jsonl" | "sessions" | "file-history" | "plans" | "session-env"
         | "shell-snapshots" | "tasks" | "todos" => "sessions",
         "settings.json"
@@ -78,13 +80,15 @@ impl Snapshot {
         self.entries.iter().filter_map(|entry| {
             entry.retained.filter(|reason| *reason != super::retention::Retention::Ancestor)
                 .map(|reason| json!({"path": self.root_path.join(&entry.path), "reason": reason.reason()}))
-        }).collect()
+        }).chain(self.retained_home.iter().map(|path| json!({"path":path,"reason":"unclassified"}))).collect()
     }
 
     pub fn has_unknown(&self) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| entry.retained == Some(super::retention::Retention::Unknown))
+        !self.retained_home.is_empty()
+            || self
+                .entries
+                .iter()
+                .any(|entry| entry.retained == Some(super::retention::Retention::Unknown))
     }
 
     pub fn capture(ctx: &Context, files_only: bool) -> Result<Self> {
@@ -142,8 +146,11 @@ impl Snapshot {
             || retained
                 .iter()
                 .map(|entry| {
-                    entry.path.as_os_str().as_encoded_bytes().len()
-                        + root_path.as_os_str().as_encoded_bytes().len()
+                    root_path
+                        .join(&entry.path)
+                        .as_os_str()
+                        .as_encoded_bytes()
+                        .len()
                 })
                 .sum::<usize>()
                 > 256 * 1024
@@ -170,6 +177,62 @@ impl Snapshot {
             Ok(_) => configurations.push(configuration(&home, false, ".claude.json")?),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => bail!("The global Claude config could not be inspected."),
+        }
+        let home_backups = super::backups::home_names(&home)?;
+        let retained_home: Vec<_> = home_backups
+            .unclassified
+            .iter()
+            .map(|name| home_path.join(name))
+            .collect();
+        if retained.len() + retained_home.len() > 1024
+            || retained
+                .iter()
+                .map(|entry| {
+                    root_path
+                        .join(&entry.path)
+                        .as_os_str()
+                        .as_encoded_bytes()
+                        .len()
+                })
+                .sum::<usize>()
+                + retained_home
+                    .iter()
+                    .map(|path| path.as_os_str().as_encoded_bytes().len())
+                    .sum::<usize>()
+                > 256 * 1024
+        {
+            bail!(
+                "The retained-path preview exceeds its safe display limit; cleanup is unavailable."
+            );
+        }
+        for name in home_backups.selected {
+            configurations.push(configuration(&home, false, &name)?);
+        }
+        let mut configuration_paths: Vec<_> = configurations
+            .iter()
+            .map(|config| {
+                if config.in_root {
+                    root_path.join(&config.name)
+                } else {
+                    home_path.join(&config.name)
+                }
+            })
+            .chain(
+                entries
+                    .iter()
+                    .filter(|entry| entry.retained.is_none() && super::backups::nested(&entry.path))
+                    .map(|entry| root_path.join(&entry.path)),
+            )
+            .collect();
+        configuration_paths.sort();
+        if configuration_paths.len() > 1024
+            || configuration_paths
+                .iter()
+                .map(|path| path.as_os_str().as_encoded_bytes().len())
+                .sum::<usize>()
+                > 256 * 1024
+        {
+            bail!("The configuration-path preview exceeds its safe display limit; cleanup is unavailable.");
         }
         let targets: Vec<_> = entries
             .iter()
@@ -219,12 +282,16 @@ impl Snapshot {
             }
         };
         let mut hash = Sha256::new();
-        hash.update(b"claude-default-data-v3-remove-telemetry");
+        hash.update(b"claude-default-data-v4-configuration-backups");
         hash.update(caller_evidence);
         hash.update(home_path.as_os_str().as_encoded_bytes());
         hash.update(tree::identity(&home)?);
         hash.update(&root_id);
         hash.update(tree::digest(&entries));
+        for name in &home_backups.unclassified {
+            hash.update((name.len() as u64).to_le_bytes());
+            hash.update(name.as_bytes());
+        }
         for config in &configurations {
             hash.update([u8::from(config.in_root)]);
             hash.update(config.name.as_bytes());
@@ -246,7 +313,9 @@ impl Snapshot {
             root,
             root_id,
             entries,
+            retained_home,
             configurations,
+            configuration_paths,
             credentials,
             files_only,
             blockers,
@@ -269,7 +338,7 @@ impl Snapshot {
                 group.2 += entry.bytes;
             }
         }
-        if let Some(config) = self.configurations.iter().find(|c| !c.in_root) {
+        for config in self.configurations.iter().filter(|c| !c.in_root) {
             let group = groups.entry("account").or_default();
             group.0 += 1;
             group.2 += config.entry.bytes;
@@ -281,7 +350,7 @@ impl Snapshot {
                 .credentials
                 .as_ref()
                 .is_some_and(|credentials| credentials.count() > 0);
-        json!({"scope":"default_claude_code","platform":std::env::consts::OS,"root":self.root_path,"config_path":self.root_path.parent().unwrap().join(".claude.json"),"base":self.base,"can_clear":self.blockers.is_empty() && changes,"groups":groups,"telemetry_policy":"remove","retained":self.retained_data(),"credential_items":self.credentials.as_ref().filter(|c|!c.skipped).map(|c|c.count()),"files_only":self.files_only,"blockers":self.blockers,"has_changes":changes})
+        json!({"scope":"default_claude_code","platform":std::env::consts::OS,"root":self.root_path,"config_path":self.root_path.parent().unwrap().join(".claude.json"),"configuration_paths":self.configuration_paths,"base":self.base,"can_clear":self.blockers.is_empty() && changes,"groups":groups,"telemetry_policy":"remove","retained":self.retained_data(),"credential_items":self.credentials.as_ref().filter(|c|!c.skipped).map(|c|c.count()),"files_only":self.files_only,"blockers":self.blockers,"has_changes":changes})
     }
 }
 

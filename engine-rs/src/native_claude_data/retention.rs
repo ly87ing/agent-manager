@@ -170,7 +170,9 @@ pub(super) fn owned(path: &Path, directory: bool, link: bool) -> bool {
                                     !id.is_empty() && id.bytes().all(|c| c.is_ascii_digit())
                                 })))
         }
-        "backups" => parts.len() == 1 && directory,
+        "backups" => {
+            parts.len() == 1 && directory || !directory && !link && super::backups::nested(path)
+        }
         "skills" | "hooks" | "workflows" => parts.len() == 1 && directory || link,
         "rules" | "commands" | "agents" | "output-styles" => {
             parts.len() == 1 && directory || link || parts.len() == 2 && name.ends_with(".md")

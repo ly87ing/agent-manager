@@ -54,6 +54,13 @@ describe("Claude local data maintenance", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Close Claude first");
     expect(calls).toHaveLength(1);
   });
+  it("shows every selected configuration and backup path before confirmation", async () => {
+    const preview = makeClaudeDataPreview();
+    renderWithEngine(<ClaudeDataPage />, { "claude-data:preview": makeEnvelope(preview) });
+    await userEvent.click(screen.getByRole("button", { name: "检查清理范围" }));
+    expect(await screen.findByRole("heading", { name: "将清理的配置与备份" })).toBeInTheDocument();
+    for (const path of preview.configuration_paths) expect(screen.getAllByText(path).length).toBeGreaterThan(0);
+  });
   it("clears a prior preview when credential scope changes", async () => {
     const { calls } = renderWithEngine(<ClaudeDataPage />, { "claude-data:preview": async (args) => makeEnvelope({ ...makeClaudeDataPreview(), files_only: args.includes("--files-only") }) });
     await userEvent.click(screen.getByRole("button", { name: "检查清理范围" }));

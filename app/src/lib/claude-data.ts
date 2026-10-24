@@ -5,6 +5,7 @@ const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const retainedItem = z.object({ path: z.string(), reason: z.enum(["project", "unclassified"]) }).strict();
 export const claudeDataPreviewSchema = z.object({
   scope: z.literal("default_claude_code"), platform: z.string(), root: z.string(), config_path: z.string(),
+  configuration_paths: z.array(z.string()).max(1024),
   base: z.string().regex(/^[a-f0-9]{64}$/), can_clear: z.boolean(), has_changes: z.boolean(),
   groups: z.array(z.object({ id: z.string(), files: count, directories: count, bytes: count }).strict()),
   telemetry_policy: z.literal("remove"),

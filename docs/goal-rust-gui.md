@@ -2766,3 +2766,26 @@ bytes and eight protected paths, a consistent database backup and retained prior
 application manifests passed. No personal Claude cleanup was performed.
 This is installed process/package evidence; native cleanup UI click-through and
 the broader R15 sources remain open.
+
+## 2026-10-23: Recognized configuration backups
+
+The default tool now includes recognized decimal-timestamp backups under
+`.claude/backups` and adjacent to the global configuration. Preview lists every
+selected configuration and backup path. Root backups retain held-ancestor checks;
+both locations require single-link evidence. Adjacent `.claude.json.*` copies
+with unknown names remain visible and prevent complete status. A mixed backup
+directory containing source/documents stays protected as a whole.
+
+Local engine 343 unit cases plus integration targets, Tauri 28, frontend 735,
+production build and Windows/Linux all-target cross-checks passed. Final focused
+checks and the real isolated CLI confirmed backup deletion, exact counts, stale
+refusal, project/unknown preservation and independent readback. An actual v3
+executable preview was refused by v4 before a database was created; a fresh v4
+preview then removed its selected backup. English/Chinese mock previews were
+read at 1000 and 760 px without overflow.
+
+The non-UTF-8 filename fixture could not be created on APFS; that failure did not
+exercise inspection. Its negative case is Linux-only and awaits native CI.
+Large display-budget limits were statically reviewed; local fixtures do not
+establish every boundary. This increment's native cross-platform and installed
+desktop acceptance remain separate, and the all-source R15 goal remains open.

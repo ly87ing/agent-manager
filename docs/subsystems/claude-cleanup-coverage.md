@@ -13,7 +13,7 @@ rules are in [Claude local data](claude-local-data.md).
 | --- | --- | --- |
 | C06 | Active sessions and writers | Guard only: known active Claude writers block deletion; the tool does not terminate sessions. |
 | C07 | Default global data directory | Partial: recognized artifacts, exact configuration carriers and local telemetry are selected; projects and unknown content stay protected. |
-| C08 | Global state and configuration backups | Partial: default ~/.claude.json only; external and historical backups are not integrated. |
+| C08 | Global state and configuration backups | Partial: default state plus recognized decimal-timestamp backups in the default backup directory and HOME; other copies remain unclassified or outside supported locations. |
 | C12 | Code Keychain credentials | Partial: three exact current-user macOS default services; custom and historical namespaces are not integrated. |
 | C13 | Credential-file fallbacks | Partial: default-directory credential files; custom roots and external copies are not integrated. |
 | C37 | Session Viewer state and watermarks | Not integrated: the installed binary exposes names, but its current mixed-state/migration schema is not verified. |

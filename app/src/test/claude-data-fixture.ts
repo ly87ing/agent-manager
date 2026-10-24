@@ -3,6 +3,7 @@ import type { ClaudeDataPreview, ClaudeDataResult } from "../lib/claude-data";
 export function makeClaudeDataPreview(): ClaudeDataPreview {
   return {
     scope: "default_claude_code", platform: "macos", root: "/YOUR_HOME/.claude", config_path: "/YOUR_HOME/.claude.json",
+    configuration_paths: ["/YOUR_HOME/.claude/settings.json", "/YOUR_HOME/.claude.json", "/YOUR_HOME/.claude.json.backup.1770000000000"],
     base: "a".repeat(64), can_clear: true, has_changes: true,
     groups: [{ id: "sessions", files: 12, directories: 3, bytes: 190_000 }, { id: "account", files: 2, directories: 0, bytes: 3000 }],
     telemetry_policy: "remove",

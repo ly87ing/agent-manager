@@ -84,7 +84,11 @@ export default function ClaudeDataPage() {
       {error && !confirm && <p role="alert" className="whitespace-pre-wrap break-words text-sm text-destructive">{error}</p>}
       {preview && <section className="space-y-3 rounded-lg border bg-card p-4" aria-label={t("清理预览")}>
         <h2 className="text-sm font-semibold">{t("清理预览")}</h2>
-        <div className="space-y-1 break-all font-mono text-xs text-muted-foreground"><p>{preview.root}</p><p>{preview.config_path}</p></div>
+        <p className="break-all font-mono text-xs text-muted-foreground">{preview.root}</p>
+        {preview.configuration_paths.length > 0 && <div className="space-y-2 rounded-md bg-muted p-3 text-sm">
+          <h3 className="font-medium">{t("将清理的配置与备份")}</h3>
+          <ul className="max-h-40 space-y-1 overflow-y-auto font-mono text-xs">{preview.configuration_paths.map((path) => <li key={path} className="break-all">{path}</li>)}</ul>
+        </div>}
         <div className="divide-y">
           {preview.groups.map((group) => <div key={group.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
             <span>{groupLabel(group.id)}</span><span className="text-xs text-muted-foreground">{t("{0} 个文件、{1} 个目录", group.files, group.directories)} · {bytes(group.bytes)}</span>
