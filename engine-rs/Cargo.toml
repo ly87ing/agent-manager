@@ -23,6 +23,11 @@ name = "native_uv_lifecycle"
 path = "tests/native_uv_lifecycle.rs"
 harness = false
 
+[[test]]
+name = "sqlite_maintenance_probe"
+path = "tests/sqlite_maintenance_probe.rs"
+harness = false
+
 [lib]
 name = "agent_manager_engine"
 path = "src/lib.rs"

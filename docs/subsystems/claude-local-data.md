@@ -123,6 +123,27 @@ Confirmed deletion still requires writer checks, exact schema validation,
 FTS-content removal and independent preservation/readback. Other Orca stores,
 custom profiles and the remaining catalog sources are not covered by this probe.
 
+### SQLite write-safety research
+
+The separate `sqlite_maintenance_probe` test executable exercises synthetic
+databases only. Its normal build verifies that FILESTAT diagnostics and the
+`sqlite_filestat` SQL builtin remain unavailable. Native CI explicitly builds an
+experimental variant with `SQLITE_ENABLE_FILESTAT` in a separate target directory;
+that step's flags do not configure application builds.
+
+The experimental variant compares the actual SQLite handle with a held file,
+rejects a replaced database before writes, and uses a second process to test
+writer exclusion across transaction commit, VACUUM and checkpoint. Unix also
+has a fault control: closing an extra raw database FD releases the process's
+POSIX locks and permits the second writer. The safe path keeps raw FDs alive
+until after SQLite closes. The dependency is pinned to SQLite 3.53.2 for this
+capability experiment; an upgrade requires a new protocol review.
+
+This proves neither safe sidecar/pathname writes nor FTS-content removal. Those
+boundaries, exact schema/configuration validation and full non-target readback
+still require a confirmed cleanup adapter. No production diagnostic flag or
+Orca deletion entry point is enabled by this research fixture.
+
 ## Constraints and failure behavior
 
 - Native process inspection remains bounded. Windows PowerShell/CIM has a

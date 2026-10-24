@@ -71,6 +71,13 @@ jobs:
       - name: Run cargo tests
         run: cargo test --manifest-path engine-rs/Cargo.toml
 
+      - name: Verify isolated SQLite connection identity and maintenance locks
+        env:
+          AGENT_MANAGER_SQLITE_PROBE_MODE: enabled
+          LIBSQLITE3_FLAGS: -DSQLITE_ENABLE_FILESTAT
+          CARGO_TARGET_DIR: ${{ runner.temp }}/agent-manager-sqlite-probe
+        run: cargo test --manifest-path engine-rs/Cargo.toml --test sqlite_maintenance_probe --locked
+
       - name: Verify disposable Claude local-data cleanup
         env:
           AM_TEST_CLAUDE_BIND_MOUNT: ${{ runner.os == 'Linux' && '1' || '0' }}

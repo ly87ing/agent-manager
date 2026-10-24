@@ -68,6 +68,11 @@ What recent work got wrong, and the rule that would have caught it. Read this be
   Rewalk ancestors with no-follow opens, then check sidecars after the last image
   read. A matching digest alone misses a newly committed WAL. Validate actual
   virtual-table type and definition; SQL comments can spoof a substring check.
+- Unix closes of any raw FD for a database inode can release SQLite's POSIX locks.
+  A synthetic second-process writer reproduced this after COMMIT. Keep auxiliary
+  FDs alive until SQLite closes; test exclusion again after identity reads,
+  commit, VACUUM and checkpoint. A pathname's HAS_MOVED flag is not comparison
+  with a held baseline file; test actual connection identity against a swap.
 
 - One source commit can have manual and push runs of the same workflow. A private
   checker keyed only by commit/name overwrote the push receipt with the earlier

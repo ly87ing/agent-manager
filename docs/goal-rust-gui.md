@@ -2821,8 +2821,16 @@ columns. Two unit injections cover late WAL creation and a Unix alias pointing
 back to the original directory. Source bytes and absent app data were read back.
 English/Chinese browser-mock layouts were inspected at 1000 and 760 px.
 
-The Windows held-directory rename test is cross-compiled but awaits native CI;
-macOS cannot exercise it. Image/time limits and simultaneous content mutation
+Source `4bcc1371` passed [main CI](https://github.com/ly87ing/agent-manager/actions/runs/40072901635)
+and all twelve [GUI CI targets](https://github.com/ly87ing/agent-manager/actions/runs/40072901735).
+All seven Orca CLI cases and the held-directory rename case passed on native
+Windows x64 and ARM64; native macOS/Linux targets also passed.
+The installed macOS x86_64 build embeds `4bcc1371` and `2026-10-24T07:07:54Z`,
+with SHA256 `b0dc93e3edefa8ea8d2d6aaab096b81ab0a2ee793324b2253275f6af11f03064`.
+Strict signature, exact process, unchanged database/protected paths, consistent
+backup and retained prior applications passed independent readback.
+
+Image/time limits and simultaneous content mutation
 have not been exhaustively exercised. This is read-only main-file snapshot
 evidence, not a writer lock, cleanup, full-source discovery or native desktop UI
 acceptance. Confirmed Orca deletion and removal of old FTS content remain open.
