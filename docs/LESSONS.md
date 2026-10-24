@@ -73,6 +73,11 @@ What recent work got wrong, and the rule that would have caught it. Read this be
   FDs alive until SQLite closes; test exclusion again after identity reads,
   commit, VACUUM and checkpoint. A pathname's HAS_MOVED flag is not comparison
   with a held baseline file; test actual connection identity against a swap.
+- An initial FTS cleanup test checked uppercase body bytes but missed the index's
+  case-folded tokens, and its retained-row filter could conceal a leftover target
+  message. Check a unique lowercase token in actual FTS blocks, retain a
+  VACUUM-only control, assert each selected row key is absent, and verify that
+  omitting rebuild or message deletion makes the copied fixture fail.
 - A Linux ARM64 positive preview failure exposed a guard that rejects unrelated
   parent activity. A deterministic sibling mutation reproduced that rejection
   through timestamp, length or link-count changes. Bind no-follow handles by native

@@ -142,10 +142,23 @@ POSIX locks and permits the second writer. The safe path keeps raw FDs alive
 until after SQLite closes. The dependency is pinned to SQLite 3.53.2 for this
 capability experiment; an upgrade requires a new protocol review.
 
-This proves neither safe sidecar/pathname writes nor FTS-content removal. Those
-boundaries, exact schema/configuration validation and full non-target readback
+A second [synthetic schema-6 fixture](../../engine-rs/tests/support/sqlite_fts_maintenance.rs)
+exercises exact-agent deletion and FTS
+rebuild in one transaction, followed by VACUUM and TRUNCATE checkpoint. It checks
+selected row keys independently, and preserves non-target storage classes/bytes,
+explicit IDs, token positions, schema, FTS configuration, index incarnation and
+an AUTOINCREMENT sequence larger than the remaining maximum ID. Orphans remain
+retained. A VACUUM-without-rebuild control removes the freed uppercase body but
+leaves a unique lowercase token in FTS data blocks. The complete maintenance and
+zero-owned-row retry must remove both. Copied-fixture mutants omitting rebuild or
+message deletion fail their specific assertions.
+This FTS fixture runs in both the normal production-flag test build and the
+separate diagnostic build; FTS maintenance does not depend on FILESTAT.
+
+These experiments do not establish safe sidecar/pathname writes or support for
+unknown schemas/configurations. Those boundaries and independent source readback
 still require a confirmed cleanup adapter. No production diagnostic flag or
-Orca deletion entry point is enabled by this research fixture.
+Orca deletion entry point is enabled by these research fixtures.
 
 ## Constraints and failure behavior
 

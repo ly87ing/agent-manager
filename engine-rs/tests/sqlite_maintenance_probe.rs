@@ -12,6 +12,9 @@ use std::{
 
 type Identity = Vec<u64>;
 
+#[path = "support/sqlite_fts_maintenance.rs"]
+mod fts_maintenance;
+
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
@@ -185,7 +188,8 @@ fn writer(path: &Path) -> i32 {
         Err(_) => return 42,
     };
     db.busy_timeout(Duration::ZERO).unwrap();
-    match db.execute("INSERT INTO probe VALUES('writer')", []) {
+    // A real header write works for both the minimal and schema-6 fixtures.
+    match db.execute_batch("PRAGMA user_version=17;") {
         Ok(_) => 17,
         Err(e)
             if matches!(
@@ -380,6 +384,7 @@ fn main() {
         drop(db);
         assert_eq!(fs::read(path).unwrap(), before);
     }
+    fts_maintenance::run(&fixture);
     drop(fixture);
     println!(
         "{}",

@@ -71,7 +71,7 @@ jobs:
       - name: Run cargo tests
         run: cargo test --manifest-path engine-rs/Cargo.toml
 
-      - name: Verify isolated SQLite connection identity and maintenance locks
+      - name: Verify isolated SQLite identity, locks and FTS maintenance
         env:
           AGENT_MANAGER_SQLITE_PROBE_MODE: enabled
           LIBSQLITE3_FLAGS: -DSQLITE_ENABLE_FILESTAT

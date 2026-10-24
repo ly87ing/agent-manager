@@ -2864,3 +2864,42 @@ last-poll success and unknown/persistent evidence. Together with the architectur
 guards, all fourteen local Node cases passed; actionlint and shell syntax passed.
 Actual portal retirement and complete teardown still require native Linux CI;
 mock mount tables do not establish that outcome.
+
+## 2026-10-24: Installed parent-binding correction and native follow-up
+
+Candidate `8232a343138ef67027257e7d47472d580e39c8e9` was built from a clean
+checkout, ad-hoc signed, installed and run from `/Applications/Agent Manager.app`.
+The binary embeds that source and build time `2026-10-24T09:54:13Z`; SHA-256 is
+`3c2db5c13490228aefd9c345caf95ef20f3ffdc2e3d4f05cf5a9eed28c6bc854`.
+Independent readback verified the exact process, signature, preserved prior app,
+unchanged eight protected paths and unchanged Manager database bytes. A consistent
+database backup passed quick_check. Native GUI click-through remains unverified.
+
+Main CI `40083771370` passed. GUI run `40083771359` passed all six native engine
+jobs, including the Linux ARM64 preview regression and the separate diagnostic
+SQLite fixture. Both Linux installer jobs passed package startup and teardown;
+their barrier logs each recorded zero remaining mounts on the first poll.
+They establish successful native teardown, while the delayed-mount branch is
+still covered only by pure fixtures. The GUI run subsequently completed with all
+twelve native engine/installer jobs successful.
+
+## 2026-10-24: Synthetic FTS residue and preservation proof
+
+The separate diagnostic SQLite fixture now uses the mixed schema-6 layout,
+installed scanner's five indexes, vocabulary relation and four generation
+triggers. Exact-agent deletion and FTS rebuild share a transaction, followed by
+VACUUM and TRUNCATE checkpoint. Independent reopening verifies all selected row
+keys are absent and retained typed values, FTS token positions, explicit IDs,
+schema, configuration, incarnation and a sequence above 2^53 are unchanged.
+Dangling/unknown ownership remains retained rather than guessed.
+
+The VACUUM-only control removes the uppercase body but leaves a unique lowercase
+token in actual FTS blocks. Complete maintenance and a retry with zero selected
+visible rows remove both. Copied-fixture mutants without rebuild and without
+message deletion fail their specific residual-token/selected-row assertions.
+The FTS fixture runs with normal production flags as well as the separate
+diagnostic flags. Both macOS variants, full engine checks, Windows/Linux
+all-target cross-checks and actionlint passed locally. New native diagnostic
+matrix results remain pending. No application flag, cleanup entry point or
+personal-data operation was introduced; sidecar/pathname write safety still
+requires a separate protocol.
