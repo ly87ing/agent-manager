@@ -2960,3 +2960,46 @@ temporary root, then separately checks canonical startup and an owned directory
 alias. The former must resolve the resource directory; the latter must log the
 refusal and remain alive. Native results for that correction remain pending.
 The failed `2dba651d` candidate was not installed over the running local app.
+
+## 2026-10-24: Installed isolated inspector and startup verification
+
+Source `26f670e1` contains the startup correction and verification-order fix.
+Before any copied component runs, macOS acceptance checks package identity and
+its existing signature policy; the component verifier checks its strict
+signature before Cargo can launch the fixture. An owned component copy with a
+modified code byte failed signature verification before Cargo/helper execution.
+The intact copied component passed. This is integrity verification, not a new
+signing-identity or notarization guarantee.
+
+The clean local macOS x86_64 build is identified by commit
+`26f670e1eea66e3ad0202c969f180825334407d3`, build date
+`2026-10-24T12:57:53Z`, and executable SHA-256
+`325ab760aa7f468bd3b3689dafee70d4591ea6d76d385f74f4de3443e81d1a12`.
+An owned copy with isolated HOME/data survived five seconds through both startup
+paths: canonical resource lookup succeeded; an explicit directory alias logged
+the resource refusal and remained alive. Both processes exited after normal
+termination. No framework protection was relaxed.
+
+The same package was installed in Applications and launched. Independent
+readback found exactly one matching process, the expected commit/date/hash and
+valid deep strict ad-hoc signature. Database bytes, eight protected paths,
+the previous app manifest and earlier retained applications were unchanged.
+The consistent database backup passed `quick_check`. The actual installed
+component passed native architecture, signature, build-path/diagnostic-flag and
+release-profile positive/held-parent-isolation checks using synthetic stores.
+All cleanup and inspector fixtures used synthetic data; no personal Claude data
+was deleted.
+
+Local engine 350 unit cases plus integrations (one CI-only ignored case), Tauri
+28, Windows/Linux all-target cross-checks, 14 Node guards, shell syntax and
+actionlint passed. Main [CI](https://github.com/ly87ing/agent-manager/actions/runs/40096103338)
+passed. [GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/40096103298)
+passed all six native engine and six installer targets. Both macOS package/startup
+jobs also passed canonical/alias marker checks. The earlier `2dba651d` startup
+failures remain recorded above; these are results for the corrected source.
+
+These receipts do not establish native desktop cleanup clicks or IPC/resource
+invocation, installed Windows/Linux desktop behavior, signed updating or
+all-source cleanup. The accessibility provider previously refused inspection;
+that acceptance remains open. Orca deletion and the remaining catalog adapters
+are still unsupported; process isolation does not implement their write protocol.
