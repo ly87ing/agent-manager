@@ -2747,3 +2747,22 @@ receipt. Failed logs remain evidence rather than being replaced by a retry.
 All-source session copies, third-party mixed stores and protected system sources
 remain R15 work. No personal cleanup, cloud revocation or reporting shutdown was
 performed or established by these synthetic tests.
+
+## 2026-10-23: Telemetry-inclusive installed runtime
+
+Runtime source `4757579e` passed [main CI](https://github.com/ly87ing/agent-manager/actions/runs/40065351053)
+and all twelve [GUI CI targets](https://github.com/ly87ing/agent-manager/actions/runs/40065351052).
+Every native cleanup case and both disposable macOS Keychain cases passed.
+Windows fixture teardown and the new deletion-path hard-link guard now have
+native Windows x64/ARM64 evidence; obsolete projector tests were removed with
+their retired policy, while applicable deletion safety cases remain.
+
+The local macOS x86_64 build embeds source `5b3bb9c1` and date
+`2026-10-24T05:14:51Z`. It was installed in Applications and launched. Its exact
+process path, source marker and SHA256
+`f90059a7a689901d7cd93a302a650b601aca0be09bc4bdb692c3344be19ebeee`
+were read back. Strict deep ad-hoc signature verification, unchanged database
+bytes and eight protected paths, a consistent database backup and retained prior
+application manifests passed. No personal Claude cleanup was performed.
+This is installed process/package evidence; native cleanup UI click-through and
+the broader R15 sources remain open.
