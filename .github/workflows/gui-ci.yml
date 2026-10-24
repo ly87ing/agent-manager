@@ -361,6 +361,12 @@ jobs:
         if: ${{ runner.os != 'macOS' }}
         run: node scripts/verify-native-architecture.mjs binary ${{ matrix.target }} app/src-tauri/clock-helper/agent-manager-clock-helper${{ runner.os == 'Windows' && '.exe' || '' }}
 
+      - name: Verify read-only inspection helper executable architecture
+        run: node scripts/verify-native-architecture.mjs binary ${{ matrix.target }} app/src-tauri/claude-data-helper/agent-manager-claude-data-helper${{ runner.os == 'Windows' && '.exe' || '' }}
+
+      - name: Exercise native inspection helper with disposable stores
+        run: node scripts/verify-inspection-helper.mjs "${{ github.workspace }}/app/src-tauri/claude-data-helper/agent-manager-claude-data-helper${{ runner.os == 'Windows' && '.exe' || '' }}" ${{ matrix.target }}
+
       - name: Collect installers and checksums
         env:
           BUILD_TARGET: ${{ matrix.target }}
@@ -404,6 +410,9 @@ jobs:
               [[ "${#notices[@]}" == 1 ]]
               cmp "app/src-tauri/vendor/glib/$notice" "${notices[0]}"
             done
+            mapfile -t inspectors < <(find "$package_root" -type f -name agent-manager-claude-data-helper)
+            [[ "${#inspectors[@]}" == 1 ]]
+            node scripts/verify-inspection-helper.mjs "${inspectors[0]}" ${{ matrix.target }}
           done
           for executable in "$test_root/squashfs-root/AppRun" "$test_root/deb/usr/bin/agent-manager-app"; do
             [[ -x "$executable" ]]

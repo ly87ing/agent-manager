@@ -4,11 +4,16 @@ mod clear;
 mod credentials;
 mod dependencies;
 mod files;
+mod inspection_process;
 mod orca_search;
 mod preview;
 mod processes;
 mod retention;
 mod tree;
+
+pub(crate) use inspection_process::{
+    configure as configure_inspection_helper, helper_main as inspection_helper_cli,
+};
 
 use crate::{diagnostic, Context, Envelope, Lock, Mode, Request};
 use serde_json::json;

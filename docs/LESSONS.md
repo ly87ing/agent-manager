@@ -77,6 +77,11 @@ What recent work got wrong, and the rule that would have caught it. Read this be
   aliases the main database. Restoring a single-link identity does not restore
   locks. Exercise the actual callback with a legal WAL filename, verify the
   opened native handle, and keep a real second-writer control after restoration.
+- Read-only source inspection can cause the same fault: opening and rejecting
+  a raw database alias closes an FD in the caller's process. An actual old/new
+  library comparison reproduced that loss during a held parent transaction.
+  Move source opens to a separate inspector, retain the real second-writer
+  assertion, and never fall back in-process when its component is unavailable.
 - An initial FTS cleanup test checked uppercase body bytes but missed the index's
   case-folded tokens, and its retained-row filter could conceal a leftover target
   message. Check a unique lowercase token in actual FTS blocks, retain a

@@ -14,6 +14,8 @@ type Identity = Vec<u64>;
 
 #[path = "support/sqlite_fts_maintenance.rs"]
 mod fts_maintenance;
+#[path = "support/sqlite_inspection_isolation.rs"]
+mod inspection_isolation;
 #[cfg(unix)]
 #[path = "support/sqlite_wal_alias.rs"]
 mod wal_alias;
@@ -390,6 +392,7 @@ fn main() {
         assert_eq!(fs::read(path).unwrap(), before);
     }
     fts_maintenance::run(&fixture);
+    inspection_isolation::run(&fixture);
     drop(fixture);
     println!(
         "{}",

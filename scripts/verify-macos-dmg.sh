@@ -208,6 +208,10 @@ if echo "$OTOOL_OUTPUT" | grep -iq "python"; then
 fi
 log_info "动态依赖检查通过: 无 Python 动态链接"
 
+# Exercise the copied consumer component, including a protected parent DB lock.
+node "${REPO_ROOT}/scripts/verify-inspection-helper.mjs" \
+  "${COPIED_APP}/Contents/Resources/claude-data-helper/agent-manager-claude-data-helper"
+
 # 包内遗留资源检查（严禁 .py, .pyc, manage.sh, python 可执行资源）
 PYTHON_ARTIFACTS="$(find "$COPIED_APP" \( -name "*.py" -o -name "*.pyc" -o -name "manage.sh" -o -name "python" -o -name "python3" \) 2>/dev/null || true)"
 if [[ -n "$PYTHON_ARTIFACTS" ]]; then

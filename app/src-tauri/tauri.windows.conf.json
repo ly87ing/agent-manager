@@ -1,5 +1,8 @@
 {
   "bundle": {
-    "resources": { "clock-helper/": "clock-helper/" }
+    "resources": {
+      "clock-helper/": "clock-helper/",
+      "claude-data-helper/": "claude-data-helper/"
+    }
   }
 }

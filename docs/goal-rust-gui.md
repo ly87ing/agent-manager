@@ -2915,3 +2915,30 @@ writer succeeds. The parent attempts no further SQL write. The local macOS
 diagnostic passed; native Linux/ARM results remain pending. The normal build
 continues to reject diagnostic capabilities. This fixture proves the alias-close
 hazard, not a safe VFS, isolated cleanup worker or confirmed Orca deletion.
+
+## 2026-10-24: Read-only source inspection process boundary
+
+An unsupported source alias could release the caller's SQLite locks even during
+read-only inspection. In the owned old-library comparison at `8453e75a` with
+matching diagnostic flags, the
+same hard-link/held-transaction fixture reached preview refusal, then a real
+second writer succeeded when it should have remained blocked. The new helper
+keeps all source opens in another process; the writer remains blocked, parent
+database bytes remain unchanged after rollback, and Manager storage is not
+initialized. Normal schema-6 counts and source bytes are independently checked.
+
+The app packages a restricted native inspector on all six targets. The CLI uses
+the adjacent component. No in-process fallback, elevation, account API or new
+cleanup operation was added. The response requires its protocol and complete
+count shape; extra fields, missing counts and wrong database leaves are refused.
+Inherited credentials are not forwarded. This is process isolation for lock
+ownership, not an OS sandbox.
+
+Local checks passed: three protocol/refusal cases, seven actual CLI cases,
+normal/diagnostic ownership fixtures, engine 349 unit cases plus integration
+targets (one CI-only ignored case), Tauri 28, frontend 741 and production build,
+Windows/Linux all-target cross-checks, actionlint and shell syntax. The native
+macOS producer helper passed architecture, signature, build-path/diagnostic-flag
+checks and the release-profile positive/isolation fixture. Native matrix and
+packaged-component results remain pending. Copied components do not establish
+desktop resource lookup or IPC click-through; that acceptance remains separate.

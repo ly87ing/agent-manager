@@ -102,6 +102,15 @@ fn main() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            agent_manager_engine::configure_claude_data_inspection_helper(
+                app.path()
+                    .resource_dir()?
+                    .join("claude-data-helper")
+                    .join(format!(
+                        "agent-manager-claude-data-helper{}",
+                        std::env::consts::EXE_SUFFIX
+                    )),
+            );
             #[cfg(any(windows, target_os = "linux"))]
             {
                 let helper = app

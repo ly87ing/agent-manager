@@ -17,7 +17,7 @@ rules are in [Claude local data](claude-local-data.md).
 | C12 | Code Keychain credentials | Partial: three exact current-user macOS default services; custom and historical namespaces are not integrated. |
 | C13 | Credential-file fallbacks | Partial: default-directory credential files; custom roots and external copies are not integrated. |
 | C37 | Session Viewer state and watermarks | Not integrated: the installed binary exposes names, but its current mixed-state/migration schema is not verified. |
-| C38 | Orca full-text index and cursors | Read-only inspection: schema-6 selected main-file snapshot, exact-agent counts and unattributed records. Cleanup, old FTS content and other profiles remain unverified. |
+| C38 | Orca full-text index and cursors | Read-only inspection in a separate native process: schema-6 selected main-file snapshot, exact-agent counts and unattributed records. Cleanup, old FTS content and other profiles remain unverified. |
 | C39 | Orca parse caches | Not integrated: current Orca also uses SQLite schema 4 and scope_cwds version 1; the older JSON input alone is insufficient. |
 | O09 | Independent Cowork resource candidates | Unverified candidate: no fixed path or independent resource identity is established. |
 

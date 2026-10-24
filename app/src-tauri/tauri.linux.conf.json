@@ -2,6 +2,7 @@
   "bundle": {
     "resources": {
       "clock-helper/": "clock-helper/",
+      "claude-data-helper/": "claude-data-helper/",
       "vendor/glib/LICENSE": "licenses/glib/LICENSE",
       "vendor/glib/COPYRIGHT": "licenses/glib/COPYRIGHT"
     }

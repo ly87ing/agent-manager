@@ -11,7 +11,7 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
-const DATABASE: &str = "session-search.sqlite";
+pub(super) const DATABASE: &str = "session-search.sqlite";
 const MAX_BYTES: u64 = 256 * 1024 * 1024;
 
 fn location(_ctx: &Context) -> Result<(PathBuf, &'static str)> {
@@ -44,7 +44,7 @@ pub(super) fn preview(ctx: &Context) -> Result<Value> {
     let (path, origin) = location(ctx)?;
     // All failures are deliberately content-free; SQLite diagnostics can include
     // schema text. A missing default is not evidence about other Orca profiles.
-    Ok(match inspect(&path) {
+    Ok(match super::inspection_process::inspect(&path) {
         Ok(Some(counts)) => json!({
             "source":"orca_search", "path":path, "location_origin":origin,
             "status":"inspected", "schema_version":6, "counts":counts,
@@ -61,7 +61,7 @@ pub(super) fn preview(ctx: &Context) -> Result<Value> {
             "source":"orca_search", "path":path, "location_origin":origin,
             "status":"unavailable", "schema_version":null, "counts":null,
             "cleanup_supported":false, "scope_complete":false,
-            "message":"The index could not be inspected safely. Close Orca and retry. Redirected paths, sidecars, changed files, unsupported schemas, damaged or oversized databases remain unchecked."
+            "message":"The inspection component or index is unavailable. Check the application installation, close Orca and retry. Redirected paths, sidecars, changed files, unsupported schemas, damaged or oversized databases remain unchecked."
         }),
     })
 }
@@ -205,7 +205,7 @@ fn image(parent: &Dir) -> Result<Option<Vec<u8>>> {
     Ok(Some(bytes))
 }
 
-fn inspect(path: &Path) -> Result<Option<Value>> {
+pub(super) fn inspect(path: &Path) -> Result<Option<Value>> {
     inspect_after_read(path, |_| Ok(()))
 }
 

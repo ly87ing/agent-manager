@@ -19,6 +19,8 @@ refused reads. See the [current receipts](goal-rust-gui.md#2026-10-24-installed-
 Synthetic FTS maintenance and preservation tests are recorded at `5b77ffa2`.
 They do not enable Orca deletion; its sidecar/pathname write protocol and the
 other catalog adapters remain open.
+Read-only source inspection is being moved to a native helper to protect parent
+SQLite locks. Component and installed-desktop/IPC acceptance remain distinct.
 
 Snapshot: 2026-10-24. Historical baseline: `3ddd9b43`; its final main
 [CI](https://github.com/ly87ing/agent-manager/actions/runs/39026462902) and

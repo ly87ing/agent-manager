@@ -53,3 +53,13 @@ pub fn environment_clock_helper_cli(args: &[String]) -> Option<i32> {
 pub fn configure_clock_helper(path: std::path::PathBuf) {
     native_environment::configure_clock_helper(path);
 }
+
+/// Read-only source inspection in its own, non-elevated process.
+pub fn claude_data_inspection_helper_cli(args: &[std::ffi::OsString]) -> i32 {
+    native_claude_data::inspection_helper_cli(args)
+}
+
+/// Use the bundled inspector instead of the CLI's adjacent executable.
+pub fn configure_claude_data_inspection_helper(path: std::path::PathBuf) {
+    native_claude_data::configure_inspection_helper(path);
+}

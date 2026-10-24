@@ -99,8 +99,24 @@ join messages and file cursors; shared session IDs and keyword matches are not
 ownership evidence. Dangling, NULL and non-integer references remain unattributed.
 Output contains counts and the database path, never session IDs or content.
 
-SQLite only receives a bounded memory copy, never the source pathname. The
-adapter holds ordinary ancestor directories, refuses aliases, hard links and any
+The desktop/CLI parent resolves the selected path and runs the packaged native
+`agent-manager-claude-data-helper`. Only that process opens source handles: a
+rejected hard-link alias must not release concurrent Manager SQLite locks.
+The desktop registers its resource path; the CLI uses the adjacent executable.
+Build all CLI components with `cargo build --manifest-path engine-rs/Cargo.toml --bins --locked`.
+Tauri's build/dev hooks build and copy the helper on each native platform.
+
+The helper supports only the exact inspection operation and database leaf. It
+does not enter the general dispatcher, initialize Manager storage, load
+credentials or elevate authority. It is a separate process, not an OS sandbox.
+The child inherits only OS loader/temp essentials. The parent uses an owned
+process group/Job with a twenty-second deadline, and accepts less
+than 4 KiB of strictly typed/versioned count output. Missing, redirected,
+incompatible, malformed or timed-out components leave inspection unavailable;
+there is no in-process fallback. Opening the page still starts no inspection.
+
+Inside the helper, SQLite only receives a bounded memory copy, never the source
+pathname. The adapter holds ordinary ancestor directories, refuses aliases, hard links and any
 WAL/SHM/journal entry, and rechecks file evidence and ancestor identities.
 Unrelated parent contents may change without invalidating the binding;
 directory timestamps, length and link count are not identity evidence. No-follow

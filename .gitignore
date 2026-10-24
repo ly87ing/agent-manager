@@ -50,6 +50,8 @@ app/src-tauri/target/
 app/src-tauri/gen/
 app/src-tauri/clock-helper/agent-manager-clock-helper
 app/src-tauri/clock-helper/agent-manager-clock-helper.exe
+app/src-tauri/claude-data-helper/agent-manager-claude-data-helper
+app/src-tauri/claude-data-helper/agent-manager-claude-data-helper.exe
 
 # Rust engine slice (engine-rs/)
 engine-rs/target/

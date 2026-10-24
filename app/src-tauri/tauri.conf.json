@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "io.github.ly87ing.agent-manager",
   "build": {
-    "beforeDevCommand": "node ../scripts/build-clock-helper.mjs --debug && pnpm dev",
+    "beforeDevCommand": "node ../scripts/build-clock-helper.mjs --debug && node ../scripts/build-claude-data-helper.mjs --debug && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build && node ../scripts/build-clock-helper.mjs",
+    "beforeBuildCommand": "pnpm build && node ../scripts/build-clock-helper.mjs && node ../scripts/build-claude-data-helper.mjs",
     "frontendDist": "../dist"
   },
   "app": {
@@ -60,6 +60,6 @@
       "icons/icon.ico",
       "icons/icon.png"
     ],
-    "resources": []
+    "resources": { "claude-data-helper/": "claude-data-helper/" }
   }
 }
