@@ -415,26 +415,46 @@ mod tests {
         let (path, ctx) = fixture();
         let snapshot = Snapshot::capture(&ctx, true).unwrap();
         let mut progress = Progress::default();
+        let mut rebound = false;
+        #[cfg(windows)]
+        let mut sharing_refused = false;
+        #[cfg(not(windows))]
+        let sharing_refused = false;
         let result = apply(
             &snapshot,
             &mut progress,
             || Ok(()),
             |phase, _| {
                 if phase == "files" {
-                    std::fs::rename(ctx.home_dir.join(".claude"), ctx.home_dir.join("retained"))?;
+                    if let Err(error) =
+                        std::fs::rename(ctx.home_dir.join(".claude"), ctx.home_dir.join("retained"))
+                    {
+                        #[cfg(windows)]
+                        {
+                            sharing_refused = matches!(error.raw_os_error(), Some(5 | 32));
+                        }
+                        return Err(error.into());
+                    }
+                    rebound = true;
                     std::fs::create_dir(ctx.home_dir.join(".claude"))?;
                 }
                 Ok(())
             },
         );
         assert!(result.is_err());
+        assert!(
+            rebound || sharing_refused,
+            "Rebinding must be observed or refused by native sharing rules"
+        );
+        let retained = ctx
+            .home_dir
+            .join(if rebound { "retained" } else { ".claude" });
         assert_eq!(
-            std::fs::read_to_string(ctx.home_dir.join("retained/.credentials.json")).unwrap(),
+            std::fs::read_to_string(retained.join(".credentials.json")).unwrap(),
             "PRIVATE_ACCOUNT"
         );
         assert_eq!(
-            std::fs::read_to_string(ctx.home_dir.join("retained/projects/project/session.jsonl"))
-                .unwrap(),
+            std::fs::read_to_string(retained.join("projects/project/session.jsonl")).unwrap(),
             "PRIVATE_SESSION"
         );
         drop(snapshot);

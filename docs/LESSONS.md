@@ -13,6 +13,15 @@ What recent work got wrong, and the rule that would have caught it. Read this be
   headers helper. Inspect known dependencies and refuse opaque ones before writes.
 - Validate the replacement candidate as well as the original immediately before
   publication; a final readback detects damage after it has already happened.
+- Native CI found that an explicit Keychain synchronizable attribute cannot be
+  combined with match-list search keys. Omitting it retains Apple's default
+  non-synchronizable scope; independently reject synchronized metadata too.
+- Linux runtimes can change `comm` to a thread name. Inspect the current user's
+  executable link as well as that display name, and keep the real writer fixture.
+- Windows held directory handles can refuse the root-replacement injection itself.
+  Assert either the observed move or the exact native sharing refusal, then read
+  back the protected bytes in their actual location. Do not weaken preservation
+  or count an injection that never happened as exercised.
 
 ## 2026-10-23: workflow evidence needs the run identity
 

@@ -34,8 +34,9 @@ extern "C" {
     fn CFDataGetBytePtr(value: Ref) -> *const u8;
     fn CFDateGetTypeID() -> usize;
     fn CFDateGetAbsoluteTime(value: Ref) -> f64;
+    fn CFBooleanGetTypeID() -> usize;
+    fn CFBooleanGetValue(value: Ref) -> bool;
     static kCFBooleanTrue: Ref;
-    static kCFBooleanFalse: Ref;
 }
 
 #[link(name = "Security", kind = "framework")]
@@ -137,6 +138,12 @@ unsafe fn item(dict: Ref, service: usize) -> Result<Item> {
     if dict.is_null() || CFGetTypeID(dict) != CFDictionaryGetTypeID() {
         bail!("Keychain metadata is unavailable.");
     }
+    let synchronized = CFDictionaryGetValue(dict, kSecAttrSynchronizable);
+    if !synchronized.is_null()
+        && (CFGetTypeID(synchronized) != CFBooleanGetTypeID() || CFBooleanGetValue(synchronized))
+    {
+        bail!("Synchronized or uncertain Keychain items are outside the cleanup scope.");
+    }
     let reference = CFDictionaryGetValue(dict, kSecValuePersistentRef);
     if reference.is_null() || CFGetTypeID(reference) != CFDataGetTypeID() {
         bail!("Keychain item identity is unavailable.");
@@ -200,7 +207,6 @@ pub(super) fn inspect(account: &str) -> Result<Vec<Item>> {
                 (kSecClass, kSecClassGenericPassword),
                 (kSecAttrService, service.0),
                 (kSecAttrAccount, account.0),
-                (kSecAttrSynchronizable, kCFBooleanFalse),
                 (kSecMatchLimit, kSecMatchLimitAll),
                 (kSecReturnAttributes, kCFBooleanTrue),
                 (kSecReturnPersistentRef, kCFBooleanTrue),
@@ -220,13 +226,14 @@ pub(super) fn inspect(account: &str) -> Result<Vec<Item>> {
 }
 
 fn inspect_reference(item: &Item) -> Result<Vec<Item>> {
+    // The omitted sync attribute excludes synchronized items by default. Apple's
+    // explicit sync-key queries cannot be combined with kSecMatchItemList.
     let reference = Owned::data(&item.reference)?;
     let list = Owned::array(&[reference.0])?;
     let pairs = unsafe {
         [
             (kSecClass, kSecClassGenericPassword),
             (kSecMatchItemList, list.0),
-            (kSecAttrSynchronizable, kCFBooleanFalse),
             (kSecReturnAttributes, kCFBooleanTrue),
             (kSecReturnPersistentRef, kCFBooleanTrue),
             (kSecUseAuthenticationUI, kSecUseAuthenticationUIFail),
@@ -246,7 +253,6 @@ pub(super) fn remove(item: &Item) -> Result<()> {
         [
             (kSecClass, kSecClassGenericPassword),
             (kSecMatchItemList, list.0),
-            (kSecAttrSynchronizable, kCFBooleanFalse),
             (kSecUseAuthenticationUI, kSecUseAuthenticationUIFail),
         ]
     })?;

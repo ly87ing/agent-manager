@@ -96,10 +96,19 @@ pub(super) fn active() -> Result<Vec<u32>> {
             if arguments.len() > 64 * 1024 {
                 bail!("A process command line exceeds the inspection limit.");
             }
-            if is_claude(
-                comm.trim(),
-                &String::from_utf8_lossy(&arguments).replace('\0', " "),
-            ) {
+            let image = match std::fs::read_link(entry.path().join("exe")) {
+                Ok(path) => path,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => bail!("A current-user process executable could not be checked."),
+            };
+            let image = image.to_string_lossy();
+            let arguments = String::from_utf8_lossy(&arguments).replace('\0', " ");
+            if is_claude(comm.trim(), &arguments)
+                || is_claude(
+                    image.strip_suffix(" (deleted)").unwrap_or(&image),
+                    &arguments,
+                )
+            {
                 pids.push(pid);
             }
         }
