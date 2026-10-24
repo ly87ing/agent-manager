@@ -2639,3 +2639,60 @@ The installed macOS application continues running with the same executable diges
 recorded above; this CI-only change does not require another installation.
 Developer ID/notarization, signed update installation and actual Windows/Linux
 desktop adoption remain open. No tag, Release or release-signing operation was created.
+
+## 2026-10-23: Claude local-data maintenance
+
+Source `12f6358e` implements Settings → Advanced → Claude local data maintenance.
+The user explicitly authorized session and account-data deletion while requiring
+telemetry configuration to remain. The [subsystem contract](subsystems/claude-local-data.md)
+defines the default current-user directory, global config and recognized native
+credential scope; project files, external repositories, shell/process environment,
+shared SDK authentication and cloud data remain outside it. This is a dedicated
+exception, not restoration of the retired account-management APIs.
+
+- Opening the page performs no inspection. Preview is zero-write; clearing
+  requires a current SHA-256 base and explicit confirmation, including typed
+  `DELETE` in the desktop dialog. Stale data, active Claude writers, unsupported
+  filesystem objects and uncertain telemetry dependencies refuse cleanup.
+- Local full engine tests passed (332 unit cases, one CI-only Keychain case
+  ignored, plus integration targets). Tauri 28, frontend 63 files / 733 tests,
+  production frontend build, Windows/Linux all-target cross-checks and the real
+  isolated macOS CLI passed. The final narrow Windows deadline correction also
+  passed focused cleanup tests, Tauri and a fresh real CLI smoke.
+- [Regular CI](https://github.com/ly87ing/agent-manager/actions/runs/40054526868)
+  passed both jobs. The [native GUI workflow](https://github.com/ly87ing/agent-manager/actions/runs/40054526963)
+  passed all six native engine and six installer targets. Its six native cleanup
+  cases passed real preview, missing
+  confirmation, stale refusal, a running synthetic Claude executable, deletion,
+  telemetry readback, external-source preservation and no-op checks. Linux also
+  exercised actual root/directory/file bind mounts; Windows exercised junctions,
+  read-only files and initial/late hard links. Both macOS architectures passed
+  actual exact-item deletion in a disposable private Keychain while preserving
+  unrelated items and the original OS search list. These are native test fixtures,
+  not installed Windows/Linux desktop acceptance.
+- Earlier native candidates exposed Windows rename sharing constraints, Linux
+  runtime thread names/protected executable links and the macOS search-list scope
+  required for persistent-reference readback. Failed attempts remain available.
+  A `93d34b71` Windows ARM run refused process inspection near the old ten-second
+  deadline; its discarded error category prevents a precise cause claim. The
+  final revision permits thirty seconds on Windows, preserves a content-free
+  timeout category and still refuses missing process evidence. Passing the next
+  run does not independently prove that earlier failure's cause.
+- English and Chinese browser layouts were checked at 1000 and 760 px, including
+  preview and typed confirmation, with no horizontal overflow. That browser used
+  the mock backend. An isolated native bundle rendered Settings, but the native
+  cleanup click-through could not finish because window focus failed; subsequent
+  installed-app accessibility reads were refused despite reported permissions.
+  UI retries stopped without modifying system permissions. CLI and Keychain
+  evidence does not establish that missing native desktop click-through.
+
+The final local macOS x86_64 bundle has source marker `12f6358e` and build date
+`2026-10-24T02:31:34Z`. It was installed in `/Applications/Agent Manager.app` and
+left running. Its executable SHA256 is
+`e526edb00c08993cf772ef93f9f49eb225105edc79f62e32b6f25cffbacfc339`.
+Strict deep ad-hoc signature verification passed; installed bytes matched the
+built bundle. Database bytes and eight protected paths stayed unchanged,
+the consistent SQLite backup passed `quick_check`, and retained previous apps
+matched their preflight manifests. Personal Claude cleanup and inspection of the
+user's real credential store were never performed. No tag, Release, notarization
+or signed update publication was created. R7–R9 remain open.

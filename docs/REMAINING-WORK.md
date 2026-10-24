@@ -1,18 +1,21 @@
 # Remaining Work
 
 Continue with **R7-R9: installed clients, receiving applications and signed updating**.
-Source `7b559512` adds guarded Ubuntu CI archive preparation to the verified GNOME
-inherited-formats slice. Actual native downloads confirm the official HTTPS
-archive on x64 and retained ports sources on ARM64. Its main
-[CI](https://github.com/ly87ing/agent-manager/actions/runs/40013020860) and
-[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/40013021196)
-passed completely: two regular jobs, six native engine targets and six installer
-targets. The preceding `45d44a3b` baseline remains recorded.
+Source `12f6358e` adds explicit Claude local-data maintenance with preserved
+telemetry configuration. Its main
+[CI](https://github.com/ly87ing/agent-manager/actions/runs/40054526868)
+passed both jobs. Its
+[GUI CI](https://github.com/ly87ing/agent-manager/actions/runs/40054526963)
+passed all six native engine and six installer targets, including all six native
+cleanup cases and both private macOS Keychain fixtures.
+The complete `7b559512` cross-platform baseline remains recorded.
 Native source/package evidence does not establish full production acceptance.
-Local macOS x86_64 source `e5cfb74f` was built, installed in Applications and run;
-the Launch all control and saved interface language were read back. Database bytes,
-eight protected paths and retained previous applications were independently checked.
-See the [current receipt](goal-rust-gui.md#2026-10-23-gnome-inherited-formats-and-local-runtime).
+Local macOS x86_64 source `12f6358e` was built, installed in Applications and run.
+Database bytes, eight protected paths and retained previous applications were
+independently checked.
+The earlier Launch all/language readback remains historical evidence; the latest
+native UI read was refused by the accessibility provider. See the
+[current receipt](goal-rust-gui.md#2026-10-23-claude-local-data-maintenance).
 
 Snapshot: 2026-10-23. Historical baseline: `3ddd9b43`; its final main
 [CI](https://github.com/ly87ing/agent-manager/actions/runs/39026462902) and
@@ -22,10 +25,11 @@ The repository owner owns release authorization in R9.
 
 ## Work queue
 
-Claude local-data maintenance is being verified as a separate destructive
-exception. Its [scope and safeguards](subsystems/claude-local-data.md) do not
-establish installed-client or native Keychain acceptance until those receipts
-are recorded. Personal data has not been used for acceptance.
+Claude local-data maintenance is a separate destructive exception. Its
+[scope and safeguards](subsystems/claude-local-data.md), real isolated CLI cases
+on six native targets and private macOS Keychain cases are recorded. Native
+desktop cleanup click-through remains unverified because of focus/accessibility
+limitations. Personal data has not been used for acceptance.
 
 | ID | Phase | Work and current state | Completion criterion |
 | --- | --- | --- | --- |
@@ -38,11 +42,11 @@ are recorded. Personal data has not been used for acceptance.
 | R7 | Partial | macOS x86_64 local install/runtime readback and isolated launch/Git cases passed. Installed cross-platform and actual consumers remain open. | Verify UI failures, restart/restore, login/share links and extension loading. |
 | R8 | Acceptance | Verify settings in receiving sessions/apps and clock behavior. | Read actual effects independently, including cancellation/failure cases. |
 | R9 | Release | Verify signed installed-app updating after separate authorization. | Verify signature, download, install, restart and exact build identity. |
-| R10 | Recorded | `7b559512` passed complete main CI/GUI CI; native archive downloads and `e5cfb74f` installed-app receipts are recorded separately. | Retain final workflow conclusions separately from native preference and desktop acceptance. |
+| R10 | Recorded | `12f6358e` passed complete main CI/GUI CI and has a local installed-app receipt; native fixture results and desktop click-through remain separate evidence. | Retain final workflow conclusions separately from native preference and desktop acceptance. |
 | R11 | Portability | Resolve skill snapshot support decisions and native evidence gaps. | Verify filesystem/volume limits and explicit refusal of unsupported shapes. |
 | R12 | Investigation | Diagnose earlier intermittent macOS DMG busy-eject failures. | Reproduce and verify the cause; a passing retry alone cannot close it. |
 | R13 | Native tests passed | TLS/ZIP corrections, GLib backport, optimized Linux iterator and extracted bundle notices passed. Maintenance notices remain recorded. | Maintain source provenance and the [security review](subsystems/dependency-security.md). |
-| R14 | Native tests passed | `7b559512` passed all six engine and installer targets, including Windows/Linux ARM64 and helper architecture gates. ARM64 release/update routing is prepared; signed and installed-desktop acceptance remains open. | Retain native evidence, payload/target binding and explicit desktop/signed-update limits. |
+| R14 | Native tests passed | `12f6358e` passed all six engine and installer targets, including Windows/Linux ARM64 and helper architecture gates. ARM64 release/update routing is prepared; signed and installed-desktop acceptance remains open. | Retain native evidence, payload/target binding and explicit desktop/signed-update limits. |
 
 R4-R6 expand currently unavailable controls; preserve those explicit capability
 limits while completing acceptance of the supported operations.
