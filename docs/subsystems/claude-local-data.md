@@ -118,6 +118,9 @@ Inspector initialization treats an uncertain resource directory as unavailable
 inspection and disables the CLI adjacency fallback for that desktop process.
 On macOS this preserves startup under the framework's executable-path refusal.
 Windows/Linux clock-helper initialization has its separate existing contract.
+macOS artifact acceptance validates package identity and signature before running
+the copied component. The component verifier also requires its strict signature
+check to pass before launching the Rust fixture.
 
 Inside the helper, SQLite only receives a bounded memory copy, never the source
 pathname. The adapter holds ordinary ancestor directories, refuses aliases, hard links and any

@@ -87,6 +87,10 @@ What recent work got wrong, and the rule that would have caught it. Read this be
   `/var` fixture alias exercised that guard. Preserve refusal as unavailable
   inspection rather than a fatal setup error. Test canonical and alias startup
   separately; never relax the framework's path protection to obtain a pass.
+- Copied-component acceptance initially executed a macOS helper before verifying
+  the enclosing package identity and signature. Validate those first and check
+  the helper signature before any fixture can launch it. A byte-tampered owned
+  copy must fail verification before Cargo or the helper runs.
 - An initial FTS cleanup test checked uppercase body bytes but missed the index's
   case-folded tokens, and its retained-row filter could conceal a leftover target
   message. Check a unique lowercase token in actual FTS blocks, retain a

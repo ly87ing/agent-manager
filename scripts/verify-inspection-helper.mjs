@@ -21,6 +21,7 @@ assert.ok(!bytes.includes(Buffer.from('sqlite_filestat')), 'Production inspector
 for (const path of [root, homedir()]) assert.ok(!bytes.includes(Buffer.from(path)), 'Inspection helper contains an unremapped build path');
 assert.ok(!process.env.AGENT_MANAGER_SQLITE_PROBE_MODE || process.env.AGENT_MANAGER_SQLITE_PROBE_MODE === 'baseline', 'Expected a normal test build');
 assert.ok(!/SQLITE_(?:ENABLE_FILESTAT|DEBUG)/.test(process.env.LIBSQLITE3_FLAGS || ''), 'Expected normal SQLite compilation flags');
+if (process.platform === 'darwin') execFileSync('codesign', ['--verify', '--strict', helper], { stdio: 'inherit' });
 execFileSync('cargo', ['test', '--manifest-path', join(root, 'engine-rs/Cargo.toml'), '--release', '--target', target,
   '--test', 'sqlite_maintenance_probe', '--locked', '--offline'], {
   cwd: root, stdio: 'inherit', timeout: 600_000,
