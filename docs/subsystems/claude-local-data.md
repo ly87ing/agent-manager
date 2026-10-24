@@ -101,8 +101,11 @@ Output contains counts and the database path, never session IDs or content.
 
 SQLite only receives a bounded memory copy, never the source pathname. The
 adapter holds ordinary ancestor directories, refuses aliases, hard links and any
-WAL/SHM/journal entry, and rechecks file evidence and ancestor identities. A
-256 MiB image bound and three-second SQL progress deadline refuse oversized or
+WAL/SHM/journal entry, and rechecks file evidence and ancestor identities.
+Unrelated parent contents may change without invalidating the binding;
+directory timestamps, length and link count are not identity evidence. No-follow
+opens and the final native-identity rewalk still reject observed replacements.
+A 256 MiB image bound and three-second SQL progress deadline refuse oversized or
 expensive input. These are inspection limits, not a transactional writer lock.
 The snapshot is an observed standalone main-file copy; active writers can make
 it unavailable or stale. No application is terminated.

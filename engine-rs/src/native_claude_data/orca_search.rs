@@ -69,6 +69,13 @@ pub(super) fn preview(ctx: &Context) -> Result<Value> {
 // Keep every ancestor capability and compare its identity after inspection.
 // A missing ordinary component means absent; aliases and traversal are refused.
 fn parents(path: &Path) -> Result<Option<Vec<(PathBuf, Dir, Vec<u8>)>>> {
+    parents_before_open(path, |_, _| Ok(()))
+}
+
+fn parents_before_open(
+    path: &Path,
+    before_open: impl Fn(&Dir, &std::ffi::OsStr) -> Result<()>,
+) -> Result<Option<Vec<(PathBuf, Dir, Vec<u8>)>>> {
     let parent = path
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Missing parent"))?;
@@ -94,6 +101,7 @@ fn parents(path: &Path) -> Result<Option<Vec<(PathBuf, Dir, Vec<u8>)>>> {
                     Err(e) => return Err(e.into()),
                 };
                 ordinary_directory(&metadata)?;
+                before_open(dir, name)?;
                 let mut options = cap_std::fs::OpenOptions::new();
                 options.read(true);
                 #[cfg(unix)]
@@ -114,9 +122,9 @@ fn parents(path: &Path) -> Result<Option<Vec<(PathBuf, Dir, Vec<u8>)>>> {
                 }
                 let next = Dir::from_std_file(dir.open_with(name, &options)?.into_std());
                 ordinary_directory(&next.dir_metadata()?)?;
-                if tree::stamp(&metadata)? != tree::stamp(&next.dir_metadata()?)? {
-                    bail!("An ancestor changed");
-                }
+                // Sibling activity changes directory timestamps, length and
+                // link count. Bind the no-follow handle below, then rewalk and
+                // compare native identities after the database snapshot.
                 anchor.push(name);
                 let identity = tree::identity(&next)?;
                 held.push((anchor.clone(), next, identity));
@@ -239,6 +247,43 @@ fn inspect_after_read(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unrelated_parent_contents_do_not_change_the_directory_binding() {
+        let base =
+            std::env::temp_dir().join(format!("am-orca-sibling-{}", crate::store::uuid_v4()));
+        std::fs::create_dir_all(base.join("ai-vault")).unwrap();
+        let base = std::fs::canonicalize(base).unwrap();
+        let path = base.join("ai-vault").join(DATABASE);
+        let db = Connection::open(&path).unwrap();
+        db.execute_batch(include_str!("../../tests/fixtures/orca-search-schema6.sql"))
+            .unwrap();
+        drop(db);
+        let before = std::fs::read(&path).unwrap();
+        let injected = std::cell::Cell::new(false);
+        let result: Result<Value> = (|| {
+            let held = parents_before_open(&path, |parent, name| {
+                if name == "ai-vault" {
+                    #[cfg(unix)]
+                    let before = parent.symlink_metadata(name)?;
+                    parent.open_dir(name)?.create_dir("unrelated")?;
+                    #[cfg(unix)]
+                    assert_ne!(
+                        tree::stamp(&before)?,
+                        tree::stamp(&parent.symlink_metadata(name)?)?
+                    );
+                    injected.set(true);
+                }
+                Ok(())
+            })?
+            .unwrap();
+            counts(&image(&held.last().unwrap().1)?.unwrap())
+        })();
+        assert_eq!(std::fs::read(path).unwrap(), before);
+        std::fs::remove_dir_all(base).unwrap();
+        assert!(injected.get(), "The sibling mutation was not reached");
+        assert_eq!(result.unwrap()["claude_sessions"], 1);
+    }
 
     #[cfg(windows)]
     #[test]

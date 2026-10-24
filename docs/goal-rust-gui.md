@@ -2834,3 +2834,19 @@ Image/time limits and simultaneous content mutation
 have not been exhaustively exercised. This is read-only main-file snapshot
 evidence, not a writer lock, cleanup, full-source discovery or native desktop UI
 acceptance. Confirmed Orca deletion and removal of old FTS content remain open.
+
+## 2026-10-24: Orca parent-binding correction
+
+Run `40077743827` at `b912b877` exposed a Linux ARM64 positive-preview failure.
+A deterministic sibling-directory insertion reproduced the parent's content-stamp
+rejection. The correction keeps no-follow opens and final native-identity
+comparison, while excluding unrelated parent timestamp/length/link-count changes.
+Database content checks, aliases, sidecars and unsupported-schema refusals remain.
+
+In an actual isolated CLI comparison with continuous sibling-directory churn,
+the previous executable returned unavailable 51 of 60 times; the corrected
+executable inspected all 60. Source database bytes stayed identical and app data
+remained absent. Focused injection/alias/sidecar cases, full engine 346 unit cases
+plus integration targets, Tauri 28, frontend 741, production build and
+Windows/Linux all-target cross-checks passed locally. Patched native CI and
+installed-app readback remain separate follow-up evidence.

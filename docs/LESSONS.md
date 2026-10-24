@@ -73,6 +73,11 @@ What recent work got wrong, and the rule that would have caught it. Read this be
   FDs alive until SQLite closes; test exclusion again after identity reads,
   commit, VACUUM and checkpoint. A pathname's HAS_MOVED flag is not comparison
   with a held baseline file; test actual connection identity against a swap.
+- A Linux ARM64 positive preview failure exposed a guard that rejects unrelated
+  parent activity. A deterministic sibling mutation reproduced that rejection
+  through timestamp, length or link-count changes. Bind no-follow handles by native
+  identity and rewalk them; selected-database checks remain separate from parent
+  contents. Retain alias/replacement refusal cases when removing that false guard.
 
 - One source commit can have manual and push runs of the same workflow. A private
   checker keyed only by commit/name overwrote the push receipt with the earlier
