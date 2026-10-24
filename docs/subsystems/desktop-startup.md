@@ -76,6 +76,23 @@ declarations belong to the package. See [xdg-mime](https://portland.freedesktop.
 
 ## Verification
 
+GUI CI starts the extracted Linux AppImage and deb executables with private
+HOME/data/runtime directories, Xvfb and a dedicated D-Bus session. Document
+portal activation may create a FUSE mount below that private runtime directory.
+After session exit, teardown uses the read-only
+[`wait-linux-installer-unmount.mjs`](../../scripts/wait-linux-installer-unmount.mjs)
+barrier to poll for all visible mounts below the fixture root to disappear,
+with at most fifty 100 ms waits. It parses the kernel's
+[mountinfo format](https://docs.kernel.org/filesystems/proc.html),
+including escaped paths and same-device bind mounts. Unknown evidence or a
+remaining mount fails teardown and retains the fixture. Only then does cleanup
+remove the owned directory with `--one-file-system` and verify absence.
+The helper does not unmount resources or change system preferences.
+
+Run its parser and wait/refusal cases with
+`node --test scripts/wait-linux-installer-unmount.test.mjs`. Mock tables establish
+the barrier logic; actual portal retirement requires native Linux CI evidence.
+
 ```sh
 cargo test --manifest-path app/src-tauri/Cargo.toml import_links::tests
 cargo test --manifest-path app/src-tauri/Cargo.toml startup::tests

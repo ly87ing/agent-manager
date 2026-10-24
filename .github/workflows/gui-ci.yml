@@ -41,8 +41,8 @@ jobs:
         id: native-host
         run: node scripts/verify-native-architecture.mjs host
 
-      - name: Verify architecture guards
-        run: node --test scripts/verify-native-architecture.test.mjs
+      - name: Verify architecture and fixture cleanup guards
+        run: node --test scripts/verify-native-architecture.test.mjs scripts/wait-linux-installer-unmount.test.mjs
 
       - name: Cache rustup and cargo artifacts
         uses: actions/cache@v4
@@ -381,7 +381,16 @@ jobs:
         run: |
           set -euo pipefail
           test_root="$(mktemp -d "$RUNNER_TEMP/linux-installer.XXXXXX")"
-          trap 'rm -rf "$test_root"' EXIT
+          cleanup_linux_installer() {
+            local command_status=$?
+            trap - EXIT
+            if node scripts/wait-linux-installer-unmount.mjs "$test_root" && \
+              rm -rf --one-file-system -- "$test_root" && [[ ! -e "$test_root" ]]; then
+              exit "$command_status"
+            fi
+            exit 1
+          }
+          trap cleanup_linux_installer EXIT
           installers="$RUNNER_TEMP/agent-manager-installers"
           images=("$installers/"*.AppImage)
           debs=("$installers/"*.deb)
@@ -401,7 +410,7 @@ jobs:
             runtime="$(mktemp -d "$test_root/runtime.XXXXXX")"
             mkdir -p "$runtime/home" "$runtime/data" "$runtime/xdg"
             chmod 700 "$runtime/xdg"
-            # 不依赖 FUSE；分别启动从 AppImage 与 deb 解包的真实程序。
+            # Run extracted binaries; the private portal may mount its document view.
             env -i HOME="$runtime/home" AGENT_MANAGER_DATA_DIR="$runtime/data" \
               XDG_RUNTIME_DIR="$runtime/xdg" PATH=/usr/bin:/bin \
               xvfb-run -a dbus-run-session -- bash -c '

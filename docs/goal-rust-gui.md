@@ -2850,3 +2850,17 @@ remained absent. Focused injection/alias/sidecar cases, full engine 346 unit cas
 plus integration targets, Tauri 28, frontend 741, production build and
 Windows/Linux all-target cross-checks passed locally. Patched native CI and
 installed-app readback remain separate follow-up evidence.
+
+## 2026-10-24: Linux isolated desktop teardown barrier
+
+At `b912b877`, run `40077743827` passed both Linux x64 extracted-package startups
+but failed immediate fixture removal at the private portal's `xdg/doc` directory.
+The corrected teardown reads mountinfo until visible mounts below its owned root
+retire, or fails while retaining the fixture. It then uses `--one-file-system`
+removal and verifies absence. The helper performs no unmount or preference write.
+
+Six pure barrier cases cover escaped paths, bind mounts, delayed retirement,
+last-poll success and unknown/persistent evidence. Together with the architecture
+guards, all fourteen local Node cases passed; actionlint and shell syntax passed.
+Actual portal retirement and complete teardown still require native Linux CI;
+mock mount tables do not establish that outcome.
