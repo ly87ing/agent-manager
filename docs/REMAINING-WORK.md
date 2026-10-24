@@ -1,6 +1,13 @@
 # Remaining Work
 
-Continue with **R7-R9: installed clients, receiving applications and signed updating**.
+Prioritize **R15: expanded Claude local-data maintenance**, then continue with
+**R7-R9: installed clients, receiving applications and signed updating**.
+The default-root preservation correction now protects real worktrees, project
+markers and unclassified content. Fresh result inspection reports retained paths;
+unclassified content prevents a complete result. Isolated Git worktree acceptance
+passed locally; native cross-platform CI and installed-app acceptance for this
+correction are still pending. The user's latest request also includes telemetry
+configuration removal; that policy change has not been implemented in this slice.
 Source `12f6358e` adds explicit Claude local-data maintenance with preserved
 telemetry configuration. Its main
 [CI](https://github.com/ly87ing/agent-manager/actions/runs/40054526868)
@@ -47,6 +54,7 @@ limitations. Personal data has not been used for acceptance.
 | R12 | Investigation | Diagnose earlier intermittent macOS DMG busy-eject failures. | Reproduce and verify the cause; a passing retry alone cannot close it. |
 | R13 | Native tests passed | TLS/ZIP corrections, GLib backport, optimized Linux iterator and extracted bundle notices passed. Maintenance notices remain recorded. | Maintain source provenance and the [security review](subsystems/dependency-security.md). |
 | R14 | Native tests passed | `12f6358e` passed all six engine and installer targets, including Windows/Linux ARM64 and helper architecture gates. ARM64 release/update routing is prepared; signed and installed-desktop acceptance remains open. | Retain native evidence, payload/target binding and explicit desktop/signed-update limits. |
+| R15 | In progress | The default-root project preservation correction passed local tests and real isolated Git worktree acceptance. The requested all-source cleanup, including telemetry configuration, remains broader than the implemented default-root scope. | Inventory the reference catalog, implement exact-source adapters in Agent Manager, preserve project/shared data, and report unsupported or remaining sources explicitly. |
 
 R4-R6 expand currently unavailable controls; preserve those explicit capability
 limits while completing acceptance of the supported operations.

@@ -1,6 +1,12 @@
 /** Application copy only; user content and engine diagnostics are never translation keys. */
 export const messages = {
   "高级": "Advanced",
+  "已保留的内容": "Retained content",
+  "预览中的保留内容，当前状态未确认": "Retained paths from the preview; current state is unverified",
+  "项目或工作树，保留代码和文档": "Project or worktree; source and documents retained",
+  "归属未确认，已保留待核对": "Ownership unconfirmed; retained for review",
+  "归属未确认的内容会保留，并列为未完成项。": "Unclassified content is retained and remains an open item.",
+  "仍有归属未确认的内容，请先核对保留路径。": "Unclassified content remains. Review the retained paths first.",
   "/ 高级 /": "/ Advanced /",
   "Claude 本地数据维护": "Claude local data maintenance",
   "预览并清理本地数据，保留遥测配置": "Preview and clear local data while preserving telemetry settings",

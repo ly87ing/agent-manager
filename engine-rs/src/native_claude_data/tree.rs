@@ -1,4 +1,5 @@
 //! Bounded, no-follow evidence rooted in an already opened directory.
+use super::retention::{self, Retention};
 use anyhow::{bail, Context as _, Result};
 use cap_std::fs::{Dir, Metadata};
 use sha2::{Digest, Sha256};
@@ -21,6 +22,7 @@ pub(super) struct Entry {
     pub stamp: Vec<u8>,
     pub hash: Vec<u8>,
     pub identity: Vec<u8>,
+    pub retained: Option<Retention>,
 }
 
 pub(super) fn stamp(metadata: &Metadata) -> Result<Vec<u8>> {
@@ -236,17 +238,21 @@ pub(super) fn entry(parent: &Dir, name: &Path, relative: PathBuf) -> Result<Entr
         stamp,
         hash: hash.finalize().to_vec(),
         identity,
+        retained: None,
     })
 }
 
 pub(super) fn scan(dir: &Dir) -> Result<Vec<Entry>> {
+    if retention::project(dir)? {
+        bail!("The cleanup directory is a project; its source and documents must be retained.");
+    }
     fn visit(
         dir: &Dir,
         prefix: &Path,
         root: &Metadata,
         result: &mut Vec<Entry>,
         depth: usize,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         if depth > 64 {
             bail!("Directory nesting exceeds the maintenance limit.");
         }
@@ -258,12 +264,13 @@ pub(super) fn scan(dir: &Dir) -> Result<Vec<Entry>> {
             names.push(item?.file_name());
         }
         names.sort();
+        let mut retained = false;
         for name in names {
             if result.len() >= 100_000 {
                 bail!("File count exceeds the maintenance limit.");
             }
             let path = Path::new(&name);
-            let value = entry(dir, path, prefix.join(path))?;
+            let mut value = entry(dir, path, prefix.join(path))?;
             if value.kind == Kind::Directory {
                 let metadata = dir.symlink_metadata(path)?;
                 if !same_device(root, &metadata) {
@@ -274,11 +281,25 @@ pub(super) fn scan(dir: &Dir) -> Result<Vec<Entry>> {
                 if stamp(&metadata)? != stamp(&child.dir_metadata()?)? {
                     bail!("A directory changed during inspection; request a new preview.");
                 }
-                visit(&child, &prefix.join(path), root, result, depth + 1)?;
+                value.retained = if retention::worktrees(&value.path) || retention::project(&child)?
+                {
+                    Some(Retention::Project)
+                } else if !retention::owned(&value.path, true, false)
+                    || retention::unknown_file(&child, &value.path)?
+                {
+                    Some(Retention::Unknown)
+                } else if visit(&child, &prefix.join(path), root, result, depth + 1)? {
+                    Some(Retention::Ancestor)
+                } else {
+                    None
+                };
+            } else if !retention::owned(&value.path, false, value.kind == Kind::Link) {
+                value.retained = Some(Retention::Unknown);
             }
+            retained |= value.retained.is_some();
             result.push(value);
         }
-        Ok(())
+        Ok(retained)
     }
     let mut result = Vec::new();
     visit(dir, Path::new(""), &dir.dir_metadata()?, &mut result, 0)
@@ -293,6 +314,13 @@ pub(super) fn digest(entries: &[Entry]) -> Vec<u8> {
         hash.update((name.len() as u64).to_le_bytes());
         hash.update(name);
         hash.update(&entry.hash);
+        hash.update(
+            entry
+                .retained
+                .map(Retention::reason)
+                .unwrap_or("delete")
+                .as_bytes(),
+        );
     }
     hash.finalize().to_vec()
 }
@@ -324,17 +352,24 @@ mod tests {
         let path = std::env::temp_dir().join(format!("am-claude-tree-{}", crate::store::uuid_v4()));
         std::fs::create_dir_all(path.join("projects/session")).unwrap();
         std::fs::write(
-            path.join("projects/session/data.jsonl"),
+            path.join("projects/session/11111111-1111-4111-8111-111111111111.jsonl"),
             b"PRIVATE_SESSION_SENTINEL",
         )
         .unwrap();
         let dir = Dir::open_ambient_dir(&path, cap_std::ambient_authority()).unwrap();
         let first = scan(&dir).unwrap();
-        assert_eq!(first[0].path, Path::new("projects/session/data.jsonl"));
+        assert_eq!(
+            first[0].path,
+            Path::new("projects/session/11111111-1111-4111-8111-111111111111.jsonl")
+        );
         assert_eq!(first.last().unwrap().path, Path::new("projects"));
         assert_eq!(first.iter().map(|e| e.bytes).sum::<u64>(), 24);
         assert_eq!(digest(&first), digest(&scan(&dir).unwrap()));
-        std::fs::write(path.join("projects/session/data.jsonl"), b"NEW_SESSION").unwrap();
+        std::fs::write(
+            path.join("projects/session/11111111-1111-4111-8111-111111111111.jsonl"),
+            b"NEW_SESSION",
+        )
+        .unwrap();
         assert_ne!(digest(&first), digest(&scan(&dir).unwrap()));
         drop(dir);
         std::fs::remove_dir_all(path).unwrap();

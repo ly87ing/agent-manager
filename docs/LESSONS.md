@@ -4,6 +4,14 @@ What recent work got wrong, and the rule that would have caught it. Read this be
 
 ## 2026-10-23: destructive maintenance needs platform and dependency evidence
 
+- The first cleanup fixtures kept project source outside the default data root.
+  A real worktree inside that root, including uncommitted work, was deleted while
+  the operation reported complete. The fixture had not exercised the preservation
+  promise. Test real in-root worktrees, VCS-free source, and a late project marker;
+  retain recognized projects and unclassified content, not just external links.
+- Directory location and absence of a VCS marker are not ownership evidence for
+  arbitrary files. Select recognized Claude artifacts, retain opaque source trees,
+  keep their ancestors, and report unknown ownership as an open result.
 - A first Keychain candidate used the iOS persistent-reference query key on
   macOS. The installed SDK specifies a different match-list contract. Compilation
   exercised neither matching nor deletion; retain a disposable native fixture.

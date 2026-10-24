@@ -1,5 +1,5 @@
 //! Confirmed, journaled cleanup. Failures retain verified progress and require a new preview.
-use super::{files, preview::Snapshot, processes, tree};
+use super::{files, preview::Snapshot, processes, retention, tree};
 use crate::{store, Context};
 use anyhow::{bail, Result};
 use cap_std::fs::Dir;
@@ -14,12 +14,47 @@ struct Progress {
 }
 
 impl Progress {
-    fn data(&self, snapshot: &Snapshot, status: &str, verified: bool, message: &str) -> Value {
+    fn data(
+        &self,
+        snapshot: &Snapshot,
+        status: &str,
+        verified: bool,
+        message: &str,
+        retained: Vec<Value>,
+        retained_verified: bool,
+    ) -> Value {
         json!({"scope":"default_claude_code","status":status,"deleted_files":self.files,
             "deleted_directories":self.directories,"deleted_credentials":self.credentials,
             "preserved_fields":snapshot.configurations.iter().map(|c|c.retained.fields).sum::<usize>(),
-            "files_only":snapshot.files_only,"telemetry_verified":verified,"message":message})
+            "files_only":snapshot.files_only,"telemetry_verified":verified,"retained":retained,"retained_verified":retained_verified,"message":message})
     }
+}
+
+struct Remaining {
+    retained: Vec<Value>,
+    issue: Option<String>,
+}
+
+fn readback(ctx: &Context, snapshot: &Snapshot) -> Result<Remaining> {
+    bindings(snapshot)?;
+    let after = Snapshot::capture(ctx, snapshot.files_only)?;
+    bindings(snapshot)?;
+    if after.root_id != snapshot.root_id {
+        bail!("The cleanup directory changed during final inspection; request a new preview.");
+    }
+    let issue = if !after.blockers.is_empty()
+        || after.data()["has_changes"].as_bool() != Some(false)
+    {
+        Some("New or remaining local data was found; request a new preview.".into())
+    } else if after.has_unknown() {
+        Some("Recognized data was processed, but unclassified content remains protected. Review it and request a new preview.".into())
+    } else {
+        None
+    };
+    Ok(Remaining {
+        retained: after.retained_data(),
+        issue,
+    })
 }
 
 fn journal(
@@ -70,6 +105,15 @@ fn bindings(snapshot: &Snapshot) -> Result<()> {
         (None, Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {}
         _ => bail!("The Claude directory changed; cleanup stopped."),
     }
+    if snapshot
+        .root
+        .as_ref()
+        .is_some_and(|root| retention::project(root).unwrap_or(true))
+    {
+        bail!(
+            "Project ownership changed or is unavailable; cleanup stopped. Request a new preview."
+        );
+    }
     Ok(())
 }
 
@@ -77,6 +121,7 @@ fn parent(
     snapshot: &Snapshot,
     path: &Path,
     directories: &std::collections::BTreeMap<&Path, &tree::Entry>,
+    observed: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
 ) -> Result<Dir> {
     let mut dir = snapshot
         .root
@@ -84,6 +129,7 @@ fn parent(
         .ok_or_else(|| anyhow::anyhow!("The Claude directory is unavailable."))?
         .try_clone()?;
     let mut prefix = std::path::PathBuf::new();
+    inspect_directory(&dir, &prefix, observed)?;
     for component in path.parent().unwrap_or(Path::new("")).components() {
         if !matches!(component, std::path::Component::Normal(_)) {
             bail!("An item is outside the cleanup scope.");
@@ -100,9 +146,31 @@ fn parent(
         if tree::identity(&next)? != expected.identity {
             bail!("A directory was replaced; cleanup stopped.");
         }
+        inspect_directory(&next, &prefix, observed)?;
         dir = next;
     }
     Ok(dir)
+}
+
+fn inspect_directory(
+    dir: &Dir,
+    path: &Path,
+    observed: &mut std::collections::BTreeMap<std::path::PathBuf, Vec<u8>>,
+) -> Result<()> {
+    if retention::project(dir)? || retention::worktrees(path) {
+        bail!("A project appeared in the cleanup path; cleanup stopped. Request a new preview.");
+    }
+    let stamp = tree::stamp(&dir.dir_metadata()?)?;
+    if observed.get(path) != Some(&stamp) {
+        if retention::unknown_file(dir, path)? {
+            bail!("Unclassified source appeared in the cleanup path; cleanup stopped. Request a new preview.");
+        }
+        if tree::stamp(&dir.dir_metadata()?)? != stamp {
+            bail!("A directory changed during ownership inspection; cleanup stopped.");
+        }
+        observed.insert(path.to_owned(), stamp);
+    }
+    Ok(())
 }
 
 fn telemetry_verified(snapshot: &Snapshot) -> bool {
@@ -157,7 +225,11 @@ fn apply(
     mut check: impl FnMut() -> Result<()>,
     mut audit: impl FnMut(&str, &Progress) -> Result<()>,
 ) -> Result<()> {
+    let mut observed = std::collections::BTreeMap::new();
     check()?;
+    if let Some(root) = &snapshot.root {
+        inspect_directory(root, Path::new(""), &mut observed)?;
+    }
     audit("credentials", progress)?;
     snapshot
         .credentials
@@ -179,6 +251,9 @@ fn apply(
         } else {
             &snapshot.home
         };
+        if config.in_root {
+            inspect_directory(dir, Path::new(""), &mut observed)?;
+        }
         if let Some(bytes) = &config.retained.bytes {
             let absolute = if config.in_root {
                 snapshot.root_path.as_path()
@@ -190,6 +265,12 @@ fn apply(
             files::remove(dir, Path::new(&config.name), &config.entry)?;
             progress.files += 1;
         }
+        if config.in_root {
+            observed.insert(
+                std::path::PathBuf::new(),
+                tree::stamp(&dir.dir_metadata()?)?,
+            );
+        }
         audit("configuration_processed", progress)?;
     }
     audit("files", progress)?;
@@ -200,6 +281,9 @@ fn apply(
         .map(|e| (e.path.as_path(), e))
         .collect();
     for entry in &snapshot.entries {
+        if entry.retained.is_some() {
+            continue;
+        }
         if snapshot
             .configurations
             .iter()
@@ -212,8 +296,12 @@ fn apply(
             check()?;
         }
         bindings(snapshot)?;
-        let dir = parent(snapshot, &entry.path, &directories)?;
+        let dir = parent(snapshot, &entry.path, &directories, &mut observed)?;
         files::remove(&dir, Path::new(entry.path.file_name().unwrap()), entry)?;
+        observed.insert(
+            entry.path.parent().unwrap_or(Path::new("")).to_owned(),
+            tree::stamp(&dir.dir_metadata()?)?,
+        );
         if entry.kind == tree::Kind::Directory {
             progress.directories += 1;
         } else {
@@ -237,7 +325,10 @@ pub(super) fn execute(ctx: &Context, base: &str, files_only: bool, run_id: &str)
             &initial,
             "not_applied",
             true,
-            "There is no data to clear in the selected scope.",
+            if initial.has_unknown() {
+                "Unclassified content remains protected. Review the retained paths before requesting another preview."
+            } else { "There is no data to clear in the selected scope." },
+            initial.retained_data(), true,
         ));
     }
     drop(initial);
@@ -258,21 +349,16 @@ pub(super) fn execute(ctx: &Context, base: &str, files_only: bool, run_id: &str)
         |phase, p| journal(&conn, run_id, phase, p),
     );
     let verified = telemetry_verified(&snapshot);
-    let final_check = if result.is_ok() && verified {
-        Snapshot::capture(ctx, files_only).and_then(|after| {
-            if !after.blockers.is_empty() || after.data()["has_changes"].as_bool() != Some(false) {
-                bail!("New or remaining local data was found; request a new preview.");
-            }
-            Ok(())
-        })
+    let (final_issue, retained, retained_verified) = if verified {
+        match readback(ctx, &snapshot) {
+            Ok(after) => (after.issue, after.retained, true),
+            Err(error) => (Some(error.to_string()), snapshot.retained_data(), false),
+        }
     } else {
-        Ok(())
+        (None, snapshot.retained_data(), false)
     };
-    let failure = result
-        .err()
-        .or_else(|| final_check.err())
-        .map(|e| e.to_string());
-    let phase = if failure.is_none() && verified {
+    let failure = result.err().map(|error| error.to_string()).or(final_issue);
+    let phase = if failure.is_none() && verified && retained_verified {
         "complete"
     } else {
         "partial"
@@ -286,13 +372,20 @@ pub(super) fn execute(ctx: &Context, base: &str, files_only: bool, run_id: &str)
     let message = failure.or_else(||audit_error.map(|e|e.to_string())).unwrap_or_else(||
         if verified {"The selected local scope was independently checked. Remote tokens and shared SDK credentials were not revoked.".into()}
         else {"Telemetry readback is uncertain; inspect the remaining files before requesting a new preview.".into()});
-    Ok(progress.data(&snapshot, status, verified, &message))
+    Ok(progress.data(
+        &snapshot,
+        status,
+        verified,
+        &message,
+        retained,
+        retained_verified,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> (std::path::PathBuf, Context) {
+    pub(super) fn fixture() -> (std::path::PathBuf, Context) {
         let path = std::env::temp_dir().join(format!("am-claude-clear-{}", store::uuid_v4()));
         let ctx = Context {
             home_dir: path.join("home"),
@@ -300,7 +393,10 @@ mod tests {
         };
         std::fs::create_dir_all(ctx.home_dir.join(".claude/projects/project/memory")).unwrap();
         for (name, bytes) in [
-            ("projects/project/session.jsonl", "PRIVATE_SESSION"),
+            (
+                "projects/project/11111111-1111-4111-8111-111111111111.jsonl",
+                "PRIVATE_SESSION",
+            ),
             ("projects/project/memory/data.md", "PRIVATE_MEMORY"),
             (".credentials.json", "PRIVATE_ACCOUNT"),
         ] {
@@ -374,7 +470,7 @@ mod tests {
         assert!(!ctx.data_dir.exists());
         assert!(ctx
             .home_dir
-            .join(".claude/projects/project/session.jsonl")
+            .join(".claude/projects/project/11111111-1111-4111-8111-111111111111.jsonl")
             .exists());
         drop(snapshot);
         std::fs::remove_dir_all(path).unwrap();
@@ -454,10 +550,17 @@ mod tests {
             "PRIVATE_ACCOUNT"
         );
         assert_eq!(
-            std::fs::read_to_string(retained.join("projects/project/session.jsonl")).unwrap(),
+            std::fs::read_to_string(
+                retained.join("projects/project/11111111-1111-4111-8111-111111111111.jsonl")
+            )
+            .unwrap(),
             "PRIVATE_SESSION"
         );
         drop(snapshot);
         std::fs::remove_dir_all(path).unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "clear_retention_tests.rs"]
+mod retention_tests;

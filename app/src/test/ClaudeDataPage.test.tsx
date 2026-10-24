@@ -63,5 +63,19 @@ describe("Claude local data maintenance", () => {
   });
   it("refuses a complete result without independent telemetry readback", () => {
     expect(claudeDataResultSchema.safeParse({ ...makeClaudeDataResult(), telemetry_verified: false }).success).toBe(false);
+    expect(claudeDataResultSchema.safeParse({ ...makeClaudeDataResult(), retained_verified: false }).success).toBe(false);
+  });
+  it("shows protected projects and does not describe unknown content as cleaned", async () => {
+    const retained = [
+      { path: "/YOUR_HOME/.claude/worktrees", reason: "project" as const },
+      { path: "/YOUR_HOME/.claude/personal-source", reason: "unclassified" as const },
+    ];
+    renderWithEngine(<ClaudeDataPage />, { "claude-data:preview": makeEnvelope({ ...makeClaudeDataPreview(), retained, has_changes: false, can_clear: false }) });
+    await userEvent.click(screen.getByRole("button", { name: "检查清理范围" }));
+    expect(await screen.findByText(retained[0].path)).toBeInTheDocument();
+    expect(screen.getByText(retained[1].path)).toBeInTheDocument();
+    expect(screen.getByText("仍有归属未确认的内容，请先核对保留路径。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "清理所选范围" })).toBeDisabled();
+    expect(claudeDataResultSchema.safeParse({ ...makeClaudeDataResult(), retained }).success).toBe(false);
   });
 });

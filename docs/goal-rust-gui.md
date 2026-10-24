@@ -2696,3 +2696,25 @@ the consistent SQLite backup passed `quick_check`, and retained previous apps
 matched their preflight manifests. Personal Claude cleanup and inspection of the
 user's real credential store were never performed. No tag, Release, notarization
 or signed update publication was created. R7–R9 remain open.
+
+## 2026-10-23: Default cleanup project-preservation correction
+
+An isolated real Git worktree inside `.claude/worktrees` demonstrated that the
+previous recursive inventory could delete source and untracked work. The new
+positive artifact classifier retains whole worktree containers, project markers,
+unclassified content and their ancestors. Unknown content prevents a complete
+result. Parent ownership is checked again before each selected leaf; this is
+conservative observation, not a transaction against concurrent writers.
+
+Fresh final inspection supplies the returned retained-path list and its explicit
+verification flag. A failed inspection cannot claim the preview list is current.
+The red regression, full engine suite, Tauri 28 tests, frontend 734 tests and real
+isolated CLI passed locally. The CLI preserved modified and untracked files in a
+real worktree, a cloned skill repository and markerless source while deleting a
+recognized Claude transcript. English and Chinese mock layouts were read at
+1000 and 760 px, including confirmation and cancellation; this does not establish
+native desktop click-through. Personal data was not used for acceptance.
+
+The user expanded the target to all local Claude sessions and related data,
+including telemetry configuration in the latest clarification. That broader goal
+is tracked as R15; the preservation correction alone does not implement it.

@@ -4,6 +4,7 @@ mod credentials;
 mod files;
 mod preview;
 mod processes;
+mod retention;
 mod telemetry;
 mod tree;
 

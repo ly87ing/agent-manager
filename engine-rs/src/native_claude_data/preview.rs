@@ -92,6 +92,19 @@ fn configuration(parent: &Dir, in_root: bool, name: &str, root: &str) -> Result<
 }
 
 impl Snapshot {
+    pub fn retained_data(&self) -> Vec<Value> {
+        self.entries.iter().filter_map(|entry| {
+            entry.retained.filter(|reason| *reason != super::retention::Retention::Ancestor)
+                .map(|reason| json!({"path": self.root_path.join(&entry.path), "reason": reason.reason()}))
+        }).collect()
+    }
+
+    pub fn has_unknown(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.retained == Some(super::retention::Retention::Unknown))
+    }
+
     pub fn capture(ctx: &Context, files_only: bool) -> Result<Self> {
         if !ctx.home_dir.is_absolute() {
             bail!("An absolute user HOME is required.");
@@ -115,6 +128,9 @@ impl Snapshot {
                 if tree::stamp(&metadata)? != tree::stamp(&dir.dir_metadata()?)? {
                     bail!("The Claude directory changed during inspection.");
                 }
+                if super::retention::unknown_file(&dir, Path::new(""))? {
+                    bail!("The cleanup root contains unclassified files. Retain its source and documents; review ownership before cleanup.");
+                }
                 Some(dir)
             }
             Ok(_) => {
@@ -133,6 +149,28 @@ impl Snapshot {
             .map(tree::scan)
             .transpose()?
             .unwrap_or_default();
+        let retained: Vec<_> = entries
+            .iter()
+            .filter(|entry| {
+                entry
+                    .retained
+                    .is_some_and(|reason| reason != super::retention::Retention::Ancestor)
+            })
+            .collect();
+        if retained.len() > 1024
+            || retained
+                .iter()
+                .map(|entry| {
+                    entry.path.as_os_str().as_encoded_bytes().len()
+                        + root_path.as_os_str().as_encoded_bytes().len()
+                })
+                .sum::<usize>()
+                > 256 * 1024
+        {
+            bail!(
+                "The retained-path preview exceeds its safe display limit; no cleanup was started."
+            );
+        }
         let mut configurations = Vec::new();
         if let Some(dir) = &root {
             for name in [
@@ -192,7 +230,7 @@ impl Snapshot {
             }
         };
         let mut hash = Sha256::new();
-        hash.update(b"claude-default-data-v1");
+        hash.update(b"claude-default-data-v2");
         hash.update(caller_evidence);
         hash.update(home_path.as_os_str().as_encoded_bytes());
         hash.update(tree::identity(&home)?);
@@ -231,6 +269,9 @@ impl Snapshot {
     pub fn data(&self) -> Value {
         let mut groups: BTreeMap<&str, (u64, u64, u64)> = BTreeMap::new();
         for entry in &self.entries {
+            if entry.retained.is_some() {
+                continue;
+            }
             if self.configurations.iter().any(|c| {
                 c.in_root && c.name == entry.path.to_string_lossy() && c.retained.bytes.is_some()
             }) {
@@ -256,13 +297,14 @@ impl Snapshot {
         let groups: Vec<_> = groups.into_iter().map(|(id,(files,directories,bytes))|json!({"id":id,"files":files,"directories":directories,"bytes":bytes})).collect();
         let preserved: Vec<_> = self.configurations.iter().filter(|c|c.retained.bytes.is_some()).map(|c|json!({"file":if c.in_root {format!(".claude/{}",c.name)} else {c.name.clone()},"fields":c.retained.fields,"changed":c.changed})).collect();
         let changes = self.entries.iter().any(|e| {
-            !self
-                .configurations
-                .iter()
-                .any(|c| c.in_root && c.entry.path == e.path && !c.changed)
+            e.retained.is_none()
+                && !self
+                    .configurations
+                    .iter()
+                    .any(|c| c.in_root && c.entry.path == e.path && !c.changed)
         }) || self.configurations.iter().any(|c| c.changed)
             || self.credentials.as_ref().is_some_and(|c| c.count() > 0);
-        json!({"scope":"default_claude_code","platform":std::env::consts::OS,"root":self.root_path,"config_path":self.root_path.parent().unwrap().join(".claude.json"),"base":self.base,"can_clear":self.blockers.is_empty() && changes,"groups":groups,"preserved":preserved,"credential_items":self.credentials.as_ref().filter(|c|!c.skipped).map(|c|c.count()),"files_only":self.files_only,"blockers":self.blockers,"has_changes":changes})
+        json!({"scope":"default_claude_code","platform":std::env::consts::OS,"root":self.root_path,"config_path":self.root_path.parent().unwrap().join(".claude.json"),"base":self.base,"can_clear":self.blockers.is_empty() && changes,"groups":groups,"preserved":preserved,"retained":self.retained_data(),"credential_items":self.credentials.as_ref().filter(|c|!c.skipped).map(|c|c.count()),"files_only":self.files_only,"blockers":self.blockers,"has_changes":changes})
     }
 }
 
@@ -309,7 +351,8 @@ mod tests {
         let settings = br#"{"env":{"DISABLE_TELEMETRY":"1","OTEL_EXPORTER_OTLP_HEADERS":"PRIVATE_OTEL_SENTINEL","ANTHROPIC_API_KEY":"PRIVATE_ACCOUNT_SENTINEL"},"model":"old"}"#;
         std::fs::write(ctx.home_dir.join(".claude/settings.json"), settings).unwrap();
         std::fs::write(
-            ctx.home_dir.join(".claude/projects/project/session.jsonl"),
+            ctx.home_dir
+                .join(".claude/projects/project/11111111-1111-4111-8111-111111111111.jsonl"),
             b"PRIVATE_SESSION_SENTINEL",
         )
         .unwrap();
@@ -336,7 +379,8 @@ mod tests {
         let original = preview.base.clone();
         drop(preview);
         std::fs::write(
-            ctx.home_dir.join(".claude/projects/project/session.jsonl"),
+            ctx.home_dir
+                .join(".claude/projects/project/11111111-1111-4111-8111-111111111111.jsonl"),
             b"NEW_SESSION",
         )
         .unwrap();

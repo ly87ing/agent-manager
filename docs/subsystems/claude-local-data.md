@@ -12,6 +12,21 @@ requiring telemetry configuration to remain. A developer must never exercise thi
 feature against personal data as acceptance. The live filesystem and native
 credential metadata are authoritative; previews are not persisted.
 
+The user subsequently expanded the target to all local Claude-related session
+copies and account remnants through Agent Manager, while retaining project code,
+documents, worktrees and shared resources. That target is not an implemented
+state. The current executable scope remains the default directory and credentials;
+the reference catalog's other sources need explicit discovery and safe adapters.
+
+| Constraint | Source | Implementation consequence |
+| --- | --- | --- |
+| Remove local Claude sessions and account remnants | User request, 2026-10-23 | Discover each source, require a fresh preview and independently read back selected cleanup |
+| Preserve project code, documents and worktrees | User request and reference C07 | Never infer ownership from an absent VCS marker; retain unknown content |
+| Keep telemetry configuration and dependencies | User request | Retain values, reject uncertain dependencies; broader adapters need a deletion-target union check |
+| Keep shared and other-assistant data | Reference C35–C46 | Use exact source identities and supported schemas, not keyword deletion or whole mixed stores |
+| Use Agent Manager as the entry point | User request | Show per-source results and remaining work in the app; no external cleanup-script prerequisite |
+| Keep development isolated | Repository contract | No real-session deletion, credential probing, app termination or permission changes for tests |
+
 Primary sources:
 
 - [Claude directory](https://code.claude.com/docs/en/claude-directory) documents
@@ -38,6 +53,8 @@ before external secret-source loading, preflight, or general database access.
    file contents/identities. It returns category counts, paths, credential counts,
    preserved-field counts, blockers and a SHA-256 base, never credential or session
    values. Preview and cancellation create neither a database nor an audit record.
+   Retained project and unclassified paths have explicit reasons and are excluded
+   from deletion counts; unknown ownership remains visible in the result.
 2. `claude-data:clear --base SHA256 --confirm [--files-only]` re-reads the same
    scope, requires an unchanged base and no blockers, acquires the existing apply
    lock, and revalidates before creating a nonsecret intent audit.
@@ -49,6 +66,9 @@ before external secret-source loading, preflight, or general database access.
    Independent final inspection must find only retained telemetry configuration
    and no selected credentials before reporting complete. Any attempt requires a
    fresh preview before retrying.
+   Returned retained paths come from independent final inspection. The
+   `retained_verified` flag is false when only preview evidence remains available;
+   complete results require verified retained paths and no unclassified content.
 
 ## Constraints and failure behavior
 
@@ -98,6 +118,16 @@ before external secret-source loading, preflight, or general database access.
   Agent Manager. New/changed observed entries stop cleanup; unknown final results
   remain partial. There is no claim of an atomic filesystem/Keychain transaction,
   secure erase, cloud deletion, anonymous identity or remote-token revocation.
+- Whole worktree containers and directories with VCS or project-manifest markers
+  are retained without traversing their source. Only recognized artifact layouts
+  are eligible; opaque directories or unclassified files remain protected, together
+  with their parents. An unclassified file at the cleanup root refuses the operation
+  before writes. Source classification is conservative and may leave review items.
+  Retained-path output is bounded to 1,024 paths and 256 KiB of path bytes.
+- Every selected leaf rechecks the root and ancestor project markers. A newly
+  observed project stops cleanup, retaining earlier verified progress. This narrows
+  the observation window; it does not turn concurrent filesystem writes into a
+  transaction. Unknown retained content prevents an overall complete result.
 - Deleting local credentials may require login and device pairing again. A partial
   result is not undone automatically. Application rollback cannot recover deleted
   data. Audit intent surviving without completion means inspect before retrying.

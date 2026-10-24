@@ -21,6 +21,17 @@ function bytes(value: number): string {
   return `${value.toFixed(index ? 1 : 0)} ${units[index]}`;
 }
 
+function RetainedContent({ items, verified = true }: { items: ClaudeDataPreview["retained"]; verified?: boolean }) {
+  if (!items.length) return null;
+  return <div className="space-y-2 rounded-md bg-muted p-3 text-sm">
+    <p className="font-medium">{verified ? t("已保留的内容") : t("预览中的保留内容，当前状态未确认")}</p>
+    <ul className="space-y-2 text-xs">{items.map((item) => <li key={item.path}>
+      <p className="break-all font-mono">{item.path}</p>
+      <p className="text-muted-foreground">{item.reason === "project" ? t("项目或工作树，保留代码和文档") : t("归属未确认，已保留待核对")}</p>
+    </li>)}</ul>
+  </div>;
+}
+
 export default function ClaudeDataPage() {
   const [includeCredentials, setIncludeCredentials] = useState(true);
   const [preview, setPreview] = useState<ClaudeDataPreview | null>(null);
@@ -58,6 +69,7 @@ export default function ClaudeDataPage() {
       <div className="rounded-lg border bg-card p-4 text-sm">
         <p>{t("不会删除项目源文件、外部技能仓库、共享 SDK 认证或云端数据；不会撤销远端令牌。")}</p>
         <p className="mt-2 text-muted-foreground">{t("Shell 文件、现有进程环境和外部认证来源不在本次范围内。用于遥测的认证配置也会保留。")}</p>
+        <p className="mt-2 text-muted-foreground">{t("归属未确认的内容会保留，并列为未完成项。")}</p>
         <p className="mt-2 text-muted-foreground">{t("删除后无法恢复。账号可能需要重新登录，设备认证可能需要重新绑定。不会自动备份敏感数据。")}</p>
         <label className="mt-3 flex items-start gap-2">
           <input type="checkbox" checked={includeCredentials} disabled={busy !== null}
@@ -84,7 +96,8 @@ export default function ClaudeDataPage() {
           <ul className="mt-1 space-y-1 text-xs">{preview.preserved.map((file) => <li key={file.file} className="break-all">{file.file} · {t("保留 {0} 项设置", file.fields)} · {file.changed ? t("其他设置将清除") : t("文件保持原样")}</li>)}</ul>
         </div>}
         {preview.blockers.length > 0 && <div role="alert" className="space-y-1 rounded-md bg-warning/10 p-3 text-sm text-warning"><p>{t("暂不能安全清理，请处理以下问题后重新检查。")}</p>{preview.blockers.map((message) => <p key={message} className="break-words text-xs">{message}</p>)}</div>}
-        {!preview.has_changes && <p role="status" className="text-sm text-muted-foreground">{t("所选范围没有需要清理的数据。")}</p>}
+        <RetainedContent items={preview.retained} />
+        {!preview.has_changes && <p role="status" className="text-sm text-muted-foreground">{preview.retained.some((item) => item.reason === "unclassified") ? t("仍有归属未确认的内容，请先核对保留路径。") : t("所选范围没有需要清理的数据。")}</p>}
         <button type="button" onClick={() => setConfirm(true)} disabled={!preview.can_clear || busy !== null} className="rounded-md bg-destructive px-3 py-1.5 text-sm font-medium text-destructive-foreground disabled:opacity-50">{t("清理所选范围")}</button>
       </section>}
       {result && <section role="status" className="space-y-2 rounded-lg border bg-card p-4 text-sm">
@@ -95,6 +108,7 @@ export default function ClaudeDataPage() {
         {!result.telemetry_verified && <p className="text-warning">{t("遥测配置未能独立确认，请先检查结果。")}</p>}
         {result.files_only && <p className="text-muted-foreground">{t("本次仅处理文件，系统凭据未清理。")}</p>}
         <p className="whitespace-pre-wrap break-words text-xs text-muted-foreground">{result.message}</p>
+        <RetainedContent items={result.retained} verified={result.retained_verified} />
         <p className="text-muted-foreground">{t("再次操作前，请重新检查清理范围。")}</p>
       </section>}
       {confirm && preview && <ConfirmModal title={t("清理 Claude 本地数据")} description={t("将永久删除预览中的数据，包括会话、账号、记忆及恢复记录。遥测相关配置会保留。请确认已关闭 Claude 及其集成。")}
