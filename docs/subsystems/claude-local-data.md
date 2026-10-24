@@ -161,6 +161,12 @@ Frontend tests exercise cancellation, typed confirmation, scope invalidation,
 partial results and fresh-preview requirements. Mock UI checks do not establish
 native credential behavior.
 
+The former telemetry projector and configuration-replacement helpers are retired.
+Their projection-only assertions do not describe the current policy. Applicable
+changed-file, external-link, read-only/junction and late-hard-link safety cases
+exercise actual deletion; telemetry removal and shared dependencies have separate
+current-policy fixtures.
+
 The ignored private-Keychain fixture is invoked explicitly on disposable macOS
 CI hosts only. It creates synthetic credentials in its own Keychain, checks that
 unrelated items remain unchanged, deletes only its previewed persistent reference,

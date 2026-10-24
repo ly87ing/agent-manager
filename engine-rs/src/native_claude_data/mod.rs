@@ -6,8 +6,6 @@ mod files;
 mod preview;
 mod processes;
 mod retention;
-#[cfg(test)]
-mod telemetry;
 mod tree;
 
 use crate::{diagnostic, Context, Envelope, Lock, Mode, Request};
