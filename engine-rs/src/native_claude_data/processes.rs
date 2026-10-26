@@ -1,6 +1,15 @@
 //! Only process metadata is inspected; command lines are never returned or logged.
 use anyhow::{bail, Result};
 
+fn runtime_argument(value: &str) -> String {
+    let value = value.replace('\\', "/");
+    if cfg!(windows) {
+        value.to_ascii_lowercase()
+    } else {
+        value
+    }
+}
+
 fn is_claude(image: &str, arguments: &str) -> bool {
     let image = image.replace('\\', "/").to_lowercase();
     let name = image.rsplit('/').next().unwrap_or("");
@@ -14,9 +23,7 @@ fn is_claude(image: &str, arguments: &str) -> bool {
         return true;
     }
     matches!(name, "node" | "node.exe" | "bun" | "bun.exe")
-        && arguments
-            .replace('\\', "/")
-            .contains("/@anthropic-ai/claude-code/")
+        && runtime_argument(arguments).contains("/@anthropic-ai/claude-code/")
 }
 
 fn is_runtime(image: &str) -> bool {
@@ -35,7 +42,7 @@ fn is_runtime(image: &str) -> bool {
 fn verify_runtime(image: &str, arguments: &[String]) -> Result<()> {
     if is_runtime(image)
         && !arguments.get(1).is_some_and(|script| {
-            let script = script.replace('\\', "/");
+            let script = runtime_argument(script);
             script.contains("/@anthropic-ai/claude-code/") && script.ends_with("/cli.js")
         })
     {
@@ -306,6 +313,16 @@ mod tests {
         assert!(verify_runtime("node", &["node".into(), "other.js".into(), cli.into()]).is_err());
         assert!(verify_runtime("node", &["node".into(), "-e".into(), cli.into()]).is_err());
         assert!(verify_runtime("codex", &[cli.into()]).is_ok());
+    }
+
+    #[test]
+    fn runtime_script_case_follows_the_platform_path_contract() {
+        let cli = r"C:\YOUR_HOME\node_modules\@ANTHROPIC-AI\CLAUDE-CODE\CLI.JS";
+        assert_eq!(is_claude("node.exe", cli), cfg!(windows));
+        assert_eq!(
+            verify_runtime("node.exe", &["node.exe".into(), cli.into()]).is_ok(),
+            cfg!(windows)
+        );
     }
 
     #[cfg(target_os = "macos")]

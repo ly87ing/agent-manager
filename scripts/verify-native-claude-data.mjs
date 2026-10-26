@@ -136,7 +136,9 @@ try {
   assert.deepEqual(run("preview",["--files-only"]).data.process_ids,[writer.pid,stubborn.pid].sort((a,b)=>a-b));
   const cli=path.join(work,"Node fixture/node_modules/@anthropic-ai/claude-code/cli.js");
   fs.mkdirSync(path.dirname(cli),{recursive:true});fs.writeFileSync(cli,"process.stdout.write('READY');setInterval(()=>{},1000)");
-  runtime=spawn(process.execPath,[cli],{cwd:work,env,stdio:["ignore","pipe","ignore"]});
+  const launchedScript=process.platform==="win32"?path.join(work,"Node fixture/node_modules/@ANTHROPIC-AI/CLAUDE-CODE/CLI.JS"):cli;
+  assert(fs.statSync(launchedScript).isFile(),"The runtime script must resolve before process classification");
+  runtime=spawn(process.execPath,[launchedScript],{cwd:work,env,stdio:["ignore","pipe","ignore"]});
   own(runtime);
   await ready(runtime);
   const fresh=run("preview",["--files-only"]); assert(fresh.ok && fresh.data.can_clear);

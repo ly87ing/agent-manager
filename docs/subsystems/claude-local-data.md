@@ -218,7 +218,8 @@ Orca deletion entry point is enabled by these research fixtures.
   Windows inspects candidate processes across logon sessions and checks their user
   tokens before classification. Positively identified other-user processes are
   excluded; unavailable ownership blocks cleanup. Ambiguous Node/Bun launch arguments
-  block cleanup. Known exited zombies are excluded; parent shells are retained.
+  block cleanup. Windows runtime-script matching ignores ASCII case; Unix matching
+  preserves case. Known exited zombies are excluded; parent shells are retained.
   Automatic restart services and custom launch wrappers remain outside proven stop
   coverage. Cross-logon-session Windows runtime acceptance remains unverified.
   A later writer still stops guarded deletion.
