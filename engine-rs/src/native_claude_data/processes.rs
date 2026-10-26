@@ -19,6 +19,71 @@ fn is_claude(image: &str, arguments: &str) -> bool {
             .contains("/@anthropic-ai/claude-code/")
 }
 
+fn is_runtime(image: &str) -> bool {
+    matches!(
+        image
+            .replace('\\', "/")
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .to_lowercase()
+            .as_str(),
+        "node" | "node.exe" | "bun" | "bun.exe"
+    )
+}
+
+fn verify_runtime(image: &str, arguments: &[String]) -> Result<()> {
+    if is_runtime(image)
+        && !arguments.get(1).is_some_and(|script| {
+            let script = script.replace('\\', "/");
+            script.contains("/@anthropic-ai/claude-code/") && script.ends_with("/cli.js")
+        })
+    {
+        bail!("A possible Claude runtime has ambiguous launch arguments; close it manually and request a new preview.");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn runtime_arguments(pid: u32) -> Result<Vec<String>> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as i32];
+    let mut bytes = vec![0u8; 64 * 1024];
+    let mut length = bytes.len();
+    if unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            bytes.as_mut_ptr().cast(),
+            &mut length,
+            std::ptr::null_mut(),
+            0,
+        )
+    } != 0
+        || length < 4
+        || length >= bytes.len()
+    {
+        bail!("A Claude runtime's launch arguments could not be verified.");
+    }
+    bytes.truncate(length);
+    let count = i32::from_ne_bytes(bytes[..4].try_into().unwrap());
+    if !(2..=1024).contains(&count) {
+        bail!("A Claude runtime's argument count is unavailable.");
+    }
+    let executable_end = bytes[4..]
+        .iter()
+        .position(|b| *b == 0)
+        .ok_or_else(|| anyhow::anyhow!("A Claude runtime's executable is unavailable."))?
+        + 4;
+    let start = (executable_end..bytes.len())
+        .find(|i| bytes[*i] != 0)
+        .ok_or_else(|| anyhow::anyhow!("A Claude runtime's arguments are unavailable."))?;
+    bytes[start..]
+        .split(|b| *b == 0)
+        .take(count as usize)
+        .map(|arg| String::from_utf8(arg.to_vec()).map_err(Into::into))
+        .collect()
+}
+
 #[cfg(target_os = "macos")]
 fn process_line(line: &str) -> Option<(u32, &str)> {
     let (pid, rest) = line.trim().split_once(char::is_whitespace)?;
@@ -62,6 +127,9 @@ pub(super) fn active() -> Result<Vec<u32>> {
             arguments.lines().filter_map(process_line).collect();
         for (pid, image) in images.lines().filter_map(process_line) {
             if is_claude(image, arguments.get(&pid).copied().unwrap_or("")) {
+                if is_runtime(image) {
+                    verify_runtime(image, &runtime_arguments(pid)?)?;
+                }
                 pids.push(pid);
             }
         }
@@ -85,6 +153,17 @@ pub(super) fn active() -> Result<Vec<u32>> {
             if metadata.uid() != unsafe { libc::geteuid() } {
                 continue;
             }
+            let stat = match std::fs::read_to_string(entry.path().join("stat")) {
+                Ok(value) => value,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(_) => bail!("A current-user process state could not be checked."),
+            };
+            if stat
+                .rsplit_once(')')
+                .is_some_and(|(_, rest)| rest.trim_start().starts_with("Z "))
+            {
+                continue;
+            }
             let comm = match std::fs::read_to_string(entry.path().join("comm")) {
                 Ok(value) => value,
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
@@ -105,9 +184,19 @@ pub(super) fn active() -> Result<Vec<u32>> {
             // Runtime thread names can replace comm without replacing this argument.
             let image =
                 String::from_utf8_lossy(arguments.split(|b| *b == 0).next().unwrap_or_default());
+            let argv: Vec<_> = arguments
+                .split(|b| *b == 0)
+                .map(|arg| String::from_utf8_lossy(arg).into_owned())
+                .collect();
             let arguments = String::from_utf8_lossy(&arguments).replace('\0', " ");
             if is_claude(comm.trim(), &arguments) || is_claude(&image, &arguments) {
-                pids.push(pid);
+                let executable = std::fs::read_link(entry.path().join("exe"))?;
+                if is_claude(&executable.to_string_lossy(), &arguments) {
+                    verify_runtime(&executable.to_string_lossy(), &argv)?;
+                    pids.push(pid);
+                } else {
+                    bail!("A Claude process name does not match its executable; cleanup is unavailable.");
+                }
             }
         }
     }
@@ -122,7 +211,7 @@ pub(super) fn active() -> Result<Vec<u32>> {
         let root = std::path::PathBuf::from(String::from_utf16(&path[..length])?);
         let executable = root.join("WindowsPowerShell/v1.0/powershell.exe");
         let mut command = crate::process::launch_command(&executable);
-        command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; $s=(Get-Process -Id $PID).SessionId; ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process -Filter \"SessionId = $s\" | Select-Object ProcessId,Name,CommandLine)"]);
+        command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "$ErrorActionPreference='Stop'; ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process | Select-Object ProcessId,Name,CommandLine)"]);
         command
             .env("PSModuleAnalysisCachePath", "NUL")
             .env("PSModulePath", executable.parent().unwrap().join("Modules"));
@@ -134,18 +223,57 @@ pub(super) fn active() -> Result<Vec<u32>> {
             let image = row["Name"]
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("Process metadata is unavailable."))?;
+            if !is_claude(image, "") && !is_runtime(image) {
+                continue;
+            }
+            let pid = row["ProcessId"]
+                .as_u64()
+                .and_then(|pid| u32::try_from(pid).ok())
+                .filter(|pid| *pid != 0)
+                .ok_or_else(|| anyhow::anyhow!("Process identity is unavailable."))?;
+            if !super::process_stop::current_user(pid)? {
+                continue;
+            }
             if matches!(image.to_lowercase().as_str(), "node.exe" | "bun.exe")
                 && row["CommandLine"].as_str().is_none()
             {
                 bail!("An editor runtime could not be inspected; cleanup is unavailable.");
             }
             if is_claude(image, row["CommandLine"].as_str().unwrap_or("")) {
-                pids.push(
-                    row["ProcessId"]
-                        .as_u64()
-                        .ok_or_else(|| anyhow::anyhow!("Process identity is unavailable."))?
-                        as u32,
-                );
+                if is_runtime(image) {
+                    use windows_sys::Win32::{
+                        Foundation::LocalFree, UI::Shell::CommandLineToArgvW,
+                    };
+                    let wide: Vec<_> = row["CommandLine"]
+                        .as_str()
+                        .unwrap()
+                        .encode_utf16()
+                        .chain(Some(0))
+                        .collect();
+                    let mut count = 0;
+                    let pointer = unsafe { CommandLineToArgvW(wide.as_ptr(), &mut count) };
+                    if pointer.is_null() {
+                        bail!("A Claude runtime's launch arguments are unavailable.");
+                    }
+                    let mut arguments = Vec::new();
+                    if (2..=1024).contains(&count) {
+                        for index in 0..count as usize {
+                            let arg = unsafe { *pointer.add(index) };
+                            let mut length = 0;
+                            while unsafe { *arg.add(length) } != 0 {
+                                length += 1;
+                            }
+                            arguments.push(String::from_utf16_lossy(unsafe {
+                                std::slice::from_raw_parts(arg, length)
+                            }));
+                        }
+                    }
+                    unsafe {
+                        LocalFree(pointer.cast());
+                    }
+                    verify_runtime(image, &arguments)?;
+                }
+                pids.push(pid);
             }
         }
     }
@@ -169,6 +297,15 @@ mod tests {
         assert!(!is_claude("codex", "--context claude-code"));
         assert!(!is_claude("node", "/YOUR_PROJECT/unrelated.js"));
         assert!(is_claude("/YOUR_HOME/Applications/Claude Code/claude", ""));
+    }
+
+    #[test]
+    fn runtime_arguments_must_launch_the_cli_not_merely_mention_it() {
+        let cli = "/YOUR HOME/node_modules/@anthropic-ai/claude-code/cli.js";
+        assert!(verify_runtime("node", &["node".into(), cli.into()]).is_ok());
+        assert!(verify_runtime("node", &["node".into(), "other.js".into(), cli.into()]).is_err());
+        assert!(verify_runtime("node", &["node".into(), "-e".into(), cli.into()]).is_err());
+        assert!(verify_runtime("codex", &[cli.into()]).is_ok());
     }
 
     #[cfg(target_os = "macos")]

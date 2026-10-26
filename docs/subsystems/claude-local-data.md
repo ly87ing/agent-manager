@@ -32,6 +32,7 @@ be cleaned. The page explicitly keeps the all-source goal incomplete.
 | Preserve shared caller dependencies | Project/shared-resource preservation constraint | Compare generic runtime certificate/key dependencies with the actual deletion-target union |
 | Keep shared and other-assistant data | Reference C35–C46 | Use exact source identities and supported schemas, not keyword deletion or whole mixed stores |
 | Use Agent Manager as the entry point | User request | Show per-source results and remaining work in the app; no external cleanup-script prerequisite |
+| Close Claude sessions before deleting session data | User request, 2026-10-25 | Stop previewed current-user Claude processes and verify their exit before deleting credentials or files |
 | Keep development isolated | Repository contract | No real-session deletion, credential probing, app termination or permission changes for tests |
 
 Primary sources:
@@ -64,14 +65,32 @@ before external secret-source loading, preflight, or general database access.
    1,024 paths and 256 KiB of path bytes.
    Retained project and unclassified paths have explicit reasons and are excluded
    from deletion counts; unknown ownership remains visible in the result.
+   `process_ids` lists recognized processes to close, or NULL on unavailable
+   inspection. Native incarnation identities
+   join the base; command lines never enter output.
 2. `claude-data:clear --base SHA256 --confirm [--files-only]` re-reads the same
    scope, requires an unchanged base and no blockers, acquires the existing apply
    lock, and revalidates before creating a nonsecret intent audit.
-3. It removes previewed credentials, exact configuration files including telemetry,
+3. It stops the previewed Claude processes, waits up to three seconds for graceful
+   exit, then force-stops surviving bound processes and waits up to three seconds
+   for verified exit. Windows uses forced termination after the initial wait.
+   macOS signals audit tokens, Linux uses pidfds, and Windows verifies the current
+   user token and creation time on held process handles. It never signals a bare
+   PID, closes an IDE/shell, or terminates shared MCPs by keyword.
+   Newly discovered processes stop execution; they are not automatically added.
+4. After independent zero-active-process inspection, it compares all original
+   filesystem, credential and caller-dependency evidence, excluding the expected
+   process disappearance. Shutdown writes invalidate the data preview: no data is
+   deleted, stopped-process progress is returned, and another preview is required.
+   It then removes previewed credentials, exact configuration files including telemetry,
    then unlinks previewed leaves and empty directories through held capabilities.
    Every file is re-read; parent identities and directory emptiness are checked.
    There is no recursive pathname removal and no automatic sensitive backup.
-4. Phase records and returned verified counts retain partial progress on failure.
+5. Phase records and returned verified counts retain partial progress on failure.
+   `stopped_processes`, `forced_processes` and `processes_stopped` describe the
+   stop phase independently from deletion counts. Forced counts include only
+   processes signaled forcibly and independently confirmed exited. Complete results require the
+   stop phase, guarded deletion and final independent readback.
    Independent final inspection must find no selected data or credentials before
    reporting complete. Any attempt requires a
    fresh preview before retrying.
@@ -79,8 +98,8 @@ before external secret-source loading, preflight, or general database access.
    `retained_verified` flag is false when only preview evidence remains available;
    `scope_verified` comes from that same independent inspection, even after a
    partial execution. Complete results require both flags and no unclassified
-   content. Preview and result require `telemetry_policy:"remove"`; the v4 base
-   binds the added backup scope and rejects older previews.
+   content. Preview and result require `telemetry_policy:"remove"`; the v5 base
+   binds stop-before-delete semantics and rejects older previews.
 
 ## Orca search-index inspection
 
@@ -196,6 +215,13 @@ Orca deletion entry point is enabled by these research fixtures.
 - Native process inspection remains bounded. Windows PowerShell/CIM has a
   thirty-second deadline; macOS process commands have ten seconds. Timeout is
   reported without command lines and always blocks cleanup.
+  Windows inspects candidate processes across logon sessions and checks their user
+  tokens before classification. Positively identified other-user processes are
+  excluded; unavailable ownership blocks cleanup. Ambiguous Node/Bun launch arguments
+  block cleanup. Known exited zombies are excluded; parent shells are retained.
+  Automatic restart services and custom launch wrappers remain outside proven stop
+  coverage. Cross-logon-session Windows runtime acceptance remains unverified.
+  A later writer still stops guarded deletion.
 
 - The default production namespace is the first supported scope. Custom config,
   secure-storage or OAuth namespace variables block macOS credential inspection;
@@ -253,8 +279,9 @@ Orca deletion entry point is enabled by these research fixtures.
   or sensitive backup is created by the whole-file deletion path.
   Windows rechecks ordinary-file link counts on the held deletion handle before
   disposition; a late hard-link alias stops deletion without removing either name.
-- Known active Claude processes block execution and are checked again at phase
-  and directory boundaries. Other writers cannot be locked transactionally by
+- Previewed Claude processes are stopped before deletion. New active processes
+  block deletion and are checked again at phase and directory boundaries.
+  Other writers cannot be locked transactionally by
   Agent Manager. New/changed observed entries stop cleanup; unknown final results
   remain partial. There is no claim of an atomic filesystem/Keychain transaction,
   secure erase, cloud deletion, anonymous identity or remote-token revocation.
@@ -288,6 +315,15 @@ Filesystem fixtures use synthetic HOME/data locations and files-only mode.
 They exercise actual deletion/readback, whole-file telemetry removal, external link
 preservation, stale previews, changed selected files, initial/late backup aliases
 and new files mid-cleanup.
+`node scripts/verify-native-claude-data.mjs` runs the real built CLI against
+synthetic files and owned native-name/Node-script processes. Before every confirmed
+clear it refuses any previewed process not owned by the fixture. It checks
+cancellation/staleness without stopping, graceful and forced exit before deletion,
+and shutdown flushes that require a new preview with zero deletions. Unit-test
+dispatch refuses discovered real targets; its native stop test binds only children
+it created and verifies an unrelated child remains running.
+Run the real CLI fixture after the Cargo suite, never concurrently: both inspect
+the same operating-system user's processes despite their separate HOME directories.
 Frontend tests exercise cancellation, typed confirmation, scope invalidation,
 partial results and fresh-preview requirements. Mock UI checks do not establish
 native credential behavior. Linux native fixtures exercise undisplayable file

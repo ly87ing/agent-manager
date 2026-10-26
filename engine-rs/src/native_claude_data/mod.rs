@@ -7,6 +7,7 @@ mod files;
 mod inspection_process;
 mod orca_search;
 mod preview;
+mod process_stop;
 mod processes;
 mod retention;
 mod tree;

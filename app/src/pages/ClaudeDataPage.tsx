@@ -66,6 +66,7 @@ export default function ClaudeDataPage() {
       <div>
         <h1 className="flex items-center gap-2 text-lg font-semibold"><Trash2 className="h-5 w-5" aria-hidden />{t("Claude 本地数据维护")}</h1>
         <p className="mt-1 text-sm text-muted-foreground">{t("清理 Claude Code 默认用户目录中的会话、账号、记忆、配置与缓存，包括遥测配置。")}</p>
+        <p className="mt-2 text-sm text-muted-foreground">{t("确认后先关闭当前用户下已识别的 Claude 会话进程，再删除数据。未退出的进程会被强制关闭；请先保存工作。")}</p>
         <p className="mt-2 text-sm text-warning">{t("全来源清理尚未完成。以下结果仅覆盖列明的范围，未检查的位置不能视为已清理。")}</p>
       </div>
       <div className="rounded-lg border bg-card p-4 text-sm">
@@ -87,6 +88,7 @@ export default function ClaudeDataPage() {
       {preview && <section className="space-y-3 rounded-lg border bg-card p-4" aria-label={t("清理预览")}>
         <h2 className="text-sm font-semibold">{t("清理预览")}</h2>
         <p className="break-all font-mono text-xs text-muted-foreground">{preview.root}</p>
+        <p className="text-sm">{preview.process_ids === null ? t("待关闭的 Claude 进程尚未确认。") : t("将关闭 {0} 个 Claude 进程。", preview.process_ids.length)}</p>
         {preview.configuration_paths.length > 0 && <div className="space-y-2 rounded-md bg-muted p-3 text-sm">
           <h3 className="font-medium">{t("将清理的配置与备份")}</h3>
           <ul className="max-h-40 space-y-1 overflow-y-auto font-mono text-xs">{preview.configuration_paths.map((path) => <li key={path} className="break-all">{path}</li>)}</ul>
@@ -105,6 +107,7 @@ export default function ClaudeDataPage() {
       </section>}
       {result && <section role="status" className="space-y-2 rounded-lg border bg-card p-4 text-sm">
         <h2 className="font-semibold">{result.status === "complete" ? t("所选范围清理完成") : t("清理未全部完成")}</h2>
+        <p>{t("已确认关闭 {0} 个 Claude 进程，其中 {1} 个强制关闭。", result.stopped_processes, result.forced_processes)}</p>
         <p>{t("已移除 {0} 个文件、{1} 个目录和 {2} 项系统凭据。", result.deleted_files, result.deleted_directories, result.deleted_credentials)}</p>
         {result.status === "partial" && <p className="text-warning">{t("以上仅统计已确认的删除；未确认的项目可能已发生变化，请检查后再操作。")}</p>}
         {!result.scope_verified && <p className="text-warning">{t("未能独立确认清理后的范围，请先检查结果。")}</p>}
@@ -114,7 +117,7 @@ export default function ClaudeDataPage() {
         <p className="text-muted-foreground">{t("再次操作前，请重新检查清理范围。")}</p>
       </section>}
       <ClaudeOrcaSearch disabled={busy !== null} onBusy={(checking) => setBusy(checking ? "orca-preview" : null)} />
-      {confirm && preview && <ConfirmModal title={t("清理 Claude 本地数据")} description={t("将永久删除预览中的数据，包括会话、账号、记忆、恢复记录及遥测配置。请确认已关闭 Claude 及其集成。")}
+      {confirm && preview && <ConfirmModal title={t("清理 Claude 本地数据")} description={t("将先关闭预览中的 Claude 进程，必要时强制关闭，再永久删除会话、账号、记忆、恢复记录及遥测配置。关闭时写回的数据需要重新检查。")}
         risk="install-remove" riskLabel={t("永久删除")} requireText="DELETE" confirmLabel={t("永久清理所选范围")} executing={busy === "clear"} error={error}
         onConfirm={() => void clear()} onClose={() => {setConfirm(false);setError(null);}} />}
     </div>

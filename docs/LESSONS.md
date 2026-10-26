@@ -2,6 +2,25 @@
 
 What recent work got wrong, and the rule that would have caught it. Read this before changing code.
 
+## 2026-10-25: isolated HOME does not isolate process termination
+
+- A temporary HOME/data directory does not isolate current-user process discovery.
+  Confirmed cleanup fixtures must check every previewed PID against children they
+  own before invoking clear; unit-test dispatch must refuse real discovered targets.
+  Native stop tests bind only children they started and retain an unrelated child
+  as a preservation control. Session shutdown can flush new files: compare the
+  complete non-process preview evidence before any credential or file deletion.
+- The full suite caught macOS dropping its task-name port between SIGTERM and
+  the BSD zombie state. Keep that transient observation as still running and
+  poll for positive exit evidence; an ESRCH signal result alone proves no exit.
+- A successful no-op signal is not forced termination. Count force only when the
+  native call accepted a forced signal and a later read confirms exit. On Windows,
+  logon-session IDs do not establish user ownership or cover other sessions of
+  the same user; enumerate candidates across sessions and inspect native user tokens.
+- Running the real CLI process fixture alongside process-enumerating unit tests
+  made six cleanup tests refuse those fixture processes. Run these two suites
+  serially; temporary HOME/data locations do not isolate their process namespace.
+
 ## 2026-10-23: destructive maintenance needs platform and dependency evidence
 
 - A non-UTF-8 filename fixture failed during creation on APFS, before inspection.

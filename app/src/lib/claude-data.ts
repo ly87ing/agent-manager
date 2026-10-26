@@ -11,7 +11,8 @@ export const claudeDataPreviewSchema = z.object({
   telemetry_policy: z.literal("remove"),
   retained: z.array(retainedItem),
   credential_items: count.nullable(), files_only: z.boolean(), blockers: z.array(z.string()),
-}).strict().refine((value) => !value.can_clear || (value.has_changes && value.blockers.length === 0), "Blocked previews cannot clear");
+  process_ids: z.array(count).max(1024).nullable(),
+}).strict().refine((value) => !value.can_clear || (value.process_ids !== null && value.has_changes && value.blockers.length === 0), "Blocked previews cannot clear");
 export type ClaudeDataPreview = z.infer<typeof claudeDataPreviewSchema>;
 
 export const claudeDataResultSchema = z.object({
@@ -22,7 +23,9 @@ export const claudeDataResultSchema = z.object({
   scope_verified: z.boolean(), message: z.string(),
   retained: z.array(retainedItem),
   retained_verified: z.boolean(),
-}).strict().refine((value) => value.status !== "complete" || (value.scope_verified && value.retained_verified && !value.retained.some((item) => item.reason === "unclassified")), "Complete cleanup requires independent scope and remaining-content readback");
+  stopped_processes: count, forced_processes: count, processes_stopped: z.boolean(),
+}).strict().refine((value) => value.forced_processes <= value.stopped_processes, "Forced closures require confirmed process exit")
+  .refine((value) => value.status !== "complete" || (value.processes_stopped && value.scope_verified && value.retained_verified && !value.retained.some((item) => item.reason === "unclassified")), "Complete cleanup requires stopped processes and independent scope and remaining-content readback");
 export type ClaudeDataResult = z.infer<typeof claudeDataResultSchema>;
 
 export const orcaSearchPreviewSchema = z.object({

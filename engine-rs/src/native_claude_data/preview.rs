@@ -1,4 +1,4 @@
-use super::{credentials, dependencies, processes, tree};
+use super::{credentials, dependencies, process_stop, tree};
 use crate::Context;
 use anyhow::{bail, Result};
 use cap_std::fs::Dir;
@@ -25,6 +25,9 @@ pub(super) struct Snapshot {
     pub files_only: bool,
     pub blockers: Vec<String>,
     pub base: String,
+    pub data_base: String,
+    pub processes: Vec<process_stop::Target>,
+    processes_known: bool,
     pub root_path: PathBuf,
 }
 
@@ -252,13 +255,8 @@ impl Snapshot {
             .collect();
         let caller_evidence = dependencies::caller_evidence(&targets)?;
         let mut blockers = Vec::new();
-        let active = match processes::active() {
-            Ok(pids) => {
-                if !pids.is_empty() {
-                    blockers.push("Close Claude Code, Claude Desktop and their active editor integrations, then request a new preview.".into());
-                }
-                pids
-            }
+        let (active, processes_known) = match process_stop::capture() {
+            Ok(targets) => (targets, true),
             Err(error) => {
                 let timed_out = error
                     .downcast_ref::<std::io::Error>()
@@ -271,7 +269,7 @@ impl Snapshot {
                     }
                     .into(),
                 );
-                vec![]
+                (vec![], false)
             }
         };
         let credentials = match credentials::inspect(ctx, files_only) {
@@ -282,7 +280,7 @@ impl Snapshot {
             }
         };
         let mut hash = Sha256::new();
-        hash.update(b"claude-default-data-v4-configuration-backups");
+        hash.update(b"claude-default-data-v5-stop-before-delete");
         hash.update(caller_evidence);
         hash.update(home_path.as_os_str().as_encoded_bytes());
         hash.update(tree::identity(&home)?);
@@ -301,11 +299,19 @@ impl Snapshot {
         if let Some(credentials) = &credentials {
             hash.update(credentials.fingerprint());
         }
-        for pid in active {
-            hash.update(pid.to_le_bytes());
-        }
         for blocker in &blockers {
             hash.update(blocker.as_bytes());
+        }
+        let data_base = hash
+            .clone()
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        for target in &active {
+            hash.update(target.pid.to_le_bytes());
+            hash.update((target.identity.len() as u64).to_le_bytes());
+            hash.update(&target.identity);
         }
         let base = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
         Ok(Self {
@@ -320,6 +326,9 @@ impl Snapshot {
             files_only,
             blockers,
             base,
+            data_base,
+            processes: active,
+            processes_known,
             root_path,
         })
     }
@@ -344,13 +353,14 @@ impl Snapshot {
             group.2 += config.entry.bytes;
         }
         let groups: Vec<_> = groups.into_iter().map(|(id,(files,directories,bytes))|json!({"id":id,"files":files,"directories":directories,"bytes":bytes})).collect();
-        let changes = self.entries.iter().any(|entry| entry.retained.is_none())
+        let changes = !self.processes.is_empty()
+            || self.entries.iter().any(|entry| entry.retained.is_none())
             || !self.configurations.is_empty()
             || self
                 .credentials
                 .as_ref()
                 .is_some_and(|credentials| credentials.count() > 0);
-        json!({"scope":"default_claude_code","platform":std::env::consts::OS,"root":self.root_path,"config_path":self.root_path.parent().unwrap().join(".claude.json"),"configuration_paths":self.configuration_paths,"base":self.base,"can_clear":self.blockers.is_empty() && changes,"groups":groups,"telemetry_policy":"remove","retained":self.retained_data(),"credential_items":self.credentials.as_ref().filter(|c|!c.skipped).map(|c|c.count()),"files_only":self.files_only,"blockers":self.blockers,"has_changes":changes})
+        json!({"scope":"default_claude_code","platform":std::env::consts::OS,"root":self.root_path,"config_path":self.root_path.parent().unwrap().join(".claude.json"),"configuration_paths":self.configuration_paths,"base":self.base,"can_clear":self.blockers.is_empty() && changes,"groups":groups,"telemetry_policy":"remove","retained":self.retained_data(),"credential_items":self.credentials.as_ref().filter(|c|!c.skipped).map(|c|c.count()),"files_only":self.files_only,"blockers":self.blockers,"has_changes":changes,"process_ids":self.processes_known.then(|| self.processes.iter().map(|target| target.pid).collect::<Vec<_>>())})
     }
 }
 

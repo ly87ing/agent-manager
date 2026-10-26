@@ -1,5 +1,5 @@
 //! Confirmed, journaled cleanup. Failures retain verified progress and require a new preview.
-use super::{files, preview::Snapshot, processes, retention, tree};
+use super::{files, preview::Snapshot, process_stop, processes, retention, tree};
 use crate::{store, Context};
 use anyhow::{bail, Result};
 use cap_std::fs::Dir;
@@ -11,6 +11,9 @@ struct Progress {
     files: u64,
     directories: u64,
     credentials: u64,
+    stopped: u64,
+    forced: u64,
+    processes_stopped: bool,
 }
 
 impl Progress {
@@ -26,6 +29,7 @@ impl Progress {
         json!({"scope":"default_claude_code","status":status,"deleted_files":self.files,
             "deleted_directories":self.directories,"deleted_credentials":self.credentials,
             "telemetry_policy":"remove",
+            "stopped_processes":self.stopped,"forced_processes":self.forced,"processes_stopped":self.processes_stopped,
             "files_only":snapshot.files_only,"scope_verified":verified,"retained":retained,"retained_verified":retained_verified,"message":message})
     }
 }
@@ -70,7 +74,8 @@ fn journal(
         Some("default_claude_code"),
         Some(&json!({
             "phase":phase,"deleted_files":progress.files,"deleted_directories":progress.directories,
-            "deleted_credentials":progress.credentials
+            "deleted_credentials":progress.credentials,
+            "stopped_processes":progress.stopped,"forced_processes":progress.forced,"processes_stopped":progress.processes_stopped
         })),
     )
     .map_err(|_| anyhow::anyhow!("The cleanup audit could not be saved; cleanup stopped."))
@@ -263,7 +268,7 @@ pub(super) fn execute(ctx: &Context, base: &str, files_only: bool, run_id: &str)
         bail!("The preview contains blockers; no cleanup was started.");
     }
     if !initial.data()["has_changes"].as_bool().unwrap_or(false) {
-        return Ok(Progress::default().data(
+        return Ok(Progress { processes_stopped: true, ..Progress::default() }.data(
             &initial,
             "not_applied",
             true,
@@ -284,12 +289,30 @@ pub(super) fn execute(ctx: &Context, base: &str, files_only: bool, run_id: &str)
     })?;
     let mut progress = Progress::default();
     journal(&conn, run_id, "intent", &progress)?;
-    let result = apply(
-        &snapshot,
-        &mut progress,
-        || guard(&snapshot),
-        |phase, p| journal(&conn, run_id, phase, p),
-    );
+    let result = (|| {
+        journal(&conn, run_id, "stopping_processes", &progress)?;
+        process_stop::stop(
+            &snapshot.processes,
+            &mut progress.stopped,
+            &mut progress.forced,
+        )?;
+        progress.processes_stopped = true;
+        journal(&conn, run_id, "processes_stopped", &progress)?;
+        // Shutdown can flush sessions or credentials. Never delete unpreviewed changes.
+        let after_stop = Snapshot::capture(ctx, files_only)?;
+        if after_stop.data_base != snapshot.data_base
+            || !after_stop.processes.is_empty()
+            || !after_stop.blockers.is_empty()
+        {
+            bail!("Claude was stopped, but the previewed data changed. No data was deleted; request a new preview.");
+        }
+        apply(
+            &after_stop,
+            &mut progress,
+            || guard(&after_stop),
+            |phase, p| journal(&conn, run_id, phase, p),
+        )
+    })();
     let (final_issue, retained, verified) = match readback(ctx, &snapshot) {
         Ok(after) => (after.issue, after.retained, true),
         Err(error) => (Some(error.to_string()), snapshot.retained_data(), false),

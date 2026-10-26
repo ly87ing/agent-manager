@@ -40,7 +40,8 @@ describe("Claude local data maintenance", () => {
     await userEvent.click(screen.getByRole("button", { name: "检查清理范围" }));
     await userEvent.click(await screen.findByRole("button", { name: "清理所选范围" }));
     expect(screen.getByTestId("confirm-modal-confirm")).toBeDisabled();
-    expect(screen.getByText("将永久删除预览中的数据，包括会话、账号、记忆、恢复记录及遥测配置。请确认已关闭 Claude 及其集成。")).toBeInTheDocument();
+    expect(screen.getByText("将关闭 2 个 Claude 进程。")).toBeInTheDocument();
+    expect(screen.getByText("将先关闭预览中的 Claude 进程，必要时强制关闭，再永久删除会话、账号、记忆、恢复记录及遥测配置。关闭时写回的数据需要重新检查。")).toBeInTheDocument();
     await userEvent.click(screen.getByTestId("confirm-modal-cancel"));
     expect(calls.map((call) => call.command)).toEqual(["claude-data:preview"]);
   });
@@ -75,10 +76,11 @@ describe("Claude local data maintenance", () => {
     expect(calls.filter((call) => call.command === "claude-data:clear")).toHaveLength(1);
   });
   it("disables cleanup for a blocked preview", async () => {
-    const { calls } = renderWithEngine(<ClaudeDataPage />, { "claude-data:preview": makeEnvelope({ ...makeClaudeDataPreview(), can_clear: false, blockers: ["Close Claude first"] }) });
+    const { calls } = renderWithEngine(<ClaudeDataPage />, { "claude-data:preview": makeEnvelope({ ...makeClaudeDataPreview(), can_clear: false, process_ids: null, blockers: ["Process inspection unavailable"] }) });
     await userEvent.click(screen.getByRole("button", { name: "检查清理范围" }));
     expect(await screen.findByRole("button", { name: "清理所选范围" })).toBeDisabled();
-    expect(screen.getByRole("alert")).toHaveTextContent("Close Claude first");
+    expect(screen.getByRole("alert")).toHaveTextContent("Process inspection unavailable");
+    expect(screen.getByText("待关闭的 Claude 进程尚未确认。")).toBeInTheDocument();
     expect(calls).toHaveLength(1);
   });
   it("shows every selected configuration and backup path before confirmation", async () => {
@@ -101,6 +103,8 @@ describe("Claude local data maintenance", () => {
     expect(claudeDataResultSchema.safeParse({ ...makeClaudeDataResult(), scope_verified: false }).success).toBe(false);
     expect(claudeDataResultSchema.safeParse({ ...makeClaudeDataResult(), telemetry_policy: "preserve" }).success).toBe(false);
     expect(claudeDataResultSchema.safeParse({ ...makeClaudeDataResult(), retained_verified: false }).success).toBe(false);
+    expect(claudeDataResultSchema.safeParse({ ...makeClaudeDataResult(), processes_stopped: false }).success).toBe(false);
+    expect(claudeDataResultSchema.safeParse({ ...makeClaudeDataResult(), status: "partial", stopped_processes: 0, forced_processes: 1 }).success).toBe(false);
   });
   it("shows protected projects and does not describe unknown content as cleaned", async () => {
     const retained = [
