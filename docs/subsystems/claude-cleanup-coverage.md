@@ -16,6 +16,9 @@ rules are in [Claude local data](claude-local-data.md).
 | C08 | Global state and configuration backups | Partial: default state plus recognized decimal-timestamp backups in the default backup directory and HOME; other copies remain unclassified or outside supported locations. |
 | C12 | Code Keychain credentials | Partial: three exact current-user macOS default services; custom and historical namespaces are not integrated. |
 | C13 | Credential-file fallbacks | Partial: default-directory credential files; custom roots and external copies are not integrated. |
+| C09 | Custom configuration/account directories | Partial: explicit user-directory connection fields only; no custom credential/session deletion or arbitrary directory sweep. |
+| C15 | Shell startup files and completions | Partial: listed HOME files, lexical inspection and individually confirmed simple literal Claude assignments on macOS. Complex/sourced/custom startup references and completions remain open. |
+| C16 | Active launch/process environment | Partial: caller field-name inspection; macOS current graphical-login named-variable inspection and individually confirmed Claude-named removal. Existing processes, persistent launchers and general shared proxies remain unchanged. Windows registry inspection is read-only. |
 | C37 | Session Viewer state and watermarks | Not integrated: the installed binary exposes names, but its current mixed-state/migration schema is not verified. |
 | C38 | Orca full-text index and cursors | Read-only inspection in a separate native process: schema-6 selected main-file snapshot, exact-agent counts and unattributed records. Cleanup, old FTS content and other profiles remain unverified. |
 | C39 | Orca parse caches | Not integrated: current Orca also uses SQLite schema 4 and scope_cwds version 1; the older JSON input alone is insufficient. |
@@ -30,12 +33,9 @@ rules are in [Claude local data](claude-local-data.md).
 | C03 | npm CLI installations |
 | C04 | Bun/pnpm CLI installations |
 | C05 | Dedicated launch wrappers |
-| C09 | Custom configuration/account directories |
 | C10 | XDG and legacy cache/state directories |
 | C11 | Organization-managed configuration |
 | C14 | External authentication sources |
-| C15 | Shell startup files and completions |
-| C16 | Active launch/process environment |
 | C17 | Dedicated automatic-start entries |
 | C18 | Shell command history |
 | C19 | npm cache and logs |

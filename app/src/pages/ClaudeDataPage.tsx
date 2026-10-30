@@ -6,6 +6,7 @@ import { engineErrorMessage } from "../lib/engine";
 import { t } from "../lib/i18n";
 import { toast } from "../lib/notifications";
 import { ClaudeOrcaSearch } from "./ClaudeOrcaSearch";
+import { ClaudeConnections } from "./ClaudeConnections";
 
 function groupLabel(id: string): string {
   const labels: Record<string, string> = {
@@ -37,7 +38,7 @@ export default function ClaudeDataPage() {
   const [includeCredentials, setIncludeCredentials] = useState(true);
   const [preview, setPreview] = useState<ClaudeDataPreview | null>(null);
   const [result, setResult] = useState<ClaudeDataResult | null>(null);
-  const [busy, setBusy] = useState<"preview" | "clear" | "orca-preview" | null>(null);
+  const [busy, setBusy] = useState<"preview" | "clear" | "orca-preview" | "connections" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
 
@@ -65,11 +66,13 @@ export default function ClaudeDataPage() {
     <div className="space-y-4" data-testid="claude-data-page">
       <div>
         <h1 className="flex items-center gap-2 text-lg font-semibold"><Trash2 className="h-5 w-5" aria-hidden />{t("Claude 本地数据维护")}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{t("清理 Claude Code 默认用户目录中的会话、账号、记忆、配置与缓存，包括遥测配置。")}</p>
-        <p className="mt-2 text-sm text-muted-foreground">{t("确认后先关闭当前用户下已识别的 Claude 会话进程，再删除数据。未退出的进程会被强制关闭；请先保存工作。")}</p>
         <p className="mt-2 text-sm text-warning">{t("全来源清理尚未完成。以下结果仅覆盖列明的范围，未检查的位置不能视为已清理。")}</p>
       </div>
+      <ClaudeConnections disabled={busy !== null} onBusy={value => setBusy(value ? "connections" : null)} />
       <div className="rounded-lg border bg-card p-4 text-sm">
+        <h2 className="font-semibold">{t("清理默认目录全部数据")}</h2>
+        <p className="mt-2 text-muted-foreground">{t("清理 Claude Code 默认用户目录中的会话、账号、记忆、配置与缓存，包括遥测配置。")}</p>
+        <p className="mt-2 text-muted-foreground">{t("确认后先关闭当前用户下已识别的 Claude 会话进程，再删除数据。未退出的进程会被强制关闭；请先保存工作。")}</p>
         <p>{t("不会删除项目源文件、外部技能仓库、共享 SDK 认证或云端数据；不会撤销远端令牌。")}</p>
         <p className="mt-2 text-muted-foreground">{t("本次不修改 Shell 文件和现有进程环境，也不删除配置引用的外部证书、脚本和共享认证。")}</p>
         <p className="mt-2 text-muted-foreground">{t("归属未确认的内容会保留，并列为未完成项。")}</p>

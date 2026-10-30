@@ -52,7 +52,9 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
             | "open-settings",
         ) => true,
         ("launch", "build" | "catalog" | "run" | "list" | "save" | "delete") => true,
-        ("claude-data", "preview" | "clear" | "orca-search-preview") => true,
+        ("claude-data", "preview" | "clear" | "orca-search-preview" | "inspect-connections") => {
+            true
+        }
         ("resources", "targets") => true,
         ("system", "audit" | "discover" | "refresh-upstream") => true,
         ("secrets", "status" | "set" | "source") => true,
@@ -131,11 +133,20 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
     let (domain, verb) = command.split_once(':').unwrap_or(("", ""));
     let mut specs: Vec<(&'static str, ArgValueKind)> = Vec::new();
     match (domain, verb) {
-        ("claude-data", "preview") => specs.push(("--files-only", ArgValueKind::Flag)),
+        ("claude-data", "preview") => {
+            specs.push(("--connection-root", ArgValueKind::FilePath));
+            specs.push(("--files-only", ArgValueKind::Flag));
+            specs.push(("--connection-items", ArgValueKind::JsonValue));
+        }
         ("claude-data", "clear") => {
+            specs.push(("--connection-root", ArgValueKind::FilePath));
+            specs.push(("--connection-items", ArgValueKind::JsonValue));
             specs.push(("--files-only", ArgValueKind::Flag));
             specs.push(("--base", ArgValueKind::Digest));
             specs.push(("--confirm", ArgValueKind::Flag));
+        }
+        ("claude-data", "inspect-connections") => {
+            specs.push(("--connection-root", ArgValueKind::FilePath))
         }
         ("environment", "check") => {
             specs.push(("--spec", ArgValueKind::JsonValue));
@@ -710,6 +721,26 @@ mod tests {
     fn claude_maintenance_does_not_reopen_account_or_arbitrary_path_surfaces() {
         assert!(validate_command("claude-data:preview").is_ok());
         assert!(validate_command("claude-data:clear").is_ok());
+        assert!(validate_command("claude-data:inspect-connections").is_ok());
+        assert!(validate_args(
+            "claude-data:inspect-connections",
+            &["--connection-root".into(), "/YOUR_CLAUDE".into()]
+        )
+        .is_ok());
+        assert!(validate_args("claude-data:inspect-connections", &["--confirm".into()]).is_err());
+        assert!(validate_args(
+            "claude-data:preview",
+            &[
+                "--connection-items".into(),
+                r#"["settings:ANTHROPIC_API_KEY"]"#.into()
+            ]
+        )
+        .is_ok());
+        assert!(validate_args(
+            "claude-data:clear",
+            &["--connection-items".into(), "not-json".into()]
+        )
+        .is_err());
         assert!(validate_command("claude-data:orca-search-preview").is_ok());
         assert!(validate_args("claude-data:orca-search-preview", &[]).is_ok());
         assert!(validate_args("claude-data:orca-search-preview", &["--confirm".into()]).is_err());

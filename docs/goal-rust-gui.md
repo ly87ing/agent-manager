@@ -2,6 +2,46 @@
 
 > Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
 
+## 2026-10-30: Individually Confirmed Claude Connection Maintenance
+
+The explicit maintenance exception now has a separate connection panel. Read-only
+inspection precedes a fresh one-item preview and typed confirmation. macOS supports
+selected settings env/root fields, conservatively simple HOME startup assignments
+and Claude-named variables in the current graphical login environment. An explicit
+custom user directory is supported. Shared sources disclose all-future-consumer
+impact and require `REMOVE SHARED`; general shared proxies remain read-only.
+Codex files, other settings, sessions, credentials, projects and worktrees stay
+outside targeted removal. Whole-data deletion keeps its separate existing action.
+
+Native tests exercise duplicate/opaque JSON preservation, refused shell contexts,
+project/Codex path aliases, scope/value changes, source metadata, inherited ACLs,
+atomic displaced-version checks and retained uncertain recovery files. The actual
+CLI fixture uses isolated HOME/data and preserved synthetic Codex/session/credential
+sentinels; its optional session test touches only one random test variable. No
+personal cleanup or third-party script execution is used for acceptance.
+
+The rendered panel at 1000 × 650 and 760 × 650, in English and Simplified Chinese,
+was connected to the actual CLI with isolated files. Inspection, zero-write cancel,
+one-field removal, shared typed-confirmation refusal/success and independent retained
+file readback passed. Confirm/cancel remained visible without horizontal overflow.
+This renderer receipt is distinct from installed native-client acceptance.
+
+Final source verification: engine 643 passed/1 pre-existing ignored, Tauri 29
+passed/1 pre-existing ignored, frontend 761 passed across 65 files, production
+frontend build and Rust formatting passed. Both the targeted real CLI fixture
+(including its random session variable) and the existing whole-data fixture
+passed sequentially. An initial restricted run lacked process/network permissions;
+an early concurrent run also hit an existing browser nonblocking-accept timing
+failure. The unchanged browser case passed alone, then serial and final full runs
+passed. No assertion or timeout was weakened. Personal credential-store fixtures
+and native Windows/Linux targeted writes were not exercised.
+
+The all-source cleanup goal remains incomplete. Complex/sourced startup files,
+organization/project configuration, persistent launchers, other profiles and other
+applications' environments remain outside the implemented scope. Windows/Linux
+targeted writes are unavailable. See [the subsystem contract](subsystems/claude-local-data.md)
+and [coverage inventory](subsystems/claude-cleanup-coverage.md).
+
 ## 2026-10-14: Audit Corrections and Current Verification
 
 Source changes: clock correction audit `4b7e596`, local-first skill adoption

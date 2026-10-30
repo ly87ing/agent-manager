@@ -18,8 +18,9 @@ credential metadata are authoritative; previews are not persisted.
 The user subsequently expanded the target to all local Claude-related session
 copies and account remnants through Agent Manager, while retaining project code,
 documents, worktrees and shared resources. That target is not an implemented
-state. The current executable scope remains the default directory, recognized configuration
-backups and credentials;
+state. Whole-data deletion covers the default directory, recognized configuration
+backups and credentials. Separate per-item connection maintenance also covers explicitly
+selected user settings and supported startup/user-environment items;
 the reference catalog's other sources need explicit discovery and safe adapters.
 Orca's search index now has a separate opt-in read-only inspection; it cannot yet
 be cleaned. The page explicitly keeps the all-source goal incomplete.
@@ -56,6 +57,75 @@ Primary sources:
 
 The desktop and CLI enter [native_claude_data](../../engine-rs/src/native_claude_data/mod.rs)
 before external secret-source loading, preflight, or general database access.
+
+### Targeted connection maintenance
+
+The 2026-10-30 request authorizes inspection followed by individually confirmed
+removal, including shared startup files, user environment and custom Claude user
+directories. This is separate from whole-data deletion below. Opening the panel
+does not inspect anything, select fields or execute helpers/scripts.
+
+- `claude-data:inspect-connections [--connection-root /YOUR_CLAUDE_CONFIG_DIR]`
+  reports field names, source paths, per-item editability and unavailable evidence,
+  never values. It observes `settings.json` and `settings.local.json` in the selected
+  user directory. The latter is an observed carrier, not proof of global precedence.
+  Fields include `ANTHROPIC_*`, uppercase/lowercase proxy variables, `CLAUDE_CONFIG_DIR`,
+  `PROXY_MANAGED` and the root `apiKeyHelper`. Presence does not prove a proxy remnant:
+  ordinary API credentials and legitimate helper configuration can use these names.
+- Unix lexical inspection covers HOME `.zshrc`, `.zprofile`, `.zshenv`, `.bashrc`,
+  `.bash_profile` and `.profile`, without sourcing them. Only standalone literal
+  Claude-named assignments in conservatively simple files can be removed. Compounds,
+  arrays, arithmetic, multiline/continued constructs, substitutions and uncertain
+  references remain read-only. Removal leaves a comment and the original comment,
+  line ending and other lines. This does not discover sourced files or ZDOTDIR.
+- macOS inspects named values in the current Aqua login domain. It queries the
+  fixed catalog and names discovered in selected files/caller environment; it does
+  not enumerate every launchd variable. A variable is session-scoped, not persistent
+  across logout. Current processes are observations only and are never normalized.
+  Windows observes fixed PowerShell profile locations and fixed user/machine registry
+  names; these do not cover custom/OneDrive/all-host profiles. Linux/Windows targeted
+  writes are unavailable pending native publication and acceptance.
+- `claude-data:preview --connection-items '["settings:ANTHROPIC_API_KEY"]'`
+  returns a fresh SHA-256 base for exactly one item. `settings:root:apiKeyHelper`,
+  `shell:.zshrc:3:ANTHROPIC_BASE_URL` and `user-env:ANTHROPIC_AUTH_TOKEN` identify the
+  other supported scopes. Forward the same optional `--connection-root` through
+  inspection, preview and clear. `claude-data:clear --connection-items JSON --base SHA256 --confirm`
+  removes only that item. Empty/unknown/malformed selections or mixed full-cleanup
+  arguments refuse; they never fall through to whole-data deletion.
+- File values, identities, parent identities and shared caller dependencies bind
+  freshness. Duplicate root/env JSON keys or malformed data refuse, without an empty
+  object fallback. Unselected JSON values retain their raw representations; other
+  file regions remain unchanged for env removal. Only supported root fields can be
+  removed. Redirected/hard-linked files, protected default/resolved `CODEX_HOME`
+  locations, Agent Manager data, project ancestors and worktree containers refuse.
+- Recognized Claude and CC Switch processes must already be closed by the user.
+  This mode never stops them. Unknown process evidence blocks removal. Cancellation
+  and preview are zero-write; confirmed attempts record a nonsecret selected-item
+  intent/completion audit. Existing whole-data deletion keeps its separate stop phase.
+- macOS publication clones from a bound source handle into a fresh private staging
+  directory, clears inherited directory ACLs and verifies mode 0700 before copying.
+  It retains source ownership/mode/ACL/flags/xattrs and uses native rename-swap to
+  inspect the displaced file. Observed external changes stop or restore guarded
+  publication. Unknown displaced/replaced versions remain in a reported private
+  recovery location, never silently deleted or reported complete. Successful cleanup
+  leaves no extra credential copy; it is not secure erase or an OS-wide transaction.
+- Shared assignments and login variables require `REMOVE SHARED` in the GUI;
+  settings require `REMOVE`. Shared `ANTHROPIC_*` and `CLAUDE_CONFIG_DIR` changes affect
+  every future consumer, potentially including custom Codex launch dependencies.
+  Codex files are neither read nor modified. General shared proxy variables remain
+  read-only; the same variables inside selected Claude settings can be removed.
+  launchctl has no compare-and-swap: the selected value/scope is re-read immediately
+  before unset and independently checked afterwards, but uncoordinated future writers
+  can still race or recreate it. No complete absence or other-consumer independence
+  is inferred. Restart and verify the target application yourself.
+
+The [environment variable reference](https://code.claude.com/docs/en/env-vars),
+[network configuration](https://code.claude.com/docs/en/network-config) and
+[settings reference](https://code.claude.com/docs/en/settings) establish the field
+meanings and inheritance limits. The supplied scripts are review inputs only:
+their Codex reset, whole-object fallback and raw-value output are not executed.
+
+### Whole default-data deletion
 
 1. `claude-data:preview [--files-only]` reads bounded no-follow evidence and hashes
    selected file contents/identities. It returns category counts, paths, credential counts,
@@ -313,6 +383,13 @@ pnpm --dir app build
 ```
 
 Filesystem fixtures use synthetic HOME/data locations and files-only mode.
+`node scripts/verify-native-claude-connections.mjs` exercises actual targeted
+inspection, cancellation, invalid/stale requests, native field/root-helper/startup
+publication, custom/protected paths and preservation of other settings, sessions,
+credentials and Codex sentinels. Run after Cargo tests. On macOS, explicitly setting
+`AM_TEST_CLAUDE_SESSION=1` also creates and clears one random `ANTHROPIC_AM_TEST_*`
+login variable, never a personal variable. The fixture retains its owned files and
+prints their location for receipt review. No credential-store query is needed.
 They exercise actual deletion/readback, whole-file telemetry removal, external link
 preservation, stale previews, changed selected files, initial/late backup aliases
 and new files mid-cleanup.

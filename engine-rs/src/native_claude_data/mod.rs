@@ -1,6 +1,14 @@
 //! Explicitly confirmed Claude Code local-data maintenance, separate from account APIs.
 mod backups;
 mod clear;
+mod connection_clear;
+mod connection_inspect;
+mod connection_json;
+#[cfg(target_os = "macos")]
+mod connection_publish;
+mod connection_session;
+mod connection_shell;
+mod connection_sources;
 mod credentials;
 mod dependencies;
 mod files;
@@ -22,6 +30,12 @@ use serde_json::json;
 pub(crate) fn execute(ctx: &Context, request: &Request) -> Envelope {
     let command = request.command.replace('.', ":");
     let result = match command.as_str() {
+        "claude-data:preview" | "claude-data:clear"
+            if request.args.iter().any(|arg| arg == "--connection-items") =>
+        {
+            connection_clear::execute(ctx, request)
+        }
+        "claude-data:inspect-connections" => connection_inspect::execute(ctx, request),
         "claude-data:orca-search-preview"
             if request
                 .args

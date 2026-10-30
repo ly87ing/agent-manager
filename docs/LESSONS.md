@@ -2,6 +2,22 @@
 
 What recent work got wrong, and the rule that would have caught it. Read this before changing code.
 
+## 2026-10-30: field removal needs native and syntax boundaries
+
+- A successful JSON parse alone can collapse duplicate fields or reformat opaque
+  values. Reject ambiguous edited objects and preserve unselected raw values;
+  malformed input must never become an empty replacement object.
+- Line matching is not shell syntax: array elements, arithmetic and multiline
+  parameter expansions can resemble assignments. Without a shell parser, retain
+  compound/uncertain files as read-only and exercise these negative cases.
+- Darwin clone operations can inherit destination-directory ACLs. Restrict and
+  verify a fresh staging directory before copying secrets, then verify source
+  metadata. Exercise an inheritable parent ACL and a source extended ACL.
+- Rename alone is not compare-and-swap. Check the atomically displaced version,
+  inject external and late writes, and retain uncertain recovery content. A final
+  launchctl unset also lacks CAS: re-read after scope verification, disclose the
+  remaining concurrent-writer limit and never claim every future source is clean.
+
 ## 2026-10-30: inspect the exact local installation signature
 
 - A successful raw macOS build was unsigned; the package verifier correctly

@@ -54,7 +54,7 @@ describe("Claude local data maintenance", () => {
     });
     await userEvent.click(screen.getByRole("button", { name: "检查清理范围" }));
     await userEvent.click(await screen.findByRole("button", { name: "清理所选范围" }));
-    await userEvent.type(screen.getByRole("textbox"), "DELETE");
+    await userEvent.type(screen.getByTestId("confirm-modal-input"), "DELETE");
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
     expect(await screen.findByRole("heading", { name: "清理未全部完成" })).toBeInTheDocument();
     expect(screen.getByText("已移除 7 个文件、3 个目录和 2 项系统凭据。")).toBeInTheDocument();
@@ -69,7 +69,7 @@ describe("Claude local data maintenance", () => {
     });
     await userEvent.click(screen.getByRole("button", { name: "检查清理范围" }));
     await userEvent.click(await screen.findByRole("button", { name: "清理所选范围" }));
-    await userEvent.type(screen.getByRole("textbox"), "DELETE");
+    await userEvent.type(screen.getByTestId("confirm-modal-input"), "DELETE");
     await userEvent.click(screen.getByTestId("confirm-modal-confirm"));
     expect(await screen.findByRole("alert")).toHaveTextContent("Preview is stale");
     expect(screen.queryByRole("button", { name: "清理所选范围" })).toBeNull();
