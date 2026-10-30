@@ -3048,3 +3048,29 @@ Browser declarations are not binary attestation, and another origin may expose
 different evidence. Windows/Linux browser inspection, privileged repairs and all
 later-stage capabilities are outside this slice. No installed application,
 installer, tag or Release was replaced or published; changes remain local.
+
+## 2026-10-30: macOS repair receipt transport
+
+The local repair fix accepts CR, LF and CRLF receipt separators. Standard
+Additions changes successful `do shell script` output to CR by default; the old
+decoder joined those rows and reported an unknown system outcome. Later session
+changes were then intentionally skipped. Duplicate, missing or invalid item
+statuses still fail closed. No authorization or write scope changed.
+
+Verification against local `main` at `5a251839` plus the working-tree changes:
+
+- Both new regressions failed before the decoder change and passed afterward.
+  One invokes actual macOS `osascript` with fixed stdout, without administrator
+  privileges or settings writes; the other checks three separators and rejected
+  receipts. All eight macOS repair unit tests passed.
+- The complete engine suite passed: 362 library tests and all applicable
+  integration targets; the existing disposable-Keychain test stayed ignored.
+  Tauri passed 29 routine tests; the interactive Chrome test was not rerun.
+- Frontend passed 751 tests in 64 files, type checking and the production build.
+  Native debug compilation, Rust formatting, whitespace checks and 49 local
+  Markdown link targets passed. Raw check logs remain in a temporary run directory.
+
+This proves the transport regression is fixed locally. No actual system repair,
+clock adjustment, target-app restart or installed-application replacement was
+performed. Complete live repair still requires the corrected application, a fresh
+preview, explicit confirmation and independent settings readback.

@@ -587,6 +587,10 @@ System changes run in a fixed, clean command environment with macOS administrato
 authorization. Values are validated and quoted as data. The privileged batch
 re-reads baselines after authorization and reads again after every write; no
 password, arbitrary executable or arbitrary preference path is accepted.
+Receipt decoding accepts native AppleScript CR as well as LF/CRLF line endings;
+duplicate, missing or invalid item statuses still leave the outcome unknown.
+The regression test runs actual `osascript` with fixed stdout and no setting
+writes. See Apple's [shell output behavior](https://developer.apple.com/library/archive/technotes/tn2065/_index.html).
 Locale repair first verifies the platform inventory and an isolated real
 `locale` invocation. Unsupported locales are rejected before any write.
 See Apple's [systemsetup reference](https://support.apple.com/guide/remote-desktop/apd95406b8d/mac).

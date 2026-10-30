@@ -352,9 +352,10 @@ fn parse_system_result(
         return Ok(("cancelled".into(), vec![], None));
     }
     let mut results = items.to_vec();
+    // Standard Additions converts shell line endings to CR by default.
     let lines: Vec<_> = text
         .unwrap_or("")
-        .lines()
+        .split(['\r', '\n'])
         .filter_map(|line| line.split_once('\t'))
         .collect();
     for item in &mut results {
@@ -478,6 +479,67 @@ mod tests {
             "partial"
         );
         assert!(user_command(&item("session.PATH", json!("old"), json!("new"))).is_none());
+    }
+
+    #[test]
+    fn system_receipts_accept_native_applescript_line_endings_without_weakening_validation() {
+        let items = vec![item("ntp.automatic_time", json!(false), json!(true))];
+        for ending in ["\n", "\r", "\r\n"] {
+            for status in ["unchanged", "verified"] {
+                let text = format!("ntp.automatic_time\t{status}{ending}automatic_time\t1{ending}");
+                let parsed = parse_system_result(&items, Some(&text)).unwrap();
+                assert_eq!(parsed.0, "applied", "{text:?}");
+                assert_eq!(parsed.1[0].status, status);
+                assert_eq!(parsed.2, Some(true));
+            }
+            for text in [
+                format!("ntp.automatic_time\tverified{ending}ntp.automatic_time\tverified{ending}"),
+                format!("ntp.automatic_time\tunexpected{ending}automatic_time\t1{ending}"),
+                format!("automatic_time\t1{ending}"),
+            ] {
+                let parsed = parse_system_result(&items, Some(&text)).unwrap();
+                assert_eq!(parsed.0, "partial");
+                assert_eq!(parsed.1[0].status, "outcome_unknown");
+            }
+            assert_eq!(
+                parse_system_result(&items, Some(&format!("cancelled{ending}")))
+                    .unwrap()
+                    .0,
+                "cancelled"
+            );
+        }
+    }
+
+    #[test]
+    fn actual_applescript_stdout_preserves_system_receipts_without_authorization_or_setting_writes()
+    {
+        // Exercise the real Standard Additions transport using fixed stdout only.
+        // No administrator privileges, systemsetup, preferences or launchctl setters.
+        let output = std::process::Command::new("/usr/bin/osascript")
+            .args([
+                "-l",
+                "AppleScript",
+                "-e",
+                "on run argv\nreturn do shell script (item 1 of argv)\nend run",
+                "/usr/bin/printf 'ntp.automatic_time\\tunchanged\\nautomatic_time\\t1\\n'",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(
+            text.contains('\r'),
+            "The fixture must exercise native AppleScript CR output: {text:?}"
+        );
+        let items = vec![item("ntp.automatic_time", json!(false), json!(true))];
+        let parsed = parse_system_result(&items, Some(&text)).unwrap();
+        assert_eq!(parsed.0, "applied");
+        assert_eq!(parsed.1[0].status, "unchanged");
+        assert_eq!(parsed.2, Some(true));
     }
 
     #[test]

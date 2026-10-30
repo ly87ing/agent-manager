@@ -2,6 +2,16 @@
 
 What recent work got wrong, and the rule that would have caught it. Read this before changing code.
 
+## 2026-10-30: verify AppleScript transport, not only the shell underneath it
+
+- macOS repair's disposable shell fixture passed, but it bypassed Standard
+  Additions. A successful multi-line `do shell script` result uses CR separators;
+  Rust `str::lines` left receipt rows joined and reported an unknown outcome.
+  Accept CR, LF and CRLF in this narrow receipt decoder and exercise actual
+  `osascript` with fixed stdout, without administrator privileges or setting writes.
+- Keep duplicate/missing/invalid receipt rejection and stop-on-uncertainty tests.
+  A later `not_applied` row is not evidence that its own setter failed.
+
 ## 2026-10-30: bound accepted loopback connections on Darwin
 
 - A nonblocking listener's accepted Darwin sockets can retain nonblocking mode.
