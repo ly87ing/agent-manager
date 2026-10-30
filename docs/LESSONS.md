@@ -2,6 +2,17 @@
 
 What recent work got wrong, and the rule that would have caught it. Read this before changing code.
 
+## 2026-10-30: inspect the exact local installation signature
+
+- A successful raw macOS build was unsigned; the package verifier correctly
+  reported its unsigned branch. Do not infer signing from a successful build.
+  For an ad-hoc local installation, explicitly select Tauri's `signingIdentity`
+  pseudo-identity `-`, then verify the exact signed bundle and final image.
+  See [Tauri's signing guide](https://v2.tauri.app/distribute/sign/macos/#ad-hoc-signing).
+- Re-read the installed digest before replacement. If the installed app changed,
+  preserve that change. An exact match with the accepted candidate needs runtime
+  verification, not another overwrite.
+
 ## 2026-10-30: verify AppleScript transport, not only the shell underneath it
 
 - macOS repair's disposable shell fixture passed, but it bypassed Standard

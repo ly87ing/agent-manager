@@ -3074,3 +3074,31 @@ This proves the transport regression is fixed locally. No actual system repair,
 clock adjustment, target-app restart or installed-application replacement was
 performed. Complete live repair still requires the corrected application, a fresh
 preview, explicit confirmation and independent settings readback.
+
+## 2026-10-30: installed macOS repair build readback
+
+The installed `/Applications/Agent Manager.app` was verified at source commit
+`4c3785842769e8b897e4893593630f9294f9c424`. Every bundle file matched the accepted
+candidate. Strict deep signature validation passed with an ad-hoc signature and
+hardened runtime. A newly opened process mapped the installed executable, whose
+digest matched the candidate. Native accessibility inspection showed the working
+Environment page, including Check Chrome and explicit repair controls.
+
+The initial raw package was unsigned. Tauri's explicit per-run ad-hoc selection
+signed the app, but its decorated DMG step failed. A plain local image containing
+that signed app passed the full existing `verify-macos-dmg.sh` checks: build/date
+identity, signature, helper isolation, independent startup and alias-path refusal.
+No source or persistent signing configuration changed for this packaging step.
+
+The installation guard found that the installed baseline had already changed to
+the exact accepted candidate and refused another overwrite. Subsequent complete
+bundle comparison and runtime readback established the installed state; the
+source of that intervening replacement was not established. Read-only comparison
+preserved the custom-profile table presence, count and contents digest (zero
+saved custom rows). The original application backup remains temporary for the
+user's retry. No system repair or clock adjustment was executed.
+
+Both implementation commits were pushed and independently fetched from remote
+`main` at `4c378584`. This documentation receipt follows that build; actual
+Los Angeles profile repair remains pending the user's fresh preview and
+confirmation in the installed application.
