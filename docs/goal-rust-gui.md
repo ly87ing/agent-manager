@@ -36,6 +36,21 @@ failure. The unchanged browser case passed alone, then serial and final full run
 passed. No assertion or timeout was weakened. Personal credential-store fixtures
 and native Windows/Linux targeted writes were not exercised.
 
+Installed macOS x86_64 receipt: source commit `0c952bb276b45d2f5740d575cc7847689c3dbb81`
+was built with path remapping and explicit ad-hoc signing. The local verification
+image passed bundle metadata, exact build identity/date, deep strict signature,
+packaged inspection-helper and isolated startup/source-independence checks.
+The complete staged and installed bundle manifests matched. The running
+`/Applications/Agent Manager.app` loaded that installed binary without open
+source-repository references; its executable SHA-256 was
+`263e20fa73ed3f5e47d545e31bb71cd121840602368e983f084e78774334384f`.
+The prior installed bundle was retained for rollback. The actual native Advanced
+panel opened and completed explicit read-only inspection. No listed fields were
+found in the observed default carriers/caller/named login variables; custom and
+unchecked sources remain unknown. No personal targeted removal was performed.
+This is a local installation receipt, not notarization, public installer release
+or consumer acceptance of destructive cleanup.
+
 The all-source cleanup goal remains incomplete. Complex/sourced startup files,
 organization/project configuration, persistent launchers, other profiles and other
 applications' environments remain outside the implemented scope. Windows/Linux
