@@ -41,6 +41,7 @@ pub fn validate_command(command: &str) -> Result<(), EngineError> {
         (
             "environment",
             "check"
+            | "check-browser"
             | "profiles"
             | "save-profile"
             | "delete-profile"
@@ -140,7 +141,7 @@ fn allowed_arg_specs(command: &str) -> Vec<(&'static str, ArgValueKind)> {
             specs.push(("--spec", ArgValueKind::JsonValue));
             specs.push(("--probe-time", ArgValueKind::Flag));
         }
-        ("environment", "sync-time") => {
+        ("environment", "sync-time" | "check-browser") => {
             specs.push(("--spec", ArgValueKind::JsonValue));
             specs.push(("--confirm", ArgValueKind::Flag));
         }
@@ -746,6 +747,54 @@ mod tests {
         assert!(validate_command("environment:apply").is_err());
         assert!(validate_args("environment:check", &["--confirm".into()]).is_err());
         assert!(validate_args("environment:check", &["--spec".into(), "not-json".into()]).is_err());
+    }
+
+    #[test]
+    fn environment_browser_check_has_no_arbitrary_launch_or_network_arguments() {
+        assert!(validate_command("environment:check-browser").is_ok());
+        assert!(validate_args(
+            "environment:check-browser",
+            &["--spec".into(), "{}".into(), "--confirm".into()]
+        )
+        .is_ok());
+        for flag in ["--url", "--browser", "--data-dir", "--probe-time", "--base"] {
+            assert!(validate_args(
+                "environment:check-browser",
+                &[flag.into(), "YOUR_VALUE".into()]
+            )
+            .is_err());
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "explicit acceptance: opens a read-only diagnostic tab in real Chrome"]
+    fn environment_browser_native_dispatch_returns_actual_chrome_without_manager_state() {
+        let root = std::env::temp_dir().join(format!("am-browser-bridge-{}", std::process::id()));
+        let context = agent_manager_engine::Context {
+            home_dir: root.join("home"),
+            data_dir: root.join("data"),
+        };
+        assert!(!root.exists());
+        let result = dispatch_native(
+            context,
+            "environment:check-browser".into(),
+            vec!["--spec".into(), "{}".into(), "--confirm".into()],
+            "browser-acceptance".into(),
+        )
+        .unwrap();
+        assert!(result.ok, "{:?}", result.errors);
+        assert_eq!(result.data["browser"]["status"], "received");
+        assert!(result.data["browser"]["sample"]["user_agent"]
+            .as_str()
+            .unwrap()
+            .contains("Chrome/"));
+        assert_eq!(result.data["browser"]["summary"]["mismatched"], 0);
+        assert!(result.data["time_sample"].is_null());
+        assert!(
+            !root.exists(),
+            "Inspection must not create HOME, data or logs"
+        );
     }
 
     #[test]

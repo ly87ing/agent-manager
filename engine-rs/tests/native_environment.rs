@@ -101,6 +101,16 @@ fn remediation_rejects_unconfirmed_reads_and_arbitrary_settings_before_any_effec
         data_dir: root.join("missing-data"),
     };
     for (command, args) in [
+        ("environment:check-browser", vec![]),
+        (
+            "environment:check-browser",
+            vec!["--confirm", "--spec", "{\"timezone\":\"../../etc\"}"],
+        ),
+        (
+            "environment:check-browser",
+            vec!["--confirm", "--probe-time"],
+        ),
+        ("environment:check-browser", vec!["--confirm", "--confirm"]),
         ("environment:check-time-settings", vec![]),
         (
             "environment:check-time-settings",

@@ -159,6 +159,56 @@ these facts.
 
 ## Runtime path
 
+### Explicit Chrome observations (macOS)
+
+`environment:check-browser --spec JSON --confirm` is separate from an ordinary
+check. It opens Google Chrome through its fixed macOS bundle identifier and a
+temporary IPv4 loopback diagnostic origin. It neither reads browser profiles nor
+enables remote debugging. Chrome may create its normal browsing history/cache.
+The desktop discloses these effects before confirmation. Saving/selecting a
+profile, opening Environment and cancelling that confirmation do not open Chrome.
+
+The shared Rust engine serves bundled HTML/JavaScript, observes an allowlist of
+same-origin HTTP headers, validates the page's returned observations and compares
+them. The CLI and Tauri return the same environment report with an optional
+`browser` member. Existing system-only reports, saved profiles and backups retain
+their format. The browser uses the selected profile's time-zone identifier and
+complete ordered language list; region, process locale and time-service criteria
+remain native checks. Blank browser criteria remain observations. Browser time
+zones compare the reported IANA identifier exactly; equivalent aliases are not
+canonicalized in this slice.
+
+The version-1 browser report records its source, origin, session identifier,
+server-side collection time and five-minute expiry. Its checks distinguish
+matches, differences, unknown evidence and inventory. HTTP/JavaScript comparisons
+cover User-Agent, the highest-quality HTTP language and client hints. Wildcard
+or unavailable primary-language evidence stays unknown. Brand order is ignored;
+the reduced User-Agent is compared at the Chrome major version only. Native
+macOS is compared with the browser's declared platform. Missing/hidden hints stay
+unknown. Screen/window sizes, DPR, visual scale and Intl locale are inventory,
+not proof of a device identity. Browser statements are not binary attestation.
+
+The listener uses an ephemeral port and an OS-random bearer path, exact Host and
+same-origin request checks, bounded headers/body/read deadlines, no CORS,
+no-store responses and a restrictive content policy. Neither bearer paths,
+cookies, authorization headers nor profile data enter reports or operation logs.
+Only diagnostic header names are retained. Completion, cancellation from the page,
+launch failure or the 45-second deadline closes the listener. A closed diagnostic
+tab can require waiting for that deadline. Inspection creates no Manager database,
+HOME or configuration; returned observations remain in memory. The browser report
+is replaced on a new check or profile selection; expired results are marked as
+historical rather than current matches.
+
+System counts and browser counts have separate scopes. GeoIP, WebRTC,
+Canvas/WebGL, fonts, sustained clock drift and TLS fingerprints are explicitly
+not checked. The current result does not establish network consistency or what
+another origin/browser context sees. No browser or system repair runs here, and
+no external reference-time query accompanies this command.
+
+```sh
+cargo run --manifest-path engine-rs/Cargo.toml -- environment:check-browser --spec '{"timezone":"America/Los_Angeles","languages":["en-US","en"]}' --confirm --json
+```
+
 Opening Environment reads local observations and saved profiles without any
 network query or write. Selecting a profile clears the old report. Compare
 profile compares its values and queries its explicit time server,
@@ -747,8 +797,12 @@ cargo test --manifest-path engine-rs/Cargo.toml --lib native_environment
 cargo test --manifest-path engine-rs/Cargo.toml --test native_environment
 cargo test --manifest-path engine-rs/Cargo.toml --test native_environment_profiles
 cargo test --manifest-path engine-rs/Cargo.toml --test native_environment_repair
+cargo test --manifest-path engine-rs/Cargo.toml --lib native_environment::browser
 cargo test --manifest-path app/src-tauri/Cargo.toml environment_
+# Explicit local acceptance; opens a read-only diagnostic tab in real Chrome:
+cargo test --manifest-path app/src-tauri/Cargo.toml environment_browser_native_dispatch -- --ignored
 pnpm --dir app test:unit run src/test/EnvironmentPage.test.tsx src/test/EnvironmentProfiles.test.tsx src/test/EnvironmentRepair.test.tsx src/test/AppNavigation.test.tsx src/test/UiCopyGuard.test.ts --maxWorkers=1
+pnpm --dir app test:unit run src/test/EnvironmentBrowser.test.tsx --maxWorkers=1
 ```
 
 Fixtures cover locale precedence, process overrides, ordered languages, absent

@@ -2,6 +2,13 @@
 
 ## Current goal
 
+- Explicit macOS Chrome inspection opens a temporary loopback diagnostic page and
+  returns browser time zone, ordered languages, UA/UA-CH, HTTP header comparisons
+  and screen inventory through the shared Rust engine. It does not inspect browser
+  profiles, enable remote debugging or modify preferences. Preserve origin/session
+  boundaries, expiry and unknown evidence. System-only counts never establish
+  complete browser/network consistency; see [Environment checks](docs/subsystems/environment-checks.md).
+
 - The independent environment tool inspects native macOS, Windows and Linux regional settings and the caller's process environment; unavailable evidence remains unknown. Custom environment profiles are maintained independently in Agent Manager's database; read-only Los Angeles and Singapore built-ins come from the shared Rust library and require explicit selection. Comparisons remain read-only, including profiles with a legacy automatic-correction flag, and may query the selected profile's time server. Applying a profile is a separate preview and confirmation. `environment:sync-time --confirm` may adjust only the system clock, after a fresh clearly excessive offset and platform authorization, followed by independent verification. Preserve unknown evidence and process boundaries. See [Environment checks](docs/subsystems/environment-checks.md).
 
 - Explicit automatic repair uses a fresh `environment:repair-preview` and `environment:repair --base SHA256 --confirm`. It may align the selected profile's supported native time zone, time preferences, NTP server, current-user regional settings and current-user or session-scoped future-process variables. Platform capabilities and write scopes must be explicit in preview; unsupported controls remain unavailable. Re-read before writes, preserve unrelated preferences, stop on changed/uncertain outcomes and independently verify. Preview cancellation stays zero-write; authorization cancellation after confirmation may retain an audit request. Never edit shell files, create login items, restart applications or normalize the checker process to hide differences. Variable lifetime and persistence follow the previewed native scope. Authorized inspection remains read-only. See [Environment checks](docs/subsystems/environment-checks.md).

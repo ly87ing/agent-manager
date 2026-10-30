@@ -3003,3 +3003,48 @@ invocation, installed Windows/Linux desktop behavior, signed updating or
 all-source cleanup. The accessibility provider previously refused inspection;
 that acceptance remains open. Orca deletion and the remaining catalog adapters
 are still unsupported; process isolation does not implement their write protocol.
+
+## 2026-10-30: macOS Chrome observation stages 0 and 1
+
+The local candidate adds an explicitly confirmed Chrome diagnostic operation to
+the shared Rust CLI/Tauri engine. Version-1 browser evidence carries origin,
+session, collection time, expiry and source. Profile time zone and ordered
+languages are compared separately from native system/process criteria;
+HTTP/JavaScript UA and client hints have independent comparisons. Screen values
+remain inventory. Missing operands stay unknown, HTTP language weights are
+honored and unimplemented network/graphics/font checks stay visible.
+
+Local verification on macOS 15.2 with Chrome 156.0.8078.48:
+
+- The final engine run passed 360 library tests and all applicable integration
+  targets. The existing disposable-runner-only synthetic Keychain case remained
+  ignored. Six browser cases cover comparisons, absent/empty hints, language
+  weights, malformed observations, protocol bounds, origin refusal, cancellation,
+  timeout and listener retirement.
+- All 29 routine Tauri tests passed. The separately invoked interactive Chrome
+  acceptance test also passed through real native command dispatch. It returned
+  browser evidence without creating Manager HOME/data/log state or querying NTP.
+- All 751 frontend tests across 64 files, type checking and the production build
+  passed. An earlier concurrent run hit MCP initialization and shortcut timeouts;
+  those tests passed on isolated rerun and the final full runs passed. No timeout
+  or assertion was weakened.
+- Three real CLI observations exercised inventory, matching criteria (13 matches,
+  zero differences/unknowns) and changed time-zone/language criteria (11 matches,
+  two differences, zero unknowns). Isolated HOME/data remained absent. Real Chrome
+  displayed the returned differences and HTTP/JavaScript evidence.
+- English renderer acceptance at 1000 x 650 and 760 x 650 used a temporary adapter
+  to the actual Rust CLI with isolated data. Confirmation/cancellation, scoped
+  results, profile-selection invalidation and actual five-minute expiry were
+  exercised. Confirmation buttons stayed in view; there was no horizontal overflow.
+  Selecting the Singapore built-in reported the two actual browser differences.
+
+These are local verification receipts, pending user acceptance. The renderer
+receipt uses a CLI adapter; the native receipt proves Tauri command dispatch,
+not an installed-app GUI click-through. Direct DevTools console readback in the
+daily browser profile was not completed after the attachment tool timed out.
+The new command has no previous implementation for a runtime old/new comparison;
+existing profile/backup and system-check regressions remained in the full suites.
+Browser declarations are not binary attestation, and another origin may expose
+different evidence. Windows/Linux browser inspection, privileged repairs and all
+later-stage capabilities are outside this slice. No installed application,
+installer, tag or Release was replaced or published; changes remain local.

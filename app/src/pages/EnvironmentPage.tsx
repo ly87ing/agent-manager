@@ -7,6 +7,8 @@ import { EnvironmentProfiles } from "../components/EnvironmentProfiles";
 import { EnvironmentApplyDialog, type EnvironmentApplication } from "../components/EnvironmentApplyDialog";
 import { EnvironmentRepairDialog, repairSummary } from "../components/EnvironmentRepairDialog";
 import { EnvironmentRemediation } from "../components/EnvironmentRemediation";
+import { BrowserEnvironmentReport } from "../components/BrowserEnvironmentReport";
+import { checkChromeEnvironment } from "../lib/environment";
 import { checkEnvironment, checkTimeSettings, deleteEnvironmentProfile, environmentLaunchRecipe, listEnvironmentProfiles, openEnvironmentSettings, profileTarget, repairEnvironmentTime, saveEnvironmentProfile, type EnvironmentBuiltin, type EnvironmentCheck, type EnvironmentProfile, type EnvironmentProfileInput, type EnvironmentReport, type EnvironmentRepairResult } from "../lib/environment";
 import type { LaunchRecipe } from "../lib/launch";
 import { engineErrorMessage } from "../lib/engine";
@@ -125,6 +127,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
   const [evidence, setEvidence] = useState(false);
   const [cooldown, setCooldown] = useState(false);
   const [authorizing, setAuthorizing] = useState(false);
+  const [browserConfirm, setBrowserConfirm] = useState(false);
   const generation = useRef(0);
   const cooldownTimer = useRef<ReturnType<typeof setTimeout>>();
   useEffect(() => {
@@ -191,6 +194,20 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
     try { await openEnvironmentSettings(pane); toast.info(t("已请求打开系统设置。完成调整后，请重新检查。"), { id: "environment-result" }); return true; }
     catch (err) { if (applying) setApplyError(engineErrorMessage(err)); else setError(engineErrorMessage(err)); notifyError(t("打开系统设置失败"), err, { id: "environment-result" }); return false; }
     finally { setBusy(false); }
+  }
+  async function inspectChrome() {
+    const id = ++generation.current;
+    setBusy(true); setError(null); setData(null); setRepairResult(null);
+    toast.dismiss("environment-result");
+    try {
+      const result = await checkChromeEnvironment(selected ? profileTarget(selected) : {});
+      if (id !== generation.current) return;
+      setData(result); setObservation(result);
+      const browser = result.browser;
+      const warning = !browser || browser.status !== "received" || browser.summary.mismatched > 0 || browser.summary.unknown > 0;
+      toast[warning ? "warning" : "info"](t("Chrome 检查已结束，详情见检查结果。"), { id: "environment-result", duration: 10000, closeButton: true });
+    } catch (err) { if (id === generation.current) { const message = engineErrorMessage(err); setError(message); notifyCheckError(message); } }
+    finally { if (id === generation.current) { setBusy(false); setBrowserConfirm(false); } }
   }
   function openApplication() { setApplyError(null); toast.dismiss("environment-result"); setApplying(true); }
   async function apply(action: EnvironmentApplication) {
@@ -283,12 +300,20 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
           onClick={() => void run()}>{busy ? t("正在检查…") : selected ? t("对比 Profile") : t("检查本机环境")}</button>
         <button className={button} disabled={!checksSupported || !selected || profilesLoading || busy || removing} onClick={openApplication}>{t("应用 Profile")}</button>
         <button className={button} disabled={!checksSupported || !selected || profilesLoading || busy || removing} onClick={() => { toast.dismiss("environment-result"); setRepairing(true); }}>{t("自动修复")}</button>
+        <button className={button} disabled={!checksSupported || observation?.platform !== "macos" || busy || removing || profilesLoading} onClick={() => setBrowserConfirm(true)}>{t("检查 Chrome")}</button>
       </div>
       {server && <p className="break-all text-xs text-muted-foreground">{t("检查会向 {0} 的 UDP 123 端口查询参考时间。", server)}</p>}
       <p className="text-xs text-muted-foreground">{t("对比始终只读。自动修复需先预览并确认；也可通过“应用 Profile”选择单项操作。")}</p>
+      <p className="text-xs text-muted-foreground">{t("系统检查代表本机及当前进程。Chrome 需单独检查；其他浏览器和网络指纹尚未覆盖。")}</p>
       {cooldown && <p role="status" className="text-xs text-muted-foreground">{t("两次时间查询至少间隔 4 秒。")}</p>}
       {profilesError && <div role="alert" className="space-y-2"><p className="break-words text-xs text-destructive">{profilesError}</p><button className={button} disabled={busy} onClick={() => void reloadProfiles()}>{t("重新读取集合")}</button></div>}
     </section>
+    {browserConfirm && <ConfirmModal title={t("检查 Chrome")} description={t("在 Chrome 打开临时本地诊断页，仅向本机返回时区、语言、请求头和屏幕数据。不会修改浏览器或系统设置，也不会查询外部服务。")}
+      risk="read" riskLabel={t("只读浏览器检查")} executing={busy} confirmLabel={t("打开 Chrome 并检查")} onConfirm={() => void inspectChrome()} onClose={() => setBrowserConfirm(false)}>
+      <p className="mt-3 text-xs text-muted-foreground">{t("Chrome 可能按正常浏览行为记录历史或缓存。服务将在收到结果、页面取消或 45 秒后关闭。关闭诊断标签页可能需要等待超时。")}</p>
+      {busy && <p role="status" className="mt-3 text-sm">{t("正在等待 Chrome 返回结果，可在诊断页面取消。")}</p>}
+    </ConfirmModal>}
+    <BrowserEnvironmentReport report={data?.browser} />
     {authorizing && <ConfirmModal title={t("授权后重新检查")} description={t("macOS 将请求管理员授权，仅运行以下只读查询，完成后更新检查结果。")}
       risk="read" riskLabel={t("只读时间设置")} executing={busy} confirmLabel={t("继续只读检查")} onConfirm={() => void authorizeTimeSettings()} onClose={() => setAuthorizing(false)}>
       <p className="mt-3 whitespace-pre-wrap break-all font-mono text-xs">/usr/sbin/systemsetup -getusingnetworktime</p>
@@ -300,6 +325,7 @@ export default function EnvironmentPage({ onConfigureLaunch }: { onConfigureLaun
     {data && auditWarning(data) && <p role="alert" className="break-words text-xs text-warning">{auditWarning(data)}</p>}
     {data && <>
       <section className="space-y-2 rounded-md border p-3" aria-label={t("检查结果")}>
+        <p className="text-xs text-muted-foreground">{t("以下统计仅包含系统与当前进程中已设置的比较目标。")}</p>
         <p role="status" className="text-sm font-medium">{data.summary.compared === 0 ? t("已读取环境，尚未设置比较目标。") : data.summary.status === "match" ? t("已检查的目标全部符合。") : data.summary.status === "mismatch" ? t("发现与目标不符的项目。") : t("仍有目标项目无法确认。")}</p>
         <p className="text-xs text-muted-foreground">{t("符合 {0} 项，不符 {1} 项，无法确认 {2} 项。", String(data.summary.matched), String(data.summary.mismatched), String(data.summary.unknown))}</p>
         {findingDetails(data).map((detail) => <p key={detail} className="break-words text-xs">{detail}</p>)}

@@ -16,17 +16,31 @@ export interface EnvironmentTarget {
 }
 
 const checkSchema = z.object({
-  id: z.string(), group: z.enum(["system", "time", "language", "process", "ntp"]),
+  id: z.string(), group: z.enum(["system", "time", "language", "process", "ntp", "browser"]),
   expected: z.string().nullable(), observed: z.string().nullable(),
   state: z.enum(["match", "mismatch", "unknown", "observed"]), source: z.string(), note: z.string(),
 }).strict();
 const targetSchema = z.object({ timezone: z.string().nullable(), languages: z.array(z.string()), region: z.string().nullable(), locale: z.string().nullable(), strict_locale: z.boolean(),
   ntp_server: z.string().nullable(), automatic_time: z.boolean().nullable(), time_synchronized: z.boolean().nullable(), automatic_timezone: z.boolean().nullable(), max_clock_offset_ms: z.number().nullable() }).strict();
+const summarySchema = z.object({ status: z.enum(["match", "mismatch", "incomplete"]), matched: z.number().int().nonnegative(), mismatched: z.number().int().nonnegative(), unknown: z.number().int().nonnegative(), compared: z.number().int().nonnegative() }).strict();
+const brandSchema = z.object({ brand: z.string(), version: z.string() }).strict();
+export const browserReportSchema = z.object({
+  schema_version: z.literal(1), status: z.enum(["received", "timeout", "cancelled", "unavailable"]), session_id: z.string(),
+  checked_at: z.string().datetime({ offset: true }), expires_at: z.string().datetime({ offset: true }), origin: z.string().url().nullable(), source: z.string(), scope: z.string(),
+  sample: z.object({ origin: z.string().url(), timezone: z.string().nullable(), languages: z.array(z.string()), intl_locale: z.string().nullable(), user_agent: z.string(), platform: z.string(),
+    client_hints: z.object({ brands: z.array(brandSchema), mobile: z.boolean(), platform: z.string(), architecture: z.string().nullable(), bitness: z.string().nullable(), platform_version: z.string().nullable(), full_version_list: z.array(brandSchema).nullable() }).strict().nullable(),
+    screen: z.object({ width: z.number().int().nonnegative(), height: z.number().int().nonnegative(), available_width: z.number().int().nonnegative(), available_height: z.number().int().nonnegative(), inner_width: z.number().int().nonnegative(), inner_height: z.number().int().nonnegative(), outer_width: z.number().int().nonnegative(), outer_height: z.number().int().nonnegative(), device_pixel_ratio: z.number().finite().positive(), visual_scale: z.number().finite().positive().nullable(), color_depth: z.number().int().nonnegative() }).strict(),
+  }).strict().nullable(),
+  headers: z.record(z.string()), checks: z.array(checkSchema), summary: summarySchema,
+  not_checked: z.array(z.enum(["geoip", "webrtc", "canvas_webgl", "fonts", "clock_drift", "tls_fingerprint"])),
+}).strict();
+export type BrowserEnvironmentReport = z.infer<typeof browserReportSchema>;
 const reportSchema = z.object({
   platform: z.enum(["macos", "windows", "linux"]), checked_at: z.string(),
   target: targetSchema,
   checks: z.array(checkSchema),
-  summary: z.object({ status: z.enum(["match", "mismatch", "incomplete"]), matched: z.number().int().nonnegative(), mismatched: z.number().int().nonnegative(), unknown: z.number().int().nonnegative(), compared: z.number().int().nonnegative() }).strict(),
+  summary: summarySchema,
+  browser: browserReportSchema.nullable().optional(),
   process_scope: z.literal("caller"), probe_server: z.string().nullable(),
   probe_error: z.string().nullable(),
   time_repair: z.object({ status: z.enum(["not_needed", "unavailable", "verified", "unverified", "cancelled", "failed"]), before_offset_ms: z.number().nullable(), before_uncertainty_ms: z.number().nullable(), audit_recorded: z.boolean().optional() }).strict().nullable(),
@@ -85,6 +99,10 @@ export async function repairEnvironment(target: EnvironmentTarget, base: string,
 
 export async function checkEnvironment(target: EnvironmentTarget = {}, probeTime = false): Promise<EnvironmentReport> {
   return reportSchema.parse(await request("check", ["--spec", JSON.stringify(target), ...(probeTime ? ["--probe-time"] : [])]));
+}
+
+export async function checkChromeEnvironment(target: EnvironmentTarget = {}): Promise<EnvironmentReport> {
+  return reportSchema.parse(await request("check-browser", ["--spec", JSON.stringify(target), "--confirm"]));
 }
 
 export function environmentLaunchRecipe(target: EnvironmentTarget, platform: LaunchRecipe["platform"]): LaunchRecipe {

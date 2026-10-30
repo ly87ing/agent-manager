@@ -1,5 +1,6 @@
 //! Read-only regional environment checks shared by the desktop and CLI.
 mod actions;
+mod browser;
 #[cfg(any(target_os = "linux", windows, test))]
 mod clock_helper;
 mod command;
@@ -585,6 +586,18 @@ fn report(target: &Target, probe: bool) -> Result<Value> {
     report_with_automatic_time(target, probe, None)
 }
 
+fn summarize(rows: &[Check]) -> Value {
+    let count = |state| {
+        rows.iter()
+            .filter(|row| row.expected.is_some() && row.state == state)
+            .count()
+    };
+    let (matched, mismatched, unknown) = (count("match"), count("mismatch"), count("unknown"));
+    let compared = matched + mismatched + unknown;
+    json!({"status":if mismatched > 0 { "mismatch" } else if unknown > 0 || compared == 0 { "incomplete" } else { "match" },
+        "matched":matched,"mismatched":mismatched,"unknown":unknown,"compared":compared})
+}
+
 fn report_with_automatic_time(
     target: &Target,
     probe: bool,
@@ -678,6 +691,37 @@ fn report_with_automatic_time(
 
 pub(crate) fn execute(ctx: &Context, req: &Request) -> Envelope {
     let command = req.command.replace('.', ":");
+    if command == "environment:check-browser" {
+        let result = (|| {
+            // Reuse strict check parsing; opening a browser is a separate explicit action.
+            if req.args.iter().any(|arg| arg == "--probe-time")
+                || req
+                    .args
+                    .iter()
+                    .filter(|arg| arg.as_str() == "--confirm")
+                    .count()
+                    != 1
+            {
+                bail!("Chrome inspection requires --confirm and does not query a time server.");
+            }
+            let parsed = Request {
+                command: "environment:check".into(),
+                args: req
+                    .args
+                    .iter()
+                    .filter(|arg| arg.as_str() != "--confirm")
+                    .cloned()
+                    .collect(),
+                run_id: req.run_id.clone(),
+            };
+            let (target, _) = arguments(&parsed)?;
+            let browser = browser::run(&target)?;
+            let mut result = report(&target, false)?;
+            result["browser"] = browser;
+            Ok(result)
+        })();
+        return envelope(req, true, result);
+    }
     if matches!(
         command.as_str(),
         "environment:repair-preview" | "environment:repair"

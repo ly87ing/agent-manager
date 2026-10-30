@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Manager · Chrome environment check</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:900px;margin:32px auto;padding:0 20px;color:#172033;background:#f8fafc}h1{font-size:24px}button{font:inherit;padding:8px 16px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:white;border:1px solid #cbd5e1;padding:16px}li{margin:8px 0}.warning{color:#854d0e}</style>
+<h1>Chrome environment check</h1>
+<p>This page observes this Chrome context only. It sends time zone, language, client hints and screen measurements to the temporary local Agent Manager service. No external server is contacted.</p>
+<p>Chrome may record this page in its normal history or cache. No browser preferences, system settings, accounts or shell files are changed.</p>
+<p id="status" role="status">Reading browser values… The local service closes after this result, cancellation, or 45 seconds.</p>
+<button id="cancel" type="button">Cancel check</button>
+<ul id="checks"></ul><pre id="details" hidden></pre>
+<p class="warning">GeoIP, WebRTC, Canvas/WebGL, fonts, clock drift and TLS fingerprints are not checked. Screen and client hints are observations; these values do not identify the browser binary or prove all websites see the same environment.</p>
+<script src="collect.js"></script></html>

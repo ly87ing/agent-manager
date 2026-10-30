@@ -2,6 +2,21 @@
 
 What recent work got wrong, and the rule that would have caught it. Read this before changing code.
 
+## 2026-10-30: bound accepted loopback connections on Darwin
+
+- A nonblocking listener's accepted Darwin sockets can retain nonblocking mode.
+  The first Chrome protocol fixture received a reset before its request arrived.
+  Set each accepted connection to blocking mode with an independent bounded read
+  deadline; test a delayed sender against a nonblocking listener.
+- System comparison counts cannot establish browser or network consistency.
+  Keep browser evidence scoped and expiring, and show unchecked capabilities
+  before detailed rows so matching selected criteria cannot hide coverage gaps.
+- A missing-hints regression initially used a User-Agent with no parseable Chrome
+  version, so it passed without exercising the missing comparison operand. Use a
+  valid version on one side and absent hints on the other; missing evidence must
+  stay unknown rather than become a difference. HTTP language comparison must
+  honor quality weights rather than assume the first entry is preferred.
+
 ## 2026-10-25: isolated HOME does not isolate process termination
 
 - A temporary HOME/data directory does not isolate current-user process discovery.
