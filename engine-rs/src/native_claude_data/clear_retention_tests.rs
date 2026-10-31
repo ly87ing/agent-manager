@@ -32,7 +32,7 @@ fn confirmed_cleanup_removes_orca_claude_marker_and_shortcuts_only_in_default_sc
     }
     let snapshot = Snapshot::capture(&ctx, true).unwrap();
     let preview = snapshot.data();
-    let canonical_root = std::fs::canonicalize(&root).unwrap();
+    let canonical_root = dunce::canonicalize(&root).unwrap();
     for name in ["orca-agent-view.json", "keybindings.json"] {
         assert_eq!(
             preview["configuration_paths"]
