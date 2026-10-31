@@ -67,6 +67,16 @@ pub(super) fn unknown_file(dir: &Dir, prefix: &Path) -> Result<bool> {
     Ok(false)
 }
 
+pub(super) fn orca_marker(bytes: &[u8]) -> bool {
+    #[derive(serde::Deserialize)]
+    struct Marker {
+        owner: String,
+    }
+    bytes.iter().find(|byte| !byte.is_ascii_whitespace()) == Some(&b'{')
+        && serde_json::from_slice::<Marker>(bytes)
+            .is_ok_and(|marker| marker.owner == "stablyai/orca/claude-agent-view")
+}
+
 pub(super) fn owned(path: &Path, directory: bool, link: bool) -> bool {
     let parts: Vec<_> = path
         .iter()
@@ -94,6 +104,7 @@ pub(super) fn owned(path: &Path, directory: bool, link: bool) -> bool {
                 | "usage.jsonl"
                 | "usage.with-fix.jsonl"
                 | "keybindings.json"
+                | "orca-agent-view.json"
                 | "CLAUDE.md"
         );
     }

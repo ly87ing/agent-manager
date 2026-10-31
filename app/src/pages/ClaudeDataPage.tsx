@@ -72,6 +72,8 @@ export default function ClaudeDataPage() {
       <div className="rounded-lg border bg-card p-4 text-sm">
         <h2 className="font-semibold">{t("清理默认目录全部数据")}</h2>
         <p className="mt-2 text-muted-foreground">{t("清理 Claude Code 默认用户目录中的会话、账号、记忆、配置与缓存，包括遥测配置。")}</p>
+        <p className="mt-2 text-muted-foreground">{t("检查只生成预览，不会自动清理。检查成功后，点击“清理所选范围”，输入 DELETE 后再次确认。")}</p>
+        <p className="mt-2 text-muted-foreground">{t("默认目录中的 Orca Claude 快捷键关联也会清理。请先退出 Orca；之后重新启用该集成可能再次生成。")}</p>
         <p className="mt-2 text-muted-foreground">{t("确认后先关闭当前用户下已识别的 Claude 会话进程，再删除数据。未退出的进程会被强制关闭；请先保存工作。")}</p>
         <p>{t("不会删除项目源文件、外部技能仓库、共享 SDK 认证或云端数据；不会撤销远端令牌。")}</p>
         <p className="mt-2 text-muted-foreground">{t("本次不修改 Shell 文件和现有进程环境，也不删除配置引用的外部证书、脚本和共享认证。")}</p>

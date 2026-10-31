@@ -2,6 +2,23 @@
 
 What recent work got wrong, and the rule that would have caught it. Read this before changing code.
 
+## 2026-10-30: include supported integration markers in real cleanup previews
+
+- A default directory containing only a third-party shortcut marker, its known
+  keybinding carrier and external skill links exposed a catalog gap that broad
+  synthetic session fixtures missed. Inventory exact installed-writer paths and
+  ownership before extending the recognized set; retain the unknown-file guard.
+- Bind marker ownership checks to the same bytes used for the preview fingerprint,
+  and exercise foreign/duplicate owners, aliases, stale data and retained outside
+  configuration. Include both related configuration paths in the visible preview.
+- Compare temporary fixture paths in the same canonical form as preview output;
+  macOS `/var` aliases otherwise fail a path assertion before removal is exercised.
+- A derived Serde struct can accept sequence input. Require an object explicitly
+  for ownership records and reject the singleton-owner array, not only an empty array.
+- A failed check never renders the later cleanup action. Explain the
+  check → preview → typed confirmation sequence before the first action so users
+  do not infer that inspection deletes data automatically.
+
 ## 2026-10-30: field removal needs native and syntax boundaries
 
 - A successful JSON parse alone can collapse duplicate fields or reformat opaque

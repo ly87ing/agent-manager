@@ -167,6 +167,11 @@ pub(super) fn entry(parent: &Dir, name: &Path, relative: PathBuf) -> Result<Entr
     let mut bytes = 0;
     let identity;
     if kind == Kind::File {
+        let inspect_orca = relative == Path::new("orca-agent-view.json");
+        if inspect_orca && metadata.len() > 64 * 1024 {
+            bail!("The Orca Claude marker exceeds the ownership inspection limit; no data was changed.");
+        }
+        let mut marker = Vec::new();
         let mut file = parent.open(name)?;
         #[cfg(unix)]
         {
@@ -200,9 +205,15 @@ pub(super) fn entry(parent: &Dir, name: &Path, relative: PathBuf) -> Result<Entr
                 bail!("A file grew during inspection; request a new preview.");
             }
             hash.update(&buffer[..count]);
+            if inspect_orca {
+                marker.extend_from_slice(&buffer[..count]);
+            }
         }
         if bytes != metadata.len() || stamp != self::stamp(&file.metadata()?)? {
             bail!("A file changed during inspection; request a new preview.");
+        }
+        if inspect_orca && !retention::orca_marker(&marker) {
+            bail!("The Orca Claude marker has an unverified owner or format; no data was changed.");
         }
     } else if kind == Kind::Directory {
         identity = self::identity(&parent.open_dir(name)?)?;

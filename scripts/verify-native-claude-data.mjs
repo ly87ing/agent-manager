@@ -62,6 +62,10 @@ function mountRefusal(source,target) {
 }
 try {
   write(".claude/settings.json",JSON.stringify(settings));
+  write(".claude/orca-agent-view.json",JSON.stringify({owner:"stablyai/orca/claude-agent-view",setup:"YOUR_SETUP",binding:{context:"YOUR_CONTEXT",chord:"YOUR_CHORD"}}));
+  write(".claude/keybindings.json",JSON.stringify({bindings:[{context:"YOUR_CONTEXT",bindings:{YOUR_CHORD:"command:orca-agent-view"}}]}));
+  const protectedConfiguration={".codex/config.toml":"PRIVATE_CODEX_CONFIGURATION",".codex/auth.json":"PRIVATE_CODEX_CREDENTIAL",".zshrc":"YOUR_SHARED_STARTUP","orca/other-profile/orca-agent-view.json":"YOUR_OTHER_MARKER","orca/preferences.json":"YOUR_OTHER_CONFIGURATION"};
+  for(const [name,value] of Object.entries(protectedConfiguration))write(name,value);
   write(".claude/.credentials.json","PRIVATE_ACCOUNT");
   write(".claude/history.jsonl","PRIVATE_HISTORY");
   write(".claude/projects/project/11111111-1111-4111-8111-111111111111.jsonl","PRIVATE_SESSION");
@@ -99,6 +103,7 @@ try {
   assert.deepEqual(preview.data.process_ids, [], "Real Claude sessions are outside acceptance; close them manually or use a disposable runner");
   assert.equal(preview.data.retained.filter(item=>item.reason==="project").length,2);
   for(const name of configurationBackups)assert(preview.data.configuration_paths.includes(fs.realpathSync(path.join(home,name))));
+  for(const name of ["orca-agent-view.json","keybindings.json"])assert.equal(preview.data.configuration_paths.filter(file=>file===fs.realpathSync(path.join(root,name))).length,1);
   assert.deepEqual(fs.readFileSync(path.join(root,"settings.json")),before);
   assert.equal(run("clear",["--base",preview.data.base,"--files-only"]).ok,false);
   assert(!fs.existsSync(data));
@@ -149,7 +154,9 @@ try {
   await exited; writer=undefined; stubborn=undefined; runtime=undefined;
   assert(cleared.ok,JSON.stringify(cleared.errors)); assert.equal(cleared.data.status,"complete"); assert.equal(cleared.data.scope_verified,true); assert.equal(cleared.data.retained_verified,true);
   assert.equal(cleared.data.stopped_processes,3);assert.equal(cleared.data.forced_processes,process.platform==="win32"?3:1);assert.equal(cleared.data.processes_stopped,true);
-  assert.equal(cleared.data.deleted_credentials,0); assert.equal(cleared.data.deleted_files,11);
+  assert.equal(cleared.data.deleted_credentials,0); assert.equal(cleared.data.deleted_files,13);
+  for(const name of ["orca-agent-view.json","keybindings.json"])assert(!fs.existsSync(path.join(root,name)));
+  for(const [name,value] of Object.entries(protectedConfiguration))assert.equal(fs.readFileSync(path.join(home,name),"utf8"),value);
   assert.deepEqual(fs.readdirSync(root),["skills","worktrees"]);
   assert(!fs.existsSync(path.join(root,"settings.json")));
   for(const name of configurationBackups)assert(!fs.existsSync(path.join(home,name)));
@@ -197,7 +204,7 @@ try {
   assert.equal(fs.readFileSync(path.join(root,"backups/.claude.json.backup.1770000000004"),"utf8"),"PRIVATE_MIXED_BACKUP");
   const after=run("preview",["--files-only"]); assert.equal(after.data.has_changes,false);
   const noOp=run("clear",["--base",after.data.base,"--confirm","--files-only"]); assert.equal(noOp.data.status,"not_applied");
-  console.log(JSON.stringify({platform:process.platform,architecture:process.arch,scope:"synthetic_files_only",previewZeroWrite:true,staleRefused:true,confirmedWritersStopped:true,nodeRuntimeStopped:true,forcedStopVerified:true,shutdownFlushRetained:process.platform!=="win32",telemetryRemoved:true,recognizedBackupsRemoved:true,externalSourcePreserved:true,worktreesPreserved:true,unclassifiedPreserved:true,status:"passed"}));
+  console.log(JSON.stringify({platform:process.platform,architecture:process.arch,scope:"synthetic_files_only",previewZeroWrite:true,staleRefused:true,confirmedWritersStopped:true,nodeRuntimeStopped:true,forcedStopVerified:true,shutdownFlushRetained:process.platform!=="win32",telemetryRemoved:true,recognizedBackupsRemoved:true,orcaClaudeAssociationRemoved:true,codexAndOtherConfigurationPreserved:true,externalSourcePreserved:true,worktreesPreserved:true,unclassifiedPreserved:true,status:"passed"}));
 } finally {
   for(const child of [writer,stubborn,runtime]) if(child && child.exitCode===null && child.signalCode===null) {const stopped=new Promise(resolve=>child.once("exit",resolve));child.kill("SIGKILL");await stopped;}
   unmount();

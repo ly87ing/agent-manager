@@ -2,6 +2,35 @@
 
 > Current scope (2026-10-11): [Extensions only](EXTENSIONS-ONLY.md) supersedes every account-management, authentication, launch-command, account-credential, and assistant-lifecycle requirement below. Earlier implementation and acceptance entries are historical; they do not authorize these operations or establish acceptance of the new scope.
 
+## 2026-10-30: Default Orca Claude Shortcut Cleanup
+
+A real default directory containing `keybindings.json`, `orca-agent-view.json`
+and external skill links refused inspection because the marker was unclassified.
+The owner explicitly included that Claude shortcut association in whole-data
+cleanup. The exact default marker now requires a bounded JSON object with a unique
+verified Orca owner, read from the same bytes used for its fingerprint. Both marker
+and keybinding paths appear once in the configuration preview and are removed only
+after the existing fresh-base/typed-confirmation workflow.
+
+The page explicitly explains check → preview → Clear selected scope → `DELETE`.
+Inspection and cancellation never clear data. Orca must be closed first; enabling
+its integration later can recreate the association. Other Orca profiles, external
+skill targets, source/documents, shared configuration and Codex stay outside this
+new scope. Unknown, foreign, duplicate-owner, array-shaped, oversized, redirected,
+hard-linked and changed markers remain refused. The all-source goal stays incomplete.
+
+Source verification passed: engine 646/1 pre-existing ignored, Tauri 29/1
+pre-existing ignored, frontend 761 across 65 files, production frontend build and
+Rust formatting. The native whole-data fixture confirmed marker/keybinding removal,
+unchanged Codex/other configuration and external targets; the connection fixture
+also passed without exercising session-variable removal. Both ran after Cargo tests.
+The actual renderer connected to an isolated CLI completed check, zero-write cancel,
+incorrect-confirmation refusal and typed cleanup at 1000/760 × 650 in both languages;
+independent readback found both files absent and outside configuration unchanged.
+An existing browser fixture's nonblocking accept readiness race was corrected in
+a separate test-only commit, preserving HTTP assertions and timeout. No personal
+cleanup or Keychain deletion was used for this verification.
+
 ## 2026-10-30: Individually Confirmed Claude Connection Maintenance
 
 The explicit maintenance exception now has a separate connection panel. Read-only

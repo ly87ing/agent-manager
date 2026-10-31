@@ -36,6 +36,8 @@ describe("Claude local data maintenance", () => {
   it("does not inspect on entry and cancellation never sends a clear request", async () => {
     const { calls } = renderWithEngine(<ClaudeDataPage />, { "claude-data:preview": makeEnvelope(makeClaudeDataPreview()) });
     expect(calls).toEqual([]);
+    expect(screen.getByText("检查只生成预览，不会自动清理。检查成功后，点击“清理所选范围”，输入 DELETE 后再次确认。")).toBeVisible();
+    expect(screen.getByText("默认目录中的 Orca Claude 快捷键关联也会清理。请先退出 Orca；之后重新启用该集成可能再次生成。")).toBeVisible();
     expect(screen.getByText("清理 Claude Code 默认用户目录中的会话、账号、记忆、配置与缓存，包括遥测配置。")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "检查清理范围" }));
     await userEvent.click(await screen.findByRole("button", { name: "清理所选范围" }));

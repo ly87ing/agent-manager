@@ -1,5 +1,7 @@
 /** Application copy only; user content and engine diagnostics are never translation keys. */
 export const messages = {
+  "检查只生成预览，不会自动清理。检查成功后，点击“清理所选范围”，输入 DELETE 后再次确认。": "Checking only creates a preview. After a successful check, choose Clear selected scope, type DELETE and confirm.",
+  "默认目录中的 Orca Claude 快捷键关联也会清理。请先退出 Orca；之后重新启用该集成可能再次生成。": "Orca's Claude shortcut association in the default directory is also removed. Quit Orca first; enabling that integration again may recreate it.",
   "清理默认目录全部数据": "Clear all default-directory data",
   "检查所选 Claude 用户目录、当前检查进程和列明的启动来源。仅显示字段名称，不显示密钥或地址值；发现字段不代表它是残留。": "Inspect the selected Claude directory, checker process and listed startup sources. Only field names are shown, never keys or addresses. Presence does not establish an unwanted override.",
   "自定义 Claude 目录（留空使用默认目录）": "Custom Claude directory (leave blank for the default)",

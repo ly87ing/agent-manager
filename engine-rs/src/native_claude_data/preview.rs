@@ -44,6 +44,8 @@ fn category(path: &Path) -> &'static str {
         "settings.json"
         | "settings.local.json"
         | "managed-settings.json"
+        | "keybindings.json"
+        | "orca-agent-view.json"
         | "skills"
         | "rules"
         | "hooks"
@@ -170,6 +172,8 @@ impl Snapshot {
                 "managed-settings.json",
                 ".claude.json",
                 "remote-settings.json",
+                "keybindings.json",
+                "orca-agent-view.json",
             ] {
                 if entries.iter().any(|entry| entry.path == Path::new(name)) {
                     configurations.push(configuration(dir, true, name)?);

@@ -131,7 +131,8 @@ their Codex reset, whole-object fallback and raw-value output are not executed.
    selected file contents/identities. It returns category counts, paths, credential counts,
    telemetry policy, blockers and a SHA-256 base, never credential or session
    values. Preview and cancellation create neither a database nor an audit record.
-   `configuration_paths` lists each selected configuration and backup, bounded to
+   `configuration_paths` lists each selected configuration and backup, including
+   default-directory `keybindings.json` and verified `orca-agent-view.json`, bounded to
    1,024 paths and 256 KiB of path bytes.
    Retained project and unclassified paths have explicit reasons and are excluded
    from deletion counts; unknown ownership remains visible in the result.
@@ -308,13 +309,24 @@ Orca deletion entry point is enabled by these research fixtures.
   readback, deletion and final readback; the OS search list is never changed.
 - Windows and Linux credentials are ordinary files in the selected directory;
   no Windows Credential Manager sweep runs.
-- The five exact default-root configuration carriers (`settings.json`,
-  `settings.local.json`, `managed-settings.json`, `.claude.json` and
-  `remote-settings.json`) and global `~/.claude.json` are deleted whole after
+- The exact default-root configuration carriers (`settings.json`,
+  `settings.local.json`, `managed-settings.json`, `.claude.json`,
+  `remote-settings.json`, `keybindings.json` and `orca-agent-view.json`) and global `~/.claude.json` are deleted whole after
   ordinary-file, single-link and unchanged-byte checks. Unknown fields, duplicate
-  JSON keys and damaged JSON do not require interpretation for whole-file removal.
+  JSON keys and damaged JSON do not require interpretation for ordinary whole-file
+  removal; the additional Orca ownership requirement is described below.
   Values never enter preview, result or audit output. Helpers are never executed;
   referenced external certificates, keys and scripts are never followed for deletion.
+- The Orca Claude shortcut marker additionally requires at most 64 KiB of valid
+  JSON with exactly one `owner` field equal to `stablyai/orca/claude-agent-view`.
+  Ownership is parsed from the same bounded bytes used for the file fingerprint;
+  missing, foreign, duplicate or invalid ownership refuses before writes. The
+  installed Orca profile worker defines that filename/owner and its association
+  with `keybindings.json`. Confirmed whole-data cleanup removes both selected
+  default-directory carriers, not other Orca profiles/preferences or Codex files.
+  Quit Orca before cleanup; enabling its integration again can recreate these files.
+  Checking only creates a preview. The user must then choose Clear selected scope,
+  type `DELETE` and confirm before processes stop or deletion starts.
 - Automatic backup recognition accepts nonempty decimal timestamp suffixes for
   `~/.claude/backups/.claude.json.backup.<timestamp>`,
   `~/.claude/backups/.claude.json.corrupted.<timestamp>` and HOME-adjacent

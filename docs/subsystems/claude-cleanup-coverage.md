@@ -12,7 +12,7 @@ rules are in [Claude local data](claude-local-data.md).
 | ID | Source | Adapter state and remaining boundary |
 | --- | --- | --- |
 | C06 | Active sessions and writers | Confirmed cleanup stops previewed recognized current-user Claude processes before deletion, verifies exit and refuses newly discovered writers or shutdown data changes. Windows candidate discovery spans logon sessions with native user-token filtering; cross-session runtime acceptance, custom wrappers and automatic restart services remain unverified. |
-| C07 | Default global data directory | Partial: recognized artifacts, exact configuration carriers and local telemetry are selected; projects and unknown content stay protected. |
+| C07 | Default global data directory | Partial: recognized artifacts, exact configuration carriers and local telemetry are selected, including verified Orca Claude shortcut markers and default keybindings. Projects and unknown content stay protected. |
 | C08 | Global state and configuration backups | Partial: default state plus recognized decimal-timestamp backups in the default backup directory and HOME; other copies remain unclassified or outside supported locations. |
 | C12 | Code Keychain credentials | Partial: three exact current-user macOS default services; custom and historical namespaces are not integrated. |
 | C13 | Credential-file fallbacks | Partial: default-directory credential files; custom roots and external copies are not integrated. |

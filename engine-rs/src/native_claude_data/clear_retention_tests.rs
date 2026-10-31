@@ -2,6 +2,132 @@
 use super::tests::fixture;
 use super::*;
 
+const ORCA_MARKER: &[u8] = br#"{"owner":"stablyai/orca/claude-agent-view","setup":"YOUR_SETUP","binding":{"context":"YOUR_CONTEXT","chord":"YOUR_CHORD"}}"#;
+
+#[test]
+fn confirmed_cleanup_removes_orca_claude_marker_and_shortcuts_only_in_default_scope() {
+    let (path, ctx) = fixture();
+    let root = ctx.home_dir.join(".claude");
+    let marker = ORCA_MARKER;
+    let shortcuts = br#"{"bindings":[{"context":"YOUR_CONTEXT","bindings":{"YOUR_CHORD":"command:orca-agent-view"}}]}"#;
+    std::fs::write(root.join("orca-agent-view.json"), marker).unwrap();
+    std::fs::write(root.join("keybindings.json"), shortcuts).unwrap();
+    let protected = [
+        (
+            ".codex/config.toml",
+            b"PRIVATE_CODEX_CONFIGURATION".as_slice(),
+        ),
+        (".codex/auth.json", b"PRIVATE_CODEX_CREDENTIAL".as_slice()),
+        (".zshrc", b"YOUR_SHARED_STARTUP".as_slice()),
+        ("orca/other-profile/orca-agent-view.json", marker),
+        (
+            "orca/preferences.json",
+            b"YOUR_OTHER_CONFIGURATION".as_slice(),
+        ),
+    ];
+    for (name, value) in protected {
+        let file = ctx.home_dir.join(name);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, value).unwrap();
+    }
+    let snapshot = Snapshot::capture(&ctx, true).unwrap();
+    let preview = snapshot.data();
+    let canonical_root = std::fs::canonicalize(&root).unwrap();
+    for name in ["orca-agent-view.json", "keybindings.json"] {
+        assert_eq!(
+            preview["configuration_paths"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|value| **value == json!(canonical_root.join(name)))
+                .count(),
+            1
+        );
+    }
+    assert_eq!(
+        std::fs::read(root.join("orca-agent-view.json")).unwrap(),
+        marker
+    );
+    assert_eq!(
+        std::fs::read(root.join("keybindings.json")).unwrap(),
+        shortcuts
+    );
+    assert!(!ctx.data_dir.exists());
+    let result = execute(&ctx, &snapshot.base, true, "orca-marker-fixture").unwrap();
+    assert_eq!(result["status"], "complete", "{result}");
+    assert_eq!(result["scope_verified"], true);
+    assert!(!root.join("orca-agent-view.json").exists());
+    assert!(!root.join("keybindings.json").exists());
+    for (name, value) in protected {
+        assert_eq!(
+            std::fs::read(ctx.home_dir.join(name)).unwrap(),
+            value,
+            "{name}"
+        );
+    }
+    assert!(!result.to_string().contains("PRIVATE_"));
+    drop(snapshot);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn orca_marker_aliases_and_unclassified_siblings_still_refuse_before_writes() {
+    for alias in ["symlink", "hardlink", "unknown_sibling"] {
+        let (path, ctx) = fixture();
+        let root = ctx.home_dir.join(".claude");
+        let external = path.join("external-marker.json");
+        std::fs::write(&external, ORCA_MARKER).unwrap();
+        let marker = root.join("orca-agent-view.json");
+        match alias {
+            "symlink" => std::os::unix::fs::symlink(&external, &marker).unwrap(),
+            "hardlink" => std::fs::hard_link(&external, &marker).unwrap(),
+            _ => {
+                std::fs::write(&marker, ORCA_MARKER).unwrap();
+                std::fs::write(root.join("PERSONAL.md"), b"YOUR_DOCUMENT").unwrap();
+            }
+        }
+        assert!(Snapshot::capture(&ctx, true).is_err(), "{alias}");
+        assert_eq!(std::fs::read(&external).unwrap(), ORCA_MARKER);
+        assert!(root.join("settings.json").exists());
+        assert!(!ctx.data_dir.exists());
+        std::fs::remove_dir_all(path).unwrap();
+    }
+}
+
+#[test]
+fn unverified_or_changed_orca_markers_refuse_without_writes() {
+    for value in [
+        br#"{"owner":"YOUR_OTHER_OWNER"}"#.to_vec(),
+        br#"{"setup":"YOUR_SETUP"}"#.to_vec(),
+        br#"{"owner":"YOUR_OTHER_OWNER","owner":"stablyai/orca/claude-agent-view"}"#.to_vec(),
+        b"INVALID_JSON".to_vec(),
+        b"[]".to_vec(),
+        br#"["stablyai/orca/claude-agent-view"]"#.to_vec(),
+        vec![b' '; 64 * 1024 + 1],
+    ] {
+        let (path, ctx) = fixture();
+        let marker = ctx.home_dir.join(".claude/orca-agent-view.json");
+        std::fs::write(&marker, &value).unwrap();
+        assert!(Snapshot::capture(&ctx, true).is_err());
+        assert_eq!(std::fs::read(&marker).unwrap(), value);
+        assert!(!ctx.data_dir.exists());
+        std::fs::remove_dir_all(path).unwrap();
+    }
+    let (path, ctx) = fixture();
+    let marker = ctx.home_dir.join(".claude/orca-agent-view.json");
+    std::fs::write(&marker, ORCA_MARKER).unwrap();
+    let snapshot = Snapshot::capture(&ctx, true).unwrap();
+    let changed = br#"{"owner":"stablyai/orca/claude-agent-view","setup":"YOUR_NEW_SETUP"}"#;
+    std::fs::write(&marker, changed).unwrap();
+    assert!(execute(&ctx, &snapshot.base, true, "stale-orca-marker").is_err());
+    assert_eq!(std::fs::read(&marker).unwrap(), changed);
+    assert!(ctx.home_dir.join(".claude/settings.json").exists());
+    assert!(!ctx.data_dir.exists());
+    drop(snapshot);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
 #[test]
 fn confirmed_cleanup_removes_all_default_configuration_including_telemetry() {
     let (path, ctx) = fixture();
