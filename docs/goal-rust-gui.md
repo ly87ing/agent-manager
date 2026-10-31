@@ -31,6 +31,19 @@ An existing browser fixture's nonblocking accept readiness race was corrected in
 a separate test-only commit, preserving HTTP assertions and timeout. No personal
 cleanup or Keychain deletion was used for this verification.
 
+Installed macOS x86_64 receipt: functional commit
+`fefb28b8bff267b8f9bdbf2476080829b8ac69fc` passed exact identity/date, deep strict
+ad-hoc signature, packaged helper, isolated startup and source-independence checks.
+Staged/source/installed bundle manifests matched; installed executable SHA-256 was
+`53f36660cef47f3470a35343f9a35ea6a48cdfb737bff08509ab71e88dd173bc`.
+The previous installed app was retained. The real installed native page completed
+read-only inspection, listed both configuration paths and showed the enabled cleanup
+action. No personal cleanup was executed; monitored Codex/shared configuration and
+Manager table digests remained unchanged. A subsequent test-only canonical-path
+normalization passed all 10 retention regressions; the full engine suite was not
+repeated for that one-line fixture adjustment. Windows runtime remains unverified
+locally. The installed functional binary is unchanged by that test-only commit.
+
 ## 2026-10-30: Individually Confirmed Claude Connection Maintenance
 
 The explicit maintenance exception now has a separate connection panel. Read-only
