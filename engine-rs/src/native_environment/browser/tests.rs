@@ -160,7 +160,19 @@ fn http_reader_waits_for_request_bytes_and_rejects_ambiguous_or_unbounded_frames
         let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
         listener.set_nonblocking(true).unwrap();
         let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let (mut stream, _) = listener.accept().unwrap();
+        let accept_deadline = Instant::now() + Duration::from_millis(500);
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(connection) => break connection,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && Instant::now() < accept_deadline =>
+                {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("Fixture connection was not accepted: {error}"),
+            }
+        };
         let sender = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(20));
             let _ = client.write_all(&frame);
